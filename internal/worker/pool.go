@@ -135,11 +135,13 @@ func (p *Pool) Errors() []error {
 }
 
 // ActiveWorkers returns the number of currently active workers
+// Note: This is an approximation based on running tasks in progress tracker
 func (p *Pool) ActiveWorkers() int {
-	// This is approximate since we can't directly query the semaphore
-	// We estimate based on maxWorkers - available capacity
-	// Note: This is a limitation of the semaphore package
-	return int(p.maxWorkers) - int(p.sem.(*semaphore.Weighted).TryAcquire(0))
+	if p.progress == nil {
+		return 0
+	}
+	stats := p.progress.Stats()
+	return stats.Running
 }
 
 // Stats returns statistics about the pool

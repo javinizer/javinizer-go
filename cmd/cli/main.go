@@ -145,7 +145,10 @@ func main() {
 
 	historyCmd.AddCommand(historyListCmd, historyStatsCmd, historyMovieCmd, historyCleanCmd)
 
-	rootCmd.AddCommand(scrapeCmd, infoCmd, initCmd, sortCmd, genreCmd, historyCmd)
+	// TUI command
+	tuiCmd := createTUICommand()
+
+	rootCmd.AddCommand(scrapeCmd, infoCmd, initCmd, sortCmd, genreCmd, historyCmd, tuiCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
