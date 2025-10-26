@@ -39,12 +39,13 @@ func (h *Header) View() string {
 
 // Browser component
 type Browser struct {
-	items      []FileItem
-	cursor     int
-	width      int
-	height     int
-	selected   map[string]bool
-	sourcePath string // Current scan path
+	items       []FileItem
+	cursor      int
+	width       int
+	height      int
+	selected    map[string]bool
+	sourcePath  string // Current scan path
+	pathDisplay string // Formatted path display for the view
 }
 
 func NewBrowser() *Browser {
@@ -65,6 +66,11 @@ func (b *Browser) SetItems(items []FileItem) {
 
 func (b *Browser) SetSourcePath(path string) {
 	b.sourcePath = path
+	b.pathDisplay = path
+}
+
+func (b *Browser) SetPathDisplay(display string) {
+	b.pathDisplay = display
 }
 
 func (b *Browser) CursorUp() {
@@ -474,6 +480,7 @@ func (h *HelpView) View() string {
 	help += "  Tab - Cycle views\n\n"
 
 	help += HelpKeyStyle.Render("Browser View") + "\n"
+	help += "  f - Change scan folder\n"
 	help += "  ↑/k - Move up\n"
 	help += "  ↓/j - Move down\n"
 	help += "  Space - Toggle selection (files or entire folders)\n"

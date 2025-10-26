@@ -117,6 +117,7 @@ func (m *Model) renderFooter() string {
 	switch m.currentView {
 	case ViewBrowser:
 		keys = []string{
+			helpKey("f", "change folder"),
 			helpKey("↑↓/jk", "navigate"),
 			helpKey("space", "select"),
 			helpKey("a/A", "sel all/none"),
@@ -150,22 +151,59 @@ func (m *Model) renderFooter() string {
 	return HelpSeparatorStyle.Render(strings.Join(keys, " │ "))
 }
 
+// renderFolderSelector renders the folder selection panel
+func (m *Model) renderFolderSelector() string {
+	label := Dimmed("Scan Folder: ")
+
+	var pathWidget string
+	if m.editingPath {
+		// Show text input when editing
+		pathWidget = m.pathInput.View()
+	} else {
+		// Show current path with edit hint
+		pathDisplay := m.sourcePath
+		if pathDisplay == "" {
+			pathDisplay = "."
+		}
+		if len(pathDisplay) > 60 {
+			pathDisplay = "..." + pathDisplay[len(pathDisplay)-57:]
+		}
+		pathWidget = Highlight(pathDisplay) + " " + Dimmed("(press 'f' to change)")
+	}
+
+	content := label + pathWidget
+	return PanelStyle.Width(m.width - 4).Render(content)
+}
+
 // renderBrowserView renders the file browser view
 func (m *Model) renderBrowserView() string {
+	// Render folder selection panel at top
+	folderPanel := m.renderFolderSelector()
+
 	if m.browser != nil && m.taskList != nil {
 		// Split screen: browser on left, tasks on right
 		browserView := m.browser.View()
 		taskView := m.taskList.View()
 
-		return lipgloss.JoinHorizontal(
+		content := lipgloss.JoinHorizontal(
 			lipgloss.Top,
 			BorderStyle.Width(m.width/2-2).Render(browserView),
 			BorderStyle.Width(m.width/2-2).Render(taskView),
 		)
+
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			folderPanel,
+			content,
+		)
 	}
 
 	// Fallback simple view
-	return m.renderSimpleBrowser()
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		folderPanel,
+		m.renderSimpleBrowser(),
+	)
 }
 
 // renderDashboardView renders the dashboard view
@@ -323,6 +361,7 @@ func (m *Model) renderSimpleHelp() string {
 	b.WriteString(helpLine("3", "Logs"))
 
 	b.WriteString("\n" + Subtitle("File Browser") + "\n")
+	b.WriteString(helpLine("f", "Change scan folder"))
 	b.WriteString(helpLine("↑↓, j/k", "Navigate files"))
 	b.WriteString(helpLine("space", "Toggle selection"))
 	b.WriteString(helpLine("a", "Select all"))

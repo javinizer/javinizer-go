@@ -5,6 +5,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -35,6 +36,9 @@ type Model struct {
 	cursor        int
 	selectedFiles map[string]bool
 	matchResults  map[string]matcher.MatchResult
+	sourcePath    string
+	pathInput     textinput.Model
+	editingPath   bool
 
 	// Task state
 	tasks         map[string]*worker.TaskProgress
@@ -115,6 +119,13 @@ func New(cfg *config.Config) *Model {
 		startTime:     time.Now(),
 	}
 
+	// Initialize text input for path editing
+	ti := textinput.New()
+	ti.Placeholder = "Enter folder path..."
+	ti.CharLimit = 256
+	ti.Width = 50
+	m.pathInput = ti
+
 	// Initialize components
 	m.header = NewHeader()
 	m.browser = NewBrowser()
@@ -171,6 +182,8 @@ func (m *Model) SetFiles(files []FileItem) {
 
 // SetSourcePath sets the source path being scanned
 func (m *Model) SetSourcePath(path string) {
+	m.sourcePath = path
+	m.pathInput.SetValue(path)
 	if m.browser != nil {
 		m.browser.SetSourcePath(path)
 	}

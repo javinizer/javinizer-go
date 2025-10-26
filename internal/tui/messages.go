@@ -87,3 +87,8 @@ type ResumeMsg struct{}
 type CancelTaskMsg struct {
 	TaskID string
 }
+
+// RescanMsg signals to rescan a new folder path
+type RescanMsg struct {
+	Path string
+}

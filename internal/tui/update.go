@@ -67,6 +67,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.workerPool.Stop()
 		}
 		return m, tea.Quit
+
+	case RescanMsg:
+		// Update source path
+		m.SetSourcePath(msg.Path)
+		m.AddLog("warn", "Path updated. Please restart TUI to rescan new folder.")
+		return m, nil
 	}
 
 	// Update active view component
@@ -136,7 +142,45 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleBrowserKeys handles browser view keybindings
 func (m *Model) handleBrowserKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	// If editing path, handle text input
+	if m.editingPath {
+		switch msg.String() {
+		case "enter":
+			// Confirm path change
+			m.editingPath = false
+			newPath := m.pathInput.Value()
+			if newPath != "" && newPath != m.sourcePath {
+				m.AddLog("info", "Path changed to: "+newPath)
+				// Trigger rescan by sending a RescanMsg
+				return m, func() tea.Msg {
+					return RescanMsg{Path: newPath}
+				}
+			}
+			return m, nil
+
+		case "esc":
+			// Cancel editing
+			m.editingPath = false
+			m.pathInput.SetValue(m.sourcePath)
+			return m, nil
+
+		default:
+			// Update text input
+			m.pathInput, cmd = m.pathInput.Update(msg)
+			return m, cmd
+		}
+	}
+
+	// Normal browser navigation
 	switch msg.String() {
+	case "f":
+		// Toggle folder editing mode
+		m.editingPath = true
+		m.pathInput.Focus()
+		return m, nil
+
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
