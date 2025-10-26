@@ -69,7 +69,7 @@ javinizer init
 javinizer tui ~/Videos
 
 # Use keyboard to select files, press Enter to process
-# See docs/TUI.md for complete guide
+# See docs/11-tui.md for complete guide
 ```
 
 **Scrape metadata**:
@@ -99,14 +99,14 @@ Comprehensive documentation available in the `/docs` folder:
 1. **[Getting Started](./docs/01-getting-started.md)** - Installation and first steps
 2. **[Configuration](./docs/02-configuration.md)** - Complete configuration reference
 3. **[CLI Reference](./docs/03-cli-reference.md)** - All commands and options
-4. **[TUI Guide](./docs/TUI.md)** - Interactive Terminal User Interface
-5. **[Template System](./docs/04-template-system.md)** - Customize naming formats
-6. **[Genre Management](./docs/05-genre-management.md)** - Genre replacement guide
-7. **[Database Schema](./docs/06-database-schema.md)** - Database structure and queries
-8. **[API Reference](./docs/07-api-reference.md)** - REST API (planned)
-9. **[Migration Guide](./docs/08-migration-guide.md)** - From PowerShell version
-10. **[Development](./docs/09-development.md)** - Contributing guide
-11. **[Troubleshooting](./docs/10-troubleshooting.md)** - Common issues and solutions
+4. **[Template System](./docs/04-template-system.md)** - Customize naming formats
+5. **[Genre Management](./docs/05-genre-management.md)** - Genre replacement guide
+6. **[Database Schema](./docs/06-database-schema.md)** - Database structure and queries
+7. **[API Reference](./docs/07-api-reference.md)** - REST API (planned)
+8. **[Migration Guide](./docs/08-migration-guide.md)** - From PowerShell version
+9. **[Development](./docs/09-development.md)** - Contributing guide
+10. **[Troubleshooting](./docs/10-troubleshooting.md)** - Common issues and solutions
+11. **[TUI Guide](./docs/11-tui.md)** - Interactive Terminal User Interface
 
 ## Project Structure
 
