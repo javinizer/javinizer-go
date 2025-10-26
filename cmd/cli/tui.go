@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -140,6 +141,26 @@ func runTUI(cmd *cobra.Command, args []string) {
 		matchMap[match.File.Path] = match
 	}
 
+	// Add directories first
+	if recursive {
+		dirSet := make(map[string]bool)
+		for _, file := range scanResult.Files {
+			dir := filepath.Dir(file.Path)
+			if dir != sourcePath && !dirSet[dir] {
+				dirSet[dir] = true
+				fileItems = append(fileItems, tui.FileItem{
+					Path:     dir,
+					Name:     filepath.Base(dir),
+					Size:     0,
+					IsDir:    true,
+					Selected: false,
+					Matched:  false,
+				})
+			}
+		}
+	}
+
+	// Add files
 	for _, file := range scanResult.Files {
 		item := tui.FileItem{
 			Path:     file.Path,

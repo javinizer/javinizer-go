@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -74,7 +75,37 @@ func (b *Browser) CursorDown() {
 }
 
 func (b *Browser) ToggleSelection(path string) {
-	b.selected[path] = !b.selected[path]
+	// Find the item
+	var targetItem *FileItem
+	for i := range b.items {
+		if b.items[i].Path == path {
+			targetItem = &b.items[i]
+			break
+		}
+	}
+
+	if targetItem == nil {
+		return
+	}
+
+	// If it's a directory, toggle all files within it
+	if targetItem.IsDir {
+		isCurrentlySelected := b.selected[path]
+		newState := !isCurrentlySelected
+
+		// Toggle all files in this directory
+		for i := range b.items {
+			if !b.items[i].IsDir && filepath.Dir(b.items[i].Path) == path {
+				b.selected[b.items[i].Path] = newState
+			}
+		}
+
+		// Toggle the folder marker itself
+		b.selected[path] = newState
+	} else {
+		// Regular file toggle
+		b.selected[path] = !b.selected[path]
+	}
 }
 
 func (b *Browser) SelectAll() {
@@ -119,9 +150,35 @@ func (b *Browser) View() string {
 			cursor = "> "
 		}
 
+		// Determine checkbox state
 		checkbox := "☐ "
-		if b.selected[item.Path] {
-			checkbox = Success("☑ ")
+		if item.IsDir {
+			// For folders, check if all children are selected
+			allChildrenSelected := true
+			hasChildren := false
+			for j := range b.items {
+				if !b.items[j].IsDir && filepath.Dir(b.items[j].Path) == item.Path {
+					hasChildren = true
+					if !b.selected[b.items[j].Path] {
+						allChildrenSelected = false
+						break
+					}
+				}
+			}
+			if hasChildren && allChildrenSelected {
+				checkbox = Success("☑ ")
+			}
+		} else {
+			// For files, check direct selection
+			if b.selected[item.Path] {
+				checkbox = Success("☑ ")
+			}
+		}
+
+		// Add folder icon for directories
+		icon := ""
+		if item.IsDir {
+			icon = "📁 "
 		}
 
 		name := item.Name
@@ -129,7 +186,13 @@ func (b *Browser) View() string {
 			name = name[:27] + "..."
 		}
 
-		view += cursor + checkbox + name + "\n"
+		// Show matched status for files
+		matchIndicator := ""
+		if !item.IsDir && item.Matched {
+			matchIndicator = " " + Dimmed("["+item.ID+"]")
+		}
+
+		view += cursor + checkbox + icon + name + matchIndicator + "\n"
 	}
 
 	view += fmt.Sprintf("\n%d/%d files", b.cursor+1, len(b.items))
@@ -386,7 +449,33 @@ func (h *HelpView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (h *HelpView) View() string {
-	return Title("Help") + "\n\nPress ? to close"
+	help := Title("Help") + "\n\n"
+
+	help += HelpKeyStyle.Render("Global Keys") + "\n"
+	help += "  ? - Toggle help\n"
+	help += "  q/Ctrl+C - Quit\n"
+	help += "  1-3 - Switch views\n"
+	help += "  Tab - Cycle views\n\n"
+
+	help += HelpKeyStyle.Render("Browser View") + "\n"
+	help += "  ↑/k - Move up\n"
+	help += "  ↓/j - Move down\n"
+	help += "  Space - Toggle selection (files or entire folders)\n"
+	help += "  a - Select all\n"
+	help += "  A - Deselect all\n"
+	help += "  Enter - Start processing\n"
+	help += "  p - Pause/resume\n\n"
+
+	help += HelpKeyStyle.Render("Logs View") + "\n"
+	help += "  ↑/k - Scroll up\n"
+	help += "  ↓/j - Scroll down\n"
+	help += "  g - Go to top\n"
+	help += "  G - Go to bottom\n"
+	help += "  a - Toggle auto-scroll\n\n"
+
+	help += Dimmed("📁 Folders with checkboxes select all files inside")
+
+	return help
 }
 
 // Helper functions
