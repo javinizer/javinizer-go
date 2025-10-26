@@ -104,6 +104,8 @@ javinizer-go/
 │   ├── config/           # Configuration management
 │   ├── database/         # Database layer (GORM)
 │   ├── downloader/       # Media downloads
+│   ├── history/          # Operation history tracking
+│   ├── logging/          # Structured logging (logrus)
 │   ├── matcher/          # File/ID matching
 │   ├── models/           # Data models
 │   ├── nfo/              # NFO generation
@@ -211,24 +213,28 @@ Javinizer Go is significantly faster than the PowerShell version:
 ### Completed ✅
 
 - Multi-source scraping (R18.dev, DMM)
-- Metadata aggregation with priority
-- File scanning and matching
-- Template-based organization
-- NFO generation (Kodi-compatible)
-- Media downloads
-- Genre replacement system
-- Database caching
-- CLI interface
-- Comprehensive documentation
+- Metadata aggregation with configurable priority
+- File scanning and matching (regex support)
+- Template-based organization with conditional logic
+- NFO generation (Kodi/Plex-compatible)
+- Media downloads (cover, poster, screenshots, trailer, actress)
+- Genre replacement system (database-backed)
+- Database caching (SQLite with GORM)
+- History tracking with CLI commands
+- File logging (logrus, configurable output)
+- CLI interface with verbose mode
+- Comprehensive documentation (10 guides)
+- Integration testing
 
 ### Planned 📋
 
 - REST API server
 - Web UI
 - WebSocket support for real-time updates
-- Additional scrapers
-- Conditional template logic
-- History tracking
+- Additional scrapers (JAVLibrary, etc.)
+- Batch processing improvements
+- Plugin system
+- Docker support
 
 ## Contributing
 
