@@ -1,0 +1,314 @@
+basePath: /
+definitions:
+  cmd_cli.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  cmd_cli.HealthResponse:
+    properties:
+      scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+      status:
+        example: ok
+        type: string
+    type: object
+  cmd_cli.MovieResponse:
+    properties:
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+    type: object
+  cmd_cli.MoviesResponse:
+    properties:
+      count:
+        example: 20
+        type: integer
+      movies:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        type: array
+    type: object
+  cmd_cli.ScrapeRequest:
+    properties:
+      id:
+        example: IPX-535
+        type: string
+    required:
+    - id
+    type: object
+  cmd_cli.ScrapeResponse:
+    properties:
+      cached:
+        example: false
+        type: boolean
+      errors:
+        items:
+          type: string
+        type: array
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+      sources_used:
+        example: 2
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.Actress:
+    properties:
+      aliases:
+        description: Pipe-separated
+        type: string
+      created_at:
+        type: string
+      first_name:
+        type: string
+      id:
+        type: integer
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      thumb_url:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.Genre:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.Movie:
+    properties:
+      actresses:
+        description: Relationships
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        type: array
+      alternate_title:
+        type: string
+      content_id:
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      director:
+        type: string
+      display_name:
+        type: string
+      genres:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre'
+        type: array
+      id:
+        type: string
+      label:
+        description: Sub-label
+        type: string
+      maker:
+        description: Studio/maker
+        type: string
+      original_filename:
+        type: string
+      rating:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Rating'
+      release_date:
+        type: string
+      release_year:
+        type: integer
+      runtime:
+        description: in minutes
+        type: integer
+      screenshot_urls:
+        items:
+          type: string
+        type: array
+      series:
+        description: Series name
+        type: string
+      source_name:
+        description: Metadata
+        type: string
+      source_url:
+        type: string
+      title:
+        type: string
+      trailer_url:
+        type: string
+      translations:
+        description: Translations
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.MovieTranslation:
+    properties:
+      alternate_title:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      director:
+        type: string
+      id:
+        type: integer
+      label:
+        type: string
+      language:
+        description: 'ISO 639-1: en, ja, zh, etc.'
+        type: string
+      maker:
+        type: string
+      movie_id:
+        type: string
+      series:
+        type: string
+      source_name:
+        description: Which scraper provided this translation
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.Rating:
+    properties:
+      score:
+        type: number
+      votes:
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact:
+    name: API Support
+    url: https://github.com/javinizer/javinizer-go/issues
+  description: REST API for JAV metadata scraping and file organization
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://github.com/javinizer/javinizer-go
+  title: Javinizer API
+  version: "1.0"
+paths:
+  /api/v1/config:
+    get:
+      description: Retrieve the current server configuration
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get configuration
+      tags:
+      - system
+  /api/v1/movie/{id}:
+    get:
+      description: Retrieve movie metadata from cache by ID
+      parameters:
+      - description: Movie ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_cli.MovieResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_cli.ErrorResponse'
+      summary: Get movie by ID
+      tags:
+      - movies
+  /api/v1/movies:
+    get:
+      description: Get a list of cached movies from the database
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_cli.MoviesResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_cli.ErrorResponse'
+      summary: List cached movies
+      tags:
+      - movies
+  /api/v1/scrape:
+    post:
+      consumes:
+      - application/json
+      description: Scrape metadata from configured sources and cache in database
+      parameters:
+      - description: Movie ID to scrape
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/cmd_cli.ScrapeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_cli.ScrapeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_cli.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_cli.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_cli.ErrorResponse'
+      summary: Scrape movie metadata
+      tags:
+      - movies
+  /health:
+    get:
+      description: Check API health and list enabled scrapers
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_cli.HealthResponse'
+      summary: Health check
+      tags:
+      - system
+schemes:
+- http
+- https
+swagger: "2.0"

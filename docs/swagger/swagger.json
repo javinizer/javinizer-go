@@ -1,0 +1,469 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "REST API for JAV metadata scraping and file organization",
+        "title": "Javinizer API",
+        "termsOfService": "https://github.com/javinizer/javinizer-go",
+        "contact": {
+            "name": "API Support",
+            "url": "https://github.com/javinizer/javinizer-go/issues"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
+        },
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/api/v1/config": {
+            "get": {
+                "description": "Retrieve the current server configuration",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get configuration",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/movie/{id}": {
+            "get": {
+                "description": "Retrieve movie metadata from cache by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "movies"
+                ],
+                "summary": "Get movie by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Movie ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_cli.MovieResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_cli.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/movies": {
+            "get": {
+                "description": "Get a list of cached movies from the database",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "movies"
+                ],
+                "summary": "List cached movies",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_cli.MoviesResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_cli.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/scrape": {
+            "post": {
+                "description": "Scrape metadata from configured sources and cache in database",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "movies"
+                ],
+                "summary": "Scrape movie metadata",
+                "parameters": [
+                    {
+                        "description": "Movie ID to scrape",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/cmd_cli.ScrapeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_cli.ScrapeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_cli.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_cli.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_cli.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "description": "Check API health and list enabled scrapers",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_cli.HealthResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "cmd_cli.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "cmd_cli.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "scrapers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "r18dev",
+                        "dmm"
+                    ]
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "cmd_cli.MovieResponse": {
+            "type": "object",
+            "properties": {
+                "movie": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                }
+            }
+        },
+        "cmd_cli.MoviesResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "movies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                    }
+                }
+            }
+        },
+        "cmd_cli.ScrapeRequest": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "IPX-535"
+                }
+            }
+        },
+        "cmd_cli.ScrapeResponse": {
+            "type": "object",
+            "properties": {
+                "cached": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "movie": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                },
+                "sources_used": {
+                    "type": "integer",
+                    "example": 2
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.Actress": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "description": "Pipe-separated",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "thumb_url": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.Genre": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.Movie": {
+            "type": "object",
+            "properties": {
+                "actresses": {
+                    "description": "Relationships",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                    }
+                },
+                "alternate_title": {
+                    "type": "string"
+                },
+                "content_id": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "director": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "genres": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "description": "Sub-label",
+                    "type": "string"
+                },
+                "maker": {
+                    "description": "Studio/maker",
+                    "type": "string"
+                },
+                "original_filename": {
+                    "type": "string"
+                },
+                "rating": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Rating"
+                },
+                "release_date": {
+                    "type": "string"
+                },
+                "release_year": {
+                    "type": "integer"
+                },
+                "runtime": {
+                    "description": "in minutes",
+                    "type": "integer"
+                },
+                "screenshot_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "series": {
+                    "description": "Series name",
+                    "type": "string"
+                },
+                "source_name": {
+                    "description": "Metadata",
+                    "type": "string"
+                },
+                "source_url": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "trailer_url": {
+                    "type": "string"
+                },
+                "translations": {
+                    "description": "Translations",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.MovieTranslation": {
+            "type": "object",
+            "properties": {
+                "alternate_title": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "director": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "language": {
+                    "description": "ISO 639-1: en, ja, zh, etc.",
+                    "type": "string"
+                },
+                "maker": {
+                    "type": "string"
+                },
+                "movie_id": {
+                    "type": "string"
+                },
+                "series": {
+                    "type": "string"
+                },
+                "source_name": {
+                    "description": "Which scraper provided this translation",
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.Rating": {
+            "type": "object",
+            "properties": {
+                "score": {
+                    "type": "number"
+                },
+                "votes": {
+                    "type": "integer"
+                }
+            }
+        }
+    }
+}
