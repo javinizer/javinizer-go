@@ -5,6 +5,7 @@
 	import { Save, RefreshCw, AlertCircle, ArrowLeft, CheckCircle2, X, GripVertical, ChevronUp, ChevronDown, ChevronRight } from 'lucide-svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
+	import { toastStore } from '$lib/stores/toast';
 
 	interface ScraperItem {
 		name: string;
@@ -18,7 +19,6 @@
 	let loading = $state(true);
 	let saving = $state(false);
 	let error = $state<string | null>(null);
-	let successMessage = $state<string | null>(null);
 	let showConfirmModal = $state(false);
 	let scrapers = $state<ScraperItem[]>([]);
 
@@ -47,7 +47,7 @@
 			// Build scraper list based on priority order in config
 			scrapers = config.Scrapers.Priority.map((name: string) => ({
 				name,
-				enabled: config.Scrapers[name.charAt(0).toUpperCase() + name.slice(1).replace('dev', 'Dev')]?.Enabled ?? false,
+				enabled: config.Scrapers[getConfigKey(name)]?.Enabled ?? false,
 				displayName: scraperDisplayNames[name] || name,
 				expanded: false,
 				options: scraperOptionsMap[name] || []
@@ -59,7 +59,7 @@
 			// Fallback to config-based list without display names or options
 			scrapers = config.Scrapers.Priority.map((name: string) => ({
 				name,
-				enabled: config.Scrapers[name.charAt(0).toUpperCase() + name.slice(1).replace('dev', 'Dev')]?.Enabled ?? false,
+				enabled: config.Scrapers[getConfigKey(name)]?.Enabled ?? false,
 				displayName: name,
 				expanded: false,
 				options: []
@@ -78,9 +78,19 @@
 		scrapers[index].expanded = !scrapers[index].expanded;
 	}
 
+	// Helper to convert scraper name to config key
+	function getConfigKey(scraperName: string): string {
+		// Special case for DMM - needs to be all uppercase
+		if (scraperName === 'dmm') {
+			return 'DMM';
+		}
+		// r18dev -> R18Dev
+		return scraperName.charAt(0).toUpperCase() + scraperName.slice(1).replace('dev', 'Dev');
+	}
+
 	// Helper to get option value from config
 	function getOptionValue(scraperName: string, optionKey: string): any {
-		const configKey = scraperName.charAt(0).toUpperCase() + scraperName.slice(1).replace('dev', 'Dev');
+		const configKey = getConfigKey(scraperName);
 		// Convert snake_case to PascalCase (e.g., scrape_actress -> ScrapeActress)
 		const pascalKey = optionKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('');
 		return config?.Scrapers?.[configKey]?.[pascalKey];
@@ -88,11 +98,15 @@
 
 	// Helper to set option value in config
 	function setOptionValue(scraperName: string, optionKey: string, value: any) {
-		const configKey = scraperName.charAt(0).toUpperCase() + scraperName.slice(1).replace('dev', 'Dev');
+		const configKey = getConfigKey(scraperName);
 		// Convert snake_case to PascalCase (e.g., scrape_actress -> ScrapeActress)
 		const pascalKey = optionKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('');
 		if (config?.Scrapers?.[configKey]) {
 			config.Scrapers[configKey][pascalKey] = value;
+			// Trigger reactivity by reassigning the config object with a deep clone
+			config = JSON.parse(JSON.stringify(config));
+			console.log(`Set ${scraperName}.${optionKey} (${pascalKey}) to ${value} in config.Scrapers.${configKey}`);
+			console.log('Updated config:', config.Scrapers[configKey]);
 		}
 	}
 
@@ -105,7 +119,7 @@
 
 		// Update enabled status
 		scrapers.forEach(scraper => {
-			const configKey = scraper.name.charAt(0).toUpperCase() + scraper.name.slice(1).replace('dev', 'Dev');
+			const configKey = getConfigKey(scraper.name);
 			if (config.Scrapers[configKey]) {
 				config.Scrapers[configKey].Enabled = scraper.enabled;
 			}
@@ -154,18 +168,15 @@
 		showConfirmModal = false;
 		saving = true;
 		error = null;
-		successMessage = null;
 		try {
 			await apiClient.request('/api/v1/config', {
 				method: 'PUT',
 				body: JSON.stringify(config)
 			});
-			successMessage = 'Configuration saved successfully to config.yaml!';
-			setTimeout(() => {
-				successMessage = null;
-			}, 5000);
+			toastStore.success('Configuration saved successfully!', 5000);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to save configuration';
+			toastStore.error(error, 5000);
 		} finally {
 			saving = false;
 		}
@@ -211,15 +222,6 @@
 			</div>
 		</div>
 
-		<!-- Success Message -->
-		{#if successMessage}
-			<div
-				class="bg-green-50 dark:bg-green-900/20 border-2 border-green-500 text-green-800 dark:text-green-200 px-4 py-3 rounded-lg flex items-center gap-2"
-			>
-				<CheckCircle2 class="h-5 w-5" />
-				<p class="font-medium">{successMessage}</p>
-			</div>
-		{/if}
 
 		<!-- Error Message -->
 		{#if error}
@@ -541,12 +543,6 @@
 						</p>
 					</div>
 
-					<div class="space-y-3">
-						<label class="flex items-center gap-2">
-							<input type="checkbox" bind:checked={config.Performance.EnableTUI} class="rounded" />
-							<span>Enable TUI Mode by Default</span>
-						</label>
-					</div>
 				</div>
 			</Card>
 

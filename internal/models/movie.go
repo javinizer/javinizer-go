@@ -10,7 +10,7 @@ type Movie struct {
 	ContentID        string     `json:"content_id" gorm:"index"`
 	DisplayName      string     `json:"display_name"`
 	Title            string     `json:"title"`
-	AlternateTitle   string     `json:"alternate_title"`
+	OriginalTitle    string     `json:"original_title"` // Japanese/original language title
 	Description      string     `json:"description" gorm:"type:text"`
 	ReleaseDate      *time.Time `json:"release_date"`
 	ReleaseYear      int        `json:"release_year"`
@@ -19,48 +19,43 @@ type Movie struct {
 	Maker            string     `json:"maker"`  // Studio/maker
 	Label            string     `json:"label"`  // Sub-label
 	Series           string     `json:"series"` // Series name
-	Rating           *Rating    `json:"rating" gorm:"embedded;embeddedPrefix:rating_"`
-	PosterURL        string     `json:"poster_url"`  // Portrait/box art image
-	CoverURL         string     `json:"cover_url"`   // Landscape/fanart image
+	RatingScore      float64    `json:"rating_score" gorm:"column:rating_score"`
+	RatingVotes      int        `json:"rating_votes" gorm:"column:rating_votes"`
+	PosterURL        string     `json:"poster_url"` // Portrait/box art image
+	CoverURL         string     `json:"cover_url"`  // Landscape/fanart image
 	TrailerURL       string     `json:"trailer_url"`
 	OriginalFileName string     `json:"original_filename"`
 
 	// Relationships
-	Actresses     []Actress  `json:"actresses" gorm:"many2many:movie_actresses;"`
-	Genres        []Genre    `json:"genres" gorm:"many2many:movie_genres;"`
-	Screenshots   []string   `json:"screenshot_urls" gorm:"serializer:json"`
+	Actresses   []Actress `json:"actresses" gorm:"many2many:movie_actresses;"`
+	Genres      []Genre   `json:"genres" gorm:"many2many:movie_genres;"`
+	Screenshots []string  `json:"screenshot_urls" gorm:"serializer:json"`
 
 	// Translations
 	Translations []MovieTranslation `json:"translations" gorm:"foreignKey:MovieID;references:ID"`
 
 	// Metadata
-	SourceName    string     `json:"source_name"` // Primary source
-	SourceURL     string     `json:"source_url"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	SourceName string    `json:"source_name"` // Primary source
+	SourceURL  string    `json:"source_url"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // MovieTranslation represents a movie's metadata in a specific language
 type MovieTranslation struct {
-	ID             uint       `json:"id" gorm:"primaryKey"`
-	MovieID        string     `json:"movie_id" gorm:"index:idx_movie_language,unique"`
-	Language       string     `json:"language" gorm:"index:idx_movie_language,unique;size:5"` // ISO 639-1: en, ja, zh, etc.
-	Title          string     `json:"title"`
-	AlternateTitle string     `json:"alternate_title"`
-	Description    string     `json:"description" gorm:"type:text"`
-	Director       string     `json:"director"`
-	Maker          string     `json:"maker"`
-	Label          string     `json:"label"`
-	Series         string     `json:"series"`
-	SourceName     string     `json:"source_name"` // Which scraper provided this translation
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-}
-
-// Rating represents user rating information
-type Rating struct {
-	Score float64 `json:"score"`
-	Votes int     `json:"votes"`
+	ID            uint      `json:"id" gorm:"primaryKey"`
+	MovieID       string    `json:"movie_id" gorm:"index:idx_movie_language,unique"`
+	Language      string    `json:"language" gorm:"index:idx_movie_language,unique;size:5"` // ISO 639-1: en, ja, zh, etc.
+	Title         string    `json:"title"`
+	OriginalTitle string    `json:"original_title"` // Japanese/original language title
+	Description   string    `json:"description" gorm:"type:text"`
+	Director      string    `json:"director"`
+	Maker         string    `json:"maker"`
+	Label         string    `json:"label"`
+	Series        string    `json:"series"`
+	SourceName    string    `json:"source_name"` // Which scraper provided this translation
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // Actress represents a JAV actress
@@ -125,16 +120,16 @@ func (Genre) TableName() string {
 
 // History represents a log of file organization operations
 type History struct {
-	ID               uint      `json:"id" gorm:"primaryKey"`
-	MovieID          string    `json:"movie_id" gorm:"index"`          // Foreign key to movies.id
-	Operation        string    `json:"operation"`                       // "scrape", "organize", "download", "nfo"
-	OriginalPath     string    `json:"original_path"`                   // Source file path
-	NewPath          string    `json:"new_path"`                        // Destination file path
-	Status           string    `json:"status"`                          // "success", "failed", "reverted"
-	ErrorMessage     string    `json:"error_message" gorm:"type:text"`  // Error details if failed
-	Metadata         string    `json:"metadata" gorm:"type:json"`       // Additional metadata (JSON)
-	DryRun           bool      `json:"dry_run"`                         // Whether this was a dry run
-	CreatedAt        time.Time `json:"created_at" gorm:"index"`
+	ID           uint      `json:"id" gorm:"primaryKey"`
+	MovieID      string    `json:"movie_id" gorm:"index"`          // Foreign key to movies.id
+	Operation    string    `json:"operation"`                      // "scrape", "organize", "download", "nfo"
+	OriginalPath string    `json:"original_path"`                  // Source file path
+	NewPath      string    `json:"new_path"`                       // Destination file path
+	Status       string    `json:"status"`                         // "success", "failed", "reverted"
+	ErrorMessage string    `json:"error_message" gorm:"type:text"` // Error details if failed
+	Metadata     string    `json:"metadata" gorm:"type:json"`      // Additional metadata (JSON)
+	DryRun       bool      `json:"dry_run"`                        // Whether this was a dry run
+	CreatedAt    time.Time `json:"created_at" gorm:"index"`
 }
 
 // TableName specifies the table name for History

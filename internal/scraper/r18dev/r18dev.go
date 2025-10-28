@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -90,8 +91,11 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 			}
 			if err := json.Unmarshal(resp.Body(), &lookupData); err == nil && lookupData.ContentID != "" {
 				contentID = lookupData.ContentID
+				logging.Debugf("R18: ✓ Resolved %s to content-id: %s", id, contentID)
 			}
 		}
+	} else {
+		logging.Debugf("R18: Content-ID lookup returned status %d for %s", resp.StatusCode(), id)
 	}
 
 	// Step 2: Fetch full movie data using content_id (or fall back to normalized ID)
@@ -99,12 +103,14 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	if contentID != "" {
 		// Use content_id if we got it from the lookup
 		finalURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, contentID)
+		logging.Debugf("R18: Using resolved content-id URL: %s", finalURL)
 	} else {
 		// Fall back to using the normalized ID directly
 		finalURL, err = s.GetURL(id)
 		if err != nil {
 			return nil, err
 		}
+		logging.Debugf("R18: Using normalized ID URL (no content-id found): %s", finalURL)
 	}
 
 	resp, err = s.client.R().
@@ -146,14 +152,15 @@ func (s *Scraper) parseResponse(data *R18Response, sourceURL string) (*models.Sc
 	}
 
 	result := &models.ScraperResult{
-		Source:      s.Name(),
-		SourceURL:   sourceURL,
-		Language:    "en", // R18.dev provides English metadata
-		ID:          movieID,
-		ContentID:   data.ContentID,
-		Title:       cleanString(getPreferredString(data.TitleEn, data.Title)),
-		Description: cleanString(getPreferredString(data.DescriptionEn, data.Description)),
-		Runtime:     data.Runtime,
+		Source:        s.Name(),
+		SourceURL:     sourceURL,
+		Language:      "en", // R18.dev provides English metadata
+		ID:            movieID,
+		ContentID:     data.ContentID,
+		Title:         cleanString(getPreferredString(data.TitleEn, data.Title)),
+		OriginalTitle: cleanString(data.Title), // Japanese title
+		Description:   cleanString(getPreferredString(data.DescriptionEn, data.Description)),
+		Runtime:       data.Runtime,
 	}
 
 	// Parse release date (now in YYYY-MM-DD format)
@@ -345,14 +352,14 @@ func getPreferredString(preferred, fallback string) string {
 
 // R18Response represents the JSON response from R18.dev API (current format)
 type R18Response struct {
-	DVDID       string `json:"dvd_id"`
-	ContentID   string `json:"content_id"`
-	Title       string `json:"title"`
-	TitleEn     string `json:"title_en"`       // New English title field
-	Description string `json:"description"`
+	DVDID         string `json:"dvd_id"`
+	ContentID     string `json:"content_id"`
+	Title         string `json:"title"`
+	TitleEn       string `json:"title_en"` // New English title field
+	Description   string `json:"description"`
 	DescriptionEn string `json:"description_en"` // New English description field
-	ReleaseDate string `json:"release_date"`
-	Runtime     int    `json:"runtime"`
+	ReleaseDate   string `json:"release_date"`
+	Runtime       int    `json:"runtime"`
 
 	// Top-level jacket URLs
 	JacketFullURL  string `json:"jacket_full_url"`
@@ -368,7 +375,7 @@ type R18Response struct {
 	SampleURL string `json:"sample_url"`
 
 	// Director is now a simple string
-	Director string `json:"director"`
+	Director   string `json:"director"`
 	DirectorEn string `json:"director_en"` // New English director field
 
 	// Maker - support both nested and flat structures

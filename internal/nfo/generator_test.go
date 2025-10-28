@@ -15,19 +15,19 @@ func TestMovieToNFO(t *testing.T) {
 	releaseDate := time.Date(2020, 9, 13, 0, 0, 0, 0, time.UTC)
 
 	movie := &models.Movie{
-		ID:             "IPX-535",
-		ContentID:      "ipx00535",
-		Title:          "Test Movie Title",
-		AlternateTitle: "テストムービー",
-		Description:    "This is a test movie description.",
-		ReleaseDate:    &releaseDate,
-		Runtime:        120,
-		Director:       "Test Director",
-		Maker:          "Test Studio",
-		Label:          "Test Label",
-		Series:         "Test Series",
-		CoverURL:    "https://example.com/cover.jpg",
-		TrailerURL:  "https://example.com/trailer.mp4",
+		ID:            "IPX-535",
+		ContentID:     "ipx00535",
+		Title:         "Test Movie Title",
+		OriginalTitle: "テストムービー",
+		Description:   "This is a test movie description.",
+		ReleaseDate:   &releaseDate,
+		Runtime:       120,
+		Director:      "Test Director",
+		Maker:         "Test Studio",
+		Label:         "Test Label",
+		Series:        "Test Series",
+		CoverURL:      "https://example.com/cover.jpg",
+		TrailerURL:    "https://example.com/trailer.mp4",
 		Screenshots: []string{
 			"https://example.com/screenshot1.jpg",
 			"https://example.com/screenshot2.jpg",
@@ -179,10 +179,10 @@ func TestMovieToNFO(t *testing.T) {
 
 func TestActressNameFormatting(t *testing.T) {
 	tests := []struct {
-		name           string
-		config         *Config
-		actress        models.Actress
-		expectedName   string
+		name         string
+		config       *Config
+		actress      models.Actress
+		expectedName string
 	}{
 		{
 			name: "FirstName LastName order",

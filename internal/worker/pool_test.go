@@ -12,9 +12,9 @@ import (
 // mockTask is a simple task for testing
 type mockTask struct {
 	BaseTask
-	duration time.Duration
+	duration   time.Duration
 	shouldFail bool
-	executed *atomic.Int32
+	executed   *atomic.Int32
 }
 
 func newMockTask(id string, duration time.Duration, shouldFail bool) *mockTask {

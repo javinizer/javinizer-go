@@ -22,9 +22,9 @@ type MockScraper struct {
 	err     error
 }
 
-func (m *MockScraper) Name() string                                     { return m.name }
-func (m *MockScraper) IsEnabled() bool                                  { return true }
-func (m *MockScraper) GetURL(id string) (string, error)                 { return "", nil }
+func (m *MockScraper) Name() string                                    { return m.name }
+func (m *MockScraper) IsEnabled() bool                                 { return true }
+func (m *MockScraper) GetURL(id string) (string, error)                { return "", nil }
 func (m *MockScraper) Search(id string) (*models.ScraperResult, error) { return m.results, m.err }
 
 // TestScrapeTask_ForceRefresh tests that forceRefresh deletes from cache before scraping

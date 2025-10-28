@@ -99,7 +99,7 @@ func (g *Generator) MovieToNFO(movie *models.Movie) *Movie {
 	nfo := &Movie{
 		ID:            movie.ID,
 		Title:         movie.Title,
-		OriginalTitle: movie.AlternateTitle,
+		OriginalTitle: movie.OriginalTitle,
 		SortTitle:     movie.ID, // Use ID for sorting
 		Plot:          movie.Description,
 		Director:      movie.Director,
@@ -131,15 +131,15 @@ func (g *Generator) MovieToNFO(movie *models.Movie) *Movie {
 	}
 
 	// Add rating
-	if movie.Rating != nil {
+	if movie.RatingScore > 0 {
 		nfo.Ratings = Ratings{
 			Rating: []Rating{
 				{
 					Name:    g.config.DefaultRatingSource,
 					Max:     10,
 					Default: true,
-					Value:   movie.Rating.Score,
-					Votes:   movie.Rating.Votes,
+					Value:   movie.RatingScore,
+					Votes:   movie.RatingVotes,
 				},
 			},
 		}
@@ -314,7 +314,7 @@ func (g *Generator) ScraperResultToNFO(result *models.ScraperResult) *Movie {
 	nfo := &Movie{
 		ID:            result.ID,
 		Title:         result.Title,
-		OriginalTitle: result.Title,
+		OriginalTitle: result.OriginalTitle,
 		SortTitle:     result.ID,
 		Plot:          result.Description,
 		Director:      result.Director,

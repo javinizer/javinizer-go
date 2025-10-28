@@ -14,14 +14,14 @@ func TestScanner_Scan(t *testing.T) {
 
 	// Create test files
 	testFiles := map[string]int64{
-		"movie1.mp4":              100 * 1024 * 1024, // 100MB
-		"movie2.mkv":              200 * 1024 * 1024, // 200MB
-		"movie3-trailer.mp4":      10 * 1024 * 1024,  // 10MB (should be excluded)
-		"movie4-sample.mp4":       5 * 1024 * 1024,   // 5MB (should be excluded)
-		"document.txt":            1 * 1024,          // Should be excluded (wrong extension)
-		"small.mp4":               100 * 1024,        // 100KB (should be excluded if min size > 1MB)
-		"subfolder/movie5.mp4":    150 * 1024 * 1024, // 150MB (in subfolder)
-		"subfolder/movie6.mkv":    180 * 1024 * 1024, // 180MB (in subfolder)
+		"movie1.mp4":                  100 * 1024 * 1024, // 100MB
+		"movie2.mkv":                  200 * 1024 * 1024, // 200MB
+		"movie3-trailer.mp4":          10 * 1024 * 1024,  // 10MB (should be excluded)
+		"movie4-sample.mp4":           5 * 1024 * 1024,   // 5MB (should be excluded)
+		"document.txt":                1 * 1024,          // Should be excluded (wrong extension)
+		"small.mp4":                   100 * 1024,        // 100KB (should be excluded if min size > 1MB)
+		"subfolder/movie5.mp4":        150 * 1024 * 1024, // 150MB (in subfolder)
+		"subfolder/movie6.mkv":        180 * 1024 * 1024, // 180MB (in subfolder)
 		"subfolder/nested/movie7.avi": 120 * 1024 * 1024, // 120MB (nested)
 	}
 
@@ -261,7 +261,7 @@ func TestScanner_ExcludePatterns(t *testing.T) {
 		{"movie-trailer.mp4", []string{"*-trailer*"}, false},
 		{"movie-sample.mp4", []string{"*-sample*"}, false},
 		{"movie-TRAILER.mp4", []string{"*-trailer*"}, true}, // Case sensitive (pattern is lowercase)
-		{"SAMPLE-movie.mp4", []string{"SAMPLE-*"}, false},  // Match uppercase at start
+		{"SAMPLE-movie.mp4", []string{"SAMPLE-*"}, false},   // Match uppercase at start
 		{"movie.mp4", []string{"*-trailer*", "*-sample*"}, true},
 		{"trailer-movie.mp4", []string{"trailer-*"}, false},
 	}

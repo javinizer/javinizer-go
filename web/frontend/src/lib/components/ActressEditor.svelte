@@ -2,7 +2,7 @@
 	import type { Movie, Actress } from '$lib/api/types';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
-	import { Plus, Edit, Trash2, X, Save } from 'lucide-svelte';
+	import { Plus, Edit, Trash2, X, Save, Search } from 'lucide-svelte';
 
 	interface Props {
 		movie: Movie;
@@ -19,6 +19,25 @@
 		last_name: '',
 		japanese_name: '',
 		thumb_url: ''
+	});
+
+	// Autocomplete state
+	let searchQuery = $state('');
+	let allActresses = $state<Actress[]>([]);
+	let showSearchResults = $state(false);
+	let isSearchFocused = $state(false);
+
+	// Filtered results based on search query (client-side filtering)
+	const filteredActresses = $derived(() => {
+		if (!searchQuery || searchQuery.trim().length === 0) {
+			return allActresses;
+		}
+		const query = searchQuery.toLowerCase();
+		return allActresses.filter(actress => {
+			const fullName = getFullName(actress).toLowerCase();
+			const japaneseName = (actress.japanese_name || '').toLowerCase();
+			return fullName.includes(query) || japaneseName.includes(query);
+		});
 	});
 
 	// Sync actresses when movie prop changes
@@ -51,12 +70,14 @@
 			thumb_url: ''
 		};
 		showEditModal = true;
+		loadAllActresses(); // Load actresses when opening modal
 	}
 
 	function openEditActress(index: number) {
 		editingIndex = index;
 		editingActress = { ...actresses[index] };
 		showEditModal = true;
+		loadAllActresses(); // Load actresses when opening modal
 	}
 
 	function saveActress() {
@@ -84,6 +105,41 @@
 
 	function cancelEdit() {
 		showEditModal = false;
+		// Reset search state when closing modal
+		searchQuery = '';
+		showSearchResults = false;
+	}
+
+	// Load all actresses on modal open
+	async function loadAllActresses() {
+		try {
+			const response = await fetch(`http://localhost:8080/api/v1/actresses/search?q=`);
+			if (response.ok) {
+				allActresses = await response.json();
+			}
+		} catch (error) {
+			console.error('Failed to load actresses:', error);
+			allActresses = [];
+		}
+	}
+
+	// Select an actress from search results
+	function selectActressFromSearch(actress: Actress) {
+		editingActress = { ...actress };
+		searchQuery = getFullName(actress); // Show selected name in input
+		showSearchResults = false;
+	}
+
+	// Handle input focus
+	function handleSearchFocus() {
+		showSearchResults = true;
+	}
+
+	// Handle input blur (with delay to allow click on dropdown)
+	function handleSearchBlur() {
+		setTimeout(() => {
+			showSearchResults = false;
+		}, 200);
 	}
 </script>
 
@@ -119,7 +175,7 @@
 								alt={getFullName(actress)}
 								class="w-full aspect-[2/3] object-cover rounded"
 								onerror={(e) => {
-									e.currentTarget.src =
+									(e.currentTarget as HTMLImageElement).src =
 										'https://via.placeholder.com/200x300?text=No+Image';
 								}}
 							/>
@@ -184,6 +240,80 @@
 
 			<!-- Body -->
 			<div class="flex-1 overflow-auto p-6 space-y-4">
+				<!-- Search Section -->
+				<div class="space-y-2">
+					<label class="text-sm font-medium block flex items-center gap-2">
+						<Search class="h-4 w-4" />
+						Select or Search Actress
+					</label>
+					<div class="relative">
+						<input
+							type="text"
+							bind:value={searchQuery}
+							onfocus={handleSearchFocus}
+							onblur={handleSearchBlur}
+							placeholder="Click to see all actresses or type to search..."
+							class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+						/>
+
+						{#if showSearchResults}
+							{#if filteredActresses().length > 0}
+								<div class="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg max-h-64 overflow-y-auto">
+									{#each filteredActresses() as actress}
+										<button
+											type="button"
+											onclick={() => selectActressFromSearch(actress)}
+											class="w-full px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 text-left flex items-center gap-3 border-b last:border-b-0 transition-colors cursor-pointer"
+										>
+											{#if actress.thumb_url}
+												<img
+													src={actress.thumb_url}
+													alt={getFullName(actress)}
+													class="w-12 h-16 object-cover rounded"
+												/>
+											{:else}
+												<div class="w-12 h-16 bg-accent rounded flex items-center justify-center text-xs">
+													No Img
+												</div>
+											{/if}
+											<div class="flex-1">
+												<p class="font-medium text-sm">{getFullName(actress)}</p>
+												{#if actress.japanese_name}
+													<p class="text-xs text-muted-foreground">{actress.japanese_name}</p>
+												{/if}
+											</div>
+										</button>
+									{/each}
+								</div>
+							{:else if allActresses.length === 0}
+								<div class="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
+									No actresses in database yet. Add your first one below!
+								</div>
+							{:else}
+								<div class="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
+									No matches found
+								</div>
+							{/if}
+						{/if}
+					</div>
+					<p class="text-xs text-muted-foreground">
+						{#if allActresses.length > 0}
+							{allActresses.length} actress{allActresses.length === 1 ? '' : 'es'} in database - select from dropdown or enter details manually below
+						{:else}
+							Enter actress details manually below
+						{/if}
+					</p>
+				</div>
+
+				<div class="relative">
+					<div class="absolute inset-0 flex items-center">
+						<div class="w-full border-t"></div>
+					</div>
+					<div class="relative flex justify-center text-xs uppercase">
+						<span class="bg-background px-2 text-muted-foreground">Or enter manually</span>
+					</div>
+				</div>
+
 				<div class="grid md:grid-cols-2 gap-6">
 					<!-- Left: Form -->
 					<div class="space-y-4">
@@ -238,7 +368,7 @@
 									alt={getFullName(editingActress) || 'Preview'}
 									class="w-full aspect-[2/3] object-cover rounded mb-2"
 									onerror={(e) => {
-										e.currentTarget.src =
+										(e.currentTarget as HTMLImageElement).src =
 											'https://via.placeholder.com/200x300?text=Invalid+URL';
 									}}
 								/>

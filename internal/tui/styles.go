@@ -6,18 +6,18 @@ import (
 
 // Color palette
 var (
-	ColorPrimary     = lipgloss.Color("#8B5CF6") // Bright Purple
-	ColorSuccess     = lipgloss.Color("#22C55E") // Bright Green
-	ColorWarning     = lipgloss.Color("#FBBF24") // Bright Amber
-	ColorError       = lipgloss.Color("#EF4444") // Red
-	ColorInfo        = lipgloss.Color("#60A5FA") // Bright Blue
-	ColorMuted       = lipgloss.Color("#9CA3AF") // Light Gray
-	ColorBorder      = lipgloss.Color("#6B7280") // Medium gray
-	ColorBackground  = lipgloss.Color("#111827") // Very dark
-	ColorForeground  = lipgloss.Color("#F9FAFB") // Very light
-	ColorHighlight   = lipgloss.Color("#A78BFA") // Light purple
-	ColorTab         = lipgloss.Color("#4B5563") // Medium dark gray
-	ColorTabActive   = lipgloss.Color("#8B5CF6") // Active tab purple
+	ColorPrimary    = lipgloss.Color("#8B5CF6") // Bright Purple
+	ColorSuccess    = lipgloss.Color("#22C55E") // Bright Green
+	ColorWarning    = lipgloss.Color("#FBBF24") // Bright Amber
+	ColorError      = lipgloss.Color("#EF4444") // Red
+	ColorInfo       = lipgloss.Color("#60A5FA") // Bright Blue
+	ColorMuted      = lipgloss.Color("#9CA3AF") // Light Gray
+	ColorBorder     = lipgloss.Color("#6B7280") // Medium gray
+	ColorBackground = lipgloss.Color("#111827") // Very dark
+	ColorForeground = lipgloss.Color("#F9FAFB") // Very light
+	ColorHighlight  = lipgloss.Color("#A78BFA") // Light purple
+	ColorTab        = lipgloss.Color("#4B5563") // Medium dark gray
+	ColorTabActive  = lipgloss.Color("#8B5CF6") // Active tab purple
 )
 
 // Styles
@@ -148,11 +148,11 @@ var (
 			MarginRight(1)
 
 	ActiveTabStyle = lipgloss.NewStyle().
-				Foreground(ColorForeground).
-				Background(ColorTabActive).
-				Padding(0, 2).
-				MarginRight(1).
-				Bold(true)
+			Foreground(ColorForeground).
+			Background(ColorTabActive).
+			Padding(0, 2).
+			MarginRight(1).
+			Bold(true)
 
 	// Panel style with lighter border
 	PanelStyle = lipgloss.NewStyle().

@@ -31,9 +31,9 @@ type FileInfo struct {
 
 // ScanResult contains the results of a directory scan
 type ScanResult struct {
-	Files    []FileInfo // Matched video files
-	Skipped  []string   // Files that were skipped (reason in comment)
-	Errors   []error    // Errors encountered during scan
+	Files   []FileInfo // Matched video files
+	Skipped []string   // Files that were skipped (reason in comment)
+	Errors  []error    // Errors encountered during scan
 }
 
 // Scan recursively scans a directory for video files

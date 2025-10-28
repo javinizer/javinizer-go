@@ -213,13 +213,14 @@ func runScrape(cmd *cobra.Command, args []string) {
 		logging.Fatalf("Failed to run migrations: %v", err)
 	}
 
+	// Initialize repositories
+	movieRepo := database.NewMovieRepository(db)
+	contentIDRepo := database.NewContentIDMappingRepository(db)
+
 	// Initialize scrapers
 	registry := models.NewScraperRegistry()
 	registry.Register(r18dev.New(cfg))
-	registry.Register(dmm.New(cfg))
-
-	// Initialize repositories
-	movieRepo := database.NewMovieRepository(db)
+	registry.Register(dmm.New(cfg, contentIDRepo))
 
 	// Initialize aggregator with database support
 	agg := aggregator.NewWithDatabase(cfg, db)
@@ -252,15 +253,48 @@ func runScrape(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Scrape from sources in priority order
+	// Phase 1: Content-ID Resolution using DMM
+	logging.Info("🔍 Resolving content-ID using DMM...")
+	var resolvedID string
+	dmmScraper, exists := registry.Get("dmm")
+	if exists {
+		if dmmScraperTyped, ok := dmmScraper.(*dmm.Scraper); ok {
+			contentID, err := dmmScraperTyped.ResolveContentID(id)
+			if err != nil {
+				logging.Debugf("DMM content-ID resolution failed: %v, will use original ID", err)
+				resolvedID = id // Fallback to original ID
+			} else {
+				resolvedID = contentID
+				logging.Infof("✅ Resolved content-ID: %s", resolvedID)
+			}
+		} else {
+			logging.Debug("DMM scraper type assertion failed, using original ID")
+			resolvedID = id
+		}
+	} else {
+		logging.Debug("DMM scraper not available, using original ID")
+		resolvedID = id
+	}
+
+	// Phase 2: Scrape from sources in priority order
 	results := []*models.ScraperResult{}
 
 	for _, scraper := range registry.GetByPriority(scrapersToUse) {
 		logging.Infof("Scraping %s...", scraper.Name())
-		result, err := scraper.Search(id)
+		result, err := scraper.Search(resolvedID)
 		if err != nil {
 			logging.Warnf("❌ %s: %v", scraper.Name(), err)
-			continue
+			// If scraping with resolved ID fails, try with original ID before giving up
+			if resolvedID != id {
+				logging.Debugf("Retrying %s with original ID: %s", scraper.Name(), id)
+				result, err = scraper.Search(id)
+				if err != nil {
+					logging.Warnf("❌ %s (with original ID): %v", scraper.Name(), err)
+					continue
+				}
+			} else {
+				continue
+			}
 		}
 		logging.Info("✅")
 		results = append(results, result)
@@ -399,8 +433,8 @@ func printMovie(movie *models.Movie, results []*models.ScraperResult) {
 	}
 
 	// Rating
-	if movie.Rating != nil && movie.Rating.Score > 0 {
-		rows = append(rows, []string{"Rating", fmt.Sprintf("%.1f/10 (%d votes)", movie.Rating.Score, movie.Rating.Votes)})
+	if movie.RatingScore > 0 {
+		rows = append(rows, []string{"Rating", fmt.Sprintf("%.1f/10 (%d votes)", movie.RatingScore, movie.RatingVotes)})
 	}
 
 	// Actresses
@@ -643,11 +677,13 @@ func runSort(cmd *cobra.Command, args []string) {
 	}
 
 	// Initialize components
+	movieRepo := database.NewMovieRepository(db)
+	contentIDRepo := database.NewContentIDMappingRepository(db)
+
 	registry := models.NewScraperRegistry()
 	registry.Register(r18dev.New(cfg))
-	registry.Register(dmm.New(cfg))
+	registry.Register(dmm.New(cfg, contentIDRepo))
 
-	movieRepo := database.NewMovieRepository(db)
 	agg := aggregator.NewWithDatabase(cfg, db)
 
 	fileScanner := scanner.NewScanner(&cfg.Matching)

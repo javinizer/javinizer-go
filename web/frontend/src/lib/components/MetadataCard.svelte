@@ -57,22 +57,22 @@
 						{formatDuration(movie.runtime)}
 					</div>
 				{/if}
-				{#if movie.rating}
+				{#if movie.rating_score}
 					<div class="flex items-center gap-1">
 						<Star class="h-4 w-4 fill-yellow-400 text-yellow-400" />
-						{movie.rating.toFixed(1)}
-						{#if movie.votes}
-							<span class="text-xs">({movie.votes})</span>
+						{movie.rating_score.toFixed(1)}
+						{#if movie.rating_votes}
+							<span class="text-xs">({movie.rating_votes})</span>
 						{/if}
 					</div>
 				{/if}
 			</div>
 
-			<!-- Studio & Label -->
-			{#if movie.studio || movie.label}
+			<!-- Maker & Label -->
+			{#if movie.maker || movie.label}
 				<div class="text-sm">
-					{#if movie.studio}
-						<span class="font-medium">{movie.studio}</span>
+					{#if movie.maker}
+						<span class="font-medium">{movie.maker}</span>
 					{/if}
 					{#if movie.label}
 						<span class="text-muted-foreground"> • {movie.label}</span>
@@ -85,7 +85,7 @@
 				<div class="flex flex-wrap gap-1">
 					{#each movie.actresses.slice(0, 3) as actress}
 						<span class="px-2 py-1 bg-primary/10 text-primary rounded-md text-xs">
-							{actress.name}
+							{actress.japanese_name || `${actress.first_name || ''} ${actress.last_name || ''}`.trim() || 'Unknown'}
 						</span>
 					{/each}
 					{#if movie.actresses.length > 3}

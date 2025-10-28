@@ -2,6 +2,12 @@ package models
 
 import "time"
 
+// Rating represents rating information from scrapers
+type Rating struct {
+	Score float64 `json:"score"`
+	Votes int     `json:"votes"`
+}
+
 // ScraperResult represents the raw data returned by a scraper
 type ScraperResult struct {
 	Source        string        `json:"source"`
@@ -10,6 +16,7 @@ type ScraperResult struct {
 	ID            string        `json:"id"`
 	ContentID     string        `json:"content_id"`
 	Title         string        `json:"title"`
+	OriginalTitle string        `json:"original_title"` // Japanese/original language title
 	Description   string        `json:"description"`
 	ReleaseDate   *time.Time    `json:"release_date"`
 	Runtime       int           `json:"runtime"`
@@ -20,8 +27,8 @@ type ScraperResult struct {
 	Rating        *Rating       `json:"rating"`
 	Actresses     []ActressInfo `json:"actresses"`
 	Genres        []string      `json:"genres"`
-	PosterURL     string        `json:"poster_url"`      // Portrait/box art image
-	CoverURL      string        `json:"cover_url"`       // Landscape/fanart image
+	PosterURL     string        `json:"poster_url"` // Portrait/box art image
+	CoverURL      string        `json:"cover_url"`  // Landscape/fanart image
 	ScreenshotURL []string      `json:"screenshot_urls"`
 	TrailerURL    string        `json:"trailer_url"`
 }

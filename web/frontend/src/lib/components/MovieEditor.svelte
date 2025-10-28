@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { Movie } from '$lib/api/types';
-	import { AlertCircle } from 'lucide-svelte';
+	import type { Movie, Genre } from '$lib/api/types';
+	import { AlertCircle, X, Plus } from 'lucide-svelte';
 
 	interface Props {
 		movie: Movie;
@@ -13,6 +13,9 @@
 	// Create a local editable copy
 	let editedMovie = $state({ ...movie });
 	let isInitialized = $state(false);
+
+	// Genre input state
+	let newGenreInput = $state('');
 
 	// Sync editedMovie when movie prop changes
 	$effect(() => {
@@ -51,6 +54,38 @@
 			? new Date(editedMovie.release_date).toISOString().split('T')[0]
 			: ''
 	);
+
+	// Genre management functions
+	function addGenre() {
+		const trimmedInput = newGenreInput.trim();
+		if (!trimmedInput) return;
+
+		// Check if genre already exists
+		const exists = editedMovie.genres?.some(g => g.name.toLowerCase() === trimmedInput.toLowerCase());
+		if (exists) {
+			newGenreInput = '';
+			return;
+		}
+
+		// Add new genre
+		if (!editedMovie.genres) {
+			editedMovie.genres = [];
+		}
+		editedMovie.genres = [...editedMovie.genres, { name: trimmedInput }];
+		newGenreInput = '';
+	}
+
+	function removeGenre(genreName: string) {
+		if (!editedMovie.genres) return;
+		editedMovie.genres = editedMovie.genres.filter(g => g.name !== genreName);
+	}
+
+	function handleGenreKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			addGenre();
+		}
+	}
 </script>
 
 <div class="space-y-4">
@@ -177,17 +212,17 @@
 			/>
 		</div>
 
-		<!-- Studio -->
+		<!-- Maker -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Studio / Maker
-				{#if isModified('studio')}
+				{#if isModified('maker')}
 					<AlertCircle class="h-3 w-3 text-orange-600" />
 				{/if}
 			</label>
 			<input
 				type="text"
-				bind:value={editedMovie.studio}
+				bind:value={editedMovie.maker}
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
@@ -222,22 +257,107 @@
 			/>
 		</div>
 
-		<!-- Rating -->
+		<!-- Rating Score -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Rating
-				{#if isModified('rating')}
+				Rating Score (0-10)
+				{#if isModified('rating_score')}
 					<AlertCircle class="h-3 w-3 text-orange-600" />
 				{/if}
 			</label>
 			<input
 				type="number"
-				bind:value={editedMovie.rating}
+				bind:value={editedMovie.rating_score}
 				min="0"
 				max="10"
 				step="0.1"
+				placeholder="0.0"
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
+			{#if editedMovie.rating_score !== undefined && editedMovie.rating_score !== null}
+				<p class="text-xs text-muted-foreground mt-1">
+					{editedMovie.rating_score.toFixed(1)}/10
+					{#if editedMovie.rating_votes}
+						({editedMovie.rating_votes} vote{editedMovie.rating_votes !== 1 ? 's' : ''})
+					{/if}
+				</p>
+			{/if}
+		</div>
+
+		<!-- Rating Votes -->
+		<div>
+			<label class="flex items-center gap-2 text-sm font-medium mb-1">
+				Rating Votes
+				{#if isModified('rating_votes')}
+					<AlertCircle class="h-3 w-3 text-orange-600" />
+				{/if}
+			</label>
+			<input
+				type="number"
+				bind:value={editedMovie.rating_votes}
+				min="0"
+				step="1"
+				placeholder="0"
+				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+			/>
+		</div>
+
+		<!-- Genres -->
+		<div class="md:col-span-2">
+			<label class="flex items-center gap-2 text-sm font-medium mb-1">
+				Genres
+				{#if isModified('genres')}
+					<AlertCircle class="h-3 w-3 text-orange-600" />
+				{/if}
+			</label>
+
+			<!-- Cloud tags display -->
+			<div class="w-full px-3 py-2.5 border rounded-lg min-h-[46px] flex flex-wrap gap-2 items-center bg-white focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
+				{#if editedMovie.genres && editedMovie.genres.length > 0}
+					{#each editedMovie.genres as genre}
+						<span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-br from-primary/10 to-primary/5 text-primary rounded-full text-sm font-medium hover:from-primary/15 hover:to-primary/10 transition-all shadow-sm border border-primary/10">
+							<span class="leading-none">{genre.name}</span>
+							<button
+								type="button"
+								onclick={() => removeGenre(genre.name)}
+								class="ml-0.5 -mr-1 p-0.5 rounded-full hover:bg-primary/20 transition-all opacity-70 hover:opacity-100"
+								title="Remove {genre.name}"
+							>
+								<X class="h-3.5 w-3.5" />
+							</button>
+						</span>
+					{/each}
+				{/if}
+
+				<!-- Input for adding new genre -->
+				<div class="flex-1 min-w-[140px] inline-flex items-center gap-2">
+					<input
+						type="text"
+						bind:value={newGenreInput}
+						onkeydown={handleGenreKeydown}
+						placeholder={editedMovie.genres && editedMovie.genres.length > 0 ? "Add another..." : "Type a genre and press Enter"}
+						class="flex-1 outline-none bg-transparent text-sm min-w-0 placeholder:text-muted-foreground/60"
+					/>
+					{#if newGenreInput.trim()}
+						<button
+							type="button"
+							onclick={addGenre}
+							class="p-1.5 rounded-full bg-primary/10 hover:bg-primary/20 text-primary transition-all hover:scale-110"
+							title="Add genre"
+						>
+							<Plus class="h-3.5 w-3.5" />
+						</button>
+					{/if}
+				</div>
+			</div>
+
+			<p class="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
+				<kbd class="px-1.5 py-0.5 bg-accent rounded text-xs font-mono border">Enter</kbd>
+				to add
+				{#if editedMovie.genres && editedMovie.genres.length > 0}
+					• Click <X class="h-3 w-3 inline" /> to remove
+				{/if}
+			</p>
 		</div>
 	</div>
 </div>

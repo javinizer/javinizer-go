@@ -2,8 +2,8 @@ package dmm
 
 import (
 	"fmt"
-	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +11,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -26,13 +28,16 @@ const (
 
 // Scraper implements the DMM/Fanza scraper
 type Scraper struct {
-	client         *resty.Client
-	enabled        bool
-	scrapeActress  bool
+	client          *resty.Client
+	enabled         bool
+	scrapeActress   bool
+	enableHeadless  bool
+	headlessTimeout int
+	contentIDRepo   *database.ContentIDMappingRepository
 }
 
 // New creates a new DMM scraper
-func New(cfg *config.Config) *Scraper {
+func New(cfg *config.Config, contentIDRepo *database.ContentIDMappingRepository) *Scraper {
 	client := resty.New()
 	client.SetTimeout(30 * time.Second)
 	client.SetRetryCount(3)
@@ -51,24 +56,17 @@ func New(cfg *config.Config) *Scraper {
 	client.SetHeader("Connection", "keep-alive")
 	client.SetHeader("Upgrade-Insecure-Requests", "1")
 
-	// Set age verification cookie
-	client.SetCookie(&http.Cookie{
-		Name:   "age_check_done",
-		Value:  "1",
-		Domain: ".dmm.co.jp",
-	})
-
-	// Additional cookies that might help
-	client.SetCookie(&http.Cookie{
-		Name:   "cklg",
-		Value:  "ja",
-		Domain: ".dmm.co.jp",
-	})
+	// Set age verification cookies once on the client
+	// These will be sent with all requests automatically
+	client.SetHeader("Cookie", "age_check_done=1; cklg=ja")
 
 	return &Scraper{
-		client:        client,
-		enabled:       cfg.Scrapers.DMM.Enabled,
-		scrapeActress: cfg.Scrapers.DMM.ScrapeActress,
+		client:          client,
+		enabled:         cfg.Scrapers.DMM.Enabled,
+		scrapeActress:   cfg.Scrapers.DMM.ScrapeActress,
+		enableHeadless:  cfg.Scrapers.DMM.EnableHeadless,
+		headlessTimeout: cfg.Scrapers.DMM.HeadlessTimeout,
+		contentIDRepo:   contentIDRepo,
 	}
 }
 
@@ -82,72 +80,241 @@ func (s *Scraper) IsEnabled() bool {
 	return s.enabled
 }
 
-// GetURL attempts to find the URL for a given movie ID using DMM search
-func (s *Scraper) GetURL(id string) (string, error) {
-	contentID := normalizeContentID(id)
+// ResolveContentID attempts to resolve the display ID to an actual DMM content ID
+// by first checking the cache, then scraping DMM search if needed
+func (s *Scraper) ResolveContentID(id string) (string, error) {
+	// If no repository available, skip resolution
+	if s.contentIDRepo == nil {
+		return "", fmt.Errorf("content ID repository not available")
+	}
 
-	// Search DMM using the contentID (e.g., "ipx00535")
-	searchURLFormatted := fmt.Sprintf(searchURL, contentID)
+	// 1. Check cache first (fast, no network)
+	normalizedID := strings.ToUpper(id)
+	if cached, err := s.contentIDRepo.FindBySearchID(normalizedID); err == nil {
+		logging.Debugf("DMM: Found cached content-id for %s: %s", id, cached.ContentID)
+		return cached.ContentID, nil
+	}
+
+	logging.Debugf("DMM: Content-id not cached for %s, attempting to resolve via search", id)
+
+	// 2. Try to scrape DMM search page
+	// Use the original ID (with zeros) for search to get precise results
+	// Remove hyphen but keep zeros: "MDB-087" -> "mdb087"
+	searchQuery := strings.ToLower(strings.ReplaceAll(id, "-", ""))
+	contentID := normalizeContentID(id) // Still needed for comparison
+	searchURLFormatted := fmt.Sprintf(searchURL, searchQuery)
+
+	// Fetch the search page (cookies are set globally on the client)
 	resp, err := s.client.R().Get(searchURLFormatted)
 	if err != nil {
-		return "", fmt.Errorf("failed to search DMM: %w", err)
+		return "", fmt.Errorf("DMM search unavailable (possible geo-restriction or network error): %w", err)
+	}
+
+	// Check for explicit geo-blocking or access denial
+	if resp.StatusCode() == 403 || resp.StatusCode() == 451 {
+		return "", fmt.Errorf("DMM access blocked (status %d, likely geo-restriction)", resp.StatusCode())
 	}
 
 	if resp.StatusCode() != 200 {
 		return "", fmt.Errorf("DMM search returned status code %d", resp.StatusCode())
 	}
 
-	// Parse search results
+	// 3. Parse search results to extract actual content-id
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
 	if err != nil {
-		return "", fmt.Errorf("failed to parse search results: %w", err)
+		return "", fmt.Errorf("failed to parse DMM search results: %w", err)
 	}
 
-	// Extract all product links from search results
-	var matchedURL string
-
-	// Also compute a "clean" version without leading zeros for matching
-	// Example: ipx00535 -> ipx535
+	// Extract content-id and URL from various DMM link types
+	var foundContentID string
+	var foundURL string
 	cleanSearchID := regexp.MustCompile(`^([a-z]+)0*(\d+.*)$`).ReplaceAllString(contentID, "$1$2")
 
-	// Look for DVD links (/mono/dvd/) first as they're still scrapeable
+	logging.Debugf("DMM: Searching for matches to searchQuery=%s, cleanSearchID=%s or contentID=%s", searchQuery, cleanSearchID, contentID)
+
+	doc.Find("a").Each(func(i int, sel *goquery.Selection) {
+		href, exists := sel.Attr("href")
+		if !exists || foundContentID != "" {
+			return
+		}
+
+		var urlCID string
+
+		// Check for various DMM link patterns:
+		// 1. Physical DVD: /mono/dvd/-/detail/=/cid=XXX
+		// 2. Digital video: /digital/videoa/-/detail/=/cid=XXX
+		// 3. Monthly subscription: /monthly/standard/-/detail/=/cid=XXX
+		// 4. Video streaming: video.dmm.co.jp/av/content/?id=XXX
+		if strings.Contains(href, "cid=") {
+			// Extract CID from www.dmm.co.jp links
+			cidRegex := regexp.MustCompile(`cid=([^/?&]+)`)
+			matches := cidRegex.FindStringSubmatch(href)
+			if len(matches) > 1 {
+				urlCID = matches[1]
+			}
+		} else if strings.Contains(href, "video.dmm.co.jp") && strings.Contains(href, "id=") {
+			// Extract ID from video.dmm.co.jp links
+			idRegex := regexp.MustCompile(`id=([^/?&]+)`)
+			matches := idRegex.FindStringSubmatch(href)
+			if len(matches) > 1 {
+				urlCID = matches[1]
+			}
+		}
+
+		if urlCID != "" {
+			// Clean the CID from URL (remove prepended numbers like "9ipx535" -> "ipx535")
+			cleanURLCID := regexp.MustCompile(`^\d*([a-z]+\d+.*)$`).ReplaceAllString(urlCID, "$1")
+
+			logging.Debugf("DMM: Found urlCID=%s, cleanURLCID=%s (comparing with searchQuery=%s, cleanSearchID=%s, contentID=%s)",
+				urlCID, cleanURLCID, searchQuery, cleanSearchID, contentID)
+
+			// Match against our search ID (with zeros, without zeros, and normalized)
+			if cleanURLCID == searchQuery || cleanURLCID == cleanSearchID || cleanURLCID == contentID {
+				foundContentID = urlCID
+				// Build full URL if it's a relative path
+				if strings.HasPrefix(href, "/") {
+					foundURL = "https://www.dmm.co.jp" + href
+				} else if strings.HasPrefix(href, "http") {
+					foundURL = href
+				}
+				logging.Debugf("DMM: ✓ Resolved %s to content-id: %s, URL: %s", id, urlCID, foundURL)
+			}
+		}
+	})
+
+	if foundContentID == "" {
+		return "", fmt.Errorf("no matching content-id found in DMM search results")
+	}
+
+	// 4. Cache the mapping for future lookups
+	mapping := &models.ContentIDMapping{
+		SearchID:  normalizedID,
+		ContentID: foundContentID,
+		Source:    "dmm",
+	}
+
+	// Ignore cache write errors - they shouldn't break the flow
+	if err := s.contentIDRepo.Create(mapping); err != nil {
+		logging.Debugf("DMM: Failed to cache content-id mapping for %s: %v", id, err)
+	} else {
+		logging.Debugf("DMM: Cached content-id mapping: %s -> %s", normalizedID, foundContentID)
+	}
+
+	return foundContentID, nil
+}
+
+// GetURL attempts to find the URL for a given movie ID using DMM search
+func (s *Scraper) GetURL(id string) (string, error) {
+	// Use ResolveContentID which now also captures the URL from search results
+	contentID, err := s.ResolveContentID(id)
+
+	if err != nil {
+		logging.Debugf("DMM: Content-ID resolution failed for %s: %v", id, err)
+		return "", fmt.Errorf("movie not found on DMM: %w", err)
+	}
+
+	// The URL is embedded in the search results - extract it from the href we found
+	// We need to search again to get the URL (TODO: refactor to return both from ResolveContentID)
+	searchQuery := strings.ToLower(strings.ReplaceAll(id, "-", ""))
+	searchURLFormatted := fmt.Sprintf(searchURL, searchQuery)
+
+	resp, err := s.client.R().Get(searchURLFormatted)
+	if err != nil || resp.StatusCode() != 200 {
+		return "", fmt.Errorf("DMM search unavailable")
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse DMM search results")
+	}
+
+	// Collect all URLs that match our content-ID and prioritize them
+	type urlCandidate struct {
+		url      string
+		priority int
+	}
+
+	var candidates []urlCandidate
+
+	// URL patterns to exclude (unsupported page structures)
+	excludePatterns := []string{
+		"/monthly/", // Monthly subscription pages have different structure
+		"/rental/",  // Rental pages
+	}
+
+	// Only exclude video.dmm.co.jp if headless browser is disabled
+	if !s.enableHeadless {
+		excludePatterns = append(excludePatterns, "video.dmm.co.jp") // New streaming platform uses JavaScript rendering
+		logging.Debug("DMM: Excluding video.dmm.co.jp URLs (headless browser disabled)")
+	} else {
+		logging.Debug("DMM: Including video.dmm.co.jp URLs (headless browser enabled)")
+	}
+
+	// Priority order (higher = better):
+	// 1. /digital/videoa/ or /digital/videoc/ (digital video DVD on www.dmm.co.jp)
+	// 2. /mono/dvd/ (physical DVD pages)
+	// 3. video.dmm.co.jp (digital streaming video pages)
+
 	doc.Find("a").Each(func(i int, sel *goquery.Selection) {
 		href, exists := sel.Attr("href")
 		if !exists {
 			return
 		}
 
-		// Check if it's a DVD product link
-		if strings.Contains(href, "/mono/dvd/-/detail/=/cid=") {
-			// Extract the CID from the URL
-			cidRegex := regexp.MustCompile(`cid=([^/?&]+)`)
-			matches := cidRegex.FindStringSubmatch(href)
+		// Check if this link contains our content-ID
+		if !strings.Contains(href, contentID) {
+			return
+		}
 
-			if len(matches) > 1 {
-				urlCID := matches[1]
+		// Build full URL
+		var fullURL string
+		if strings.HasPrefix(href, "/") {
+			fullURL = "https://www.dmm.co.jp" + href
+		} else if strings.HasPrefix(href, "http") {
+			fullURL = href
+		} else {
+			return
+		}
 
-				// Clean the CID from URL (remove prepended numbers like "9ipx535" -> "ipx535")
-				cleanURLCID := regexp.MustCompile(`^\d*([a-z]+\d+.*)$`).ReplaceAllString(urlCID, "$1")
-
-				// Match against our search ID (both with and without leading zeros)
-				if cleanURLCID == cleanSearchID || cleanURLCID == contentID {
-					matchedURL = href
-					return
-				}
+		// Skip excluded patterns
+		excluded := false
+		for _, pattern := range excludePatterns {
+			if strings.Contains(fullURL, pattern) {
+				logging.Debugf("DMM: Skipping excluded URL type: %s", fullURL)
+				excluded = true
+				break
 			}
 		}
+		if excluded {
+			return
+		}
+
+		// Assign priority
+		priority := 0
+		if strings.Contains(fullURL, "/digital/videoa/") || strings.Contains(fullURL, "/digital/videoc/") {
+			priority = 3 // Highest priority: digital video DVD
+		} else if strings.Contains(fullURL, "/mono/dvd/") {
+			priority = 2 // Second: physical DVD
+		} else if strings.Contains(fullURL, "video.dmm.co.jp") {
+			priority = 1 // Third: digital streaming video
+		}
+
+		candidates = append(candidates, urlCandidate{url: fullURL, priority: priority})
+		logging.Debugf("DMM: Found candidate URL (priority %d): %s", priority, fullURL)
 	})
 
-	if matchedURL == "" {
-		return "", fmt.Errorf("movie not found on DMM search results")
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no scrapable URL found for movie on DMM")
 	}
 
-	// Ensure the URL is absolute
-	if !strings.HasPrefix(matchedURL, "http") {
-		matchedURL = baseURL + matchedURL
-	}
+	// Sort by priority (highest first)
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].priority > candidates[j].priority
+	})
 
-	return matchedURL, nil
+	foundURL := candidates[0].url
+	logging.Debugf("DMM: Selected URL for %s (priority %d): %s", id, candidates[0].priority, foundURL)
+	return foundURL, nil
 }
 
 // Search searches for and scrapes metadata for a given movie ID
@@ -157,18 +324,38 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, err
 	}
 
-	resp, err := s.client.R().Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch data from DMM: %w", err)
-	}
+	var doc *goquery.Document
 
-	if resp.StatusCode() != 200 {
-		return nil, fmt.Errorf("DMM returned status code %d", resp.StatusCode())
-	}
+	// Check if this is a video.dmm.co.jp URL and headless is enabled
+	if strings.Contains(url, "video.dmm.co.jp") && s.enableHeadless {
+		logging.Debug("DMM: Using headless browser for video.dmm.co.jp page")
 
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+		// Use headless browser to fetch JavaScript-rendered content
+		bodyHTML, err := FetchWithHeadless(url, s.headlessTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("headless browser failed: %w", err)
+		}
+
+		// Parse the HTML from headless browser
+		doc, err = goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse HTML from headless browser: %w", err)
+		}
+	} else {
+		// Use regular HTTP client (cookies are set globally on the client)
+		resp, err := s.client.R().Get(url)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch data from DMM: %w", err)
+		}
+
+		if resp.StatusCode() != 200 {
+			return nil, fmt.Errorf("DMM returned status code %d", resp.StatusCode())
+		}
+
+		doc, err = goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse HTML: %w", err)
+		}
 	}
 
 	return s.parseHTML(doc, url)
@@ -182,17 +369,37 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 		Language:  "ja", // DMM provides Japanese metadata
 	}
 
+	var japaneseTitle string
+
 	// Extract Content ID from URL
 	if cid := extractContentIDFromURL(sourceURL); cid != "" {
 		result.ContentID = cid
 		result.ID = normalizeID(cid)
 	}
 
-	// Extract title
-	result.Title = cleanString(doc.Find("h1#title.item").Text())
+	// Detect if this is video.dmm.co.jp (new site format)
+	isNewSite := strings.Contains(sourceURL, "video.dmm.co.jp")
+
+	// Extract title (different selectors for new site)
+	if isNewSite {
+		// video.dmm.co.jp uses simple h1 tags or og:title meta tag
+		japaneseTitle = cleanString(doc.Find("h1").First().Text())
+		if japaneseTitle == "" {
+			// Fallback to og:title meta tag
+			ogTitle, _ := doc.Find(`meta[property="og:title"]`).Attr("content")
+			japaneseTitle = cleanString(ogTitle)
+		}
+	} else {
+		// www.dmm.co.jp uses h1#title.item
+		japaneseTitle = cleanString(doc.Find("h1#title.item").Text())
+	}
+
+	// For DMM, both Title and OriginalTitle are the Japanese title
+	result.Title = japaneseTitle
+	result.OriginalTitle = japaneseTitle
 
 	// Extract description
-	result.Description = s.extractDescription(doc)
+	result.Description = s.extractDescription(doc, isNewSite)
 
 	// Extract release date
 	if date := s.extractReleaseDate(doc); date != nil {
@@ -206,16 +413,16 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 	result.Director = s.extractDirector(doc)
 
 	// Extract maker/studio
-	result.Maker = s.extractMaker(doc)
+	result.Maker = s.extractMaker(doc, isNewSite)
 
 	// Extract label
 	result.Label = s.extractLabel(doc)
 
 	// Extract series
-	result.Series = s.extractSeries(doc)
+	result.Series = s.extractSeries(doc, isNewSite)
 
 	// Extract rating
-	result.Rating = s.extractRating(doc)
+	result.Rating = s.extractRating(doc, isNewSite)
 
 	// Extract genres
 	result.Genres = s.extractGenres(doc)
@@ -224,10 +431,13 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 	result.Actresses = s.extractActresses(doc)
 
 	// Extract cover URL
-	result.CoverURL = s.extractCoverURL(doc)
+	result.CoverURL = s.extractCoverURL(doc, isNewSite)
+
+	// Poster URL is the same as cover URL (both use large pl.jpg image)
+	result.PosterURL = result.CoverURL
 
 	// Extract screenshots
-	result.ScreenshotURL = s.extractScreenshots(doc)
+	result.ScreenshotURL = s.extractScreenshots(doc, isNewSite)
 
 	// Extract trailer URL
 	result.TrailerURL = s.extractTrailerURL(doc, sourceURL)
@@ -236,7 +446,11 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 }
 
 // extractDescription extracts the plot description
-func (s *Scraper) extractDescription(doc *goquery.Document) string {
+func (s *Scraper) extractDescription(doc *goquery.Document, isNewSite bool) string {
+	if isNewSite {
+		return s.extractDescriptionNewSite(doc)
+	}
+
 	desc := doc.Find("div.mg-b20.lh4 p.mg-b20").Text()
 	if desc == "" {
 		desc = doc.Find("div.mg-b20.lh4").Text()
@@ -283,7 +497,11 @@ func (s *Scraper) extractDirector(doc *goquery.Document) string {
 }
 
 // extractMaker extracts the studio/maker name
-func (s *Scraper) extractMaker(doc *goquery.Document) string {
+func (s *Scraper) extractMaker(doc *goquery.Document, isNewSite bool) string {
+	if isNewSite {
+		return s.extractMakerNewSite(doc)
+	}
+
 	// Updated pattern to match PowerShell: supports both ?maker= and /article=maker/id= formats
 	makerRegex := regexp.MustCompile(`<a[^>]*href="[^"]*(?:\?maker=|/article=maker/id=)(\d+)[^"]*"[^>]*>([\s\S]*?)</a>`)
 	html, _ := doc.Html()
@@ -309,7 +527,11 @@ func (s *Scraper) extractLabel(doc *goquery.Document) string {
 }
 
 // extractSeries extracts the series name
-func (s *Scraper) extractSeries(doc *goquery.Document) string {
+func (s *Scraper) extractSeries(doc *goquery.Document, isNewSite bool) string {
+	if isNewSite {
+		return s.extractSeriesNewSite(doc)
+	}
+
 	seriesRegex := regexp.MustCompile(`<a href="(?:/digital/videoa/|(?:/en)?/mono/dvd/)-/list/=/article=series/id=\d*/"[^>]*?>(.*)</a></td>`)
 	html, _ := doc.Html()
 	matches := seriesRegex.FindStringSubmatch(html)
@@ -321,7 +543,18 @@ func (s *Scraper) extractSeries(doc *goquery.Document) string {
 }
 
 // extractRating extracts the rating information
-func (s *Scraper) extractRating(doc *goquery.Document) *models.Rating {
+func (s *Scraper) extractRating(doc *goquery.Document, isNewSite bool) *models.Rating {
+	if isNewSite {
+		rating, votes := s.extractRatingNewSite(doc)
+		if rating > 0 || votes > 0 {
+			return &models.Rating{
+				Score: rating,
+				Votes: votes,
+			}
+		}
+		return nil
+	}
+
 	ratingRegex := regexp.MustCompile(`<strong>(.*)\s?(?:points|点)</strong>`)
 	html, _ := doc.Html()
 	matches := ratingRegex.FindStringSubmatch(html)
@@ -425,8 +658,16 @@ func (s *Scraper) extractActresses(doc *goquery.Document) []models.ActressInfo {
 			actressName = regexp.MustCompile(`\(.*\)|（.*）`).ReplaceAllString(actressName, "")
 			actressName = strings.TrimSpace(actressName)
 
-			// Determine if name is Japanese
-			isJapanese := regexp.MustCompile(`[\u3040-\u309f]|[\u30a0-\u30ff]|[\uff66-\uff9f]|[\u4e00-\u9faf]`).MatchString(actressName)
+			// Filter out known non-actress text patterns (DMM UI elements)
+			if strings.Contains(actressName, "購入前") ||
+				strings.Contains(actressName, "レビュー") ||
+				strings.Contains(actressName, "ポイント") ||
+				actressName == "" {
+				continue
+			}
+
+			// Determine if name is Japanese (using Unicode properties for Go 1.25+ compatibility)
+			isJapanese := regexp.MustCompile(`\p{Hiragana}|\p{Katakana}|\p{Han}`).MatchString(actressName)
 
 			actress := models.ActressInfo{
 				DMMID: actressID,
@@ -453,7 +694,11 @@ func (s *Scraper) extractActresses(doc *goquery.Document) []models.ActressInfo {
 }
 
 // extractCoverURL extracts the cover image URL
-func (s *Scraper) extractCoverURL(doc *goquery.Document) string {
+func (s *Scraper) extractCoverURL(doc *goquery.Document, isNewSite bool) string {
+	if isNewSite {
+		return s.extractCoverURLNewSite(doc)
+	}
+
 	coverRegex := regexp.MustCompile(`(https://pics\.dmm\.co\.jp/(?:mono/movie/adult|digital/(?:video|amateur))/(.*)/(.*).jpg)`)
 	html, _ := doc.Html()
 	matches := coverRegex.FindStringSubmatch(html)
@@ -466,7 +711,11 @@ func (s *Scraper) extractCoverURL(doc *goquery.Document) string {
 }
 
 // extractScreenshots extracts screenshot URLs
-func (s *Scraper) extractScreenshots(doc *goquery.Document) []string {
+func (s *Scraper) extractScreenshots(doc *goquery.Document, isNewSite bool) []string {
+	if isNewSite {
+		return s.extractScreenshotsNewSite(doc)
+	}
+
 	screenshots := make([]string, 0)
 
 	doc.Find("a[name='sample-image']").Each(func(i int, sel *goquery.Selection) {
@@ -543,13 +792,22 @@ func normalizeID(contentID string) string {
 }
 
 // extractContentIDFromURL extracts content ID from DMM URL
+// Supports both www.dmm.co.jp (cid=) and video.dmm.co.jp (id=) formats
 func extractContentIDFromURL(url string) string {
-	re := regexp.MustCompile(`cid=([^/]+)`)
-	matches := re.FindStringSubmatch(url)
-
+	// Try cid= format first (www.dmm.co.jp)
+	cidRegex := regexp.MustCompile(`cid=([^/?&]+)`)
+	matches := cidRegex.FindStringSubmatch(url)
 	if len(matches) > 1 {
 		return matches[1]
 	}
+
+	// Try id= format (video.dmm.co.jp)
+	idRegex := regexp.MustCompile(`[?&]id=([^/?&]+)`)
+	matches = idRegex.FindStringSubmatch(url)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+
 	return ""
 }
 

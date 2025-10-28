@@ -185,12 +185,14 @@ func runTUI(cmd *cobra.Command, args []string) {
 		logging.Errorf("Failed to run migrations: %v", err)
 	}
 
+	// Initialize repositories
 	movieRepo := database.NewMovieRepository(db)
+	contentIDRepo := database.NewContentIDMappingRepository(db)
 
 	// Initialize scraper registry
 	registry := models.NewScraperRegistry()
 	registry.Register(r18dev.New(cfg))
-	registry.Register(dmm.New(cfg))
+	registry.Register(dmm.New(cfg, contentIDRepo))
 
 	// Initialize aggregator
 	agg := aggregator.NewWithDatabase(cfg, db)

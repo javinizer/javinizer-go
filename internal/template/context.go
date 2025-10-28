@@ -53,7 +53,7 @@ func NewContextFromMovie(movie *models.Movie) *Context {
 		ID:               movie.ID,
 		ContentID:        movie.ContentID,
 		Title:            movie.Title,
-		OriginalTitle:    movie.AlternateTitle,
+		OriginalTitle:    movie.OriginalTitle,
 		ReleaseDate:      movie.ReleaseDate,
 		Runtime:          movie.Runtime,
 		Director:         movie.Director,
@@ -67,8 +67,8 @@ func NewContextFromMovie(movie *models.Movie) *Context {
 	}
 
 	// Extract rating
-	if movie.Rating != nil {
-		ctx.Rating = movie.Rating.Score
+	if movie.RatingScore > 0 {
+		ctx.Rating = movie.RatingScore
 	}
 
 	// Build actress list
@@ -99,18 +99,19 @@ func NewContextFromMovie(movie *models.Movie) *Context {
 // NewContextFromScraperResult creates a template context from a ScraperResult
 func NewContextFromScraperResult(result *models.ScraperResult) *Context {
 	ctx := &Context{
-		ID:          result.ID,
-		ContentID:   result.ContentID,
-		Title:       result.Title,
-		ReleaseDate: result.ReleaseDate,
-		Runtime:     result.Runtime,
-		Director:    result.Director,
-		Maker:       result.Maker,
-		Label:       result.Label,
-		Series:      result.Series,
-		Description: result.Description,
-		CoverURL:    result.CoverURL,
-		TrailerURL:  result.TrailerURL,
+		ID:            result.ID,
+		ContentID:     result.ContentID,
+		Title:         result.Title,
+		OriginalTitle: result.OriginalTitle,
+		ReleaseDate:   result.ReleaseDate,
+		Runtime:       result.Runtime,
+		Director:      result.Director,
+		Maker:         result.Maker,
+		Label:         result.Label,
+		Series:        result.Series,
+		Description:   result.Description,
+		CoverURL:      result.CoverURL,
+		TrailerURL:    result.TrailerURL,
 	}
 
 	// Extract rating

@@ -19,13 +19,13 @@ import (
 // ScrapeTask scrapes metadata for a JAV ID
 type ScrapeTask struct {
 	BaseTask
-	javID         string
-	registry      *models.ScraperRegistry
-	aggregator    *aggregator.Aggregator
-	movieRepo     *database.MovieRepository
+	javID           string
+	registry        *models.ScraperRegistry
+	aggregator      *aggregator.Aggregator
+	movieRepo       *database.MovieRepository
 	progressTracker *ProgressTracker
-	dryRun        bool
-	forceRefresh  bool
+	dryRun          bool
+	forceRefresh    bool
 }
 
 // NewScrapeTask creates a new scrape task

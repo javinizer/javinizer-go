@@ -80,8 +80,8 @@ func (a *Aggregator) Aggregate(results []*models.ScraperResult) (*models.Movie, 
 		return r.Title
 	})
 
-	movie.AlternateTitle = a.getFieldByPriority(resultsBySource, a.config.Metadata.Priority.AlternateTitle, func(r *models.ScraperResult) string {
-		return r.Title
+	movie.OriginalTitle = a.getFieldByPriority(resultsBySource, a.config.Metadata.Priority.OriginalTitle, func(r *models.ScraperResult) string {
+		return r.OriginalTitle
 	})
 
 	movie.Description = a.getFieldByPriority(resultsBySource, a.config.Metadata.Priority.Description, func(r *models.ScraperResult) string {
@@ -131,7 +131,9 @@ func (a *Aggregator) Aggregate(results []*models.ScraperResult) (*models.Movie, 
 	}
 
 	// Aggregate rating
-	movie.Rating = a.getRatingByPriority(resultsBySource, a.config.Metadata.Priority.Rating)
+	ratingScore, ratingVotes := a.getRatingByPriority(resultsBySource, a.config.Metadata.Priority.Rating)
+	movie.RatingScore = ratingScore
+	movie.RatingVotes = ratingVotes
 
 	// Aggregate actresses
 	movie.Actresses = a.getActressesByPriority(resultsBySource, a.config.Metadata.Priority.Actress)
@@ -219,38 +221,78 @@ func (a *Aggregator) getTimeFieldByPriority(
 func (a *Aggregator) getRatingByPriority(
 	results map[string]*models.ScraperResult,
 	priority []string,
-) *models.Rating {
+) (float64, int) {
 	for _, source := range priority {
 		if result, exists := results[source]; exists {
 			if result.Rating != nil && (result.Rating.Score > 0 || result.Rating.Votes > 0) {
-				return result.Rating
+				return result.Rating.Score, result.Rating.Votes
 			}
 		}
 	}
-	return nil
+	return 0, 0
 }
 
-// getActressesByPriority retrieves actresses based on priority
+// getActressesByPriority retrieves actresses based on priority and merges data from multiple sources
 func (a *Aggregator) getActressesByPriority(
 	results map[string]*models.ScraperResult,
 	priority []string,
 ) []models.Actress {
+	// Collect actresses from all sources, keyed by a unique identifier
+	actressMap := make(map[string]*models.Actress)
+
+	// Process sources in priority order
 	for _, source := range priority {
-		if result, exists := results[source]; exists {
-			if len(result.Actresses) > 0 {
-				actresses := make([]models.Actress, 0, len(result.Actresses))
-				for _, info := range result.Actresses {
-					actresses = append(actresses, models.Actress{
-						DMMID:        info.DMMID,
-						FirstName:    info.FirstName,
-						LastName:     info.LastName,
-						JapaneseName: info.JapaneseName,
-						ThumbURL:     info.ThumbURL,
-					})
+		result, exists := results[source]
+		if !exists || len(result.Actresses) == 0 {
+			continue
+		}
+
+		for _, info := range result.Actresses {
+			// Use JapaneseName as key for matching (most reliable across sources)
+			key := info.JapaneseName
+			if key == "" {
+				// Fallback to FirstName + LastName if no Japanese name
+				key = info.FirstName + " " + info.LastName
+			}
+
+			// If actress doesn't exist yet, create entry
+			if _, found := actressMap[key]; !found {
+				actressMap[key] = &models.Actress{
+					DMMID:        info.DMMID,
+					FirstName:    info.FirstName,
+					LastName:     info.LastName,
+					JapaneseName: info.JapaneseName,
+					ThumbURL:     info.ThumbURL,
 				}
-				return actresses
+			} else {
+				// Merge data: fill in missing fields from this source
+				existing := actressMap[key]
+				if existing.DMMID == 0 && info.DMMID != 0 {
+					existing.DMMID = info.DMMID
+				}
+				if existing.FirstName == "" && info.FirstName != "" {
+					existing.FirstName = info.FirstName
+				}
+				if existing.LastName == "" && info.LastName != "" {
+					existing.LastName = info.LastName
+				}
+				if existing.JapaneseName == "" && info.JapaneseName != "" {
+					existing.JapaneseName = info.JapaneseName
+				}
+				if existing.ThumbURL == "" && info.ThumbURL != "" {
+					existing.ThumbURL = info.ThumbURL
+				}
 			}
 		}
+	}
+
+	// Convert map to slice
+	if len(actressMap) > 0 {
+		actresses := make([]models.Actress, 0, len(actressMap))
+		for _, actress := range actressMap {
+			actresses = append(actresses, *actress)
+		}
+		return actresses
 	}
 
 	// If no actresses found and unknown actress text is set, add unknown
@@ -318,15 +360,15 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult) []models
 		}
 
 		translation := models.MovieTranslation{
-			Language:       result.Language,
-			Title:          result.Title,
-			AlternateTitle: result.Title, // Can be customized based on source
-			Description:    result.Description,
-			Director:       result.Director,
-			Maker:          result.Maker,
-			Label:          result.Label,
-			Series:         result.Series,
-			SourceName:     result.Source,
+			Language:      result.Language,
+			Title:         result.Title,
+			OriginalTitle: result.OriginalTitle, // Japanese/original language title
+			Description:   result.Description,
+			Director:      result.Director,
+			Maker:         result.Maker,
+			Label:         result.Label,
+			Series:        result.Series,
+			SourceName:    result.Source,
 		}
 
 		translations = append(translations, translation)

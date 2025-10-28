@@ -25,13 +25,13 @@ type Downloader struct {
 
 // DownloadResult represents the result of a download operation
 type DownloadResult struct {
-	URL          string
-	LocalPath    string
-	Size         int64
-	Downloaded   bool
-	Error        error
-	Type         MediaType
-	Duration     time.Duration
+	URL        string
+	LocalPath  string
+	Size       int64
+	Downloaded bool
+	Error      error
+	Type       MediaType
+	Duration   time.Duration
 }
 
 // MediaType represents the type of media being downloaded

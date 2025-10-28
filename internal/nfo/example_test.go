@@ -86,22 +86,22 @@ func ExampleGenerator_MovieToNFO() {
 func ExampleConfigFromAppConfig() {
 	// Application config would typically come from config.yaml
 	appCfg := &struct {
-		FilenameTemplate  string
-		FirstNameOrder    bool
-		ActressLanguageJA bool
-		UnknownActressText string
-		IncludeFanart     bool
-		IncludeTrailer    bool
-		RatingSource      string
+		FilenameTemplate     string
+		FirstNameOrder       bool
+		ActressLanguageJA    bool
+		UnknownActressText   string
+		IncludeFanart        bool
+		IncludeTrailer       bool
+		RatingSource         string
 		IncludeStreamDetails bool
 	}{
-		FilenameTemplate:  "<ID>.nfo",
-		FirstNameOrder:    true,
-		ActressLanguageJA: false,
-		UnknownActressText: "Unknown",
-		IncludeFanart:     true,
-		IncludeTrailer:    true,
-		RatingSource:      "themoviedb",
+		FilenameTemplate:     "<ID>.nfo",
+		FirstNameOrder:       true,
+		ActressLanguageJA:    false,
+		UnknownActressText:   "Unknown",
+		IncludeFanart:        true,
+		IncludeTrailer:       true,
+		RatingSource:         "themoviedb",
 		IncludeStreamDetails: false,
 	}
 

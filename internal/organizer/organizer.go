@@ -38,14 +38,14 @@ type OrganizeResult struct {
 
 // OrganizePlan represents a planned file organization operation
 type OrganizePlan struct {
-	Match       matcher.MatchResult
-	Movie       *models.Movie
-	SourcePath  string
-	TargetDir   string
-	TargetFile  string
-	TargetPath  string
-	WillMove    bool
-	Conflicts   []string
+	Match      matcher.MatchResult
+	Movie      *models.Movie
+	SourcePath string
+	TargetDir  string
+	TargetFile string
+	TargetPath string
+	WillMove   bool
+	Conflicts  []string
 }
 
 // Plan creates an organization plan without executing it

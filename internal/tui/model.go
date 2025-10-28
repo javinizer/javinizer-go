@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -62,42 +62,42 @@ type Model struct {
 	folderPickerMode    string // "source" or "dest"
 
 	// Task state
-	tasks         map[string]*worker.TaskProgress
-	taskOrder     []string // Maintain insertion order
-	workerPool    *worker.Pool
-	progressChan  chan worker.ProgressUpdate
-	processor     *ProcessingCoordinator
-	isProcessing  bool
-	isPaused      bool
-	dryRun        bool // Preview mode - don't make actual changes
+	tasks        map[string]*worker.TaskProgress
+	taskOrder    []string // Maintain insertion order
+	workerPool   *worker.Pool
+	progressChan chan worker.ProgressUpdate
+	processor    *ProcessingCoordinator
+	isProcessing bool
+	isPaused     bool
+	dryRun       bool // Preview mode - don't make actual changes
 
 	// Runtime settings (can be toggled in Settings view)
-	forceUpdate        bool // Replace existing files (images, NFO)
-	forceRefresh       bool // Clear DB cache and rescrape metadata
-	moveFiles          bool // Move instead of copy
-	scrapeEnabled      bool // Enable metadata scraping
-	downloadEnabled    bool // Enable media downloads
+	forceUpdate         bool // Replace existing files (images, NFO)
+	forceRefresh        bool // Clear DB cache and rescrape metadata
+	moveFiles           bool // Move instead of copy
+	scrapeEnabled       bool // Enable metadata scraping
+	downloadEnabled     bool // Enable media downloads
 	downloadExtrafanart bool // Enable extrafanart (screenshots) downloads
-	organizeEnabled    bool // Enable file organization
-	nfoEnabled         bool // Enable NFO generation
-	updateMode         bool // Update mode: only create/update metadata without moving files
-	settingsCursor     int  // Cursor position in settings view
+	organizeEnabled     bool // Enable file organization
+	nfoEnabled          bool // Enable NFO generation
+	updateMode          bool // Update mode: only create/update metadata without moving files
+	settingsCursor      int  // Cursor position in settings view
 
 	// Statistics
-	stats         worker.ProgressStats
-	startTime     time.Time
-	elapsedTime   time.Duration
+	stats       worker.ProgressStats
+	startTime   time.Time
+	elapsedTime time.Duration
 
 	// Logs
-	logs        []LogEntry
-	maxLogs     int
-	autoScroll  bool
-	logScroll   int
+	logs       []LogEntry
+	maxLogs    int
+	autoScroll bool
+	logScroll  int
 
 	// UI state
-	ready       bool
-	quitting    bool
-	err         error
+	ready    bool
+	quitting bool
+	err      error
 
 	// Components (will be initialized with actual components)
 	header       *Header
@@ -155,15 +155,15 @@ func New(cfg *config.Config) *Model {
 		startTime:     time.Now(),
 
 		// Runtime settings defaults
-		forceUpdate:        false,
-		forceRefresh:       false,
-		moveFiles:          false,
-		scrapeEnabled:      true,
-		downloadEnabled:    true,
+		forceUpdate:         false,
+		forceRefresh:        false,
+		moveFiles:           false,
+		scrapeEnabled:       true,
+		downloadEnabled:     true,
 		downloadExtrafanart: cfg.Output.DownloadExtrafanart, // Initialize from config
-		organizeEnabled:    true,
-		nfoEnabled:         true,
-		settingsCursor:     0,
+		organizeEnabled:     true,
+		nfoEnabled:          true,
+		settingsCursor:      0,
 	}
 
 	// Initialize text input for path editing

@@ -40,8 +40,8 @@ func (e *Engine) Execute(template string, ctx *Context) (string, error) {
 	matches := e.tagPattern.FindAllStringSubmatch(result, -1)
 
 	for _, match := range matches {
-		fullTag := match[0]     // e.g., "<TITLE:50>"
-		tagName := match[1]     // e.g., "TITLE"
+		fullTag := match[0] // e.g., "<TITLE:50>"
+		tagName := match[1] // e.g., "TITLE"
 		modifier := ""
 		if len(match) > 2 {
 			modifier = match[2] // e.g., "50"
@@ -73,9 +73,9 @@ func (e *Engine) processConditionals(template string, ctx *Context) string {
 	matches := e.conditionalPattern.FindAllStringSubmatch(result, -1)
 
 	for _, match := range matches {
-		fullBlock := match[0]      // e.g., "<IF:SERIES>Series: <SERIES></IF>"
-		tagName := match[1]        // e.g., "SERIES"
-		trueContent := match[2]    // e.g., "Series: <SERIES>"
+		fullBlock := match[0]   // e.g., "<IF:SERIES>Series: <SERIES></IF>"
+		tagName := match[1]     // e.g., "SERIES"
+		trueContent := match[2] // e.g., "Series: <SERIES>"
 		falseContent := ""
 		if len(match) > 3 {
 			falseContent = match[3] // Content after <ELSE>
@@ -235,4 +235,3 @@ func (e *Engine) formatDate(date *time.Time, pattern string) string {
 
 	return date.Format(pattern)
 }
-

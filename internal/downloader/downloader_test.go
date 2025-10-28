@@ -383,7 +383,7 @@ func TestGetImageExtension(t *testing.T) {
 		{"http://example.com/image.png", ".png"},
 		{"http://example.com/image.gif", ".gif"},
 		{"http://example.com/image.webp", ".webp"},
-		{"http://example.com/image", ".jpg"}, // Default
+		{"http://example.com/image", ".jpg"},     // Default
 		{"http://example.com/image.JPG", ".jpg"}, // Case insensitive
 	}
 

@@ -7,16 +7,16 @@ import (
 
 // TaskProgress tracks the progress of a single task
 type TaskProgress struct {
-	ID          string
-	Type        TaskType
-	Status      TaskStatus
-	Progress    float64   // 0.0 to 1.0
-	Message     string
-	BytesTotal  int64
-	BytesDone   int64
-	StartTime   time.Time
-	UpdatedAt   time.Time
-	Error       error
+	ID         string
+	Type       TaskType
+	Status     TaskStatus
+	Progress   float64 // 0.0 to 1.0
+	Message    string
+	BytesTotal int64
+	BytesDone  int64
+	StartTime  time.Time
+	UpdatedAt  time.Time
+	Error      error
 }
 
 // ProgressTracker tracks progress for all tasks
@@ -219,14 +219,14 @@ func (pt *ProgressTracker) Stats() ProgressStats {
 	defer pt.mu.RUnlock()
 
 	stats := ProgressStats{
-		Total:        len(pt.tasks),
-		Pending:      0,
-		Running:      0,
-		Success:      0,
-		Failed:       0,
-		Canceled:     0,
-		TotalBytes:   0,
-		DoneBytes:    0,
+		Total:           len(pt.tasks),
+		Pending:         0,
+		Running:         0,
+		Success:         0,
+		Failed:          0,
+		Canceled:        0,
+		TotalBytes:      0,
+		DoneBytes:       0,
 		OverallProgress: 0.0,
 	}
 

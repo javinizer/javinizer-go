@@ -75,6 +75,11 @@ export interface ProgressMessage {
 	error?: string;
 }
 
+export interface Genre {
+	id?: number;
+	name: string;
+}
+
 export interface Movie {
 	id: string;
 	content_id?: string;
@@ -84,12 +89,12 @@ export interface Movie {
 	release_date?: string;
 	runtime?: number;
 	director?: string;
-	studio?: string;
+	maker?: string;
 	label?: string;
 	series?: string;
-	rating?: number;
-	votes?: number;
-	genres?: string[];
+	rating_score?: number;
+	rating_votes?: number;
+	genres?: Genre[];
 	actresses?: Actress[];
 	cover_url?: string;
 	poster_url?: string;

@@ -11,18 +11,18 @@ import (
 
 // Matcher identifies JAV IDs from filenames
 type Matcher struct {
-	config        *config.MatchingConfig
-	regexPattern  *regexp.Regexp
+	config         *config.MatchingConfig
+	regexPattern   *regexp.Regexp
 	builtinPattern *regexp.Regexp
 }
 
 // MatchResult represents a matched file with extracted ID
 type MatchResult struct {
-	File         scanner.FileInfo
-	ID           string // Extracted JAV ID (e.g., "IPX-535")
-	PartNumber   string // Part number for multi-part files (e.g., "1", "2")
-	IsMultiPart  bool   // Whether this is a multi-part file
-	MatchedBy    string // "regex" or "builtin"
+	File        scanner.FileInfo
+	ID          string // Extracted JAV ID (e.g., "IPX-535")
+	PartNumber  string // Part number for multi-part files (e.g., "1", "2")
+	IsMultiPart bool   // Whether this is a multi-part file
+	MatchedBy   string // "regex" or "builtin"
 }
 
 // NewMatcher creates a new file matcher

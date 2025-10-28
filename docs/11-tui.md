@@ -215,7 +215,6 @@ The TUI uses settings from `configs/config.yaml`:
 performance:
   max_workers: 5          # Concurrent tasks (1-20)
   worker_timeout: 300     # Task timeout in seconds
-  enable_tui: true        # Enable TUI features
   buffer_size: 100        # Progress update buffer
   update_interval: 100    # UI refresh rate (ms)
 

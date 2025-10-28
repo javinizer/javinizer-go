@@ -56,6 +56,7 @@ func (db *DB) AutoMigrate() error {
 		&models.Genre{},
 		&models.GenreReplacement{},
 		&models.History{},
+		&models.ContentIDMapping{},
 	)
 }
 
@@ -121,7 +122,11 @@ func (r *MovieRepository) Upsert(movie *models.Movie) error {
 		return err
 	}
 
-	// Update the movie record
+	// Save translations separately - temporarily remove them to avoid Save() trying to insert them
+	translations := movie.Translations
+	movie.Translations = nil
+
+	// Update the movie record (without translations)
 	if err := r.db.Save(movie).Error; err != nil {
 		return err
 	}
@@ -133,6 +138,18 @@ func (r *MovieRepository) Upsert(movie *models.Movie) error {
 	if err := r.db.Model(movie).Association("Actresses").Replace(movie.Actresses); err != nil {
 		return err
 	}
+
+	// Upsert translations individually to avoid UNIQUE constraint violations
+	translationRepo := NewMovieTranslationRepository(r.db)
+	for i := range translations {
+		translations[i].MovieID = movie.ID
+		if err := translationRepo.Upsert(&translations[i]); err != nil {
+			return err
+		}
+	}
+
+	// Restore translations to movie object
+	movie.Translations = translations
 
 	return nil
 }
@@ -296,6 +313,27 @@ func (r *ActressRepository) FindOrCreate(actress *models.Actress) error {
 func (r *ActressRepository) List(limit, offset int) ([]models.Actress, error) {
 	var actresses []models.Actress
 	err := r.db.Limit(limit).Offset(offset).Find(&actresses).Error
+	return actresses, err
+}
+
+// Search searches for actresses by name (first, last, or Japanese name)
+// If query is empty, returns all actresses (limited to 100)
+func (r *ActressRepository) Search(query string) ([]models.Actress, error) {
+	var actresses []models.Actress
+
+	// If query is empty, return all actresses
+	if query == "" {
+		err := r.db.Limit(100).Order("japanese_name ASC, last_name ASC, first_name ASC").Find(&actresses).Error
+		return actresses, err
+	}
+
+	// Otherwise search by pattern
+	searchPattern := "%" + query + "%"
+	err := r.db.Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
+		searchPattern, searchPattern, searchPattern).
+		Order("japanese_name ASC, last_name ASC, first_name ASC").
+		Limit(20). // Limit results to prevent too many matches
+		Find(&actresses).Error
 	return actresses, err
 }
 

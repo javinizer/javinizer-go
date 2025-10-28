@@ -180,7 +180,6 @@ file_matching:
 performance:
   max_workers: 5          # Concurrent tasks for TUI
   worker_timeout: 300     # Task timeout (seconds)
-  enable_tui: true        # Enable TUI features
   buffer_size: 100        # Progress update buffer
 ```
 

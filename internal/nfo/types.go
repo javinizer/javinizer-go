@@ -23,10 +23,10 @@ type Movie struct {
 	Tagline string `xml:"tagline,omitempty"`
 
 	// Time information
-	Runtime     int    `xml:"runtime,omitempty"`      // in minutes
-	Year        int    `xml:"year,omitempty"`         // Release year
-	ReleaseDate string `xml:"releasedate,omitempty"`  // YYYY-MM-DD format
-	Premiered   string `xml:"premiered,omitempty"`    // YYYY-MM-DD format
+	Runtime     int    `xml:"runtime,omitempty"`     // in minutes
+	Year        int    `xml:"year,omitempty"`        // Release year
+	ReleaseDate string `xml:"releasedate,omitempty"` // YYYY-MM-DD format
+	Premiered   string `xml:"premiered,omitempty"`   // YYYY-MM-DD format
 
 	// Rating
 	Ratings Ratings `xml:"ratings,omitempty"`
@@ -47,9 +47,9 @@ type Movie struct {
 	Tags   []string `xml:"tag,omitempty"`
 
 	// Media
-	Thumb   []Thumb  `xml:"thumb,omitempty"`
-	Fanart  *Fanart  `xml:"fanart,omitempty"`
-	Trailer string   `xml:"trailer,omitempty"`
+	Thumb   []Thumb `xml:"thumb,omitempty"`
+	Fanart  *Fanart `xml:"fanart,omitempty"`
+	Trailer string  `xml:"trailer,omitempty"`
 
 	// File info (optional)
 	FileInfo *FileInfo `xml:"fileinfo,omitempty"`

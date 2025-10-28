@@ -17,19 +17,19 @@ func TestNFOGenerationEndToEnd(t *testing.T) {
 	// Create a realistic movie with all fields
 	releaseDate := time.Date(2020, 9, 13, 0, 0, 0, 0, time.UTC)
 	movie := &models.Movie{
-		ID:             "IPX-535",
-		ContentID:      "ipx00535",
-		Title:          "Beautiful Day with Sakura",
-		AlternateTitle: "桜と過ごす美しい一日",
-		Description:    "A wonderful story about a beautiful day spent with Sakura Momo. The cinematography is exceptional and the performances are outstanding.",
-		ReleaseDate:    &releaseDate,
-		Runtime:        120,
-		Director:       "Yamada Taro",
-		Maker:          "IdeaPocket",
-		Label:          "IP Premium",
-		Series:         "Beautiful Days",
-		CoverURL:       "https://example.com/covers/ipx535.jpg",
-		TrailerURL:     "https://example.com/trailers/ipx535.mp4",
+		ID:            "IPX-535",
+		ContentID:     "ipx00535",
+		Title:         "Beautiful Day with Sakura",
+		OriginalTitle: "桜と過ごす美しい一日",
+		Description:   "A wonderful story about a beautiful day spent with Sakura Momo. The cinematography is exceptional and the performances are outstanding.",
+		ReleaseDate:   &releaseDate,
+		Runtime:       120,
+		Director:      "Yamada Taro",
+		Maker:         "IdeaPocket",
+		Label:         "IP Premium",
+		Series:        "Beautiful Days",
+		CoverURL:      "https://example.com/covers/ipx535.jpg",
+		TrailerURL:    "https://example.com/trailers/ipx535.mp4",
 		Screenshots: []string{
 			"https://example.com/screenshots/ipx535-1.jpg",
 			"https://example.com/screenshots/ipx535-2.jpg",
@@ -261,8 +261,8 @@ func TestNFOFromScraperResult(t *testing.T) {
 				ThumbURL:     "https://example.com/test.jpg",
 			},
 		},
-		Genres: []string{"Genre1", "Genre2"},
-		CoverURL:   "https://example.com/cover.jpg",
+		Genres:   []string{"Genre1", "Genre2"},
+		CoverURL: "https://example.com/cover.jpg",
 		ScreenshotURL: []string{
 			"https://example.com/screenshot1.jpg",
 			"https://example.com/screenshot2.jpg",
@@ -368,8 +368,8 @@ func verifyNFOContent(t *testing.T, nfo *Movie, movie *models.Movie, cfg *Config
 	if nfo.Title != movie.Title {
 		t.Errorf("Title mismatch: got %s, want %s", nfo.Title, movie.Title)
 	}
-	if nfo.OriginalTitle != movie.AlternateTitle {
-		t.Errorf("OriginalTitle mismatch: got %s, want %s", nfo.OriginalTitle, movie.AlternateTitle)
+	if nfo.OriginalTitle != movie.OriginalTitle {
+		t.Errorf("OriginalTitle mismatch: got %s, want %s", nfo.OriginalTitle, movie.OriginalTitle)
 	}
 	if nfo.Plot != movie.Description {
 		t.Errorf("Plot mismatch: got %s, want %s", nfo.Plot, movie.Description)

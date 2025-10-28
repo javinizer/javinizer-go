@@ -19,12 +19,12 @@ func TestMatcher_MatchFile(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name            string
-		filename        string
-		expectedID      string
-		expectedPart    string
-		expectedMulti   bool
-		shouldMatch     bool
+		name          string
+		filename      string
+		expectedID    string
+		expectedPart  string
+		expectedMulti bool
+		shouldMatch   bool
 	}{
 		// Standard formats
 		{"Standard ID", "IPX-535.mp4", "IPX-535", "", false, true},
@@ -109,10 +109,10 @@ func TestMatcher_CustomRegex(t *testing.T) {
 		expectedID     string
 		expectedSource string // "regex" or "builtin"
 	}{
-		{"IPX-535.mp4", "IPX-535", "regex"},     // Matches custom regex
-		{"ABC-123.mp4", "ABC-123", "regex"},     // Matches custom regex
-		{"T28-123.mp4", "T28-123", "builtin"},   // Falls back to builtin (T28 not 3 letters)
-		{"ABCD-123.mp4", "BCD-123", "regex"},    // Custom regex matches BCD-123 from ABCD-123
+		{"IPX-535.mp4", "IPX-535", "regex"},   // Matches custom regex
+		{"ABC-123.mp4", "ABC-123", "regex"},   // Matches custom regex
+		{"T28-123.mp4", "T28-123", "builtin"}, // Falls back to builtin (T28 not 3 letters)
+		{"ABCD-123.mp4", "BCD-123", "regex"},  // Custom regex matches BCD-123 from ABCD-123
 	}
 
 	for _, tc := range testCases {

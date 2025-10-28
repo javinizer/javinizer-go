@@ -41,8 +41,10 @@ type R18DevConfig struct {
 
 // DMMConfig holds DMM/Fanza scraper configuration
 type DMMConfig struct {
-	Enabled        bool `yaml:"enabled"`
-	ScrapeActress  bool `yaml:"scrape_actress"`
+	Enabled         bool `yaml:"enabled"`
+	ScrapeActress   bool `yaml:"scrape_actress"`
+	EnableHeadless  bool `yaml:"enable_headless"`  // Enable headless browser for video.dmm.co.jp
+	HeadlessTimeout int  `yaml:"headless_timeout"` // Timeout in seconds for headless browser (default: 30)
 }
 
 // MetadataConfig holds metadata aggregation settings
@@ -58,7 +60,7 @@ type MetadataConfig struct {
 // PriorityConfig defines which scraper to prefer for each field
 type PriorityConfig struct {
 	Actress       []string `yaml:"actress"`
-	AlternateTitle []string `yaml:"alternate_title"`
+	OriginalTitle []string `yaml:"original_title"`
 	CoverURL      []string `yaml:"cover_url"`
 	Description   []string `yaml:"description"`
 	Director      []string `yaml:"director"`
@@ -79,9 +81,9 @@ type PriorityConfig struct {
 
 // CSVConfig holds CSV file configuration
 type CSVConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	Path     string `yaml:"path"`
-	AutoAdd  bool   `yaml:"auto_add"`
+	Enabled bool   `yaml:"enabled"`
+	Path    string `yaml:"path"`
+	AutoAdd bool   `yaml:"auto_add"`
 }
 
 // NFOConfig holds NFO generation settings
@@ -139,11 +141,10 @@ type LoggingConfig struct {
 
 // PerformanceConfig holds performance and concurrency settings
 type PerformanceConfig struct {
-	MaxWorkers     int  `yaml:"max_workers"`      // Maximum concurrent workers (default: 5)
-	WorkerTimeout  int  `yaml:"worker_timeout"`   // Timeout per task in seconds (default: 300)
-	EnableTUI      bool `yaml:"enable_tui"`       // Enable TUI mode by default (default: true)
-	BufferSize     int  `yaml:"buffer_size"`      // Channel buffer size (default: 100)
-	UpdateInterval int  `yaml:"update_interval"`  // UI update interval in milliseconds (default: 100)
+	MaxWorkers     int `yaml:"max_workers"`     // Maximum concurrent workers (default: 5)
+	WorkerTimeout  int `yaml:"worker_timeout"`  // Timeout per task in seconds (default: 300)
+	BufferSize     int `yaml:"buffer_size"`     // Channel buffer size (default: 100)
+	UpdateInterval int `yaml:"update_interval"` // UI update interval in milliseconds (default: 100)
 }
 
 // DefaultConfig returns the default configuration
@@ -239,7 +240,6 @@ func DefaultConfig() *Config {
 		Performance: PerformanceConfig{
 			MaxWorkers:     5,
 			WorkerTimeout:  300,
-			EnableTUI:      true,
 			BufferSize:     100,
 			UpdateInterval: 100,
 		},
