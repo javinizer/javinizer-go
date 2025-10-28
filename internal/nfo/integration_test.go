@@ -59,7 +59,7 @@ func TestNFOGenerationEndToEnd(t *testing.T) {
 	t.Run("Default Config", func(t *testing.T) {
 		gen := NewGenerator(DefaultConfig())
 
-		err := gen.Generate(movie, tmpDir)
+		err := gen.Generate(movie, tmpDir, "")
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -100,7 +100,7 @@ func TestNFOGenerationEndToEnd(t *testing.T) {
 		gen := NewGenerator(cfg)
 
 		tmpDir2 := t.TempDir()
-		err := gen.Generate(movie, tmpDir2)
+		err := gen.Generate(movie, tmpDir2, "")
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -159,7 +159,7 @@ func TestNFOGenerationEndToEnd(t *testing.T) {
 		gen := NewGenerator(cfg)
 
 		tmpDir3 := t.TempDir()
-		err := gen.Generate(movie, tmpDir3)
+		err := gen.Generate(movie, tmpDir3, "")
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -320,7 +320,7 @@ func TestXMLFormatting(t *testing.T) {
 	gen := NewGenerator(DefaultConfig())
 	tmpDir := t.TempDir()
 
-	err := gen.Generate(movie, tmpDir)
+	err := gen.Generate(movie, tmpDir, "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}

@@ -190,6 +190,7 @@ type DownloadTask struct {
 	downloader      *downloader.Downloader
 	progressTracker *ProgressTracker
 	dryRun          bool
+	partNumber      int // 0 = single file, 1+ = multi-part
 }
 
 // NewDownloadTask creates a new download task
@@ -199,6 +200,7 @@ func NewDownloadTask(
 	dl *downloader.Downloader,
 	progressTracker *ProgressTracker,
 	dryRun bool,
+	partNumber int,
 ) *DownloadTask {
 	desc := fmt.Sprintf("Downloading media for %s", movie.ID)
 	if dryRun {
@@ -216,6 +218,7 @@ func NewDownloadTask(
 		downloader:      dl,
 		progressTracker: progressTracker,
 		dryRun:          dryRun,
+		partNumber:      partNumber,
 	}
 }
 
@@ -253,8 +256,8 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	logging.Debugf("[%s] Initiating DownloadAll for media files", t.movie.ID)
-	results, err := t.downloader.DownloadAll(t.movie, t.targetDir)
+	logging.Debugf("[%s] Initiating DownloadAll for media files (part %d)", t.movie.ID, t.partNumber)
+	results, err := t.downloader.DownloadAll(t.movie, t.targetDir, t.partNumber)
 	if err != nil {
 		logging.Debugf("[%s] Download failed: %v", t.movie.ID, err)
 		return fmt.Errorf("download failed: %w", err)
@@ -412,6 +415,7 @@ type NFOTask struct {
 	generator       *nfo.Generator
 	progressTracker *ProgressTracker
 	dryRun          bool
+	partSuffix      string // Optional suffix for multi-part files (e.g., "-pt1", "-A")
 }
 
 // NewNFOTask creates a new NFO generation task
@@ -421,15 +425,19 @@ func NewNFOTask(
 	gen *nfo.Generator,
 	progressTracker *ProgressTracker,
 	dryRun bool,
+	partSuffix string, // Optional suffix for multi-part files (e.g., "-pt1", "-A")
 ) *NFOTask {
 	desc := fmt.Sprintf("Generating NFO for %s", movie.ID)
+	if partSuffix != "" {
+		desc = fmt.Sprintf("Generating NFO for %s%s", movie.ID, partSuffix)
+	}
 	if dryRun {
 		desc = "[DRY RUN] " + desc
 	}
 
 	return &NFOTask{
 		BaseTask: BaseTask{
-			id:          fmt.Sprintf("nfo-%s", movie.ID),
+			id:          fmt.Sprintf("nfo-%s%s", movie.ID, partSuffix),
 			taskType:    TaskTypeNFO,
 			description: desc,
 		},
@@ -438,6 +446,7 @@ func NewNFOTask(
 		generator:       gen,
 		progressTracker: progressTracker,
 		dryRun:          dryRun,
+		partSuffix:      partSuffix,
 	}
 }
 
@@ -455,7 +464,7 @@ func (t *NFOTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	if err := t.generator.Generate(t.movie, t.targetDir); err != nil {
+	if err := t.generator.Generate(t.movie, t.targetDir, t.partSuffix); err != nil {
 		return fmt.Errorf("failed to generate NFO: %w", err)
 	}
 
@@ -651,12 +660,18 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 
 	// Step 2: Download media (before organizing so files are in place)
 	if t.downloadEnabled {
+		// Use match.PartNumber for deduplication (0 for single, 1+ for multi-part)
+		partNumber := t.match.PartNumber
+		if !t.match.IsMultiPart {
+			partNumber = 0
+		}
 		downloadTask := NewDownloadTask(
 			movie,
 			targetDir,
 			t.downloader,
 			t.progressTracker,
 			t.dryRun,
+			partNumber,
 		)
 		if err := downloadTask.Execute(ctx); err != nil {
 			// Log but don't fail - continue with other tasks
@@ -666,12 +681,19 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 
 	// Step 3: Generate NFO (before organizing so it's in place)
 	if t.nfoEnabled {
+		// Determine part suffix for NFO generation
+		partSuffix := ""
+		if t.match.IsMultiPart {
+			partSuffix = t.match.PartSuffix
+		}
+
 		nfoTask := NewNFOTask(
 			movie,
 			targetDir,
 			t.nfoGenerator,
 			t.progressTracker,
 			t.dryRun,
+			partSuffix,
 		)
 		if err := nfoTask.Execute(ctx); err != nil {
 			// Log but don't fail

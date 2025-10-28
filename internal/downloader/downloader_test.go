@@ -327,6 +327,76 @@ func TestDownloader_Download_BadStatusCode(t *testing.T) {
 	}
 }
 
+func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
+	// Set up mock HTTP server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("fake image data"))
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+
+	cfg := &config.OutputConfig{
+		DownloadCover:       true,
+		DownloadPoster:      true,
+		DownloadExtrafanart: true,
+		DownloadTrailer:     true,
+		DownloadActress:     true,
+		PosterFormat:        "<ID>-poster",
+		FanartFormat:        "<ID>-fanart",
+		TrailerFormat:       "<ID>-trailer",
+	}
+
+	movie := &models.Movie{
+		ID:          "IPX-535",
+		Title:       "Test Movie",
+		CoverURL:    server.URL + "/cover.jpg",
+		PosterURL:   server.URL + "/poster.jpg",
+		Screenshots: []string{
+			server.URL + "/screen1.jpg",
+			server.URL + "/screen2.jpg",
+		},
+		TrailerURL: server.URL + "/trailer.mp4",
+		Actresses: []models.Actress{
+			{ThumbURL: server.URL + "/actress1.jpg"},
+		},
+	}
+
+	downloader := NewDownloader(cfg, "test-agent")
+
+	// Part 1 should download everything
+	resultsPart1, err := downloader.DownloadAll(movie, tmpDir, 1)
+	if err != nil {
+		t.Fatalf("DownloadAll part 1 failed: %v", err)
+	}
+
+	if len(resultsPart1) == 0 {
+		t.Error("Expected downloads for part 1, got 0")
+	}
+
+	// Part 2 should NOT download anything (deduplication)
+	resultsPart2, err := downloader.DownloadAll(movie, tmpDir, 2)
+	if err != nil {
+		t.Fatalf("DownloadAll part 2 failed: %v", err)
+	}
+
+	if len(resultsPart2) != 0 {
+		t.Errorf("Expected 0 downloads for part 2 (deduplication), got %d", len(resultsPart2))
+	}
+
+	// Part 0 (single file) should download everything
+	tmpDir2 := t.TempDir()
+	resultsPart0, err := downloader.DownloadAll(movie, tmpDir2, 0)
+	if err != nil {
+		t.Fatalf("DownloadAll part 0 failed: %v", err)
+	}
+
+	if len(resultsPart0) == 0 {
+		t.Error("Expected downloads for part 0 (single file), got 0")
+	}
+}
+
 func TestDownloader_DownloadAll(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -354,7 +424,7 @@ func TestDownloader_DownloadAll(t *testing.T) {
 
 	downloader := NewDownloader(cfg, "test-agent")
 
-	results, err := downloader.DownloadAll(movie, tmpDir)
+	results, err := downloader.DownloadAll(movie, tmpDir, 0) // Part 0 = single file
 	if err != nil {
 		t.Fatalf("DownloadAll failed: %v", err)
 	}

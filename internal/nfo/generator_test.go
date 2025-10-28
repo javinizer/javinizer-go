@@ -393,8 +393,8 @@ func TestGenerateWithTemplate(t *testing.T) {
 	// Create temp directory
 	tmpDir := t.TempDir()
 
-	// Generate NFO
-	err := gen.Generate(movie, tmpDir)
+	// Generate NFO (no part suffix for single file)
+	err := gen.Generate(movie, tmpDir, "")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -410,5 +410,75 @@ func TestGenerateWithTemplate(t *testing.T) {
 		for _, f := range files {
 			t.Logf("  - %s", f.Name())
 		}
+	}
+}
+
+func TestGenerator_GenerateMultiPart(t *testing.T) {
+	// Test NFO generation with part suffixes for multi-part files
+	cfg := &Config{
+		ActorFirstNameOrder:  true,
+		ActorJapaneseNames:   false,
+		UnknownActress:       "Unknown",
+		NFOFilenameTemplate:  "<ID>.nfo",
+		PerFile:              true, // Enable per-file NFO generation
+		IncludeStreamDetails: false,
+		IncludeFanart:        true,
+		IncludeTrailer:       true,
+		DefaultRatingSource:  "themoviedb",
+	}
+
+	gen := NewGenerator(cfg)
+
+	releaseDate := time.Date(2023, 5, 1, 0, 0, 0, 0, time.UTC)
+	movie := &models.Movie{
+		ID:          "IPX-535",
+		Title:       "Test Movie",
+		ReleaseDate: &releaseDate,
+	}
+
+	tmpDir := t.TempDir()
+
+	// Generate NFO for part 1
+	err := gen.Generate(movie, tmpDir, "-pt1")
+	if err != nil {
+		t.Fatalf("Generate part 1 failed: %v", err)
+	}
+
+	// Generate NFO for part 2
+	err = gen.Generate(movie, tmpDir, "-pt2")
+	if err != nil {
+		t.Fatalf("Generate part 2 failed: %v", err)
+	}
+
+	// Verify both files were created
+	part1Path := filepath.Join(tmpDir, "IPX-535-pt1.nfo")
+	if _, err := os.Stat(part1Path); os.IsNotExist(err) {
+		// List files in directory for debugging
+		files, _ := os.ReadDir(tmpDir)
+		t.Log("Files in directory:")
+		for _, f := range files {
+			t.Logf("  - %s", f.Name())
+		}
+		t.Errorf("Expected file '%s' was not created", part1Path)
+	}
+
+	part2Path := filepath.Join(tmpDir, "IPX-535-pt2.nfo")
+	if _, err := os.Stat(part2Path); os.IsNotExist(err) {
+		t.Errorf("Expected file '%s' was not created", part2Path)
+	}
+
+	// Verify content is identical (both should contain same metadata)
+	content1, err := os.ReadFile(part1Path)
+	if err != nil {
+		t.Fatalf("Failed to read part 1: %v", err)
+	}
+
+	content2, err := os.ReadFile(part2Path)
+	if err != nil {
+		t.Fatalf("Failed to read part 2: %v", err)
+	}
+
+	if string(content1) != string(content2) {
+		t.Error("Part 1 and Part 2 NFO content should be identical")
 	}
 }

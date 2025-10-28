@@ -94,6 +94,7 @@ type NFOConfig struct {
 	FilenameTemplate     string   `yaml:"filename_template"`
 	FirstNameOrder       bool     `yaml:"first_name_order"`
 	ActressLanguageJA    bool     `yaml:"actress_language_ja"`
+	PerFile              bool     `yaml:"per_file"` // Create separate NFO for each multi-part file
 	UnknownActressText   string   `yaml:"unknown_actress_text"`
 	ActressAsTag         bool     `yaml:"actress_as_tag"`
 	IncludeStreamDetails bool     `yaml:"include_stream_details"`
@@ -132,11 +133,12 @@ type OutputConfig struct {
 	ScreenshotFolder    string   `yaml:"screenshot_folder"`
 	ScreenshotPadding   int      `yaml:"screenshot_padding"`
 	ActressFolder       string   `yaml:"actress_folder"`
-	DownloadCover       bool     `yaml:"download_cover"`
-	DownloadPoster      bool     `yaml:"download_poster"`
-	DownloadExtrafanart bool     `yaml:"download_extrafanart"`
-	DownloadTrailer     bool     `yaml:"download_trailer"`
-	DownloadActress     bool     `yaml:"download_actress"`
+	DownloadCover       bool `yaml:"download_cover"`
+	DownloadPoster      bool `yaml:"download_poster"`
+	DownloadExtrafanart bool `yaml:"download_extrafanart"`
+	DownloadTrailer     bool `yaml:"download_trailer"`
+	DownloadActress     bool `yaml:"download_actress"`
+	DownloadTimeout     int  `yaml:"download_timeout"` // Timeout in seconds for HTTP downloads (default: 60)
 }
 
 // DatabaseConfig holds database configuration
@@ -252,6 +254,7 @@ func DefaultConfig() *Config {
 			DownloadExtrafanart: false,
 			DownloadTrailer:     false,
 			DownloadActress:     false,
+			DownloadTimeout:     60, // 60 seconds default
 		},
 		Database: DatabaseConfig{
 			Type: "sqlite",

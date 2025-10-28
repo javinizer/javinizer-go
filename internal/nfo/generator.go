@@ -26,6 +26,7 @@ type Config struct {
 
 	// File naming
 	NFOFilenameTemplate string // Template for NFO filename (default: "<ID>.nfo")
+	PerFile             bool   // Create separate NFO for each multi-part file (default: false)
 
 	// Optional fields
 	IncludeStreamDetails bool // Include video/audio stream information
@@ -71,7 +72,8 @@ func DefaultConfig() *Config {
 }
 
 // Generate creates an NFO file from a Movie model
-func (g *Generator) Generate(movie *models.Movie, outputPath string) error {
+// partSuffix: optional suffix for multi-part files (e.g., "-pt1", "-A")
+func (g *Generator) Generate(movie *models.Movie, outputPath string, partSuffix string) error {
 	nfo := g.MovieToNFO(movie)
 
 	// Generate filename using template
@@ -84,10 +86,16 @@ func (g *Generator) Generate(movie *models.Movie, outputPath string) error {
 	// Sanitize filename
 	filename = template.SanitizeFilename(filename)
 
-	// Ensure .nfo extension
-	if !strings.HasSuffix(filename, ".nfo") {
-		filename += ".nfo"
+	// Remove .nfo extension if present (we'll add it back at the end)
+	filename = strings.TrimSuffix(filename, ".nfo")
+
+	// Append part suffix before extension (if provided and per_file is enabled)
+	if partSuffix != "" && g.config.PerFile {
+		filename = filename + partSuffix
 	}
+
+	// Ensure .nfo extension
+	filename += ".nfo"
 
 	fullPath := filepath.Join(outputPath, filename)
 

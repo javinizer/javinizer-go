@@ -47,10 +47,16 @@ const (
 
 // NewDownloader creates a new media downloader
 func NewDownloader(cfg *config.OutputConfig, userAgent string) *Downloader {
+	// Use configured timeout, default to 60 seconds if not set
+	timeout := cfg.DownloadTimeout
+	if timeout <= 0 {
+		timeout = 60
+	}
+
 	return &Downloader{
 		config: cfg,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: time.Duration(timeout) * time.Second,
 			Transport: &http.Transport{
 				MaxIdleConns:        10,
 				IdleConnTimeout:     30 * time.Second,
@@ -279,32 +285,39 @@ func (d *Downloader) DownloadActressImages(movie *models.Movie, destDir string) 
 }
 
 // DownloadAll downloads all enabled media types for a movie
-func (d *Downloader) DownloadAll(movie *models.Movie, destDir string) ([]DownloadResult, error) {
+// partNumber: 0 = single file or first part, 1+ = subsequent parts
+// For multi-part files, only downloads shared media (cover/poster/trailer/actresses) for part 0 or 1
+func (d *Downloader) DownloadAll(movie *models.Movie, destDir string, partNumber int) ([]DownloadResult, error) {
 	results := make([]DownloadResult, 0)
 
-	// Download cover
-	if coverResult, err := d.DownloadCover(movie, destDir); err == nil && coverResult != nil {
-		results = append(results, *coverResult)
-	}
+	// Download shared media only for single files (partNumber == 0) or first part (partNumber == 1)
+	shouldDownloadShared := partNumber == 0 || partNumber == 1
 
-	// Download poster
-	if posterResult, err := d.DownloadPoster(movie, destDir); err == nil && posterResult != nil {
-		results = append(results, *posterResult)
-	}
+	if shouldDownloadShared {
+		// Download cover
+		if coverResult, err := d.DownloadCover(movie, destDir); err == nil && coverResult != nil {
+			results = append(results, *coverResult)
+		}
 
-	// Download extrafanart (screenshots)
-	if extrafanart, err := d.DownloadExtrafanart(movie, destDir); err == nil {
-		results = append(results, extrafanart...)
-	}
+		// Download poster
+		if posterResult, err := d.DownloadPoster(movie, destDir); err == nil && posterResult != nil {
+			results = append(results, *posterResult)
+		}
 
-	// Download trailer
-	if trailerResult, err := d.DownloadTrailer(movie, destDir); err == nil && trailerResult != nil {
-		results = append(results, *trailerResult)
-	}
+		// Download extrafanart (screenshots)
+		if extrafanart, err := d.DownloadExtrafanart(movie, destDir); err == nil {
+			results = append(results, extrafanart...)
+		}
 
-	// Download actress images
-	if actresses, err := d.DownloadActressImages(movie, destDir); err == nil {
-		results = append(results, actresses...)
+		// Download trailer
+		if trailerResult, err := d.DownloadTrailer(movie, destDir); err == nil && trailerResult != nil {
+			results = append(results, *trailerResult)
+		}
+
+		// Download actress images
+		if actresses, err := d.DownloadActressImages(movie, destDir); err == nil {
+			results = append(results, actresses...)
+		}
 	}
 
 	return results, nil

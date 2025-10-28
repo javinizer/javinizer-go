@@ -856,21 +856,51 @@ func runSort(cmd *cobra.Command, args []string) {
 		nfoCount := 0
 
 		for id, movie := range movies {
-			// Create destination folder for this movie
-			plan, err := fileOrganizer.Plan(matches[0], movie, destPath, forceUpdate) // Use first match for folder planning
+			// Find all matches for this ID
+			var idMatches []matcher.MatchResult
+			for _, m := range matches {
+				if m.ID == id {
+					idMatches = append(idMatches, m)
+				}
+			}
+
+			// Create destination folder for this movie (use first match for planning)
+			plan, err := fileOrganizer.Plan(idMatches[0], movie, destPath, forceUpdate)
 			if err != nil {
 				logging.Infof("Failed to plan for %s: %v", id, err)
 				continue
 			}
 
-			if dryRun {
-				fmt.Printf("   %s.nfo (would generate)\n", id)
+			// If per_file is enabled and this is multi-part, generate NFO for each part
+			if cfg.Metadata.NFO.PerFile && len(idMatches) > 1 {
+				for _, match := range idMatches {
+					partSuffix := ""
+					if match.IsMultiPart {
+						partSuffix = match.PartSuffix
+					}
+
+					if dryRun {
+						fmt.Printf("   %s%s.nfo (would generate)\n", id, partSuffix)
+					} else {
+						if err := nfoGenerator.Generate(movie, plan.TargetDir, partSuffix); err != nil {
+							logging.Infof("Failed to generate NFO for %s%s: %v", id, partSuffix, err)
+						} else {
+							nfoCount++
+							fmt.Printf("   %s%s.nfo ✅\n", id, partSuffix)
+						}
+					}
+				}
 			} else {
-				if err := nfoGenerator.Generate(movie, plan.TargetDir); err != nil {
-					logging.Infof("Failed to generate NFO for %s: %v", id, err)
+				// Single NFO for all parts (or single file)
+				if dryRun {
+					fmt.Printf("   %s.nfo (would generate)\n", id)
 				} else {
-					nfoCount++
-					fmt.Printf("   %s.nfo ✅\n", id)
+					if err := nfoGenerator.Generate(movie, plan.TargetDir, ""); err != nil {
+						logging.Infof("Failed to generate NFO for %s: %v", id, err)
+					} else {
+						nfoCount++
+						fmt.Printf("   %s.nfo ✅\n", id)
+					}
 				}
 			}
 		}
@@ -888,14 +918,17 @@ func runSort(cmd *cobra.Command, args []string) {
 		downloadCount := 0
 
 		for id, movie := range movies {
-			// Find first match for this ID
-			var firstMatch matcher.MatchResult
+			// Find all matches for this ID
+			var idMatches []matcher.MatchResult
 			for _, m := range matches {
 				if m.ID == id {
-					firstMatch = m
-					break
+					idMatches = append(idMatches, m)
 				}
 			}
+			if len(idMatches) == 0 {
+				continue
+			}
+			firstMatch := idMatches[0]
 
 			plan, err := fileOrganizer.Plan(firstMatch, movie, destPath, forceUpdate)
 			if err != nil {
@@ -915,7 +948,25 @@ func runSort(cmd *cobra.Command, args []string) {
 				fmt.Printf("   %s: would download ~%d file(s)\n", id, count)
 			} else {
 				logging.Debugf("[%s] Starting download to: %s", id, plan.TargetDir)
-				results, err := mediaDownloader.DownloadAll(movie, plan.TargetDir)
+				// Use PartNumber for deduplication (0 for single file, 1+ for multi-part)
+				// Find the lowest part number to determine if we should download shared media
+				partNumber := 0
+				if firstMatch.IsMultiPart {
+					// For multi-part, find the lowest part number among all matches
+					minPartNumber := idMatches[0].PartNumber
+					for _, m := range idMatches {
+						if m.PartNumber < minPartNumber {
+							minPartNumber = m.PartNumber
+						}
+					}
+					// Clamp to 1 so even if only later segments exist (e.g., only pt2),
+					// we still download shared media once
+					if minPartNumber > 1 {
+						minPartNumber = 1
+					}
+					partNumber = minPartNumber
+				}
+				results, err := mediaDownloader.DownloadAll(movie, plan.TargetDir, partNumber)
 				if err != nil {
 					logging.Infof("Download error for %s: %v", id, err)
 				}

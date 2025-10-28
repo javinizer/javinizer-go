@@ -40,9 +40,9 @@ func ExampleGenerator_Generate() {
 	// Create generator with default config
 	gen := nfo.NewGenerator(nfo.DefaultConfig())
 
-	// Generate NFO file
+	// Generate NFO file (no part suffix for single file)
 	tmpDir := os.TempDir()
-	err := gen.Generate(movie, tmpDir)
+	err := gen.Generate(movie, tmpDir, "")
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return

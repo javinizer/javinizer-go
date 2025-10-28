@@ -245,7 +245,7 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 	// Initialize organizer, downloader, and NFO generator
 	org := organizer.NewOrganizer(&cfg.Output)
 	dl := downloader.NewDownloader(&cfg.Output, "Javinizer/1.0")
-	nfoGen := nfo.NewGenerator(nil) // Use default config
+	nfoGen := nfo.NewGenerator(nfo.ConfigFromAppConfig(&cfg.Metadata.NFO))
 
 	// Broadcast organization started
 	wsHub.BroadcastProgress(&ws.ProgressMessage{
@@ -326,8 +326,13 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 
 		// Generate NFO file
 		if result.Moved {
-			nfoPath := filepath.Join(result.FolderPath, strings.TrimSuffix(result.FileName, filepath.Ext(result.FileName))+".nfo")
-			if err := nfoGen.Generate(movie, nfoPath); err != nil {
+			// Determine part suffix for multi-part files (only if per_file is enabled)
+			partSuffix := ""
+			if cfg.Metadata.NFO.PerFile && match.IsMultiPart {
+				partSuffix = match.PartSuffix
+			}
+
+			if err := nfoGen.Generate(movie, result.FolderPath, partSuffix); err != nil {
 				logging.Errorf("Failed to generate NFO for %s: %v", movie.ID, err)
 			}
 		}

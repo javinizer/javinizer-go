@@ -157,7 +157,7 @@ func TestFullWorkflow(t *testing.T) {
 	nfoGen := nfo.NewGenerator(nfoConfig)
 
 	for id, movie := range movies {
-		if err := nfoGen.Generate(movie, tmpDir); err != nil {
+		if err := nfoGen.Generate(movie, tmpDir, ""); err != nil {
 			t.Fatalf("NFO generation failed for %s: %v", id, err)
 		}
 

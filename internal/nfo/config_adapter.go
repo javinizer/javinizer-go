@@ -13,6 +13,7 @@ func ConfigFromAppConfig(appCfg *config.NFOConfig) *Config {
 		ActorJapaneseNames:   appCfg.ActressLanguageJA,
 		UnknownActress:       appCfg.UnknownActressText,
 		NFOFilenameTemplate:  appCfg.FilenameTemplate,
+		PerFile:              appCfg.PerFile,
 		IncludeStreamDetails: appCfg.IncludeStreamDetails,
 		IncludeFanart:        appCfg.IncludeFanart,
 		IncludeTrailer:       appCfg.IncludeTrailer,
