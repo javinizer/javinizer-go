@@ -25,38 +25,44 @@ type VideoInfo struct {
 	Container string // "mp4", "mkv", "avi", etc.
 }
 
-// Analyze extracts metadata from a video file
-// Supports: MP4, MKV (WebM)
+// Global registry (initialized on first use)
+var defaultRegistry *ProberRegistry
+
+// Analyze extracts metadata from a video file using the ProberRegistry
+// Supports: MP4, MKV, MOV, AVI, FLV
+// Falls back to MediaInfo CLI if enabled and native parsers fail
 // Returns partial info if some fields are unavailable
 func Analyze(filePath string) (*VideoInfo, error) {
-	// Open file to detect container type
+	return AnalyzeWithConfig(filePath, nil)
+}
+
+// AnalyzeWithConfig extracts metadata using custom configuration
+func AnalyzeWithConfig(filePath string, cfg *MediaInfoConfig) (*VideoInfo, error) {
+	// Open file
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer f.Close()
 
-	// Read first 16 bytes to detect container
-	header := make([]byte, 16)
-	n, err := f.Read(header)
-	if err != nil || n < 16 {
-		return nil, fmt.Errorf("failed to read file header: %w", err)
+	// Initialize registry if needed
+	if cfg == nil {
+		cfg = DefaultMediaInfoConfig()
+	}
+	registry := NewProberRegistry(cfg)
+
+	// Use registry to probe with fallback
+	info, err := registry.ProbeWithFallback(f)
+	if err != nil {
+		return nil, err
 	}
 
-	// Reset file pointer
-	f.Seek(0, 0)
-
-	// Detect container type and dispatch to appropriate parser
-	container := detectContainer(header)
-
-	switch container {
-	case "mp4":
-		return analyzeMP4(f)
-	case "mkv":
-		return analyzeMKV(f)
-	default:
-		return nil, fmt.Errorf("unsupported container format (detected: %s)", container)
+	// Compute aspect ratio if dimensions available
+	if info.Width > 0 && info.Height > 0 {
+		info.AspectRatio = float64(info.Width) / float64(info.Height)
 	}
+
+	return info, nil
 }
 
 // detectContainer detects the container format from file header
