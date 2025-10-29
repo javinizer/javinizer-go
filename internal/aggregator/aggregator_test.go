@@ -2,9 +2,13 @@ package aggregator
 
 import (
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsRegexPattern(t *testing.T) {
@@ -339,6 +343,374 @@ func TestGenreAutoAdd(t *testing.T) {
 				if err == nil {
 					t.Error("Expected genre to not exist in database, but it does")
 				}
+			}
+		})
+	}
+}
+
+func TestDisplayNameFormatting(t *testing.T) {
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			Priority: config.PriorityConfig{
+				ID:    []string{"r18dev"},
+				Title: []string{"r18dev"},
+			},
+			NFO: config.NFOConfig{
+				DisplayName: "[<ID>] <TITLE>",
+			},
+		},
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"r18dev"},
+		},
+	}
+
+	agg := New(cfg)
+
+	results := []*models.ScraperResult{
+		{
+			Source: "r18dev",
+			ID:     "IPX-001",
+			Title:  "Test Movie",
+		},
+	}
+
+	movie, err := agg.Aggregate(results)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+
+	// Verify display name was formatted correctly
+	assert.Equal(t, "[IPX-001] Test Movie", movie.DisplayName)
+}
+
+func TestDisplayNameFormattingWithTemplate(t *testing.T) {
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			Priority: config.PriorityConfig{
+				ID:    []string{"r18dev"},
+				Title: []string{"r18dev"},
+				Maker: []string{"r18dev"},
+			},
+			NFO: config.NFOConfig{
+				DisplayName: "<TITLE> by <STUDIO>",
+			},
+		},
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"r18dev"},
+		},
+	}
+
+	agg := New(cfg)
+
+	results := []*models.ScraperResult{
+		{
+			Source: "r18dev",
+			ID:     "IPX-001",
+			Title:  "Amazing Movie",
+			Maker:  "Idea Pocket",
+		},
+	}
+
+	movie, err := agg.Aggregate(results)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+
+	// Verify display name was formatted correctly
+	assert.Equal(t, "Amazing Movie by Idea Pocket", movie.DisplayName)
+}
+
+func TestDisplayNameEmpty(t *testing.T) {
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			Priority: config.PriorityConfig{
+				ID: []string{"r18dev"},
+			},
+			NFO: config.NFOConfig{
+				DisplayName: "", // Empty - should not set DisplayName
+			},
+		},
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"r18dev"},
+		},
+	}
+
+	agg := New(cfg)
+
+	results := []*models.ScraperResult{
+		{
+			Source: "r18dev",
+			ID:     "IPX-001",
+		},
+	}
+
+	movie, err := agg.Aggregate(results)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+
+	// DisplayName should be empty when not configured
+	assert.Empty(t, movie.DisplayName)
+}
+
+func TestRequiredFieldsValidation(t *testing.T) {
+	// Helper to create time pointer
+	timePtr := func(s string) *time.Time {
+		t, _ := time.Parse("2006-01-02", s)
+		return &t
+	}
+
+	tests := []struct {
+		name           string
+		requiredFields []string
+		movie          *models.ScraperResult
+		shouldPass     bool
+		expectedError  string
+	}{
+		{
+			name:           "All required fields present",
+			requiredFields: []string{"ID", "Title", "ReleaseDate"},
+			movie: &models.ScraperResult{
+				Source:      "r18dev",
+				ID:          "IPX-001",
+				Title:       "Test Movie",
+				ReleaseDate: timePtr("2023-01-15"),
+			},
+			shouldPass: true,
+		},
+		{
+			name:           "Missing single required field",
+			requiredFields: []string{"ID", "Title", "Director"},
+			movie: &models.ScraperResult{
+				Source: "r18dev",
+				ID:     "IPX-001",
+				Title:  "Test Movie",
+				// Director missing
+			},
+			shouldPass:    false,
+			expectedError: "missing required fields: Director",
+		},
+		{
+			name:           "Missing multiple required fields",
+			requiredFields: []string{"ID", "Title", "Director", "Maker", "ReleaseDate"},
+			movie: &models.ScraperResult{
+				Source: "r18dev",
+				ID:     "IPX-001",
+				// Title, Director, Maker, ReleaseDate missing
+			},
+			shouldPass:    false,
+			expectedError: "missing required fields: Title, Director, Maker, ReleaseDate",
+		},
+		{
+			name:           "Case insensitive field names",
+			requiredFields: []string{"id", "TITLE", "ReLEaSeDate"},
+			movie: &models.ScraperResult{
+				Source:      "r18dev",
+				ID:          "IPX-001",
+				Title:       "Test Movie",
+				ReleaseDate: timePtr("2023-01-15"),
+			},
+			shouldPass: true,
+		},
+		{
+			name:           "Field name aliases - CoverURL",
+			requiredFields: []string{"cover_url", "poster"},
+			movie: &models.ScraperResult{
+				Source:    "r18dev",
+				ID:        "IPX-001",
+				CoverURL:  "https://example.com/cover.jpg",
+				PosterURL: "https://example.com/poster.jpg",
+			},
+			shouldPass: true,
+		},
+		{
+			name:           "Field name aliases - ContentID",
+			requiredFields: []string{"content_id"},
+			movie: &models.ScraperResult{
+				Source:    "r18dev",
+				ID:        "IPX-001",
+				ContentID: "ipx00001",
+			},
+			shouldPass: true,
+		},
+		{
+			name:           "Field name aliases - RatingScore",
+			requiredFields: []string{"rating_score"},
+			movie: &models.ScraperResult{
+				Source: "r18dev",
+				ID:     "IPX-001",
+				Rating: &models.Rating{Score: 4.5, Votes: 100},
+			},
+			shouldPass: true,
+		},
+		{
+			name:           "Empty required fields list",
+			requiredFields: []string{},
+			movie: &models.ScraperResult{
+				Source: "r18dev",
+				ID:     "IPX-001",
+				// Minimal data
+			},
+			shouldPass: true,
+		},
+		{
+			name:           "Unknown field names ignored",
+			requiredFields: []string{"ID", "UnknownField", "AnotherUnknownField"},
+			movie: &models.ScraperResult{
+				Source: "r18dev",
+				ID:     "IPX-001",
+			},
+			shouldPass: true, // Unknown fields are ignored for forward compatibility
+		},
+		{
+			name:           "Array field - Actresses required and present",
+			requiredFields: []string{"actresses"},
+			movie: &models.ScraperResult{
+				Source: "r18dev",
+				ID:     "IPX-001",
+				Actresses: []models.ActressInfo{
+					{FirstName: "Actress", LastName: "One"},
+					{FirstName: "Actress", LastName: "Two"},
+				},
+			},
+			shouldPass: true,
+		},
+		{
+			name:           "Array field - Actresses required but empty",
+			requiredFields: []string{"actresses"},
+			movie: &models.ScraperResult{
+				Source:    "r18dev",
+				ID:        "IPX-001",
+				Actresses: []models.ActressInfo{},
+			},
+			shouldPass:    false,
+			expectedError: "missing required fields: Actresses",
+		},
+		{
+			name:           "Array field - Genres required and present",
+			requiredFields: []string{"genres"},
+			movie: &models.ScraperResult{
+				Source: "r18dev",
+				ID:     "IPX-001",
+				Genres: []string{"Drama", "Romance"},
+			},
+			shouldPass: true,
+		},
+		{
+			name:           "Array field - Screenshots required and present",
+			requiredFields: []string{"screenshots"},
+			movie: &models.ScraperResult{
+				Source:        "r18dev",
+				ID:            "IPX-001",
+				ScreenshotURL: []string{"https://example.com/ss1.jpg"},
+			},
+			shouldPass: true,
+		},
+		{
+			name:           "Numeric field - Runtime required and present",
+			requiredFields: []string{"runtime"},
+			movie: &models.ScraperResult{
+				Source:  "r18dev",
+				ID:      "IPX-001",
+				Runtime: 120,
+			},
+			shouldPass: true,
+		},
+		{
+			name:           "Numeric field - Runtime required but zero",
+			requiredFields: []string{"runtime"},
+			movie: &models.ScraperResult{
+				Source:  "r18dev",
+				ID:      "IPX-001",
+				Runtime: 0,
+			},
+			shouldPass:    false,
+			expectedError: "missing required fields: Runtime",
+		},
+		{
+			name:           "Numeric field - RatingScore zero is treated as missing",
+			requiredFields: []string{"rating"},
+			movie: &models.ScraperResult{
+				Source: "r18dev",
+				ID:     "IPX-001",
+				Rating: &models.Rating{Score: 0, Votes: 0},
+			},
+			shouldPass:    false,
+			expectedError: "missing required fields: RatingScore",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Metadata: config.MetadataConfig{
+					RequiredFields: tt.requiredFields,
+					Priority: config.PriorityConfig{
+						ID: []string{"r18dev"},
+					},
+				},
+				Scrapers: config.ScrapersConfig{
+					Priority: []string{"r18dev"},
+				},
+			}
+
+			agg := New(cfg)
+			results := []*models.ScraperResult{tt.movie}
+
+			movie, err := agg.Aggregate(results)
+
+			if tt.shouldPass {
+				require.NoError(t, err, "Expected validation to pass but got error")
+				require.NotNil(t, movie, "Expected movie to be returned")
+			} else {
+				require.Error(t, err, "Expected validation to fail but got no error")
+				assert.Contains(t, err.Error(), tt.expectedError,
+					"Error message should contain expected text")
+				assert.Nil(t, movie, "Expected no movie when validation fails")
+			}
+		})
+	}
+}
+
+func TestRequiredFieldsValidationAliases(t *testing.T) {
+	// Test that all aliases for the same field work identically
+	aliasGroups := map[string][]string{
+		"ContentID":     {"contentid", "content_id", "CONTENTID"},
+		"CoverURL":      {"coverurl", "cover_url", "cover", "COVER"},
+		"PosterURL":     {"posterurl", "poster_url", "poster"},
+		"TrailerURL":    {"trailerurl", "trailer_url", "trailer"},
+		"Screenshots":   {"screenshots", "screenshot_url", "screenshoturl", "SCREENSHOTURL"},
+		"OriginalTitle": {"originaltitle", "original_title"},
+		"ReleaseDate":   {"releasedate", "release_date"},
+		"RatingScore":   {"rating", "ratingscore", "rating_score"},
+	}
+
+	for fieldName, aliases := range aliasGroups {
+		t.Run(fieldName, func(t *testing.T) {
+			// Create a movie with the field missing
+			movie := &models.ScraperResult{
+				Source: "r18dev",
+				ID:     "IPX-001",
+			}
+
+			for _, alias := range aliases {
+				cfg := &config.Config{
+					Metadata: config.MetadataConfig{
+						RequiredFields: []string{alias},
+						Priority: config.PriorityConfig{
+							ID: []string{"r18dev"},
+						},
+					},
+					Scrapers: config.ScrapersConfig{
+						Priority: []string{"r18dev"},
+					},
+				}
+
+				agg := New(cfg)
+				results := []*models.ScraperResult{movie}
+
+				_, err := agg.Aggregate(results)
+				require.Error(t, err,
+					"Alias %q should trigger validation error for missing %s", alias, fieldName)
+				assert.Contains(t, err.Error(), fieldName,
+					"Error should mention canonical field name %s when using alias %q", fieldName, alias)
 			}
 		})
 	}

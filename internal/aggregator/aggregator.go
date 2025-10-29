@@ -3,17 +3,20 @@ package aggregator
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/template"
 )
 
 // Aggregator combines metadata from multiple scrapers based on priority
 type Aggregator struct {
 	config                *config.Config
+	templateEngine        *template.Engine
 	genreReplacementRepo  *database.GenreReplacementRepository
 	genreReplacementCache map[string]string
 	genreCacheMutex       sync.RWMutex        // Protects genreReplacementCache from concurrent access
@@ -28,6 +31,7 @@ type Aggregator struct {
 func New(cfg *config.Config) *Aggregator {
 	agg := &Aggregator{
 		config:                cfg,
+		templateEngine:        template.NewEngine(),
 		genreReplacementCache: make(map[string]string),
 		actressAliasCache:     make(map[string]string),
 	}
@@ -40,6 +44,7 @@ func New(cfg *config.Config) *Aggregator {
 func NewWithDatabase(cfg *config.Config, db *database.DB) *Aggregator {
 	agg := &Aggregator{
 		config:                cfg,
+		templateEngine:        template.NewEngine(),
 		genreReplacementRepo:  database.NewGenreReplacementRepository(db),
 		genreReplacementCache: make(map[string]string),
 		actressAliasRepo:      database.NewActressAliasRepository(db),
@@ -400,6 +405,23 @@ func (a *Aggregator) Aggregate(results []*models.ScraperResult) (*models.Movie, 
 		movie.SourceURL = results[0].SourceURL
 	}
 
+	// Generate display name from template if configured
+	if a.config.Metadata.NFO.DisplayName != "" {
+		ctx := template.NewContextFromMovie(movie)
+		displayName, err := a.templateEngine.Execute(a.config.Metadata.NFO.DisplayName, ctx)
+		if err == nil {
+			movie.DisplayName = displayName
+		}
+		// Silently ignore template errors - display name is optional
+	}
+
+	// Validate required fields if configured
+	if len(a.config.Metadata.RequiredFields) > 0 {
+		if err := a.validateRequiredFields(movie); err != nil {
+			return nil, fmt.Errorf("required field validation failed: %w", err)
+		}
+	}
+
 	// Set timestamps
 	now := time.Now().UTC()
 	movie.CreatedAt = now
@@ -667,4 +689,100 @@ func (a *Aggregator) applyGenreReplacement(original string) string {
 // ReloadGenreReplacements reloads the genre replacement cache from database
 func (a *Aggregator) ReloadGenreReplacements() {
 	a.loadGenreReplacementCache()
+}
+
+// validateRequiredFields checks if all required fields are present and non-empty
+func (a *Aggregator) validateRequiredFields(movie *models.Movie) error {
+	missingFields := []string{}
+
+	for _, fieldName := range a.config.Metadata.RequiredFields {
+		// Normalize field name to lowercase for case-insensitive comparison
+		fieldLower := strings.ToLower(fieldName)
+
+		// Check each field
+		switch fieldLower {
+		case "id":
+			if movie.ID == "" {
+				missingFields = append(missingFields, "ID")
+			}
+		case "contentid", "content_id":
+			if movie.ContentID == "" {
+				missingFields = append(missingFields, "ContentID")
+			}
+		case "title":
+			if movie.Title == "" {
+				missingFields = append(missingFields, "Title")
+			}
+		case "originaltitle", "original_title":
+			if movie.OriginalTitle == "" {
+				missingFields = append(missingFields, "OriginalTitle")
+			}
+		case "description", "plot":
+			if movie.Description == "" {
+				missingFields = append(missingFields, "Description")
+			}
+		case "director":
+			if movie.Director == "" {
+				missingFields = append(missingFields, "Director")
+			}
+		case "maker", "studio":
+			if movie.Maker == "" {
+				missingFields = append(missingFields, "Maker")
+			}
+		case "label":
+			if movie.Label == "" {
+				missingFields = append(missingFields, "Label")
+			}
+		case "series", "set":
+			if movie.Series == "" {
+				missingFields = append(missingFields, "Series")
+			}
+		case "releasedate", "release_date", "premiered":
+			if movie.ReleaseDate == nil {
+				missingFields = append(missingFields, "ReleaseDate")
+			}
+		case "runtime":
+			if movie.Runtime == 0 {
+				missingFields = append(missingFields, "Runtime")
+			}
+		case "coverurl", "cover_url", "cover":
+			if movie.CoverURL == "" {
+				missingFields = append(missingFields, "CoverURL")
+			}
+		case "posterurl", "poster_url", "poster":
+			if movie.PosterURL == "" {
+				missingFields = append(missingFields, "PosterURL")
+			}
+		case "trailerurl", "trailer_url", "trailer":
+			if movie.TrailerURL == "" {
+				missingFields = append(missingFields, "TrailerURL")
+			}
+		case "screenshots", "screenshot_url", "screenshoturl":
+			if len(movie.Screenshots) == 0 {
+				missingFields = append(missingFields, "Screenshots")
+			}
+		case "actresses", "actress":
+			if len(movie.Actresses) == 0 {
+				missingFields = append(missingFields, "Actresses")
+			}
+		case "genres", "genre":
+			if len(movie.Genres) == 0 {
+				missingFields = append(missingFields, "Genres")
+			}
+		case "rating", "ratingscore", "rating_score":
+			if movie.RatingScore == 0 {
+				missingFields = append(missingFields, "RatingScore")
+			}
+		default:
+			// Unknown field name - log warning but don't fail
+			// This allows for forward compatibility
+			continue
+		}
+	}
+
+	if len(missingFields) > 0 {
+		return fmt.Errorf("missing required fields: %s", strings.Join(missingFields, ", "))
+	}
+
+	return nil
 }

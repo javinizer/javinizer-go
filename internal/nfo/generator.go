@@ -43,6 +43,11 @@ type Config struct {
 	// Rating source
 	DefaultRatingSource string // Which rating to mark as default (default: "themoviedb")
 
+	// Static NFO fields
+	StaticTags    []string // Static tags to add to all NFOs
+	StaticTagline string   // Static tagline for all NFOs
+	StaticCredits []string // Static credits for all NFOs
+
 	// Output configuration
 	GroupActress bool // Replace multiple actresses with "@Group" (default: false)
 }
@@ -261,6 +266,34 @@ func (g *Generator) MovieToNFO(movie *models.Movie, videoFilePath string) *Movie
 				tagSet[actressName] = true
 			}
 		}
+	}
+
+	// Add static tags from config
+	if len(g.config.StaticTags) > 0 {
+		// Create set for deduplication if not already created
+		tagSet := make(map[string]bool)
+		for _, tag := range nfo.Tags {
+			tagSet[tag] = true
+		}
+
+		// Add static tags
+		for _, tag := range g.config.StaticTags {
+			if tag != "" && !tagSet[tag] {
+				nfo.Tags = append(nfo.Tags, tag)
+				tagSet[tag] = true
+			}
+		}
+	}
+
+	// Add static tagline from config
+	if g.config.StaticTagline != "" {
+		nfo.Tagline = g.config.StaticTagline
+	}
+
+	// Add static credits from config
+	if len(g.config.StaticCredits) > 0 {
+		// Join credits with comma separator for NFO XML
+		nfo.Credits = strings.Join(g.config.StaticCredits, ", ")
 	}
 
 	return nfo

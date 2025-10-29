@@ -27,6 +27,9 @@ func ConfigFromAppConfig(appCfg *config.NFOConfig, outputCfg *config.OutputConfi
 		IncludeFanart:        appCfg.IncludeFanart,
 		IncludeTrailer:       appCfg.IncludeTrailer,
 		DefaultRatingSource:  appCfg.RatingSource,
+		StaticTags:           appCfg.Tag,
+		StaticTagline:        appCfg.Tagline,
+		StaticCredits:        appCfg.Credits,
 		GroupActress:         groupActress,
 	}
 }

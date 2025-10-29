@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMovieToNFO(t *testing.T) {
@@ -769,4 +770,83 @@ func TestActressAsTagInXML(t *testing.T) {
 			t.Errorf("Expected tag '%s' not found in XML tags: %v", expectedTag, parsed.Tags)
 		}
 	}
+}
+
+func TestStaticNFOFields(t *testing.T) {
+	cfg := &Config{
+		ActorFirstNameOrder: true,
+		DefaultRatingSource: "themoviedb",
+		StaticTags:          []string{"JAV", "Japanese"},
+		StaticTagline:       "Brought to you by Javinizer",
+		StaticCredits:       []string{"Scraped by Javinizer", "Organized automatically"},
+	}
+
+	gen := NewGenerator(cfg)
+
+	movie := &models.Movie{
+		ID:    "IPX-001",
+		Title: "Test Movie",
+	}
+
+	nfo := gen.MovieToNFO(movie, "")
+
+	// Verify static tags were added
+	assert.Contains(t, nfo.Tags, "JAV")
+	assert.Contains(t, nfo.Tags, "Japanese")
+	assert.Len(t, nfo.Tags, 2)
+
+	// Verify static tagline
+	assert.Equal(t, "Brought to you by Javinizer", nfo.Tagline)
+
+	// Verify static credits
+	assert.Equal(t, "Scraped by Javinizer, Organized automatically", nfo.Credits)
+}
+
+func TestStaticTagsWithActressAsTag(t *testing.T) {
+	cfg := &Config{
+		ActorFirstNameOrder: true,
+		DefaultRatingSource: "themoviedb",
+		ActressAsTag:        true,
+		StaticTags:          []string{"JAV", "Collection"},
+	}
+
+	gen := NewGenerator(cfg)
+
+	movie := &models.Movie{
+		ID:    "IPX-001",
+		Title: "Test Movie",
+		Actresses: []models.Actress{
+			{FirstName: "Yui", LastName: "Hatano"},
+		},
+	}
+
+	nfo := gen.MovieToNFO(movie, "")
+
+	// Verify both actress name and static tags are present
+	assert.Contains(t, nfo.Tags, "Yui Hatano")
+	assert.Contains(t, nfo.Tags, "JAV")
+	assert.Contains(t, nfo.Tags, "Collection")
+	assert.Len(t, nfo.Tags, 3)
+}
+
+func TestStaticFieldsEmpty(t *testing.T) {
+	cfg := &Config{
+		ActorFirstNameOrder: true,
+		DefaultRatingSource: "themoviedb",
+		// No static fields configured
+	}
+
+	gen := NewGenerator(cfg)
+
+	movie := &models.Movie{
+		ID:    "IPX-001",
+		Title: "Test Movie",
+	}
+
+	nfo := gen.MovieToNFO(movie, "")
+
+	// Verify no static fields were added
+	assert.Empty(t, nfo.Tags)
+	assert.Empty(t, nfo.Tagline)
+	assert.Empty(t, nfo.Credits)
 }
