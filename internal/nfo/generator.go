@@ -30,9 +30,15 @@ type Config struct {
 	PerFile             bool   // Create separate NFO for each multi-part file (default: false)
 
 	// Optional fields
+	ActressAsTag         bool // Copy actress names to <tag> elements
+	IncludeOriginalPath  bool // Include source filename in NFO
 	IncludeStreamDetails bool // Include video/audio stream information
 	IncludeFanart        bool // Include fanart section
 	IncludeTrailer       bool // Include trailer URLs
+
+	// Actress role options
+	AddGenericRole bool // Add generic "Actress" role to all actresses (default: false)
+	AltNameRole    bool // Use alternate name (Japanese) in role field instead of name (default: false)
 
 	// Rating source
 	DefaultRatingSource string // Which rating to mark as default (default: "themoviedb")
@@ -170,6 +176,16 @@ func (g *Generator) MovieToNFO(movie *models.Movie, videoFilePath string) *Movie
 				Order: i,
 			}
 
+			// Add generic role if configured
+			if g.config.AddGenericRole {
+				actor.Role = "Actress"
+			}
+
+			// Use alternate name (Japanese) in role field if configured
+			if g.config.AltNameRole && actress.JapaneseName != "" {
+				actor.Role = actress.JapaneseName
+			}
+
 			// Add actress image if available
 			if actress.ThumbURL != "" {
 				actor.Thumb = actress.ThumbURL
@@ -220,6 +236,29 @@ func (g *Generator) MovieToNFO(movie *models.Movie, videoFilePath string) *Movie
 		if streamDetails := g.extractStreamDetails(videoFilePath); streamDetails != nil {
 			nfo.FileInfo = &FileInfo{
 				StreamDetails: streamDetails,
+			}
+		}
+	}
+
+	// Add original filename if enabled
+	if g.config.IncludeOriginalPath && movie.OriginalFileName != "" {
+		nfo.OriginalPath = movie.OriginalFileName
+	}
+
+	// Add actress names as tags if enabled
+	if g.config.ActressAsTag && len(movie.Actresses) > 0 {
+		// Create set of existing tags for deduplication
+		tagSet := make(map[string]bool)
+		for _, tag := range nfo.Tags {
+			tagSet[tag] = true
+		}
+
+		// Add actress names as tags
+		for _, actress := range movie.Actresses {
+			actressName := g.formatActressName(actress)
+			if actressName != "" && actressName != g.config.UnknownActress && !tagSet[actressName] {
+				nfo.Tags = append(nfo.Tags, actressName)
+				tagSet[actressName] = true
 			}
 		}
 	}
@@ -392,6 +431,16 @@ func (g *Generator) ScraperResultToNFO(result *models.ScraperResult) *Movie {
 			actor := Actor{
 				Name:  actorName,
 				Order: i,
+			}
+
+			// Add generic role if configured
+			if g.config.AddGenericRole {
+				actor.Role = "Actress"
+			}
+
+			// Use alternate name (Japanese) in role field if configured
+			if g.config.AltNameRole && actress.JapaneseName != "" {
+				actor.Role = actress.JapaneseName
 			}
 
 			if actress.ThumbURL != "" {

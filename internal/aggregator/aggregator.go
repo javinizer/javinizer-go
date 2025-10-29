@@ -3,6 +3,7 @@ package aggregator
 import (
 	"fmt"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -15,6 +16,10 @@ type Aggregator struct {
 	config                *config.Config
 	genreReplacementRepo  *database.GenreReplacementRepository
 	genreReplacementCache map[string]string
+	genreCacheMutex       sync.RWMutex        // Protects genreReplacementCache from concurrent access
+	actressAliasRepo      *database.ActressAliasRepository
+	actressAliasCache     map[string]string // Maps alias name to canonical name
+	aliasCacheMutex       sync.RWMutex      // Protects actressAliasCache from concurrent access
 	resolvedPriorities    map[string][]string // Cached resolved priorities for each field
 	ignoreGenreRegexes    []*regexp.Regexp    // Compiled regex patterns for genre filtering
 }
@@ -24,22 +29,28 @@ func New(cfg *config.Config) *Aggregator {
 	agg := &Aggregator{
 		config:                cfg,
 		genreReplacementCache: make(map[string]string),
+		actressAliasCache:     make(map[string]string),
 	}
 	agg.resolvePriorities()
 	agg.compileGenreRegexes()
 	return agg
 }
 
-// NewWithDatabase creates a new aggregator with database support for genre replacements
+// NewWithDatabase creates a new aggregator with database support for genre replacements and actress aliases
 func NewWithDatabase(cfg *config.Config, db *database.DB) *Aggregator {
 	agg := &Aggregator{
 		config:                cfg,
 		genreReplacementRepo:  database.NewGenreReplacementRepository(db),
 		genreReplacementCache: make(map[string]string),
+		actressAliasRepo:      database.NewActressAliasRepository(db),
+		actressAliasCache:     make(map[string]string),
 	}
 
 	// Load replacement cache
 	agg.loadGenreReplacementCache()
+
+	// Load actress alias cache
+	agg.loadActressAliasCache()
 
 	// Resolve priorities at initialization
 	agg.resolvePriorities()
@@ -58,8 +69,100 @@ func (a *Aggregator) loadGenreReplacementCache() {
 
 	replacementMap, err := a.genreReplacementRepo.GetReplacementMap()
 	if err == nil {
+		a.genreCacheMutex.Lock()
 		a.genreReplacementCache = replacementMap
+		a.genreCacheMutex.Unlock()
 	}
+}
+
+// loadActressAliasCache loads actress aliases into memory
+func (a *Aggregator) loadActressAliasCache() {
+	if a.actressAliasRepo == nil {
+		return
+	}
+
+	aliasMap, err := a.actressAliasRepo.GetAliasMap()
+	if err == nil {
+		a.aliasCacheMutex.Lock()
+		a.actressAliasCache = aliasMap
+		a.aliasCacheMutex.Unlock()
+	}
+}
+
+// applyActressAlias converts actress names using the alias database
+// It checks Japanese name, FirstName LastName, and LastName FirstName combinations
+func (a *Aggregator) applyActressAlias(actress *models.Actress) {
+	// Check cache first with read lock
+	a.aliasCacheMutex.RLock()
+	defer a.aliasCacheMutex.RUnlock()
+
+	// Try Japanese name first
+	if actress.JapaneseName != "" {
+		if canonical, found := a.actressAliasCache[actress.JapaneseName]; found {
+			actress.JapaneseName = canonical
+			return
+		}
+	}
+
+	// Try FirstName LastName combination
+	if actress.FirstName != "" && actress.LastName != "" {
+		fullName := actress.FirstName + " " + actress.LastName
+		if canonical, found := a.actressAliasCache[fullName]; found {
+			// Parse canonical name back into first/last if it contains space
+			// Otherwise, assume it's a Japanese name
+			if len(canonical) > 0 {
+				parts := splitActressName(canonical)
+				if len(parts) == 2 {
+					// Canonical form is typically "FamilyName GivenName" (Japanese convention)
+					// Assign so FullName() returns LastName + " " + FirstName = canonical
+					actress.LastName = parts[0]  // Family name
+					actress.FirstName = parts[1] // Given name
+				} else {
+					// Canonical is a single name (likely Japanese)
+					actress.JapaneseName = canonical
+				}
+			}
+			return
+		}
+
+		// Try LastName FirstName combination
+		reverseName := actress.LastName + " " + actress.FirstName
+		if canonical, found := a.actressAliasCache[reverseName]; found {
+			if len(canonical) > 0 {
+				parts := splitActressName(canonical)
+				if len(parts) == 2 {
+					// Canonical form is typically "FamilyName GivenName" (Japanese convention)
+					// Assign so FullName() returns LastName + " " + FirstName = canonical
+					actress.LastName = parts[0]  // Family name
+					actress.FirstName = parts[1] // Given name
+				} else {
+					actress.JapaneseName = canonical
+				}
+			}
+			return
+		}
+	}
+}
+
+// splitActressName splits a full name into parts (e.g., "Yui Hatano" -> ["Yui", "Hatano"])
+func splitActressName(fullName string) []string {
+	// Simple split by space - could be enhanced for more complex names
+	var parts []string
+	currentPart := ""
+	for _, char := range fullName {
+		if char == ' ' {
+			if currentPart != "" {
+				parts = append(parts, currentPart)
+				currentPart = ""
+			}
+		} else {
+			currentPart += string(char)
+		}
+	}
+	if currentPart != "" {
+		parts = append(parts, currentPart)
+	}
+	return parts
 }
 
 // compileGenreRegexes compiles regex patterns from ignore_genres config
@@ -422,10 +525,14 @@ func (a *Aggregator) getActressesByPriority(
 		}
 	}
 
-	// Convert map to slice
+	// Convert map to slice and apply alias conversion if enabled
 	if len(actressMap) > 0 {
 		actresses := make([]models.Actress, 0, len(actressMap))
 		for _, actress := range actressMap {
+			// Apply alias conversion if enabled
+			if a.config.Metadata.ActressDatabase.ConvertAlias {
+				a.applyActressAlias(actress)
+			}
 			actresses = append(actresses, *actress)
 		}
 		return actresses
@@ -525,10 +632,34 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult) []models
 
 // applyGenreReplacement applies genre replacement if one exists
 func (a *Aggregator) applyGenreReplacement(original string) string {
-	// Check cache first
-	if replacement, exists := a.genreReplacementCache[original]; exists {
+	// Check cache first with read lock
+	a.genreCacheMutex.RLock()
+	replacement, exists := a.genreReplacementCache[original]
+	a.genreCacheMutex.RUnlock()
+
+	if exists {
 		return replacement
 	}
+
+	// Auto-add genre if enabled and repository is available
+	if a.config.Metadata.GenreReplacement.AutoAdd && a.genreReplacementRepo != nil {
+		// Create identity mapping (genre maps to itself)
+		genreReplacement := &models.GenreReplacement{
+			Original:    original,
+			Replacement: original,
+		}
+
+		// Try to create the replacement (will fail silently if already exists due to race condition)
+		if err := a.genreReplacementRepo.Create(genreReplacement); err == nil {
+			// Successfully added, update cache with write lock
+			a.genreCacheMutex.Lock()
+			a.genreReplacementCache[original] = original
+			a.genreCacheMutex.Unlock()
+		}
+		// If create failed due to unique constraint (race condition), ignore the error
+		// The genre is already in the database from another goroutine
+	}
+
 	// Return original if no replacement found
 	return original
 }

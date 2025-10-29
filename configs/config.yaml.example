@@ -67,14 +67,16 @@ metadata:
         trailer_url:
             - dmm
             - r18dev
-    thumb_csv:
+    # Actress image database (SQLite-backed)
+    actress_database:
         enabled: true
-        path: data/actress.csv
-        auto_add: true
-    genre_csv:
+        auto_add: true        # Automatically add new actresses to database
+        convert_alias: false  # Convert actress names using alias database
+
+    # Genre replacement/normalization database (SQLite-backed)
+    genre_replacement:
         enabled: true
-        path: data/genres.csv
-        auto_add: true
+        auto_add: true  # Automatically add new genres with identity mapping (genre -> genre)
     # Genres to ignore/filter out. Supports both exact strings and regex patterns.
     # Patterns starting with ^, ending with $, or containing regex metacharacters are treated as regex.
     # Examples:
@@ -98,6 +100,9 @@ metadata:
         actress_language_ja: false
         unknown_actress_text: Unknown
         actress_as_tag: false
+        add_generic_role: false  # Add generic "Actress" role to all actresses
+        alt_name_role: false     # Use alternate name (Japanese) in role field
+        include_originalpath: false  # Include source filename in NFO
         include_stream_details: false
         include_fanart: true
         include_trailer: true

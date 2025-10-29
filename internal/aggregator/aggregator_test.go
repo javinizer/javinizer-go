@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 )
 
 func TestIsRegexPattern(t *testing.T) {
@@ -253,5 +254,92 @@ func TestGenreFilteringIntegration(t *testing.T) {
 		if agg.isGenreIgnored(genre) {
 			t.Errorf("Genre %q should be kept but was filtered", genre)
 		}
+	}
+}
+
+func TestGenreAutoAdd(t *testing.T) {
+	// Create a temporary database
+	db, err := database.New(&config.Config{
+		Database: config.DatabaseConfig{
+			Type: "sqlite",
+			DSN:  ":memory:", // In-memory database for testing
+		},
+		Logging: config.LoggingConfig{
+			Level: "error",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer db.Close()
+
+	// Run migrations
+	if err := db.AutoMigrate(); err != nil {
+		t.Fatalf("Failed to migrate database: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		autoAdd     bool
+		genreName   string
+		shouldExist bool
+	}{
+		{
+			name:        "Auto-add enabled - new genre",
+			autoAdd:     true,
+			genreName:   "New Genre",
+			shouldExist: true,
+		},
+		{
+			name:        "Auto-add disabled - new genre",
+			autoAdd:     false,
+			genreName:   "Another Genre",
+			shouldExist: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Scrapers: config.ScrapersConfig{
+					Priority: []string{"test"},
+				},
+				Metadata: config.MetadataConfig{
+					GenreReplacement: config.GenreReplacementConfig{
+						AutoAdd: tt.autoAdd,
+					},
+				},
+			}
+
+			agg := NewWithDatabase(cfg, db)
+
+			// Apply genre replacement (which triggers auto-add)
+			result := agg.applyGenreReplacement(tt.genreName)
+
+			// Result should always be the original genre name
+			if result != tt.genreName {
+				t.Errorf("Expected result '%s', got '%s'", tt.genreName, result)
+			}
+
+			// Check if genre exists in database
+			repo := database.NewGenreReplacementRepository(db)
+			replacement, err := repo.FindByOriginal(tt.genreName)
+
+			if tt.shouldExist {
+				if err != nil {
+					t.Errorf("Expected genre to exist in database, but got error: %v", err)
+				}
+				if replacement.Original != tt.genreName {
+					t.Errorf("Expected original '%s', got '%s'", tt.genreName, replacement.Original)
+				}
+				if replacement.Replacement != tt.genreName {
+					t.Errorf("Expected replacement '%s', got '%s'", tt.genreName, replacement.Replacement)
+				}
+			} else {
+				if err == nil {
+					t.Error("Expected genre to not exist in database, but it does")
+				}
+			}
+		})
 	}
 }

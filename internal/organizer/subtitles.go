@@ -105,9 +105,10 @@ func (sh *SubtitleHandler) FindSubtitles(videoFile scanner.FileInfo) []SubtitleM
 		// Check if subtitle filename matches the video filename
 		// Require exact match or separator after video name to avoid false matches
 		// (e.g., "IPX-535.mp4" should not match "IPX-535-trailer.srt")
+		// Use case-insensitive matching for Windows compatibility
 		subtitleNameWithoutExt := strings.TrimSuffix(subtitleName, filepath.Ext(subtitleName))
-		base := videoNameWithoutExt
-		cand := subtitleNameWithoutExt
+		base := strings.ToLower(videoNameWithoutExt)
+		cand := strings.ToLower(subtitleNameWithoutExt)
 
 		// Exact match or has separator (., -, _) after base name
 		isMatch := cand == base ||
@@ -190,9 +191,10 @@ func (sh *SubtitleHandler) isSubtitleFile(filename string) bool {
 func (sh *SubtitleHandler) extractLanguageCode(subtitleName, videoNameWithoutExt string) string {
 	subtitleNameWithoutExt := strings.TrimSuffix(subtitleName, filepath.Ext(subtitleName))
 
-	// Remove the video name prefix to get the language part
-	if strings.HasPrefix(subtitleNameWithoutExt, videoNameWithoutExt) {
-		remaining := strings.TrimPrefix(subtitleNameWithoutExt, videoNameWithoutExt)
+	// Remove the video name prefix to get the language part (case-insensitive)
+	if len(subtitleNameWithoutExt) >= len(videoNameWithoutExt) &&
+		strings.EqualFold(subtitleNameWithoutExt[:len(videoNameWithoutExt)], videoNameWithoutExt) {
+		remaining := subtitleNameWithoutExt[len(videoNameWithoutExt):]
 
 		// Remove leading dots, dashes, or underscores
 		remaining = strings.TrimLeft(remaining, "._-")

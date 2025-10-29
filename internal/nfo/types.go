@@ -52,7 +52,8 @@ type Movie struct {
 	Trailer string  `xml:"trailer,omitempty"`
 
 	// File info (optional)
-	FileInfo *FileInfo `xml:"fileinfo,omitempty"`
+	FileInfo     *FileInfo `xml:"fileinfo,omitempty"`
+	OriginalPath string    `xml:"originalpath,omitempty"` // Original source filename
 }
 
 // UniqueID represents a unique identifier with a type

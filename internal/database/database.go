@@ -55,6 +55,7 @@ func (db *DB) AutoMigrate() error {
 		&models.Actress{},
 		&models.Genre{},
 		&models.GenreReplacement{},
+		&models.ActressAlias{},
 		&models.History{},
 		&models.ContentIDMapping{},
 	)
@@ -582,4 +583,76 @@ func (r *HistoryRepository) List(limit, offset int) ([]models.History, error) {
 	var history []models.History
 	err := r.db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&history).Error
 	return history, err
+}
+
+// ActressAliasRepository provides database operations for actress aliases
+type ActressAliasRepository struct {
+	db *DB
+}
+
+// NewActressAliasRepository creates a new actress alias repository
+func NewActressAliasRepository(db *DB) *ActressAliasRepository {
+	return &ActressAliasRepository{db: db}
+}
+
+// Create adds a new actress alias
+func (r *ActressAliasRepository) Create(alias *models.ActressAlias) error {
+	return r.db.Create(alias).Error
+}
+
+// Upsert creates or updates an actress alias
+func (r *ActressAliasRepository) Upsert(alias *models.ActressAlias) error {
+	existing, err := r.FindByAliasName(alias.AliasName)
+	if err != nil {
+		// Doesn't exist, create it
+		return r.Create(alias)
+	}
+
+	// Exists, update it
+	alias.ID = existing.ID
+	alias.CreatedAt = existing.CreatedAt
+	return r.db.Save(alias).Error
+}
+
+// FindByAliasName finds a canonical name by alias
+func (r *ActressAliasRepository) FindByAliasName(aliasName string) (*models.ActressAlias, error) {
+	var alias models.ActressAlias
+	err := r.db.First(&alias, "alias_name = ?", aliasName).Error
+	if err != nil {
+		return nil, err
+	}
+	return &alias, nil
+}
+
+// FindByCanonicalName finds all aliases for a canonical name
+func (r *ActressAliasRepository) FindByCanonicalName(canonicalName string) ([]models.ActressAlias, error) {
+	var aliases []models.ActressAlias
+	err := r.db.Where("canonical_name = ?", canonicalName).Find(&aliases).Error
+	return aliases, err
+}
+
+// List returns all actress aliases
+func (r *ActressAliasRepository) List() ([]models.ActressAlias, error) {
+	var aliases []models.ActressAlias
+	err := r.db.Find(&aliases).Error
+	return aliases, err
+}
+
+// Delete removes an actress alias
+func (r *ActressAliasRepository) Delete(aliasName string) error {
+	return r.db.Delete(&models.ActressAlias{}, "alias_name = ?", aliasName).Error
+}
+
+// GetAliasMap returns all aliases as a map[aliasName]canonicalName
+func (r *ActressAliasRepository) GetAliasMap() (map[string]string, error) {
+	aliases, err := r.List()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]string)
+	for _, a := range aliases {
+		result[a.AliasName] = a.CanonicalName
+	}
+	return result, nil
 }

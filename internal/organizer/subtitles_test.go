@@ -83,6 +83,79 @@ func TestSubtitleHandler_FindSubtitles(t *testing.T) {
 	}
 }
 
+func TestSubtitleHandler_FindSubtitles_CaseInsensitive(t *testing.T) {
+	cfg := &config.OutputConfig{
+		SubtitleExtensions: []string{".srt", ".ass"},
+	}
+
+	handler := NewSubtitleHandler(cfg)
+
+	// Create temporary directory structure
+	tmpDir := t.TempDir()
+
+	// Create video file with uppercase name
+	videoPath := filepath.Join(tmpDir, "IPX-535.mp4")
+	if err := os.WriteFile(videoPath, []byte("fake video"), 0644); err != nil {
+		t.Fatalf("Failed to create video file: %v", err)
+	}
+
+	videoFile := scanner.FileInfo{
+		Name:      "IPX-535.mp4",
+		Path:      videoPath,
+		Extension: ".mp4",
+		Size:      1000,
+	}
+
+	// Create subtitle files with different cases (common on Windows)
+	subtitleFiles := []string{
+		"ipx-535.srt",           // Lowercase - should still match
+		"IPX-535.eng.srt",       // Exact case with language code
+		"ipx-535.japanese.srt",  // Lowercase with full language name
+		"Ipx-535.chi.ass",       // Mixed case
+	}
+
+	for _, filename := range subtitleFiles {
+		path := filepath.Join(tmpDir, filename)
+		if err := os.WriteFile(path, []byte("fake subtitle"), 0644); err != nil {
+			t.Fatalf("Failed to create subtitle file %s: %v", filename, err)
+		}
+	}
+
+	// Test subtitle detection with case-insensitive matching
+	matches := handler.FindSubtitles(videoFile)
+
+	// Should find all 4 subtitle files regardless of case
+	if len(matches) != 4 {
+		t.Errorf("Expected 4 subtitle matches, got %d", len(matches))
+		for _, match := range matches {
+			t.Logf("Found: %s (language: %s)", match.OriginalPath, match.Language)
+		}
+	}
+
+	// Verify all files were found and language codes were detected
+	foundFiles := make(map[string]string) // filename -> detected language
+	for _, match := range matches {
+		filename := filepath.Base(match.OriginalPath)
+		foundFiles[filename] = match.Language
+	}
+
+	expectedLanguages := map[string]string{
+		"ipx-535.srt":          "",         // No language code
+		"IPX-535.eng.srt":      "english",  // Language code detected (mixed case)
+		"ipx-535.japanese.srt": "japanese", // Full language name (lowercase)
+		"Ipx-535.chi.ass":      "chinese",  // Chinese with mixed case
+	}
+
+	for expectedFile, expectedLang := range expectedLanguages {
+		actualLang, found := foundFiles[expectedFile]
+		if !found {
+			t.Errorf("Expected subtitle file not found: %s", expectedFile)
+		} else if actualLang != expectedLang {
+			t.Errorf("File %s: expected language %q, got %q", expectedFile, expectedLang, actualLang)
+		}
+	}
+}
+
 func TestSubtitleHandler_MoveSubtitles(t *testing.T) {
 	cfg := &config.OutputConfig{
 		SubtitleExtensions: []string{".srt", ".ass"},

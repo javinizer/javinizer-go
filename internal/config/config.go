@@ -49,12 +49,12 @@ type DMMConfig struct {
 
 // MetadataConfig holds metadata aggregation settings
 type MetadataConfig struct {
-	Priority       PriorityConfig `yaml:"priority"`
-	ThumbCSV       CSVConfig      `yaml:"thumb_csv"`
-	GenreCSV       CSVConfig      `yaml:"genre_csv"`
-	IgnoreGenres   []string       `yaml:"ignore_genres"`
-	RequiredFields []string       `yaml:"required_fields"`
-	NFO            NFOConfig      `yaml:"nfo"`
+	Priority         PriorityConfig             `yaml:"priority"`
+	ActressDatabase  ActressDatabaseConfig      `yaml:"actress_database"`  // Actress image database (SQLite-backed)
+	GenreReplacement GenreReplacementConfig     `yaml:"genre_replacement"` // Genre replacement/normalization (SQLite-backed)
+	IgnoreGenres     []string                   `yaml:"ignore_genres"`
+	RequiredFields   []string                   `yaml:"required_fields"`
+	NFO              NFOConfig                  `yaml:"nfo"`
 }
 
 // PriorityConfig defines which scraper to prefer for each field
@@ -80,11 +80,17 @@ type PriorityConfig struct {
 	TrailerURL    []string `yaml:"trailer_url" json:"TrailerURL"`
 }
 
-// CSVConfig holds CSV file configuration
-type CSVConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Path    string `yaml:"path"`
-	AutoAdd bool   `yaml:"auto_add"`
+// ActressDatabaseConfig holds actress image database configuration
+type ActressDatabaseConfig struct {
+	Enabled       bool `yaml:"enabled"`        // Enable actress image lookup from database
+	AutoAdd       bool `yaml:"auto_add"`       // Automatically add new actresses to database
+	ConvertAlias  bool `yaml:"convert_alias"`  // Convert actress names using alias database
+}
+
+// GenreReplacementConfig holds genre replacement/normalization configuration
+type GenreReplacementConfig struct {
+	Enabled bool `yaml:"enabled"`  // Enable genre replacement from database
+	AutoAdd bool `yaml:"auto_add"` // Automatically add new genres to database (identity mapping)
 }
 
 // NFOConfig holds NFO generation settings
@@ -97,6 +103,9 @@ type NFOConfig struct {
 	PerFile              bool     `yaml:"per_file"` // Create separate NFO for each multi-part file
 	UnknownActressText   string   `yaml:"unknown_actress_text"`
 	ActressAsTag         bool     `yaml:"actress_as_tag"`
+	AddGenericRole       bool     `yaml:"add_generic_role"` // Add generic "Actress" role to all actresses
+	AltNameRole          bool     `yaml:"alt_name_role"`    // Use alternate name (Japanese) in role field
+	IncludeOriginalPath  bool     `yaml:"include_originalpath"` // Include source filename in NFO
 	IncludeStreamDetails bool     `yaml:"include_stream_details"`
 	IncludeFanart        bool     `yaml:"include_fanart"`
 	IncludeTrailer       bool     `yaml:"include_trailer"`
@@ -203,14 +212,12 @@ func DefaultConfig() *Config {
 				ScreenshotURL: []string{"r18dev", "dmm"},
 				TrailerURL:    []string{"r18dev", "dmm"},
 			},
-			ThumbCSV: CSVConfig{
+			ActressDatabase: ActressDatabaseConfig{
 				Enabled: true,
-				Path:    "data/actress.csv",
 				AutoAdd: true,
 			},
-			GenreCSV: CSVConfig{
+			GenreReplacement: GenreReplacementConfig{
 				Enabled: true,
-				Path:    "data/genres.csv",
 				AutoAdd: true,
 			},
 			IgnoreGenres: []string{},

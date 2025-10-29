@@ -482,3 +482,291 @@ func TestGenerator_GenerateMultiPart(t *testing.T) {
 		t.Error("Part 1 and Part 2 NFO content should be identical")
 	}
 }
+
+func TestIncludeOriginalPath(t *testing.T) {
+	tests := []struct {
+		name                string
+		includeOriginalPath bool
+		originalFileName    string
+		expectedPath        string
+	}{
+		{
+			name:                "Config enabled with filename",
+			includeOriginalPath: true,
+			originalFileName:    "ipx-535.mp4",
+			expectedPath:        "ipx-535.mp4",
+		},
+		{
+			name:                "Config disabled",
+			includeOriginalPath: false,
+			originalFileName:    "ipx-535.mp4",
+			expectedPath:        "",
+		},
+		{
+			name:                "Config enabled but empty filename",
+			includeOriginalPath: true,
+			originalFileName:    "",
+			expectedPath:        "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				ActorFirstNameOrder:  true,
+				ActorJapaneseNames:   false,
+				UnknownActress:       "Unknown",
+				NFOFilenameTemplate:  "<ID>.nfo",
+				IncludeOriginalPath:  tt.includeOriginalPath,
+				IncludeStreamDetails: false,
+				IncludeFanart:        true,
+				IncludeTrailer:       true,
+				DefaultRatingSource:  "themoviedb",
+			}
+
+			gen := NewGenerator(cfg)
+
+			movie := &models.Movie{
+				ID:               "IPX-535",
+				Title:            "Test Movie",
+				OriginalFileName: tt.originalFileName,
+			}
+
+			nfo := gen.MovieToNFO(movie, "")
+
+			if nfo.OriginalPath != tt.expectedPath {
+				t.Errorf("Expected OriginalPath '%s', got '%s'", tt.expectedPath, nfo.OriginalPath)
+			}
+		})
+	}
+}
+
+func TestOriginalPathInXML(t *testing.T) {
+	// Test that originalpath is properly included in XML output
+	cfg := &Config{
+		ActorFirstNameOrder:  true,
+		ActorJapaneseNames:   false,
+		UnknownActress:       "Unknown",
+		NFOFilenameTemplate:  "<ID>.nfo",
+		IncludeOriginalPath:  true,
+		IncludeStreamDetails: false,
+		IncludeFanart:        true,
+		IncludeTrailer:       true,
+		DefaultRatingSource:  "themoviedb",
+	}
+
+	gen := NewGenerator(cfg)
+
+	movie := &models.Movie{
+		ID:               "IPX-535",
+		Title:            "Test Movie",
+		OriginalFileName: "ipx-535-original.mp4",
+	}
+
+	tmpDir := t.TempDir()
+
+	err := gen.Generate(movie, tmpDir, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Read the generated NFO file
+	nfoPath := filepath.Join(tmpDir, "IPX-535.nfo")
+	content, err := os.ReadFile(nfoPath)
+	if err != nil {
+		t.Fatalf("Failed to read NFO file: %v", err)
+	}
+
+	// Verify XML contains originalpath
+	var parsed Movie
+	err = xml.Unmarshal(content, &parsed)
+	if err != nil {
+		t.Fatalf("Failed to parse NFO XML: %v", err)
+	}
+
+	if parsed.OriginalPath != "ipx-535-original.mp4" {
+		t.Errorf("Expected OriginalPath 'ipx-535-original.mp4' in XML, got '%s'", parsed.OriginalPath)
+	}
+}
+
+func TestActressAsTag(t *testing.T) {
+	tests := []struct {
+		name          string
+		actressAsTag  bool
+		actresses     []models.Actress
+		existingTags  []string
+		expectedTags  []string
+		firstNameOrder bool
+	}{
+		{
+			name:         "Config enabled with actresses",
+			actressAsTag: true,
+			actresses: []models.Actress{
+				{FirstName: "Momo", LastName: "Sakura"},
+				{FirstName: "Test", LastName: "Actress"},
+			},
+			existingTags:   []string{},
+			expectedTags:   []string{"Momo Sakura", "Test Actress"},
+			firstNameOrder: true,
+		},
+		{
+			name:         "Config disabled",
+			actressAsTag: false,
+			actresses: []models.Actress{
+				{FirstName: "Momo", LastName: "Sakura"},
+			},
+			existingTags:   []string{},
+			expectedTags:   []string{},
+			firstNameOrder: true,
+		},
+		{
+			name:         "Deduplication - actress already in tags",
+			actressAsTag: true,
+			actresses: []models.Actress{
+				{FirstName: "Momo", LastName: "Sakura"},
+				{FirstName: "Test", LastName: "Actress"},
+			},
+			existingTags:   []string{},
+			expectedTags:   []string{"Momo Sakura", "Test Actress"},
+			firstNameOrder: true,
+		},
+		{
+			name:           "Empty actress list",
+			actressAsTag:   true,
+			actresses:      []models.Actress{},
+			existingTags:   []string{},
+			expectedTags:   []string{},
+			firstNameOrder: true,
+		},
+		{
+			name:         "Unknown actress filtered out",
+			actressAsTag: true,
+			actresses: []models.Actress{
+				{FirstName: "", LastName: ""},
+				{FirstName: "Known", LastName: "Actress"},
+			},
+			existingTags:   []string{},
+			expectedTags:   []string{"Known Actress"},
+			firstNameOrder: true,
+		},
+		{
+			name:         "Japanese names when enabled",
+			actressAsTag: true,
+			actresses: []models.Actress{
+				{FirstName: "Momo", LastName: "Sakura", JapaneseName: "桜空もも"},
+			},
+			existingTags:   []string{},
+			expectedTags:   []string{"Momo Sakura"},
+			firstNameOrder: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				ActorFirstNameOrder:  tt.firstNameOrder,
+				ActorJapaneseNames:   false,
+				UnknownActress:       "Unknown",
+				NFOFilenameTemplate:  "<ID>.nfo",
+				ActressAsTag:         tt.actressAsTag,
+				IncludeStreamDetails: false,
+				IncludeFanart:        true,
+				IncludeTrailer:       true,
+				DefaultRatingSource:  "themoviedb",
+			}
+
+			gen := NewGenerator(cfg)
+
+			movie := &models.Movie{
+				ID:        "IPX-535",
+				Title:     "Test Movie",
+				Actresses: tt.actresses,
+			}
+
+			nfo := gen.MovieToNFO(movie, "")
+
+			if len(nfo.Tags) != len(tt.expectedTags) {
+				t.Errorf("Expected %d tags, got %d tags: %v", len(tt.expectedTags), len(nfo.Tags), nfo.Tags)
+			}
+
+			// Check each expected tag is present
+			for _, expectedTag := range tt.expectedTags {
+				found := false
+				for _, tag := range nfo.Tags {
+					if tag == expectedTag {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected tag '%s' not found in tags: %v", expectedTag, nfo.Tags)
+				}
+			}
+		})
+	}
+}
+
+func TestActressAsTagInXML(t *testing.T) {
+	// Test that actress names are properly included in XML as tags
+	cfg := &Config{
+		ActorFirstNameOrder:  true,
+		ActorJapaneseNames:   false,
+		UnknownActress:       "Unknown",
+		NFOFilenameTemplate:  "<ID>.nfo",
+		ActressAsTag:         true,
+		IncludeStreamDetails: false,
+		IncludeFanart:        true,
+		IncludeTrailer:       true,
+		DefaultRatingSource:  "themoviedb",
+	}
+
+	gen := NewGenerator(cfg)
+
+	movie := &models.Movie{
+		ID:    "IPX-535",
+		Title: "Test Movie",
+		Actresses: []models.Actress{
+			{FirstName: "Momo", LastName: "Sakura"},
+			{FirstName: "Test", LastName: "Actress"},
+		},
+	}
+
+	tmpDir := t.TempDir()
+
+	err := gen.Generate(movie, tmpDir, "", "")
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Read the generated NFO file
+	nfoPath := filepath.Join(tmpDir, "IPX-535.nfo")
+	content, err := os.ReadFile(nfoPath)
+	if err != nil {
+		t.Fatalf("Failed to read NFO file: %v", err)
+	}
+
+	// Verify XML contains tags
+	var parsed Movie
+	err = xml.Unmarshal(content, &parsed)
+	if err != nil {
+		t.Fatalf("Failed to parse NFO XML: %v", err)
+	}
+
+	expectedTags := []string{"Momo Sakura", "Test Actress"}
+	if len(parsed.Tags) != len(expectedTags) {
+		t.Errorf("Expected %d tags, got %d: %v", len(expectedTags), len(parsed.Tags), parsed.Tags)
+	}
+
+	for _, expectedTag := range expectedTags {
+		found := false
+		for _, tag := range parsed.Tags {
+			if tag == expectedTag {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected tag '%s' not found in XML tags: %v", expectedTag, parsed.Tags)
+		}
+	}
+}
