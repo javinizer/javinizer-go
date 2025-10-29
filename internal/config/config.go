@@ -18,6 +18,7 @@ type Config struct {
 	Database    DatabaseConfig    `yaml:"database"`
 	Logging     LoggingConfig     `yaml:"logging"`
 	Performance PerformanceConfig `yaml:"performance"`
+	MediaInfo   MediaInfoConfig   `yaml:"mediainfo"`
 }
 
 // ServerConfig holds API server configuration
@@ -190,6 +191,13 @@ type PerformanceConfig struct {
 	UpdateInterval int `yaml:"update_interval"` // UI update interval in milliseconds (default: 100)
 }
 
+// MediaInfoConfig holds MediaInfo functionality configuration
+type MediaInfoConfig struct {
+	CLIEnabled bool   `yaml:"cli_enabled"` // Enable MediaInfo CLI fallback (default: false)
+	CLIPath    string `yaml:"cli_path"`    // Path to mediainfo binary (default: "mediainfo")
+	CLITimeout int    `yaml:"cli_timeout"` // Timeout in seconds for CLI execution (default: 30)
+}
+
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -310,6 +318,11 @@ func DefaultConfig() *Config {
 			WorkerTimeout:  300,
 			BufferSize:     100,
 			UpdateInterval: 100,
+		},
+		MediaInfo: MediaInfoConfig{
+			CLIEnabled: false,
+			CLIPath:    "mediainfo",
+			CLITimeout: 30,
 		},
 	}
 }

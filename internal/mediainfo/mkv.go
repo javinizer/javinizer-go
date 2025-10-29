@@ -8,6 +8,33 @@ import (
 	"github.com/at-wat/ebml-go"
 )
 
+// MKVProber implements the Prober interface for MKV/WebM containers
+type MKVProber struct{}
+
+// NewMKVProber creates a new MKV prober
+func NewMKVProber() *MKVProber {
+	return &MKVProber{}
+}
+
+// Name returns the prober identifier
+func (p *MKVProber) Name() string {
+	return "mkv"
+}
+
+// CanProbe checks if this prober can handle the file based on header
+func (p *MKVProber) CanProbe(header []byte) bool {
+	// MKV/WebM: EBML header starts with 0x1A 0x45 0xDF 0xA3
+	if len(header) >= 4 {
+		return header[0] == 0x1A && header[1] == 0x45 && header[2] == 0xDF && header[3] == 0xA3
+	}
+	return false
+}
+
+// Probe extracts metadata from the MKV file
+func (p *MKVProber) Probe(f *os.File) (*VideoInfo, error) {
+	return analyzeMKV(f)
+}
+
 // MKV EBML element IDs (from Matroska specification)
 const (
 	idSegment        = 0x18538067

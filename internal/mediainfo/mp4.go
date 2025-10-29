@@ -7,6 +7,33 @@ import (
 	"github.com/Eyevinn/mp4ff/mp4"
 )
 
+// MP4Prober implements the Prober interface for MP4 containers
+type MP4Prober struct{}
+
+// NewMP4Prober creates a new MP4 prober
+func NewMP4Prober() *MP4Prober {
+	return &MP4Prober{}
+}
+
+// Name returns the prober identifier
+func (p *MP4Prober) Name() string {
+	return "mp4"
+}
+
+// CanProbe checks if this prober can handle the file based on header
+func (p *MP4Prober) CanProbe(header []byte) bool {
+	// MP4/MOV: contains "ftyp" in first 12 bytes (at offset 4-7)
+	if len(header) >= 8 {
+		return header[4] == 'f' && header[5] == 't' && header[6] == 'y' && header[7] == 'p'
+	}
+	return false
+}
+
+// Probe extracts metadata from the MP4 file
+func (p *MP4Prober) Probe(f *os.File) (*VideoInfo, error) {
+	return analyzeMP4(f)
+}
+
 // analyzeMP4 extracts metadata from MP4/MOV files
 func analyzeMP4(f *os.File) (*VideoInfo, error) {
 	info := &VideoInfo{

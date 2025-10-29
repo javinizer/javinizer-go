@@ -163,3 +163,17 @@ performance:
     worker_timeout: 300
     buffer_size: 100
     update_interval: 100
+
+# MediaInfo configuration for video metadata extraction
+mediainfo:
+    # Enable MediaInfo CLI fallback for unsupported formats (WMV, ASF, exotic containers)
+    # Requires 'mediainfo' binary installed on system (https://mediaarea.net/MediaInfo)
+    # Native Go parsers handle: MP4, MOV, MKV, AVI, FLV
+    cli_enabled: false
+
+    # Path to mediainfo binary (default: searches system PATH)
+    # Examples: "mediainfo", "/usr/local/bin/mediainfo", "C:\\Program Files\\MediaInfo\\MediaInfo.exe"
+    cli_path: "mediainfo"
+
+    # Timeout for CLI execution in seconds (default: 30)
+    cli_timeout: 30
