@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/mediainfo"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
@@ -47,6 +48,9 @@ type Config struct {
 	StaticTags    []string // Static tags to add to all NFOs
 	StaticTagline string   // Static tagline for all NFOs
 	StaticCredits []string // Static credits for all NFOs
+
+	// Database integration
+	TagDatabase *database.MovieTagRepository // Optional tag database for per-movie tags
 
 	// Output configuration
 	GroupActress bool // Replace multiple actresses with "@Group" (default: false)
@@ -264,6 +268,26 @@ func (g *Generator) MovieToNFO(movie *models.Movie, videoFilePath string) *Movie
 			if actressName != "" && actressName != g.config.UnknownActress && !tagSet[actressName] {
 				nfo.Tags = append(nfo.Tags, actressName)
 				tagSet[actressName] = true
+			}
+		}
+	}
+
+	// Add movie-specific tags from database
+	if g.config.TagDatabase != nil {
+		movieTags, err := g.config.TagDatabase.GetTagsForMovie(movie.ID)
+		if err == nil && len(movieTags) > 0 {
+			// Create or reuse tagSet for deduplication
+			tagSet := make(map[string]bool)
+			for _, tag := range nfo.Tags {
+				tagSet[tag] = true
+			}
+
+			// Add database tags
+			for _, tag := range movieTags {
+				if tag != "" && !tagSet[tag] {
+					nfo.Tags = append(nfo.Tags, tag)
+					tagSet[tag] = true
+				}
 			}
 		}
 	}

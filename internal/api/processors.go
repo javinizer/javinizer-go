@@ -245,7 +245,8 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 	// Initialize organizer, downloader, and NFO generator
 	org := organizer.NewOrganizer(&cfg.Output)
 	dl := downloader.NewDownloader(&cfg.Output, "Javinizer/1.0")
-	nfoGen := nfo.NewGenerator(nfo.ConfigFromAppConfig(&cfg.Metadata.NFO, &cfg.Output))
+	// Note: nil db means tag database not available in API context
+	nfoGen := nfo.NewGenerator(nfo.ConfigFromAppConfig(&cfg.Metadata.NFO, &cfg.Output, &cfg.Metadata, nil))
 
 	// Broadcast organization started
 	wsHub.BroadcastProgress(&ws.ProgressMessage{

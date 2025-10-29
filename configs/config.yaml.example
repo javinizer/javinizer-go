@@ -77,6 +77,13 @@ metadata:
     genre_replacement:
         enabled: true
         auto_add: true  # Automatically add new genres with identity mapping (genre -> genre)
+
+    # Per-movie tag database (SQLite-backed)
+    # Allows adding custom tags to individual movies (appears in NFO files)
+    tag_database:
+        enabled: false  # Enable per-movie tag lookup (opt-in feature)
+        auto_add: false # Automatically add movies to tag database
+
     # Genres to ignore/filter out. Supports both exact strings and regex patterns.
     # Patterns starting with ^, ending with $, or containing regex metacharacters are treated as regex.
     # Examples:

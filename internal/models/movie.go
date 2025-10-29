@@ -108,6 +108,16 @@ type ActressAlias struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+// MovieTag represents a custom user-defined tag for a specific movie
+// Tags are used for personal organization and appear in NFO files
+type MovieTag struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	MovieID   string    `json:"movie_id" gorm:"index:idx_movie_tag,unique;not null;size:50"` // Foreign key to movies.id
+	Tag       string    `json:"tag" gorm:"index:idx_movie_tag,unique;not null;size:100"`     // Tag name (case-sensitive)
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // TableName specifies the table name for Movie
 func (Movie) TableName() string {
 	return "movies"
@@ -126,6 +136,11 @@ func (Actress) TableName() string {
 // TableName specifies the table name for Genre
 func (Genre) TableName() string {
 	return "genres"
+}
+
+// TableName specifies the table name for MovieTag
+func (MovieTag) TableName() string {
+	return "movie_tags"
 }
 
 // History represents a log of file organization operations

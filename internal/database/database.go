@@ -56,6 +56,7 @@ func (db *DB) AutoMigrate() error {
 		&models.Genre{},
 		&models.GenreReplacement{},
 		&models.ActressAlias{},
+		&models.MovieTag{},
 		&models.History{},
 		&models.ContentIDMapping{},
 	)
@@ -655,4 +656,86 @@ func (r *ActressAliasRepository) GetAliasMap() (map[string]string, error) {
 		result[a.AliasName] = a.CanonicalName
 	}
 	return result, nil
+}
+
+// MovieTagRepository handles movie tag operations
+type MovieTagRepository struct {
+	db *DB
+}
+
+// NewMovieTagRepository creates a new movie tag repository
+func NewMovieTagRepository(db *DB) *MovieTagRepository {
+	return &MovieTagRepository{db: db}
+}
+
+// AddTag adds a tag to a movie
+// Returns error if tag already exists (UNIQUE constraint violation)
+func (r *MovieTagRepository) AddTag(movieID, tag string) error {
+	movieTag := &models.MovieTag{
+		MovieID: movieID,
+		Tag:     tag,
+	}
+	return r.db.Create(movieTag).Error
+}
+
+// RemoveTag removes a specific tag from a movie
+func (r *MovieTagRepository) RemoveTag(movieID, tag string) error {
+	return r.db.Where("movie_id = ? AND tag = ?", movieID, tag).Delete(&models.MovieTag{}).Error
+}
+
+// RemoveAllTags removes all tags for a movie
+func (r *MovieTagRepository) RemoveAllTags(movieID string) error {
+	return r.db.Where("movie_id = ?", movieID).Delete(&models.MovieTag{}).Error
+}
+
+// GetTagsForMovie returns all tags for a specific movie
+func (r *MovieTagRepository) GetTagsForMovie(movieID string) ([]string, error) {
+	var movieTags []models.MovieTag
+	err := r.db.Where("movie_id = ?", movieID).Order("tag ASC").Find(&movieTags).Error
+	if err != nil {
+		return nil, err
+	}
+
+	tags := make([]string, len(movieTags))
+	for i, mt := range movieTags {
+		tags[i] = mt.Tag
+	}
+	return tags, nil
+}
+
+// GetMoviesWithTag returns all movie IDs that have the specified tag
+func (r *MovieTagRepository) GetMoviesWithTag(tag string) ([]string, error) {
+	var movieTags []models.MovieTag
+	err := r.db.Where("tag = ?", tag).Order("movie_id ASC").Find(&movieTags).Error
+	if err != nil {
+		return nil, err
+	}
+
+	movieIDs := make([]string, len(movieTags))
+	for i, mt := range movieTags {
+		movieIDs[i] = mt.MovieID
+	}
+	return movieIDs, nil
+}
+
+// ListAll returns a map of all movie IDs to their tags
+func (r *MovieTagRepository) ListAll() (map[string][]string, error) {
+	var movieTags []models.MovieTag
+	err := r.db.Order("movie_id ASC, tag ASC").Find(&movieTags).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]string)
+	for _, mt := range movieTags {
+		result[mt.MovieID] = append(result[mt.MovieID], mt.Tag)
+	}
+	return result, nil
+}
+
+// GetUniqueTagsList returns all unique tags in the database
+func (r *MovieTagRepository) GetUniqueTagsList() ([]string, error) {
+	var tags []string
+	err := r.db.Model(&models.MovieTag{}).Distinct("tag").Order("tag ASC").Pluck("tag", &tags).Error
+	return tags, err
 }

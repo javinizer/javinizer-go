@@ -201,7 +201,7 @@ func TestConfigFromAppConfig(t *testing.T) {
 		RatingSource:         "custom",
 	}
 
-	nfoCfg := ConfigFromAppConfig(appCfg, nil)
+	nfoCfg := ConfigFromAppConfig(appCfg, nil, nil, nil)
 
 	// Verify all fields are mapped correctly
 	if nfoCfg.ActorFirstNameOrder != false {

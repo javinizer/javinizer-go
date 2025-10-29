@@ -1,9 +1,13 @@
 package nfo
 
-import "github.com/javinizer/javinizer-go/internal/config"
+import (
+	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
+)
 
 // ConfigFromAppConfig converts application config to NFO generator config
-func ConfigFromAppConfig(appCfg *config.NFOConfig, outputCfg *config.OutputConfig) *Config {
+// Optional db parameter enables tag database lookups if metadata config has tag_database.enabled
+func ConfigFromAppConfig(appCfg *config.NFOConfig, outputCfg *config.OutputConfig, metadataCfg *config.MetadataConfig, db *database.DB) *Config {
 	if appCfg == nil {
 		return DefaultConfig()
 	}
@@ -13,7 +17,7 @@ func ConfigFromAppConfig(appCfg *config.NFOConfig, outputCfg *config.OutputConfi
 		groupActress = outputCfg.GroupActress
 	}
 
-	return &Config{
+	nfoConfig := &Config{
 		ActorFirstNameOrder:  appCfg.FirstNameOrder,
 		ActorJapaneseNames:   appCfg.ActressLanguageJA,
 		UnknownActress:       appCfg.UnknownActressText,
@@ -32,4 +36,11 @@ func ConfigFromAppConfig(appCfg *config.NFOConfig, outputCfg *config.OutputConfi
 		StaticCredits:        appCfg.Credits,
 		GroupActress:         groupActress,
 	}
+
+	// Add tag database if enabled and db provided
+	if db != nil && metadataCfg != nil && metadataCfg.TagDatabase.Enabled {
+		nfoConfig.TagDatabase = database.NewMovieTagRepository(db)
+	}
+
+	return nfoConfig
 }
