@@ -34,9 +34,11 @@ func NewProberRegistry(cfg *MediaInfoConfig) *ProberRegistry {
 	}
 
 	// Register native probers
+	// NOTE: MOV must come before MP4 since both use ftyp box
+	// MOV checks for QuickTime-specific brands, MP4 is more generic
+	registry.Register(NewMOVProber())
 	registry.Register(NewMP4Prober())
 	registry.Register(NewMKVProber())
-	registry.Register(NewMOVProber())
 	registry.Register(NewAVIProber())
 	registry.Register(NewFLVProber())
 
