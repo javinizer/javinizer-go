@@ -1,0 +1,43 @@
+{
+  "dvd_id": "ABW-001",
+  "content_id": "118abw00001",
+  "title": "レガシー形式テスト",
+  "description": "古いAPIレスポンス形式",
+  "release_date": "2019-01-15",
+  "runtime": 150,
+  "director": "古田新太",
+  "maker": {
+    "name": "Prestige"
+  },
+  "label": {
+    "name": "Absolutely Beautiful Women"
+  },
+  "series": {
+    "name": "Legacy Series"
+  },
+  "categories": [
+    {"name": "Drama"},
+    {"name": "Beautiful Girl"}
+  ],
+  "actresses": [
+    {
+      "id": 67890,
+      "name_kanji": "田中 花子",
+      "name_romaji": "Hanako Tanaka"
+    }
+  ],
+  "images": {
+    "jacket_image": {
+      "large": "https://pics.dmm.co.jp/digital/video/118abw00001/118abw00001pl.jpg",
+      "large2": "https://pics.dmm.co.jp/digital/video/118abw00001/118abw00001pl2.jpg"
+    },
+    "sample_images": [
+      "https://pics.dmm.co.jp/digital/video/118abw00001/118abw00001jp-1.jpg",
+      "https://pics.dmm.co.jp/digital/video/118abw00001/118abw00001jp-2.jpg"
+    ]
+  },
+  "sample": {
+    "high": "https://cc3001.dmm.co.jp/litevideo/freepv/a/abw/118abw00001/118abw00001_mhb_w.mp4",
+    "low": "https://cc3001.dmm.co.jp/litevideo/freepv/a/abw/118abw00001/118abw00001_dm_w.mp4"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "dvd_id": "TEST-001",
+  "content_id": "test00001",
+  "title": "Empty Arrays Test",
+  "release_date": "2022-03-10",
+  "runtime": 60,
+  "categories": [],
+  "actresses": [],
+  "gallery": []
+}
