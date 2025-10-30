@@ -59,13 +59,13 @@ type ProxyConfig struct {
 
 // MetadataConfig holds metadata aggregation settings
 type MetadataConfig struct {
-	Priority         PriorityConfig             `yaml:"priority"`
-	ActressDatabase  ActressDatabaseConfig      `yaml:"actress_database"`  // Actress image database (SQLite-backed)
-	GenreReplacement GenreReplacementConfig     `yaml:"genre_replacement"` // Genre replacement/normalization (SQLite-backed)
-	TagDatabase      TagDatabaseConfig          `yaml:"tag_database"`      // Per-movie tag database (SQLite-backed)
-	IgnoreGenres     []string                   `yaml:"ignore_genres"`
-	RequiredFields   []string                   `yaml:"required_fields"`
-	NFO              NFOConfig                  `yaml:"nfo"`
+	Priority         PriorityConfig         `yaml:"priority"`
+	ActressDatabase  ActressDatabaseConfig  `yaml:"actress_database"`  // Actress image database (SQLite-backed)
+	GenreReplacement GenreReplacementConfig `yaml:"genre_replacement"` // Genre replacement/normalization (SQLite-backed)
+	TagDatabase      TagDatabaseConfig      `yaml:"tag_database"`      // Per-movie tag database (SQLite-backed)
+	IgnoreGenres     []string               `yaml:"ignore_genres"`
+	RequiredFields   []string               `yaml:"required_fields"`
+	NFO              NFOConfig              `yaml:"nfo"`
 }
 
 // PriorityConfig defines which scraper to prefer for each field
@@ -93,9 +93,9 @@ type PriorityConfig struct {
 
 // ActressDatabaseConfig holds actress image database configuration
 type ActressDatabaseConfig struct {
-	Enabled       bool `yaml:"enabled"`        // Enable actress image lookup from database
-	AutoAdd       bool `yaml:"auto_add"`       // Automatically add new actresses to database
-	ConvertAlias  bool `yaml:"convert_alias"`  // Convert actress names using alias database
+	Enabled      bool `yaml:"enabled"`       // Enable actress image lookup from database
+	AutoAdd      bool `yaml:"auto_add"`      // Automatically add new actresses to database
+	ConvertAlias bool `yaml:"convert_alias"` // Convert actress names using alias database
 }
 
 // GenreReplacementConfig holds genre replacement/normalization configuration
@@ -119,8 +119,8 @@ type NFOConfig struct {
 	PerFile              bool     `yaml:"per_file"` // Create separate NFO for each multi-part file
 	UnknownActressText   string   `yaml:"unknown_actress_text"`
 	ActressAsTag         bool     `yaml:"actress_as_tag"`
-	AddGenericRole       bool     `yaml:"add_generic_role"` // Add generic "Actress" role to all actresses
-	AltNameRole          bool     `yaml:"alt_name_role"`    // Use alternate name (Japanese) in role field
+	AddGenericRole       bool     `yaml:"add_generic_role"`     // Add generic "Actress" role to all actresses
+	AltNameRole          bool     `yaml:"alt_name_role"`        // Use alternate name (Japanese) in role field
 	IncludeOriginalPath  bool     `yaml:"include_originalpath"` // Include source filename in NFO
 	IncludeStreamDetails bool     `yaml:"include_stream_details"`
 	IncludeFanart        bool     `yaml:"include_fanart"`
@@ -142,29 +142,29 @@ type MatchingConfig struct {
 
 // OutputConfig holds output/organization settings
 type OutputConfig struct {
-	FolderFormat        string   `yaml:"folder_format"`
-	FileFormat          string   `yaml:"file_format"`
-	SubfolderFormat     []string `yaml:"subfolder_format"`
-	Delimiter           string   `yaml:"delimiter"`
-	MaxTitleLength      int      `yaml:"max_title_length"`
-	MaxPathLength       int      `yaml:"max_path_length"`
-	MoveSubtitles       bool     `yaml:"move_subtitles"`
-	SubtitleExtensions  []string `yaml:"subtitle_extensions"`
-	RenameFolderInPlace bool     `yaml:"rename_folder_in_place"`
-	MoveToFolder        bool     `yaml:"move_to_folder"` // Move/copy files to organized folders (default: true)
-	RenameFile          bool     `yaml:"rename_file"`    // Rename files using file_format template (default: true)
-	GroupActress        bool     `yaml:"group_actress"`  // Replace multiple actresses with "@Group" in templates (default: false)
-	PosterFormat        string   `yaml:"poster_format"`
-	FanartFormat        string   `yaml:"fanart_format"`
-	TrailerFormat       string   `yaml:"trailer_format"`
-	ScreenshotFormat    string   `yaml:"screenshot_format"`
-	ScreenshotFolder    string   `yaml:"screenshot_folder"`
-	ScreenshotPadding   int      `yaml:"screenshot_padding"`
-	ActressFolder       string   `yaml:"actress_folder"`
-	DownloadCover       bool `yaml:"download_cover"`
-	DownloadPoster      bool `yaml:"download_poster"`
-	DownloadExtrafanart bool `yaml:"download_extrafanart"`
-	DownloadTrailer     bool `yaml:"download_trailer"`
+	FolderFormat        string      `yaml:"folder_format"`
+	FileFormat          string      `yaml:"file_format"`
+	SubfolderFormat     []string    `yaml:"subfolder_format"`
+	Delimiter           string      `yaml:"delimiter"`
+	MaxTitleLength      int         `yaml:"max_title_length"`
+	MaxPathLength       int         `yaml:"max_path_length"`
+	MoveSubtitles       bool        `yaml:"move_subtitles"`
+	SubtitleExtensions  []string    `yaml:"subtitle_extensions"`
+	RenameFolderInPlace bool        `yaml:"rename_folder_in_place"`
+	MoveToFolder        bool        `yaml:"move_to_folder"` // Move/copy files to organized folders (default: true)
+	RenameFile          bool        `yaml:"rename_file"`    // Rename files using file_format template (default: true)
+	GroupActress        bool        `yaml:"group_actress"`  // Replace multiple actresses with "@Group" in templates (default: false)
+	PosterFormat        string      `yaml:"poster_format"`
+	FanartFormat        string      `yaml:"fanart_format"`
+	TrailerFormat       string      `yaml:"trailer_format"`
+	ScreenshotFormat    string      `yaml:"screenshot_format"`
+	ScreenshotFolder    string      `yaml:"screenshot_folder"`
+	ScreenshotPadding   int         `yaml:"screenshot_padding"`
+	ActressFolder       string      `yaml:"actress_folder"`
+	DownloadCover       bool        `yaml:"download_cover"`
+	DownloadPoster      bool        `yaml:"download_poster"`
+	DownloadExtrafanart bool        `yaml:"download_extrafanart"`
+	DownloadTrailer     bool        `yaml:"download_trailer"`
 	DownloadActress     bool        `yaml:"download_actress"`
 	DownloadTimeout     int         `yaml:"download_timeout"` // Timeout in seconds for HTTP downloads (default: 60)
 	DownloadProxy       ProxyConfig `yaml:"download_proxy"`   // Separate proxy for downloads (optional)

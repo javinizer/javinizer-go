@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -286,7 +287,7 @@ func (m *Model) handleDashboardKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "r":
 		// Refresh/reset stats
-		m.startTime = m.startTime
+		m.startTime = time.Now()
 	}
 
 	return m, nil

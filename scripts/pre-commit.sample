@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# pre-commit hook for javinizer-go
+# Runs fast checks before allowing a commit
+#
+# Installation: cp scripts/pre-commit.sample .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# To skip this hook temporarily: git commit --no-verify
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}Running pre-commit checks...${NC}"
+echo ""
+
+# Check 1: Go formatting
+echo -e "${BLUE}[1/4] Checking code formatting...${NC}"
+UNFORMATTED=$(gofmt -l . 2>&1)
+if [ -n "$UNFORMATTED" ]; then
+    echo -e "${RED}✗ Code is not formatted. Please run 'make fmt'${NC}"
+    echo "Unformatted files:"
+    echo "$UNFORMATTED"
+    exit 1
+fi
+echo -e "${GREEN}✓ Code formatting OK${NC}"
+echo ""
+
+# Check 2: Go vet
+echo -e "${BLUE}[2/4] Running go vet...${NC}"
+if ! go vet ./... 2>&1; then
+    echo -e "${RED}✗ go vet found issues${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ go vet passed${NC}"
+echo ""
+
+# Check 3: Fast unit tests
+echo -e "${BLUE}[3/4] Running fast unit tests...${NC}"
+if ! go test -short -timeout=30s ./... 2>&1; then
+    echo -e "${RED}✗ Tests failed${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Tests passed${NC}"
+echo ""
+
+# Check 4: Build verification
+echo -e "${BLUE}[4/4] Verifying build...${NC}"
+if ! go build -o /tmp/javinizer-test ./cmd/cli 2>&1; then
+    echo -e "${RED}✗ Build failed${NC}"
+    exit 1
+fi
+rm -f /tmp/javinizer-test
+echo -e "${GREEN}✓ Build successful${NC}"
+echo ""
+
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}All pre-commit checks passed!${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+echo -e "${YELLOW}Tip: Run 'make coverage-check' before pushing to ensure coverage threshold is met${NC}"
+
+exit 0

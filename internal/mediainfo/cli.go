@@ -81,12 +81,12 @@ type mediaInfoJSON struct {
 			FileSize       string `json:"FileSize"`
 
 			// Video track
-			Width             string `json:"Width"`
-			Height            string `json:"Height"`
-			FrameRate         string `json:"FrameRate"`
-			Format_Profile    string `json:"Format_Profile"`
-			CodecID           string `json:"CodecID"`
-			BitRate           string `json:"BitRate"`
+			Width              string `json:"Width"`
+			Height             string `json:"Height"`
+			FrameRate          string `json:"FrameRate"`
+			Format_Profile     string `json:"Format_Profile"`
+			CodecID            string `json:"CodecID"`
+			BitRate            string `json:"BitRate"`
 			DisplayAspectRatio string `json:"DisplayAspectRatio"`
 
 			// Audio track

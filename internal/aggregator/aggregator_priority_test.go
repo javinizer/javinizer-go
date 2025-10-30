@@ -192,9 +192,9 @@ func TestAggregatePriority_EmptyPriorityFallsBackToGlobal(t *testing.T) {
 		},
 		Metadata: config.MetadataConfig{
 			Priority: config.PriorityConfig{
-				Title:       []string{},           // Empty - should use global
-				Description: []string{"dmm"},      // Explicit priority
-				Maker:       []string{},           // Empty - should use global
+				Title:       []string{},      // Empty - should use global
+				Description: []string{"dmm"}, // Explicit priority
+				Maker:       []string{},      // Empty - should use global
 			},
 		},
 	}

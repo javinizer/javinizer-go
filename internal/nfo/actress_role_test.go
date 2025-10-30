@@ -58,10 +58,10 @@ func TestAddGenericRole(t *testing.T) {
 
 func TestAltNameRole(t *testing.T) {
 	tests := []struct {
-		name             string
-		altNameRole      bool
-		japaneseName     string
-		expectedRole     string
+		name         string
+		altNameRole  bool
+		japaneseName string
+		expectedRole string
 	}{
 		{
 			name:         "Config enabled with Japanese name",

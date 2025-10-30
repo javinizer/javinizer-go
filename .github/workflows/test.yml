@@ -1,0 +1,135 @@
+name: Test & Coverage
+
+on:
+  push:
+    branches: [ master, main, develop ]
+  pull_request:
+    branches: [ master, main, develop ]
+
+jobs:
+  # Job 1: Fast unit tests and coverage
+  test:
+    name: Unit Tests & Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22.x'  # Use stable release version
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run unit tests
+      run: go test -v ./...
+
+    - name: Generate coverage report
+      run: make coverage
+
+    - name: Check coverage threshold
+      run: ./scripts/check_coverage.sh 25 coverage.out
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-javinizer
+        fail_ci_if_error: false
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Archive coverage report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: coverage.out
+        retention-days: 30
+
+  # Job 2: Race detector tests (concurrent code)
+  race-tests:
+    name: Race Detector Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22.x'  # Use stable release version
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run race detector tests
+      run: make test-race
+
+  # Job 3: Linting and code quality
+  lint:
+    name: Linting & Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22.x'  # Use stable release version
+        cache: true
+
+    - name: Run go vet
+      run: make vet
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: latest
+        args: --timeout=5m
+
+    - name: Check formatting
+      run: |
+        if [ -n "$(gofmt -l .)" ]; then
+          echo "Go code is not formatted:"
+          gofmt -d .
+          exit 1
+        fi
+
+  # Job 4: Build verification
+  build:
+    name: Build Verification
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22.x'  # Use stable release version
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build CLI
+      run: make build
+
+    - name: Verify binary
+      run: |
+        if [ ! -f bin/javinizer ]; then
+          echo "Binary not created"
+          exit 1
+        fi
+        chmod +x bin/javinizer
+        ./bin/javinizer --version || echo "Version check completed"

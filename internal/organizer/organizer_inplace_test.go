@@ -27,39 +27,39 @@ func TestIsDedicatedFolder(t *testing.T) {
 	o := NewOrganizer(orgCfg)
 
 	tests := []struct {
-		name       string
-		files      []string
-		id         string
+		name           string
+		files          []string
+		id             string
 		shouldDedicate bool
 	}{
 		{
-			name:       "Single ID - dedicated",
-			files:      []string{"IPX-535.mp4", "IPX-535.nfo", "cover.jpg"},
-			id:         "IPX-535",
+			name:           "Single ID - dedicated",
+			files:          []string{"IPX-535.mp4", "IPX-535.nfo", "cover.jpg"},
+			id:             "IPX-535",
 			shouldDedicate: true,
 		},
 		{
-			name:       "Multi-part same ID - dedicated",
-			files:      []string{"IPX-535-pt1.mp4", "IPX-535-pt2.mp4"},
-			id:         "IPX-535",
+			name:           "Multi-part same ID - dedicated",
+			files:          []string{"IPX-535-pt1.mp4", "IPX-535-pt2.mp4"},
+			id:             "IPX-535",
 			shouldDedicate: true,
 		},
 		{
-			name:       "Mixed IDs - not dedicated",
-			files:      []string{"IPX-535.mp4", "ABC-123.mp4"},
-			id:         "IPX-535",
+			name:           "Mixed IDs - not dedicated",
+			files:          []string{"IPX-535.mp4", "ABC-123.mp4"},
+			id:             "IPX-535",
 			shouldDedicate: false,
 		},
 		{
-			name:       "No video files - not dedicated",
-			files:      []string{"cover.jpg", "metadata.nfo"},
-			id:         "IPX-535",
+			name:           "No video files - not dedicated",
+			files:          []string{"cover.jpg", "metadata.nfo"},
+			id:             "IPX-535",
 			shouldDedicate: false,
 		},
 		{
-			name:       "Different ID - not dedicated",
-			files:      []string{"ABC-123.mp4"},
-			id:         "IPX-535",
+			name:           "Different ID - not dedicated",
+			files:          []string{"ABC-123.mp4"},
+			id:             "IPX-535",
 			shouldDedicate: false,
 		},
 	}
@@ -102,49 +102,49 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 	}
 
 	tests := []struct {
-		name              string
+		name                string
 		renameFolderInPlace bool
-		sourceFolder      string
-		sourceFile        string
-		destDir           string
-		expectedInPlace   bool
-		expectedReason    string
+		sourceFolder        string
+		sourceFile          string
+		destDir             string
+		expectedInPlace     bool
+		expectedReason      string
 	}{
 		{
-			name:              "In-place enabled, dedicated folder, needs rename",
+			name:                "In-place enabled, dedicated folder, needs rename",
 			renameFolderInPlace: true,
-			sourceFolder:      "old_folder_name",
-			sourceFile:        "IPX-535.mp4",
-			destDir:           tmpDir,
-			expectedInPlace:   true,
-			expectedReason:    "",
+			sourceFolder:        "old_folder_name",
+			sourceFile:          "IPX-535.mp4",
+			destDir:             tmpDir,
+			expectedInPlace:     true,
+			expectedReason:      "",
 		},
 		{
-			name:              "In-place disabled",
+			name:                "In-place disabled",
 			renameFolderInPlace: false,
-			sourceFolder:      "old_folder_name",
-			sourceFile:        "IPX-535.mp4",
-			destDir:           tmpDir,
-			expectedInPlace:   false,
-			expectedReason:    "feature disabled in config",
+			sourceFolder:        "old_folder_name",
+			sourceFile:          "IPX-535.mp4",
+			destDir:             tmpDir,
+			expectedInPlace:     false,
+			expectedReason:      "feature disabled in config",
 		},
 		{
-			name:              "Folder already has correct name",
+			name:                "Folder already has correct name",
 			renameFolderInPlace: true,
-			sourceFolder:      "IPX-535 [IdeaPocket] - Beautiful Day",
-			sourceFile:        "IPX-535.mp4",
-			destDir:           tmpDir,
-			expectedInPlace:   false,
-			expectedReason:    "folder already has correct name",
+			sourceFolder:        "IPX-535 [IdeaPocket] - Beautiful Day",
+			sourceFile:          "IPX-535.mp4",
+			destDir:             tmpDir,
+			expectedInPlace:     false,
+			expectedReason:      "folder already has correct name",
 		},
 		{
-			name:              "Mixed IDs in folder",
+			name:                "Mixed IDs in folder",
 			renameFolderInPlace: true,
-			sourceFolder:      "mixed_folder",
-			sourceFile:        "IPX-535.mp4",
-			destDir:           tmpDir,
-			expectedInPlace:   false,
-			expectedReason:    "folder contains mixed IDs",
+			sourceFolder:        "mixed_folder",
+			sourceFile:          "IPX-535.mp4",
+			destDir:             tmpDir,
+			expectedInPlace:     false,
+			expectedReason:      "folder contains mixed IDs",
 		},
 	}
 

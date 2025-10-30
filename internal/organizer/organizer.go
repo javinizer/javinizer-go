@@ -38,14 +38,14 @@ func (o *Organizer) SetMatcher(m *matcher.Matcher) {
 
 // OrganizeResult represents the result of organizing a file
 type OrganizeResult struct {
-	OriginalPath    string
-	NewPath         string
-	FolderPath      string
-	FileName        string
-	Moved           bool
-	Error           error
-	Subtitles       []SubtitleResult
-	InPlaceRenamed  bool   // Whether an in-place directory rename occurred
+	OriginalPath     string
+	NewPath          string
+	FolderPath       string
+	FileName         string
+	Moved            bool
+	Error            error
+	Subtitles        []SubtitleResult
+	InPlaceRenamed   bool   // Whether an in-place directory rename occurred
 	OldDirectoryPath string // Original directory path (for updating subsequent file paths)
 	NewDirectoryPath string // New directory path after in-place rename
 }
@@ -60,18 +60,18 @@ type SubtitleResult struct {
 
 // OrganizePlan represents a planned file organization operation
 type OrganizePlan struct {
-	Match              matcher.MatchResult
-	Movie              *models.Movie
-	SourcePath         string
-	TargetDir          string
-	TargetFile         string
-	TargetPath         string
-	WillMove           bool
-	Conflicts          []string
-	InPlace            bool   // Whether renaming folder in-place
-	OldDir             string // Original directory path (for in-place renames)
-	IsDedicated        bool   // Whether source folder is dedicated to this ID
-	SkipInPlaceReason  string // Reason why in-place was not used
+	Match             matcher.MatchResult
+	Movie             *models.Movie
+	SourcePath        string
+	TargetDir         string
+	TargetFile        string
+	TargetPath        string
+	WillMove          bool
+	Conflicts         []string
+	InPlace           bool   // Whether renaming folder in-place
+	OldDir            string // Original directory path (for in-place renames)
+	IsDedicated       bool   // Whether source folder is dedicated to this ID
+	SkipInPlaceReason string // Reason why in-place was not used
 }
 
 // isDedicatedFolder checks if a folder is dedicated to a single movie ID

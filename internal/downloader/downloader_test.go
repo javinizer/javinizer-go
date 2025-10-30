@@ -349,10 +349,10 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 	}
 
 	movie := &models.Movie{
-		ID:          "IPX-535",
-		Title:       "Test Movie",
-		CoverURL:    server.URL + "/cover.jpg",
-		PosterURL:   server.URL + "/poster.jpg",
+		ID:        "IPX-535",
+		Title:     "Test Movie",
+		CoverURL:  server.URL + "/cover.jpg",
+		PosterURL: server.URL + "/poster.jpg",
 		Screenshots: []string{
 			server.URL + "/screen1.jpg",
 			server.URL + "/screen2.jpg",

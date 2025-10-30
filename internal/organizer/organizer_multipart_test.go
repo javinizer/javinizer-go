@@ -30,10 +30,10 @@ func TestPlan_AppendsPartSuffix(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		partSuffix     string
-		partNumber     int
-		expectedFile   string
+		name         string
+		partSuffix   string
+		partNumber   int
+		expectedFile string
 	}{
 		{
 			name:         "Part with -pt1",

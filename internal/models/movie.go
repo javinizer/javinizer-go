@@ -102,8 +102,8 @@ type GenreReplacement struct {
 // This allows users to consolidate multiple actress names into a canonical one
 type ActressAlias struct {
 	ID            uint      `json:"id" gorm:"primaryKey"`
-	AliasName     string    `json:"alias_name" gorm:"uniqueIndex;not null"`     // The alternate name (e.g., "Yui Hatano")
-	CanonicalName string    `json:"canonical_name" gorm:"index;not null"`       // The canonical/preferred name (e.g., "Hatano Yui")
+	AliasName     string    `json:"alias_name" gorm:"uniqueIndex;not null"` // The alternate name (e.g., "Yui Hatano")
+	CanonicalName string    `json:"canonical_name" gorm:"index;not null"`   // The canonical/preferred name (e.g., "Hatano Yui")
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

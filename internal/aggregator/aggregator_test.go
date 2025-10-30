@@ -87,7 +87,7 @@ func TestCompileGenreRegexes(t *testing.T) {
 			agg := New(cfg)
 
 			if len(agg.ignoreGenreRegexes) != tt.wantLen {
-				t.Errorf("compileGenreRegexes() compiled %d patterns, want %d", 
+				t.Errorf("compileGenreRegexes() compiled %d patterns, want %d",
 					len(agg.ignoreGenreRegexes), tt.wantLen)
 			}
 		})
@@ -96,10 +96,10 @@ func TestCompileGenreRegexes(t *testing.T) {
 
 func TestIsGenreIgnored(t *testing.T) {
 	tests := []struct {
-		name          string
-		ignoreGenres  []string
-		genreToTest   string
-		shouldIgnore  bool
+		name         string
+		ignoreGenres []string
+		genreToTest  string
+		shouldIgnore bool
 	}{
 		{
 			name:         "Exact match",
@@ -199,7 +199,7 @@ func TestIsGenreIgnored(t *testing.T) {
 			result := agg.isGenreIgnored(tt.genreToTest)
 
 			if result != tt.shouldIgnore {
-				t.Errorf("isGenreIgnored(%q) = %v, want %v", 
+				t.Errorf("isGenreIgnored(%q) = %v, want %v",
 					tt.genreToTest, result, tt.shouldIgnore)
 			}
 		})
@@ -214,10 +214,10 @@ func TestGenreFilteringIntegration(t *testing.T) {
 		},
 		Metadata: config.MetadataConfig{
 			IgnoreGenres: []string{
-				"^Featured",      // Regex: starts with "Featured"
-				".*mosaic.*",     // Regex: contains "mosaic"
-				"Sample",         // Exact: exactly "Sample"
-				"^(HD|4K)",       // Regex: starts with HD or 4K
+				"^Featured",  // Regex: starts with "Featured"
+				".*mosaic.*", // Regex: contains "mosaic"
+				"Sample",     // Exact: exactly "Sample"
+				"^(HD|4K)",   // Regex: starts with HD or 4K
 			},
 		},
 	}
@@ -231,12 +231,12 @@ func TestGenreFilteringIntegration(t *testing.T) {
 
 	// Test genres that should be filtered
 	shouldFilter := []string{
-		"Featured Actress",  // Matches ^Featured
-		"HD mosaic",         // Matches .*mosaic.*
-		"Sample",            // Exact match
-		"HD",                // Matches ^(HD|4K)
-		"4K",                // Matches ^(HD|4K)
-		"mosaic version",    // Matches .*mosaic.*
+		"Featured Actress", // Matches ^Featured
+		"HD mosaic",        // Matches .*mosaic.*
+		"Sample",           // Exact match
+		"HD",               // Matches ^(HD|4K)
+		"4K",               // Matches ^(HD|4K)
+		"mosaic version",   // Matches .*mosaic.*
 	}
 
 	for _, genre := range shouldFilter {

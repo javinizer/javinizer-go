@@ -592,11 +592,11 @@ func TestOriginalPathInXML(t *testing.T) {
 
 func TestActressAsTag(t *testing.T) {
 	tests := []struct {
-		name          string
-		actressAsTag  bool
-		actresses     []models.Actress
-		existingTags  []string
-		expectedTags  []string
+		name           string
+		actressAsTag   bool
+		actresses      []models.Actress
+		existingTags   []string
+		expectedTags   []string
 		firstNameOrder bool
 	}{
 		{

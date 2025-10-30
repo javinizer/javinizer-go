@@ -34,12 +34,12 @@ func TestSubtitleHandler_FindSubtitles(t *testing.T) {
 
 	// Create subtitle files
 	subtitleFiles := []string{
-		"IPX-535.srt",           // Exact match
-		"IPX-535.eng.srt",       // English language code
-		"IPX-535.japanese.srt",  // Full language name
-		"IPX-535.chi.ass",       // Chinese with different extension
-		"ABCD-123.srt",          // Different video - should not match
-		"not-a-subtitle.txt",    // Wrong extension
+		"IPX-535.srt",          // Exact match
+		"IPX-535.eng.srt",      // English language code
+		"IPX-535.japanese.srt", // Full language name
+		"IPX-535.chi.ass",      // Chinese with different extension
+		"ABCD-123.srt",         // Different video - should not match
+		"not-a-subtitle.txt",   // Wrong extension
 	}
 
 	for _, filename := range subtitleFiles {
@@ -108,10 +108,10 @@ func TestSubtitleHandler_FindSubtitles_CaseInsensitive(t *testing.T) {
 
 	// Create subtitle files with different cases (common on Windows)
 	subtitleFiles := []string{
-		"ipx-535.srt",           // Lowercase - should still match
-		"IPX-535.eng.srt",       // Exact case with language code
-		"ipx-535.japanese.srt",  // Lowercase with full language name
-		"Ipx-535.chi.ass",       // Mixed case
+		"ipx-535.srt",          // Lowercase - should still match
+		"IPX-535.eng.srt",      // Exact case with language code
+		"ipx-535.japanese.srt", // Lowercase with full language name
+		"Ipx-535.chi.ass",      // Mixed case
 	}
 
 	for _, filename := range subtitleFiles {
@@ -248,10 +248,10 @@ func TestSubtitleHandler_extractLanguageCode(t *testing.T) {
 	handler := NewSubtitleHandler(cfg)
 
 	tests := []struct {
-		name                 string
-		subtitleName         string
-		videoNameWithoutExt  string
-		expectedLanguage     string
+		name                string
+		subtitleName        string
+		videoNameWithoutExt string
+		expectedLanguage    string
 	}{
 		{
 			name:                "No language code",
@@ -321,11 +321,11 @@ func TestSubtitleHandler_generateSubtitleFileName(t *testing.T) {
 	handler := NewSubtitleHandler(cfg)
 
 	tests := []struct {
-		name                 string
-		videoNameWithoutExt  string
-		language             string
-		extension            string
-		expectedFilename     string
+		name                string
+		videoNameWithoutExt string
+		language            string
+		extension           string
+		expectedFilename    string
 	}{
 		{
 			name:                "No language",

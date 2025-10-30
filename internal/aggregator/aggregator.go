@@ -19,10 +19,10 @@ type Aggregator struct {
 	templateEngine        *template.Engine
 	genreReplacementRepo  *database.GenreReplacementRepository
 	genreReplacementCache map[string]string
-	genreCacheMutex       sync.RWMutex        // Protects genreReplacementCache from concurrent access
+	genreCacheMutex       sync.RWMutex // Protects genreReplacementCache from concurrent access
 	actressAliasRepo      *database.ActressAliasRepository
-	actressAliasCache     map[string]string // Maps alias name to canonical name
-	aliasCacheMutex       sync.RWMutex      // Protects actressAliasCache from concurrent access
+	actressAliasCache     map[string]string   // Maps alias name to canonical name
+	aliasCacheMutex       sync.RWMutex        // Protects actressAliasCache from concurrent access
 	resolvedPriorities    map[string][]string // Cached resolved priorities for each field
 	ignoreGenreRegexes    []*regexp.Regexp    // Compiled regex patterns for genre filtering
 }

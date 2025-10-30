@@ -244,10 +244,10 @@ func TestTemplateEngine_TruncateTitle(t *testing.T) {
 	engine := NewEngine()
 
 	tests := []struct {
-		name    string
-		title   string
-		maxLen  int
-		want    string
+		name   string
+		title  string
+		maxLen int
+		want   string
 	}{
 		{
 			name:   "Short title - no truncation",

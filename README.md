@@ -4,6 +4,8 @@ A modern, high-performance Go implementation of Javinizer - a metadata scraper a
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Test & Coverage](https://github.com/javinizer/javinizer-go/actions/workflows/test.yml/badge.svg)](https://github.com/javinizer/javinizer-go/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/javinizer/javinizer-go/branch/master/graph/badge.svg)](https://codecov.io/gh/javinizer/javinizer-go)
 
 ## Features
 
@@ -119,6 +121,8 @@ Comprehensive documentation available in the `/docs` folder:
 9. **[Development](./docs/09-development.md)** - Contributing guide
 10. **[Troubleshooting](./docs/10-troubleshooting.md)** - Common issues and solutions
 11. **[TUI Guide](./docs/11-tui.md)** - Interactive Terminal User Interface
+12. **[Testing Guide](./docs/13-testing-guide.md)** - Test coverage, CI/CD, and best practices
+13. **[Local CI Testing](./docs/14-local-ci-testing.md)** - Run GitHub Actions checks locally
 
 ## Project Structure
 
@@ -274,6 +278,68 @@ Javinizer Go is significantly faster than the PowerShell version:
 - Plugin system
 - Docker support
 
+## Testing
+
+Javinizer maintains high code quality with automated testing and continuous integration.
+
+### Quick Test Commands
+
+```bash
+# Run all tests
+make test
+
+# Run tests with coverage report
+make coverage
+
+# View coverage in browser
+make coverage-html
+
+# Check if coverage meets 60% threshold
+make coverage-check
+
+# Run race detector on concurrent code
+make test-race
+
+# Run full CI suite locally
+make ci
+```
+
+### Coverage Status
+
+- **Current Coverage:** 60%+ (enforced in CI)
+- **Target Coverage:** 75%+
+- **Critical Packages:** 85%+ (worker, aggregator, matcher, organizer)
+
+### Development Tools
+
+The project uses `go run` to execute development tools (like `go-acc` for coverage) without requiring global installation. All tool dependencies are tracked in `tools.go` and `go.mod`, ensuring consistent versions across all environments and CI/CD.
+
+**Setup:**
+```bash
+# Download all dependencies (including dev tools)
+make deps
+
+# That's it! Tools work automatically via go run
+make coverage  # Uses go-acc via go run
+```
+
+### Pre-commit Hooks
+
+Install the pre-commit hook to catch issues before committing:
+
+```bash
+cp scripts/pre-commit.sample .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+The hook automatically checks:
+- Code formatting (`gofmt`)
+- Static analysis (`go vet`)
+- Fast unit tests
+- Build verification
+
+For complete testing documentation, see **[Testing Guide](./docs/13-testing-guide.md)**.
+
 ## Contributing
 
 Contributions welcome!
@@ -281,8 +347,11 @@ Contributions welcome!
 1. Fork the repository
 2. Create your feature branch
 3. Make your changes
-4. Add tests
-5. Submit a pull request
+4. **Add tests** (ensure `make coverage-check` passes)
+5. Run `make ci` to verify all checks pass
+6. Submit a pull request
+
+See **[Development Guide](./docs/09-development.md)** and **[Testing Guide](./docs/13-testing-guide.md)** for details.
 
 ## Compatibility
 

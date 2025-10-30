@@ -69,35 +69,35 @@ func getAvailableScrapers(registry *models.ScraperRegistry) gin.HandlerFunc {
 				displayName = "R18.dev"
 				// R18Dev has no additional options
 				options = []ScraperOption{}
-		case "dmm":
-			displayName = "DMM/Fanza"
-			// DMM scraper options
-			minTimeout := 5
-			maxTimeout := 120
-			options = []ScraperOption{
-				{
-					Key:         "scrape_actress",
-					Label:       "Scrape Actress Information",
-					Description: "Extract actress names and IDs from DMM. Disable for faster scraping if you only need actress data from other sources.",
-					Type:        "boolean",
-				},
-				{
-					Key:         "enable_headless",
-					Label:       "Enable headless browser",
-					Description: "Use headless browser for video.dmm.co.jp (required for some content)",
-					Type:        "boolean",
-				},
-				{
-					Key:         "headless_timeout",
-					Label:       "Headless timeout",
-					Description: "Maximum time to wait for headless browser operations",
-					Type:        "number",
-					Min:         &minTimeout,
-					Max:         &maxTimeout,
-					Unit:        "seconds",
-				},
+			case "dmm":
+				displayName = "DMM/Fanza"
+				// DMM scraper options
+				minTimeout := 5
+				maxTimeout := 120
+				options = []ScraperOption{
+					{
+						Key:         "scrape_actress",
+						Label:       "Scrape Actress Information",
+						Description: "Extract actress names and IDs from DMM. Disable for faster scraping if you only need actress data from other sources.",
+						Type:        "boolean",
+					},
+					{
+						Key:         "enable_headless",
+						Label:       "Enable headless browser",
+						Description: "Use headless browser for video.dmm.co.jp (required for some content)",
+						Type:        "boolean",
+					},
+					{
+						Key:         "headless_timeout",
+						Label:       "Headless timeout",
+						Description: "Maximum time to wait for headless browser operations",
+						Type:        "number",
+						Min:         &minTimeout,
+						Max:         &maxTimeout,
+						Unit:        "seconds",
+					},
+				}
 			}
-		}
 
 			scrapers = append(scrapers, ScraperInfo{
 				Name:        name,

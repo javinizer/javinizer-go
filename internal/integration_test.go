@@ -417,9 +417,9 @@ func createTestConfig(dataDir string) *config.Config {
 			RegexPattern:    `(?i)([a-z]{2,10})-?(\d{2,5})`,
 		},
 		Output: config.OutputConfig{
-			FolderFormat:        "<ID> [<STUDIO>] - <TITLE> (<YEAR>)",
-			FileFormat:          "<ID>",
-			SubfolderFormat:     []string{},
+			FolderFormat:    "<ID> [<STUDIO>] - <TITLE> (<YEAR>)",
+			FileFormat:      "<ID>",
+			SubfolderFormat: []string{},
 			Delimiter:       ", ",
 			DownloadCover:   true,
 			DownloadPoster:  false,
