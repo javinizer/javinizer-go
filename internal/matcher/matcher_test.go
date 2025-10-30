@@ -1,6 +1,7 @@
 package matcher
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -349,6 +350,459 @@ func TestMatcher_RealWorldFilenames(t *testing.T) {
 
 			if result.ID != tc.expectedID {
 				t.Errorf("Expected ID %s, got %s", tc.expectedID, result.ID)
+			}
+		})
+	}
+}
+
+// TestMatcher_MatchString_EdgeCases tests additional edge cases for MatchString
+func TestMatcher_MatchString_EdgeCases(t *testing.T) {
+	testCases := []struct {
+		name         string
+		regexEnabled bool
+		regexPattern string
+		input        string
+		expected     string
+		shouldError  bool
+	}{
+		{
+			name:         "Empty string",
+			regexEnabled: false,
+			input:        "",
+			expected:     "",
+		},
+		{
+			name:         "Only whitespace",
+			regexEnabled: false,
+			input:        "   ",
+			expected:     "",
+		},
+		{
+			name:         "No match pattern",
+			regexEnabled: false,
+			input:        "just some text",
+			expected:     "",
+		},
+		{
+			name:         "Multiple IDs - returns first",
+			regexEnabled: false,
+			input:        "IPX-535 and ABC-123",
+			expected:     "IPX-535",
+		},
+		{
+			name:         "ID at end",
+			regexEnabled: false,
+			input:        "The movie is IPX-535",
+			expected:     "IPX-535",
+		},
+		{
+			name:         "Custom regex enabled - matches",
+			regexEnabled: true,
+			regexPattern: `([A-Z]{3}-\d+)`,
+			input:        "IPX-535",
+			expected:     "IPX-535",
+		},
+		{
+			name:         "Custom regex enabled - no match, fallback to builtin",
+			regexEnabled: true,
+			regexPattern: `([A-Z]{3}-\d+)`,
+			input:        "T28-567", // T28 not 3 letters
+			expected:     "T28-567",
+		},
+		{
+			name:         "Custom regex with no capture group",
+			regexEnabled: true,
+			regexPattern: `[A-Z]{3}-\d+`, // No capture group
+			input:        "IPX-535",
+			expected:     "IPX-535", // Falls back to builtin
+		},
+		{
+			name:         "Case insensitive matching",
+			regexEnabled: false,
+			input:        "ipx-535",
+			expected:     "IPX-535",
+		},
+		{
+			name:         "With special characters",
+			regexEnabled: false,
+			input:        "[ThZu.Cc]IPX-535(1080p)",
+			expected:     "IPX-535",
+		},
+		{
+			name:         "Very long string",
+			regexEnabled: false,
+			input:        strings.Repeat("text ", 1000) + "IPX-535" + strings.Repeat(" more", 1000),
+			expected:     "IPX-535",
+		},
+		{
+			name:         "Unicode characters around ID",
+			regexEnabled: false,
+			input:        "映画 IPX-535 美しい",
+			expected:     "IPX-535",
+		},
+		{
+			name:         "Numbers only",
+			regexEnabled: false,
+			input:        "123456",
+			expected:     "",
+		},
+		{
+			name:         "Letters only",
+			regexEnabled: false,
+			input:        "ABCDEF",
+			expected:     "",
+		},
+		{
+			name:         "Almost valid - missing number",
+			regexEnabled: false,
+			input:        "IPX-",
+			expected:     "",
+		},
+		{
+			name:         "Almost valid - missing studio",
+			regexEnabled: false,
+			input:        "-535",
+			expected:     "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.MatchingConfig{
+				RegexEnabled: tc.regexEnabled,
+				RegexPattern: tc.regexPattern,
+			}
+
+			matcher, err := NewMatcher(cfg)
+			if tc.shouldError {
+				if err == nil {
+					t.Error("Expected error creating matcher, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Failed to create matcher: %v", err)
+			}
+
+			result := matcher.MatchString(tc.input)
+			if result != tc.expected {
+				t.Errorf("Expected %q, got %q for input %q", tc.expected, result, tc.input)
+			}
+		})
+	}
+}
+
+// TestMatcher_EmptyResults tests handling of empty file lists
+func TestMatcher_EmptyResults(t *testing.T) {
+	cfg := &config.MatchingConfig{
+		RegexEnabled: false,
+	}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	// Empty file list
+	results := matcher.Match([]scanner.FileInfo{})
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for empty file list, got %d", len(results))
+	}
+
+	// Nil file list
+	results = matcher.Match(nil)
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for nil file list, got %d", len(results))
+	}
+}
+
+// TestGroupByID_EdgeCases tests edge cases for GroupByID
+func TestGroupByID_EdgeCases(t *testing.T) {
+	t.Run("Empty results", func(t *testing.T) {
+		grouped := GroupByID([]MatchResult{})
+		if len(grouped) != 0 {
+			t.Errorf("Expected 0 groups for empty results, got %d", len(grouped))
+		}
+	})
+
+	t.Run("Nil results", func(t *testing.T) {
+		grouped := GroupByID(nil)
+		if len(grouped) != 0 {
+			t.Errorf("Expected 0 groups for nil results, got %d", len(grouped))
+		}
+	})
+
+	t.Run("Single ID multiple times", func(t *testing.T) {
+		results := []MatchResult{
+			{ID: "IPX-535"},
+			{ID: "IPX-535"},
+			{ID: "IPX-535"},
+		}
+		grouped := GroupByID(results)
+		if len(grouped) != 1 {
+			t.Errorf("Expected 1 group, got %d", len(grouped))
+		}
+		if len(grouped["IPX-535"]) != 3 {
+			t.Errorf("Expected 3 files in group, got %d", len(grouped["IPX-535"]))
+		}
+	})
+}
+
+// TestFilterMultiPart_EdgeCases tests edge cases for FilterMultiPart
+func TestFilterMultiPart_EdgeCases(t *testing.T) {
+	t.Run("Empty results", func(t *testing.T) {
+		filtered := FilterMultiPart([]MatchResult{})
+		if len(filtered) != 0 {
+			t.Errorf("Expected 0 filtered results for empty input, got %d", len(filtered))
+		}
+	})
+
+	t.Run("Nil results", func(t *testing.T) {
+		filtered := FilterMultiPart(nil)
+		if len(filtered) != 0 {
+			t.Errorf("Expected 0 filtered results for nil input, got %d", len(filtered))
+		}
+	})
+
+	t.Run("All single-part", func(t *testing.T) {
+		results := []MatchResult{
+			{ID: "IPX-535", IsMultiPart: false},
+			{ID: "ABC-123", IsMultiPart: false},
+		}
+		filtered := FilterMultiPart(results)
+		if len(filtered) != 0 {
+			t.Errorf("Expected 0 filtered results for all single-part, got %d", len(filtered))
+		}
+	})
+
+	t.Run("All multi-part", func(t *testing.T) {
+		results := []MatchResult{
+			{ID: "IPX-535", IsMultiPart: true},
+			{ID: "ABC-123", IsMultiPart: true},
+		}
+		filtered := FilterMultiPart(results)
+		if len(filtered) != 2 {
+			t.Errorf("Expected 2 filtered results for all multi-part, got %d", len(filtered))
+		}
+	})
+}
+
+// TestFilterSinglePart_EdgeCases tests edge cases for FilterSinglePart
+func TestFilterSinglePart_EdgeCases(t *testing.T) {
+	t.Run("Empty results", func(t *testing.T) {
+		filtered := FilterSinglePart([]MatchResult{})
+		if len(filtered) != 0 {
+			t.Errorf("Expected 0 filtered results for empty input, got %d", len(filtered))
+		}
+	})
+
+	t.Run("Nil results", func(t *testing.T) {
+		filtered := FilterSinglePart(nil)
+		if len(filtered) != 0 {
+			t.Errorf("Expected 0 filtered results for nil input, got %d", len(filtered))
+		}
+	})
+
+	t.Run("All multi-part", func(t *testing.T) {
+		results := []MatchResult{
+			{ID: "IPX-535", IsMultiPart: true},
+			{ID: "ABC-123", IsMultiPart: true},
+		}
+		filtered := FilterSinglePart(results)
+		if len(filtered) != 0 {
+			t.Errorf("Expected 0 filtered results for all multi-part, got %d", len(filtered))
+		}
+	})
+
+	t.Run("All single-part", func(t *testing.T) {
+		results := []MatchResult{
+			{ID: "IPX-535", IsMultiPart: false},
+			{ID: "ABC-123", IsMultiPart: false},
+		}
+		filtered := FilterSinglePart(results)
+		if len(filtered) != 2 {
+			t.Errorf("Expected 2 filtered results for all single-part, got %d", len(filtered))
+		}
+	})
+}
+
+// TestMatcher_VariousExtensions tests matching with different file extensions
+func TestMatcher_VariousExtensions(t *testing.T) {
+	cfg := &config.MatchingConfig{
+		RegexEnabled: false,
+	}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	extensions := []string{".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v"}
+
+	for _, ext := range extensions {
+		t.Run(ext, func(t *testing.T) {
+			file := scanner.FileInfo{
+				Name:      "IPX-535" + ext,
+				Extension: ext,
+			}
+
+			result := matcher.MatchFile(file)
+			if result == nil {
+				t.Fatalf("Expected match for extension %s, got nil", ext)
+			}
+
+			if result.ID != "IPX-535" {
+				t.Errorf("Expected ID IPX-535, got %s", result.ID)
+			}
+		})
+	}
+}
+
+// TestMatcher_PathSeparators tests that path separators don't break matching
+func TestMatcher_PathSeparators(t *testing.T) {
+	cfg := &config.MatchingConfig{
+		RegexEnabled: false,
+	}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	testCases := []struct {
+		name       string
+		filename   string
+		expectedID string
+	}{
+		{"With path", "/path/to/IPX-535.mp4", "IPX-535"},
+		{"Windows path", "C:\\Videos\\IPX-535.mp4", "IPX-535"},
+		{"Relative path", "./videos/IPX-535.mp4", "IPX-535"},
+		{"Deep path", "/a/b/c/d/e/IPX-535.mp4", "IPX-535"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			file := scanner.FileInfo{
+				Name:      tc.filename,
+				Extension: ".mp4",
+			}
+
+			result := matcher.MatchFile(file)
+			if result == nil {
+				t.Fatalf("Expected match for %s, got nil", tc.filename)
+			}
+
+			if result.ID != tc.expectedID {
+				t.Errorf("Expected ID %s, got %s", tc.expectedID, result.ID)
+			}
+		})
+	}
+}
+
+// TestMatcher_LongStudioCodes tests studio codes of varying lengths
+func TestMatcher_LongStudioCodes(t *testing.T) {
+	cfg := &config.MatchingConfig{
+		RegexEnabled: false,
+	}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	testCases := []struct {
+		filename   string
+		expectedID string
+	}{
+		// 2 letters
+		{"AB-123.mp4", "AB-123"},
+		// 3 letters
+		{"IPX-535.mp4", "IPX-535"},
+		// 4 letters
+		{"SSIS-001.mp4", "SSIS-001"},
+		// 5 letters
+		{"STARS-123.mp4", "STARS-123"},
+		// Special case: T28
+		{"T28-567.mp4", "T28-567"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.filename, func(t *testing.T) {
+			file := scanner.FileInfo{
+				Name:      tc.filename,
+				Extension: ".mp4",
+			}
+
+			result := matcher.MatchFile(file)
+			if result == nil {
+				t.Fatalf("Expected match for %s, got nil", tc.filename)
+			}
+
+			if result.ID != tc.expectedID {
+				t.Errorf("Expected ID %s, got %s", tc.expectedID, result.ID)
+			}
+		})
+	}
+}
+
+// TestMatcher_PartSuffixVariations tests various multi-part suffix formats
+func TestMatcher_PartSuffixVariations(t *testing.T) {
+	cfg := &config.MatchingConfig{
+		RegexEnabled: false,
+	}
+
+	matcher, err := NewMatcher(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	testCases := []struct {
+		name         string
+		filename     string
+		expectedID   string
+		expectedPart int
+		isMultiPart  bool
+	}{
+		// Letter suffixes
+		{"Letter A", "IPX-535-A.mp4", "IPX-535", 1, true},
+		{"Letter B", "IPX-535-B.mp4", "IPX-535", 2, true},
+		{"Letter C", "IPX-535-C.mp4", "IPX-535", 3, true},
+		{"Lowercase letter", "IPX-535-a.mp4", "IPX-535", 1, true},
+
+		// Numeric suffixes
+		{"pt1", "IPX-535-pt1.mp4", "IPX-535", 1, true},
+		{"pt2", "IPX-535-pt2.mp4", "IPX-535", 2, true},
+		{"part1", "IPX-535-part1.mp4", "IPX-535", 1, true},
+		{"part2", "IPX-535-part2.mp4", "IPX-535", 2, true},
+		{"Double digit", "IPX-535-pt10.mp4", "IPX-535", 10, true},
+
+		// No suffix - single part
+		{"No suffix", "IPX-535.mp4", "IPX-535", 0, false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			file := scanner.FileInfo{
+				Name:      tc.filename,
+				Extension: ".mp4",
+			}
+
+			result := matcher.MatchFile(file)
+			if result == nil {
+				t.Fatalf("Expected match for %s, got nil", tc.filename)
+			}
+
+			if result.ID != tc.expectedID {
+				t.Errorf("Expected ID %s, got %s", tc.expectedID, result.ID)
+			}
+
+			if result.PartNumber != tc.expectedPart {
+				t.Errorf("Expected part number %d, got %d", tc.expectedPart, result.PartNumber)
+			}
+
+			if result.IsMultiPart != tc.isMultiPart {
+				t.Errorf("Expected IsMultiPart %v, got %v", tc.isMultiPart, result.IsMultiPart)
 			}
 		})
 	}
