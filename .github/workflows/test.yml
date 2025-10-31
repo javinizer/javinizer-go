@@ -22,6 +22,17 @@ jobs:
         go-version: '1.22.x'  # Use stable release version
         cache: true
 
+    - name: Detect act environment
+      id: detect
+      run: |
+        if [ -n "$ACT" ]; then
+          echo "running_in_act=true" >> $GITHUB_OUTPUT
+          echo "Running in act (local testing mode)"
+        else
+          echo "running_in_act=false" >> $GITHUB_OUTPUT
+          echo "Running in GitHub Actions"
+        fi
+
     - name: Download dependencies
       run: go mod download
 
@@ -35,6 +46,7 @@ jobs:
       run: ./scripts/check_coverage.sh 25 coverage.out
 
     - name: Upload coverage to Codecov
+      if: steps.detect.outputs.running_in_act != 'true'
       uses: codecov/codecov-action@v4
       with:
         file: ./coverage.out
@@ -45,11 +57,18 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
     - name: Archive coverage report
+      if: steps.detect.outputs.running_in_act != 'true'
       uses: actions/upload-artifact@v4
       with:
         name: coverage-report
         path: coverage.out
         retention-days: 30
+
+    - name: Display coverage report (act only)
+      if: steps.detect.outputs.running_in_act == 'true'
+      run: |
+        echo "Coverage report generated (skipped upload in act mode)"
+        go tool cover -func=coverage.out | tail -20
 
   # Job 2: Race detector tests (concurrent code)
   race-tests:

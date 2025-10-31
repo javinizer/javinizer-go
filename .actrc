@@ -1,0 +1,14 @@
+# Use smaller runner images to save disk space (~15GB saved)
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+-P ubuntu-22.04=catthehacker/ubuntu:act-22.04
+-P ubuntu-20.04=catthehacker/ubuntu:act-20.04
+
+# Set mock secrets for local testing
+-s DOCKERHUB_USERNAME=test
+-s DOCKERHUB_TOKEN=test
+
+# Set default environment variables
+--env JAVINIZER_ENV=test
+
+# Default platform to run (for multi-platform workflows)
+--platform linux/amd64

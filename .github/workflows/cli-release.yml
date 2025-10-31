@@ -1,0 +1,230 @@
+name: CLI Binary Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BINARY_NAME: javinizer
+
+jobs:
+  # ============================================================================
+  # Linux AMD64 Build
+  # ============================================================================
+  build-linux-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          VERSION=${{ github.ref_name }}
+          COMMIT=${{ github.sha }}
+          BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')
+          go build -ldflags="-w -s \
+            -X github.com/javinizer/javinizer-go/internal/version.Version=${VERSION} \
+            -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} \
+            -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE}" \
+            -o ${{ env.BINARY_NAME }}-${{ github.ref_name }}-linux-amd64 ./cmd/cli
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: javinizer-linux-amd64
+          path: ${{ env.BINARY_NAME }}-${{ github.ref_name }}-linux-amd64
+
+  # ============================================================================
+  # Linux ARM64 Build (using QEMU)
+  # ============================================================================
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install cross-compile dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: arm64
+          CC: aarch64-linux-gnu-gcc
+        run: |
+          VERSION=${{ github.ref_name }}
+          COMMIT=${{ github.sha }}
+          BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')
+          go build -ldflags="-w -s \
+            -X github.com/javinizer/javinizer-go/internal/version.Version=${VERSION} \
+            -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} \
+            -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE}" \
+            -o ${{ env.BINARY_NAME }}-${{ github.ref_name }}-linux-arm64 ./cmd/cli
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: javinizer-linux-arm64
+          path: ${{ env.BINARY_NAME }}-${{ github.ref_name }}-linux-arm64
+
+  # ============================================================================
+  # macOS Build (Intel + Apple Silicon + Universal)
+  # ============================================================================
+  build-darwin:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Set build variables
+        id: build_vars
+        run: |
+          echo "VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "COMMIT=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')" >> $GITHUB_OUTPUT
+
+      - name: Build AMD64 (Intel)
+        env:
+          CGO_ENABLED: 1
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          go build -ldflags="-w -s \
+            -X github.com/javinizer/javinizer-go/internal/version.Version=${{ steps.build_vars.outputs.VERSION }} \
+            -X github.com/javinizer/javinizer-go/internal/version.Commit=${{ steps.build_vars.outputs.COMMIT }} \
+            -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${{ steps.build_vars.outputs.BUILD_DATE }}" \
+            -o ${{ env.BINARY_NAME }}-amd64 ./cmd/cli
+
+      - name: Build ARM64 (Apple Silicon)
+        env:
+          CGO_ENABLED: 1
+          GOOS: darwin
+          GOARCH: arm64
+        run: |
+          go build -ldflags="-w -s \
+            -X github.com/javinizer/javinizer-go/internal/version.Version=${{ steps.build_vars.outputs.VERSION }} \
+            -X github.com/javinizer/javinizer-go/internal/version.Commit=${{ steps.build_vars.outputs.COMMIT }} \
+            -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${{ steps.build_vars.outputs.BUILD_DATE }}" \
+            -o ${{ env.BINARY_NAME }}-arm64 ./cmd/cli
+
+      - name: Create Universal Binary
+        run: |
+          lipo -create ${{ env.BINARY_NAME }}-amd64 ${{ env.BINARY_NAME }}-arm64 \
+            -output ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-universal
+
+      - name: Rename architecture-specific binaries
+        run: |
+          mv ${{ env.BINARY_NAME }}-amd64 ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-amd64
+          mv ${{ env.BINARY_NAME }}-arm64 ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-arm64
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: javinizer-darwin
+          path: |
+            ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-amd64
+            ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-arm64
+            ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-universal
+
+  # ============================================================================
+  # Windows Build
+  # ============================================================================
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: 1
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          $VERSION = "${{ github.ref_name }}"
+          $COMMIT = "${{ github.sha }}"
+          $BUILD_DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd_HH:mm:ss")
+          go build -ldflags="-w -s -X github.com/javinizer/javinizer-go/internal/version.Version=${VERSION} -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE}" -o ${{ env.BINARY_NAME }}-${{ github.ref_name }}-windows-amd64.exe ./cmd/cli
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: javinizer-windows-amd64
+          path: ${{ env.BINARY_NAME }}-${{ github.ref_name }}-windows-amd64.exe
+
+  # ============================================================================
+  # Create Release and Upload Binaries
+  # ============================================================================
+  create-release:
+    needs: [build-linux-amd64, build-linux-arm64, build-darwin, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Organize artifacts
+        run: |
+          mkdir -p ./release
+          find ./artifacts -type f -exec mv {} ./release/ \;
+          ls -lh ./release/
+
+      - name: Generate checksums
+        run: |
+          cd ./release
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./release/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

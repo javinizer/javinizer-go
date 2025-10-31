@@ -20,6 +20,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
+	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -32,10 +33,14 @@ var (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "javinizer",
-		Short: "Javinizer - JAV metadata scraper and organizer",
-		Long:  `A metadata scraper and file organizer for Japanese Adult Videos (JAV)`,
+		Use:     "javinizer",
+		Short:   "Javinizer - JAV metadata scraper and organizer",
+		Long:    `A metadata scraper and file organizer for Japanese Adult Videos (JAV)`,
+		Version: version.Short(),
 	}
+
+	// Customize version template to show full build info
+	rootCmd.SetVersionTemplate(version.Info() + "\n")
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "configs/config.yaml", "config file path")
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "enable debug logging")

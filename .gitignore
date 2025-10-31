@@ -51,3 +51,6 @@ configs/config.yaml
 *.out
 coverage.html
 *.coverprofile
+
+# Local GitHub Actions testing (act)
+.secrets
