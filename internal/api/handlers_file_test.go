@@ -175,10 +175,14 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 			errorContains:  "system directory",
 		},
 		{
-			name:           "path traversal with ../ - nonexistent path",
-			path:           filepath.Join(tempDir, "../../../etc"),
-			expectedStatus: 400,
-			errorContains:  "does not exist",
+			name: "path traversal with ../ - should block",
+			path: filepath.Join(tempDir, "../../../etc"),
+			// Accept either 400 (path doesn't exist) or 403 (system directory blocked)
+			// Behavior depends on temp directory depth:
+			// - macOS: /var/folders/.../T/test/../../../etc → /var/folders/.../etc (doesn't exist) → 400
+			// - Linux: /tmp/test/../../../etc → /etc (exists, blocked) → 403
+			expectedStatus: 0,  // Will validate manually
+			errorContains:  "", // Will validate manually
 		},
 		{
 			name:           "nonexistent path",
@@ -200,9 +204,23 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 
 			router.ServeHTTP(w, req)
 
-			assert.Equal(t, tt.expectedStatus, w.Code, "Response body: %s", w.Body.String())
-			if tt.errorContains != "" {
-				assert.Contains(t, w.Body.String(), tt.errorContains)
+			// Special handling for path traversal test (environment-dependent behavior)
+			if tt.expectedStatus == 0 {
+				// Accept either 400 (path doesn't exist) or 403 (system directory blocked)
+				assert.True(t, w.Code == 400 || w.Code == 403,
+					"Expected 400 or 403 for path traversal, got %d. Response: %s", w.Code, w.Body.String())
+				// Verify error message contains security-related keywords
+				responseBody := w.Body.String()
+				assert.True(t,
+					strings.Contains(responseBody, "does not exist") ||
+						strings.Contains(responseBody, "system directory") ||
+						strings.Contains(responseBody, "access denied"),
+					"Expected security-related error message, got: %s", responseBody)
+			} else {
+				assert.Equal(t, tt.expectedStatus, w.Code, "Response body: %s", w.Body.String())
+				if tt.errorContains != "" {
+					assert.Contains(t, w.Body.String(), tt.errorContains)
+				}
 			}
 		})
 	}
