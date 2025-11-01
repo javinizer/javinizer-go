@@ -370,6 +370,21 @@ func generatePreview(movie *models.Movie, destination string, cfg *config.Config
 	ctx.GroupActress = cfg.Output.GroupActress
 	templateEngine := template.NewEngine()
 
+	// Generate subfolder hierarchy (if configured)
+	subfolderParts := make([]string, 0, len(cfg.Output.SubfolderFormat))
+	for _, subfolderTemplate := range cfg.Output.SubfolderFormat {
+		subfolderName, err := templateEngine.Execute(subfolderTemplate, ctx)
+		if err != nil {
+			logging.Errorf("Failed to generate subfolder from template '%s': %v", subfolderTemplate, err)
+			continue
+		}
+		// Sanitize and add to parts if not empty
+		subfolderName = template.SanitizeFolderPath(subfolderName)
+		if subfolderName != "" {
+			subfolderParts = append(subfolderParts, subfolderName)
+		}
+	}
+
 	// Generate folder name
 	folderName, err := templateEngine.Execute(cfg.Output.FolderFormat, ctx)
 	if err != nil {
@@ -386,8 +401,12 @@ func generatePreview(movie *models.Movie, destination string, cfg *config.Config
 	}
 	fileName = template.SanitizeFilename(fileName)
 
-	// Build paths
-	folderPath := filepath.Join(destination, folderName)
+	// Build target paths with subfolder hierarchy
+	// Start with destination, add subfolder parts, then final folder name
+	pathParts := []string{destination}
+	pathParts = append(pathParts, subfolderParts...)
+	pathParts = append(pathParts, folderName)
+	folderPath := filepath.Join(pathParts...)
 	videoPath := filepath.Join(folderPath, fileName+".mp4") // Using .mp4 as placeholder
 	nfoPath := filepath.Join(folderPath, fileName+".nfo")
 	posterPath := filepath.Join(folderPath, fileName+"-poster.jpg")
