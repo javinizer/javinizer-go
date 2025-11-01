@@ -283,6 +283,12 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 	// Fallback: serve index.html for browser SPA routing only
 	// API requests to non-existent endpoints should return proper 404 JSON
 	router.NoRoute(func(c *gin.Context) {
+		// Log unmatched routes for debugging
+		logging.Debugf("NoRoute hit: %s %s (Accept: %s)",
+			c.Request.Method,
+			c.Request.URL.Path,
+			c.Request.Header.Get("Accept"))
+
 		// Only serve SPA for GET/HEAD requests that accept HTML (browser traffic)
 		// HEAD is treated like GET for monitoring tools and HTTP caches
 		method := c.Request.Method
@@ -296,8 +302,15 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 			"error":   "Not Found",
 			"message": "The requested resource does not exist",
 			"path":    c.Request.URL.Path,
+			"method":  c.Request.Method,
 		})
 	})
+
+	// Print all registered routes for debugging
+	logging.Debugf("Registered routes:")
+	for _, route := range router.Routes() {
+		logging.Debugf("  %s %s", route.Method, route.Path)
+	}
 
 	return router
 }
