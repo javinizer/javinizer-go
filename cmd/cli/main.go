@@ -244,6 +244,10 @@ func loadConfig() error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Override config values with environment variables (Docker-friendly)
+	// These take precedence over config file settings
+	applyEnvironmentOverrides(cfg)
+
 	// Initialize logger
 	logCfg := &logging.Config{
 		Level:  cfg.Logging.Level,
@@ -261,6 +265,20 @@ func loadConfig() error {
 	}
 
 	logging.Debugf("Loaded configuration from: %s", cfgFile)
+
+	// Log environment variable overrides (after logger is initialized)
+	if os.Getenv("JAVINIZER_DB") != "" {
+		logging.Debugf("Database DSN overridden by JAVINIZER_DB: %s", cfg.Database.DSN)
+	}
+	if os.Getenv("JAVINIZER_LOG_DIR") != "" {
+		logging.Debugf("Log output overridden by JAVINIZER_LOG_DIR: %s", cfg.Logging.Output)
+	}
+	if os.Getenv("JAVINIZER_DATA_DIR") != "" {
+		logging.Debugf("Allowed directories set by JAVINIZER_DATA_DIR: %v", cfg.API.Security.AllowedDirectories)
+	}
+	if os.Getenv("JAVINIZER_HOME") != "" {
+		logging.Debugf("JAVINIZER_HOME is set to: %s (reserved for future use)", os.Getenv("JAVINIZER_HOME"))
+	}
 
 	// Validate proxy configuration
 	if cfg.Scrapers.Proxy.Enabled {
@@ -294,6 +312,51 @@ func loadConfig() error {
 	}
 
 	return nil
+}
+
+// applyEnvironmentOverrides applies environment variable overrides to the config.
+// Environment variables take precedence over config file settings.
+// This is designed for Docker deployments where config files may be read-only.
+func applyEnvironmentOverrides(cfg *config.Config) {
+	// JAVINIZER_DB - Override database DSN path
+	if envDB := os.Getenv("JAVINIZER_DB"); envDB != "" {
+		cfg.Database.DSN = envDB
+	}
+
+	// JAVINIZER_LOG_DIR - Override log output directory
+	// Handles both single paths and comma-separated multiple outputs
+	if envLogDir := os.Getenv("JAVINIZER_LOG_DIR"); envLogDir != "" {
+		// Split on comma to support multiple outputs (e.g., "stdout,logs/app.log")
+		outputs := strings.Split(cfg.Logging.Output, ",")
+		newOutputs := make([]string, 0, len(outputs))
+
+		for _, output := range outputs {
+			output = strings.TrimSpace(output)
+			// Only override file paths, preserve stdout/stderr
+			if output != "stdout" && output != "stderr" && output != "" {
+				filename := filepath.Base(output)
+				newOutputs = append(newOutputs, filepath.Join(envLogDir, filename))
+			} else {
+				newOutputs = append(newOutputs, output)
+			}
+		}
+
+		cfg.Logging.Output = strings.Join(newOutputs, ",")
+	}
+
+	// JAVINIZER_DATA_DIR - Set as default allowed directory if not explicitly configured
+	// This is useful for Docker where media is mounted at a specific path (e.g., /media)
+	// Only apply if allowed_directories is empty (user hasn't explicitly configured it)
+	if envDataDir := os.Getenv("JAVINIZER_DATA_DIR"); envDataDir != "" {
+		if len(cfg.API.Security.AllowedDirectories) == 0 {
+			cfg.API.Security.AllowedDirectories = []string{envDataDir}
+		}
+	}
+
+	// JAVINIZER_HOME - Reserved for future use
+	// Currently not used, but available for reference or future enhancements
+	// Could be used for expanding ~ paths or as a base directory for relative paths
+	// (No action taken - just documented for future use)
 }
 
 func runScrape(cmd *cobra.Command, args []string, deps *Dependencies) error {
