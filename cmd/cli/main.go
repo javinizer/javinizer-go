@@ -267,6 +267,9 @@ func loadConfig() error {
 	logging.Debugf("Loaded configuration from: %s", cfgFile)
 
 	// Log environment variable overrides (after logger is initialized)
+	if os.Getenv("LOG_LEVEL") != "" {
+		logging.Debugf("Log level overridden by LOG_LEVEL: %s", cfg.Logging.Level)
+	}
 	if os.Getenv("JAVINIZER_DB") != "" {
 		logging.Debugf("Database DSN overridden by JAVINIZER_DB: %s", cfg.Database.DSN)
 	}
@@ -315,6 +318,11 @@ func loadConfig() error {
 // Environment variables take precedence over config file settings.
 // This is designed for Docker deployments where config files may be read-only.
 func applyEnvironmentOverrides(cfg *config.Config) {
+	// LOG_LEVEL - Override log level (debug, info, warn, error)
+	if envLogLevel := os.Getenv("LOG_LEVEL"); envLogLevel != "" {
+		cfg.Logging.Level = strings.ToLower(envLogLevel)
+	}
+
 	// JAVINIZER_DB - Override database DSN path
 	if envDB := os.Getenv("JAVINIZER_DB"); envDB != "" {
 		cfg.Database.DSN = envDB

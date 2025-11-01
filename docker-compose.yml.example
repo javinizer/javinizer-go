@@ -36,6 +36,10 @@ services:
       # Log directory
       - JAVINIZER_LOG_DIR=/javinizer/logs
 
+      # Log level (optional: debug, info, warn, error)
+      # Uncomment to override config.yaml
+      # - LOG_LEVEL=${LOG_LEVEL:-info}
+
       # Timezone
       - TZ=${TZ:-UTC}
 
@@ -70,4 +74,5 @@ services:
       - JAVINIZER_CONFIG=/javinizer/config.yaml
       - JAVINIZER_DB=/javinizer/javinizer.db
       - JAVINIZER_LOG_DIR=/javinizer/logs
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
       - TZ=${TZ:-UTC}
