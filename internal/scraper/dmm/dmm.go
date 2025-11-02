@@ -596,10 +596,14 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 	// Extract genres
 	result.Genres = s.extractGenres(doc)
 
-	// Extract actresses (only if scrape_actress is enabled)
-	if s.scrapeActress {
+	// Extract actresses (only if scrape_actress is enabled AND not a monthly page)
+	// Monthly pages (/monthly/standard/, /monthly/premium/) don't have actress info in HTML
+	isMonthlyPage := strings.Contains(sourceURL, "/monthly/")
+	if s.scrapeActress && !isMonthlyPage {
 		result.Actresses = s.extractActresses(doc)
 		logging.Debugf("DMM: Extracted %d actresses", len(result.Actresses))
+	} else if isMonthlyPage {
+		logging.Debug("DMM: Skipping actress extraction (monthly page - no actress data)")
 	} else {
 		logging.Debug("DMM: Skipping actress extraction (scrape_actress=false)")
 	}

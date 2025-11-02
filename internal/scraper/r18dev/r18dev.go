@@ -91,7 +91,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	// Generate ID variations to try (original first, then with DMM prefix stripped)
 	idVariations := []string{
 		normalizeIDWithoutStripping(id), // Try original ID first (e.g., "61mdb087")
-		normalizeID(id),                  // Then try with DMM prefix stripped (e.g., "mdb087")
+		normalizeID(id),                 // Then try with DMM prefix stripped (e.g., "mdb087")
 	}
 
 	// Remove duplicates
