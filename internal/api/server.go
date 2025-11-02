@@ -256,7 +256,7 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 
 		// System endpoints
 		v1.GET("/config", getConfig(deps.Config))
-		v1.PUT("/config", updateConfig(deps.Config, deps.ConfigFile))
+		v1.PUT("/config", updateConfig(deps))
 		v1.GET("/scrapers", getAvailableScrapers(deps.Registry))
 
 		// File endpoints

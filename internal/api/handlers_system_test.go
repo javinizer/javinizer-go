@@ -250,12 +250,14 @@ func TestUpdateConfig(t *testing.T) {
 					Host: "localhost",
 					Port: 8080,
 				},
+				Matching: config.MatchingConfig{},
 			},
 			requestBody: &config.Config{
 				Server: config.ServerConfig{
 					Host: "0.0.0.0",
 					Port: 9090,
 				},
+				Matching: config.MatchingConfig{},
 			},
 			expectedStatus: 200,
 		},
@@ -266,6 +268,7 @@ func TestUpdateConfig(t *testing.T) {
 					Host: "localhost",
 					Port: 8080,
 				},
+				Matching: config.MatchingConfig{},
 			},
 			requestBody:    "invalid json",
 			expectedStatus: 400,
@@ -278,8 +281,11 @@ func TestUpdateConfig(t *testing.T) {
 			// Create a temporary config file for testing
 			tempConfigFile := t.TempDir() + "/config.yaml"
 
+			// Create minimal dependencies for testing
+			deps := createTestDeps(t, tt.initialConfig, tempConfigFile)
+
 			router := gin.New()
-			router.PUT("/config", updateConfig(tt.initialConfig, tempConfigFile))
+			router.PUT("/config", updateConfig(deps))
 
 			var body []byte
 			var err error
@@ -315,12 +321,16 @@ func TestUpdateConfig_ConcurrentAccess(t *testing.T) {
 			Host: "localhost",
 			Port: 8080,
 		},
+		Matching: config.MatchingConfig{},
 	}
 
 	tempConfigFile := t.TempDir() + "/config.yaml"
 
+	// Create minimal dependencies for testing
+	deps := createTestDeps(t, cfg, tempConfigFile)
+
 	router := gin.New()
-	router.PUT("/config", updateConfig(cfg, tempConfigFile))
+	router.PUT("/config", updateConfig(deps))
 
 	// Launch multiple concurrent requests
 	done := make(chan bool, 5)
@@ -333,6 +343,7 @@ func TestUpdateConfig_ConcurrentAccess(t *testing.T) {
 					Host: "0.0.0.0",
 					Port: 8080 + port,
 				},
+				Matching: config.MatchingConfig{},
 			}
 
 			body, err := json.Marshal(newConfig)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -365,10 +366,26 @@ func TestSecurity_InputValidation(t *testing.T) {
 	mat, err := matcher.NewMatcher(&cfg.Matching)
 	require.NoError(t, err)
 
+	// Create in-memory database for testing
+	dbCfg := &config.Config{
+		Database: config.DatabaseConfig{
+			Type: "sqlite",
+			DSN:  ":memory:",
+		},
+		Logging: config.LoggingConfig{
+			Level: "error",
+		},
+	}
+	db, err := database.New(dbCfg)
+	require.NoError(t, err)
+	err = db.AutoMigrate()
+	require.NoError(t, err)
+
 	deps := &ServerDependencies{
 		Config:      cfg,
 		ConfigFile:  "/tmp/config.yaml",
 		Registry:    registry,
+		DB:          db,
 		Aggregator:  aggregator.New(cfg),
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),

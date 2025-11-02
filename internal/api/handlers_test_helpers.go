@@ -1,9 +1,14 @@
 package api
 
 import (
+	"testing"
+
+	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
 // Test helpers for creating mock repositories
@@ -72,4 +77,60 @@ func newMockActressRepo() *database.ActressRepository {
 	db, _ := database.New(cfg)
 	db.AutoMigrate()
 	return database.NewActressRepository(db)
+}
+
+// createTestDeps creates minimal ServerDependencies for testing
+func createTestDeps(t *testing.T, cfg *config.Config, configFile string) *ServerDependencies {
+	t.Helper()
+
+	// Initialize in-memory database
+	dbCfg := &config.Config{
+		Database: config.DatabaseConfig{
+			Type: "sqlite",
+			DSN:  ":memory:",
+		},
+		Logging: config.LoggingConfig{
+			Level: "error",
+		},
+	}
+
+	db, err := database.New(dbCfg)
+	if err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+
+	if err := db.AutoMigrate(); err != nil {
+		t.Fatalf("Failed to migrate test database: %v", err)
+	}
+
+	// Initialize repositories
+	movieRepo := database.NewMovieRepository(db)
+	actressRepo := database.NewActressRepository(db)
+
+	// Initialize scraper registry
+	registry := models.NewScraperRegistry()
+
+	// Initialize aggregator
+	agg := aggregator.NewWithDatabase(cfg, db)
+
+	// Initialize matcher
+	mat, err := matcher.NewMatcher(&cfg.Matching)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	// Initialize job queue
+	jobQueue := worker.NewJobQueue()
+
+	return &ServerDependencies{
+		Config:      cfg,
+		ConfigFile:  configFile,
+		Registry:    registry,
+		DB:          db,
+		Aggregator:  agg,
+		MovieRepo:   movieRepo,
+		ActressRepo: actressRepo,
+		Matcher:     mat,
+		JobQueue:    jobQueue,
+	}
 }
