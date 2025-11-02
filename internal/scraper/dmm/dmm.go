@@ -25,6 +25,8 @@ const (
 	physicalURL = baseURL + "/mono/dvd/-/detail/=/cid=%s/"
 	// New URL format (video.dmm.co.jp)
 	newDigitalURL = newBaseURL + "/av/content/?id=%s"
+	// Amateur video URL format (video.dmm.co.jp/amateur/)
+	newAmateurURL = newBaseURL + "/amateur/content/?id=%s"
 )
 
 // Scraper implements the DMM/Fanza scraper
@@ -325,6 +327,8 @@ func (s *Scraper) GetURL(id string) (string, error) {
 			fmt.Sprintf(digitalURL, baseID),     // /digital/videoa/ with base ID - priority 2
 			fmt.Sprintf(physicalURL, contentID), // /mono/dvd/ with content ID - priority 3
 			fmt.Sprintf(digitalURL, contentID),  // /digital/videoa/ with content ID - priority 2
+			fmt.Sprintf(newDigitalURL, baseID),  // video.dmm.co.jp/av/ with base ID - priority 1
+			fmt.Sprintf(newAmateurURL, baseID),  // video.dmm.co.jp/amateur/ with base ID - priority 1
 		}
 
 		logging.Debugf("DMM: Best candidate has low priority (%d), trying direct URLs for %s", allCandidates[0].priority, baseID)
@@ -341,6 +345,10 @@ func (s *Scraper) GetURL(id string) (string, error) {
 					priority = 3
 				} else if strings.Contains(directURL, "/digital/videoa/") {
 					priority = 2
+				} else if strings.Contains(directURL, "video.dmm.co.jp/av/content/") {
+					priority = 1 // New digital video format
+				} else if strings.Contains(directURL, "video.dmm.co.jp/amateur/content/") {
+					priority = 1 // Amateur video format (same priority as new digital)
 				}
 
 				extractedID := extractContentIDFromURL(directURL)
@@ -902,9 +910,18 @@ func (s *Scraper) extractTrailerURL(doc *goquery.Document, sourceURL string) str
 
 // normalizeContentID converts movie ID to DMM content ID format
 // Example: "ABP-420" -> "abp00420"
+// Amateur IDs like "oreco183", "cap123" are returned as-is (no padding)
 func normalizeContentID(id string) string {
 	// Convert to lowercase
 	id = strings.ToLower(id)
+
+	// Check if this is an amateur ID (3-6 letters + 3-4 digits, no hyphen)
+	// Amateur IDs use specific prefixes: oreco, luxu, siro, gana, ara, maan, simm, scute, etc.
+	// These should be passed through without modification (no zero-padding)
+	amateurPattern := regexp.MustCompile(`^(?:oreco|luxu|siro|gana|ara|maan|simm|scute|hmhi|blor|nnpj|suke|ntk|cap|apak|sweet|nonn)\d{3,4}$`)
+	if amateurPattern.MatchString(id) {
+		return id // Return amateur IDs as-is
+	}
 
 	// Remove hyphens
 	id = strings.ReplaceAll(id, "-", "")
@@ -932,7 +949,16 @@ func normalizeContentID(id string) string {
 
 // normalizeID converts content ID back to standard ID format
 // Example: "abp00420" -> "ABP-420"
+// Amateur IDs like "oreco183", "cap123" are returned in uppercase without modification
 func normalizeID(contentID string) string {
+	// Check if this is an amateur ID (3-6 letters + 3-4 digits, no hyphen)
+	// Amateur IDs use specific prefixes: oreco, luxu, siro, gana, ara, maan, simm, scute, etc.
+	// These should be returned in uppercase without hyphen insertion
+	amateurPattern := regexp.MustCompile(`^(?i)(?:oreco|luxu|siro|gana|ara|maan|simm|scute|hmhi|blor|nnpj|suke|ntk|cap|apak|sweet|nonn)\d{3,4}$`)
+	if amateurPattern.MatchString(contentID) {
+		return strings.ToUpper(contentID) // Return amateur IDs in uppercase
+	}
+
 	re := regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
 	matches := re.FindStringSubmatch(contentID)
 

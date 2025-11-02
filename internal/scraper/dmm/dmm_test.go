@@ -142,6 +142,15 @@ func TestNormalizeContentID(t *testing.T) {
 		{"T28 format", "T28-123", "t28123"},
 		{"leading zeros", "MDB-087", "mdb00087"},
 		{"3 digit number", "ABC-001", "abc00001"},
+		// Amateur IDs (no zero-padding)
+		{"amateur oreco", "oreco183", "oreco183"},
+		{"amateur ORECO uppercase", "ORECO183", "oreco183"},
+		{"amateur luxu", "luxu456", "luxu456"},
+		{"amateur siro", "siro789", "siro789"},
+		{"amateur cap (3 letters)", "cap123", "cap123"},
+		{"amateur CAP uppercase", "CAP123", "cap123"},
+		{"amateur ntk (3 letters)", "ntk456", "ntk456"},
+		{"amateur ara (3 letters)", "ara789", "ara789"},
 	}
 
 	for _, tt := range tests {
@@ -164,6 +173,15 @@ func TestNormalizeID(t *testing.T) {
 		{"with suffix", "ipx00535z", "IPX-535Z"},
 		{"T28 format", "t28123", "T-28123"}, // normalizeID adds hyphen after letter prefix
 		{"short number", "mdb00087", "MDB-087"},
+		// Amateur IDs (no hyphen insertion)
+		{"amateur oreco", "oreco183", "ORECO183"},
+		{"amateur ORECO uppercase", "ORECO183", "ORECO183"},
+		{"amateur luxu", "luxu456", "LUXU456"},
+		{"amateur siro", "siro789", "SIRO789"},
+		{"amateur cap (3 letters)", "cap123", "CAP123"},
+		{"amateur CAP uppercase", "CAP123", "CAP123"},
+		{"amateur ntk (3 letters)", "ntk456", "NTK456"},
+		{"amateur ara (3 letters)", "ara789", "ARA789"},
 	}
 
 	for _, tt := range tests {
@@ -200,6 +218,11 @@ func TestExtractContentIDFromURL(t *testing.T) {
 			name:     "with query parameters",
 			url:      "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/?ref=search",
 			expected: "ipx00535",
+		},
+		{
+			name:     "amateur video",
+			url:      "https://video.dmm.co.jp/amateur/content/?id=oreco183",
+			expected: "oreco183",
 		},
 		{
 			name:     "no content ID",

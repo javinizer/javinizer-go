@@ -48,10 +48,22 @@ func TestMatcher_MatchFile(t *testing.T) {
 		{"Lowercase", "ipx-535.mp4", "IPX-535", 0, false, true},
 		{"Mixed case", "IpX-535.mp4", "IPX-535", 0, false, true},
 
+		// Amateur IDs (no hyphen, specific prefixes)
+		{"Amateur oreco", "oreco183.mp4", "ORECO183", 0, false, true},
+		{"Amateur luxu", "luxu456.mp4", "LUXU456", 0, false, true},
+		{"Amateur siro", "siro789.mp4", "SIRO789", 0, false, true},
+		{"Amateur with title", "oreco183 Beautiful Girl.mp4", "ORECO183", 0, false, true},
+		{"Amateur maan", "maan321.mp4", "MAAN321", 0, false, true},
+		{"Amateur cap (3 letters)", "cap123.mp4", "CAP123", 0, false, true},
+		{"Amateur ntk (3 letters)", "ntk456.mp4", "NTK456", 0, false, true},
+		{"Amateur ara (3 letters)", "ara789.mp4", "ARA789", 0, false, true},
+
 		// Edge cases
 		{"No match", "random_movie.mp4", "", 0, false, false},
 		{"Only numbers", "12345.mp4", "", 0, false, false},
 		{"Invalid format", "ABC_123.mp4", "", 0, false, false},
+		{"Generic scene001 not matched", "scene001.mp4", "", 0, false, false}, // Should not match due to restricted prefixes
+		{"video1080 not matched", "video1080.mp4", "", 0, false, false},       // Should not match due to restricted prefixes
 	}
 
 	for _, tc := range testCases {
