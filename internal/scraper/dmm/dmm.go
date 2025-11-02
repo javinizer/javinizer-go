@@ -909,10 +909,6 @@ func (s *Scraper) extractActresses(doc *goquery.Document) []models.ActressInfo {
 			}
 		}
 
-		// Note: We don't construct fallback URLs because DMM actress thumbnails use romaji names
-		// (e.g., https://pics.dmm.co.jp/mono/actjpgs/sirakami_emika.jpg), but DMM pages only
-		// provide Japanese names. The aggregator will use r18dev's ThumbURL when available.
-
 		// Determine if name is Japanese (using Unicode properties for Go 1.25+ compatibility)
 		isJapanese := regexp.MustCompile(`\p{Hiragana}|\p{Katakana}|\p{Han}`).MatchString(actressName)
 
@@ -932,6 +928,12 @@ func (s *Scraper) extractActresses(doc *goquery.Document) []models.ActressInfo {
 				actress.LastName = parts[0]
 				actress.FirstName = parts[1]
 			}
+		}
+
+		// Try to construct fallback thumbnail URLs if we have no thumb yet
+		// DMM actress thumbnails follow pattern: https://pics.dmm.co.jp/mono/actjpgs/{name}.jpg
+		if actress.ThumbURL == "" {
+			actress.ThumbURL = s.tryActressThumbURLs(actress.FirstName, actress.LastName, actress.DMMID)
 		}
 
 		actresses = append(actresses, actress)
@@ -1093,7 +1095,125 @@ func (s *Scraper) extractActressFromLink(sel *goquery.Selection) models.ActressI
 		}
 	}
 
+	// Try to construct fallback thumbnail URLs if we have no thumb yet
+	if actress.ThumbURL == "" {
+		actress.ThumbURL = s.tryActressThumbURLs(actress.FirstName, actress.LastName, actress.DMMID)
+	}
+
 	return actress
+}
+
+// tryActressThumbURLs tries to construct and test actress thumbnail URLs
+// Strategy:
+// 1. If we have English/romaji names, try constructing URL directly
+// 2. If we have DMM ID, fetch actress profile page and extract romaji from hiragana
+// 3. Test each candidate URL and return the first working one
+func (s *Scraper) tryActressThumbURLs(firstName, lastName string, dmmID int) string {
+	candidates := make([]string, 0)
+
+	// Strategy 1: Try with provided English/romaji names if available
+	if firstName != "" && lastName != "" {
+		firstLower := strings.ToLower(firstName)
+		lastLower := strings.ToLower(lastName)
+
+		candidates = append(candidates,
+			fmt.Sprintf("https://pics.dmm.co.jp/mono/actjpgs/%s_%s.jpg", lastLower, firstLower),  // lastname_firstname (most common)
+			fmt.Sprintf("https://pics.dmm.co.jp/mono/actjpgs/%s_%s.jpg", firstLower, lastLower),  // firstname_lastname
+		)
+	}
+
+	// Strategy 2: If we have DMM ID, fetch actress page and extract romaji from hiragana
+	if dmmID > 0 {
+		romajiVariants := s.extractRomajiVariantsFromActressPage(dmmID)
+		for _, romaji := range romajiVariants {
+			candidates = append(candidates,
+				fmt.Sprintf("https://pics.dmm.co.jp/mono/actjpgs/%s.jpg", romaji),
+			)
+		}
+	}
+
+	// Create a client that doesn't follow redirects for URL testing
+	// We want to detect 302s and only accept exact 200 responses
+	testClient := resty.New().
+		SetRedirectPolicy(resty.NoRedirectPolicy()).
+		SetTimeout(5 * time.Second)
+
+	// Test each candidate URL
+	for _, url := range candidates {
+		resp, err := testClient.R().
+			SetDoNotParseResponse(true).
+			Head(url)
+
+		// Only accept exact 200 OK, not redirects (302) or other status codes
+		if err == nil && resp.StatusCode() == 200 {
+			logging.Debugf("DMM: Found actress thumbnail via fallback: %s", url)
+			return url
+		}
+	}
+
+	logging.Debugf("DMM: No actress thumbnail found (tried %d candidates)", len(candidates))
+	return ""
+}
+
+// extractRomajiVariantsFromActressPage fetches the actress profile page and returns multiple romaji variants
+// Returns variants with different split points for lastname_firstname format
+func (s *Scraper) extractRomajiVariantsFromActressPage(dmmID int) []string {
+	url := fmt.Sprintf("https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=%d/", dmmID)
+
+	resp, err := s.client.R().Get(url)
+	if err != nil || resp.StatusCode() != 200 {
+		logging.Debugf("DMM: Failed to fetch actress page for ID %d", dmmID)
+		return nil
+	}
+
+	// Parse HTML
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+	if err != nil {
+		return nil
+	}
+
+	// Extract title: "白上咲花(しらかみえみか) - アダルトDVD..."
+	title := doc.Find("title").Text()
+
+	// Extract hiragana reading from parentheses
+	re := regexp.MustCompile(`\(([ぁ-ん]+)\)`)
+	matches := re.FindStringSubmatch(title)
+
+	if len(matches) < 2 {
+		logging.Debugf("DMM: No hiragana reading found in actress page title")
+		return nil
+	}
+
+	hiragana := matches[1]
+	logging.Debugf("DMM: Extracted hiragana reading: %s", hiragana)
+
+	// Convert hiragana to romaji
+	romaji := hiraganaToRomaji(hiragana)
+	logging.Debugf("DMM: Converted to romaji: %s", romaji)
+
+	// Generate multiple split variants to try
+	// Japanese family names are typically 2-6 characters in romaji
+	variants := make([]string, 0)
+
+	if len(romaji) >= 4 {
+		// Try different split points (most common first)
+		// Japanese family names are typically 4-8 chars in romaji
+		splitPoints := []int{8, 7, 6, 5, 4, 3, 9, 10, 2} // Order by likelihood (longer names first)
+		for _, splitPoint := range splitPoints {
+			if splitPoint < len(romaji)-1 {
+				lastName := romaji[:splitPoint]
+				firstName := romaji[splitPoint:]
+				variant := lastName + "_" + firstName
+				variants = append(variants, variant)
+			}
+		}
+	}
+
+	// Also add the unsplit version as a fallback
+	variants = append(variants, romaji)
+
+	logging.Debugf("DMM: Generated %d romaji variants from hiragana", len(variants))
+	return variants
 }
 
 // extractCoverURL extracts the cover image URL
@@ -1264,4 +1384,76 @@ func cleanString(s string) string {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
 	return s
+}
+
+// hiraganaToRomaji converts hiragana to romaji using Nihon-shiki romanization
+// DMM uses Nihon-shiki (si, ti, tu) not Hepburn (shi, chi, tsu)
+// Example: しらかみえみか -> sirakamiemika
+func hiraganaToRomaji(hiragana string) string {
+	// Hiragana to romaji mapping (Nihon-shiki)
+	mapping := map[string]string{
+		"あ": "a", "い": "i", "う": "u", "え": "e", "お": "o",
+		"か": "ka", "き": "ki", "く": "ku", "け": "ke", "こ": "ko",
+		"が": "ga", "ぎ": "gi", "ぐ": "gu", "げ": "ge", "ご": "go",
+		"さ": "sa", "し": "si", "す": "su", "せ": "se", "そ": "so",
+		"ざ": "za", "じ": "zi", "ず": "zu", "ぜ": "ze", "ぞ": "zo",
+		"た": "ta", "ち": "ti", "つ": "tu", "て": "te", "と": "to",
+		"だ": "da", "ぢ": "di", "づ": "du", "で": "de", "ど": "do",
+		"な": "na", "に": "ni", "ぬ": "nu", "ね": "ne", "の": "no",
+		"は": "ha", "ひ": "hi", "ふ": "hu", "へ": "he", "ほ": "ho",
+		"ば": "ba", "び": "bi", "ぶ": "bu", "べ": "be", "ぼ": "bo",
+		"ぱ": "pa", "ぴ": "pi", "ぷ": "pu", "ぺ": "pe", "ぽ": "po",
+		"ま": "ma", "み": "mi", "む": "mu", "め": "me", "も": "mo",
+		"や": "ya", "ゆ": "yu", "よ": "yo",
+		"ら": "ra", "り": "ri", "る": "ru", "れ": "re", "ろ": "ro",
+		"わ": "wa", "を": "wo", "ん": "n",
+		// Small kana
+		"ゃ": "ya", "ゅ": "yu", "ょ": "yo",
+		"ぁ": "a", "ぃ": "i", "ぅ": "u", "ぇ": "e", "ぉ": "o",
+		"っ": "", // Small tsu (gemination marker, handled separately)
+	}
+
+	result := ""
+	runes := []rune(hiragana)
+
+	for i := 0; i < len(runes); i++ {
+		char := string(runes[i])
+
+		// Check for combined characters (きゃ, しゃ, etc.)
+		if i+1 < len(runes) {
+			next := string(runes[i+1])
+			if next == "ゃ" || next == "ゅ" || next == "ょ" {
+				// Consonant + small ya/yu/yo
+				if romaji, ok := mapping[char]; ok {
+					// Remove the vowel and add the y-sound
+					if len(romaji) > 0 {
+						consonant := romaji[:len(romaji)-1] // Remove last char (vowel)
+						result += consonant + mapping[next]
+						i++ // Skip next character
+						continue
+					}
+				}
+			}
+
+			// Check for small tsu (gemination - doubles next consonant)
+			if char == "っ" && i+1 < len(runes) {
+				nextChar := string(runes[i+1])
+				if romaji, ok := mapping[nextChar]; ok && len(romaji) > 0 {
+					// Double the first consonant
+					result += string(romaji[0])
+					continue
+				}
+			}
+		}
+
+		// Regular character mapping
+		if romaji, ok := mapping[char]; ok {
+			result += romaji
+		} else {
+			// Unknown character, keep as-is
+			result += char
+		}
+	}
+
+	return result
 }
