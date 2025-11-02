@@ -214,6 +214,29 @@ func (r *MovieRepository) ensureGenresExist(genres []models.Genre) error {
 }
 
 // ensureActressesExist ensures all actresses exist in DB, gets or creates them
+// mergeActressData updates existing actress with new data if available
+func (r *MovieRepository) mergeActressData(existing *models.Actress, new models.Actress) bool {
+	needsUpdate := false
+
+	// Update ThumbURL if we have a new one and existing doesn't have one
+	if new.ThumbURL != "" && existing.ThumbURL == "" {
+		existing.ThumbURL = new.ThumbURL
+		needsUpdate = true
+	}
+
+	// Update FirstName/LastName if we have new ones and existing doesn't
+	if new.FirstName != "" && existing.FirstName == "" {
+		existing.FirstName = new.FirstName
+		needsUpdate = true
+	}
+	if new.LastName != "" && existing.LastName == "" {
+		existing.LastName = new.LastName
+		needsUpdate = true
+	}
+
+	return needsUpdate
+}
+
 func (r *MovieRepository) ensureActressesExist(actresses []models.Actress) error {
 	for i := range actresses {
 		var existing models.Actress
@@ -234,7 +257,12 @@ func (r *MovieRepository) ensureActressesExist(actresses []models.Actress) error
 		}
 
 		if err == nil {
-			// Actress exists, use their ID
+			// Actress exists, merge new data and update if needed
+			if r.mergeActressData(&existing, actresses[i]) {
+				if err := r.db.Save(&existing).Error; err != nil {
+					return err
+				}
+			}
 			actresses[i] = existing
 		} else {
 			// Actress doesn't exist, create them
@@ -242,16 +270,31 @@ func (r *MovieRepository) ensureActressesExist(actresses []models.Actress) error
 				// Might be a race condition, try to find again
 				if actresses[i].DMMID != 0 {
 					if err := r.db.Where("dmm_id = ?", actresses[i].DMMID).First(&existing).Error; err == nil {
+						if r.mergeActressData(&existing, actresses[i]) {
+							if err := r.db.Save(&existing).Error; err != nil {
+								return err
+							}
+						}
 						actresses[i] = existing
 						continue
 					}
 				} else if actresses[i].JapaneseName != "" {
 					if err := r.db.Where("japanese_name = ?", actresses[i].JapaneseName).First(&existing).Error; err == nil {
+						if r.mergeActressData(&existing, actresses[i]) {
+							if err := r.db.Save(&existing).Error; err != nil {
+								return err
+							}
+						}
 						actresses[i] = existing
 						continue
 					}
 				} else if actresses[i].FirstName != "" || actresses[i].LastName != "" {
 					if err := r.db.Where("first_name = ? AND last_name = ?", actresses[i].FirstName, actresses[i].LastName).First(&existing).Error; err == nil {
+						if r.mergeActressData(&existing, actresses[i]) {
+							if err := r.db.Save(&existing).Error; err != nil {
+								return err
+							}
+						}
 						actresses[i] = existing
 						continue
 					}
