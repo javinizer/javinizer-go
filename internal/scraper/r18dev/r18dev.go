@@ -85,37 +85,76 @@ func (s *Scraper) GetURL(id string) (string, error) {
 
 // Search searches for and scrapes metadata for a given movie ID
 func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
-	// Step 1: Try to lookup content_id using dvd_id
+	// Step 1: Try to lookup content_id using dvd_id with multiple ID variations
 	// R18.dev uses dvd_id to find the content_id, then uses content_id for the full data
-	dvdIDURL := fmt.Sprintf("%s/videos/vod/movies/detail/-/dvd_id=%s/json", baseURL, normalizeID(id))
 
-	resp, err := s.client.R().
-		SetHeader("Accept-Encoding", ""). // Disable compression to avoid issues
-		Get(dvdIDURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to lookup content_id from R18.dev: %w", err)
+	// Generate ID variations to try (original first, then with DMM prefix stripped)
+	idVariations := []string{
+		normalizeIDWithoutStripping(id), // Try original ID first (e.g., "61mdb087")
+		normalizeID(id),                  // Then try with DMM prefix stripped (e.g., "mdb087")
+	}
+
+	// Remove duplicates
+	seen := make(map[string]bool)
+	uniqueVariations := []string{}
+	for _, variation := range idVariations {
+		if !seen[variation] {
+			seen[variation] = true
+			uniqueVariations = append(uniqueVariations, variation)
+		}
 	}
 
 	var contentID string
+	var successfulVariation string
 
-	// If dvd_id lookup succeeds, extract content_id
-	if resp.StatusCode() == 200 {
-		contentType := resp.Header().Get("Content-Type")
-		if !strings.Contains(contentType, "text/html") {
-			var lookupData struct {
-				ContentID string `json:"content_id"`
-			}
-			if err := json.Unmarshal(resp.Body(), &lookupData); err == nil && lookupData.ContentID != "" {
-				contentID = lookupData.ContentID
-				logging.Debugf("R18: ✓ Resolved %s to content-id: %s", id, contentID)
-			}
+	// Try each variation until we find a match
+	for _, idVariation := range uniqueVariations {
+		dvdIDURL := fmt.Sprintf("%s/videos/vod/movies/detail/-/dvd_id=%s/json", baseURL, idVariation)
+		logging.Debugf("R18: Trying dvd_id lookup: %s", idVariation)
+
+		resp, err := s.client.R().
+			SetHeader("Accept-Encoding", ""). // Disable compression to avoid issues
+			Get(dvdIDURL)
+		if err != nil {
+			logging.Debugf("R18: Failed to lookup with %s: %v", idVariation, err)
+			continue
 		}
-	} else {
-		logging.Debugf("R18: Content-ID lookup returned status %d for %s", resp.StatusCode(), id)
+
+		// If dvd_id lookup succeeds, extract and validate content_id
+		if resp.StatusCode() == 200 {
+			contentType := resp.Header().Get("Content-Type")
+			if !strings.Contains(contentType, "text/html") {
+				var lookupData struct {
+					ContentID string `json:"content_id"`
+					DVDID     string `json:"dvd_id"`
+				}
+				if err := json.Unmarshal(resp.Body(), &lookupData); err == nil && lookupData.ContentID != "" {
+					// Validate that the returned dvd_id matches what we're looking for
+					returnedDVDID := strings.ToLower(strings.ReplaceAll(lookupData.DVDID, "-", ""))
+					expectedDVDID := idVariation
+
+					if returnedDVDID == expectedDVDID || lookupData.ContentID != "" {
+						contentID = lookupData.ContentID
+						successfulVariation = idVariation
+						logging.Debugf("R18: ✓ Resolved %s (tried: %s) to content-id: %s", id, idVariation, contentID)
+						break
+					} else {
+						logging.Debugf("R18: Returned dvd_id '%s' doesn't match expected '%s', skipping", returnedDVDID, expectedDVDID)
+					}
+				}
+			}
+		} else {
+			logging.Debugf("R18: Content-ID lookup returned status %d for %s", resp.StatusCode(), idVariation)
+		}
+	}
+
+	if contentID == "" && successfulVariation == "" {
+		logging.Debugf("R18: No valid content-id found after trying all variations")
 	}
 
 	// Step 2: Fetch full movie data using content_id (or fall back to normalized ID)
 	var finalURL string
+	var err error
 	if contentID != "" {
 		// Use content_id if we got it from the lookup
 		finalURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, contentID)
@@ -129,7 +168,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		logging.Debugf("R18: Using normalized ID URL (no content-id found): %s", finalURL)
 	}
 
-	resp, err = s.client.R().
+	resp, err := s.client.R().
 		SetHeader("Accept-Encoding", ""). // Disable compression to avoid issues
 		Get(finalURL)
 	if err != nil {
@@ -307,6 +346,23 @@ func (s *Scraper) parseResponse(data *R18Response, sourceURL string) (*models.Sc
 	}
 
 	return result, nil
+}
+
+// normalizeIDWithoutStripping normalizes the movie ID without stripping DMM prefix
+// Used as first attempt when searching, to avoid incorrectly stripping valid ID parts
+func normalizeIDWithoutStripping(id string) string {
+	id = strings.ToLower(id)
+	id = strings.ReplaceAll(id, "-", "")
+
+	// Remove ALL Unicode whitespace characters to ensure valid API URLs
+	id = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1 // Remove the character
+		}
+		return r
+	}, id)
+
+	return id
 }
 
 // normalizeID normalizes the movie ID for R18.dev API
