@@ -673,28 +673,30 @@ func (s *Scraper) extractMaker(doc *goquery.Document, isNewSite bool) string {
 		return s.extractMakerNewSite(doc)
 	}
 
-	// Updated pattern to match PowerShell: supports both ?maker= and /article=maker/id= formats
-	makerRegex := regexp.MustCompile(`<a[^>]*href="[^"]*(?:\?maker=|/article=maker/id=)(\d+)[^"]*"[^>]*>([\s\S]*?)</a>`)
-	html, _ := doc.Html()
-	matches := makerRegex.FindStringSubmatch(html)
-
-	if len(matches) > 2 {
-		return cleanString(matches[2])
-	}
-	return ""
+	// Use goquery to find the maker link and extract text (without HTML tags)
+	// Supports both ?maker= and /article=maker/id= formats
+	var maker string
+	doc.Find("a[href*='?maker='], a[href*='/article=maker/id=']").Each(func(i int, sel *goquery.Selection) {
+		if maker == "" {
+			// Extract text content only (strips HTML tags automatically)
+			maker = cleanString(sel.Text())
+		}
+	})
+	return maker
 }
 
 // extractLabel extracts the label name
 func (s *Scraper) extractLabel(doc *goquery.Document) string {
-	// Updated pattern to match PowerShell: supports both ?label= and /article=label/id= formats
-	labelRegex := regexp.MustCompile(`<a[^>]*href="[^"]*(?:\?label=|/article=label/id=)(\d+)[^"]*"[^>]*>([\s\S]*?)</a>`)
-	html, _ := doc.Html()
-	matches := labelRegex.FindStringSubmatch(html)
-
-	if len(matches) > 2 {
-		return cleanString(matches[2])
-	}
-	return ""
+	// Use goquery to find the label link and extract text (without HTML tags)
+	// Supports both ?label= and /article=label/id= formats
+	var label string
+	doc.Find("a[href*='?label='], a[href*='/article=label/id=']").Each(func(i int, sel *goquery.Selection) {
+		if label == "" {
+			// Extract text content only (strips HTML tags automatically)
+			label = cleanString(sel.Text())
+		}
+	})
+	return label
 }
 
 // extractSeries extracts the series name

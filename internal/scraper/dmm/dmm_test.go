@@ -946,8 +946,8 @@ func TestExtractLabel_Formats(t *testing.T) {
 		{
 			name:        "Label with special characters",
 			html:        `<a href="?label=123">Label &amp; Co.</a>`,
-			expected:    "Label &amp; Co.",
-			description: "Should preserve HTML entities in label",
+			expected:    "Label & Co.",
+			description: "Should decode HTML entities in label (&amp; becomes &)",
 		},
 		{
 			name:        "No label",
