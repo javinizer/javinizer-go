@@ -404,11 +404,12 @@ func (s *Scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 	}
 
 	// Priority order (higher = better):
-	// 1. /monthly/standard/ (monthly standard subscription - most accessible)
-	// 2. /monthly/premium/ (monthly premium subscription)
-	// 3. /digital/videoa/ or /digital/videoc/ (digital video DVD on www.dmm.co.jp)
-	// 4. /mono/dvd/ (physical DVD pages)
-	// 5. video.dmm.co.jp (digital streaming video pages)
+	// 1. video.dmm.co.jp/amateur/ (amateur pages have full metadata - highest for amateur)
+	// 2. /monthly/standard/ (monthly standard subscription - but limited metadata)
+	// 3. /monthly/premium/ (monthly premium subscription)
+	// 4. /digital/videoa/ or /digital/videoc/ (digital video DVD on www.dmm.co.jp)
+	// 5. /mono/dvd/ (physical DVD pages)
+	// 6. video.dmm.co.jp/av/ (digital streaming video pages)
 
 	// Extract base ID from content ID (e.g., "4sone860" -> "sone860", "61mdb087" -> "mdb087")
 	// Strip leading digits to get base ID, keep lowercase for URL matching
@@ -455,8 +456,10 @@ func (s *Scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 
 		// Assign priority
 		priority := 0
-		if strings.Contains(fullURL, "/monthly/standard/") {
-			priority = 5 // Highest priority: monthly standard subscription (most accessible)
+		if strings.Contains(fullURL, "video.dmm.co.jp/amateur/") {
+			priority = 6 // Highest for amateur: amateur pages have full metadata
+		} else if strings.Contains(fullURL, "/monthly/standard/") {
+			priority = 5 // Monthly standard subscription (but limited metadata for amateur)
 		} else if strings.Contains(fullURL, "/monthly/premium/") {
 			priority = 4 // Monthly premium subscription
 		} else if strings.Contains(fullURL, "/mono/dvd/") {
@@ -464,7 +467,7 @@ func (s *Scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 		} else if strings.Contains(fullURL, "/digital/videoa/") || strings.Contains(fullURL, "/digital/videoc/") {
 			priority = 2 // Digital video DVD
 		} else if strings.Contains(fullURL, "video.dmm.co.jp") {
-			priority = 1 // Digital streaming video
+			priority = 1 // Digital streaming video (av pages)
 		}
 
 		// Extract content ID from URL for comparison
