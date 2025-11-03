@@ -191,11 +191,12 @@ func TestMovieRepository_DeleteWithTranslations(t *testing.T) {
 
 	// Create a movie with translations
 	movie := &models.Movie{
-		ID:    "TEST-DELETE",
-		Title: "Test Movie",
+		ContentID: "testdelete", // ContentID is the primary key
+		ID:        "TEST-DELETE",
+		Title:     "Test Movie",
 		Translations: []models.MovieTranslation{
-			{MovieID: "TEST-DELETE", Language: "en", Title: "English Title"},
-			{MovieID: "TEST-DELETE", Language: "ja", Title: "日本語タイトル"},
+			{Language: "en", Title: "English Title"}, // MovieID will be set by Upsert
+			{Language: "ja", Title: "日本語タイトル"},       // MovieID will be set by Upsert
 		},
 	}
 
@@ -209,7 +210,7 @@ func TestMovieRepository_DeleteWithTranslations(t *testing.T) {
 
 	// Check translations exist in database directly
 	var translationCount int64
-	db.DB.Model(&models.MovieTranslation{}).Where("movie_id = ?", "TEST-DELETE").Count(&translationCount)
+	db.DB.Model(&models.MovieTranslation{}).Where("movie_id = ?", "testdelete").Count(&translationCount)
 	assert.Equal(t, int64(2), translationCount, "Should have 2 translations")
 
 	// Delete the movie
@@ -221,7 +222,7 @@ func TestMovieRepository_DeleteWithTranslations(t *testing.T) {
 	assert.Error(t, err, "Movie should not exist after delete")
 
 	// Verify translations are also gone
-	db.DB.Model(&models.MovieTranslation{}).Where("movie_id = ?", "TEST-DELETE").Count(&translationCount)
+	db.DB.Model(&models.MovieTranslation{}).Where("movie_id = ?", "testdelete").Count(&translationCount)
 	assert.Equal(t, int64(0), translationCount, "Translations should be deleted with movie")
 }
 

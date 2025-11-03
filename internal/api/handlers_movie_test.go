@@ -205,8 +205,8 @@ func TestListMovies(t *testing.T) {
 		{
 			name: "list multiple movies",
 			setupData: func(repo *database.MovieRepository) {
-				repo.Upsert(&models.Movie{ID: "IPX-535", Title: "Movie 1"})
-				repo.Upsert(&models.Movie{ID: "ABC-123", Title: "Movie 2"})
+				repo.Upsert(&models.Movie{ContentID: "ipx535", ID: "IPX-535", Title: "Movie 1"})
+				repo.Upsert(&models.Movie{ContentID: "abc123", ID: "ABC-123", Title: "Movie 2"})
 			},
 			expectedStatus: 200,
 			validateFn: func(t *testing.T, resp *MoviesResponse) {

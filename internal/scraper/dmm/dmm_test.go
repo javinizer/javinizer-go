@@ -1248,6 +1248,51 @@ func TestNormalizeID_EdgeCases(t *testing.T) {
 	}
 }
 
+// TestNormalizeID_MalformedInputs tests handling of malformed and edge case inputs
+func TestNormalizeID_MalformedInputs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// Whitespace handling
+		{"Leading whitespace", " sone860", " SONE860"},   // Whitespace preserved (not stripped in current implementation)
+		{"Trailing whitespace", "sone860 ", "SONE-860 "}, // Normalizes ID, preserves trailing space
+		{"Internal whitespace", "sone 860", "SONE 860"},  // No match - returns uppercase as-is
+
+		// Special characters (no match - returns uppercase as-is)
+		{"Special chars in ID", "IPX-535!@#", "IPX-535!@#"},
+		{"Asterisk in ID", "SONE*860", "SONE*860"},
+
+		// Very long numbers (no integer overflow with string-based approach)
+		// Leading zeros are stripped, then padded to minimum 3 digits
+		{"Very long number", "ipx" + strings.Repeat("0", 100) + "1", "IPX-001"},
+		{"Extremely long number", "abc" + strings.Repeat("9", 200), "ABC-" + strings.Repeat("9", 200)},
+
+		// All zeros
+		{"All zero digits", "ipx00000", "IPX-000"},
+		{"Single zero", "abc0", "ABC-000"},
+
+		// Very short numbers
+		{"Single digit", "abc1", "ABC-001"},
+		{"Two digits", "abc12", "ABC-012"},
+
+		// Only components (no match patterns)
+		{"Only prefix", "sone", "SONE"},
+		{"Only numbers", "860", "860"},
+
+		// Mixed case already handled in main tests
+		{"MixedCase input", "AbC123", "ABC-123"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeID(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 // TestExtractCandidateURLs_Priorities verifies URL priority assignment
 func TestExtractCandidateURLs_Priorities(t *testing.T) {
 	tests := []struct {

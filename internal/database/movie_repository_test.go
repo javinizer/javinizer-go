@@ -1,6 +1,7 @@
 package database
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -12,9 +13,11 @@ import (
 
 func createTestMovie(id string) *models.Movie {
 	releaseDate := time.Date(2023, 5, 15, 0, 0, 0, 0, time.UTC)
+	// Note: ContentID is now the primary key, ID is for display/search
+	// For tests, we use lowercase version of ID as ContentID (mimics real scraper behavior)
 	return &models.Movie{
-		ID:            id,
-		ContentID:     "content-" + id,
+		ContentID:     strings.ToLower(strings.ReplaceAll(id, "-", "")), // e.g., "ipx064"
+		ID:            id,                                               // e.g., "IPX-064"
 		DisplayName:   "Test Movie " + id,
 		Title:         "Test Title " + id,
 		OriginalTitle: "テストタイトル" + id,

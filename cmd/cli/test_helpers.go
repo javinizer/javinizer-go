@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -459,9 +460,11 @@ func assertFileNotExists(t *testing.T, path string) {
 //	movie := createTestMovie("IPX-535", "Test Movie Title")
 func createTestMovie(id, title string) *models.Movie {
 	releaseDate := time.Date(2023, 5, 1, 0, 0, 0, 0, time.UTC)
+	// ContentID is the primary key, generate it from ID (lowercase, no hyphens)
+	contentID := strings.ToLower(strings.ReplaceAll(id, "-", ""))
 	return &models.Movie{
 		ID:          id,
-		ContentID:   "test00001",
+		ContentID:   contentID,
 		Title:       title,
 		ReleaseDate: &releaseDate,
 		Runtime:     120,

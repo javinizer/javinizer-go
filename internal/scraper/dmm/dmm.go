@@ -30,6 +30,12 @@ const (
 	newAmateurURL = newBaseURL + "/amateur/content/?id=%s"
 )
 
+// Package-level compiled regexes for performance
+var (
+	normalizeIDRegex        = regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
+	normalizeContentIDRegex = regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
+)
+
 // Scraper implements the DMM/Fanza scraper
 type Scraper struct {
 	client          *resty.Client
@@ -1415,8 +1421,7 @@ func normalizeContentID(id string) string {
 	idNoHyphen := strings.ReplaceAll(idLower, "-", "")
 
 	// Extract components: optional leading digits, letters, numbers, optional suffix
-	re := regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
-	matches := re.FindStringSubmatch(idNoHyphen)
+	matches := normalizeContentIDRegex.FindStringSubmatch(idNoHyphen)
 
 	if len(matches) > 3 {
 		prefix := matches[2]
@@ -1437,28 +1442,38 @@ func normalizeContentID(id string) string {
 			return prefix + number + suffix
 		}
 
-		// Standard JAV ID or ambiguous - apply zero-padding to be safe
+		// Standard JAV ID or ambiguous - apply zero-padding to width 5 (string-based, safe for all lengths)
 		// Cache will correct if this was actually an amateur ID
-		paddedNumber := fmt.Sprintf("%05s", number)
-		return prefix + paddedNumber + suffix
+		if len(number) < 5 {
+			number = strings.Repeat("0", 5-len(number)) + number
+		}
+		return prefix + number + suffix
 	}
 
 	return idNoHyphen
 }
 
 // normalizeID converts content ID back to standard DVD-ID format with hyphen
-// Examples: "ipx00535" -> "IPX-535", "sone860" -> "SONE-860", "oreco183" -> "ORECO-183"
+//
+// Examples:
+//
+//	"ipx00535"   -> "IPX-535"
+//	"sone860"    -> "SONE-860"
+//	"oreco183"   -> "ORECO-183"
+//	"4sone860"   -> "SONE-860"   (leading digits stripped - DMM catalog prefix)
+//	"61mdb087"   -> "MDB-087"    (leading digits stripped - DMM channel prefix)
+//	"t28123"     -> "T-28123"    (5-digit number preserved)
 //
 // Strategy:
 //  1. Split by word-digit boundary (letters vs numbers)
-//  2. Remove leading zeros from number (e.g., "00535" -> "535")
-//  3. Ensure at least 3 digits remain (pad with zeros if needed)
-//  4. Always add hyphen between prefix and number for consistency
+//  2. Strip leading numeric prefixes (DMM uses catalog/channel codes)
+//  3. Remove leading zeros from number (e.g., "00535" -> "535")
+//  4. Ensure at least 3 digits remain (pad with zeros if needed)
+//  5. Always add hyphen between prefix and number for consistency
 func normalizeID(contentID string) string {
 	// Match pattern: optional leading digits, letter prefix, number, optional suffix
 	// Examples: "4sone860", "sone860", "ipx00535", "oreco183"
-	re := regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
-	matches := re.FindStringSubmatch(strings.ToLower(contentID))
+	matches := normalizeIDRegex.FindStringSubmatch(strings.ToLower(contentID))
 
 	if len(matches) > 3 {
 		prefix := strings.ToUpper(matches[2])
@@ -1468,12 +1483,17 @@ func normalizeID(contentID string) string {
 			suffix = strings.ToUpper(matches[4])
 		}
 
-		// Remove leading zeros from number, but keep at least 3 digits
-		// Examples: "00535" -> "535", "860" -> "860", "01" -> "001"
-		numberInt, err := strconv.Atoi(number)
-		if err == nil {
-			// Format with minimum 3 digits (pad with zeros if needed)
-			number = fmt.Sprintf("%03d", numberInt)
+		// Remove leading zeros from number, but keep at least 3 digits (string-based, no overflow)
+		// Examples: "00535" -> "535", "860" -> "860", "01" -> "001", "00000" -> "000"
+		trimmed := strings.TrimLeft(number, "0")
+		if trimmed == "" {
+			trimmed = "0" // All zeros case
+		}
+		// Pad to minimum 3 digits
+		if len(trimmed) < 3 {
+			number = strings.Repeat("0", 3-len(trimmed)) + trimmed
+		} else {
+			number = trimmed
 		}
 
 		// Always add hyphen between prefix and number for consistency

@@ -6,8 +6,8 @@ import (
 
 // Movie represents the aggregated metadata for a JAV movie
 type Movie struct {
-	ID               string     `json:"id" gorm:"primaryKey"`
-	ContentID        string     `json:"content_id" gorm:"index"`
+	ContentID        string     `json:"content_id" gorm:"primaryKey"`
+	ID               string     `json:"id" gorm:"index"`
 	DisplayName      string     `json:"display_name"`
 	Title            string     `json:"title"`
 	OriginalTitle    string     `json:"original_title"` // Japanese/original language title
@@ -33,7 +33,7 @@ type Movie struct {
 	Screenshots []string  `json:"screenshot_urls" gorm:"serializer:json"`
 
 	// Translations
-	Translations []MovieTranslation `json:"translations" gorm:"foreignKey:MovieID;references:ID"`
+	Translations []MovieTranslation `json:"translations" gorm:"foreignKey:MovieID;references:ContentID"`
 
 	// Metadata
 	SourceName string    `json:"source_name"` // Primary source
@@ -113,7 +113,7 @@ type ActressAlias struct {
 // Tags are used for personal organization and appear in NFO files
 type MovieTag struct {
 	ID        uint      `json:"id" gorm:"primaryKey"`
-	MovieID   string    `json:"movie_id" gorm:"index:idx_movie_tag,unique;not null;size:50"` // Foreign key to movies.id
+	MovieID   string    `json:"movie_id" gorm:"index:idx_movie_tag,unique;not null;size:50"` // Foreign key to movies.content_id (CASCADE handled in Delete)
 	Tag       string    `json:"tag" gorm:"index:idx_movie_tag,unique;not null;size:100"`     // Tag name (case-sensitive)
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -147,7 +147,7 @@ func (MovieTag) TableName() string {
 // History represents a log of file organization operations
 type History struct {
 	ID           uint      `json:"id" gorm:"primaryKey"`
-	MovieID      string    `json:"movie_id" gorm:"index"`          // Foreign key to movies.id
+	MovieID      string    `json:"movie_id" gorm:"index"`          // Foreign key to movies.content_id (nullable for historical records)
 	Operation    string    `json:"operation"`                      // "scrape", "organize", "download", "nfo"
 	OriginalPath string    `json:"original_path"`                  // Source file path
 	NewPath      string    `json:"new_path"`                       // Destination file path
