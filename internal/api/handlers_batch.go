@@ -148,14 +148,12 @@ func updateBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		// If not found by MovieID, try searching by the actual movie.ID (in case of content ID resolution)
-		usedFallback := false
 		if foundResult == nil {
 			for filePath, result := range status.Results {
 				if result.Data != nil {
 					if m, ok := result.Data.(*models.Movie); ok && m.ID == movieID {
 						foundFilePath = filePath
 						foundResult = result
-						usedFallback = true
 						break
 					}
 				}
@@ -167,21 +165,23 @@ func updateBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Update the movie data in the file result
-		foundResult.Data = req.Movie
-
-		// If we used the fallback search, also sync the MovieID to keep job state consistent
-		if usedFallback {
-			foundResult.MovieID = req.Movie.ID
-		}
-
-		job.UpdateFileResult(foundFilePath, foundResult)
-
-		// Also update in database if it exists
+		// Update database first (before updating job state) to complete any mutations
+		// before exposing the pointer to concurrent readers
 		if err := deps.MovieRepo.Upsert(req.Movie); err != nil {
 			logging.Errorf("Failed to update movie in database: %v", err)
 			// Don't fail the request if DB update fails
 		}
+
+		// Clone the FileResult to avoid mutating the shared pointer outside the job lock
+		updatedResult := *foundResult
+
+		// Update the movie data
+		updatedResult.Data = req.Movie
+
+		// Always sync MovieID to keep job state consistent (handles both content ID resolution and user edits)
+		updatedResult.MovieID = req.Movie.ID
+
+		job.UpdateFileResult(foundFilePath, &updatedResult)
 
 		c.JSON(200, MovieResponse{Movie: req.Movie})
 	}
