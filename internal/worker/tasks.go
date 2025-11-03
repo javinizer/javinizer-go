@@ -19,13 +19,14 @@ import (
 // ScrapeTask scrapes metadata for a JAV ID
 type ScrapeTask struct {
 	BaseTask
-	javID           string
-	registry        *models.ScraperRegistry
-	aggregator      *aggregator.Aggregator
-	movieRepo       *database.MovieRepository
-	progressTracker *ProgressTracker
-	dryRun          bool
-	forceRefresh    bool
+	javID                 string
+	registry              *models.ScraperRegistry
+	aggregator            *aggregator.Aggregator
+	movieRepo             *database.MovieRepository
+	progressTracker       *ProgressTracker
+	dryRun                bool
+	forceRefresh          bool
+	customScraperPriority []string // Optional custom scraper priority (nil = use default)
 }
 
 // NewScrapeTask creates a new scrape task
@@ -37,6 +38,7 @@ func NewScrapeTask(
 	progressTracker *ProgressTracker,
 	dryRun bool,
 	forceRefresh bool,
+	customScraperPriority []string, // Optional custom scraper priority (nil = use default)
 ) *ScrapeTask {
 	desc := fmt.Sprintf("Scraping metadata for %s", javID)
 	if dryRun {
@@ -49,18 +51,22 @@ func NewScrapeTask(
 			taskType:    TaskTypeScrape,
 			description: desc,
 		},
-		javID:           javID,
-		registry:        registry,
-		aggregator:      agg,
-		movieRepo:       movieRepo,
-		progressTracker: progressTracker,
-		dryRun:          dryRun,
-		forceRefresh:    forceRefresh,
+		javID:                 javID,
+		registry:              registry,
+		aggregator:            agg,
+		movieRepo:             movieRepo,
+		progressTracker:       progressTracker,
+		dryRun:                dryRun,
+		forceRefresh:          forceRefresh,
+		customScraperPriority: customScraperPriority,
 	}
 }
 
 func (t *ScrapeTask) Execute(ctx context.Context) error {
-	logging.Debugf("[%s] Starting scrape task (dryRun=%v, forceRefresh=%v)", t.javID, t.dryRun, t.forceRefresh)
+	logging.Debugf("[%s] Starting scrape task (dryRun=%v, forceRefresh=%v, customScrapers=%v)", t.javID, t.dryRun, t.forceRefresh, t.customScraperPriority)
+
+	// Determine if we should skip cache
+	skipCache := t.forceRefresh || len(t.customScraperPriority) > 0
 
 	// If force refresh is enabled, delete from cache first
 	if t.forceRefresh {
@@ -73,8 +79,8 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 			logging.Debugf("[%s] Cache cleared successfully", t.javID)
 			t.progressTracker.Update(t.id, 0.1, "Cache cleared, re-scraping...", 0)
 		}
-	} else {
-		// Check cache first (only if not forcing refresh)
+	} else if !skipCache {
+		// Check cache first (only if not forcing refresh and no custom scrapers)
 		logging.Debugf("[%s] Checking cache for existing metadata", t.javID)
 		if cached, err := t.movieRepo.FindByID(t.javID); err == nil {
 			logging.Debugf("[%s] Found in cache: Title=%s, Maker=%s, Actresses=%d",
@@ -87,6 +93,8 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 			return nil
 		}
 		logging.Debugf("[%s] Not found in cache, will scrape from sources", t.javID)
+	} else if len(t.customScraperPriority) > 0 {
+		logging.Debugf("[%s] Custom scrapers specified, bypassing cache", t.javID)
 	}
 
 	// Scrape from sources
@@ -97,8 +105,16 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 	t.progressTracker.Update(t.id, 0.2, msg, 0)
 
 	results := make([]*models.ScraperResult, 0)
-	scrapers := t.registry.GetByPriority([]string{"r18dev", "dmm"})
-	logging.Debugf("[%s] Initialized %d scrapers in priority order", t.javID, len(scrapers))
+
+	// Use custom scraper priority if provided, otherwise use default
+	var scrapers []models.Scraper
+	if len(t.customScraperPriority) > 0 {
+		scrapers = t.registry.GetByPriority(t.customScraperPriority)
+		logging.Debugf("[%s] Using custom scraper priority: %v (%d scrapers)", t.javID, t.customScraperPriority, len(scrapers))
+	} else {
+		scrapers = t.registry.GetByPriority([]string{"r18dev", "dmm"})
+		logging.Debugf("[%s] Using default scraper priority (%d scrapers)", t.javID, len(scrapers))
+	}
 
 	for i, scraper := range scrapers {
 		select {
@@ -479,23 +495,24 @@ func (t *NFOTask) Execute(ctx context.Context) error {
 // It executes scrape, download, organize, and NFO tasks sequentially
 type ProcessFileTask struct {
 	BaseTask
-	match           matcher.MatchResult
-	registry        *models.ScraperRegistry
-	aggregator      *aggregator.Aggregator
-	movieRepo       *database.MovieRepository
-	downloader      *downloader.Downloader
-	organizer       *organizer.Organizer
-	nfoGenerator    *nfo.Generator
-	destPath        string
-	moveFiles       bool
-	forceUpdate     bool
-	forceRefresh    bool
-	progressTracker *ProgressTracker
-	dryRun          bool
-	scrapeEnabled   bool
-	downloadEnabled bool
-	organizeEnabled bool
-	nfoEnabled      bool
+	match                 matcher.MatchResult
+	registry              *models.ScraperRegistry
+	aggregator            *aggregator.Aggregator
+	movieRepo             *database.MovieRepository
+	downloader            *downloader.Downloader
+	organizer             *organizer.Organizer
+	nfoGenerator          *nfo.Generator
+	destPath              string
+	moveFiles             bool
+	forceUpdate           bool
+	forceRefresh          bool
+	progressTracker       *ProgressTracker
+	dryRun                bool
+	scrapeEnabled         bool
+	downloadEnabled       bool
+	organizeEnabled       bool
+	nfoEnabled            bool
+	customScraperPriority []string // Optional custom scraper priority (nil = use default)
 }
 
 // NewProcessFileTask creates a new composite task for processing a file
@@ -517,6 +534,7 @@ func NewProcessFileTask(
 	downloadEnabled bool,
 	organizeEnabled bool,
 	nfoEnabled bool,
+	customScraperPriority []string, // Optional custom scraper priority (nil = use default)
 ) *ProcessFileTask {
 	desc := fmt.Sprintf("Processing %s", match.ID)
 	if dryRun {
@@ -529,23 +547,24 @@ func NewProcessFileTask(
 			taskType:    "process",
 			description: desc,
 		},
-		match:           match,
-		registry:        registry,
-		aggregator:      agg,
-		movieRepo:       movieRepo,
-		downloader:      dl,
-		organizer:       org,
-		nfoGenerator:    nfoGen,
-		destPath:        destPath,
-		moveFiles:       moveFiles,
-		forceUpdate:     forceUpdate,
-		forceRefresh:    forceRefresh,
-		progressTracker: progressTracker,
-		dryRun:          dryRun,
-		scrapeEnabled:   scrapeEnabled,
-		downloadEnabled: downloadEnabled,
-		organizeEnabled: organizeEnabled,
-		nfoEnabled:      nfoEnabled,
+		match:                 match,
+		registry:              registry,
+		aggregator:            agg,
+		movieRepo:             movieRepo,
+		downloader:            dl,
+		organizer:             org,
+		nfoGenerator:          nfoGen,
+		destPath:              destPath,
+		moveFiles:             moveFiles,
+		forceUpdate:           forceUpdate,
+		forceRefresh:          forceRefresh,
+		progressTracker:       progressTracker,
+		dryRun:                dryRun,
+		scrapeEnabled:         scrapeEnabled,
+		downloadEnabled:       downloadEnabled,
+		organizeEnabled:       organizeEnabled,
+		nfoEnabled:            nfoEnabled,
+		customScraperPriority: customScraperPriority,
 	}
 }
 
@@ -569,6 +588,7 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 			t.progressTracker,
 			t.dryRun,
 			t.forceRefresh,
+			t.customScraperPriority,
 		)
 		if err := scrapeTask.Execute(ctx); err != nil {
 			return fmt.Errorf("scrape failed: %w", err)
@@ -578,7 +598,13 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 		// We need to scrape again but this time keep the result
 		if t.dryRun {
 			// Re-scrape to get the movie object for preview
-			scrapers := t.registry.GetByPriority([]string{"r18dev", "dmm"})
+			// Use custom scraper priority if provided
+			var scrapers []models.Scraper
+			if len(t.customScraperPriority) > 0 {
+				scrapers = t.registry.GetByPriority(t.customScraperPriority)
+			} else {
+				scrapers = t.registry.GetByPriority([]string{"r18dev", "dmm"})
+			}
 			results := make([]*models.ScraperResult, 0)
 
 			for _, scraper := range scrapers {

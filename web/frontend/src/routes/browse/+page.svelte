@@ -3,11 +3,13 @@
 	import FileBrowser from '$lib/components/FileBrowser.svelte';
 	import ProgressModal from '$lib/components/ProgressModal.svelte';
 	import BackgroundJobIndicator from '$lib/components/BackgroundJobIndicator.svelte';
+	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
 	import { Play, FolderInput, Scan, FolderOutput, FolderOpen, RotateCcw, Loader2 } from 'lucide-svelte';
+	import type { Scraper } from '$lib/api/types';
 
 	let selectedFiles: string[] = $state([]);
 	let currentJobId: string | null = $state(null);
@@ -25,6 +27,9 @@
 	let showInputBrowser = $state(false);
 	let tempInputPath = $state('');
 	let currentBrowserPath = $state('');
+	let availableScrapers: Scraper[] = $state([]);
+	let selectedScrapers: string[] = $state([]);
+	let showScraperSelector = $state(false);
 
 	// localStorage keys
 	const STORAGE_KEY_INPUT = 'javinizer_input_path';
@@ -46,6 +51,17 @@
 		// Load output path from localStorage, or fall back to initialPath
 		const savedOutputPath = localStorage.getItem(STORAGE_KEY_OUTPUT);
 		destinationPath = savedOutputPath || initialPath;
+
+		// Fetch available scrapers
+		try {
+			availableScrapers = await apiClient.getScrapers();
+			// Initialize with all enabled scrapers
+			selectedScrapers = availableScrapers
+				.filter((s) => s.enabled)
+				.map((s) => s.name);
+		} catch (error) {
+			console.error('Failed to fetch scrapers:', error);
+		}
 	});
 
 	function handleFileSelect(files: string[]) {
@@ -109,7 +125,8 @@
 				strict: false,
 				force: forceRefresh,
 				destination: destinationPath.trim() || undefined,
-				update: updateMode
+				update: updateMode,
+				selected_scrapers: showScraperSelector ? selectedScrapers : undefined
 			});
 			currentJobId = response.job_id;
 
@@ -300,26 +317,82 @@
 		</Card>
 
 		<!-- Controls -->
-		<Card class="p-4">
-			<div class="flex items-center justify-between gap-4">
-				<div class="flex items-center gap-4">
-					<label class="flex items-center gap-2 text-sm">
-						<input type="checkbox" bind:checked={forceRefresh} class="rounded" />
-						<span>Force Refresh</span>
-					</label>
-					<label class="flex items-center gap-2 text-sm">
-						<input type="checkbox" bind:checked={updateMode} class="rounded" />
-						<span>Update Only (metadata only, don't move files)</span>
-					</label>
+		<Card class="p-6">
+			<div class="space-y-6">
+				<!-- Options Section -->
+				<div class="space-y-3">
+					<h3 class="text-sm font-semibold text-foreground mb-3">Scrape Options</h3>
+					<div class="grid gap-3">
+						<label
+							class="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 cursor-pointer transition-colors"
+						>
+							<input
+								type="checkbox"
+								bind:checked={forceRefresh}
+								class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+							/>
+							<div class="flex-1">
+								<span class="text-sm font-medium">Force Refresh</span>
+								<p class="text-xs text-muted-foreground mt-0.5">
+									Clear cache and fetch fresh metadata from scrapers
+								</p>
+							</div>
+						</label>
+
+						<label
+							class="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 cursor-pointer transition-colors"
+						>
+							<input
+								type="checkbox"
+								bind:checked={updateMode}
+								class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+							/>
+							<div class="flex-1">
+								<span class="text-sm font-medium">Update Mode</span>
+								<p class="text-xs text-muted-foreground mt-0.5">
+									Only update metadata files, don't move or organize video files
+								</p>
+							</div>
+						</label>
+
+						<label
+							class="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 cursor-pointer transition-colors"
+						>
+							<input
+								type="checkbox"
+								bind:checked={showScraperSelector}
+								class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+							/>
+							<div class="flex-1">
+								<span class="text-sm font-medium">Manual Scraper Selection</span>
+								<p class="text-xs text-muted-foreground mt-0.5">
+									Choose specific scrapers instead of using default priority
+								</p>
+							</div>
+						</label>
+					</div>
 				</div>
-				<div class="flex items-center gap-2">
+
+				<!-- Scraper Selector (if enabled) -->
+				{#if showScraperSelector}
+					<div class="pt-2 border-t">
+						<ScraperSelector scrapers={availableScrapers} bind:selected={selectedScrapers} />
+					</div>
+				{/if}
+
+				<!-- Action Buttons -->
+				<div class="flex items-center justify-end gap-3 pt-2 border-t">
 					<Button
 						onclick={scanCurrentBrowserPath}
 						disabled={!currentBrowserPath.trim() || scanning}
 						variant="outline"
 					>
 						{#snippet children()}
-							<Scan class="h-4 w-4 mr-2" />
+							{#if scanning}
+								<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+							{:else}
+								<Scan class="h-4 w-4 mr-2" />
+							{/if}
 							{scanning ? 'Scanning...' : 'Scan Current'}
 						{/snippet}
 					</Button>
@@ -330,7 +403,9 @@
 							{:else}
 								<Play class="h-4 w-4 mr-2" />
 							{/if}
-							{scraping ? 'Starting...' : `Scrape ${selectedFiles.length} File${selectedFiles.length !== 1 ? 's' : ''}`}
+							{scraping
+								? 'Starting...'
+								: `Scrape ${selectedFiles.length} File${selectedFiles.length !== 1 ? 's' : ''}`}
 						{/snippet}
 					</Button>
 				</div>

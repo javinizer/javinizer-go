@@ -31,7 +31,7 @@ func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
 		job := deps.JobQueue.CreateJob(req.Files)
 
 		// Start processing in background - use getters for thread-safe access
-		go processBatchJob(job, deps.GetRegistry(), deps.GetAggregator(), deps.MovieRepo, deps.GetMatcher(), req.Strict, req.Force, req.Destination, deps.GetConfig())
+		go processBatchJob(job, deps.GetRegistry(), deps.GetAggregator(), deps.MovieRepo, deps.GetMatcher(), req.Strict, req.Force, req.Destination, deps.GetConfig(), req.SelectedScrapers)
 
 		c.JSON(200, BatchScrapeResponse{
 			JobID: job.ID,

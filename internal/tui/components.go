@@ -541,6 +541,7 @@ func (h *HelpView) View() string {
 	help += "  Tab - Cycle views\n\n"
 
 	help += HelpKeyStyle.Render("Browser View") + "\n"
+	help += "  m - Manual search (select scrapers + ID/URL)\n"
 	help += "  f - Change scan folder\n"
 	help += "  r - Refresh/rescan current folder\n"
 	help += "  ↑/k - Move up\n"

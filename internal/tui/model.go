@@ -61,6 +61,14 @@ type Model struct {
 	folderPickerPath    string
 	folderPickerMode    string // "source" or "dest"
 
+	// Manual search modal state
+	showingManualSearch bool
+	manualSearchInput   textinput.Model
+	scraperCheckboxes   map[string]bool
+	scraperList         []string // Cached sorted list of scraper names for stable ordering
+	manualSearchCursor  int
+	focusOnInput        bool
+
 	// Task state
 	tasks        map[string]*worker.TaskProgress
 	taskOrder    []string // Maintain insertion order
@@ -172,6 +180,17 @@ func New(cfg *config.Config) *Model {
 	ti.CharLimit = 256
 	ti.Width = 50
 	m.pathInput = ti
+
+	// Initialize manual search input
+	manualSearchInput := textinput.New()
+	manualSearchInput.Placeholder = "Enter JAV ID or URL"
+	manualSearchInput.CharLimit = 200
+	manualSearchInput.Width = 50
+	m.manualSearchInput = manualSearchInput
+	m.scraperCheckboxes = make(map[string]bool)
+	m.manualSearchCursor = 0
+	m.focusOnInput = true
+	m.showingManualSearch = false
 
 	// Initialize components
 	m.header = NewHeader()

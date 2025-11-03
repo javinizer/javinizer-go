@@ -13,7 +13,9 @@ import type {
 	OrganizeResponse,
 	OrganizePreviewRequest,
 	OrganizePreviewResponse,
-	AvailableScrapersResponse
+	AvailableScrapersResponse,
+	Scraper,
+	RescrapeRequest
 } from './types';
 
 // Build API base URL dynamically from browser location
@@ -143,6 +145,26 @@ class APIClient {
 	// Get available scrapers
 	async getAvailableScrapers(): Promise<AvailableScrapersResponse> {
 		return this.request<AvailableScrapersResponse>('/api/v1/scrapers');
+	}
+
+	// Get scrapers (simplified version)
+	async getScrapers(): Promise<Scraper[]> {
+		const response = await this.getAvailableScrapers();
+		return response.scrapers.map(s => ({
+			name: s.name,
+			display_name: s.display_name,
+			enabled: s.enabled,
+			options: s.options || {}
+		}));
+	}
+
+	// Rescrape movie with selected scrapers
+	async rescrapeMovie(id: string, req: RescrapeRequest): Promise<Movie> {
+		const response = await this.request<{ movie: Movie }>(`/api/v1/movie/${id}/rescrape`, {
+			method: 'POST',
+			body: JSON.stringify(req)
+		});
+		return response.movie;
 	}
 }
 

@@ -127,6 +127,7 @@ func TestScrapeTask_ForceRefresh(t *testing.T) {
 			progressTracker,
 			false, // dryRun
 			false, // forceRefresh
+			nil,   // no custom scraper priority
 		)
 
 		// Execute task
@@ -150,6 +151,7 @@ func TestScrapeTask_ForceRefresh(t *testing.T) {
 			progressTracker,
 			false, // dryRun
 			true,  // forceRefresh
+			nil,   // no custom scraper priority
 		)
 
 		// Execute task
@@ -306,6 +308,7 @@ func TestScrapeTask_ForceRefresh_NotInCache(t *testing.T) {
 		progressTracker,
 		false, // dryRun
 		true,  // forceRefresh
+		nil,   // no custom scraper priority
 	)
 
 	// Execute task - should not fail even though movie doesn't exist

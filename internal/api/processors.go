@@ -24,12 +24,21 @@ import (
 )
 
 // processBatchJob processes a batch scraping job (metadata only, no file organization)
-func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg *aggregator.Aggregator, movieRepo *database.MovieRepository, mat *matcher.Matcher, strict, force bool, destination string, cfg *config.Config) {
+func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg *aggregator.Aggregator, movieRepo *database.MovieRepository, mat *matcher.Matcher, strict, force bool, destination string, cfg *config.Config, selectedScrapers []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	job.CancelFunc = cancel
 	defer cancel()
 
 	job.MarkStarted()
+
+	// Determine scraper list
+	scrapersToUse := cfg.Scrapers.Priority
+	if len(selectedScrapers) > 0 {
+		scrapersToUse = selectedScrapers
+		logging.Infof("Batch job using custom scrapers: %v", scrapersToUse)
+	}
+
+	usingCustomScrapers := len(selectedScrapers) > 0
 
 	for i, filePath := range job.Files {
 		// Check if context is cancelled
@@ -90,8 +99,8 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 			Message:   fmt.Sprintf("Scraping %s", movieID),
 		})
 
-		// Check cache first
-		if !force {
+		// Skip cache if custom scrapers
+		if !usingCustomScrapers && !force {
 			existing, err := movieRepo.FindByID(movieID)
 			if err == nil && existing != nil {
 				result.Status = worker.JobStatusCompleted
@@ -109,6 +118,11 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 					Message:   "Found in cache",
 				})
 				continue
+			}
+		} else if usingCustomScrapers || force {
+			// Clear cache if using custom scrapers or force
+			if err := movieRepo.Delete(movieID); err != nil {
+				logging.Debugf("Failed to delete %s from cache: %v", movieID, err)
 			}
 		}
 		// Phase 1: Content-ID Resolution using DMM
@@ -137,7 +151,7 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 		results := []*models.ScraperResult{}
 		errors := []string{}
 
-		for _, scraper := range registry.GetByPriority(cfg.Scrapers.Priority) {
+		for _, scraper := range registry.GetByPriority(scrapersToUse) {
 			logging.Debugf("[%s] Querying scraper: %s", movieID, scraper.Name())
 			scraperResult, err := scraper.Search(resolvedID)
 			if err != nil {

@@ -2,9 +2,14 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
@@ -86,6 +91,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleKeyPress handles keyboard input
 func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// If manual search modal is open, handle its keys first
+	if m.showingManualSearch {
+		return handleManualSearchInput(m, msg)
+	}
 
 	// If folder picker is open, handle its keys first
 	if m.showingFolderPicker {
@@ -188,6 +198,28 @@ func (m *Model) handleBrowserKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Normal browser navigation
 	switch msg.String() {
+	case "m":
+		// Open manual search modal
+		m.showingManualSearch = true
+		m.focusOnInput = true
+		m.manualSearchInput.Focus()
+		m.manualSearchInput.SetValue("")
+
+		// Build stable sorted list of scrapers (cache to prevent reshuffling)
+		m.scraperList = make([]string, 0)
+		m.scraperCheckboxes = make(map[string]bool)
+		if m.processor != nil && m.processor.registry != nil {
+			for _, scraper := range m.processor.registry.GetAll() {
+				scraperName := scraper.Name()
+				m.scraperList = append(m.scraperList, scraperName)
+				m.scraperCheckboxes[scraperName] = false
+			}
+			// Sort for stable ordering
+			sort.Strings(m.scraperList)
+		}
+		m.manualSearchCursor = 0
+		return m, nil
+
 	case "f":
 		// Open folder picker for source
 		m.OpenFolderPicker(m.sourcePath, "source")
@@ -535,4 +567,165 @@ func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// handleManualSearchInput handles keyboard input for the manual search modal
+func handleManualSearchInput(m *Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.showingManualSearch = false
+		m.manualSearchInput.Blur()
+		return m, nil
+
+	case "tab":
+		m.focusOnInput = !m.focusOnInput
+		if m.focusOnInput {
+			m.manualSearchInput.Focus()
+		} else {
+			m.manualSearchInput.Blur()
+		}
+		return m, nil
+
+	case "up":
+		if !m.focusOnInput && m.manualSearchCursor > 0 {
+			m.manualSearchCursor--
+		}
+		return m, nil
+
+	case "down":
+		if !m.focusOnInput && len(m.scraperList) > 0 {
+			maxCursor := len(m.scraperList) - 1
+			if m.manualSearchCursor < maxCursor {
+				m.manualSearchCursor++
+			}
+		}
+		return m, nil
+
+	case " ":
+		if !m.focusOnInput && len(m.scraperList) > 0 {
+			// Toggle checkbox using cached list
+			if m.manualSearchCursor < len(m.scraperList) {
+				scraperName := m.scraperList[m.manualSearchCursor]
+				m.scraperCheckboxes[scraperName] = !m.scraperCheckboxes[scraperName]
+			}
+		}
+		return m, nil
+
+	case "enter":
+		return executeManualSearch(m)
+	}
+
+	// Update input if focused
+	if m.focusOnInput {
+		var cmd tea.Cmd
+		m.manualSearchInput, cmd = m.manualSearchInput.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+// executeManualSearch performs the manual search with selected scrapers
+func executeManualSearch(m *Model) (*Model, tea.Cmd) {
+	input := strings.TrimSpace(m.manualSearchInput.Value())
+	if input == "" {
+		// Validation: no empty search
+		return m, nil
+	}
+
+	// Get selected scrapers
+	selectedScrapers := []string{}
+	for scraper, checked := range m.scraperCheckboxes {
+		if checked {
+			selectedScrapers = append(selectedScrapers, scraper)
+		}
+	}
+
+	if len(selectedScrapers) == 0 {
+		// Validation: at least one scraper must be selected
+		return m, nil
+	}
+
+	// Parse input (URL or ID)
+	parsed, err := matcher.ParseInput(input)
+	if err != nil {
+		// Show error in logs
+		m.AddLog("error", fmt.Sprintf("Invalid input: %v", err))
+		return m, nil
+	}
+
+	// If URL with scraper hint, prioritize that scraper
+	if parsed.IsURL && parsed.ScraperHint != "" {
+		selectedScrapers = reorderWithPriority(selectedScrapers, parsed.ScraperHint)
+	}
+
+	// Set custom scrapers
+	m.processor.SetCustomScrapers(selectedScrapers)
+
+	// For manual search, we only want to scrape metadata and download media
+	// Disable organize and NFO since there's no actual video file to work with
+	originalOrganize := m.organizeEnabled
+	originalNFO := m.nfoEnabled
+	m.processor.SetOrganizeEnabled(false)
+	m.processor.SetNFOEnabled(false)
+
+	// Create fake match result for manual search
+	// We need to create a minimal FileInfo for the MatchResult
+	fakeFileInfo := scanner.FileInfo{
+		Path: "manual-search",
+		Name: parsed.ID,
+	}
+
+	manualMatch := matcher.MatchResult{
+		File:        fakeFileInfo,
+		ID:          parsed.ID,
+		PartNumber:  0,
+		PartSuffix:  "",
+		IsMultiPart: false,
+		MatchedBy:   "manual",
+	}
+
+	// Submit to processor
+	ctx := context.Background()
+	files := []FileItem{{
+		Path:    "manual-search",
+		Name:    parsed.ID,
+		Matched: true,
+		ID:      parsed.ID,
+	}}
+	matches := map[string]matcher.MatchResult{
+		"manual-search": manualMatch,
+	}
+
+	if err := m.processor.ProcessFiles(ctx, files, matches); err != nil {
+		m.AddLog("error", fmt.Sprintf("Failed to start manual search: %v", err))
+	} else {
+		m.AddLog("info", fmt.Sprintf("Started manual search for %s with scrapers: %v (metadata + downloads only)", parsed.ID, selectedScrapers))
+	}
+
+	// Close modal and reset
+	m.showingManualSearch = false
+	m.manualSearchInput.SetValue("")
+	m.manualSearchInput.Blur()
+	m.processor.SetCustomScrapers(nil) // Reset after submission
+
+	// Restore original organize/NFO settings
+	m.processor.SetOrganizeEnabled(originalOrganize)
+	m.processor.SetNFOEnabled(originalNFO)
+
+	// Switch to dashboard view to see progress
+	m.currentView = ViewDashboard
+
+	return m, nil
+}
+
+// reorderWithPriority moves the priority scraper to the front of the list
+func reorderWithPriority(scrapers []string, priority string) []string {
+	result := []string{priority}
+	for _, s := range scrapers {
+		if s != priority {
+			result = append(result, s)
+		}
+	}
+	return result
 }

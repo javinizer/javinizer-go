@@ -13,7 +13,9 @@ type HealthResponse struct {
 
 // ScrapeRequest represents the scrape request payload
 type ScrapeRequest struct {
-	ID string `json:"id" binding:"required" example:"IPX-535"`
+	ID               string   `json:"id" binding:"required" example:"IPX-535"`
+	Force            bool     `json:"force" example:"false"`
+	SelectedScrapers []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
 }
 
 // ScrapeResponse represents the scrape response
@@ -91,11 +93,12 @@ type FileInfo struct {
 
 // BatchScrapeRequest represents a batch scrape request
 type BatchScrapeRequest struct {
-	Files       []string `json:"files" binding:"required"`
-	Strict      bool     `json:"strict" example:"false"`
-	Force       bool     `json:"force" example:"false"`
-	Destination string   `json:"destination,omitempty" example:"/path/to/output"`
-	Update      bool     `json:"update" example:"false"` // Update mode: only create/update metadata files without moving video files
+	Files            []string `json:"files" binding:"required"`
+	Strict           bool     `json:"strict" example:"false"`
+	Force            bool     `json:"force" example:"false"`
+	Destination      string   `json:"destination,omitempty" example:"/path/to/output"`
+	Update           bool     `json:"update" example:"false"` // Update mode: only create/update metadata files without moving video files
+	SelectedScrapers []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
 }
 
 // BatchScrapeResponse represents batch scrape response
@@ -155,4 +158,10 @@ type BrowseResponse struct {
 // UpdateMovieRequest represents the update movie request payload
 type UpdateMovieRequest struct {
 	Movie *models.Movie `json:"movie" binding:"required"`
+}
+
+// RescrapeRequest represents a request to rescrape with specific scrapers
+type RescrapeRequest struct {
+	SelectedScrapers []string `json:"selected_scrapers" binding:"required" example:"r18dev,dmm"`
+	Force            bool     `json:"force" example:"false"`
 }

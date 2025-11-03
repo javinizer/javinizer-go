@@ -439,6 +439,152 @@ func (a *Aggregator) Aggregate(results []*models.ScraperResult) (*models.Movie, 
 	return movie, nil
 }
 
+// AggregateWithPriority aggregates results using a custom scraper priority order
+// This is used for manual scraping where users specify which scrapers to use and in what order
+func (a *Aggregator) AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, error) {
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no scraper results to aggregate")
+	}
+
+	movie := &models.Movie{}
+
+	// Build translations from all scraper results
+	movie.Translations = a.buildTranslations(results)
+
+	// Create a map of results by source name for quick lookup
+	resultsBySource := make(map[string]*models.ScraperResult)
+	for _, result := range results {
+		resultsBySource[result.Source] = result
+	}
+
+	// Use custom priority for ALL fields (ignore config priorities)
+	// Aggregate each field based on custom priority
+	movie.ID = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.ID
+	})
+
+	movie.ContentID = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.ContentID
+	})
+
+	movie.Title = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.Title
+	})
+
+	movie.OriginalTitle = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.OriginalTitle
+	})
+
+	movie.Description = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.Description
+	})
+
+	movie.Director = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.Director
+	})
+
+	movie.Maker = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.Maker
+	})
+
+	movie.Label = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.Label
+	})
+
+	movie.Series = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.Series
+	})
+
+	movie.PosterURL = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.PosterURL
+	})
+
+	movie.CoverURL = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.CoverURL
+	})
+
+	// Set ShouldCropPoster based on the same source as PosterURL
+	for _, source := range customPriority {
+		if result, exists := resultsBySource[source]; exists && result.PosterURL != "" {
+			movie.ShouldCropPoster = result.ShouldCropPoster
+			break
+		}
+	}
+
+	movie.TrailerURL = a.getFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) string {
+		return r.TrailerURL
+	})
+
+	// Aggregate runtime
+	movie.Runtime = a.getIntFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) int {
+		return r.Runtime
+	})
+
+	// Aggregate release date
+	movie.ReleaseDate = a.getTimeFieldByPriority(resultsBySource, customPriority, func(r *models.ScraperResult) *time.Time {
+		return r.ReleaseDate
+	})
+
+	if movie.ReleaseDate != nil {
+		movie.ReleaseYear = movie.ReleaseDate.Year()
+	}
+
+	// Aggregate rating
+	ratingScore, ratingVotes := a.getRatingByPriority(resultsBySource, customPriority)
+	movie.RatingScore = ratingScore
+	movie.RatingVotes = ratingVotes
+
+	// Aggregate actresses
+	movie.Actresses = a.getActressesByPriority(resultsBySource, customPriority)
+
+	// Aggregate genres
+	genreNames := a.getGenresByPriority(resultsBySource, customPriority)
+	movie.Genres = make([]models.Genre, 0, len(genreNames))
+	for _, name := range genreNames {
+		// Apply replacement if exists
+		replacedName := a.applyGenreReplacement(name)
+
+		// Filter out ignored genres
+		if a.isGenreIgnored(replacedName) {
+			continue
+		}
+		movie.Genres = append(movie.Genres, models.Genre{Name: replacedName})
+	}
+
+	// Aggregate screenshots
+	movie.Screenshots = a.getScreenshotsByPriority(resultsBySource, customPriority)
+
+	// Set source metadata
+	if len(results) > 0 {
+		movie.SourceName = results[0].Source
+		movie.SourceURL = results[0].SourceURL
+	}
+
+	// Generate display name from template if configured
+	if a.config.Metadata.NFO.DisplayName != "" {
+		ctx := template.NewContextFromMovie(movie)
+		displayName, err := a.templateEngine.Execute(a.config.Metadata.NFO.DisplayName, ctx)
+		if err == nil {
+			movie.DisplayName = displayName
+		}
+		// Silently ignore template errors - display name is optional
+	}
+
+	// Validate required fields if configured
+	if len(a.config.Metadata.RequiredFields) > 0 {
+		if err := a.validateRequiredFields(movie); err != nil {
+			return nil, fmt.Errorf("required field validation failed: %w", err)
+		}
+	}
+
+	// Set timestamps
+	now := time.Now().UTC()
+	movie.CreatedAt = now
+	movie.UpdatedAt = now
+
+	return movie, nil
+}
+
 // getFieldByPriority retrieves a string field based on priority
 func (a *Aggregator) getFieldByPriority(
 	results map[string]*models.ScraperResult,

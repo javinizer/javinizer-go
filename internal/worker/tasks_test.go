@@ -534,6 +534,7 @@ func TestScrapeTask_Execute_DryRun(t *testing.T) {
 		tracker,
 		true,  // dry-run
 		false, // no force refresh
+		nil,   // no custom scraper priority
 	)
 
 	// Execute - will fail because no scrapers registered, but we test dry-run behavior
@@ -602,6 +603,7 @@ func TestScrapeTask_Execute_ForceRefresh(t *testing.T) {
 		tracker,
 		false, // not dry-run
 		true,  // force refresh
+		nil,   // no custom scraper priority
 	)
 
 	// Execute - will fail because no scrapers, but we test force refresh behavior
@@ -670,6 +672,7 @@ func TestScrapeTask_Execute_Cache(t *testing.T) {
 		tracker,
 		false, // not dry-run
 		false, // no force refresh
+		nil,   // no custom scraper priority
 	)
 
 	// Start tracking before execution
@@ -719,7 +722,7 @@ func TestScrapeTask_Execute_Cancellation(t *testing.T) {
 	progressChan := make(chan ProgressUpdate, 10)
 	tracker := NewProgressTracker(progressChan)
 
-	task := NewScrapeTask("IPX-999", registry, agg, movieRepo, tracker, false, false)
+	task := NewScrapeTask("IPX-999", registry, agg, movieRepo, tracker, false, false, nil)
 
 	// Create canceled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -828,6 +831,7 @@ func TestProcessFileTask_Execute_DisabledSteps(t *testing.T) {
 				tt.downloadEnabled,
 				tt.organizeEnabled,
 				tt.nfoEnabled,
+				nil, // no custom scraper priority
 			)
 
 			// Execute
@@ -860,7 +864,7 @@ func TestNewTaskConstructors(t *testing.T) {
 		movieRepo := database.NewMovieRepository(db)
 		agg := aggregator.New(cfg)
 
-		task := NewScrapeTask("IPX-001", registry, agg, movieRepo, tracker, false, false)
+		task := NewScrapeTask("IPX-001", registry, agg, movieRepo, tracker, false, false, nil)
 		assert.NotNil(t, task)
 		assert.Equal(t, "IPX-001", task.ID())
 		assert.Equal(t, TaskTypeScrape, task.Type())
@@ -877,7 +881,7 @@ func TestNewTaskConstructors(t *testing.T) {
 		movieRepo := database.NewMovieRepository(db)
 		agg := aggregator.New(cfg)
 
-		task := NewScrapeTask("IPX-002", registry, agg, movieRepo, tracker, true, false)
+		task := NewScrapeTask("IPX-002", registry, agg, movieRepo, tracker, true, false, nil)
 		assert.Contains(t, task.Description(), "[DRY RUN]")
 	})
 
@@ -941,7 +945,7 @@ func TestNewTaskConstructors(t *testing.T) {
 		task := NewProcessFileTask(
 			match, registry, agg, movieRepo, dl, org, gen,
 			"/tmp", false, false, false, tracker, false,
-			true, true, true, true,
+			true, true, true, true, nil,
 		)
 		assert.NotNil(t, task)
 		assert.Contains(t, task.ID(), "process-")

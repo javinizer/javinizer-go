@@ -17,23 +17,24 @@ import (
 
 // ProcessingCoordinator coordinates task execution for the TUI
 type ProcessingCoordinator struct {
-	pool            *worker.Pool
-	progressTracker *worker.ProgressTracker
-	movieRepo       *database.MovieRepository
-	registry        *models.ScraperRegistry
-	aggregator      *aggregator.Aggregator
-	downloader      *downloader.Downloader
-	organizer       *organizer.Organizer
-	nfoGenerator    *nfo.Generator
-	destPath        string
-	moveFiles       bool
-	forceUpdate     bool
-	forceRefresh    bool
-	dryRun          bool
-	scrapeEnabled   bool
-	downloadEnabled bool
-	organizeEnabled bool
-	nfoEnabled      bool
+	pool                  *worker.Pool
+	progressTracker       *worker.ProgressTracker
+	movieRepo             *database.MovieRepository
+	registry              *models.ScraperRegistry
+	aggregator            *aggregator.Aggregator
+	downloader            *downloader.Downloader
+	organizer             *organizer.Organizer
+	nfoGenerator          *nfo.Generator
+	destPath              string
+	moveFiles             bool
+	forceUpdate           bool
+	forceRefresh          bool
+	dryRun                bool
+	scrapeEnabled         bool
+	downloadEnabled       bool
+	organizeEnabled       bool
+	nfoEnabled            bool
+	customScraperPriority []string // Optional custom scraper priority (nil = use default)
 }
 
 // NewProcessingCoordinator creates a new processing coordinator
@@ -127,6 +128,25 @@ func (pc *ProcessingCoordinator) SetForceRefresh(forceRefresh bool) {
 	pc.forceRefresh = forceRefresh
 }
 
+// SetCustomScrapers sets custom scraper priority for manual search
+// Makes a defensive copy to prevent data races with worker goroutines
+func (pc *ProcessingCoordinator) SetCustomScrapers(scrapers []string) {
+	if scrapers == nil {
+		pc.customScraperPriority = nil
+		return
+	}
+	pc.customScraperPriority = append([]string(nil), scrapers...)
+}
+
+// GetCustomScrapers returns the current custom scraper priority
+// Returns a copy to prevent external mutation
+func (pc *ProcessingCoordinator) GetCustomScrapers() []string {
+	if pc.customScraperPriority == nil {
+		return nil
+	}
+	return append([]string(nil), pc.customScraperPriority...)
+}
+
 // ProcessFiles processes the selected files with matched JAV IDs
 func (pc *ProcessingCoordinator) ProcessFiles(
 	ctx context.Context,
@@ -158,6 +178,13 @@ func (pc *ProcessingCoordinator) ProcessFiles(
 
 		logging.Debugf("Submitting task for file: %s (ID: %s)", file.Path, match.ID)
 
+		// Make a defensive copy of custom scraper priority for this task
+		// to prevent data races if the UI modifies it while tasks are running
+		var customScrapers []string
+		if pc.customScraperPriority != nil {
+			customScrapers = append([]string(nil), pc.customScraperPriority...)
+		}
+
 		// Submit a composite task that handles all operations sequentially
 		processTask := worker.NewProcessFileTask(
 			match,
@@ -177,6 +204,7 @@ func (pc *ProcessingCoordinator) ProcessFiles(
 			pc.downloadEnabled,
 			pc.organizeEnabled,
 			pc.nfoEnabled,
+			customScrapers,
 		)
 
 		if err := pc.pool.Submit(processTask); err != nil {

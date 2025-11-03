@@ -55,6 +55,7 @@ func TestNewProcessFileTask(t *testing.T) {
 			true,
 			true,
 			true,
+			nil, // no custom scraper priority
 		)
 
 		assert.NotNil(t, task)
@@ -101,6 +102,7 @@ func TestNewProcessFileTask(t *testing.T) {
 			false,
 			false,
 			false,
+			nil, // no custom scraper priority
 		)
 
 		assert.NotNil(t, task)
@@ -145,6 +147,7 @@ func TestNewProcessFileTask(t *testing.T) {
 			false, // downloadEnabled
 			true,  // organizeEnabled
 			false, // nfoEnabled
+			nil,   // no custom scraper priority
 		)
 
 		assert.NotNil(t, task)
@@ -197,6 +200,7 @@ func TestProcessFileTask_Execute_DryRun(t *testing.T) {
 			false,
 			false,
 			false,
+			nil, // no custom scraper priority
 		)
 
 		ctx := context.Background()
@@ -268,6 +272,7 @@ func TestProcessFileTask_Execute_ContextCancellation(t *testing.T) {
 			false,
 			false,
 			false,
+			nil, // no custom scraper priority
 		)
 
 		// Create a canceled context
@@ -328,6 +333,7 @@ func TestProcessFileTask_Execute_ProgressTracking(t *testing.T) {
 			false,
 			false,
 			false,
+			nil, // no custom scraper priority
 		)
 
 		// Start consuming progress updates in background
@@ -403,6 +409,7 @@ func TestProcessFileTask_Execute_NoScraperEnabled(t *testing.T) {
 			false,
 			false,
 			false,
+			nil, // no custom scraper priority
 		)
 
 		ctx := context.Background()
@@ -467,6 +474,7 @@ func TestProcessFileTask_Interface(t *testing.T) {
 			true,
 			true,
 			true,
+			nil, // no custom scraper priority
 		)
 
 		// Verify it implements Task interface
@@ -526,6 +534,7 @@ func TestProcessFileTask_ConcurrentExecution(t *testing.T) {
 				false,
 				false,
 				false,
+				nil, // no custom scraper priority
 			)
 
 			pool.Submit(task)
@@ -579,6 +588,7 @@ func TestProcessFileTask_ForceRefreshFlag(t *testing.T) {
 			true,
 			true,
 			true,
+			nil, // no custom scraper priority
 		)
 
 		assert.NotNil(t, task)
@@ -628,6 +638,7 @@ func TestProcessFileTask_AllOperationsDisabled(t *testing.T) {
 			false, // no download
 			false, // no organize
 			false, // no nfo
+			nil,   // no custom scraper priority
 		)
 
 		ctx := context.Background()
@@ -692,6 +703,7 @@ func TestProcessFileTask_MoveVsCopyFlag(t *testing.T) {
 			false,
 			false,
 			false,
+			nil, // no custom scraper priority
 		)
 		assert.NotNil(t, taskMove)
 
@@ -714,6 +726,7 @@ func TestProcessFileTask_MoveVsCopyFlag(t *testing.T) {
 			false,
 			false,
 			false,
+			nil, // no custom scraper priority
 		)
 		assert.NotNil(t, taskCopy)
 	})

@@ -3,7 +3,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { apiClient } from '$lib/api/client';
-	import type { BatchJobResponse, FileResult, Movie, OrganizePreviewResponse } from '$lib/api/types';
+	import type { BatchJobResponse, FileResult, Movie, OrganizePreviewResponse, Scraper } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
 	import { websocketStore } from '$lib/stores/websocket';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -13,6 +13,7 @@
 	import ScreenshotManager from '$lib/components/ScreenshotManager.svelte';
 	import ImageViewer from '$lib/components/ImageViewer.svelte';
 	import VideoModal from '$lib/components/VideoModal.svelte';
+	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
 	import {
 		ChevronLeft,
 		ChevronRight,
@@ -82,6 +83,13 @@
 
 	// Preview screenshot expansion state
 	let showAllPreviewScreenshots = $state(false);
+
+	// Rescrape modal state
+	let availableScrapers: Scraper[] = $state([]);
+	let showRescrapeModal = $state(false);
+	let rescrapeMovieId = $state('');
+	let rescrapeSelectedScrapers: string[] = $state([]);
+	let rescrapingStates = $state<Map<string, boolean>>(new Map());
 
 	// Get all successful movie results
 	const movieResults = $derived<FileResult[]>(
@@ -205,6 +213,86 @@
 		if (!currentResult?.data) return;
 		editedMovies.delete(currentResult.file_path);
 		editedMovies = editedMovies;
+	}
+
+	async function openRescrapeModal(movieId: string) {
+		if (availableScrapers.length === 0) {
+			try {
+				availableScrapers = await apiClient.getScrapers();
+			} catch (error) {
+				console.error('Failed to fetch scrapers:', error);
+				toastStore.error('Failed to load scrapers');
+				return;
+			}
+		}
+		rescrapeMovieId = movieId;
+		rescrapeSelectedScrapers = availableScrapers
+			.filter((s) => s.enabled)
+			.map((s) => s.name);
+		showRescrapeModal = true;
+	}
+
+	async function executeRescrape() {
+		if (rescrapeSelectedScrapers.length === 0) {
+			toastStore.error('Please select at least one scraper');
+			return;
+		}
+
+		if (!currentResult) {
+			toastStore.error('No current movie to rescrape');
+			return;
+		}
+
+		// Set rescraping state
+		rescrapingStates.set(rescrapeMovieId, true);
+		rescrapingStates = new Map(rescrapingStates);
+
+		try {
+			const updatedMovie = await apiClient.rescrapeMovie(rescrapeMovieId, {
+				selected_scrapers: rescrapeSelectedScrapers,
+				force: true
+			});
+
+			console.log('Rescrape successful, updating job results for:', rescrapeMovieId);
+
+			// Update the movie in the job results using the current file path
+			if (job && currentResult.file_path) {
+				const filePath = currentResult.file_path;
+				console.log('Updating result for file:', filePath);
+
+				// Create new results object with updated movie
+				const newResults = { ...job.results };
+
+				// Create new result object to trigger reactivity
+				newResults[filePath] = {
+					...newResults[filePath],
+					data: updatedMovie
+				};
+
+				// Create new job object to trigger Svelte reactivity
+				job = {
+					...job,
+					results: newResults
+				};
+				console.log('Job results updated successfully');
+			}
+
+			// Clear any edited state for this movie
+			if (editedMovies.has(currentResult.file_path)) {
+				editedMovies.delete(currentResult.file_path);
+				editedMovies = editedMovies;
+			}
+
+			toastStore.success(`Successfully rescraped ${rescrapeMovieId}`);
+			showRescrapeModal = false;
+		} catch (error) {
+			console.error('Rescrape failed:', error);
+			const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+			toastStore.error('Rescrape failed: ' + errorMessage);
+		} finally {
+			rescrapingStates.delete(rescrapeMovieId);
+			rescrapingStates = new Map(rescrapingStates);
+		}
 	}
 
 	async function saveAllEdits() {
@@ -730,12 +818,30 @@
 						<div class="space-y-4">
 							<div class="flex items-center justify-between">
 								<h2 class="text-xl font-semibold">Movie Metadata</h2>
-								<Button variant="outline" size="sm" onclick={resetCurrentMovie}>
-									{#snippet children()}
-										<RotateCcw class="h-4 w-4 mr-2" />
-										Reset to Original
-									{/snippet}
-								</Button>
+								<div class="flex gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => currentMovie && openRescrapeModal(currentMovie.id)}
+										disabled={rescrapingStates.get(currentMovie?.id || '') || false}
+									>
+										{#snippet children()}
+											{#if rescrapingStates.get(currentMovie?.id || '')}
+												<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+												Rescraping...
+											{:else}
+												<RotateCcw class="h-4 w-4 mr-2" />
+												Rescrape
+											{/if}
+										{/snippet}
+									</Button>
+									<Button variant="outline" size="sm" onclick={resetCurrentMovie}>
+										{#snippet children()}
+											<RotateCcw class="h-4 w-4 mr-2" />
+											Reset to Original
+										{/snippet}
+									</Button>
+								</div>
 							</div>
 
 							<MovieEditor
@@ -819,4 +925,79 @@
 	title={imageViewerTitle}
 	onClose={closeImageViewer}
 />
+
+<!-- Rescrape Modal -->
+{#if showRescrapeModal}
+	<div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+		<Card class="w-full max-w-lg flex flex-col max-h-[90vh]">
+			<!-- Header -->
+			<div class="p-6 border-b flex items-center justify-between">
+				<h2 class="text-xl font-bold">Rescrape {rescrapeMovieId}</h2>
+				<Button
+					variant="ghost"
+					size="icon"
+					onclick={() => (showRescrapeModal = false)}
+					disabled={rescrapingStates.get(rescrapeMovieId) || false}
+				>
+					{#snippet children()}
+						<X class="h-4 w-4" />
+					{/snippet}
+				</Button>
+			</div>
+
+			<!-- Body -->
+			<div class="flex-1 overflow-auto p-6">
+				{#if rescrapingStates.get(rescrapeMovieId)}
+					<!-- Loading State -->
+					<div class="flex flex-col items-center justify-center py-8 space-y-4">
+						<Loader2 class="h-12 w-12 animate-spin text-primary" />
+						<div class="text-center space-y-2">
+							<p class="text-sm font-medium">Rescraping metadata...</p>
+							<p class="text-xs text-muted-foreground">
+								Fetching data from {rescrapeSelectedScrapers.join(', ')}
+							</p>
+						</div>
+					</div>
+				{:else}
+					<!-- Selection State -->
+					<p class="text-sm text-muted-foreground mb-4">
+						Select which scrapers to use for fetching fresh metadata. The results will be
+						aggregated according to your configured priorities.
+					</p>
+
+					<ScraperSelector
+						scrapers={availableScrapers}
+						bind:selected={rescrapeSelectedScrapers}
+						disabled={false}
+					/>
+				{/if}
+			</div>
+
+			<!-- Footer -->
+			<div class="p-6 border-t flex items-center justify-end gap-3">
+				<Button
+					variant="outline"
+					onclick={() => (showRescrapeModal = false)}
+					disabled={rescrapingStates.get(rescrapeMovieId) || false}
+				>
+					{#snippet children()}Cancel{/snippet}
+				</Button>
+				<Button
+					onclick={executeRescrape}
+					disabled={rescrapingStates.get(rescrapeMovieId) || false}
+				>
+					{#snippet children()}
+						{#if rescrapingStates.get(rescrapeMovieId)}
+							<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+							Rescraping...
+						{:else}
+							<RotateCcw class="h-4 w-4 mr-2" />
+							Rescrape
+						{/if}
+					{/snippet}
+				</Button>
+			</div>
+		</Card>
+	</div>
+{/if}
 

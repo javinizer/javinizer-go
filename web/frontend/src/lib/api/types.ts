@@ -31,12 +31,24 @@ export interface BrowseResponse {
 	items: FileInfo[];
 }
 
+export interface ScrapeRequest {
+	id: string;
+	force?: boolean;
+	selected_scrapers?: string[];
+}
+
 export interface BatchScrapeRequest {
 	files: string[];
 	strict: boolean;
 	force: boolean;
 	destination?: string;
 	update?: boolean;
+	selected_scrapers?: string[];
+}
+
+export interface RescrapeRequest {
+	selected_scrapers: string[];
+	force?: boolean;
 }
 
 export interface BatchScrapeResponse {
@@ -165,6 +177,13 @@ export interface ScraperInfo {
 	display_name: string;
 	enabled: boolean;
 	options?: ScraperOption[];
+}
+
+export interface Scraper {
+	name: string;
+	display_name: string;
+	enabled: boolean;
+	options?: Record<string, any>;
 }
 
 export interface AvailableScrapersResponse {

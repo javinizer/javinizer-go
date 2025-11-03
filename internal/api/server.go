@@ -302,6 +302,7 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 		v1.POST("/scrape", scrapeMovie(deps))
 		v1.GET("/movie/:id", getMovie(deps))
 		v1.GET("/movies", listMovies(deps))
+		v1.POST("/movie/:id/rescrape", rescrapeMovie(deps))
 
 		// Actress endpoints
 		v1.GET("/actresses/search", searchActresses(deps.ActressRepo))

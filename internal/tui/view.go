@@ -45,6 +45,11 @@ func (m *Model) View() string {
 		footer,
 	)
 
+	// Show manual search modal overlay if active (takes priority)
+	if m.showingManualSearch {
+		return RenderManualSearchModal(m)
+	}
+
 	// Show folder picker overlay if active
 	if m.showingFolderPicker {
 		return m.renderFolderPickerOverlay(mainView)
