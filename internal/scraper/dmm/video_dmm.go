@@ -156,9 +156,12 @@ func (s *Scraper) extractCoverURLNewSite(doc *goquery.Document, contentID string
 
 	// Final fallback for amateur videos: construct URL from content ID
 	// Amateur videos use pattern: https://pics.dmm.co.jp/digital/amateur/{contentid}/{contentid}pl.jpg
+	// DMM serves cover assets on lowercase paths, so normalize to lowercase
 	if contentID != "" {
+		// Normalize to lowercase to match DMM's URL structure
+		normalizedID := strings.ToLower(contentID)
 		// Try amateur video pattern
-		coverURL = "https://pics.dmm.co.jp/digital/amateur/" + contentID + "/" + contentID + "pl.jpg"
+		coverURL = "https://pics.dmm.co.jp/digital/amateur/" + normalizedID + "/" + normalizedID + "pl.jpg"
 		logging.Debugf("DMM Streaming: Constructed amateur cover URL from content ID '%s': %s", contentID, coverURL)
 		return coverURL
 	}
