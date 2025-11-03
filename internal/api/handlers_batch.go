@@ -147,6 +147,19 @@ func updateBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 			}
 		}
 
+		// If not found by MovieID, try searching by the actual movie.ID (in case of content ID resolution)
+		if foundResult == nil {
+			for filePath, result := range status.Results {
+				if result.Data != nil {
+					if m, ok := result.Data.(*models.Movie); ok && m.ID == movieID {
+						foundFilePath = filePath
+						foundResult = result
+						break
+					}
+				}
+			}
+		}
+
 		if foundResult == nil {
 			c.JSON(404, ErrorResponse{Error: fmt.Sprintf("Movie %s not found in job", movieID)})
 			return
