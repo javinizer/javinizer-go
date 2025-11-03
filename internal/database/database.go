@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -16,6 +17,29 @@ type DB struct {
 	*gorm.DB
 }
 
+// parseLogLevel converts a log level string to a GORM logger.LogLevel
+// Normalizes input by trimming whitespace and converting to lowercase
+// Returns logger.Silent for invalid values with a warning
+func parseLogLevel(level string) logger.LogLevel {
+	// Normalize input: trim whitespace and convert to lowercase for case-insensitive comparison
+	normalized := strings.ToLower(strings.TrimSpace(level))
+
+	switch normalized {
+	case "info":
+		return logger.Info
+	case "warn":
+		return logger.Warn
+	case "error":
+		return logger.Error
+	case "silent", "":
+		return logger.Silent
+	default:
+		// Invalid log level provided - warn and default to silent
+		fmt.Printf("Warning: invalid database log_level '%s', defaulting to 'silent'. Valid options: silent, error, warn, info\n", level)
+		return logger.Silent
+	}
+}
+
 // New creates a new database connection
 func New(cfg *config.Config) (*DB, error) {
 	var dialector gorm.Dialector
@@ -27,12 +51,8 @@ func New(cfg *config.Config) (*DB, error) {
 		return nil, fmt.Errorf("unsupported database type: %s", cfg.Database.Type)
 	}
 
-	// Configure logger level
-	logLevel := logger.Silent
-	switch cfg.Logging.Level {
-	case "debug":
-		logLevel = logger.Info
-	}
+	// Configure database logger level (independent from app logging)
+	logLevel := parseLogLevel(cfg.Database.LogLevel)
 
 	db, err := gorm.Open(dialector, &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),

@@ -200,8 +200,9 @@ type OutputConfig struct {
 
 // DatabaseConfig holds database configuration
 type DatabaseConfig struct {
-	Type string `yaml:"type"` // sqlite, postgres, mysql
-	DSN  string `yaml:"dsn"`  // Data Source Name
+	Type     string `yaml:"type" json:"Type"`          // sqlite, postgres, mysql
+	DSN      string `yaml:"dsn" json:"DSN"`            // Data Source Name
+	LogLevel string `yaml:"log_level" json:"LogLevel"` // Database query logging: silent, error, warn, info (default: silent)
 }
 
 // LoggingConfig holds logging configuration
@@ -341,8 +342,9 @@ func DefaultConfig() *Config {
 			},
 		},
 		Database: DatabaseConfig{
-			Type: "sqlite",
-			DSN:  "data/javinizer.db",
+			Type:     "sqlite",
+			DSN:      "data/javinizer.db",
+			LogLevel: "silent", // Default: no SQL query logging
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
