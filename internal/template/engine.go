@@ -268,6 +268,53 @@ func (e *Engine) TruncateTitle(title string, maxLen int) string {
 	return title
 }
 
+// TruncateTitleBytes smartly truncates a title to fit within maxBytes (byte length)
+// This is needed because file paths have byte length limits, not rune count limits
+func (e *Engine) TruncateTitleBytes(title string, maxBytes int) string {
+	if maxBytes <= 0 || len(title) <= maxBytes {
+		return title
+	}
+
+	runes := []rune(title)
+	currentBytes := 0
+
+	// Always use rune-safe iteration to avoid splitting UTF-8 sequences
+	// even for very small byte limits
+	for i, r := range runes {
+		runeSize := len(string(r)) // Byte size of this rune
+
+		if currentBytes+runeSize > maxBytes {
+			// Can't fit this rune
+			if i == 0 {
+				// Can't fit even one rune, return empty
+				return ""
+			}
+
+			// Truncate here (no ellipsis if we have < 3 bytes budget)
+			truncated := string(runes[:i])
+
+			// Only add ellipsis if we have room (at least 3 bytes left after truncated)
+			if maxBytes >= len(truncated)+3 {
+				// For English/Latin text, try to break at word boundary
+				if !e.containsCJK(title) {
+					lastSpace := strings.LastIndex(truncated, " ")
+					if lastSpace > 0 && maxBytes >= len(truncated[:lastSpace])+3 {
+						return truncated[:lastSpace] + "..."
+					}
+				}
+				return truncated + "..."
+			}
+
+			// Not enough room for ellipsis, just return truncated
+			return truncated
+		}
+		currentBytes += runeSize
+	}
+
+	// Entire title fits
+	return title
+}
+
 // ValidatePathLength checks if a path exceeds the maximum length
 func (e *Engine) ValidatePathLength(path string, maxLen int) error {
 	if maxLen <= 0 {

@@ -251,6 +251,34 @@ func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir
 		skipInPlaceReason = "matcher not set"
 	}
 
+	// Automatically truncate path if it exceeds MaxPathLength
+	if o.config.MaxPathLength > 0 && len(targetPath) > o.config.MaxPathLength {
+		// Calculate how much we need to truncate (in bytes)
+		excess := len(targetPath) - o.config.MaxPathLength
+
+		// Truncate the folder name (usually the longest variable part)
+		currentFolderLen := len(folderName)
+		if currentFolderLen > excess {
+			// Calculate the byte budget for the new folder name
+			// TruncateTitleBytes will handle adding ellipsis if there's room
+			newFolderByteLen := currentFolderLen - excess
+			folderName = o.templateEngine.TruncateTitleBytes(folderName, newFolderByteLen)
+
+			// Rebuild paths with truncated folder, respecting in-place rename structure
+			if inPlace {
+				// In-place rename: just destDir + folderName (no subfolders)
+				targetDir = filepath.Join(destDir, folderName)
+			} else {
+				// Normal move: destDir + subfolders + folderName
+				pathParts := []string{destDir}
+				pathParts = append(pathParts, subfolderParts...)
+				pathParts = append(pathParts, folderName)
+				targetDir = filepath.Join(pathParts...)
+			}
+			targetPath = filepath.Join(targetDir, fileName)
+		}
+	}
+
 	// Validate final path length
 	if o.config.MaxPathLength > 0 {
 		if err := o.templateEngine.ValidatePathLength(targetPath, o.config.MaxPathLength); err != nil {
