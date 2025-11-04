@@ -38,23 +38,26 @@
 	const latestMessage = $derived(progressMessages[progressMessages.length - 1]);
 
 	// Categorize files by status
-	const activeFiles = $derived(
-		job ? Object.values(job.results).filter(r => r.status === 'running') : []
-	);
+	const activeFiles = $derived.by<FileResult[]>(() => {
+		if (!job?.results) return [];
+		return (Object.values(job.results) as FileResult[]).filter(r => r.status === 'running');
+	});
 
-	const queuedFiles = $derived(() => {
+	const queuedFiles = $derived.by<string[]>(() => {
 		if (!job || !job.files) return [];
 		const processedPaths = new Set(Object.keys(job.results));
 		return job.files.filter(f => !processedPaths.has(f));
 	});
 
-	const completedFiles = $derived(
-		job ? Object.values(job.results).filter(r => r.status === 'completed') : []
-	);
+	const completedFiles = $derived.by<FileResult[]>(() => {
+		if (!job?.results) return [];
+		return (Object.values(job.results) as FileResult[]).filter(r => r.status === 'completed');
+	});
 
-	const failedFiles = $derived(
-		job ? Object.values(job.results).filter(r => r.status === 'failed') : []
-	);
+	const failedFiles = $derived.by<FileResult[]>(() => {
+		if (!job?.results) return [];
+		return (Object.values(job.results) as FileResult[]).filter(r => r.status === 'failed');
+	});
 
 	// Worker pool status (default to 5 if not configured)
 	const maxWorkers = $state(5);

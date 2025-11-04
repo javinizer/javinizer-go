@@ -341,23 +341,23 @@ func TestParseHTML_OldSite(t *testing.T) {
 	<!-- Label -->
 	<a href="?label=789">Test Label</a>
 
-	<!-- Actresses -->
-	<tr>
-		<td>Actress:</td>
-		<td>
-			<a href="?actress=111">Test Actress</a>
-			<a href="?actress=222">Another Actress</a>
-		</td>
-	</tr>
-
-	<!-- Genres -->
-	<tr>
-		<td>Genre:</td>
-		<td>
-			<a href="/genre/1">Drama</a>
-			<a href="/genre/2">Romance</a>
-		</td>
-	</tr>
+	<!-- Actresses and Genres in table -->
+	<table>
+		<tr>
+			<td>Actress:</td>
+			<td>
+				<a href="?actress=111">Test Actress</a>
+				<a href="?actress=222">Another Actress</a>
+			</td>
+		</tr>
+		<tr>
+			<td>Genre:</td>
+			<td>
+				<a href="/genre/1">Drama</a>
+				<a href="/genre/2">Romance</a>
+			</td>
+		</tr>
+	</table>
 
 	<!-- Cover Image -->
 	<img src="https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535ps.jpg" />
@@ -503,26 +503,39 @@ func TestExtractActresses(t *testing.T) {
 		checkNames    []string
 	}{
 		{
-			name:          "Japanese names",
-			html:          `<a href="?actress=111">山田 花子</a><a href="?actress=222">田中 美咲</a>`,
+			name: "Japanese names",
+			html: `<table><tr><td>出演者:</td><td>
+				<a href="?actress=111">山田 花子</a>
+				<a href="?actress=222">田中 美咲</a>
+			</td></tr></table>`,
 			expectedCount: 2,
 			checkNames:    []string{"山田 花子", "田中 美咲"},
 		},
 		{
-			name:          "English names",
-			html:          `<a href="?actress=111">Jane Doe</a><a href="?actress=222">Mary Smith</a>`,
+			name: "English names",
+			html: `<table><tr><td>Actress:</td><td>
+				<a href="?actress=111">Jane Doe</a>
+				<a href="?actress=222">Mary Smith</a>
+			</td></tr></table>`,
 			expectedCount: 2,
 			checkNames:    []string{"Doe", "Smith"}, // Check first names are extracted (note: FirstName field gets second part)
 		},
 		{
-			name:          "Filter out UI elements",
-			html:          `<a href="?actress=111">Test Actress</a><a href="?actress=222">購入前</a><a href="?actress=333">レビュー</a>`,
+			name: "Filter out UI elements",
+			html: `<table><tr><td>actress:</td><td>
+				<a href="?actress=111">Test Actress</a>
+				<a href="?actress=222">購入前</a>
+				<a href="?actress=333">レビュー</a>
+			</td></tr></table>`,
 			expectedCount: 1,
 			checkNames:    []string{"Actress"}, // Only real actress retained (FirstName="Actress"), UI elements filtered
 		},
 		{
-			name:          "With thumbnail images",
-			html:          `<a href="?actress=111"><img src="https://pics.dmm.co.jp/actress/111/thumb.jpg">山田 花子</a><a href="?actress=222"><img src="https://pics.dmm.co.jp/actress/222/thumb.jpg">田中 美咲</a>`,
+			name: "With thumbnail images",
+			html: `<table><tr><td>演者:</td><td>
+				<a href="?actress=111"><img src="https://pics.dmm.co.jp/actress/111/thumb.jpg">山田 花子</a>
+				<a href="?actress=222"><img src="https://pics.dmm.co.jp/actress/222/thumb.jpg">田中 美咲</a>
+			</td></tr></table>`,
 			expectedCount: 2,
 			checkNames:    []string{"山田 花子", "田中 美咲"},
 		},
@@ -1152,7 +1165,14 @@ func TestParseHTML_ScrapeActressFlag(t *testing.T) {
 <html>
 <body>
 	<h1 id="title" class="item">Test Movie</h1>
-	<a href="?actress=111">Test Actress</a>
+	<table>
+		<tr>
+			<td>Actress:</td>
+			<td>
+				<a href="?actress=111">Test Actress</a>
+			</td>
+		</tr>
+	</table>
 </body>
 </html>
 `

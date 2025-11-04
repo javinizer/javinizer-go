@@ -587,7 +587,7 @@
 
 			<div class="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6">
 				<!-- Left Sidebar: Media Preview -->
-				<div class="space-y-4">
+				<div class="space-y-4 lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
 					<!-- Poster Image -->
 					{#if showPosterPanel}
 						<Card class="p-4">
@@ -935,7 +935,11 @@
 
 								<!-- Collapsible content -->
 								{#if showImagePanelContent}
-									<ScreenshotManager movie={currentMovie!} onUpdate={updateCurrentMovie} />
+									<ScreenshotManager
+										movie={currentMovie!}
+										displayPosterUrl={displayPosterUrl}
+										onUpdate={updateCurrentMovie}
+									/>
 								{/if}
 							</div>
 						</Card>

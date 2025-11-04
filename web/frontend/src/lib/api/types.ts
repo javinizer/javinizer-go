@@ -98,6 +98,7 @@ export interface Movie {
 	id: string;
 	content_id?: string;
 	title: string;
+	display_name?: string;
 	original_title?: string;
 	description?: string;
 	release_date?: string;

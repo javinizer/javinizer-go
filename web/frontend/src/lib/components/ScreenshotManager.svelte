@@ -8,10 +8,11 @@
 
 	interface Props {
 		movie: Movie;
+		displayPosterUrl?: string;
 		onUpdate: (movie: Movie) => void;
 	}
 
-	let { movie, onUpdate }: Props = $props();
+	let { movie, displayPosterUrl, onUpdate }: Props = $props();
 
 	let screenshots = $state<string[]>(movie.screenshot_urls || []);
 	let posterUrl = $state(movie.poster_url || '');
@@ -95,10 +96,11 @@
 				<div class="text-sm font-medium mb-1 block">
 					Preview{movie.should_crop_poster ? ' (Cropped)' : ''}
 				</div>
-				{#if posterUrl}
+				{#if displayPosterUrl || posterUrl}
 					<div class="w-full max-w-xs aspect-[2/3] overflow-hidden rounded border relative">
-						{#if movie.should_crop_poster}
+						{#if movie.should_crop_poster && !displayPosterUrl}
 							<!-- Crop to show only right 47.2% of image (removes promotional text on left) -->
+							<!-- Only apply cropping if displayPosterUrl is not available (displayPosterUrl is already cropped if temp_poster_url) -->
 							<img
 								src={posterUrl}
 								alt="Poster"
@@ -109,9 +111,9 @@
 								}}
 							/>
 						{:else}
-							<!-- Use poster directly without cropping -->
+							<!-- Use displayPosterUrl (temp_poster_url if available) or posterUrl directly without cropping -->
 							<img
-								src={posterUrl}
+								src={displayPosterUrl || posterUrl}
 								alt="Poster"
 								class="w-full h-full object-contain"
 								onerror={(e) => {

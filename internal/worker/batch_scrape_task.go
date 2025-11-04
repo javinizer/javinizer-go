@@ -335,6 +335,10 @@ func (t *BatchScrapeTask) Execute(ctx context.Context) error {
 			finalMovie = movie // Fallback to aggregated movie
 		} else {
 			finalMovie = reloadedMovie
+			// Preserve DisplayName from aggregated movie (DB may have stale/empty value)
+			if movie.DisplayName != "" {
+				finalMovie.DisplayName = movie.DisplayName
+			}
 			logging.Debugf("[Batch %s] File %d: Reloaded movie from database with associations", t.job.ID, t.fileIndex)
 		}
 	} else {
