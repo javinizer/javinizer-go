@@ -130,7 +130,7 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination string, copyOnly bool, db *database.DB, cfg *config.Config) {
 	// Initialize organizer, downloader, and NFO generator
 	org := organizer.NewOrganizer(&cfg.Output)
-	dl := downloader.NewDownloader(&cfg.Output, "Javinizer/1.0")
+	dl := downloader.NewDownloaderWithNFOConfig(&cfg.Output, "Javinizer/1.0", cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
 	nfoGen := nfo.NewGenerator(nfo.ConfigFromAppConfig(&cfg.Metadata.NFO, &cfg.Output, &cfg.Metadata, db))
 
 	// Broadcast organization started
@@ -207,6 +207,20 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 		if result.Moved && cfg.Output.DownloadExtrafanart {
 			if _, err := dl.DownloadExtrafanart(movie, result.FolderPath); err != nil {
 				logging.Errorf("Failed to download screenshots for %s: %v", movie.ID, err)
+			}
+		}
+
+		// Download trailer if enabled
+		if result.Moved && cfg.Output.DownloadTrailer {
+			if _, err := dl.DownloadTrailer(movie, result.FolderPath); err != nil {
+				logging.Errorf("Failed to download trailer for %s: %v", movie.ID, err)
+			}
+		}
+
+		// Download actress images if enabled
+		if result.Moved && cfg.Output.DownloadActress {
+			if _, err := dl.DownloadActressImages(movie, result.FolderPath); err != nil {
+				logging.Errorf("Failed to download actress images for %s: %v", movie.ID, err)
 			}
 		}
 

@@ -475,6 +475,11 @@ See [Template System](./04-template-system.md) for available tags and modifiers.
 
 **download_actress**: Download actress thumbnail images to `.actors/` subfolder.
 
+**actress_format**: Template for actress image filenames (default: `<ACTORNAME>.jpg`). Supports template variables like `<ID>`, `<ACTORNAME>`, etc. Examples:
+- `<ACTORNAME>.jpg` - Default, matches original Javinizer (e.g., `白上咲花.jpg`)
+- `<ID>_<ACTORNAME>.jpg` - Include movie ID (e.g., `SONE-860_白上咲花.jpg`)
+- `actress-<ACTORNAME>.jpg` - With prefix (e.g., `actress-白上咲花.jpg`)
+
 ### Delimiter
 
 **delimiter**: String used to join multiple values (e.g., actress names, genres) in templates.

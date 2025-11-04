@@ -189,6 +189,7 @@ type OutputConfig struct {
 	ScreenshotFolder    string      `yaml:"screenshot_folder"`
 	ScreenshotPadding   int         `yaml:"screenshot_padding"`
 	ActressFolder       string      `yaml:"actress_folder"`
+	ActressFormat       string      `yaml:"actress_format"`
 	DownloadCover       bool        `yaml:"download_cover"`
 	DownloadPoster      bool        `yaml:"download_poster"`
 	DownloadExtrafanart bool        `yaml:"download_extrafanart"`
@@ -330,6 +331,7 @@ func DefaultConfig() *Config {
 			ScreenshotFolder:    "extrafanart",
 			ScreenshotPadding:   1,
 			ActressFolder:       ".actors",
+			ActressFormat:       "<ACTORNAME>.jpg",
 			DownloadCover:       true,
 			DownloadPoster:      true,
 			DownloadExtrafanart: false,

@@ -20,9 +20,11 @@ import (
 
 // Downloader handles media file downloads
 type Downloader struct {
-	config     *config.OutputConfig
-	httpClient *http.Client
-	userAgent  string
+	config              *config.OutputConfig
+	httpClient          *http.Client
+	userAgent           string
+	actorJapaneseNames  bool // Use Japanese names for actress files
+	actorFirstNameOrder bool // true = FirstName LastName, false = LastName FirstName
 }
 
 // DownloadResult represents the result of a download operation
@@ -82,10 +84,20 @@ func NewDownloader(cfg *config.OutputConfig, userAgent string) *Downloader {
 	}
 
 	return &Downloader{
-		config:     cfg,
-		httpClient: client,
-		userAgent:  userAgent,
+		config:              cfg,
+		httpClient:          client,
+		userAgent:           userAgent,
+		actorJapaneseNames:  false, // Default: use English names
+		actorFirstNameOrder: true,  // Default: FirstName LastName
 	}
+}
+
+// NewDownloaderWithNFOConfig creates a new media downloader with NFO config for actress name formatting
+func NewDownloaderWithNFOConfig(cfg *config.OutputConfig, userAgent string, actorJapaneseNames, actorFirstNameOrder bool) *Downloader {
+	d := NewDownloader(cfg, userAgent)
+	d.actorJapaneseNames = actorJapaneseNames
+	d.actorFirstNameOrder = actorFirstNameOrder
+	return d
 }
 
 // generateFilename generates a filename using the configured template
@@ -260,6 +272,44 @@ func (d *Downloader) DownloadTrailer(movie *models.Movie, destDir string) (*Down
 	return d.download(movie.TrailerURL, destPath, MediaTypeTrailer)
 }
 
+// formatActressName formats an actress name according to NFO settings
+// This mirrors the logic in the NFO generator to ensure consistency
+func (d *Downloader) formatActressName(actress models.Actress) string {
+	// Use Japanese name if configured and available
+	if d.actorJapaneseNames && actress.JapaneseName != "" {
+		return actress.JapaneseName
+	}
+
+	// Format based on name order preference
+	firstName := actress.FirstName
+	lastName := actress.LastName
+
+	if firstName != "" && lastName != "" {
+		if d.actorFirstNameOrder {
+			// FirstName LastName
+			return firstName + " " + lastName
+		}
+		// LastName FirstName
+		return lastName + " " + firstName
+	}
+
+	// Single name only
+	if firstName != "" {
+		return firstName
+	}
+	if lastName != "" {
+		return lastName
+	}
+
+	// Fallback to Japanese name if English names are empty
+	if actress.JapaneseName != "" {
+		return actress.JapaneseName
+	}
+
+	// Last resort: use FullName() which tries all options
+	return actress.FullName()
+}
+
 // DownloadActressImages downloads actress thumbnail images
 func (d *Downloader) DownloadActressImages(movie *models.Movie, destDir string) ([]DownloadResult, error) {
 	if !d.config.DownloadActress || len(movie.Actresses) == 0 {
@@ -276,18 +326,21 @@ func (d *Downloader) DownloadActressImages(movie *models.Movie, destDir string) 
 			continue
 		}
 
+		// Format actress name according to NFO settings (Japanese vs English)
+		formattedName := d.formatActressName(actress)
+
 		// Use configurable template for actress filenames
 		// Create a temporary movie with actress data for template processing
 		actressMovie := &models.Movie{
 			ID:    movie.ID,
-			Title: actress.FullName(),
+			Title: formattedName,
 		}
 
-		filename := d.generateFilename(actressMovie, "actress-<ACTORNAME>.jpg", 0)
+		filename := d.generateFilename(actressMovie, d.config.ActressFormat, 0)
 		if filename == "" {
-			// Fallback to hardcoded format
-			name := template.SanitizeFilename(actress.FullName())
-			filename = fmt.Sprintf("actress-%s.jpg", name)
+			// Fallback to default format
+			name := template.SanitizeFilename(formattedName)
+			filename = fmt.Sprintf("%s.jpg", name)
 		}
 		destPath := filepath.Join(actressDir, filename)
 

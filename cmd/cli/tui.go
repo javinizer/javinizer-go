@@ -198,7 +198,7 @@ func runTUI(cmd *cobra.Command, args []string) {
 	agg := aggregator.NewWithDatabase(cfg, db)
 
 	// Initialize downloader
-	dl := downloader.NewDownloader(&cfg.Output, cfg.Scrapers.UserAgent)
+	dl := downloader.NewDownloaderWithNFOConfig(&cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
 
 	// Initialize organizer
 	org := organizer.NewOrganizer(&cfg.Output)

@@ -340,8 +340,11 @@ func (g *Generator) formatActressNameFromInfo(firstName, lastName, japaneseName 
 		return japaneseName
 	}
 
-	// Handle unknown actress
+	// Handle unknown actress - fall back to Japanese name if available
 	if firstName == "" && lastName == "" {
+		if japaneseName != "" {
+			return japaneseName // Better to show Japanese name than "Unknown"
+		}
 		return g.config.UnknownActress
 	}
 

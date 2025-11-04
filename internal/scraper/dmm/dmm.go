@@ -1001,9 +1001,10 @@ func (s *Scraper) extractActresses(doc *goquery.Document) []models.ActressInfo {
 		}
 
 		if isJapanese {
+			// Japanese names: only populate japanese_name field
 			actress.JapaneseName = actressName
 		} else {
-			// Split English name
+			// English names: populate first_name and last_name
 			parts := strings.Fields(actressName)
 			if len(parts) == 1 {
 				actress.FirstName = parts[0]
@@ -1158,16 +1159,10 @@ func (s *Scraper) extractActressFromLink(sel *goquery.Selection) models.ActressI
 	}
 
 	if isJapanese {
+		// Japanese names: only populate japanese_name field
 		actress.JapaneseName = actressName
-
-		// Try to split name (Family name comes first in Japanese)
-		parts := strings.Fields(actressName)
-		if len(parts) >= 2 {
-			actress.LastName = parts[0]
-			actress.FirstName = parts[1]
-		}
 	} else {
-		// English name - split it
+		// English names: populate first_name and last_name
 		parts := strings.Fields(actressName)
 		if len(parts) >= 2 {
 			// Given name comes first in English

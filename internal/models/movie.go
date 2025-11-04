@@ -28,8 +28,8 @@ type Movie struct {
 	OriginalFileName string     `json:"original_filename"`
 
 	// Relationships
-	Actresses   []Actress `json:"actresses" gorm:"many2many:movie_actresses;"`
-	Genres      []Genre   `json:"genres" gorm:"many2many:movie_genres;"`
+	Actresses   []Actress `json:"actresses" gorm:"many2many:movie_actresses;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:ActressID"`
+	Genres      []Genre   `json:"genres" gorm:"many2many:movie_genres;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:GenreID"`
 	Screenshots []string  `json:"screenshot_urls" gorm:"serializer:json"`
 
 	// Translations

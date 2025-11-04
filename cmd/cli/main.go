@@ -920,7 +920,7 @@ func runSort(cmd *cobra.Command, args []string, deps *Dependencies) error {
 
 	fileOrganizer := organizer.NewOrganizer(&deps.Config.Output)
 	nfoGenerator := nfo.NewGenerator(nfo.ConfigFromAppConfig(&deps.Config.Metadata.NFO, &deps.Config.Output, &deps.Config.Metadata, deps.DB))
-	mediaDownloader := downloader.NewDownloader(&deps.Config.Output, deps.Config.Scrapers.UserAgent)
+	mediaDownloader := downloader.NewDownloaderWithNFOConfig(&deps.Config.Output, deps.Config.Scrapers.UserAgent, deps.Config.Metadata.NFO.ActressLanguageJA, deps.Config.Metadata.NFO.FirstNameOrder)
 
 	// Print configuration
 	fmt.Println("=== Javinizer Sort ===")

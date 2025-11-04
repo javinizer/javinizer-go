@@ -701,6 +701,14 @@
 							placeholder=".actors"
 							onchange={(val) => { config.Output.ActressFolder = val; }}
 						/>
+
+					<FormTemplateInput
+						label="Actress format"
+						description="Naming template for actress image files"
+						value={config.Output.ActressFormat ?? "<ACTORNAME>.jpg"}
+						placeholder="<ACTORNAME>.jpg"
+						onchange={(val) => { config.Output.ActressFormat = val; }}
+					/>
 					</SettingsSubsection>
 				</div>
 			</SettingsSection>
