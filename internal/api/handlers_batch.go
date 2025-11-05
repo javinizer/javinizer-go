@@ -54,22 +54,27 @@ func getBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jobID := c.Param("id")
 
+		// GetJob() now returns a snapshot (result of GetStatus()), not a pointer
+		// So we don't need to call GetStatus() again
 		job, ok := deps.JobQueue.GetJob(jobID)
 		if !ok {
 			c.JSON(404, ErrorResponse{Error: "Job not found"})
 			return
 		}
 
-		status := job.GetStatus()
+		// Debug logging to trace the state
+		logging.Debugf("[GET /batch/%s] Returning job with %d results, completed=%d, failed=%d",
+			jobID, len(job.Results), job.Completed, job.Failed)
+
 		var completedAt *string
-		if status.CompletedAt != nil {
-			str := status.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
+		if job.CompletedAt != nil {
+			str := job.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
 			completedAt = &str
 		}
 
 		// Transform results to add temp poster URLs
 		results := make(map[string]*BatchFileResult)
-		for filePath, fileResult := range status.Results {
+		for filePath, fileResult := range job.Results {
 			var endedAt *string
 			if fileResult.EndedAt != nil {
 				str := fileResult.EndedAt.Format("2006-01-02T15:04:05Z07:00")
@@ -100,14 +105,14 @@ func getBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		c.JSON(200, BatchJobResponse{
-			ID:          status.ID,
-			Status:      string(status.Status),
-			TotalFiles:  status.TotalFiles,
-			Completed:   status.Completed,
-			Failed:      status.Failed,
-			Progress:    status.Progress,
+			ID:          job.ID,
+			Status:      string(job.Status),
+			TotalFiles:  job.TotalFiles,
+			Completed:   job.Completed,
+			Failed:      job.Failed,
+			Progress:    job.Progress,
 			Results:     results,
-			StartedAt:   status.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+			StartedAt:   job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
 			CompletedAt: completedAt,
 		})
 	}
@@ -328,17 +333,16 @@ func previewOrganize(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Get the batch job
+		// Get the batch job (already a snapshot, don't call GetStatus() again)
 		job, ok := deps.JobQueue.GetJob(jobID)
 		if !ok {
 			c.JSON(404, ErrorResponse{Error: "Job not found"})
 			return
 		}
 
-		// Find the movie in the job results
-		status := job.GetStatus()
+		// Find the movie in the job results (job is already a snapshot, use it directly)
 		var movie *models.Movie
-		for _, result := range status.Results {
+		for _, result := range job.Results {
 			if result.MovieID == movieID {
 				if result.Data != nil {
 					var ok bool
@@ -354,7 +358,7 @@ func previewOrganize(deps *ServerDependencies) gin.HandlerFunc {
 
 		// If not found by MovieID, try searching by the actual movie.ID (in case of content ID resolution)
 		if movie == nil {
-			for _, result := range status.Results {
+			for _, result := range job.Results {
 				if result.Data != nil {
 					if m, ok := result.Data.(*models.Movie); ok && m.ID == movieID {
 						movie = m

@@ -398,12 +398,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("scrapers.dmm.headless_timeout must be between 1 and 300")
 	}
 
+	// Set default referer if not specified (for backward compatibility with old configs)
+	// DMM CDN requires a referer header to avoid 403 errors
+	if c.Scrapers.Referer == "" {
+		c.Scrapers.Referer = "https://www.dmm.co.jp/"
+	}
+
 	// Validate referer URL format
-	if c.Scrapers.Referer != "" {
-		u, err := url.Parse(c.Scrapers.Referer)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return fmt.Errorf("scrapers.referer must be a valid http(s) URL with a host")
-		}
+	u, err := url.Parse(c.Scrapers.Referer)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("scrapers.referer must be a valid http(s) URL with a host")
 	}
 
 	// Validate performance settings

@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -67,6 +68,18 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 	pool := worker.NewPoolWithContext(ctx, maxWorkers, timeout, progressTracker)
 	defer pool.Stop()
 
+	// Create HTTP client for poster downloads with proxy support
+	// Use scraper request timeout from config (default 30s)
+	requestTimeout := time.Duration(cfg.Scrapers.RequestTimeoutSeconds) * time.Second
+	if requestTimeout <= 0 {
+		requestTimeout = 30 * time.Second
+	}
+	httpClient, err := httpclient.NewHTTPClient(&cfg.Scrapers.Proxy, requestTimeout)
+	if err != nil {
+		logging.Warnf("Failed to create HTTP client for poster downloads: %v (will skip poster generation)", err)
+		httpClient = nil // Continue without poster generation
+	}
+
 	// Submit tasks to pool
 	for i, filePath := range job.Files {
 		// Check if context is cancelled
@@ -83,6 +96,15 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 		// Register with adapter for WebSocket mapping
 		adapter.RegisterTask(taskID, i, filePath)
 
+		// Determine scraper priority contract:
+		// - nil = use registry defaults (enables DB persistence, standard batch mode)
+		// - non-nil = custom scraper mode (temporary aggregation, no DB persistence)
+		// Pass nil when no custom scrapers specified to maintain proper persistence semantics
+		scrapersToUse := selectedScrapers
+		if len(selectedScrapers) == 0 {
+			scrapersToUse = nil // Use registry defaults, not config list
+		}
+
 		// Create batch scrape task
 		task := worker.NewBatchScrapeTask(
 			taskID,
@@ -95,8 +117,8 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 			mat,
 			progressTracker,
 			force,
-			selectedScrapers,       // Pass as-is (empty = use defaults, non-empty = custom)
-			nil,                    // httpClient - will be created in the task
+			scrapersToUse,          // nil = registry defaults (DB persist), non-nil = custom mode
+			httpClient,             // httpClient - configured with proxy support
 			cfg.Scrapers.UserAgent, // userAgent
 			cfg.Scrapers.Referer,   // referer
 		)

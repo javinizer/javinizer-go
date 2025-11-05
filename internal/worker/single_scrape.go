@@ -160,15 +160,19 @@ func RunBatchScrapeOnce(
 	results := make([]*models.ScraperResult, 0)
 	scraperErrors := make([]string, 0)
 
-	// GetByPriority returns all enabled scrapers when passed empty/nil
-	scrapersToUse := registry.GetByPriority(selectedScrapers)
+	// Normalize empty slice to nil for explicit GetByPriority semantics
+	var scraperNames []string
 	if len(selectedScrapers) > 0 {
-		logging.Debugf("[Batch %s] File %d: Using custom scraper priority: %v (%d scrapers)",
-			job.ID, fileIndex, selectedScrapers, len(scrapersToUse))
+		scraperNames = selectedScrapers
+		logging.Debugf("[Batch %s] File %d: Using custom scraper priority: %v", job.ID, fileIndex, selectedScrapers)
 	} else {
-		logging.Debugf("[Batch %s] File %d: Using default scraper priority (%d scrapers)",
-			job.ID, fileIndex, len(scrapersToUse))
+		scraperNames = nil // Explicitly pass nil to use registry defaults
+		logging.Debugf("[Batch %s] File %d: Using default scraper priority", job.ID, fileIndex)
 	}
+
+	// GetByPriority returns all enabled scrapers when passed nil
+	scrapersToUse := registry.GetByPriority(scraperNames)
+	logging.Debugf("[Batch %s] File %d: Resolved to %d scrapers", job.ID, fileIndex, len(scrapersToUse))
 
 	for _, scraper := range scrapersToUse {
 		// Check for context cancellation
@@ -312,6 +316,11 @@ func RunBatchScrapeOnce(
 			logging.Debugf("[Batch %s] File %d: Reloaded movie from database with associations", job.ID, fileIndex)
 		}
 	} else {
+		// Custom scraper mode: Use aggregated movie directly without database reload.
+		// This is intentional - custom scraper results are temporary (not persisted to DB)
+		// and the Movie object contains all necessary data from the aggregator.
+		// Note: ORM associations (Actresses, Genres) won't be lazily loaded since the
+		// movie is not from the database, but all data is already populated by the aggregator.
 		finalMovie = movie
 	}
 

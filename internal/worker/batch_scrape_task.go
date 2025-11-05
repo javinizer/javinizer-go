@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scanner"
 )
 
 // BatchScrapeTask represents a task for scraping metadata for a single file in a batch operation
@@ -75,8 +76,24 @@ func NewBatchScrapeTask(
 
 // Execute implements the Task interface
 func (t *BatchScrapeTask) Execute(ctx context.Context) error {
-	// Update progress tracker
-	t.progressTracker.Update(t.id, 0.1, fmt.Sprintf("Starting scrape..."), 0)
+	// Extract movie ID first for progress tracking
+	fileInfo := scanner.FileInfo{
+		Path:      t.filePath,
+		Name:      filepath.Base(t.filePath),
+		Extension: filepath.Ext(t.filePath),
+		Dir:       filepath.Dir(t.filePath),
+	}
+	matchResults := t.matcher.Match([]scanner.FileInfo{fileInfo})
+
+	var movieID string
+	if len(matchResults) > 0 {
+		movieID = matchResults[0].ID
+	} else {
+		movieID = filepath.Base(t.filePath) // Fallback to filename for progress display
+	}
+
+	// Step 1: Initial progress update
+	t.progressTracker.Update(t.id, 0.1, fmt.Sprintf("Scraping %s", movieID), 0)
 
 	// Record running state immediately so UI can show in-progress status
 	startTime := time.Now()
@@ -85,6 +102,9 @@ func (t *BatchScrapeTask) Execute(ctx context.Context) error {
 		Status:    JobStatusRunning,
 		StartedAt: startTime,
 	})
+
+	// Step 2: Querying scrapers
+	t.progressTracker.Update(t.id, 0.2, "Querying scrapers...", 0)
 
 	// Use the shared scraping logic
 	movie, fileResult, err := RunBatchScrapeOnce(
@@ -104,6 +124,11 @@ func (t *BatchScrapeTask) Execute(ctx context.Context) error {
 		t.selectedScrapers,
 	)
 
+	// Step 3: Aggregating results (if we got this far without error)
+	if err == nil && fileResult != nil && fileResult.Status == JobStatusCompleted {
+		t.progressTracker.Update(t.id, 0.8, "Aggregating metadata...", 0)
+	}
+
 	// Update job with result
 	if fileResult != nil {
 		t.job.UpdateFileResult(t.filePath, fileResult)
@@ -122,9 +147,13 @@ func (t *BatchScrapeTask) Execute(ctx context.Context) error {
 	}
 
 	// Success
-	movieID := fileResult.MovieID
+	if fileResult != nil && fileResult.MovieID != "" {
+		movieID = fileResult.MovieID
+	}
 	t.progressTracker.Complete(t.id, fmt.Sprintf("Scraped %s successfully", movieID))
-	logging.Debugf("[Batch %s] File %d: Task completed successfully for %s", t.job.ID, t.fileIndex, movie.ID)
+	if movie != nil {
+		logging.Debugf("[Batch %s] File %d: Task completed successfully for %s", t.job.ID, t.fileIndex, movie.ID)
+	}
 
 	return nil
 }

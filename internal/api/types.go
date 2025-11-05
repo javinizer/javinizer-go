@@ -176,3 +176,16 @@ type RescrapeRequest struct {
 	SelectedScrapers []string `json:"selected_scrapers" binding:"required" example:"r18dev,dmm"`
 	Force            bool     `json:"force" example:"false"`
 }
+
+// BatchRescrapeRequest represents a batch rescrape request for manual search/rescraping
+type BatchRescrapeRequest struct {
+	Force             bool     `json:"force" example:"false"`
+	SelectedScrapers  []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
+	ManualSearchInput string   `json:"manual_search_input,omitempty" example:"IPX-535"`
+}
+
+// BatchRescrapeResponse represents a batch rescrape response with movie and temp poster
+type BatchRescrapeResponse struct {
+	Movie         *models.Movie `json:"movie"`
+	TempPosterURL string        `json:"temp_poster_url,omitempty"`
+}
