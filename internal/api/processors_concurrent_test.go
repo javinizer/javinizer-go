@@ -89,8 +89,8 @@ func (s *stubScraper) Search(id string) (*models.ScraperResult, error) {
 		Label:         "Test Label",
 		Series:        "Test Series",
 		Actresses: []models.ActressInfo{
-			{FirstName: "Test", LastName: "Actress 1", JapaneseName: "テスト女優1"},
-			{FirstName: "Test", LastName: "Actress 2", JapaneseName: "テスト女優2"},
+			{FirstName: "Test", LastName: "Actress 1", JapaneseName: "テスト女優1", DMMID: 1001},
+			{FirstName: "Test", LastName: "Actress 2", JapaneseName: "テスト女優2", DMMID: 1002},
 		},
 		Genres:    []string{"Drama", "Action"},
 		PosterURL: fmt.Sprintf("https://example.com/posters/%s.jpg", id),
@@ -149,9 +149,20 @@ func createTestFiles(t *testing.T, count int) ([]string, string) {
 func createInvalidTestFiles(t *testing.T, count int, tmpDir string) []string {
 	t.Helper()
 
+	// Create files with patterns that won't match ANY JAV ID regex
+	// These deliberately avoid the letter-hyphen-digit or letter+digit patterns
 	files := make([]string, 0, count)
+	patterns := []string{
+		"movie_backup_%d.mp4", // underscore, not hyphen
+		"random123video.mkv",  // digits before letters
+		"nohyphenhere%d.avi",  // no hyphen separator
+		"123456.mp4",          // only numbers, no letters
+		"xy.mp4",              // too short (< 3 letters)
+	}
+
 	for i := 0; i < count; i++ {
-		filename := fmt.Sprintf("invalid-file-%d.mp4", i)
+		pattern := patterns[i%len(patterns)]
+		filename := fmt.Sprintf(pattern, i)
 		filePath := filepath.Join(tmpDir, filename)
 
 		file, err := os.Create(filePath)
@@ -554,7 +565,7 @@ func TestBatchScrapeTaskDatabaseSafety(t *testing.T) {
 			RegexEnabled: false,
 		},
 		Performance: config.PerformanceConfig{
-			MaxWorkers:    3,
+			MaxWorkers:    1, // Sequential processing to avoid race conditions with same movie ID
 			WorkerTimeout: 30,
 		},
 	}

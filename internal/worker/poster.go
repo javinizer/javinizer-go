@@ -1,0 +1,135 @@
+package worker
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+
+	"github.com/javinizer/javinizer-go/internal/config"
+	imageutil "github.com/javinizer/javinizer-go/internal/image"
+	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
+)
+
+// GenerateTempPoster downloads and crops a poster temporarily for the review page
+// Returns the relative API URL path for the temp poster
+// Updates movie.ShouldCropPoster to false since the temp image is already cropped
+//
+// Parameters:
+//   - ctx: Context for cancellation support
+//   - jobID: Batch job ID for organizing temp files by job
+//   - movie: Movie model containing poster/cover URLs
+//   - httpClient: Pre-configured HTTP client with proxy and timeout settings
+//   - userAgent: User-Agent header value from config
+//   - referer: Referer header value from config (for CDN compatibility)
+//
+// Returns:
+//   - tempRelativeURL: API URL path like "/api/v1/temp/posters/{jobID}/{movieID}.jpg"
+//   - error: Any error encountered during download or cropping
+func GenerateTempPoster(
+	ctx context.Context,
+	jobID string,
+	movie *models.Movie,
+	httpClient *http.Client,
+	userAgent string,
+	referer string,
+) (tempRelativeURL string, err error) {
+	// Determine poster URL to download
+	originalPosterURL := movie.PosterURL
+	if originalPosterURL == "" {
+		originalPosterURL = movie.CoverURL
+	}
+	if originalPosterURL == "" {
+		return "", fmt.Errorf("no poster or cover URL available")
+	}
+
+	// Create temp directory: data/temp/posters/{job_id}/
+	// Use DirPermTemp (0700) for owner-only access to sensitive temp files
+	tempDir := filepath.Join("data", "temp", "posters", jobID)
+	if err := os.MkdirAll(tempDir, config.DirPermTemp); err != nil {
+		return "", fmt.Errorf("failed to create temp poster directory: %w", err)
+	}
+
+	// Define file paths
+	tempFullPath := filepath.Join(tempDir, fmt.Sprintf("%s-full.jpg", movie.ID))
+	tempCroppedPath := filepath.Join(tempDir, fmt.Sprintf("%s.jpg", movie.ID))
+
+	// Download the poster
+	req, err := http.NewRequestWithContext(ctx, "GET", originalPosterURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers from config (not hardcoded)
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+	// Set Referer header for CDN compatibility (DMM/R18 require it)
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to download poster: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("poster download failed with status %d", resp.StatusCode)
+	}
+
+	// Save to temporary file using atomic write pattern
+	tempDownloadPath := tempFullPath + ".tmp"
+	outFile, err := os.Create(tempDownloadPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	_, err = io.Copy(outFile, resp.Body)
+	outFile.Close()
+	if err != nil {
+		os.Remove(tempDownloadPath)
+		return "", fmt.Errorf("failed to write poster: %w", err)
+	}
+
+	// Atomic rename to final path
+	if err := os.Rename(tempDownloadPath, tempFullPath); err != nil {
+		os.Remove(tempDownloadPath)
+		return "", fmt.Errorf("failed to finalize poster download: %w", err)
+	}
+
+	// Check for cancellation before expensive cropping operation
+	select {
+	case <-ctx.Done():
+		os.Remove(tempFullPath)
+		os.Remove(tempCroppedPath)
+		return "", ctx.Err()
+	default:
+	}
+
+	// Crop the poster using the smart cropping algorithm
+	if err := imageutil.CropPosterFromCover(tempFullPath, tempCroppedPath); err != nil {
+		os.Remove(tempFullPath)
+		os.Remove(tempCroppedPath)
+		return "", fmt.Errorf("failed to crop poster: %w", err)
+	}
+
+	// Clean up the full image after successful crop
+	os.Remove(tempFullPath)
+
+	// Update movie metadata to indicate poster is already cropped
+	// This prevents CSS-based cropping in the frontend
+	movie.ShouldCropPoster = false
+
+	// Return API URL for frontend to fetch the poster
+	tempRelativeURL = fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg", jobID, movie.ID)
+
+	logging.Debugf("[Job %s] Created temp cropped poster at %s (original URL preserved: %s)",
+		jobID, tempCroppedPath, originalPosterURL)
+
+	return tempRelativeURL, nil
+}

@@ -51,6 +51,17 @@ export interface RescrapeRequest {
 	force?: boolean;
 }
 
+export interface BatchRescrapeRequest {
+	force?: boolean;
+	selected_scrapers?: string[];
+	manual_search_input?: string;
+}
+
+export interface BatchRescrapeResponse {
+	movie: Movie;
+	temp_poster_url?: string;
+}
+
 export interface BatchScrapeResponse {
 	job_id: string;
 }

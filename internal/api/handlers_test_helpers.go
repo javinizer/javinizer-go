@@ -83,11 +83,15 @@ func newMockActressRepo() *database.ActressRepository {
 func createTestDeps(t *testing.T, cfg *config.Config, configFile string) *ServerDependencies {
 	t.Helper()
 
-	// Initialize in-memory database
+	// Initialize in-memory database with a unique name per test to avoid cross-test pollution
+	// Using file:TESTNAME:?mode=memory&cache=shared ensures:
+	// 1. Isolation between different tests (each gets its own DB)
+	// 2. Shared cache within a test (concurrent goroutines see same data)
+	dbName := t.Name()
 	dbCfg := &config.Config{
 		Database: config.DatabaseConfig{
 			Type: "sqlite",
-			DSN:  ":memory:",
+			DSN:  "file:" + dbName + ":?mode=memory&cache=shared",
 		},
 		Logging: config.LoggingConfig{
 			Level: "error",

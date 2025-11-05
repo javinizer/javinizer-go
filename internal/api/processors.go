@@ -34,11 +34,11 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 
 	job.MarkStarted()
 
-	// Determine scraper list (custom scrapers override defaults)
-	scrapersToUse := cfg.Scrapers.Priority
+	// Log which scrapers will be used
 	if len(selectedScrapers) > 0 {
-		scrapersToUse = selectedScrapers
-		logging.Infof("Batch job using custom scrapers: %v", scrapersToUse)
+		logging.Infof("Batch job using custom scrapers: %v", selectedScrapers)
+	} else {
+		logging.Infof("Batch job using default scrapers from config: %v", cfg.Scrapers.Priority)
 	}
 
 	// Create progress adapter for WebSocket broadcasting
@@ -95,7 +95,7 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 			mat,
 			progressTracker,
 			force,
-			scrapersToUse,
+			selectedScrapers,       // Pass as-is (empty = use defaults, non-empty = custom)
 			nil,                    // httpClient - will be created in the task
 			cfg.Scrapers.UserAgent, // userAgent
 			cfg.Scrapers.Referer,   // referer

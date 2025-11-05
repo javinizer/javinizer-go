@@ -15,7 +15,10 @@ import type {
 	OrganizePreviewResponse,
 	AvailableScrapersResponse,
 	Scraper,
-	RescrapeRequest
+	RescrapeRequest,
+	ScrapeRequest,
+	BatchRescrapeRequest,
+	BatchRescrapeResponse
 } from './types';
 
 // Build API base URL dynamically from browser location
@@ -172,6 +175,28 @@ class APIClient {
 			body: JSON.stringify(req)
 		});
 		return response.movie;
+	}
+
+	// Scrape movie from content-id/dvd-id or URL
+	async scrapeMovie(input: string, options?: { force?: boolean; selected_scrapers?: string[] }): Promise<Movie> {
+		const request: ScrapeRequest = {
+			id: input,
+			force: options?.force,
+			selected_scrapers: options?.selected_scrapers
+		};
+		const response = await this.request<{ movie: Movie }>('/api/v1/scrape', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		});
+		return response.movie;
+	}
+
+	// Rescrape movie within a batch job (batch-aware rescrape)
+	async rescrapeBatchMovie(jobId: string, movieId: string, req: BatchRescrapeRequest): Promise<BatchRescrapeResponse> {
+		return this.request<BatchRescrapeResponse>(`/api/v1/batch/${jobId}/movies/${movieId}/rescrape`, {
+			method: 'POST',
+			body: JSON.stringify(req)
+		});
 	}
 }
 

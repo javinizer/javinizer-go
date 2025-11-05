@@ -2,10 +2,22 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+)
+
+// File and directory permission constants
+// Centralized to ensure consistency across the codebase
+const (
+	// DirPermConfig is the permission mode for configuration directories (owner + group read/execute)
+	DirPermConfig = 0755
+	// DirPermTemp is the permission mode for temporary/sensitive directories (owner-only access)
+	DirPermTemp = 0700
+	// FilePermConfig is the permission mode for configuration files
+	FilePermConfig = 0644
 )
 
 // Config represents the application configuration
@@ -57,11 +69,14 @@ type SystemConfig struct {
 
 // ScrapersConfig holds scraper-specific settings
 type ScrapersConfig struct {
-	UserAgent string       `yaml:"user_agent"`
-	Priority  []string     `yaml:"priority"` // Global scraper priority order
-	Proxy     ProxyConfig  `yaml:"proxy"`    // HTTP/SOCKS5 proxy for scraper requests
-	R18Dev    R18DevConfig `yaml:"r18dev"`
-	DMM       DMMConfig    `yaml:"dmm"`
+	UserAgent             string       `yaml:"user_agent"`
+	Referer               string       `yaml:"referer"`                 // Referer header for CDN compatibility (default: https://www.dmm.co.jp/)
+	TimeoutSeconds        int          `yaml:"timeout_seconds"`         // HTTP client timeout in seconds (default: 30)
+	RequestTimeoutSeconds int          `yaml:"request_timeout_seconds"` // Overall request timeout in seconds (default: 60)
+	Priority              []string     `yaml:"priority"`                // Global scraper priority order
+	Proxy                 ProxyConfig  `yaml:"proxy"`                   // HTTP/SOCKS5 proxy for scraper requests
+	R18Dev                R18DevConfig `yaml:"r18dev"`
+	DMM                   DMMConfig    `yaml:"dmm"`
 }
 
 // R18DevConfig holds R18.dev scraper configuration
@@ -244,8 +259,10 @@ func DefaultConfig() *Config {
 			},
 		},
 		Scrapers: ScrapersConfig{
-			UserAgent: "Javinizer (+https://github.com/javinizer/Javinizer)",
-			Priority:  []string{"r18dev", "dmm"}, // Global scraper execution order
+			UserAgent:             "Javinizer (+https://github.com/javinizer/Javinizer)",
+			TimeoutSeconds:        30,                        // HTTP client timeout
+			RequestTimeoutSeconds: 60,                        // Overall request timeout
+			Priority:              []string{"r18dev", "dmm"}, // Global scraper execution order
 			Proxy: ProxyConfig{
 				Enabled: false,
 				URL:     "",
@@ -254,8 +271,9 @@ func DefaultConfig() *Config {
 				Enabled: true,
 			},
 			DMM: DMMConfig{
-				Enabled:       false, // DMM site now redirects to JavaScript-rendered site
-				ScrapeActress: false,
+				Enabled:         false, // DMM site now redirects to JavaScript-rendered site
+				ScrapeActress:   false,
+				HeadlessTimeout: 30, // Timeout for headless browser
 			},
 		},
 		Metadata: MetadataConfig{
@@ -367,6 +385,41 @@ func DefaultConfig() *Config {
 	}
 }
 
+// Validate checks configuration values for validity
+func (c *Config) Validate() error {
+	// Validate scraper timeouts
+	if c.Scrapers.TimeoutSeconds < 1 || c.Scrapers.TimeoutSeconds > 300 {
+		return fmt.Errorf("scrapers.timeout_seconds must be between 1 and 300")
+	}
+	if c.Scrapers.RequestTimeoutSeconds < 1 || c.Scrapers.RequestTimeoutSeconds > 600 {
+		return fmt.Errorf("scrapers.request_timeout_seconds must be between 1 and 600")
+	}
+	if c.Scrapers.DMM.HeadlessTimeout < 1 || c.Scrapers.DMM.HeadlessTimeout > 300 {
+		return fmt.Errorf("scrapers.dmm.headless_timeout must be between 1 and 300")
+	}
+
+	// Validate referer URL format
+	if c.Scrapers.Referer != "" {
+		u, err := url.Parse(c.Scrapers.Referer)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("scrapers.referer must be a valid http(s) URL with a host")
+		}
+	}
+
+	// Validate performance settings
+	if c.Performance.MaxWorkers < 1 || c.Performance.MaxWorkers > 100 {
+		return fmt.Errorf("performance.max_workers must be between 1 and 100")
+	}
+	if c.Performance.WorkerTimeout < 10 || c.Performance.WorkerTimeout > 3600 {
+		return fmt.Errorf("performance.worker_timeout must be between 10 and 3600")
+	}
+	if c.Performance.UpdateInterval < 10 || c.Performance.UpdateInterval > 5000 {
+		return fmt.Errorf("performance.update_interval must be between 10 and 5000")
+	}
+
+	return nil
+}
+
 // Load reads configuration from a YAML file
 func Load(path string) (*Config, error) {
 	cfg := DefaultConfig()
@@ -395,11 +448,11 @@ func Save(cfg *Config, path string) error {
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0777); err != nil {
+	if err := os.MkdirAll(dir, DirPermConfig); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, FilePermConfig); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -411,6 +464,11 @@ func LoadOrCreate(path string) (*Config, error) {
 	cfg, err := Load(path)
 	if err != nil {
 		return nil, err
+	}
+
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	// If file didn't exist, save the default config

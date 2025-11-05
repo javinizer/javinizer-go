@@ -92,6 +92,9 @@
 	let rescrapeMovieId = $state('');
 	let rescrapeSelectedScrapers: string[] = $state([]);
 	let rescrapingStates = $state<Map<string, boolean>>(new Map());
+	// Manual search mode state
+	let manualSearchMode = $state(false);
+	let manualSearchInput = $state('');
 
 	// Get all successful movie results
 	const movieResults = $derived<FileResult[]>(
@@ -241,18 +244,30 @@
 		rescrapeSelectedScrapers = availableScrapers
 			.filter((s) => s.enabled)
 			.map((s) => s.name);
+		manualSearchMode = false;
+		manualSearchInput = '';
 		showRescrapeModal = true;
 	}
 
 	async function executeRescrape() {
+		// Validate common requirements
 		if (rescrapeSelectedScrapers.length === 0) {
 			toastStore.error('Please select at least one scraper');
 			return;
 		}
 
 		if (!currentResult) {
-			toastStore.error('No current movie to rescrape');
+			toastStore.error('No current movie to update');
 			return;
+		}
+
+		// Manual search mode - validate input
+		if (manualSearchMode) {
+			const input = manualSearchInput.trim();
+			if (!input) {
+				toastStore.error('Please enter a content ID, DVD ID, or URL');
+				return;
+			}
 		}
 
 		// Set rescraping state
@@ -260,12 +275,17 @@
 		rescrapingStates = new Map(rescrapingStates);
 
 		try {
-			const updatedMovie = await apiClient.rescrapeMovie(rescrapeMovieId, {
+			// Call batch-aware rescrape endpoint (handles both modes)
+			const response = await apiClient.rescrapeBatchMovie(jobId, rescrapeMovieId, {
+				force: true,
 				selected_scrapers: rescrapeSelectedScrapers,
-				force: true
+				manual_search_input: manualSearchMode ? manualSearchInput.trim() : undefined
 			});
 
-			console.log('Rescrape successful, updating job results for:', rescrapeMovieId);
+			const updatedMovie = response.movie;
+			const tempPosterUrl = response.temp_poster_url;
+
+			console.log(manualSearchMode ? 'Manual search successful' : 'Rescrape successful', ', updating job results');
 
 			// Update the movie in the job results using the current file path
 			if (job && currentResult.file_path) {
@@ -276,9 +296,11 @@
 				const newResults = { ...job.results };
 
 				// Create new result object to trigger reactivity
+				// Include temp_poster_url if provided by backend
 				newResults[filePath] = {
 					...newResults[filePath],
-					data: updatedMovie
+					data: updatedMovie,
+					temp_poster_url: tempPosterUrl
 				};
 
 				// Create new job object to trigger Svelte reactivity
@@ -295,12 +317,15 @@
 				editedMovies = editedMovies;
 			}
 
-			toastStore.success(`Successfully rescraped ${rescrapeMovieId}`);
+			toastStore.success(manualSearchMode
+				? `Successfully scraped metadata for ${manualSearchInput.trim()}`
+				: `Successfully rescraped ${rescrapeMovieId}`
+			);
 			showRescrapeModal = false;
 		} catch (error) {
-			console.error('Rescrape failed:', error);
+			console.error(manualSearchMode ? 'Manual search failed' : 'Rescrape failed', ':', error);
 			const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
-			toastStore.error('Rescrape failed: ' + errorMessage);
+			toastStore.error((manualSearchMode ? 'Manual search failed: ' : 'Rescrape failed: ') + errorMessage);
 		} finally {
 			rescrapingStates.delete(rescrapeMovieId);
 			rescrapingStates = new Map(rescrapingStates);
@@ -997,7 +1022,7 @@
 		<Card class="w-full max-w-lg flex flex-col max-h-[90vh]">
 			<!-- Header -->
 			<div class="p-6 border-b flex items-center justify-between">
-				<h2 class="text-xl font-bold">Rescrape {rescrapeMovieId}</h2>
+				<h2 class="text-xl font-bold">{manualSearchMode ? 'Manual Search' : `Rescrape ${rescrapeMovieId}`}</h2>
 				<Button
 					variant="ghost"
 					size="icon"
@@ -1017,14 +1042,62 @@
 					<div class="flex flex-col items-center justify-center py-8 space-y-4">
 						<Loader2 class="h-12 w-12 animate-spin text-primary" />
 						<div class="text-center space-y-2">
-							<p class="text-sm font-medium">Rescraping metadata...</p>
+							<p class="text-sm font-medium">{manualSearchMode ? 'Scraping metadata...' : 'Rescraping metadata...'}</p>
 							<p class="text-xs text-muted-foreground">
 								Fetching data from {rescrapeSelectedScrapers.join(', ')}
 							</p>
 						</div>
 					</div>
+{:else}
+				<!-- Mode Toggle -->
+				<div class="flex gap-2 mb-6 p-1 bg-accent rounded-lg">
+					<button
+						onclick={() => manualSearchMode = false}
+						class="flex-1 px-4 py-2 rounded transition-all {!manualSearchMode ? 'bg-white shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}"
+					>
+						Rescrape from File
+					</button>
+					<button
+						onclick={() => manualSearchMode = true}
+						class="flex-1 px-4 py-2 rounded transition-all {manualSearchMode ? 'bg-white shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}"
+					>
+						Manual Search
+					</button>
+				</div>
+
+				{#if manualSearchMode}
+					<!-- Manual Search Input -->
+					<div class="space-y-4">
+						<div>
+							<label for="manual-search-input" class="text-sm font-medium mb-2 block">
+								DVD ID, Content ID, or Direct URL
+							</label>
+							<input
+								id="manual-search-input"
+								type="text"
+								bind:value={manualSearchInput}
+								placeholder="e.g., IPX-123 or https://www.dmm.co.jp/..."
+								class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
+							/>
+							<p class="text-xs text-muted-foreground mt-2">
+								Enter a DVD ID (e.g., IPX-123), content ID (e.g., ipx00535), or a direct URL from DMM or R18.dev
+							</p>
+						</div>
+
+						<div>
+							<p class="text-sm text-muted-foreground mb-4">
+								Select which scrapers to use. The results will be aggregated according to your configured priorities.
+							</p>
+
+							<ScraperSelector
+								scrapers={availableScrapers}
+								bind:selected={rescrapeSelectedScrapers}
+								disabled={false}
+							/>
+						</div>
+					</div>
 				{:else}
-					<!-- Selection State -->
+					<!-- Standard Rescrape -->
 					<p class="text-sm text-muted-foreground mb-4">
 						Select which scrapers to use for fetching fresh metadata. The results will be
 						aggregated according to your configured priorities.
@@ -1036,7 +1109,7 @@
 						disabled={false}
 					/>
 				{/if}
-			</div>
+			{/if}			</div>
 
 			<!-- Footer -->
 			<div class="p-6 border-t flex items-center justify-end gap-3">
@@ -1054,10 +1127,10 @@
 					{#snippet children()}
 						{#if rescrapingStates.get(rescrapeMovieId)}
 							<Loader2 class="h-4 w-4 mr-2 animate-spin" />
-							Rescraping...
+							{manualSearchMode ? 'Scraping...' : 'Rescraping...'}
 						{:else}
 							<RotateCcw class="h-4 w-4 mr-2" />
-							Rescrape
+							{manualSearchMode ? 'Search' : 'Rescrape'}
 						{/if}
 					{/snippet}
 				</Button>

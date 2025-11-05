@@ -188,19 +188,34 @@ func (a *Aggregator) compileGenreRegexes() {
 	}
 }
 
-// isRegexPattern checks if a string looks like a regex pattern
+// isRegexPattern checks if a string contains regex metacharacters
+// Only returns true for patterns with clear regex intent
+// Avoids false positives on literal dots in names like "S1.No1Style"
 func isRegexPattern(s string) bool {
-	// Check for common regex metacharacters
-	regexChars := []string{"^", "$", ".*", ".+", "\\", "[", "]", "(", ")", "|", "?", "*", "+"}
-	for _, char := range regexChars {
-		if len(s) > 0 && (s[0] == '^' || s[len(s)-1] == '$') {
-			return true
+	if s == "" {
+		return false
+	}
+	// Check for anchor characters (highest confidence indicators)
+	if s[0] == '^' || s[len(s)-1] == '$' {
+		return true
+	}
+	// Check for quantifier patterns (*, +, ?) that follow other characters
+	// This catches patterns like "test*", "test+", "test?" which are clearly regex
+	if len(s) >= 2 {
+		for i := 0; i < len(s)-1; i++ {
+			// Check if next character is a quantifier
+			if s[i+1] == '*' || s[i+1] == '+' || s[i+1] == '?' {
+				return true
+			}
 		}
-		if len(s) >= len(char) {
-			for i := 0; i <= len(s)-len(char); i++ {
-				if s[i:i+len(char)] == char {
-					return true
-				}
+	}
+	// Check for other unambiguous regex metacharacters
+	// Note: we explicitly exclude lone dots (.) as they're common in genre names
+	meta := []rune{'\\', '[', ']', '(', ')', '|', '{', '}'}
+	for _, r := range s {
+		for _, m := range meta {
+			if r == m {
+				return true
 			}
 		}
 	}

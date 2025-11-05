@@ -26,6 +26,12 @@ system:
     umask: "002"
 scrapers:
     user_agent: Javinizer (+https://github.com/javinizer/Javinizer)
+    # Referer header for CDN compatibility (required by DMM/R18 CDN)
+    referer: https://www.dmm.co.jp/
+    # HTTP client timeout in seconds (default: 30)
+    timeout_seconds: 30
+    # Overall request timeout in seconds (default: 60)
+    request_timeout_seconds: 60
     priority:
         - r18dev
         - dmm
