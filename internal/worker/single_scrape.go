@@ -124,14 +124,18 @@ func RunBatchScrapeOnce(
 			// This ensures multi-part files (CD1/CD2/CD3) all have accessible posters
 			// Without this, cached results would have 404 poster URLs
 			var posterErr *string
-			if httpClient != nil && processedMovieIDs != nil {
-				// Check if we've already generated a poster for this movie ID (thread-safe)
-				processedMovieIDsMutex.Lock()
-				shouldGenerate := !processedMovieIDs[cached.ID]
-				if shouldGenerate {
-					processedMovieIDs[cached.ID] = true
+			if httpClient != nil {
+				shouldGenerate := true
+
+				// If processedMovieIDs tracking is enabled, check if we've already generated this poster
+				if processedMovieIDs != nil {
+					processedMovieIDsMutex.Lock()
+					shouldGenerate = !processedMovieIDs[cached.ID]
+					if shouldGenerate {
+						processedMovieIDs[cached.ID] = true
+					}
+					processedMovieIDsMutex.Unlock()
 				}
-				processedMovieIDsMutex.Unlock()
 
 				if shouldGenerate {
 					if tempPosterURL, err := GenerateTempPoster(ctx, job.ID, cached, httpClient, userAgent, referer); err != nil {
