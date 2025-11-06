@@ -12,7 +12,6 @@
 
 	// Create a local editable copy
 	let editedMovie = $state({ ...movie });
-	let isInitialized = $state(false);
 
 	// Genre input state
 	let newGenreInput = $state('');
@@ -20,7 +19,6 @@
 	// Sync editedMovie when movie prop changes
 	$effect(() => {
 		editedMovie = { ...movie };
-		isInitialized = false;
 	});
 
 	// Track which fields have been modified
@@ -28,23 +26,11 @@
 		return editedMovie[field] !== originalMovie[field];
 	}
 
-	// Update parent when fields change (but not on initial mount)
-	$effect(() => {
-		// Access editedMovie to track it as a dependency
-		const _ = editedMovie;
-
-		if (!isInitialized) {
-			isInitialized = true;
-			return;
-		}
-
-		onUpdate(editedMovie);
-	});
-
 	function handleDateChange(e: Event) {
 		const target = e.target as HTMLInputElement;
 		if (target.value) {
 			editedMovie.release_date = target.value;
+			onUpdate(editedMovie);
 		}
 	}
 
@@ -73,11 +59,13 @@
 		}
 		editedMovie.genres = [...editedMovie.genres, { name: trimmedInput }];
 		newGenreInput = '';
+		onUpdate(editedMovie);
 	}
 
 	function removeGenre(genreName: string) {
 		if (!editedMovie.genres) return;
 		editedMovie.genres = editedMovie.genres.filter(g => g.name !== genreName);
+		onUpdate(editedMovie);
 	}
 
 	function handleGenreKeydown(e: KeyboardEvent) {
@@ -101,6 +89,7 @@
 			<input
 				type="text"
 				bind:value={editedMovie.id}
+				onchange={() => onUpdate(editedMovie)}
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
@@ -116,6 +105,7 @@
 			<input
 				type="text"
 				bind:value={editedMovie.content_id}
+				onchange={() => onUpdate(editedMovie)}
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
@@ -150,6 +140,7 @@
 			<input
 				type="text"
 				bind:value={editedMovie.original_title}
+				onchange={() => onUpdate(editedMovie)}
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
@@ -164,6 +155,7 @@
 			</label>
 			<textarea
 				bind:value={editedMovie.description}
+				onchange={() => onUpdate(editedMovie)}
 				rows="4"
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			></textarea>
@@ -196,6 +188,7 @@
 			<input
 				type="number"
 				bind:value={editedMovie.runtime}
+				onchange={() => onUpdate(editedMovie)}
 				min="0"
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
@@ -212,6 +205,7 @@
 			<input
 				type="text"
 				bind:value={editedMovie.director}
+				onchange={() => onUpdate(editedMovie)}
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
@@ -227,6 +221,7 @@
 			<input
 				type="text"
 				bind:value={editedMovie.maker}
+				onchange={() => onUpdate(editedMovie)}
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
@@ -242,6 +237,7 @@
 			<input
 				type="text"
 				bind:value={editedMovie.label}
+				onchange={() => onUpdate(editedMovie)}
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
@@ -257,6 +253,7 @@
 			<input
 				type="text"
 				bind:value={editedMovie.series}
+				onchange={() => onUpdate(editedMovie)}
 				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
@@ -272,6 +269,7 @@
 			<input
 				type="number"
 				bind:value={editedMovie.rating_score}
+				onchange={() => onUpdate(editedMovie)}
 				min="0"
 				max="10"
 				step="0.1"
@@ -299,6 +297,7 @@
 			<input
 				type="number"
 				bind:value={editedMovie.rating_votes}
+				onchange={() => onUpdate(editedMovie)}
 				min="0"
 				step="1"
 				placeholder="0"

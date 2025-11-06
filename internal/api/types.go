@@ -131,14 +131,13 @@ type OrganizePreviewResponse struct {
 
 // BatchFileResult wraps worker.FileResult with additional API-specific fields
 type BatchFileResult struct {
-	FilePath      string      `json:"file_path"`
-	MovieID       string      `json:"movie_id"`
-	Status        string      `json:"status"`
-	Error         string      `json:"error,omitempty"`
-	Data          interface{} `json:"data,omitempty"`            // Movie data
-	TempPosterURL string      `json:"temp_poster_url,omitempty"` // API URL for temp cropped poster
-	StartedAt     string      `json:"started_at"`
-	EndedAt       *string     `json:"ended_at,omitempty"`
+	FilePath  string      `json:"file_path"`
+	MovieID   string      `json:"movie_id"`
+	Status    string      `json:"status"`
+	Error     string      `json:"error,omitempty"`
+	Data      interface{} `json:"data,omitempty"` // Movie data
+	StartedAt string      `json:"started_at"`
+	EndedAt   *string     `json:"ended_at,omitempty"`
 }
 
 // BatchJobResponse represents a batch job status
@@ -184,8 +183,7 @@ type BatchRescrapeRequest struct {
 	ManualSearchInput string   `json:"manual_search_input,omitempty" example:"IPX-535"`
 }
 
-// BatchRescrapeResponse represents a batch rescrape response with movie and temp poster
+// BatchRescrapeResponse represents a batch rescrape response with movie
 type BatchRescrapeResponse struct {
-	Movie         *models.Movie `json:"movie"`
-	TempPosterURL string        `json:"temp_poster_url,omitempty"`
+	Movie *models.Movie `json:"movie"`
 }

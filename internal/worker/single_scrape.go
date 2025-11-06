@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -296,6 +298,42 @@ func RunBatchScrapeOnce(
 		} else {
 			logging.Debugf("[Batch %s] File %d: Successfully saved to database", job.ID, fileIndex)
 		}
+
+		// Step 8a: Copy temp poster to persistent location (only for fresh scrapes, not cache hits)
+		// This happens after database save so the movie exists in DB for the repository update
+		// We reuse the temp poster from Step 7 instead of regenerating to avoid redundant downloads
+		if httpClient != nil && posterErr == nil {
+			tempPath := filepath.Join("data", "temp", "posters", job.ID, movie.ID+".jpg")
+			persistentPath := filepath.Join("data", "posters", movie.ID+".jpg")
+
+			logging.Debugf("[Batch %s] File %d: Copying temp poster to persistent location for %s", job.ID, fileIndex, movie.ID)
+
+			// Ensure persistent posters directory exists
+			posterDir := filepath.Join("data", "posters")
+			if err := os.MkdirAll(posterDir, 0755); err != nil {
+				logging.Warnf("[Batch %s] File %d: Failed to create posters directory: %v", job.ID, fileIndex, err)
+			} else {
+				// Copy temp poster to persistent location
+				if copyErr := copyFile(tempPath, persistentPath); copyErr != nil {
+					logging.Warnf("[Batch %s] File %d: Failed to copy poster: %v", job.ID, fileIndex, copyErr)
+				} else {
+					// Update database with cropped poster URL
+					croppedURL := fmt.Sprintf("/api/v1/posters/%s.jpg", movie.ID)
+					movie.CroppedPosterURL = croppedURL
+
+					if updateErr := movieRepo.Update(movie); updateErr != nil {
+						logging.Warnf("[Batch %s] File %d: Failed to update cropped poster URL: %v", job.ID, fileIndex, updateErr)
+					} else {
+						logging.Debugf("[Batch %s] File %d: Successfully persisted cropped poster: %s", job.ID, fileIndex, croppedURL)
+					}
+
+					// Clean up temp poster after successful copy
+					if removeErr := os.Remove(tempPath); removeErr != nil && !os.IsNotExist(removeErr) {
+						logging.Debugf("[Batch %s] File %d: Failed to remove temp poster: %v", job.ID, fileIndex, removeErr)
+					}
+				}
+			}
+		}
 	} else {
 		logging.Debugf("[Batch %s] File %d: Skipping database save (custom scrapers used)", job.ID, fileIndex)
 	}
@@ -339,4 +377,45 @@ func RunBatchScrapeOnce(
 	logging.Debugf("[Batch %s] File %d: Scrape completed successfully", job.ID, fileIndex)
 
 	return finalMovie, fileResult, nil
+}
+
+// copyFile copies a file from src to dst atomically using streaming I/O
+// Returns an error if the source file doesn't exist or if the copy fails
+// Uses streaming to avoid loading entire file into memory (safe for large files)
+func copyFile(src, dst string) error {
+	// Open source file
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open source file: %w", err)
+	}
+	defer srcFile.Close()
+
+	// Write to temporary file first for atomic operation
+	tmpDst := dst + ".tmp"
+	dstFile, err := os.Create(tmpDst)
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	// Stream copy (memory-safe for large files)
+	_, err = io.Copy(dstFile, srcFile)
+	closeErr := dstFile.Close()
+
+	if err != nil {
+		os.Remove(tmpDst) // Clean up temp file on copy error
+		return fmt.Errorf("failed to copy data: %w", err)
+	}
+
+	if closeErr != nil {
+		os.Remove(tmpDst) // Clean up temp file on close error
+		return fmt.Errorf("failed to close temp file: %w", closeErr)
+	}
+
+	// Rename temp file to final destination (atomic on most filesystems)
+	if err := os.Rename(tmpDst, dst); err != nil {
+		os.Remove(tmpDst) // Clean up temp file on rename error
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	return nil
 }

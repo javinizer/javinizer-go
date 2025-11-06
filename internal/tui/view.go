@@ -230,12 +230,22 @@ func (m *Model) renderBrowserView() string {
 
 // renderDashboardView renders the dashboard view
 func (m *Model) renderDashboardView() string {
+	var content string
+
 	if m.dashboard != nil {
-		return m.dashboard.View()
+		content = m.dashboard.View()
+	} else {
+		// Fallback simple dashboard
+		content = m.renderSimpleDashboard()
 	}
 
-	// Fallback simple dashboard
-	return m.renderSimpleDashboard()
+	// Add completion banner if processing just finished
+	if m.processingComplete && !m.isProcessing {
+		banner := m.renderCompletionBanner()
+		content = lipgloss.JoinVertical(lipgloss.Left, banner, "", content)
+	}
+
+	return content
 }
 
 // renderLogsView renders the logs view
@@ -280,6 +290,46 @@ func (m *Model) renderHelpView() string {
 
 	// Fallback simple help
 	return m.renderSimpleHelp()
+}
+
+// renderCompletionBanner renders a completion notification banner
+func (m *Model) renderCompletionBanner() string {
+	elapsed := m.completionTime.Sub(m.startTime).Round(time.Second)
+
+	// Build summary message
+	var summary strings.Builder
+	summary.WriteString(Success("✓ Processing Complete! "))
+
+	// Show file count
+	summary.WriteString(fmt.Sprintf("Processed %d files in %v", m.totalFilesCount, elapsed))
+
+	// Show success/failed counts
+	if m.stats.Success > 0 || m.stats.Failed > 0 {
+		summary.WriteString(" (")
+		if m.stats.Success > 0 {
+			summary.WriteString(Success(fmt.Sprintf("%d succeeded", m.stats.Success)))
+		}
+		if m.stats.Failed > 0 {
+			if m.stats.Success > 0 {
+				summary.WriteString(", ")
+			}
+			summary.WriteString(Error(fmt.Sprintf("%d failed", m.stats.Failed)))
+		}
+		summary.WriteString(")")
+	}
+
+	// Add navigation hints
+	hints := Dimmed("  •  Press '1' or 'b' to return to browser  •  Press '3' for logs  •  Press 'd' to dismiss")
+
+	// Style the banner
+	bannerStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("42")).
+		Padding(0, 1).
+		Width(m.width - 4)
+
+	content := summary.String() + "\n" + hints
+	return bannerStyle.Render(content)
 }
 
 // Fallback renderers (simple text-based views)

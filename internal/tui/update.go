@@ -120,7 +120,8 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "1":
+	case "1", "b":
+		// 'b' for browser (also works as dismiss for completion banner)
 		m.currentView = ViewBrowser
 		return m, nil
 
@@ -134,6 +135,13 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "4":
 		m.currentView = ViewSettings
+		return m, nil
+
+	case "d":
+		// 'd' to dismiss completion banner (stay on current view)
+		if m.processingComplete {
+			m.processingComplete = false
+		}
 		return m, nil
 
 	case "tab":

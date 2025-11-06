@@ -2,8 +2,6 @@ package api
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -72,7 +70,7 @@ func getBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 			completedAt = &str
 		}
 
-		// Transform results to add temp poster URLs
+		// Transform results from worker.FileResult to BatchFileResult
 		results := make(map[string]*BatchFileResult)
 		for filePath, fileResult := range job.Results {
 			var endedAt *string
@@ -81,7 +79,7 @@ func getBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 				endedAt = &str
 			}
 
-			batchResult := &BatchFileResult{
+			results[filePath] = &BatchFileResult{
 				FilePath:  fileResult.FilePath,
 				MovieID:   fileResult.MovieID,
 				Status:    string(fileResult.Status),
@@ -90,18 +88,6 @@ func getBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 				StartedAt: fileResult.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
 				EndedAt:   endedAt,
 			}
-
-			// Add temp poster URL if movie data exists
-			if movie, ok := fileResult.Data.(*models.Movie); ok && movie != nil {
-				// Check if temp poster exists for this movie
-				tempPosterPath := filepath.Join("data", "temp", "posters", jobID, movie.ID+".jpg")
-				if _, err := os.Stat(tempPosterPath); err == nil {
-					// Temp poster exists - provide API URL
-					batchResult.TempPosterURL = fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg", jobID, movie.ID)
-				}
-			}
-
-			results[filePath] = batchResult
 		}
 
 		c.JSON(200, BatchJobResponse{

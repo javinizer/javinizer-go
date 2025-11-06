@@ -23,6 +23,7 @@ type Movie struct {
 	RatingVotes      int        `json:"rating_votes" gorm:"column:rating_votes"`
 	PosterURL        string     `json:"poster_url"`         // Portrait/box art image
 	CoverURL         string     `json:"cover_url"`          // Landscape/fanart image
+	CroppedPosterURL string     `json:"cropped_poster_url"` // URL to the cropped poster (persisted)
 	ShouldCropPoster bool       `json:"should_crop_poster"` // Whether poster needs cropping from cover
 	TrailerURL       string     `json:"trailer_url"`
 	OriginalFileName string     `json:"original_filename"`

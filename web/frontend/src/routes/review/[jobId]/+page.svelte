@@ -14,6 +14,7 @@
 	import ImageViewer from '$lib/components/ImageViewer.svelte';
 	import VideoModal from '$lib/components/VideoModal.svelte';
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
+	import equal from 'fast-deep-equal';
 	import {
 		ChevronLeft,
 		ChevronRight,
@@ -107,9 +108,9 @@
 			: null
 	);
 
-	// Use temp_poster_url if available (for cropped posters during batch scraping), otherwise use poster_url
+	// Use cropped_poster_url if available (persisted cropped posters), otherwise use poster_url
 	const displayPosterUrl = $derived<string | undefined>(
-		currentResult?.temp_poster_url || currentMovie?.poster_url
+		currentMovie?.cropped_poster_url || currentMovie?.poster_url
 	);
 
 	async function fetchJob() {
@@ -198,20 +199,25 @@
 
 			// Handle completion for both operations
 			if (msg.status === 'organization_completed' || msg.status === 'update_completed') {
-				organizeStatus = 'completed';
 				organizeProgress = 100;
-				organizing = false;
 
-				// Count failures
-				const failures = Array.from(fileStatuses.values())
-					.filter(s => s.status === 'failed').length;
+				// Show 100% progress bar for 800ms before showing completion UI
+				setTimeout(() => {
+					organizeStatus = 'completed';
+					organizing = false;
 
-				if (failures === 0) {
-					const action = isUpdateMode ? 'updated' : 'organized';
-					toastStore.success(msg.message || `All files ${action} successfully`, 5000);
-					setTimeout(() => goto('/browse'), 1000);
-				}
-				// If there are failures, stay on page to show them
+					// Count failures
+					const failures = Array.from(fileStatuses.values())
+						.filter(s => s.status === 'failed').length;
+
+					if (failures === 0) {
+						const action = isUpdateMode ? 'updated' : 'organized';
+						toastStore.success(msg.message || `All files ${action} successfully! Redirecting in 5 seconds...`, 8000);
+						// Give users time to review results before redirecting
+						setTimeout(() => goto('/browse'), 5000);
+					}
+					// If there are failures, stay on page to show them
+				}, 800);
 			}
 		});
 
@@ -219,8 +225,17 @@
 	});
 
 	function updateCurrentMovie(movie: Movie) {
-		if (!currentResult) return;
-		editedMovies.set(currentResult.file_path, movie);
+		if (!currentResult?.data) return;
+
+		// Use fast-deep-equal to compare with original
+		const isActuallyModified = !equal(movie, currentResult.data);
+
+		if (isActuallyModified) {
+			editedMovies.set(currentResult.file_path, movie);
+		} else {
+			// Remove from edited movies if no actual changes
+			editedMovies.delete(currentResult.file_path);
+		}
 		editedMovies = editedMovies; // Trigger reactivity
 	}
 
@@ -283,7 +298,6 @@
 			});
 
 			const updatedMovie = response.movie;
-			const tempPosterUrl = response.temp_poster_url;
 
 			console.log(manualSearchMode ? 'Manual search successful' : 'Rescrape successful', ', updating job results');
 
@@ -296,11 +310,9 @@
 				const newResults = { ...job.results };
 
 				// Create new result object to trigger reactivity
-				// Include temp_poster_url if provided by backend
 				newResults[filePath] = {
 					...newResults[filePath],
-					data: updatedMovie,
-					temp_poster_url: tempPosterUrl
+					data: updatedMovie
 				};
 
 				// Create new job object to trigger Svelte reactivity
@@ -402,6 +414,31 @@
 			organizing = false;
 			const errorMessage = e instanceof Error ? e.message : 'Failed to start update';
 			toastStore.error(errorMessage, 7000);
+		}
+	}
+
+	async function retryFailed() {
+		// Get count of failed files before clearing
+		const failedCount = Array.from(fileStatuses.values()).filter(s => s.status === 'failed').length;
+
+		if (failedCount === 0) {
+			return;
+		}
+
+		toastStore.info(`Retrying ${failedCount} failed file${failedCount > 1 ? 's' : ''}...`);
+
+		// Clear WebSocket messages and reset state
+		websocketStore.clearMessages();
+		organizeStatus = 'organizing';
+		organizing = true;
+		organizeProgress = 0;
+		fileStatuses = new Map();
+
+		// Call the appropriate function based on current mode
+		if (isUpdateMode) {
+			await updateAll();
+		} else {
+			await organizeAll();
 		}
 	}
 
@@ -566,12 +603,37 @@
 				</Card>
 			{/if}
 
-			<!-- Organize Completed with Errors -->
+			<!-- Organize Completed Successfully (no errors) -->
 			{#if organizeStatus === 'completed'}
 				{@const failures = Array.from(fileStatuses.values()).filter(s => s.status === 'failed')}
 				{@const successes = Array.from(fileStatuses.values()).filter(s => s.status === 'success')}
 
-				{#if failures.length > 0}
+				{#if failures.length === 0}
+					<Card class="p-6 border-green-500 bg-green-50">
+						<div class="flex items-start gap-3">
+							<Check class="h-6 w-6 text-green-600 shrink-0" />
+							<div class="flex-1">
+								<h3 class="font-semibold mb-2 text-green-900">
+									{isUpdateMode ? 'Update Complete!' : 'Organization Complete!'}
+								</h3>
+								<p class="text-sm text-green-800 mb-3">
+									All {successes.length} file(s) {isUpdateMode ? 'updated' : 'organized'} successfully
+								</p>
+								<p class="text-xs text-green-700">
+									Redirecting to browse page in a few seconds...
+								</p>
+								<div class="mt-4">
+									<Button onclick={() => goto('/browse')} variant="outline">
+										{#snippet children()}
+											<ChevronLeft class="h-4 w-4 mr-2" />
+											Return to Browse Now
+										{/snippet}
+									</Button>
+								</div>
+							</div>
+						</div>
+					</Card>
+				{:else if failures.length > 0}
 					<Card class="p-6 border-orange-500">
 						<div class="flex items-start gap-3">
 							<AlertCircle class="h-6 w-6 text-orange-600 shrink-0" />
@@ -593,7 +655,7 @@
 								</div>
 
 								<div class="mt-4 flex gap-2">
-									<Button onclick={() => organizeStatus = 'idle'}>
+									<Button onclick={retryFailed}>
 										{#snippet children()}
 											Retry Failed
 										{/snippet}
@@ -621,9 +683,9 @@
 							</h3>
 							{#if displayPosterUrl}
 								<div class="w-full aspect-2/3 overflow-hidden rounded border relative">
-									{#if currentMovie.should_crop_poster && !currentResult?.temp_poster_url}
+									{#if currentMovie.should_crop_poster && !currentMovie.cropped_poster_url}
 										<!-- Crop to show only right 47.2% of image (removes promotional text on left) -->
-										<!-- Only apply cropping if temp_poster_url is not available (temp_poster_url is already cropped) -->
+										<!-- Only apply cropping if cropped_poster_url is not available (cropped_poster_url is already cropped) -->
 										<img
 											src={displayPosterUrl}
 											alt="Poster"
@@ -634,7 +696,7 @@
 											}}
 										/>
 									{:else}
-										<!-- Use poster directly without cropping (either temp_poster_url or regular poster) -->
+										<!-- Use poster directly without cropping (either cropped_poster_url or regular poster) -->
 										<img
 											src={displayPosterUrl}
 											alt="Poster"

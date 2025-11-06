@@ -133,3 +133,114 @@ func GenerateTempPoster(
 
 	return tempRelativeURL, nil
 }
+
+// GenerateCroppedPoster downloads and crops a poster, then persists it to disk
+// Returns the API URL for the persisted cropped poster
+// Updates movie.ShouldCropPoster to false since the image is already cropped
+//
+// Parameters:
+//   - ctx: Context for cancellation support
+//   - movie: Movie model containing poster/cover URLs
+//   - httpClient: Pre-configured HTTP client with proxy and timeout settings
+//   - userAgent: User-Agent header value from config
+//   - referer: Referer header value from config (for CDN compatibility)
+//
+// Returns:
+//   - croppedURL: API URL path like "/api/v1/posters/{movieID}.jpg"
+//   - error: Any error encountered during download, cropping, or persistence
+//
+// Note: Caller is responsible for updating the database with the returned croppedURL
+func GenerateCroppedPoster(
+	ctx context.Context,
+	movie *models.Movie,
+	httpClient *http.Client,
+	userAgent string,
+	referer string,
+) (croppedURL string, err error) {
+	// Determine poster URL to download
+	originalPosterURL := movie.PosterURL
+	if originalPosterURL == "" {
+		originalPosterURL = movie.CoverURL
+	}
+	if originalPosterURL == "" {
+		return "", fmt.Errorf("no poster or cover URL available")
+	}
+
+	// Create persistent directory: data/posters/
+	// Use DirPermConfig (0755) for publicly accessible static files
+	posterDir := filepath.Join("data", "posters")
+	if err := os.MkdirAll(posterDir, config.DirPermConfig); err != nil {
+		return "", fmt.Errorf("failed to create poster directory: %w", err)
+	}
+
+	// Define file paths
+	tempFullPath := filepath.Join(posterDir, fmt.Sprintf("%s-full.jpg.tmp", movie.ID))
+	croppedPath := filepath.Join(posterDir, fmt.Sprintf("%s.jpg", movie.ID))
+
+	// Download the poster
+	req, err := http.NewRequestWithContext(ctx, "GET", originalPosterURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers from config (not hardcoded)
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to download poster: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("poster download failed with status %d", resp.StatusCode)
+	}
+
+	// Save to temporary file using atomic write pattern
+	outFile, err := os.Create(tempFullPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	_, err = io.Copy(outFile, resp.Body)
+	outFile.Close()
+	if err != nil {
+		os.Remove(tempFullPath)
+		return "", fmt.Errorf("failed to write poster: %w", err)
+	}
+
+	// Check for cancellation before expensive cropping operation
+	select {
+	case <-ctx.Done():
+		os.Remove(tempFullPath)
+		os.Remove(croppedPath)
+		return "", ctx.Err()
+	default:
+	}
+
+	// Crop the poster using the smart cropping algorithm
+	if err := imageutil.CropPosterFromCover(tempFullPath, croppedPath); err != nil {
+		os.Remove(tempFullPath)
+		os.Remove(croppedPath)
+		return "", fmt.Errorf("failed to crop poster: %w", err)
+	}
+
+	// Clean up the full image after successful crop
+	os.Remove(tempFullPath)
+
+	// Update movie metadata to indicate poster is already cropped
+	movie.ShouldCropPoster = false
+
+	// Return API URL for frontend to fetch the poster
+	croppedURL = fmt.Sprintf("/api/v1/posters/%s.jpg", movie.ID)
+
+	logging.Debugf("[Movie %s] Created persisted cropped poster at %s (original URL: %s)",
+		movie.ID, croppedPath, originalPosterURL)
+
+	return croppedURL, nil
+}

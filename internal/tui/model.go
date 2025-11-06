@@ -79,6 +79,11 @@ type Model struct {
 	isPaused     bool
 	dryRun       bool // Preview mode - don't make actual changes
 
+	// Completion state
+	processingComplete bool      // True when processing has finished
+	completionTime     time.Time // When processing completed
+	totalFilesCount    int       // Total number of files processed
+
 	// Runtime settings (can be toggled in Settings view)
 	forceUpdate         bool // Replace existing files (images, NFO)
 	forceRefresh        bool // Clear DB cache and rescrape metadata
@@ -455,7 +460,9 @@ func (m *Model) StartProcessing(ctx context.Context) error {
 	}
 
 	m.isProcessing = true
+	m.processingComplete = false // Reset completion state
 	m.startTime = time.Now()
+	m.totalFilesCount = selectedCount // Track total files being processed
 
 	// Filter to get selected file items
 	// If a directory is selected, include all its child files
@@ -505,6 +512,10 @@ func (m *Model) StartProcessing(ctx context.Context) error {
 		}
 
 		m.isProcessing = false
+		m.processingComplete = true
+		m.completionTime = time.Now()
+		// Stay on dashboard to allow user to review results
+		// User can press '1' or 'b' to return to browser when ready
 	}()
 
 	return nil

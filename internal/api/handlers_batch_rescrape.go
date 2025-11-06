@@ -158,27 +158,29 @@ func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 			logging.Errorf("[Rescrape] Failed to verify update for %s", foundFilePath)
 		}
 
-		// Generate temp poster for preview
-		tempPosterURL := ""
+		// Generate and persist cropped poster
 		if httpClient != nil && movie != nil {
-			url, posterErr := worker.GenerateTempPoster(
+			croppedURL, posterErr := worker.GenerateCroppedPoster(
 				ctx,
-				jobID,
 				movie,
 				httpClient,
 				cfg.Scrapers.UserAgent,
 				cfg.Scrapers.Referer,
 			)
 			if posterErr != nil {
-				logging.Warnf("Failed to generate temp poster: %v", posterErr)
+				logging.Warnf("Failed to generate cropped poster: %v", posterErr)
 			} else {
-				tempPosterURL = url
+				// Update movie's cropped poster URL
+				movie.CroppedPosterURL = croppedURL
+				// Save to database
+				if err := deps.MovieRepo.Update(movie); err != nil {
+					logging.Warnf("Failed to save cropped poster URL to database: %v", err)
+				}
 			}
 		}
 
 		c.JSON(http.StatusOK, BatchRescrapeResponse{
-			Movie:         movie,
-			TempPosterURL: tempPosterURL,
+			Movie: movie,
 		})
 	}
 }

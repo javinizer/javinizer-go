@@ -59,7 +59,6 @@ export interface BatchRescrapeRequest {
 
 export interface BatchRescrapeResponse {
 	movie: Movie;
-	temp_poster_url?: string;
 }
 
 export interface BatchScrapeResponse {
@@ -72,7 +71,6 @@ export interface FileResult {
 	status: string;
 	error?: string;
 	data?: Movie;
-	temp_poster_url?: string;
 	started_at: string;
 	ended_at?: string;
 }
@@ -124,6 +122,7 @@ export interface Movie {
 	actresses?: Actress[];
 	cover_url?: string;
 	poster_url?: string;
+	cropped_poster_url?: string;
 	should_crop_poster?: boolean;
 	screenshot_urls?: string[];
 	trailer_url?: string;
