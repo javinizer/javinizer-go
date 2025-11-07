@@ -172,11 +172,36 @@ output:
     file_format: <ID>
     subfolder_format: []
     delimiter: ', '
-    download_cover: true
-    download_poster: true
-    download_extrafanart: true
+    max_title_length: 100
+    max_path_length: 240
+    move_subtitles: false
+    subtitle_extensions:
+        - .srt
+        - .ass
+        - .ssa
+        - .smi
+        - .vtt
+    rename_folder_in_place: false
+    move_to_folder: true
+    rename_file: true
+    group_actress: false
+    # Media file naming templates (support placeholders like <ID>, <TITLE>, <INDEX>, etc.)
+    poster_format: <ID>-poster.jpg              # Vertical poster image (e.g., IPX-535-poster.jpg)
+    fanart_format: <ID>-fanart.jpg              # Horizontal cover/background image (e.g., IPX-535-fanart.jpg)
+    trailer_format: <ID>-trailer.mp4            # Trailer video file
+    screenshot_format: fanart<INDEX>.jpg        # Screenshots in extrafanart folder (e.g., fanart1.jpg, fanart2.jpg)
+                                                 # Use <INDEX:2> for zero-padded numbers (fanart01.jpg, fanart02.jpg)
+    screenshot_folder: extrafanart              # Subfolder for storing screenshots
+    screenshot_padding: 1                       # Zero-padding for fallback numbering (ignored if <INDEX> in template)
+    actress_folder: .actors                     # Subfolder for storing actress images
+    actress_format: <ACTORNAME>.jpg             # Actress image naming (e.g., Momo Sakura.jpg)
+    # Download toggles for each media type
+    download_cover: true                        # Download horizontal cover/fanart image
+    download_poster: true                       # Download vertical poster image
+    download_extrafanart: true                  # Download screenshots to extrafanart folder
     download_trailer: true
     download_actress: true
+    download_timeout: 60
     # Separate proxy for downloads (optional - leave disabled to use no proxy for downloads)
     download_proxy:
         enabled: false

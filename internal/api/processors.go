@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
@@ -608,7 +609,7 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 	isMultiPart := len(fileResults) > 1 && fileResults[0] != nil && fileResults[0].IsMultiPart
 	generatePerFileNFO := cfg.Metadata.NFO.PerFile && isMultiPart
 
-	// Generate NFO paths
+	// Generate NFO paths using template engine
 	var nfoPath string
 	var nfoPaths []string
 
@@ -617,12 +618,19 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 		nfoPaths = make([]string, 0, len(fileResults))
 		for _, result := range fileResults {
 			if result != nil && result.FilePath != "" {
-				nfoFileName := fileName
-				if result.IsMultiPart && result.PartSuffix != "" {
-					nfoFileName = fileName + result.PartSuffix
+				// Generate NFO filename using template
+				nfoFileName, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, ctx)
+				if err != nil || nfoFileName == "" {
+					// Fallback to fileName-based naming
+					nfoFileName = fileName
 				}
-				nfoPath := filepath.Join(folderPath, nfoFileName+".nfo")
-				nfoPaths = append(nfoPaths, nfoPath)
+				nfoFileName = template.SanitizeFilename(nfoFileName)
+				nfoFileName = strings.TrimSuffix(nfoFileName, ".nfo")
+				if result.IsMultiPart && result.PartSuffix != "" {
+					nfoFileName = nfoFileName + result.PartSuffix
+				}
+				nfoFilePath := filepath.Join(folderPath, nfoFileName+".nfo")
+				nfoPaths = append(nfoPaths, nfoFilePath)
 			}
 		}
 		// Set primary NFO path for backward compatibility (use first)
@@ -630,19 +638,55 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 			nfoPath = nfoPaths[0]
 		}
 	} else {
-		// Single NFO file (default behavior)
-		nfoPath = filepath.Join(folderPath, fileName+".nfo")
+		// Single NFO file (default behavior) - use template engine
+		nfoFileName, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, ctx)
+		if err != nil || nfoFileName == "" {
+			// Fallback to fileName-based naming
+			nfoFileName = fileName + ".nfo"
+		} else {
+			nfoFileName = template.SanitizeFilename(nfoFileName)
+			// Ensure .nfo extension
+			if !strings.HasSuffix(nfoFileName, ".nfo") {
+				nfoFileName += ".nfo"
+			}
+		}
+		nfoPath = filepath.Join(folderPath, nfoFileName)
 	}
 
-	posterPath := filepath.Join(folderPath, fileName+"-poster.jpg")
-	fanartPath := filepath.Join(folderPath, fileName+"-fanart.jpg")
-	extrafanartPath := filepath.Join(folderPath, "extrafanart")
+	// Generate poster path using template engine
+	posterFileName, err := templateEngine.Execute(cfg.Output.PosterFormat, ctx)
+	if err != nil || posterFileName == "" {
+		// Fallback to hardcoded format
+		posterFileName = fmt.Sprintf("%s-poster.jpg", movie.ID)
+	}
+	posterPath := filepath.Join(folderPath, posterFileName)
 
-	// Generate screenshot names
+	// Generate fanart path using template engine
+	fanartFileName, err := templateEngine.Execute(cfg.Output.FanartFormat, ctx)
+	if err != nil || fanartFileName == "" {
+		// Fallback to hardcoded format
+		fanartFileName = fmt.Sprintf("%s-fanart.jpg", movie.ID)
+	}
+	fanartPath := filepath.Join(folderPath, fanartFileName)
+
+	// Use configured screenshot folder name
+	extrafanartPath := filepath.Join(folderPath, cfg.Output.ScreenshotFolder)
+
+	// Generate screenshot names using template engine (same as downloader)
 	screenshots := []string{}
 	if movie.Screenshots != nil && len(movie.Screenshots) > 0 {
 		for i := range movie.Screenshots {
-			screenshots = append(screenshots, fmt.Sprintf("fanart%d.jpg", i+1))
+			ctx.Index = i + 1 // Set index for template
+			screenshotName, err := templateEngine.Execute(cfg.Output.ScreenshotFormat, ctx)
+			if err != nil || screenshotName == "" {
+				// Fallback to hardcoded format with configurable padding (matching downloader logic)
+				if cfg.Output.ScreenshotPadding > 0 {
+					screenshotName = fmt.Sprintf("fanart%0*d.jpg", cfg.Output.ScreenshotPadding, i+1)
+				} else {
+					screenshotName = fmt.Sprintf("fanart%d.jpg", i+1)
+				}
+			}
+			screenshots = append(screenshots, screenshotName)
 		}
 	}
 

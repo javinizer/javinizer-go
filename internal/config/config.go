@@ -348,7 +348,7 @@ func DefaultConfig() *Config {
 			PosterFormat:        "<ID>-poster.jpg",
 			FanartFormat:        "<ID>-fanart.jpg",
 			TrailerFormat:       "<ID>-trailer.mp4",
-			ScreenshotFormat:    "fanart",
+			ScreenshotFormat:    "fanart<INDEX>.jpg",
 			ScreenshotFolder:    "extrafanart",
 			ScreenshotPadding:   1,
 			ActressFolder:       ".actors",
