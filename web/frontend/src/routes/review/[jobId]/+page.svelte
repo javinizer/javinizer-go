@@ -1036,7 +1036,16 @@
 												<!-- Single video file -->
 												<div class="break-all" style="margin-left: {fileIndent + 4}px">🎬 {preview.file_name}.mp4</div>
 											{/if}
-											<div class="break-all" style="margin-left: {fileIndent + 4}px">📄 {preview.file_name}.nfo</div>
+											{#if preview.nfo_paths && preview.nfo_paths.length > 0}
+												<!-- Multi-part NFO files (per_file enabled) -->
+												{#each preview.nfo_paths as nfoFile, index}
+													{@const fileName = nfoFile.split(/[\\/]/).pop()}
+													<div class="break-all" style="margin-left: {fileIndent + 4}px">📄 {fileName}</div>
+												{/each}
+											{:else}
+												<!-- Single NFO file -->
+												<div class="break-all" style="margin-left: {fileIndent + 4}px">📄 {preview.file_name}.nfo</div>
+											{/if}
 											<div class="break-all" style="margin-left: {fileIndent + 4}px">🖼️ {preview.file_name}-poster.jpg</div>
 											<div class="break-all" style="margin-left: {fileIndent + 4}px">🖼️ {preview.file_name}-fanart.jpg</div>
 											{#if preview.screenshots && preview.screenshots.length > 0}
