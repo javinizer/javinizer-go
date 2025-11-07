@@ -32,8 +32,11 @@ const (
 
 // Package-level compiled regexes for performance
 var (
-	normalizeIDRegex        = regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
-	normalizeContentIDRegex = regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
+	// After prefix cleaning, ID format is: letters + digits + optional suffix
+	normalizeIDRegex        = regexp.MustCompile(`^([a-z]+)(\d+)(.*)$`)
+	normalizeContentIDRegex = regexp.MustCompile(`^([a-z]+)(\d+)(.*)$`)
+	// Generalized prefix cleaning for DMM content IDs (leading digits OR h_<digits>)
+	cleanPrefixRegex = regexp.MustCompile(`^(?:\d+|h_\d+)?([a-z]+\d+.*)$`)
 )
 
 // Scraper implements the DMM/Fanza scraper
@@ -193,10 +196,11 @@ func (s *Scraper) ResolveContentID(id string) (string, error) {
 		}
 
 		if urlCID != "" {
-			// Clean the CID from URL:
-			// 1. Remove prepended numbers: "9ipx535" -> "ipx535"
-			// 2. Remove h_<digits> prefix pattern: "h_796san167" -> "san167"
-			cleanURLCID := regexp.MustCompile(`^(?:\d+|h_\d+)?([a-z]+\d+.*)$`).ReplaceAllString(urlCID, "$1")
+			// Clean the CID from URL using precompiled regex for consistency and performance
+			// Strips DMM prefixes: "9ipx535" -> "ipx535", "h_796san167" -> "san167"
+			// Normalize to lowercase and remove hyphens before regex (cleanPrefixRegex expects lowercase)
+			normalizedHrefCID := strings.ToLower(strings.ReplaceAll(urlCID, "-", ""))
+			cleanURLCID := cleanPrefixRegex.ReplaceAllString(normalizedHrefCID, "$1")
 
 			logging.Debugf("DMM: Found urlCID=%s, cleanURLCID=%s (comparing with searchQuery=%s, cleanSearchID=%s, contentID=%s)",
 				urlCID, cleanURLCID, searchQuery, cleanSearchID, contentID)
@@ -211,12 +215,13 @@ func (s *Scraper) ResolveContentID(id string) (string, error) {
 					fullURL = href
 				}
 
+				// Store canonical (cleaned) content ID for consistency downstream
 				candidates = append(candidates, candidate{
-					contentID: urlCID,
+					contentID: cleanURLCID,
 					url:       fullURL,
-					length:    len(urlCID),
+					length:    len(cleanURLCID),
 				})
-				logging.Debugf("DMM: ✓ Found candidate %s (length: %d), URL: %s", urlCID, len(urlCID), fullURL)
+				logging.Debugf("DMM: ✓ Found candidate %s (canonical: %s, length: %d), URL: %s", urlCID, cleanURLCID, len(cleanURLCID), fullURL)
 			}
 		}
 	})
@@ -425,11 +430,13 @@ func (s *Scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 	// 2. /monthly/premium/ (monthly premium - LIMITED metadata, no actress data)
 	// 1. /monthly/standard/ (monthly standard - LIMITED metadata, no actress data)
 
-	// Extract base ID from content ID (e.g., "4sone860" -> "sone860", "61mdb087" -> "mdb087")
-	// Strip leading digits to get base ID, keep lowercase for URL matching
-	baseID := regexp.MustCompile(`^\d+`).ReplaceAllString(contentID, "")
+	// Extract canonical base ID by stripping DMM prefixes (leading digits OR h_<digits>)
+	// Examples: "4sone860" -> "sone860", "61mdb087" -> "mdb087", "h_1472smkcx003" -> "smkcx003"
+	// Keep lowercase for URL matching consistency
+	contentIDLower := strings.ToLower(contentID)
+	baseID := cleanPrefixRegex.ReplaceAllString(contentIDLower, "$1")
 	if baseID == "" {
-		baseID = contentID // No leading digits, use as-is
+		baseID = contentIDLower // No prefix, use as-is
 	}
 
 	doc.Find("a").Each(func(i int, sel *goquery.Selection) {
@@ -438,9 +445,10 @@ func (s *Scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 			return
 		}
 
-		// Check if this link contains our content-ID or base ID
+		// Check if this link contains our canonical content-ID or base ID
 		// DMM product pages can use different ID formats (e.g., sone860, 4sone860, tksone860)
-		containsID := strings.Contains(href, contentID) || strings.Contains(href, baseID)
+		// Use lowercase canonical forms for consistent matching
+		containsID := strings.Contains(href, contentIDLower) || strings.Contains(href, baseID)
 		if !containsID {
 			return
 		}
@@ -1448,15 +1456,22 @@ func normalizeContentID(id string) string {
 	// Remove hyphens for processing
 	idNoHyphen := strings.ReplaceAll(idLower, "-", "")
 
-	// Extract components: optional leading digits, letters, numbers, optional suffix
+	// Strip DMM-specific prefixes (leading digits or h_<digits> pattern)
+	// Examples: h_1472smkcx003 -> smkcx003, 9ipx535 -> ipx535, h_796san167 -> san167
+	// Uses precompiled cleanPrefixRegex for performance
+	if cleaned := cleanPrefixRegex.ReplaceAllString(idNoHyphen, "$1"); cleaned != "" {
+		idNoHyphen = cleaned
+	}
+
+	// Extract components: letters, numbers, optional suffix
 	matches := normalizeContentIDRegex.FindStringSubmatch(idNoHyphen)
 
-	if len(matches) > 3 {
-		prefix := matches[2]
-		number := matches[3]
+	if len(matches) > 2 {
+		prefix := matches[1]
+		number := matches[2]
 		suffix := ""
-		if len(matches) > 4 {
-			suffix = matches[4]
+		if len(matches) > 3 {
+			suffix = matches[3]
 		}
 
 		// Conservative heuristic for amateur detection:
@@ -1491,24 +1506,35 @@ func normalizeContentID(id string) string {
 //	"4sone860"   -> "SONE-860"   (leading digits stripped - DMM catalog prefix)
 //	"61mdb087"   -> "MDB-087"    (leading digits stripped - DMM channel prefix)
 //	"t28123"     -> "T-28123"    (5-digit number preserved)
+//	"h_1472smkcx003" -> "SMKCX-003" (h_<digits> prefix stripped)
 //
 // Strategy:
-//  1. Split by word-digit boundary (letters vs numbers)
-//  2. Strip leading numeric prefixes (DMM uses catalog/channel codes)
-//  3. Remove leading zeros from number (e.g., "00535" -> "535")
-//  4. Ensure at least 3 digits remain (pad with zeros if needed)
-//  5. Always add hyphen between prefix and number for consistency
+//  1. Strip h_<digits> prefix if present (DMM content-ID format)
+//  2. Split by word-digit boundary (letters vs numbers)
+//  3. Strip leading numeric prefixes (DMM uses catalog/channel codes)
+//  4. Remove leading zeros from number (e.g., "00535" -> "535")
+//  5. Ensure at least 3 digits remain (pad with zeros if needed)
+//  6. Always add hyphen between prefix and number for consistency
 func normalizeID(contentID string) string {
-	// Match pattern: optional leading digits, letter prefix, number, optional suffix
-	// Examples: "4sone860", "sone860", "ipx00535", "oreco183"
-	matches := normalizeIDRegex.FindStringSubmatch(strings.ToLower(contentID))
+	idLower := strings.ToLower(contentID)
 
-	if len(matches) > 3 {
-		prefix := strings.ToUpper(matches[2])
-		number := matches[3]
+	// Strip DMM-specific prefixes (leading digits or h_<digits> pattern)
+	// Examples: h_1472smkcx003 -> smkcx003, 4sone860 -> sone860, 61mdb087 -> mdb087
+	// Uses precompiled cleanPrefixRegex for performance
+	if cleaned := cleanPrefixRegex.ReplaceAllString(idLower, "$1"); cleaned != "" {
+		idLower = cleaned
+	}
+
+	// Match pattern: letter prefix, number, optional suffix
+	// Examples: "sone860", "ipx00535", "oreco183"
+	matches := normalizeIDRegex.FindStringSubmatch(idLower)
+
+	if len(matches) > 2 {
+		prefix := strings.ToUpper(matches[1])
+		number := matches[2]
 		suffix := ""
-		if len(matches) > 4 {
-			suffix = strings.ToUpper(matches[4])
+		if len(matches) > 3 {
+			suffix = strings.ToUpper(matches[3])
 		}
 
 		// Remove leading zeros from number, but keep at least 3 digits (string-based, no overflow)

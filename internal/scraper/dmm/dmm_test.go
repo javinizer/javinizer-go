@@ -163,6 +163,14 @@ func TestNormalizeContentID(t *testing.T) {
 		{"short number gets padding", "abc12", "abc00012"},             // 3 letters + 2 digits (< 3 digits) = padding
 		{"7 letter prefix gets padding", "abcdefg123", "abcdefg00123"}, // 7 letters (> 6) = padding
 		{"5 digit number gets padding", "abc12345", "abc12345"},        // 5 digits, already padded length
+
+		// DMM prefix formats (generalized cleaning: leading digits OR h_<digits>)
+		{"h_ prefix lowercase", "h_1472smkcx003", "smkcx003"},       // h_1472 stripped, 5+3 letters = no padding (amateur)
+		{"h_ prefix uppercase", "H_1472SMKCX003", "smkcx003"},       // h_1472 stripped, 5+3 letters = no padding (amateur)
+		{"h_ prefix san", "h_796san167", "san00167"},                // h_796 stripped, 3+3 letters = padding (standard)
+		{"h_ prefix with hyphen", "h_1472-smkcx-003", "smkcx00003"}, // h_1472 + hyphens stripped = padding (standard)
+		{"numeric prefix", "9ipx535", "ipx00535"},                   // Leading digit stripped, 3+3 = padding (standard)
+		{"channel prefix", "61mdb087", "mdb00087"},                  // Channel ID stripped, 3+3 = padding (standard)
 	}
 
 	for _, tt := range tests {
@@ -206,6 +214,16 @@ func TestNormalizeID(t *testing.T) {
 		{"5 digit number", "abc12345", "ABC-12345"},        // 5 digits kept as-is
 		{"2 digit number padded", "abc00012", "ABC-012"},   // 12 padded to 012
 		{"7 letter prefix", "abcdefg00123", "ABCDEFG-123"}, // Very long prefix
+
+		// DMM h_<digits> prefix stripped by normalizeContentID, then normalized
+		{"from h_ prefix", "smkcx003", "SMKCX-003"},   // After h_1472 stripped by normalizeContentID
+		{"from h_ prefix san", "san00167", "SAN-167"}, // After h_796 stripped by normalizeContentID
+
+		// Generalized prefix stripping in normalizeID (leading digits OR h_<digits>)
+		{"h_ prefix in normalizeID", "h_1472smkcx003", "SMKCX-003"}, // h_1472 stripped → SMKCX-003
+		{"h_ prefix san in normalizeID", "h_796san167", "SAN-167"},  // h_796 stripped → SAN-167
+		{"numeric prefix in normalizeID", "9ipx535", "IPX-535"},     // Leading 9 stripped → IPX-535
+		{"channel prefix in normalizeID", "61mdb087", "MDB-087"},    // Leading 61 stripped → MDB-087
 	}
 
 	for _, tt := range tests {

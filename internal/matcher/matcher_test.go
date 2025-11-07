@@ -59,6 +59,12 @@ func TestMatcher_MatchFile(t *testing.T) {
 		{"Ntk 3 letters matches", "ntk456.mp4", "NTK456", 0, false, true}, // Matches but normalizes with padding
 		{"Ara 3 letters matches", "ara789.mp4", "ARA789", 0, false, true}, // Matches but normalizes with padding
 
+		// DMM h_<digits> prefix format
+		{"DMM h_ prefix", "h_1472smkcx003.mp4", "H_1472SMKCX003", 0, false, true},
+		{"DMM h_ prefix san", "h_796san167.mp4", "H_796SAN167", 0, false, true},
+		{"DMM h_ prefix with title", "[Test] h_1472smkcx003 [720p].mkv", "H_1472SMKCX003", 0, false, true},
+		{"DMM h_ prefix uppercase", "H_1472SMKCX003.mp4", "H_1472SMKCX003", 0, false, true},
+
 		// Edge cases
 		{"No match", "random_movie.mp4", "", 0, false, false},
 		{"Only numbers", "12345.mp4", "", 0, false, false},

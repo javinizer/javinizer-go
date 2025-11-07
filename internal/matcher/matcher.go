@@ -34,6 +34,7 @@ func NewMatcher(cfg *config.MatchingConfig) (*Matcher, error) {
 
 	// Compile built-in pattern (covers most JAV IDs)
 	// Matches:
+	//   - DMM h_<digits> prefix format: h_1472smkcx003 (DMM content-ID format)
 	//   - Standard JAV: ABC-123, ABC-123Z, ABC-123E, T28-123, etc.
 	//   - Potential amateur: 3-6 letters + 3-4 digits (no hyphen, word boundary)
 	//
@@ -42,11 +43,12 @@ func NewMatcher(cfg *config.MatchingConfig) (*Matcher, error) {
 	// False positives (like "video1080") will fail gracefully during search (no results).
 	// This allows new amateur series to work automatically without code changes.
 	//
-	// Pattern combines both formats with OR (|) operator:
-	//   1. No-hyphen format: word boundary + 3-6 letters + 3-4 digits + word boundary
+	// Pattern combines formats with OR (|) operator:
+	//   1. h_ prefix format: h_<digits><letters><digits> (e.g., h_1472smkcx003)
+	//   2. No-hyphen format: word boundary + 3-6 letters + 3-4 digits + word boundary
 	//      (prevents partial matches like "PPV1234" from "FC2PPV123456")
-	//   2. Hyphen format: letters + hyphen + digits (standard JAV)
-	builtinPattern := `(?i)((?:\b[A-Za-z]{3,6}\d{3,4}\b)|(?:(?:[A-Za-z]+|T28)-\d+(?:[ZE])?))`
+	//   3. Hyphen format: letters + hyphen + digits (standard JAV)
+	builtinPattern := `(?i)((?:h_\d+[a-z]+\d+)|(?:\b[A-Za-z]{3,6}\d{3,4}\b)|(?:(?:[A-Za-z]+|T28)-\d+(?:[ZE])?))`
 	compiled, err := regexp.Compile(builtinPattern)
 	if err != nil {
 		return nil, err
