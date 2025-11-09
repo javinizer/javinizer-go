@@ -341,20 +341,135 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		hasErrors := false
 		errorMsg := ""
 
-		// Copy temp cropped poster BEFORE downloads (so downloader skips it)
-		copyTempCroppedPoster(job, movie, sourceDir, cfg, "Update")
+		// NFO MERGE LOGIC: Check if NFO already exists and merge if present
+		// Default strategy: prefer scraper data (non-destructive update)
+		movieToWrite := movie
+		var mergeStats *nfo.MergeStats
 
-		// Generate NFO in source directory
-		if err := nfoGen.Generate(movie, sourceDir, "", filePath); err != nil {
-			logging.Warnf("Failed to generate NFO for %s: %v", movie.ID, err)
+		// Construct expected NFO path using template (same logic as NFO generation)
+		// This ensures we find custom-named NFOs correctly
+		tmplCtx := template.NewContextFromMovie(movie)
+		tmplCtx.GroupActress = cfg.Output.GroupActress
+
+		// Detect part suffix for multi-part files
+		partSuffix := ""
+		if cfg.Metadata.NFO.PerFile && filePath != "" {
+			videoName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+			partNum, detectedSuffix := matcher.DetectPartSuffix(videoName, movie.ID)
+			partSuffix = detectedSuffix
+
+			// Populate template context with multi-part fields for accurate NFO lookup
+			tmplCtx.PartNumber = partNum
+			tmplCtx.PartSuffix = partSuffix
+			tmplCtx.IsMultiPart = partNum > 0 || partSuffix != ""
+		}
+
+		// Generate expected filename using template
+		templateEngine := template.NewEngine()
+		nfoFilename, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
+		if err != nil {
+			// Fall back to default naming on template error (with sanitization)
+			logging.Warnf("Failed to execute NFO filename template: %v, using default", err)
+			sanitized := template.SanitizeFilename(movie.ID)
+			if sanitized == "" {
+				sanitized = "metadata"
+			}
+			nfoFilename = sanitized + ".nfo"
+		} else {
+			// Template fully controls suffix/part formatting - do not re-append
+			// Case-insensitive .nfo trimming to prevent double extensions
+			basename := nfoFilename
+			lower := strings.ToLower(basename)
+			if strings.HasSuffix(lower, ".nfo") {
+				basename = basename[:len(basename)-4]
+			}
+			sanitized := template.SanitizeFilename(basename)
+
+			// Fallback to safe default if sanitization results in empty string
+			if sanitized == "" {
+				sanitized = template.SanitizeFilename(movie.ID)
+				if sanitized == "" {
+					sanitized = "metadata" // Ultimate fallback
+				}
+			}
+
+			nfoFilename = sanitized + ".nfo"
+		}
+
+		nfoPath := filepath.Join(sourceDir, nfoFilename)
+
+		// Also try legacy paths for backward compatibility
+		legacyPaths := []string{}
+		if nfoFilename != movie.ID+".nfo" {
+			legacyPaths = append(legacyPaths, filepath.Join(sourceDir, movie.ID+".nfo"))
+		}
+		if cfg.Metadata.NFO.PerFile && filePath != "" {
+			videoName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+			videoNFO := filepath.Join(sourceDir, videoName+".nfo")
+			if videoNFO != nfoPath {
+				legacyPaths = append(legacyPaths, videoNFO)
+			}
+		}
+
+		// Check if NFO exists (try template path first, then legacy)
+		foundPath := ""
+		if _, err := os.Stat(nfoPath); err == nil {
+			foundPath = nfoPath
+		} else {
+			for _, legacyPath := range legacyPaths {
+				if _, err := os.Stat(legacyPath); err == nil {
+					foundPath = legacyPath
+					logging.Debugf("Found NFO at legacy path: %s", legacyPath)
+					break
+				}
+			}
+		}
+
+		if foundPath != "" {
+			// NFO exists - parse and merge
+			logging.Infof("Found existing NFO, merging data: %s", foundPath)
+
+			parseResult, err := nfo.ParseNFO(foundPath)
+			if err != nil {
+				logging.Warnf("Failed to parse existing NFO %s: %v (will overwrite)", foundPath, err)
+			} else {
+				// Merge with prefer-scraper strategy (default)
+				mergeResult, err := nfo.MergeMovieMetadata(movie, parseResult.Movie, nfo.PreferScraper)
+				if err != nil {
+					logging.Warnf("Failed to merge NFO data for %s: %v (using scraper data only)", movie.ID, err)
+				} else {
+					movieToWrite = mergeResult.Merged
+					mergeStats = &mergeResult.Stats
+					logging.Infof("NFO merge complete for %s: %d from scraper, %d from NFO, %d conflicts resolved",
+						movie.ID, mergeStats.FromScraper, mergeStats.FromNFO, mergeStats.ConflictsResolved)
+				}
+			}
+		} else {
+			logging.Debugf("No existing NFO found, creating new one at %s", nfoPath)
+		}
+
+		// Copy temp cropped poster BEFORE downloads (so downloader skips it)
+		copyTempCroppedPoster(job, movieToWrite, sourceDir, cfg, "Update")
+
+		// Note: partSuffix already computed above for NFO template lookup
+
+		// Generate NFO in source directory (with merged data if applicable)
+		if err := nfoGen.Generate(movieToWrite, sourceDir, partSuffix, filePath); err != nil {
+			logging.Warnf("Failed to generate NFO for %s: %v", movieToWrite.ID, err)
 			hasErrors = true
 			errorMsg = fmt.Sprintf("NFO generation failed: %v", err)
 		} else {
-			logging.Infof("Generated NFO in: %s", sourceDir)
+			if mergeStats != nil {
+				logging.Infof("Generated merged NFO in: %s (%d fields from scraper, %d from existing NFO)",
+					sourceDir, mergeStats.FromScraper, mergeStats.FromNFO)
+			} else {
+				logging.Infof("Generated NFO in: %s", sourceDir)
+			}
 		}
 
 		// Download all media files to source directory
-		results, err := dl.DownloadAll(movie, sourceDir, 0)
+		// Use movieToWrite (merged) to include NFO data in downloads
+		results, err := dl.DownloadAll(movieToWrite, sourceDir, 0)
 		if err != nil {
 			logging.Warnf("Failed to download media for %s: %v", movie.ID, err)
 			hasErrors = true
@@ -650,9 +765,24 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 						nfoFileName = fileName + result.PartSuffix
 					}
 				}
-				nfoFileName = template.SanitizeFilename(nfoFileName)
-				nfoFileName = strings.TrimSuffix(nfoFileName, ".nfo")
-				nfoFilePath := filepath.Join(folderPath, nfoFileName+".nfo")
+
+				// Case-insensitive .nfo trimming to prevent double extensions
+				basename := nfoFileName
+				lower := strings.ToLower(basename)
+				if strings.HasSuffix(lower, ".nfo") {
+					basename = basename[:len(basename)-4]
+				}
+				sanitized := template.SanitizeFilename(basename)
+
+				// Three-tier fallback for empty results
+				if sanitized == "" {
+					sanitized = template.SanitizeFilename(fileName)
+					if sanitized == "" {
+						sanitized = "metadata"
+					}
+				}
+
+				nfoFilePath := filepath.Join(folderPath, sanitized+".nfo")
 				nfoPaths = append(nfoPaths, nfoFilePath)
 			}
 		}
@@ -667,11 +797,23 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 			// Fallback to fileName-based naming
 			nfoFileName = fileName + ".nfo"
 		} else {
-			nfoFileName = template.SanitizeFilename(nfoFileName)
-			// Ensure .nfo extension
-			if !strings.HasSuffix(nfoFileName, ".nfo") {
-				nfoFileName += ".nfo"
+			// Case-insensitive .nfo trimming to prevent double extensions
+			basename := nfoFileName
+			lower := strings.ToLower(basename)
+			if strings.HasSuffix(lower, ".nfo") {
+				basename = basename[:len(basename)-4]
 			}
+			sanitized := template.SanitizeFilename(basename)
+
+			// Three-tier fallback for empty results
+			if sanitized == "" {
+				sanitized = template.SanitizeFilename(fileName)
+				if sanitized == "" {
+					sanitized = "metadata"
+				}
+			}
+
+			nfoFileName = sanitized + ".nfo"
 		}
 		nfoPath = filepath.Join(folderPath, nfoFileName)
 	}
