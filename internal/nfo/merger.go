@@ -21,6 +21,42 @@ const (
 	MergeArrays
 )
 
+// ParseMergeStrategy converts a merge strategy string to MergeStrategy enum
+// Valid values: "prefer-scraper", "prefer-nfo", "merge-arrays"
+// Returns PreferNFO as default for Update Mode
+// Deprecated: Use ParseScalarStrategy and ParseArrayStrategy instead
+func ParseMergeStrategy(strategy string) MergeStrategy {
+	switch strategy {
+	case "prefer-scraper":
+		return PreferScraper
+	case "prefer-nfo":
+		return PreferNFO
+	case "merge-arrays":
+		return MergeArrays
+	default:
+		return PreferNFO // default for Update Mode
+	}
+}
+
+// ParseScalarStrategy converts scalar strategy string to MergeStrategy
+// Valid values: "prefer-scraper", "prefer-nfo" (case-insensitive)
+// Returns PreferNFO as default
+func ParseScalarStrategy(strategy string) MergeStrategy {
+	switch strings.ToLower(strategy) {
+	case "prefer-scraper":
+		return PreferScraper
+	default:
+		return PreferNFO
+	}
+}
+
+// ParseArrayStrategy converts array strategy string to boolean
+// Valid values: "merge", "replace" (case-insensitive)
+// Returns true (merge) as default
+func ParseArrayStrategy(strategy string) bool {
+	return strings.ToLower(strategy) != "replace" // merge is default
+}
+
 // MergeResult contains the merged movie and metadata about the merge
 type MergeResult struct {
 	Merged     *models.Movie
@@ -151,6 +187,122 @@ func MergeMovieMetadata(scraped, nfo *models.Movie, strategy MergeStrategy) (*Me
 	merged.UpdatedAt = time.Now()
 
 	// Calculate total fields consistently using the merged result
+	stats.TotalFields = countNonEmptyFields(merged)
+
+	return &MergeResult{
+		Merged:     merged,
+		Provenance: provenance,
+		Stats:      stats,
+	}, nil
+}
+
+// MergeMovieMetadataWithOptions merges scraped and NFO data with granular control
+// scraped: Movie from scraper results
+// nfo: Movie from existing NFO file
+// scalarStrategy: How to handle scalar fields (PreferNFO or PreferScraper)
+// mergeArrays: If true, combine arrays from both sources; if false, use scalarStrategy for arrays too
+//
+// This provides independent control over:
+// - Scalar fields (title, studio, etc): prefer NFO or prefer scraped
+// - Array fields (actresses, genres): merge both sources or replace
+func MergeMovieMetadataWithOptions(scraped, nfo *models.Movie, scalarStrategy MergeStrategy, mergeArrays bool) (*MergeResult, error) {
+	if scraped == nil && nfo == nil {
+		return nil, fmt.Errorf("both scraped and nfo are nil")
+	}
+
+	// If only one source exists, use it
+	if scraped == nil {
+		return &MergeResult{
+			Merged:     nfo,
+			Provenance: makeProvenanceMap(nfo, "nfo"),
+			Stats: MergeStats{
+				TotalFields: countNonEmptyFields(nfo),
+				FromNFO:     countNonEmptyFields(nfo),
+			},
+		}, nil
+	}
+	if nfo == nil {
+		return &MergeResult{
+			Merged:     scraped,
+			Provenance: makeProvenanceMap(scraped, "scraper"),
+			Stats: MergeStats{
+				TotalFields: countNonEmptyFields(scraped),
+				FromScraper: countNonEmptyFields(scraped),
+			},
+		}, nil
+	}
+
+	// Both exist - perform merge
+	merged := &models.Movie{}
+	provenance := make(map[string]DataSource)
+	stats := MergeStats{}
+
+	// Get source timestamps
+	scrapedTS := scraped.UpdatedAt
+	if scrapedTS.IsZero() && !scraped.CreatedAt.IsZero() {
+		scrapedTS = scraped.CreatedAt
+	}
+	if scrapedTS.IsZero() {
+		scrapedTS = time.Now()
+	}
+
+	nfoTS := nfo.UpdatedAt
+	if nfoTS.IsZero() && !nfo.CreatedAt.IsZero() {
+		nfoTS = nfo.CreatedAt
+	}
+	if nfoTS.IsZero() {
+		nfoTS = time.Now()
+	}
+
+	// Merge scalar fields using scalarStrategy
+	merged.ContentID = mergeStringField("ContentID", scraped.ContentID, nfo.ContentID, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.ID = mergeStringField("ID", scraped.ID, nfo.ID, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.DisplayName = mergeStringField("DisplayName", scraped.DisplayName, nfo.DisplayName, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.Title = mergeStringField("Title", scraped.Title, nfo.Title, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.OriginalTitle = mergeStringField("OriginalTitle", scraped.OriginalTitle, nfo.OriginalTitle, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.Description = mergeStringField("Description", scraped.Description, nfo.Description, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.Director = mergeStringField("Director", scraped.Director, nfo.Director, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.Maker = mergeStringField("Maker", scraped.Maker, nfo.Maker, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.Label = mergeStringField("Label", scraped.Label, nfo.Label, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.Series = mergeStringField("Series", scraped.Series, nfo.Series, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.PosterURL = mergeStringField("PosterURL", scraped.PosterURL, nfo.PosterURL, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.CoverURL = mergeStringField("CoverURL", scraped.CoverURL, nfo.CoverURL, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.CroppedPosterURL = mergeStringField("CroppedPosterURL", scraped.CroppedPosterURL, nfo.CroppedPosterURL, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.TrailerURL = mergeStringField("TrailerURL", scraped.TrailerURL, nfo.TrailerURL, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.OriginalFileName = mergeStringField("OriginalFileName", scraped.OriginalFileName, nfo.OriginalFileName, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.SourceName = mergeStringField("SourceName", scraped.SourceName, nfo.SourceName, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.SourceURL = mergeStringField("SourceURL", scraped.SourceURL, nfo.SourceURL, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+
+	// Merge int fields
+	merged.ReleaseYear = mergeIntField("ReleaseYear", scraped.ReleaseYear, nfo.ReleaseYear, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.Runtime = mergeIntField("Runtime", scraped.Runtime, nfo.Runtime, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.RatingVotes = mergeIntField("RatingVotes", scraped.RatingVotes, nfo.RatingVotes, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+
+	// Merge float fields
+	merged.RatingScore = mergeFloatField("RatingScore", scraped.RatingScore, nfo.RatingScore, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+
+	// Merge bool fields
+	merged.ShouldCropPoster = mergeBoolField("ShouldCropPoster", scraped.ShouldCropPoster, nfo.ShouldCropPoster, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+
+	// Merge pointer fields
+	merged.ReleaseDate = mergeDateField("ReleaseDate", scraped.ReleaseDate, nfo.ReleaseDate, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+
+	// Merge array fields using mergeArrays flag
+	arrayStrategy := scalarStrategy
+	if mergeArrays {
+		arrayStrategy = MergeArrays
+	}
+	merged.Actresses = mergeActresses("Actresses", scraped.Actresses, nfo.Actresses, arrayStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.Genres = mergeGenres("Genres", scraped.Genres, nfo.Genres, arrayStrategy, &stats, provenance, scrapedTS, nfoTS)
+	merged.Screenshots = mergeStringSlice("Screenshots", scraped.Screenshots, nfo.Screenshots, arrayStrategy, &stats, provenance, scrapedTS, nfoTS)
+
+	// Timestamps
+	merged.CreatedAt = scraped.CreatedAt
+	if !nfo.CreatedAt.IsZero() && (scraped.CreatedAt.IsZero() || nfo.CreatedAt.After(scraped.CreatedAt)) {
+		merged.CreatedAt = nfo.CreatedAt
+	}
+	merged.UpdatedAt = time.Now()
+
 	stats.TotalFields = countNonEmptyFields(merged)
 
 	return &MergeResult{
@@ -579,16 +731,29 @@ func mergeStringSlice(fieldName string, scraped, nfo []string, strategy MergeStr
 }
 
 // actressKey creates a normalized unique key for deduplication
-// Uses case-insensitive, trimmed comparison to catch variants like "Yui Hatano" vs "yui hatano"
+// Priority: JapaneseName (most consistent) → DMMID → FirstName+LastName (least reliable due to order variations)
 func actressKey(actress models.Actress) string {
+	// 1. JapaneseName is most consistent across scraped and NFO data
+	//    Scraped data has DMMID but NFO typically doesn't, but both have JapaneseName
+	japaneseName := strings.ToLower(strings.TrimSpace(actress.JapaneseName))
+	if japaneseName != "" {
+		return fmt.Sprintf("jp:%s", japaneseName)
+	}
+
+	// 2. DMMID is reliable but only present in scraped data (not in NFO)
+	if actress.DMMID > 0 {
+		return fmt.Sprintf("dmm:%d", actress.DMMID)
+	}
+
+	// 3. Fall back to normalized romanized FirstName + LastName (least reliable)
 	firstName := strings.ToLower(strings.TrimSpace(actress.FirstName))
 	lastName := strings.ToLower(strings.TrimSpace(actress.LastName))
-
-	// Use normalized FirstName + LastName as key, fall back to normalized JapaneseName
 	if firstName != "" || lastName != "" {
-		return fmt.Sprintf("%s|%s", firstName, lastName)
+		return fmt.Sprintf("name:%s|%s", firstName, lastName)
 	}
-	return strings.ToLower(strings.TrimSpace(actress.JapaneseName))
+
+	// No identifying information
+	return ""
 }
 
 // makeProvenanceMap creates a provenance map for a single source
@@ -634,10 +799,16 @@ func makeProvenanceMap(movie *models.Movie, source string) map[string]DataSource
 
 		// Check if field has data
 		if !isEmptyValue(field) {
+			// Create a unique timestamp copy for each field to avoid pointer aliasing
+			var fieldTimestamp *time.Time
+			if timestamp != nil {
+				ts := *timestamp
+				fieldTimestamp = &ts
+			}
 			provenance[fieldName] = DataSource{
 				Source:      source,
 				Confidence:  1.0,
-				LastUpdated: timestamp,
+				LastUpdated: fieldTimestamp,
 			}
 		}
 	}

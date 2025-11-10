@@ -72,6 +72,11 @@ func NFOToMovie(nfo *Movie) (*models.Movie, []string) {
 		ReleaseYear:   nfo.Year,
 	}
 
+	// Fallback: Use Studio if Maker is empty (standard Kodi field → JAV custom field)
+	if movie.Maker == "" && nfo.Studio != "" {
+		movie.Maker = nfo.Studio
+	}
+
 	// Extract ID from various sources
 	if nfo.ID != "" {
 		movie.ID = nfo.ID
@@ -187,19 +192,40 @@ func NFOToMovie(nfo *Movie) (*models.Movie, []string) {
 
 // parseActorToActress converts an NFO Actor to a models.Actress
 func parseActorToActress(actor Actor) models.Actress {
-	firstName, lastName := splitActorName(actor.Name)
-
 	actress := models.Actress{
-		FirstName: firstName,
-		LastName:  lastName,
-		ThumbURL:  actor.Thumb,
+		ThumbURL: actor.Thumb,
 	}
 
-	// Check both Role and Name for Japanese characters
-	// Prefer Role if it contains Japanese, otherwise fall back to Name
-	if actor.Role != "" && containsJapanese(actor.Role) {
+	// Determine which field has Japanese and which has romanized text
+	nameHasJapanese := containsJapanese(actor.Name)
+	altNameHasJapanese := containsJapanese(actor.AltName)
+	roleHasJapanese := actor.Role != "" && containsJapanese(actor.Role)
+
+	// Priority for FirstName/LastName (romanized):
+	// 1. Use AltName if it's romanized (not Japanese)
+	// 2. Use Name if it's romanized (not Japanese)
+	// 3. Otherwise leave empty (both are Japanese)
+	if actor.AltName != "" && !altNameHasJapanese {
+		// AltName is romanized, use it
+		firstName, lastName := splitActorName(actor.AltName)
+		actress.FirstName = firstName
+		actress.LastName = lastName
+	} else if actor.Name != "" && !nameHasJapanese {
+		// Name is romanized, use it
+		firstName, lastName := splitActorName(actor.Name)
+		actress.FirstName = firstName
+		actress.LastName = lastName
+	}
+
+	// Priority for JapaneseName:
+	// 1. Use Role if it contains Japanese (custom JAV field)
+	// 2. Use AltName if it contains Japanese (reverse format NFO)
+	// 3. Use Name if it contains Japanese (standard Kodi field)
+	if roleHasJapanese {
 		actress.JapaneseName = actor.Role
-	} else if containsJapanese(actor.Name) {
+	} else if altNameHasJapanese {
+		actress.JapaneseName = actor.AltName
+	} else if nameHasJapanese {
 		actress.JapaneseName = actor.Name
 	}
 

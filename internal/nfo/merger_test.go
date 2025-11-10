@@ -421,19 +421,34 @@ func TestActressKey(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "Full English name",
+			name:    "JapaneseName priority (most consistent across sources)",
+			actress: models.Actress{FirstName: "Yui", LastName: "Hatano", JapaneseName: "波多野結衣", DMMID: 123456},
+			want:    "jp:波多野結衣",
+		},
+		{
+			name:    "JapaneseName without DMMID",
+			actress: models.Actress{FirstName: "Yui", LastName: "Hatano", JapaneseName: "波多野結衣"},
+			want:    "jp:波多野結衣",
+		},
+		{
+			name:    "DMMID fallback (no Japanese name)",
+			actress: models.Actress{FirstName: "Yui", LastName: "Hatano", DMMID: 123456},
+			want:    "dmm:123456",
+		},
+		{
+			name:    "Romanized name only (no DMMID, no Japanese)",
 			actress: models.Actress{FirstName: "Yui", LastName: "Hatano"},
-			want:    "yui|hatano", // Now normalized to lowercase
+			want:    "name:yui|hatano",
 		},
 		{
 			name:    "Only first name",
 			actress: models.Actress{FirstName: "Madonna"},
-			want:    "madonna|", // Now normalized to lowercase
+			want:    "name:madonna|",
 		},
 		{
 			name:    "Only Japanese name",
 			actress: models.Actress{JapaneseName: "波多野結衣"},
-			want:    "波多野結衣", // Japanese characters remain as-is
+			want:    "jp:波多野結衣",
 		},
 	}
 

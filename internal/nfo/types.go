@@ -79,10 +79,11 @@ type Rating struct {
 
 // Actor represents an actress/actor in the movie
 type Actor struct {
-	Name  string `xml:"name"`
-	Role  string `xml:"role,omitempty"`
-	Order int    `xml:"order,omitempty"`
-	Thumb string `xml:"thumb,omitempty"`
+	Name    string `xml:"name"`
+	AltName string `xml:"altname,omitempty"` // Alternative/romanized name
+	Role    string `xml:"role,omitempty"`
+	Order   int    `xml:"order,omitempty"`
+	Thumb   string `xml:"thumb,omitempty"`
 }
 
 // Thumb represents a thumbnail/poster image

@@ -429,7 +429,7 @@ func TestParseActorToActress(t *testing.T) {
 			actor: Actor{
 				Name: "波多野結衣",
 			},
-			wantFirstName: "波多野結衣",
+			wantFirstName: "", // Japanese detected, not used for romanized names
 			wantLastName:  "",
 			wantJapanese:  "波多野結衣",
 		},
@@ -439,8 +439,8 @@ func TestParseActorToActress(t *testing.T) {
 				Name: "Yui Hatano 波多野結衣",
 				Role: "",
 			},
-			wantFirstName: "Yui",
-			wantLastName:  "Hatano 波多野結衣",
+			wantFirstName: "", // Japanese detected, entire field treated as Japanese
+			wantLastName:  "",
 			wantJapanese:  "Yui Hatano 波多野結衣",
 		},
 	}
