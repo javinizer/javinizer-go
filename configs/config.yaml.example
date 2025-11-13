@@ -10,12 +10,13 @@ api:
         allowed_origins: []  # Change to ["*"] for local development
 
         # Allowed directories for API file operations (organize, preview, etc.)
-        # Empty list = deny all. Docker deployments auto-detect /media.
-        # Manual deployments should list specific paths:
+        # SECURITY: Empty list = deny all (secure by default)
+        # Docker deployments auto-detect /media automatically.
+        # Manual deployments should uncomment and add specific paths below:
         #   allowed_directories:
         #     - /path/to/media
         #     - ~/Videos
-        allowed_directories: []
+        allowed_directories: []  # Deny all by default - configure paths for your deployment
 
         # Explicitly deny specific directories (optional)
         denied_directories: []

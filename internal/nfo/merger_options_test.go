@@ -208,25 +208,27 @@ func TestMergeMovieMetadataWithOptions_EmptyFields(t *testing.T) {
 		Maker:       "NFO Studio",
 	}
 
-	// Test PreferNFO strategy
+	// Test PreferNFO strategy (strict mode: uses empty NFO values, no fallback)
 	result, err := MergeMovieMetadataWithOptions(scraped, nfoData, PreferNFO, false)
 	require.NoError(t, err)
 
-	// When preferring NFO, empty NFO title should fallback to scraped
-	assert.Equal(t, "Scraped Title", result.Merged.Title, "Should fallback to scraped when NFO is empty")
+	// With strict PreferNFO: empty NFO title is used (no fallback to scraped)
+	// Note: Critical field protection only applies when the PREFERRED source is empty AND the other source is also empty
+	// Here, NFO (preferred) is empty, but scraper is non-empty, so strict mode uses empty NFO value
+	assert.Equal(t, "", result.Merged.Title, "Strict PreferNFO uses empty NFO value (no fallback to scraper)")
 	// When preferring NFO, non-empty NFO description should be used
 	assert.Equal(t, "NFO Description", result.Merged.Description, "Should use NFO when it's not empty")
 	// When preferring NFO, non-empty NFO maker should be used
 	assert.Equal(t, "NFO Studio", result.Merged.Maker, "Should use NFO when it's not empty")
 
-	// Test PreferScraper strategy
+	// Test PreferScraper strategy (strict mode: uses empty scraper values, no fallback)
 	result2, err := MergeMovieMetadataWithOptions(scraped, nfoData, PreferScraper, false)
 	require.NoError(t, err)
 
 	// When preferring scraper, non-empty scraped title should be used
 	assert.Equal(t, "Scraped Title", result2.Merged.Title, "Should use scraped when it's not empty")
-	// When preferring scraper, empty scraped description should fallback to NFO
-	assert.Equal(t, "NFO Description", result2.Merged.Description, "Should fallback to NFO when scraped is empty")
+	// With strict PreferScraper: empty scraped description is used (no fallback to NFO)
+	assert.Equal(t, "", result2.Merged.Description, "Strict PreferScraper uses empty scraper value")
 	// When preferring scraper, non-empty scraped maker should be used
 	assert.Equal(t, "Scraped Studio", result2.Merged.Maker, "Should use scraped when it's not empty")
 }
