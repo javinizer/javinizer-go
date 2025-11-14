@@ -200,7 +200,8 @@ func MergeMovieMetadata(scraped, nfo *models.Movie, strategy MergeStrategy) (*Me
 	merged.Series = mergeStringField("Series", scraped.Series, nfo.Series, strategy, &stats, provenance, scrapedTS, nfoTS)
 	merged.PosterURL = mergeStringField("PosterURL", scraped.PosterURL, nfo.PosterURL, strategy, &stats, provenance, scrapedTS, nfoTS)
 	merged.CoverURL = mergeStringField("CoverURL", scraped.CoverURL, nfo.CoverURL, strategy, &stats, provenance, scrapedTS, nfoTS)
-	merged.CroppedPosterURL = mergeStringField("CroppedPosterURL", scraped.CroppedPosterURL, nfo.CroppedPosterURL, strategy, &stats, provenance, scrapedTS, nfoTS)
+	// CroppedPosterURL: Always use scraped value (not stored in NFO, runtime-generated temp URL)
+	merged.CroppedPosterURL = scraped.CroppedPosterURL
 	merged.TrailerURL = mergeStringField("TrailerURL", scraped.TrailerURL, nfo.TrailerURL, strategy, &stats, provenance, scrapedTS, nfoTS)
 	merged.OriginalFileName = mergeStringField("OriginalFileName", scraped.OriginalFileName, nfo.OriginalFileName, strategy, &stats, provenance, scrapedTS, nfoTS)
 	merged.SourceName = mergeStringField("SourceName", scraped.SourceName, nfo.SourceName, strategy, &stats, provenance, scrapedTS, nfoTS)
@@ -313,7 +314,8 @@ func MergeMovieMetadataWithOptions(scraped, nfo *models.Movie, scalarStrategy Me
 	merged.Series = mergeStringField("Series", scraped.Series, nfo.Series, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
 	merged.PosterURL = mergeStringField("PosterURL", scraped.PosterURL, nfo.PosterURL, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
 	merged.CoverURL = mergeStringField("CoverURL", scraped.CoverURL, nfo.CoverURL, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
-	merged.CroppedPosterURL = mergeStringField("CroppedPosterURL", scraped.CroppedPosterURL, nfo.CroppedPosterURL, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
+	// CroppedPosterURL: Always use scraped value (not stored in NFO, runtime-generated temp URL)
+	merged.CroppedPosterURL = scraped.CroppedPosterURL
 	merged.TrailerURL = mergeStringField("TrailerURL", scraped.TrailerURL, nfo.TrailerURL, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
 	merged.OriginalFileName = mergeStringField("OriginalFileName", scraped.OriginalFileName, nfo.OriginalFileName, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)
 	merged.SourceName = mergeStringField("SourceName", scraped.SourceName, nfo.SourceName, scalarStrategy, &stats, provenance, scrapedTS, nfoTS)

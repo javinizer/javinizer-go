@@ -261,8 +261,8 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			name:          "default strategy (empty string)",
 			mergeStrategy: "",
 			checkResponse: func(t *testing.T, resp *NFOComparisonResponse) {
-				// Default should be prefer-scraper
-				assert.Equal(t, "Scraped Title", resp.MergedData.Title)
+				// Default for compareNFO should be prefer-nfo (conservative, preserves existing data)
+				assert.Equal(t, "NFO Title", resp.MergedData.Title)
 			},
 		},
 	}

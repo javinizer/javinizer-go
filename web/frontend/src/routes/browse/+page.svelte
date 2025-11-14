@@ -32,7 +32,8 @@
 	let availableScrapers: Scraper[] = $state([]);
 	let selectedScrapers: string[] = $state([]);
 	let showScraperSelector = $state(false);
-	let scalarStrategy: string = $state('prefer-nfo');  // For scalar fields: prefer-nfo, prefer-scraper
+	let selectedPreset: string | undefined = $state(undefined);  // Merge strategy preset: conservative, gap-fill, aggressive
+	let scalarStrategy: string = $state('prefer-nfo');  // For scalar fields: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
 	let arrayStrategy: string = $state('merge');        // For array fields: merge, replace
 
 	// localStorage keys
@@ -119,6 +120,25 @@
 		await scanPath(customPath, true);
 	}
 
+	// Apply preset to scalar and array strategies
+	function applyPreset(preset: string) {
+		selectedPreset = preset;
+		switch (preset) {
+			case 'conservative':
+				scalarStrategy = 'preserve-existing';
+				arrayStrategy = 'merge';
+				break;
+			case 'gap-fill':
+				scalarStrategy = 'fill-missing-only';
+				arrayStrategy = 'merge';
+				break;
+			case 'aggressive':
+				scalarStrategy = 'prefer-scraper';
+				arrayStrategy = 'replace';
+				break;
+		}
+	}
+
 	async function startBatchScrape() {
 		if (selectedFiles.length === 0) return;
 
@@ -132,6 +152,7 @@
 				destination: isUpdateMode ? undefined : (destinationPath.trim() || undefined),
 				update: isUpdateMode,
 				selected_scrapers: showScraperSelector ? selectedScrapers : undefined,
+				preset: isUpdateMode ? (selectedPreset as any) : undefined,
 				scalar_strategy: isUpdateMode ? scalarStrategy : undefined,
 				array_strategy: isUpdateMode ? arrayStrategy : undefined
 			});
@@ -337,23 +358,75 @@
 					<p class="text-sm text-muted-foreground">Choose how to merge existing NFO data with freshly scraped data</p>
 				</div>
 
+				<!-- Preset Selection -->
+				<div class="space-y-2">
+					<div class="flex items-center justify-between">
+						<h4 class="text-sm font-medium">Quick Presets</h4>
+						{#if selectedPreset}
+							<button
+								onclick={() => { selectedPreset = undefined; }}
+								class="text-xs text-primary hover:underline"
+							>
+								Clear preset
+							</button>
+						{/if}
+					</div>
+					<div class="grid grid-cols-3 gap-2">
+						<button
+							onclick={() => applyPreset('conservative')}
+							class="p-3 rounded-lg border-2 text-sm transition-all {selectedPreset === 'conservative' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+						>
+							<div class="font-medium">🛡️ Conservative</div>
+							<div class="text-xs text-muted-foreground mt-1">Never overwrite existing</div>
+						</button>
+						<button
+							onclick={() => applyPreset('gap-fill')}
+							class="p-3 rounded-lg border-2 text-sm transition-all {selectedPreset === 'gap-fill' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+						>
+							<div class="font-medium">📝 Gap Fill</div>
+							<div class="text-xs text-muted-foreground mt-1">Fill missing fields only</div>
+						</button>
+						<button
+							onclick={() => applyPreset('aggressive')}
+							class="p-3 rounded-lg border-2 text-sm transition-all {selectedPreset === 'aggressive' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+						>
+							<div class="font-medium">⚡ Aggressive</div>
+							<div class="text-xs text-muted-foreground mt-1">Trust scrapers completely</div>
+						</button>
+					</div>
+				</div>
+
 				<!-- Scalar Fields Strategy -->
 				<div class="space-y-2">
 					<h4 class="text-sm font-medium">Scalar Fields (Title, Studio, Label, etc.)</h4>
 					<div class="grid grid-cols-2 gap-2">
 						<button
-							onclick={() => scalarStrategy = 'prefer-nfo'}
+							onclick={() => { scalarStrategy = 'prefer-nfo'; selectedPreset = undefined; }}
 							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'prefer-nfo' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
 							<div class="font-medium">Prefer NFO</div>
 							<div class="text-xs text-muted-foreground mt-1">Keep existing values</div>
 						</button>
 						<button
-							onclick={() => scalarStrategy = 'prefer-scraper'}
+							onclick={() => { scalarStrategy = 'prefer-scraper'; selectedPreset = undefined; }}
 							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'prefer-scraper' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
 							<div class="font-medium">Prefer Scraped</div>
 							<div class="text-xs text-muted-foreground mt-1">Update with fresh data</div>
+						</button>
+						<button
+							onclick={() => { scalarStrategy = 'preserve-existing'; selectedPreset = undefined; }}
+							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'preserve-existing' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+						>
+							<div class="font-medium">Preserve Existing</div>
+							<div class="text-xs text-muted-foreground mt-1">Never overwrite</div>
+						</button>
+						<button
+							onclick={() => { scalarStrategy = 'fill-missing-only'; selectedPreset = undefined; }}
+							class="p-3 rounded-lg border-2 text-sm transition-all {scalarStrategy === 'fill-missing-only' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+						>
+							<div class="font-medium">Fill Missing Only</div>
+							<div class="text-xs text-muted-foreground mt-1">Safe gap filling</div>
 						</button>
 					</div>
 				</div>
@@ -363,14 +436,14 @@
 					<h4 class="text-sm font-medium">Array Fields (Actresses, Genres, Screenshots)</h4>
 					<div class="grid grid-cols-2 gap-2">
 						<button
-							onclick={() => arrayStrategy = 'merge'}
+							onclick={() => { arrayStrategy = 'merge'; selectedPreset = undefined; }}
 							class="p-3 rounded-lg border-2 text-sm transition-all {arrayStrategy === 'merge' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
 							<div class="font-medium">Merge</div>
 							<div class="text-xs text-muted-foreground mt-1">Combine arrays</div>
 						</button>
 						<button
-							onclick={() => arrayStrategy = 'replace'}
+							onclick={() => { arrayStrategy = 'replace'; selectedPreset = undefined; }}
 							class="p-3 rounded-lg border-2 text-sm transition-all {arrayStrategy === 'replace' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
 							<div class="font-medium">Replace</div>

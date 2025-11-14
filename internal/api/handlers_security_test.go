@@ -495,21 +495,20 @@ func TestSecurity_InputValidation(t *testing.T) {
 			},
 		},
 		{
-			// NOTE: This is NOT a security validation test - it's a functional test
-			// The API accepts job requests without path validation (which happens during scan)
-			// TODO: Add scanner-level tests to verify path traversal is rejected during file processing
-			name:           "batch scrape accepts request with relative paths",
+			// Security validation: API should reject path traversal attempts at request time
+			// This provides defense-in-depth by rejecting malicious requests before job creation
+			name:           "batch scrape rejects request with path traversal attempts",
 			method:         "POST",
 			path:           "/api/v1/batch/scrape",
 			body:           BatchScrapeRequest{Files: []string{"../../../etc/passwd"}},
-			expectedStatus: 200, // API accepts request - scanner validates paths during processing
+			expectedStatus: 403, // Security fix: API now validates paths against allowlist and rejects unsafe paths
 			securityCheck: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var resp BatchScrapeResponse
+				var resp ErrorResponse
 				err := json.Unmarshal(w.Body.Bytes(), &resp)
 				require.NoError(t, err)
-				// Verifies API creates job ID without pre-validation
-				// Security: Path sanitization must occur at scanner level (see internal/scanner package)
-				assert.NotEmpty(t, resp.JobID, "API should accept job and return job ID")
+				// Verify error message indicates access denied (without leaking internal paths)
+				assert.NotEmpty(t, resp.Error, "Should return error message")
+				assert.Contains(t, strings.ToLower(resp.Error), "access", "Error should mention access restriction")
 			},
 		},
 		{

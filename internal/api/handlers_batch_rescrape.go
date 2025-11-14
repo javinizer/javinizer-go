@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
@@ -35,6 +36,17 @@ func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 			return
+		}
+
+		// Apply preset if specified (overrides individual strategy fields)
+		if req.Preset != "" {
+			var presetErr error
+			req.ScalarStrategy, req.ArrayStrategy, presetErr = nfo.ApplyPreset(req.Preset, req.ScalarStrategy, req.ArrayStrategy)
+			if presetErr != nil {
+				c.JSON(http.StatusBadRequest, ErrorResponse{Error: presetErr.Error()})
+				return
+			}
+			logging.Infof("Applied preset '%s': scalar=%s, array=%s", req.Preset, req.ScalarStrategy, req.ArrayStrategy)
 		}
 
 		// Validate request
@@ -114,7 +126,7 @@ func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 			cfg.Scrapers.UserAgent, // userAgent
 			cfg.Scrapers.Referer,   // referer
 			req.Force,              // force rescrape
-			req.ScalarStrategy != "" || req.ArrayStrategy != "", // updateMode - true if either strategy provided
+			req.Preset != "" || req.ScalarStrategy != "" || req.ArrayStrategy != "", // updateMode - true if preset or either strategy provided
 			req.SelectedScrapers, // selectedScrapers (empty = use defaults)
 			nil,                  // processedMovieIDs (nil = no deduplication for single file rescrape)
 			cfg,                  // cfg (needed for NFO path construction)

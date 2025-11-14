@@ -293,8 +293,20 @@ func rescrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 // validateNFOPath validates an NFO file path against security constraints
 // Returns the validated absolute path or a sentinel error
 func validateNFOPath(requestedPath string, allowedDirs []string) (string, error) {
+	// Expand ~ in requested path (security: consistent with allowlist handling)
+	expandedPath := requestedPath
+	if strings.HasPrefix(requestedPath, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			if requestedPath == "~" {
+				expandedPath = home
+			} else if strings.HasPrefix(requestedPath, "~/") {
+				expandedPath = filepath.Join(home, strings.TrimPrefix(requestedPath, "~/"))
+			}
+		}
+	}
+
 	// Clean and normalize the path
-	cleanPath := filepath.Clean(requestedPath)
+	cleanPath := filepath.Clean(expandedPath)
 
 	// Convert to absolute path
 	absPath, err := filepath.Abs(cleanPath)
@@ -481,25 +493,55 @@ func compareNFO(deps *ServerDependencies) gin.HandlerFunc {
 		}
 		response.ScrapedData = scrapedMovie
 
-		// Step 4: Determine merge strategy
-		strategy := nfo.PreferScraper // default
-		if req.MergeStrategy != "" {
-			// Normalize strategy string (case-insensitive, trimmed) for better UX
+		// Step 4: Determine merge strategy using two-parameter system
+		scalarStrategyStr := req.ScalarStrategy
+		arrayStrategyStr := req.ArrayStrategy
+
+		// Apply preset if specified (overrides individual strategy fields)
+		if req.Preset != "" {
+			var presetErr error
+			scalarStrategyStr, arrayStrategyStr, presetErr = nfo.ApplyPreset(req.Preset, scalarStrategyStr, arrayStrategyStr)
+			if presetErr != nil {
+				c.JSON(400, ErrorResponse{Error: presetErr.Error()})
+				return
+			}
+			logging.Infof("compareNFO: Applied preset '%s': scalar=%s, array=%s", req.Preset, scalarStrategyStr, arrayStrategyStr)
+		}
+
+		// Support backward compatibility with old merge_strategy field
+		if req.MergeStrategy != "" && req.Preset == "" && scalarStrategyStr == "" {
+			logging.Warnf("compareNFO: Using deprecated merge_strategy field: %s", req.MergeStrategy)
+			// Map old single-parameter strategy to two-parameter system
 			switch strings.ToLower(strings.TrimSpace(req.MergeStrategy)) {
 			case "prefer-scraper":
-				strategy = nfo.PreferScraper
+				scalarStrategyStr = "prefer-scraper"
+				arrayStrategyStr = "replace"
 			case "prefer-nfo":
-				strategy = nfo.PreferNFO
+				scalarStrategyStr = "prefer-nfo"
+				arrayStrategyStr = "merge"
 			case "merge-arrays":
-				strategy = nfo.MergeArrays
+				scalarStrategyStr = "prefer-scraper"
+				arrayStrategyStr = "merge"
 			default:
 				c.JSON(400, ErrorResponse{Error: fmt.Sprintf("Invalid merge strategy: %s", req.MergeStrategy)})
 				return
 			}
 		}
 
+		// Apply defaults if not specified
+		if scalarStrategyStr == "" {
+			scalarStrategyStr = "prefer-nfo" // default for comparison/update mode
+		}
+		if arrayStrategyStr == "" {
+			arrayStrategyStr = "merge" // default
+		}
+
+		// Parse strategies
+		scalarStrategy := nfo.ParseScalarStrategy(scalarStrategyStr)
+		mergeArrays := nfo.ParseArrayStrategy(arrayStrategyStr)
+
 		// Step 5: Merge and generate provenance
-		mergeResult, err := nfo.MergeMovieMetadata(scrapedMovie, response.NFOData, strategy)
+		mergeResult, err := nfo.MergeMovieMetadataWithOptions(scrapedMovie, response.NFOData, scalarStrategy, mergeArrays)
 		if err != nil {
 			c.JSON(500, ErrorResponse{Error: fmt.Sprintf("Merge failed: %v", err)})
 			return

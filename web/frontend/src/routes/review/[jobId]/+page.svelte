@@ -98,8 +98,28 @@
 	let manualSearchMode = $state(false);
 	let manualSearchInput = $state('');
 	// Merge strategies for update mode (two independent options)
-	let rescrapeScalarStrategy = $state('prefer-nfo');  // For scalar fields: prefer-nfo, prefer-scraper
+	let rescrapePreset: string | undefined = $state(undefined);  // Merge strategy preset: conservative, gap-fill, aggressive
+	let rescrapeScalarStrategy = $state('prefer-nfo');  // For scalar fields: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
 	let rescrapeArrayStrategy = $state('merge');        // For array fields: merge, replace
+
+	// Apply preset to rescrape scalar and array strategies
+	function applyRescrapePreset(preset: string) {
+		rescrapePreset = preset;
+		switch (preset) {
+			case 'conservative':
+				rescrapeScalarStrategy = 'preserve-existing';
+				rescrapeArrayStrategy = 'merge';
+				break;
+			case 'gap-fill':
+				rescrapeScalarStrategy = 'fill-missing-only';
+				rescrapeArrayStrategy = 'merge';
+				break;
+			case 'aggressive':
+				rescrapeScalarStrategy = 'prefer-scraper';
+				rescrapeArrayStrategy = 'replace';
+				break;
+		}
+	}
 
 	// Group file results by movie_id to handle multi-part files
 	// Each movie group contains all file results with the same movie_id
@@ -342,6 +362,7 @@
 				force: true,
 				selected_scrapers: rescrapeSelectedScrapers,
 				manual_search_input: manualSearchMode ? manualSearchInput.trim() : undefined,
+				preset: rescrapePreset as any,
 				scalar_strategy: rescrapeScalarStrategy !== '' ? rescrapeScalarStrategy : undefined,
 				array_strategy: rescrapeArrayStrategy !== '' ? rescrapeArrayStrategy : undefined
 			});
@@ -1302,33 +1323,92 @@
 				{/if}
 
 				<!-- Merge Strategy Selection -->
-				<div class="mt-6">
-					<h3 class="font-semibold mb-2">NFO Merge Strategy</h3>
-					<p class="text-sm text-muted-foreground mb-3">
-						Choose how to merge existing NFO data with freshly scraped data. Leave empty to replace all data.
-					</p>
-					<div class="grid grid-cols-3 gap-2">
-						<button
-							onclick={() => rescrapeScalarStrategy = 'prefer-nfo'}
-							class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === 'prefer-nfo' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">Prefer NFO</div>
-							<div class="text-xs text-muted-foreground mt-1">Keep existing data</div>
-						</button>
-						<button
-							onclick={() => rescrapeScalarStrategy = 'prefer-scraper'}
-							class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === 'prefer-scraper' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">Prefer Scraped</div>
-							<div class="text-xs text-muted-foreground mt-1">Update with fresh data</div>
-						</button>
-						<button
-							onclick={() => rescrapeScalarStrategy = ''}
-							class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === '' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
-						>
-							<div class="font-medium">Replace All</div>
-							<div class="text-xs text-muted-foreground mt-1">Fresh scrape only</div>
-						</button>
+				<div class="mt-6 space-y-4">
+					<div>
+						<h3 class="font-semibold mb-2">NFO Merge Strategy</h3>
+						<p class="text-sm text-muted-foreground mb-3">
+							Choose how to merge existing NFO data with freshly scraped data. Leave empty to replace all data.
+						</p>
+					</div>
+
+					<!-- Preset Selection -->
+					<div class="space-y-2">
+						<div class="flex items-center justify-between">
+							<h4 class="text-sm font-medium">Quick Presets</h4>
+							{#if rescrapePreset}
+								<button
+									onclick={() => { rescrapePreset = undefined; }}
+									class="text-xs text-primary hover:underline"
+								>
+									Clear preset
+								</button>
+							{/if}
+						</div>
+						<div class="grid grid-cols-3 gap-2">
+							<button
+								onclick={() => applyRescrapePreset('conservative')}
+								class="p-3 rounded-lg border-2 text-sm transition-all {rescrapePreset === 'conservative' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+							>
+								<div class="font-medium">🛡️ Conservative</div>
+								<div class="text-xs text-muted-foreground mt-1">Never overwrite existing</div>
+							</button>
+							<button
+								onclick={() => applyRescrapePreset('gap-fill')}
+								class="p-3 rounded-lg border-2 text-sm transition-all {rescrapePreset === 'gap-fill' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+							>
+								<div class="font-medium">📝 Gap Fill</div>
+								<div class="text-xs text-muted-foreground mt-1">Fill missing fields only</div>
+							</button>
+							<button
+								onclick={() => applyRescrapePreset('aggressive')}
+								class="p-3 rounded-lg border-2 text-sm transition-all {rescrapePreset === 'aggressive' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+							>
+								<div class="font-medium">⚡ Aggressive</div>
+								<div class="text-xs text-muted-foreground mt-1">Trust scrapers completely</div>
+							</button>
+						</div>
+					</div>
+
+					<!-- Individual Strategy Selection -->
+					<div class="space-y-2">
+						<h4 class="text-sm font-medium">Or Choose Individual Strategies</h4>
+						<div class="grid grid-cols-2 gap-2">
+							<button
+								onclick={() => { rescrapeScalarStrategy = 'prefer-nfo'; rescrapePreset = undefined; }}
+								class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === 'prefer-nfo' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+							>
+								<div class="font-medium">Prefer NFO</div>
+								<div class="text-xs text-muted-foreground mt-1">Keep existing data</div>
+							</button>
+							<button
+								onclick={() => { rescrapeScalarStrategy = 'prefer-scraper'; rescrapePreset = undefined; }}
+								class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === 'prefer-scraper' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+							>
+								<div class="font-medium">Prefer Scraped</div>
+								<div class="text-xs text-muted-foreground mt-1">Update with fresh data</div>
+							</button>
+							<button
+								onclick={() => { rescrapeScalarStrategy = 'preserve-existing'; rescrapePreset = undefined; }}
+								class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === 'preserve-existing' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+							>
+								<div class="font-medium">Preserve Existing</div>
+								<div class="text-xs text-muted-foreground mt-1">Never overwrite</div>
+							</button>
+							<button
+								onclick={() => { rescrapeScalarStrategy = 'fill-missing-only'; rescrapePreset = undefined; }}
+								class="p-3 rounded-lg border-2 text-sm transition-all {rescrapeScalarStrategy === 'fill-missing-only' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+							>
+								<div class="font-medium">Fill Missing Only</div>
+								<div class="text-xs text-muted-foreground mt-1">Safe gap filling</div>
+							</button>
+							<button
+								onclick={() => { rescrapeScalarStrategy = ''; rescrapePreset = undefined; }}
+								class="p-3 rounded-lg border-2 text-sm transition-all col-span-2 {rescrapeScalarStrategy === '' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+							>
+								<div class="font-medium">Replace All</div>
+								<div class="text-xs text-muted-foreground mt-1">Fresh scrape only (ignore existing NFO)</div>
+							</button>
+						</div>
 					</div>
 				</div>
 			{/if}			</div>

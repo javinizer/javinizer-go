@@ -44,8 +44,9 @@ export interface BatchScrapeRequest {
 	destination?: string;
 	update?: boolean;
 	selected_scrapers?: string[];
-	scalar_strategy?: string; // prefer-nfo, prefer-scraper
-	array_strategy?: string;  // merge, replace
+	preset?: 'conservative' | 'gap-fill' | 'aggressive'; // Merge strategy preset (overrides scalar/array)
+	scalar_strategy?: 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
+	array_strategy?: 'merge' | 'replace';
 }
 
 export interface RescrapeRequest {
@@ -57,8 +58,9 @@ export interface BatchRescrapeRequest {
 	force?: boolean;
 	selected_scrapers?: string[];
 	manual_search_input?: string;
-	scalar_strategy?: string; // prefer-nfo, prefer-scraper
-	array_strategy?: string;  // merge, replace
+	preset?: 'conservative' | 'gap-fill' | 'aggressive'; // Merge strategy preset (overrides scalar/array)
+	scalar_strategy?: 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
+	array_strategy?: 'merge' | 'replace';
 }
 
 export interface BatchRescrapeResponse {
@@ -90,7 +92,10 @@ export interface FieldDifference {
 
 export interface NFOComparisonRequest {
 	nfo_path?: string;
-	merge_strategy?: 'prefer-scraper' | 'prefer-nfo' | 'merge-arrays';
+	merge_strategy?: 'prefer-scraper' | 'prefer-nfo' | 'merge-arrays'; // Deprecated: use preset or scalar/array strategies
+	preset?: 'conservative' | 'gap-fill' | 'aggressive';
+	scalar_strategy?: 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
+	array_strategy?: 'merge' | 'replace';
 	selected_scrapers?: string[];
 }
 
@@ -118,6 +123,9 @@ export interface FileResult {
 	data?: Movie;
 	started_at: string;
 	ended_at?: string;
+	is_multi_part?: boolean;
+	part_number?: number;
+	part_suffix?: string;
 }
 
 export interface BatchJobResponse {

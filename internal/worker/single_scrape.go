@@ -275,6 +275,7 @@ func RunBatchScrapeOnce(
 				if foundPath != "" {
 					// NFO exists - parse and merge with cached data
 					logging.Infof("[Batch %s] File %d: Found existing NFO, merging with cached data: %s", job.ID, fileIndex, foundPath)
+					logging.Infof("[Batch %s] File %d: *** DEBUG *** Scalar=%s Array=%s", job.ID, fileIndex, scalarStrategy, arrayStrategy)
 
 					parseResult, err := nfo.ParseNFO(foundPath)
 					if err != nil {
@@ -283,6 +284,7 @@ func RunBatchScrapeOnce(
 						// Merge with user-selected strategies for Update Mode
 						scalar := nfo.ParseScalarStrategy(scalarStrategy)
 						mergeArrays := nfo.ParseArrayStrategy(arrayStrategy)
+						logging.Debugf("[Batch %s] File %d: Parsed scalar strategy: %v (from string: %s)", job.ID, fileIndex, scalar, scalarStrategy)
 						mergeResult, err := nfo.MergeMovieMetadataWithOptions(cached, parseResult.Movie, scalar, mergeArrays)
 						if err != nil {
 							logging.Warnf("[Batch %s] File %d: Failed to merge NFO data for %s: %v (using cached data only)", job.ID, fileIndex, cached.ID, err)
@@ -291,13 +293,20 @@ func RunBatchScrapeOnce(
 							logging.Infof("[Batch %s] File %d: NFO merge complete for cached %s: %d from cache, %d from NFO, %d conflicts resolved",
 								job.ID, fileIndex, cached.ID, mergeResult.Stats.FromScraper, mergeResult.Stats.FromNFO, mergeResult.Stats.ConflictsResolved)
 
-							// Regenerate DisplayName from merged data (uses merged Title)
-							if cfg != nil && cfg.Metadata.NFO.DisplayName != "" {
+							// Handle DisplayName: if Title is already templated (starts with [ID]), use it directly
+							// Otherwise, regenerate DisplayName from Title using the template
+							titleAlreadyTemplated := strings.HasPrefix(movieToReturn.Title, "["+movieToReturn.ID+"]")
+							if titleAlreadyTemplated {
+								// Title already has template applied, use it directly
+								movieToReturn.DisplayName = movieToReturn.Title
+								logging.Debugf("[Batch %s] File %d: Using templated Title as DisplayName: %s", job.ID, fileIndex, movieToReturn.DisplayName)
+							} else if cfg != nil && cfg.Metadata.NFO.DisplayName != "" {
+								// Title not templated, regenerate DisplayName from Title
 								tmplEngine := template.NewEngine()
 								ctx := template.NewContextFromMovie(movieToReturn)
 								if displayName, err := tmplEngine.Execute(cfg.Metadata.NFO.DisplayName, ctx); err == nil {
 									movieToReturn.DisplayName = displayName
-									logging.Debugf("[Batch %s] File %d: Regenerated DisplayName after merge: %s", job.ID, fileIndex, displayName)
+									logging.Debugf("[Batch %s] File %d: Regenerated DisplayName from Title: %s", job.ID, fileIndex, displayName)
 								}
 							}
 						}
@@ -604,13 +613,20 @@ func RunBatchScrapeOnce(
 					logging.Infof("[Batch %s] File %d: NFO merge complete for %s: %d from scraper, %d from NFO, %d conflicts resolved",
 						job.ID, fileIndex, movie.ID, mergeResult.Stats.FromScraper, mergeResult.Stats.FromNFO, mergeResult.Stats.ConflictsResolved)
 
-					// Regenerate DisplayName from merged data (uses merged Title)
-					if cfg != nil && cfg.Metadata.NFO.DisplayName != "" {
+					// Handle DisplayName: if Title is already templated (starts with [ID]), use it directly
+					// Otherwise, regenerate DisplayName from Title using the template
+					titleAlreadyTemplated := strings.HasPrefix(movie.Title, "["+movie.ID+"]")
+					if titleAlreadyTemplated {
+						// Title already has template applied, use it directly
+						movie.DisplayName = movie.Title
+						logging.Debugf("[Batch %s] File %d: Using templated Title as DisplayName: %s", job.ID, fileIndex, movie.DisplayName)
+					} else if cfg != nil && cfg.Metadata.NFO.DisplayName != "" {
+						// Title not templated, regenerate DisplayName from Title
 						tmplEngine := template.NewEngine()
 						ctx := template.NewContextFromMovie(movie)
 						if displayName, err := tmplEngine.Execute(cfg.Metadata.NFO.DisplayName, ctx); err == nil {
 							movie.DisplayName = displayName
-							logging.Debugf("[Batch %s] File %d: Regenerated DisplayName after merge: %s", job.ID, fileIndex, displayName)
+							logging.Debugf("[Batch %s] File %d: Regenerated DisplayName from Title: %s", job.ID, fileIndex, displayName)
 						}
 					}
 				}
