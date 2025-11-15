@@ -1,10 +1,74 @@
-.PHONY: build run run-api test test-short test-race test-verbose bench clean deps install web-dev web-build web-preview web-install web-clean
+.PHONY: help build run run-api test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean
 .PHONY: coverage coverage-html coverage-check coverage-func ci simulate-ci
-.PHONY: fmt lint vet
+.PHONY: fmt lint vet swagger docs
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
 .PHONY: docker-build docker-build-no-cache docker-run docker-stop docker-clean docker-push docker-test docker-logs docker-help
 .PHONY: docker-compose-up docker-compose-down docker-compose-restart docker-compose-logs docker-compose-build
+
+# Default target - show help
+.DEFAULT_GOAL := help
+
+# Help target - displays available targets
+help:
+	@echo "Javinizer Makefile - Available Targets"
+	@echo ""
+	@echo "Build & Run:"
+	@echo "  make build              - Build CLI binary with version info"
+	@echo "  make run                - Run CLI directly (no build)"
+	@echo "  make run-api            - Run API server directly"
+	@echo "  make install            - Install binary to GOPATH/bin"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test               - Run all tests with verbose output"
+	@echo "  make test-short         - Run fast tests only (for pre-commit)"
+	@echo "  make test-race          - Run race detector on concurrent packages"
+	@echo "  make test-verbose       - Run tests with verbose output and count=1"
+	@echo "  make bench              - Run benchmarks"
+	@echo ""
+	@echo "Coverage:"
+	@echo "  make coverage           - Generate coverage report (coverage.out)"
+	@echo "  make coverage-html      - Open coverage report in browser"
+	@echo "  make coverage-func      - Display function-by-function coverage"
+	@echo "  make coverage-check     - Enforce 60%% minimum coverage threshold"
+	@echo ""
+	@echo "Code Quality:"
+	@echo "  make fmt                - Format code with go fmt"
+	@echo "  make vet                - Run go vet"
+	@echo "  make lint               - Run golangci-lint"
+	@echo "  make swagger            - Generate Swagger API documentation"
+	@echo ""
+	@echo "CI/CD:"
+	@echo "  make ci                 - Run full CI suite (vet + lint + coverage + race)"
+	@echo "  make simulate-ci        - Simulate GitHub Actions CI locally"
+	@echo ""
+	@echo "Web Frontend:"
+	@echo "  make web-install        - Install npm dependencies"
+	@echo "  make web-dev            - Start dev server with hot reload"
+	@echo "  make web-build          - Build for production"
+	@echo "  make web-preview        - Preview production build"
+	@echo "  make web-clean          - Clean node_modules and build artifacts"
+	@echo ""
+	@echo "Cleanup:"
+	@echo "  make clean              - Remove build artifacts and coverage"
+	@echo "  make clean-all          - Deep clean (includes test binaries)"
+	@echo ""
+	@echo "Cross-Platform Builds:"
+	@echo "  make build-cli-linux    - Build for Linux (amd64)"
+	@echo "  make build-cli-darwin   - Build for macOS (universal binary)"
+	@echo "  make build-cli-windows  - Build for Windows (amd64)"
+	@echo "  make build-cli-all      - Build for all platforms"
+	@echo ""
+	@echo "Docker:"
+	@echo "  make docker-help        - Show Docker-specific commands"
+	@echo ""
+	@echo "GitHub Actions (act):"
+	@echo "  make act-help           - Show act-specific commands"
+	@echo ""
+	@echo "Variables:"
+	@echo "  VERSION=$(VERSION)"
+	@echo "  COMMIT=$(COMMIT)"
+	@echo ""
 
 # Version information (can be overridden)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -75,9 +139,9 @@ coverage-html: coverage
 coverage-func: coverage
 	go tool cover -func=coverage.out
 
-# Check if coverage meets minimum threshold (default: 25% - increase as tests are added)
+# Check if coverage meets minimum threshold (60% as per CLAUDE.md)
 coverage-check: coverage
-	@./scripts/check_coverage.sh 25 coverage.out
+	@./scripts/check_coverage.sh 60 coverage.out
 
 # Run full CI test suite
 ci: vet lint coverage-check test-race
@@ -87,10 +151,20 @@ ci: vet lint coverage-check test-race
 simulate-ci:
 	@./scripts/simulate-ci.sh
 
-# Clean build artifacts
+# Clean build artifacts and coverage reports
 clean:
+	@echo "Cleaning build artifacts and coverage reports..."
 	rm -rf bin/
 	rm -f coverage.out coverage.html
+	@echo "Clean complete!"
+
+# Deep clean - removes everything including test binaries and caches
+clean-all: clean
+	@echo "Deep cleaning (test binaries, caches, etc.)..."
+	rm -f *.test cli javinizer api.test
+	rm -f COMMIT_MESSAGE.txt zen_*.changeset
+	go clean -cache -testcache -modcache
+	@echo "Deep clean complete!"
 
 # Download dependencies (includes dev tools via tools.go)
 deps:
@@ -113,9 +187,12 @@ vet:
 lint:
 	golangci-lint run
 
-# Generate API documentation
-docs:
-	swag init -g cmd/cli/api.go -o api/docs
+# Generate Swagger API documentation
+swagger:
+	swag init -g cmd/cli/api.go -o docs/swagger
+
+# Alias for backward compatibility
+docs: swagger
 
 # Web frontend targets
 web-dev:
