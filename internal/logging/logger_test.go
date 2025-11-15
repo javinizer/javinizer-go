@@ -257,6 +257,50 @@ func TestWithField(t *testing.T) {
 	}
 }
 
+func TestWithFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "fields_multiple.log")
+
+	cfg := &Config{
+		Level:  "info",
+		Format: "text",
+		Output: logFile,
+	}
+
+	err := InitLogger(cfg)
+	if err != nil {
+		t.Fatalf("InitLogger failed: %v", err)
+	}
+
+	// Test WithFields (plural)
+	fields := map[string]interface{}{
+		"user_id": "12345",
+		"action":  "test",
+		"count":   42,
+	}
+	WithFields(fields).Info("Multiple fields test")
+
+	// Read file content
+	content, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	contentStr := string(content)
+
+	if !strings.Contains(contentStr, "Multiple fields test") {
+		t.Error("Log file missing fields test message")
+	}
+
+	if !strings.Contains(contentStr, "user_id") {
+		t.Error("Log file missing user_id field")
+	}
+
+	if !strings.Contains(contentStr, "action") {
+		t.Error("Log file missing action field")
+	}
+}
+
 func TestGetLogger_UninitializedReturnsDefault(t *testing.T) {
 	// Reset logger state
 	current.Store((*loggerState)(nil))
