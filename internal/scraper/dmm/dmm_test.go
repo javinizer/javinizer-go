@@ -1617,3 +1617,39 @@ func TestExtractCandidateURLs_PriorityOrder(t *testing.T) {
 	assert.Contains(t, priorityMap[2], "/monthly/premium/", "Priority 2 should be monthly premium (limited metadata)")
 	assert.Contains(t, priorityMap[1], "/monthly/standard/", "Priority 1 should be monthly standard (lowest - limited metadata)")
 }
+
+// TestResolveContentID_NoRepository verifies error when repository is nil
+func TestResolveContentID_NoRepository(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			DMM: config.DMMConfig{
+				Enabled: true,
+			},
+		},
+	}
+
+	// Create scraper with nil repository
+	scraper := New(cfg, nil)
+
+	_, err := scraper.ResolveContentID("ipx-535")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "content ID repository not available")
+}
+
+// TestGetURL_NoRepository verifies error when repository is nil
+func TestGetURL_NoRepository(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			DMM: config.DMMConfig{
+				Enabled: true,
+			},
+		},
+	}
+
+	// Create scraper with nil repository
+	scraper := New(cfg, nil)
+
+	_, err := scraper.GetURL("ipx-535")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "movie not found on DMM")
+}
