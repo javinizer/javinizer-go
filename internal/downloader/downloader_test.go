@@ -1148,3 +1148,327 @@ func TestCleanupPartialDownloads_WithSubdirectory(t *testing.T) {
 		t.Error("Subdirectory was removed")
 	}
 }
+
+func TestNewDownloaderWithNFOConfig(t *testing.T) {
+	tests := []struct {
+		name                   string
+		actorJapaneseNames     bool
+		actorFirstNameOrder    bool
+		expectedJapanese       bool
+		expectedFirstNameOrder bool
+	}{
+		{
+			name:                   "Japanese names, FirstName LastName order",
+			actorJapaneseNames:     true,
+			actorFirstNameOrder:    true,
+			expectedJapanese:       true,
+			expectedFirstNameOrder: true,
+		},
+		{
+			name:                   "English names, LastName FirstName order",
+			actorJapaneseNames:     false,
+			actorFirstNameOrder:    false,
+			expectedJapanese:       false,
+			expectedFirstNameOrder: false,
+		},
+		{
+			name:                   "Japanese names, LastName FirstName order",
+			actorJapaneseNames:     true,
+			actorFirstNameOrder:    false,
+			expectedJapanese:       true,
+			expectedFirstNameOrder: false,
+		},
+		{
+			name:                   "English names, FirstName LastName order",
+			actorJapaneseNames:     false,
+			actorFirstNameOrder:    true,
+			expectedJapanese:       false,
+			expectedFirstNameOrder: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.OutputConfig{
+				DownloadTimeout: 30,
+			}
+
+			downloader := NewDownloaderWithNFOConfig(cfg, "test-agent", tt.actorJapaneseNames, tt.actorFirstNameOrder)
+
+			if downloader == nil {
+				t.Fatal("NewDownloaderWithNFOConfig returned nil")
+			}
+
+			if downloader.actorJapaneseNames != tt.expectedJapanese {
+				t.Errorf("Expected actorJapaneseNames=%v, got %v", tt.expectedJapanese, downloader.actorJapaneseNames)
+			}
+
+			if downloader.actorFirstNameOrder != tt.expectedFirstNameOrder {
+				t.Errorf("Expected actorFirstNameOrder=%v, got %v", tt.expectedFirstNameOrder, downloader.actorFirstNameOrder)
+			}
+
+			if downloader.userAgent != "test-agent" {
+				t.Errorf("Expected userAgent=%q, got %q", "test-agent", downloader.userAgent)
+			}
+
+			if downloader.httpClient.Timeout != 30*time.Second {
+				t.Errorf("Expected timeout=30s, got %v", downloader.httpClient.Timeout)
+			}
+		})
+	}
+}
+
+func TestFormatActressName(t *testing.T) {
+	tests := []struct {
+		name           string
+		actress        models.Actress
+		useJapanese    bool
+		firstNameOrder bool
+		expectedName   string
+		description    string
+	}{
+		{
+			name: "Both names - FirstName LastName order",
+			actress: models.Actress{
+				FirstName:    "Yui",
+				LastName:     "Hatano",
+				JapaneseName: "波多野結衣",
+			},
+			useJapanese:    false,
+			firstNameOrder: true,
+			expectedName:   "Yui Hatano",
+			description:    "English names in FirstName LastName order",
+		},
+		{
+			name: "Both names - LastName FirstName order",
+			actress: models.Actress{
+				FirstName:    "Yui",
+				LastName:     "Hatano",
+				JapaneseName: "波多野結衣",
+			},
+			useJapanese:    false,
+			firstNameOrder: false,
+			expectedName:   "Hatano Yui",
+			description:    "English names in LastName FirstName order",
+		},
+		{
+			name: "Japanese name preferred",
+			actress: models.Actress{
+				FirstName:    "Yui",
+				LastName:     "Hatano",
+				JapaneseName: "波多野結衣",
+			},
+			useJapanese:    true,
+			firstNameOrder: true,
+			expectedName:   "波多野結衣",
+			description:    "Japanese name when configured",
+		},
+		{
+			name: "Only first name",
+			actress: models.Actress{
+				FirstName:    "Yui",
+				JapaneseName: "波多野結衣",
+			},
+			useJapanese:    false,
+			firstNameOrder: true,
+			expectedName:   "Yui",
+			description:    "Single first name only",
+		},
+		{
+			name: "Only last name",
+			actress: models.Actress{
+				LastName:     "Hatano",
+				JapaneseName: "波多野結衣",
+			},
+			useJapanese:    false,
+			firstNameOrder: true,
+			expectedName:   "Hatano",
+			description:    "Single last name only",
+		},
+		{
+			name: "Only Japanese name",
+			actress: models.Actress{
+				JapaneseName: "波多野結衣",
+			},
+			useJapanese:    false,
+			firstNameOrder: true,
+			expectedName:   "波多野結衣",
+			description:    "Fallback to Japanese when English names empty",
+		},
+		{
+			name: "Japanese name not available - fallback to FullName",
+			actress: models.Actress{
+				FirstName: "",
+				LastName:  "",
+			},
+			useJapanese:    true,
+			firstNameOrder: true,
+			expectedName:   "",
+			description:    "Empty name when all fields empty",
+		},
+		{
+			name: "First name with Japanese preference but no Japanese name",
+			actress: models.Actress{
+				FirstName: "Test",
+				LastName:  "Actress",
+			},
+			useJapanese:    true,
+			firstNameOrder: true,
+			expectedName:   "Test Actress",
+			description:    "Fallback to English when Japanese name unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.OutputConfig{}
+			downloader := NewDownloaderWithNFOConfig(cfg, "test", tt.useJapanese, tt.firstNameOrder)
+
+			result := downloader.formatActressName(tt.actress)
+
+			if result != tt.expectedName {
+				t.Errorf("%s: Expected %q, got %q", tt.description, tt.expectedName, result)
+			}
+		})
+	}
+}
+
+func TestDownloader_DownloadPoster_WithCropping(t *testing.T) {
+	// Create a real JPEG image for cropping test
+	img := image.NewRGBA(image.Rect(0, 0, 1500, 1000))
+	// Fill with a pattern
+	for y := 0; y < 1000; y++ {
+		for x := 0; x < 1500; x++ {
+			img.Set(x, y, color.RGBA{uint8(x % 256), uint8(y % 256), 100, 255})
+		}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.WriteHeader(http.StatusOK)
+		jpeg.Encode(w, img, &jpeg.Options{Quality: 85})
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	movie := createTestMovie()
+	movie.PosterURL = server.URL + "/cover.jpg"
+	movie.ShouldCropPoster = true // Enable cropping
+
+	cfg := &config.OutputConfig{
+		DownloadPoster: true,
+		PosterFormat:   "<ID>-poster.jpg",
+	}
+
+	downloader := NewDownloader(cfg, "test-agent")
+
+	result, err := downloader.DownloadPoster(movie, tmpDir)
+	if err != nil {
+		t.Fatalf("DownloadPoster with cropping failed: %v", err)
+	}
+
+	if !result.Downloaded {
+		t.Error("Expected Downloaded to be true")
+	}
+
+	expectedPath := filepath.Join(tmpDir, "IPX-535-poster.jpg")
+	if result.LocalPath != expectedPath {
+		t.Errorf("Expected path %s, got %s", expectedPath, result.LocalPath)
+	}
+
+	// Verify file exists
+	info, err := os.Stat(result.LocalPath)
+	if err != nil {
+		t.Fatalf("Cropped poster file does not exist: %v", err)
+	}
+
+	if info.Size() == 0 {
+		t.Error("Cropped poster file has zero size")
+	}
+
+	// Verify temp file was cleaned up
+	tempPath := expectedPath + ".full.tmp"
+	if _, err := os.Stat(tempPath); !os.IsNotExist(err) {
+		t.Error("Temp file was not cleaned up after cropping")
+	}
+}
+
+func TestDownloader_DownloadActressImages_WithNFOConfig(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("actress image"))
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name             string
+		useJapanese      bool
+		firstNameOrder   bool
+		expectedFilename string
+	}{
+		{
+			name:             "English FirstName LastName",
+			useJapanese:      false,
+			firstNameOrder:   true,
+			expectedFilename: "Momo Sakura.jpg",
+		},
+		{
+			name:             "English LastName FirstName",
+			useJapanese:      false,
+			firstNameOrder:   false,
+			expectedFilename: "Sakura Momo.jpg",
+		},
+		{
+			name:             "Japanese name",
+			useJapanese:      true,
+			firstNameOrder:   true,
+			expectedFilename: "さくらもも.jpg",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testDir := filepath.Join(tmpDir, tt.name)
+
+			movie := &models.Movie{
+				ID: "IPX-535",
+				Actresses: []models.Actress{
+					{
+						FirstName:    "Momo",
+						LastName:     "Sakura",
+						JapaneseName: "さくらもも",
+						ThumbURL:     server.URL + "/actress.jpg",
+					},
+				},
+			}
+
+			cfg := &config.OutputConfig{
+				DownloadActress: true,
+				ActressFolder:   ".actors",
+			}
+
+			downloader := NewDownloaderWithNFOConfig(cfg, "test", tt.useJapanese, tt.firstNameOrder)
+
+			results, err := downloader.DownloadActressImages(movie, testDir)
+			if err != nil {
+				t.Fatalf("DownloadActressImages failed: %v", err)
+			}
+
+			if len(results) != 1 {
+				t.Fatalf("Expected 1 result, got %d", len(results))
+			}
+
+			if !results[0].Downloaded {
+				t.Error("Expected actress image to be downloaded")
+			}
+
+			// Verify filename contains expected actress name format
+			filename := filepath.Base(results[0].LocalPath)
+			if filename != tt.expectedFilename {
+				t.Errorf("Expected filename %q, got %q", tt.expectedFilename, filename)
+			}
+		})
+	}
+}
