@@ -620,3 +620,62 @@ func TestRunTagAllTags_Empty(t *testing.T) {
 		assert.NotContains(t, stdout, "===")
 	})
 }
+
+// TestRunTagAdd_DatabaseError tests error handling for non-UNIQUE database errors
+func TestRunTagAdd_DatabaseError(t *testing.T) {
+	configPath, _ := setupTagTestDB(t)
+
+	withTempConfigFile(t, configPath, func() {
+		err := loadConfig()
+		require.NoError(t, err)
+
+		deps := createTestDependencies(t, cfg)
+		defer deps.Close()
+
+		err = deps.DB.AutoMigrate()
+		require.NoError(t, err)
+
+		// Close the database to cause an error
+		deps.DB.Close()
+
+		cmd := &cobra.Command{}
+
+		// Try to add tag with closed database - should fail with non-UNIQUE error
+		err = runTagAdd(cmd, []string{"IPX-535", "test-tag"}, deps)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Failed to add tag")
+	})
+}
+
+// TestRunTagList_DatabaseError tests error handling in runTagList
+func TestRunTagList_DatabaseError(t *testing.T) {
+	configPath, _ := setupTagTestDB(t)
+
+	withTempConfigFile(t, configPath, func() {
+		err := loadConfig()
+		require.NoError(t, err)
+
+		deps := createTestDependencies(t, cfg)
+		err = deps.DB.AutoMigrate()
+		require.NoError(t, err)
+
+		// Close database to trigger error
+		deps.DB.Close()
+
+		cmd := &cobra.Command{}
+
+		// Test with movie ID argument
+		err = runTagList(cmd, []string{"IPX-123"}, deps)
+		assert.Error(t, err)
+
+		// Re-create deps for second test
+		deps = createTestDependencies(t, cfg)
+		err = deps.DB.AutoMigrate()
+		require.NoError(t, err)
+		deps.DB.Close()
+
+		// Test without arguments (all tags)
+		err = runTagList(cmd, []string{}, deps)
+		assert.Error(t, err)
+	})
+}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/cobra"
@@ -220,6 +221,30 @@ func WithNFOEnabled(enabled bool) ConfigOption {
 func WithDownloadCover(enabled bool) ConfigOption {
 	return func(cfg *config.Config) {
 		cfg.Output.DownloadCover = enabled
+	}
+}
+
+// WithVideoExtensions sets the video file extensions.
+func WithVideoExtensions(extensions []string) ConfigOption {
+	return func(cfg *config.Config) {
+		cfg.Matching.Extensions = extensions
+	}
+}
+
+// WithMatchingPatterns sets the JAV ID matching pattern (enables regex mode).
+func WithMatchingPatterns(patterns []string) ConfigOption {
+	return func(cfg *config.Config) {
+		if len(patterns) > 0 {
+			cfg.Matching.RegexEnabled = true
+			cfg.Matching.RegexPattern = patterns[0] // Use first pattern
+		}
+	}
+}
+
+// WithMinFileSize sets the minimum file size in MB.
+func WithMinFileSize(sizeMB int) ConfigOption {
+	return func(cfg *config.Config) {
+		cfg.Matching.MinSizeMB = sizeMB
 	}
 }
 
@@ -842,4 +867,23 @@ func createMockScraperRegistry() *models.ScraperRegistry {
 	registry.Register(mockDMM)
 
 	return registry
+}
+
+// MockDownloader is a mock implementation of MediaDownloader for testing
+type MockDownloader struct {
+	results []downloader.DownloadResult
+	err     error
+}
+
+// NewMockDownloader creates a new mock downloader with predefined results
+func NewMockDownloader(results []downloader.DownloadResult, err error) *MockDownloader {
+	return &MockDownloader{
+		results: results,
+		err:     err,
+	}
+}
+
+// DownloadAll implements MediaDownloader interface
+func (m *MockDownloader) DownloadAll(movie *models.Movie, destDir string, partNumber int) ([]downloader.DownloadResult, error) {
+	return m.results, m.err
 }

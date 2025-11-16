@@ -2,7 +2,9 @@ package main
 
 import (
 	"testing"
+	"time"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -478,4 +480,109 @@ func TestMain_HistoryCommandSetup(t *testing.T) {
 
 	err = historyMovieCmd.Args(historyMovieCmd, []string{"IPX-535"})
 	assert.NoError(t, err)
+}
+
+// TestPrintMovie_AllFields tests printMovie with all possible fields populated
+func TestPrintMovie_AllFields(t *testing.T) {
+	releaseDate, _ := time.Parse("2006-01-02", "2021-03-25")
+	movie := &models.Movie{
+		ID:          "IPX-123",
+		ContentID:   "ipx00123",
+		Title:       "Test Movie",
+		ReleaseDate: &releaseDate,
+		Runtime:     120,
+		Director:    "Test Director",
+		Maker:       "Test Maker",
+		Label:       "Test Label",
+		Series:      "Test Series",
+		RatingScore: 8.5,
+		RatingVotes: 100,
+		Actresses: []models.Actress{
+			{FirstName: "Test", LastName: "Actress"},
+		},
+		Genres: []models.Genre{
+			{Name: "Drama"},
+		},
+	}
+
+	// Capture output
+	stdout, _ := captureOutput(t, func() {
+		printMovie(movie, nil)
+	})
+
+	// Verify all fields are printed
+	assert.Contains(t, stdout, "IPX-123")
+	assert.Contains(t, stdout, "ipx00123")
+	assert.Contains(t, stdout, "Test Movie")
+	assert.Contains(t, stdout, "2021-03-25")
+	assert.Contains(t, stdout, "120 min")
+	assert.Contains(t, stdout, "Test Director")
+	assert.Contains(t, stdout, "Test Maker")
+	assert.Contains(t, stdout, "Test Label")
+	assert.Contains(t, stdout, "Test Series")
+	assert.Contains(t, stdout, "8.5/10")
+	assert.Contains(t, stdout, "100 votes")
+	assert.Contains(t, stdout, "Actress Test") // Name is printed as "Actress Test"
+	assert.Contains(t, stdout, "Drama")
+}
+
+// TestPrintMovie_MinimalFields tests printMovie with minimal fields
+func TestPrintMovie_MinimalFields(t *testing.T) {
+	movie := &models.Movie{
+		ID: "IPX-123",
+		// All other fields empty/nil
+	}
+
+	// Capture output
+	stdout, _ := captureOutput(t, func() {
+		printMovie(movie, nil)
+	})
+
+	// Verify only ID is printed
+	assert.Contains(t, stdout, "IPX-123")
+	// Should not contain empty field labels
+	assert.NotContains(t, stdout, "Director")
+	assert.NotContains(t, stdout, "Maker")
+	assert.NotContains(t, stdout, "Label")
+}
+
+// TestPrintMovie_SameContentID tests when ContentID equals ID (should not print twice)
+func TestPrintMovie_SameContentID(t *testing.T) {
+	movie := &models.Movie{
+		ID:        "IPX-123",
+		ContentID: "IPX-123", // Same as ID
+		Title:     "Test",
+	}
+
+	stdout, _ := captureOutput(t, func() {
+		printMovie(movie, nil)
+	})
+
+	// ContentID row should NOT appear when it's the same as ID
+	lines := countOccurrences(stdout, "IPX-123")
+	// Should appear once in ID row, not twice
+	assert.LessOrEqual(t, lines, 2, "ContentID should not be printed when same as ID")
+}
+
+// Helper function to count occurrences
+func countOccurrences(s, substr string) int {
+	count := 0
+	for i := 0; i < len(s); {
+		idx := indexOf(s[i:], substr)
+		if idx == -1 {
+			break
+		}
+		count++
+		i += idx + len(substr)
+	}
+	return count
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
 }

@@ -406,3 +406,49 @@ func TestRunGenreRemove_MultipleRemoves(t *testing.T) {
 		assert.Equal(t, "Comedy", replacements[0].Replacement)
 	})
 }
+
+// TestRunGenreAdd_DatabaseError tests database error handling
+func TestRunGenreAdd_DatabaseError(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	withTempConfigFile(t, configPath, func() {
+		err := loadConfig()
+		require.NoError(t, err)
+
+		deps := createTestDependencies(t, cfg)
+		err = deps.DB.AutoMigrate()
+		require.NoError(t, err)
+
+		// Close database to cause error
+		deps.DB.Close()
+
+		cmd := &cobra.Command{}
+
+		err = runGenreAdd(cmd, []string{"original", "replacement"}, deps)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Failed to add genre replacement")
+	})
+}
+
+// TestRunGenreList_DatabaseError tests error handling in runGenreList
+func TestRunGenreList_DatabaseError(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	withTempConfigFile(t, configPath, func() {
+		err := loadConfig()
+		require.NoError(t, err)
+
+		deps := createTestDependencies(t, cfg)
+		err = deps.DB.AutoMigrate()
+		require.NoError(t, err)
+
+		// Close database to trigger error
+		deps.DB.Close()
+
+		cmd := &cobra.Command{}
+		err = runGenreList(cmd, []string{}, deps)
+
+		// Should handle error gracefully
+		assert.Error(t, err)
+	})
+}

@@ -14,6 +14,12 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scanner"
 )
 
+// MediaDownloader defines the interface for downloading media files.
+// This interface allows for easier testing by enabling mock implementations.
+type MediaDownloader interface {
+	DownloadAll(movie *models.Movie, destDir string, partNumber int) ([]downloader.DownloadResult, error)
+}
+
 // scanAndMatch scans files and extracts JAV IDs.
 // Returns matched results, scan result, and error.
 func scanAndMatch(
@@ -281,7 +287,7 @@ func generateNFOs(
 func downloadMediaFiles(
 	movies map[string]*models.Movie,
 	matches []matcher.MatchResult,
-	mediaDownloader *downloader.Downloader,
+	mediaDownloader MediaDownloader,
 	fileOrganizer *organizer.Organizer,
 	downloadCover bool,
 	downloadExtrafanart bool,
