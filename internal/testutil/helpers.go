@@ -3,9 +3,11 @@ package testutil
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -211,4 +213,133 @@ func CreateTestVideoFile(t *testing.T, dir string, filename string) string {
 	require.NoError(t, err, "Failed to create test video file")
 
 	return path
+}
+
+// LoadGoldenFile loads a golden file from the testdata directory relative to the caller's test.
+// Golden files are reference files used for snapshot testing complex outputs like XML or JSON.
+// The file must be located in testdata/*.golden relative to the test file.
+//
+// Returns the file contents as []byte. Fails the test if the file cannot be read.
+//
+// Example:
+//
+//	func TestNFOGeneration(t *testing.T) {
+//	    expected := testutil.LoadGoldenFile(t, "movie_complete.xml.golden")
+//	    actual := nfo.Generate(movie)
+//	    assert.Equal(t, expected, actual)
+//	}
+func LoadGoldenFile(t *testing.T, name string) []byte {
+	t.Helper()
+
+	path := filepath.Join("testdata", name)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		require.NoError(t, err, "Failed to load golden file: %s\nCreate the golden file at: %s", name, path)
+	}
+
+	return content
+}
+
+// CompareGoldenFile compares actual test output against a golden file.
+// If the content doesn't match, the test fails with a readable diff showing the differences.
+// Golden files must be in testdata/*.golden relative to the test file.
+//
+// This is useful for snapshot testing complex outputs like NFO XML, JSON responses, or templates.
+//
+// Example:
+//
+//	func TestAPIResponse(t *testing.T) {
+//	    response := api.GetMovie("IPX-123")
+//	    actual, _ := json.MarshalIndent(response, "", "  ")
+//	    testutil.CompareGoldenFile(t, "movie_response.json.golden", actual)
+//	}
+func CompareGoldenFile(t *testing.T, name string, actual []byte) {
+	t.Helper()
+
+	expected := LoadGoldenFile(t, name)
+
+	if !bytes.Equal(expected, actual) {
+		// Generate a readable diff
+		diff := generateDiff(string(expected), string(actual))
+		require.Fail(t, "Golden file mismatch",
+			"Golden file: testdata/%s\n\nDiff (expected vs actual):\n%s", name, diff)
+	}
+}
+
+// UpdateGoldenFile writes content to a golden file in the testdata directory.
+// This function is intended for MANUAL USE ONLY during test development to create or update
+// golden files. It should NOT be called in automated tests.
+//
+// Creates the testdata/ directory if it doesn't exist.
+// Returns an error if the file cannot be written.
+//
+// Example usage during test development:
+//
+//	// Temporarily add this to generate/update the golden file
+//	func TestGenerateGolden(t *testing.T) {
+//	    output := generateComplexOutput()
+//	    err := testutil.UpdateGoldenFile("output.golden", output)
+//	    require.NoError(t, err)
+//	}
+//	// Remove after golden file is created
+func UpdateGoldenFile(name string, content []byte) error {
+	testdataDir := "testdata"
+
+	// Create testdata directory if it doesn't exist
+	if err := os.MkdirAll(testdataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create testdata directory: %w", err)
+	}
+
+	path := filepath.Join(testdataDir, name)
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		return fmt.Errorf("failed to write golden file %s: %w", path, err)
+	}
+
+	return nil
+}
+
+// generateDiff creates a line-by-line diff between expected and actual strings.
+// Similar to the output of `diff -u` but simplified for test output.
+func generateDiff(expected, actual string) string {
+	expectedLines := splitLines(expected)
+	actualLines := splitLines(actual)
+
+	var diff strings.Builder
+	maxLines := len(expectedLines)
+	if len(actualLines) > maxLines {
+		maxLines = len(actualLines)
+	}
+
+	for i := 0; i < maxLines; i++ {
+		var expLine, actLine string
+		if i < len(expectedLines) {
+			expLine = expectedLines[i]
+		}
+		if i < len(actualLines) {
+			actLine = actualLines[i]
+		}
+
+		if expLine != actLine {
+			if expLine != "" {
+				diff.WriteString(fmt.Sprintf("- [line %d] %s\n", i+1, expLine))
+			}
+			if actLine != "" {
+				diff.WriteString(fmt.Sprintf("+ [line %d] %s\n", i+1, actLine))
+			}
+		}
+	}
+
+	if diff.Len() == 0 {
+		return "(no differences found)"
+	}
+
+	return diff.String()
+}
+
+// splitLines splits a string into lines, preserving empty lines.
+func splitLines(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, "\n")
 }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+  <id>IPX-123</id>
+  <title>Test Movie</title>
+  <studio>Test Studio</studio>
+  <actresses>
+    <actress>Test Actress</actress>
+  </actresses>
+  <genres>
+    <genre>Drama</genre>
+    <genre>Romance</genre>
+  </genres>
+  <releaseDate>2025-01-01</releaseDate>
+  <runtime>120</runtime>
+  <rating>8.5</rating>
+</movie>
