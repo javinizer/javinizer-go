@@ -2,12 +2,9 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
@@ -23,32 +20,23 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
 	"github.com/javinizer/javinizer-go/internal/template"
-	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/spf13/cobra"
 )
 
-var (
-	cfgFile      string
-	cfg          *config.Config
-	scrapersFlag []string
-	verboseFlag  bool
-)
+// Global vars moved to root.go
 
 func main() {
-	rootCmd := &cobra.Command{
-		Use:     "javinizer",
-		Short:   "Javinizer - JAV metadata scraper and organizer",
-		Long:    `A metadata scraper and file organizer for Japanese Adult Videos (JAV)`,
-		Version: version.Short(),
+	// Root command and all setup moved to root.go
+	// Commands wired via root.go's init() function
+	if err := Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
+}
 
-	// Customize version template to show full build info
-	rootCmd.SetVersionTemplate(version.Info() + "\n")
+// Command definitions - will be extracted to separate files in Phase 2
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "configs/config.yaml", "config file path")
-	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "enable debug logging")
-
-	// Scrape command
+func newScrapeCmd() *cobra.Command {
 	scrapeCmd := &cobra.Command{
 		Use:   "scrape [id]",
 		Short: "Scrape metadata for a movie ID",
@@ -57,36 +45,35 @@ func main() {
 	}
 	scrapeCmd.Flags().StringSliceVarP(&scrapersFlag, "scrapers", "s", nil, "Comma-separated list of scrapers to use (e.g., 'r18dev,dmm' or 'dmm')")
 	scrapeCmd.Flags().BoolP("force", "f", false, "Force refresh metadata from scrapers (clear cache)")
-
-	// DMM scraper configuration overrides
 	scrapeCmd.Flags().Bool("scrape-actress", false, "Enable actress scraping (overrides config)")
 	scrapeCmd.Flags().Bool("no-scrape-actress", false, "Disable actress scraping (overrides config)")
 	scrapeCmd.Flags().Bool("headless", false, "Enable headless browser for DMM (overrides config)")
 	scrapeCmd.Flags().Bool("no-headless", false, "Disable headless browser for DMM (overrides config)")
 	scrapeCmd.Flags().Int("headless-timeout", 0, "Headless browser timeout in seconds (overrides config, 0=use config)")
-
-	// Metadata configuration overrides
-	// Note: These flags set config values but may not affect runtime behavior yet
 	scrapeCmd.Flags().Bool("actress-db", false, "Enable actress database lookup (overrides config)")
 	scrapeCmd.Flags().Bool("no-actress-db", false, "Disable actress database lookup (overrides config)")
 	scrapeCmd.Flags().Bool("genre-replacement", false, "Enable genre replacement (overrides config)")
 	scrapeCmd.Flags().Bool("no-genre-replacement", false, "Disable genre replacement (overrides config)")
+	return scrapeCmd
+}
 
-	// Info command
-	infoCmd := &cobra.Command{
+func newInfoCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "info",
 		Short: "Show configuration and scraper information",
 		RunE:  runWithConfig(runInfo),
 	}
+}
 
-	// Init command
-	initCmd := &cobra.Command{
+func newInitCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "init",
 		Short: "Initialize configuration and database",
 		RunE:  runWithDeps(runInit),
 	}
+}
 
-	// Sort command
+func newSortCmd() *cobra.Command {
 	sortCmd := &cobra.Command{
 		Use:   "sort [path]",
 		Short: "Scan, scrape, and organize video files",
@@ -104,8 +91,10 @@ func main() {
 	sortCmd.Flags().StringSliceP("scrapers", "p", nil, "Scraper priority (comma-separated, e.g., 'r18dev,dmm')")
 	sortCmd.Flags().BoolP("force-update", "f", false, "Force update existing files")
 	sortCmd.Flags().Bool("force-refresh", false, "Force refresh metadata from scrapers (clear cache)")
+	return sortCmd
+}
 
-	// Update command
+func newUpdateCmd() *cobra.Command {
 	updateCmd := &cobra.Command{
 		Use:   "update [path]",
 		Short: "Update metadata for existing files in place",
@@ -124,8 +113,10 @@ func main() {
 	updateCmd.Flags().String("preset", "", "Merge strategy preset: conservative, gap-fill, or aggressive (overrides scalar/array strategies)")
 	updateCmd.Flags().String("scalar-strategy", "prefer-nfo", "Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing, or fill-missing-only")
 	updateCmd.Flags().String("array-strategy", "merge", "Array field merge strategy: merge or replace")
+	return updateCmd
+}
 
-	// Genre command with subcommands
+func newGenreCmd() *cobra.Command {
 	genreCmd := &cobra.Command{
 		Use:   "genre",
 		Short: "Manage genre replacements",
@@ -153,8 +144,10 @@ func main() {
 	}
 
 	genreCmd.AddCommand(genreAddCmd, genreListCmd, genreRemoveCmd)
+	return genreCmd
+}
 
-	// Tag command with subcommands
+func newTagCmd() *cobra.Command {
 	tagCmd := &cobra.Command{
 		Use:   "tag",
 		Short: "Manage per-movie tags",
@@ -215,8 +208,10 @@ Example:
 	}
 
 	tagCmd.AddCommand(tagAddCmd, tagListCmd, tagRemoveCmd, tagSearchCmd, tagAllTagsCmd)
+	return tagCmd
+}
 
-	// History command with subcommands
+func newHistoryCmd() *cobra.Command {
 	historyCmd := &cobra.Command{
 		Use:   "history",
 		Short: "View operation history",
@@ -253,225 +248,11 @@ Example:
 	historyCleanCmd.Flags().IntP("days", "d", 30, "Delete records older than this many days")
 
 	historyCmd.AddCommand(historyListCmd, historyStatsCmd, historyMovieCmd, historyCleanCmd)
-
-	// TUI command
-	tuiCmd := createTUICommand()
-
-	// API command
-	apiCmd := newAPICmd()
-
-	rootCmd.AddCommand(scrapeCmd, infoCmd, initCmd, sortCmd, updateCmd, genreCmd, tagCmd, historyCmd, tuiCmd, apiCmd)
-
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+	return historyCmd
 }
 
-func loadConfig() error {
-	// Check for JAVINIZER_CONFIG environment variable (Docker override)
-	if envConfig := os.Getenv("JAVINIZER_CONFIG"); envConfig != "" {
-		cfgFile = envConfig
-	}
-
-	var err error
-	cfg, err = config.LoadOrCreate(cfgFile)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override config values with environment variables (Docker-friendly)
-	// These take precedence over config file settings
-	applyEnvironmentOverrides(cfg)
-
-	// Initialize logger
-	logCfg := &logging.Config{
-		Level:  cfg.Logging.Level,
-		Format: cfg.Logging.Format,
-		Output: cfg.Logging.Output,
-	}
-
-	// Override level to debug if --verbose flag is set
-	if verboseFlag {
-		logCfg.Level = "debug"
-	}
-
-	if err := logging.InitLogger(logCfg); err != nil {
-		return fmt.Errorf("failed to initialize logger: %w", err)
-	}
-
-	logging.Debugf("Loaded configuration from: %s", cfgFile)
-
-	// Log environment variable overrides (after logger is initialized)
-	if os.Getenv("LOG_LEVEL") != "" {
-		logging.Debugf("Log level overridden by LOG_LEVEL: %s", cfg.Logging.Level)
-	}
-	if os.Getenv("JAVINIZER_DB") != "" {
-		logging.Debugf("Database DSN overridden by JAVINIZER_DB: %s", cfg.Database.DSN)
-	}
-	if os.Getenv("JAVINIZER_LOG_DIR") != "" {
-		logging.Debugf("Log output overridden by JAVINIZER_LOG_DIR: %s", cfg.Logging.Output)
-	}
-	if os.Getenv("JAVINIZER_HOME") != "" {
-		logging.Debugf("JAVINIZER_HOME is set to: %s (reserved for future use)", os.Getenv("JAVINIZER_HOME"))
-	}
-
-	// Validate proxy configuration
-	if cfg.Scrapers.Proxy.Enabled {
-		if cfg.Scrapers.Proxy.URL == "" {
-			logging.Warn("Scraper proxy is enabled but URL is empty, disabling proxy")
-			cfg.Scrapers.Proxy.Enabled = false
-		} else {
-			// Sanitize URL to avoid logging credentials
-			sanitizedURL := cfg.Scrapers.Proxy.URL
-			if u, err := url.Parse(sanitizedURL); err == nil && u.User != nil {
-				u.User = url.User("[REDACTED]")
-				sanitizedURL = u.String()
-			}
-			logging.Infof("Scraper proxy enabled: %s", sanitizedURL)
-		}
-	}
-
-	if cfg.Output.DownloadProxy.Enabled {
-		if cfg.Output.DownloadProxy.URL == "" {
-			logging.Warn("Download proxy is enabled but URL is empty, disabling proxy")
-			cfg.Output.DownloadProxy.Enabled = false
-		} else {
-			// Sanitize URL to avoid logging credentials
-			sanitizedURL := cfg.Output.DownloadProxy.URL
-			if u, err := url.Parse(sanitizedURL); err == nil && u.User != nil {
-				u.User = url.User("[REDACTED]")
-				sanitizedURL = u.String()
-			}
-			logging.Infof("Download proxy enabled: %s", sanitizedURL)
-		}
-	}
-
-	// Apply umask if configured
-	if cfg.System.Umask != "" {
-		// Parse umask string (e.g., "002" or "0022") to integer
-		umaskValue, err := strconv.ParseUint(cfg.System.Umask, 8, 32)
-		if err != nil {
-			logging.Warnf("Invalid umask value '%s', using default: %v", cfg.System.Umask, err)
-		} else {
-			oldUmask := syscall.Umask(int(umaskValue))
-			logging.Debugf("Applied umask: %s (previous: %04o)", cfg.System.Umask, oldUmask)
-		}
-	}
-
-	return nil
-}
-
-// applyEnvironmentOverrides applies environment variable overrides to the config.
-// Environment variables take precedence over config file settings.
-// This is designed for Docker deployments where config files may be read-only.
-func applyEnvironmentOverrides(cfg *config.Config) {
-	// LOG_LEVEL - Override log level (debug, info, warn, error)
-	if envLogLevel := os.Getenv("LOG_LEVEL"); envLogLevel != "" {
-		cfg.Logging.Level = strings.ToLower(envLogLevel)
-	}
-
-	// UMASK - Override file creation mask
-	if envUmask := os.Getenv("UMASK"); envUmask != "" {
-		cfg.System.Umask = envUmask
-	}
-
-	// JAVINIZER_DB - Override database DSN path
-	if envDB := os.Getenv("JAVINIZER_DB"); envDB != "" {
-		cfg.Database.DSN = envDB
-	}
-
-	// JAVINIZER_LOG_DIR - Override log output directory
-	// Handles both single paths and comma-separated multiple outputs
-	if envLogDir := os.Getenv("JAVINIZER_LOG_DIR"); envLogDir != "" {
-		// Split on comma to support multiple outputs (e.g., "stdout,logs/app.log")
-		outputs := strings.Split(cfg.Logging.Output, ",")
-		newOutputs := make([]string, 0, len(outputs))
-
-		for _, output := range outputs {
-			output = strings.TrimSpace(output)
-			// Only override file paths, preserve stdout/stderr
-			if output != "stdout" && output != "stderr" && output != "" {
-				filename := filepath.Base(output)
-				newOutputs = append(newOutputs, filepath.Join(envLogDir, filename))
-			} else {
-				newOutputs = append(newOutputs, output)
-			}
-		}
-
-		cfg.Logging.Output = strings.Join(newOutputs, ",")
-	}
-
-	// Docker auto-detection: If allowed_directories is empty and /media exists,
-	// automatically use /media as the default allowed directory.
-	// This makes Docker deployments work out-of-the-box since MEDIA_PATH is always
-	// mounted to /media in the container.
-	if len(cfg.API.Security.AllowedDirectories) == 0 {
-		if _, err := os.Stat("/media"); err == nil {
-			cfg.API.Security.AllowedDirectories = []string{"/media"}
-			logging.Debugf("Auto-detected Docker environment, setting allowed directories to [/media]")
-		}
-	}
-
-	// JAVINIZER_HOME - Reserved for future use
-	// Currently not used, but available for reference or future enhancements
-	// Could be used for expanding ~ paths or as a base directory for relative paths
-	// (No action taken - just documented for future use)
-}
-
-// applyScrapeFlagOverrides applies CLI flag overrides to the config for the scrape command.
-// This allows users to override key configuration settings without modifying config.yaml.
-func applyScrapeFlagOverrides(cmd *cobra.Command, cfg *config.Config) {
-	// DMM scraper overrides
-	if cmd.Flags().Changed("scrape-actress") {
-		scrapeActress, _ := cmd.Flags().GetBool("scrape-actress")
-		cfg.Scrapers.DMM.ScrapeActress = scrapeActress
-		logging.Debugf("CLI override: scrape_actress = %v", scrapeActress)
-	}
-	if cmd.Flags().Changed("no-scrape-actress") {
-		cfg.Scrapers.DMM.ScrapeActress = false
-		logging.Debugf("CLI override: scrape_actress = false")
-	}
-
-	if cmd.Flags().Changed("headless") {
-		headless, _ := cmd.Flags().GetBool("headless")
-		cfg.Scrapers.DMM.EnableHeadless = headless
-		logging.Debugf("CLI override: enable_headless = %v", headless)
-	}
-	if cmd.Flags().Changed("no-headless") {
-		cfg.Scrapers.DMM.EnableHeadless = false
-		logging.Debugf("CLI override: enable_headless = false")
-	}
-
-	if cmd.Flags().Changed("headless-timeout") {
-		timeout, _ := cmd.Flags().GetInt("headless-timeout")
-		if timeout > 0 {
-			cfg.Scrapers.DMM.HeadlessTimeout = timeout
-			logging.Debugf("CLI override: headless_timeout = %d", timeout)
-		}
-	}
-
-	// Metadata configuration overrides
-	if cmd.Flags().Changed("actress-db") {
-		actressDB, _ := cmd.Flags().GetBool("actress-db")
-		cfg.Metadata.ActressDatabase.Enabled = actressDB
-		logging.Debugf("CLI override: actress_database.enabled = %v", actressDB)
-	}
-	if cmd.Flags().Changed("no-actress-db") {
-		cfg.Metadata.ActressDatabase.Enabled = false
-		logging.Debugf("CLI override: actress_database.enabled = false")
-	}
-
-	if cmd.Flags().Changed("genre-replacement") {
-		genreRepl, _ := cmd.Flags().GetBool("genre-replacement")
-		cfg.Metadata.GenreReplacement.Enabled = genreRepl
-		logging.Debugf("CLI override: genre_replacement.enabled = %v", genreRepl)
-	}
-	if cmd.Flags().Changed("no-genre-replacement") {
-		cfg.Metadata.GenreReplacement.Enabled = false
-		logging.Debugf("CLI override: genre_replacement.enabled = false")
-	}
-}
+// Helper functions and runXXX implementations below
+// These will be extracted to separate files in Phase 2
 
 func runScrape(cmd *cobra.Command, args []string, deps *Dependencies) error {
 	id := args[0]
@@ -1740,67 +1521,4 @@ func percentage(part, total int64) float64 {
 		return 0
 	}
 	return float64(part) / float64(total) * 100
-}
-
-// Wrapper functions that handle dependency initialization
-
-// runWithDeps is a higher-order function that wraps any run* function with
-// dependency injection. It handles config loading, dependency creation,
-// cleanup, and error handling in one place.
-//
-// This wrapper uses Cobra's RunE to properly propagate errors and ensure
-// resources are cleaned up even on error paths.
-//
-// For the scrape command, CLI flag overrides are applied BEFORE creating
-// dependencies, ensuring scrapers are initialized with the correct config.
-//
-// Usage:
-//
-//	scrapeCmd := &cobra.Command{
-//	    Use:  "scrape [id]",
-//	    RunE: runWithDeps(runScrape),
-//	}
-func runWithDeps(fn func(*cobra.Command, []string, *Dependencies) error) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		if err := loadConfig(); err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-
-		// Apply scrape command overrides BEFORE creating dependencies
-		// This ensures scrapers are initialized with the overridden config
-		if cmd.Name() == "scrape" {
-			applyScrapeFlagOverrides(cmd, cfg)
-		}
-
-		deps, err := NewDependencies(cfg)
-		if err != nil {
-			return fmt.Errorf("failed to initialize dependencies: %w", err)
-		}
-		defer func() {
-			if closeErr := deps.Close(); closeErr != nil {
-				logging.Warnf("Failed to close dependencies: %v", closeErr)
-			}
-		}()
-
-		return fn(cmd, args, deps)
-	}
-}
-
-// runWithConfig is a lightweight wrapper for commands that only need config
-// (no database or scrapers). Use this for diagnostic commands like 'info'
-// that should work even when the database is unavailable.
-//
-// Usage:
-//
-//	infoCmd := &cobra.Command{
-//	    Use:  "info",
-//	    RunE: runWithConfig(runInfo),
-//	}
-func runWithConfig(fn func(*cobra.Command, []string, *config.Config) error) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		if err := loadConfig(); err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-		return fn(cmd, args, cfg)
-	}
 }
