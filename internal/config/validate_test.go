@@ -53,20 +53,20 @@ func TestConfig_Validate(t *testing.T) {
 			errorContains: "request_timeout_seconds must be between 1 and 600",
 		},
 		{
-			name: "headless_timeout too low",
+			name: "browser_timeout too low",
 			modifyConfig: func(c *Config) {
-				c.Scrapers.DMM.HeadlessTimeout = 0
+				c.Scrapers.DMM.BrowserTimeout = 0
 			},
 			expectError:   true,
-			errorContains: "headless_timeout must be between 1 and 300",
+			errorContains: "browser_timeout must be between 1 and 300",
 		},
 		{
-			name: "headless_timeout too high",
+			name: "browser_timeout too high",
 			modifyConfig: func(c *Config) {
-				c.Scrapers.DMM.HeadlessTimeout = 400
+				c.Scrapers.DMM.BrowserTimeout = 400
 			},
 			expectError:   true,
-			errorContains: "headless_timeout must be between 1 and 300",
+			errorContains: "browser_timeout must be between 1 and 300",
 		},
 		{
 			name: "invalid referer URL",

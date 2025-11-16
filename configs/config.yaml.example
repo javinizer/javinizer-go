@@ -56,8 +56,8 @@ scrapers:
     dmm:
         enabled: true
         scrape_actress: false
-        enable_headless: true
-        headless_timeout: 30
+        enable_browser: true      # Enable browser automation for JavaScript-rendered pages
+        browser_timeout: 30       # Timeout in seconds for browser operations
 metadata:
     priority:
         actress:

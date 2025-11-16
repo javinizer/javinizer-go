@@ -522,8 +522,8 @@ scrapers:
   dmm:
     enabled: true
     scrape_actress: true
-    enable_headless: false
-    headless_timeout: 60
+    enable_browser: false
+    browser_timeout: 60
 `
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "scraper_extended.yaml")
@@ -540,8 +540,8 @@ scrapers:
 	assert.False(t, cfg.Scrapers.R18Dev.Enabled)
 	assert.True(t, cfg.Scrapers.DMM.Enabled)
 	assert.True(t, cfg.Scrapers.DMM.ScrapeActress)
-	assert.False(t, cfg.Scrapers.DMM.EnableHeadless)
-	assert.Equal(t, 60, cfg.Scrapers.DMM.HeadlessTimeout)
+	assert.False(t, cfg.Scrapers.DMM.EnableBrowser)
+	assert.Equal(t, 60, cfg.Scrapers.DMM.BrowserTimeout)
 }
 
 // TestAllPriorityFields tests that all PriorityConfig fields can be loaded

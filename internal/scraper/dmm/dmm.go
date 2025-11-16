@@ -41,13 +41,13 @@ var (
 
 // Scraper implements the DMM/Fanza scraper
 type Scraper struct {
-	client          *resty.Client
-	enabled         bool
-	scrapeActress   bool
-	enableHeadless  bool
-	headlessTimeout int
-	contentIDRepo   *database.ContentIDMappingRepository
-	proxyConfig     *config.ProxyConfig // Store proxy config for headless browser
+	client         *resty.Client
+	enabled        bool
+	scrapeActress  bool
+	enableBrowser  bool
+	browserTimeout int
+	contentIDRepo  *database.ContentIDMappingRepository
+	proxyConfig    *config.ProxyConfig // Store proxy config for browser operations
 }
 
 // New creates a new DMM scraper
@@ -89,13 +89,13 @@ func New(cfg *config.Config, contentIDRepo *database.ContentIDMappingRepository)
 	}
 
 	return &Scraper{
-		client:          client,
-		enabled:         cfg.Scrapers.DMM.Enabled,
-		scrapeActress:   cfg.Scrapers.DMM.ScrapeActress,
-		enableHeadless:  cfg.Scrapers.DMM.EnableHeadless,
-		headlessTimeout: cfg.Scrapers.DMM.HeadlessTimeout,
-		contentIDRepo:   contentIDRepo,
-		proxyConfig:     &cfg.Scrapers.Proxy, // Store proxy config for headless browser
+		client:         client,
+		enabled:        cfg.Scrapers.DMM.Enabled,
+		scrapeActress:  cfg.Scrapers.DMM.ScrapeActress,
+		enableBrowser:  cfg.Scrapers.DMM.EnableBrowser,
+		browserTimeout: cfg.Scrapers.DMM.BrowserTimeout,
+		contentIDRepo:  contentIDRepo,
+		proxyConfig:    &cfg.Scrapers.Proxy, // Store proxy config for browser operations
 	}
 }
 
@@ -414,12 +414,12 @@ func (s *Scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 		"/service/-/exchange/", // Exchange/redirect pages
 	}
 
-	// Only exclude video.dmm.co.jp if headless browser is disabled
-	if !s.enableHeadless {
+	// Only exclude video.dmm.co.jp if browser mode is disabled
+	if !s.enableBrowser {
 		excludePatterns = append(excludePatterns, "video.dmm.co.jp") // New streaming platform uses JavaScript rendering
-		logging.Debug("DMM: Excluding video.dmm.co.jp URLs (headless browser disabled)")
+		logging.Debug("DMM: Excluding video.dmm.co.jp URLs (browser mode disabled)")
 	} else {
-		logging.Debug("DMM: Including video.dmm.co.jp URLs (headless browser enabled)")
+		logging.Debug("DMM: Including video.dmm.co.jp URLs (browser mode enabled)")
 	}
 
 	// Priority order (higher = better):
@@ -518,20 +518,20 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 
 	var doc *goquery.Document
 
-	// Check if this is a video.dmm.co.jp URL and headless is enabled
-	if strings.Contains(url, "video.dmm.co.jp") && s.enableHeadless {
-		logging.Debug("DMM: Using headless browser for video.dmm.co.jp page")
+	// Check if this is a video.dmm.co.jp URL and browser mode is enabled
+	if strings.Contains(url, "video.dmm.co.jp") && s.enableBrowser {
+		logging.Debug("DMM: Using browser mode for video.dmm.co.jp page")
 
-		// Use headless browser to fetch JavaScript-rendered content
-		bodyHTML, err := FetchWithHeadless(url, s.headlessTimeout, s.proxyConfig)
+		// Use browser to fetch JavaScript-rendered content
+		bodyHTML, err := FetchWithBrowser(url, s.browserTimeout, s.proxyConfig)
 		if err != nil {
-			return nil, fmt.Errorf("headless browser failed: %w", err)
+			return nil, fmt.Errorf("browser fetch failed: %w", err)
 		}
 
-		// Parse the HTML from headless browser
+		// Parse the HTML from browser
 		doc, err = goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse HTML from headless browser: %w", err)
+			return nil, fmt.Errorf("failed to parse HTML from browser: %w", err)
 		}
 	} else {
 		// Use regular HTTP client (cookies are set globally on the client)

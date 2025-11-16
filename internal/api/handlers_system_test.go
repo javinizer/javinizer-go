@@ -200,8 +200,8 @@ func TestGetAvailableScrapers(t *testing.T) {
 					optionKeys[opt.Key] = true
 				}
 				assert.True(t, optionKeys["scrape_actress"])
-				assert.True(t, optionKeys["enable_headless"])
-				assert.True(t, optionKeys["headless_timeout"])
+				assert.True(t, optionKeys["enable_browser"])
+				assert.True(t, optionKeys["browser_timeout"])
 			},
 		},
 		{
@@ -423,10 +423,10 @@ func TestGetAvailableScrapers_OptionsValidation(t *testing.T) {
 	assert.Equal(t, "boolean", scrapeActressOpt.Type)
 	assert.Contains(t, scrapeActressOpt.Description, "actress")
 
-	// Test headless_timeout option
+	// Test browser_timeout option
 	var timeoutOpt *ScraperOption
 	for i := range scraper.Options {
-		if scraper.Options[i].Key == "headless_timeout" {
+		if scraper.Options[i].Key == "browser_timeout" {
 			timeoutOpt = &scraper.Options[i]
 			break
 		}

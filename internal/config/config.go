@@ -89,10 +89,10 @@ type R18DevConfig struct {
 
 // DMMConfig holds DMM/Fanza scraper configuration
 type DMMConfig struct {
-	Enabled         bool `yaml:"enabled"`
-	ScrapeActress   bool `yaml:"scrape_actress"`
-	EnableHeadless  bool `yaml:"enable_headless"`  // Enable headless browser for video.dmm.co.jp
-	HeadlessTimeout int  `yaml:"headless_timeout"` // Timeout in seconds for headless browser (default: 30)
+	Enabled        bool `yaml:"enabled"`
+	ScrapeActress  bool `yaml:"scrape_actress"`
+	EnableBrowser  bool `yaml:"enable_browser"`  // Enable browser mode for video.dmm.co.jp (JavaScript rendering)
+	BrowserTimeout int  `yaml:"browser_timeout"` // Timeout in seconds for browser operations (default: 30)
 }
 
 // ProxyConfig holds HTTP/SOCKS5 proxy configuration
@@ -274,9 +274,9 @@ func DefaultConfig() *Config {
 				Enabled: true,
 			},
 			DMM: DMMConfig{
-				Enabled:         false, // DMM site now redirects to JavaScript-rendered site
-				ScrapeActress:   false,
-				HeadlessTimeout: 30, // Timeout for headless browser
+				Enabled:        false, // DMM site now redirects to JavaScript-rendered site
+				ScrapeActress:  false,
+				BrowserTimeout: 30, // Timeout for browser operations
 			},
 		},
 		Metadata: MetadataConfig{
@@ -397,8 +397,8 @@ func (c *Config) Validate() error {
 	if c.Scrapers.RequestTimeoutSeconds < 1 || c.Scrapers.RequestTimeoutSeconds > 600 {
 		return fmt.Errorf("scrapers.request_timeout_seconds must be between 1 and 600")
 	}
-	if c.Scrapers.DMM.HeadlessTimeout < 1 || c.Scrapers.DMM.HeadlessTimeout > 300 {
-		return fmt.Errorf("scrapers.dmm.headless_timeout must be between 1 and 300")
+	if c.Scrapers.DMM.BrowserTimeout < 1 || c.Scrapers.DMM.BrowserTimeout > 300 {
+		return fmt.Errorf("scrapers.dmm.browser_timeout must be between 1 and 300")
 	}
 
 	// Set default referer if not specified (for backward compatibility with old configs)

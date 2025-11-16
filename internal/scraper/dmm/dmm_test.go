@@ -55,20 +55,20 @@ func TestNew(t *testing.T) {
 			description: "should create scraper with proxy config",
 		},
 		{
-			name: "headless enabled",
+			name: "browser enabled",
 			cfg: &config.Config{
 				Scrapers: config.ScrapersConfig{
 					UserAgent: "Test Agent",
 					DMM: config.DMMConfig{
-						Enabled:         true,
-						ScrapeActress:   true,
-						EnableHeadless:  true,
-						HeadlessTimeout: 60,
+						Enabled:        true,
+						ScrapeActress:  true,
+						EnableBrowser:  true,
+						BrowserTimeout: 60,
 					},
 				},
 			},
 			expectNil:   false,
-			description: "should create scraper with headless browser enabled",
+			description: "should create scraper with browser automation enabled",
 		},
 	}
 
@@ -83,7 +83,7 @@ func TestNew(t *testing.T) {
 				assert.NotNil(t, scraper.client)
 				assert.Equal(t, tt.cfg.Scrapers.DMM.Enabled, scraper.enabled)
 				assert.Equal(t, tt.cfg.Scrapers.DMM.ScrapeActress, scraper.scrapeActress)
-				assert.Equal(t, tt.cfg.Scrapers.DMM.EnableHeadless, scraper.enableHeadless)
+				assert.Equal(t, tt.cfg.Scrapers.DMM.EnableBrowser, scraper.enableBrowser)
 			}
 		})
 	}
@@ -1402,8 +1402,8 @@ func TestExtractCandidateURLs_Priorities(t *testing.T) {
 			cfg := &config.Config{
 				Scrapers: config.ScrapersConfig{
 					DMM: config.DMMConfig{
-						Enabled:        true,
-						EnableHeadless: true, // Enable to include video.dmm.co.jp URLs
+						Enabled:       true,
+						EnableBrowser: true, // Enable to include video.dmm.co.jp URLs
 					},
 				},
 			}
@@ -1507,7 +1507,7 @@ func TestExtractCandidateURLs_ExcludePatterns(t *testing.T) {
 		name             string
 		html             string
 		contentID        string
-		enableHeadless   bool
+		enableBrowser    bool
 		shouldBeExcluded bool
 		description      string
 	}{
@@ -1517,29 +1517,29 @@ func TestExtractCandidateURLs_ExcludePatterns(t *testing.T) {
 				<a href="https://www.dmm.co.jp/rental/-/detail/=/cid=mdb087/">Rental</a>
 			`,
 			contentID:        "mdb087",
-			enableHeadless:   false,
+			enableBrowser:    false,
 			shouldBeExcluded: true,
 			description:      "/rental/ URLs should be excluded",
 		},
 		{
-			name: "Streaming excluded when headless disabled",
+			name: "Streaming excluded when browser mode disabled",
 			html: `
 				<a href="https://video.dmm.co.jp/av/content/?id=mdb087">Streaming</a>
 			`,
 			contentID:        "mdb087",
-			enableHeadless:   false,
+			enableBrowser:    false,
 			shouldBeExcluded: true,
-			description:      "video.dmm.co.jp should be excluded when headless is disabled",
+			description:      "video.dmm.co.jp should be excluded when browser mode is disabled",
 		},
 		{
-			name: "Streaming included when headless enabled",
+			name: "Streaming included when browser mode enabled",
 			html: `
 				<a href="https://video.dmm.co.jp/av/content/?id=mdb087">Streaming</a>
 			`,
 			contentID:        "mdb087",
-			enableHeadless:   true,
+			enableBrowser:    true,
 			shouldBeExcluded: false,
-			description:      "video.dmm.co.jp should be included when headless is enabled",
+			description:      "video.dmm.co.jp should be included when browser mode is enabled",
 		},
 		{
 			name: "Monthly standard not excluded",
@@ -1547,7 +1547,7 @@ func TestExtractCandidateURLs_ExcludePatterns(t *testing.T) {
 				<a href="https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/">Monthly</a>
 			`,
 			contentID:        "61mdb087",
-			enableHeadless:   false,
+			enableBrowser:    false,
 			shouldBeExcluded: false,
 			description:      "/monthly/standard/ should not be excluded",
 		},
@@ -1558,8 +1558,8 @@ func TestExtractCandidateURLs_ExcludePatterns(t *testing.T) {
 			cfg := &config.Config{
 				Scrapers: config.ScrapersConfig{
 					DMM: config.DMMConfig{
-						Enabled:        true,
-						EnableHeadless: tt.enableHeadless,
+						Enabled:       true,
+						EnableBrowser: tt.enableBrowser,
 					},
 				},
 			}
@@ -1592,8 +1592,8 @@ func TestExtractCandidateURLs_PriorityOrder(t *testing.T) {
 	cfg := &config.Config{
 		Scrapers: config.ScrapersConfig{
 			DMM: config.DMMConfig{
-				Enabled:        true,
-				EnableHeadless: true,
+				Enabled:       true,
+				EnableBrowser: true,
 			},
 		},
 	}

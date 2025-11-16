@@ -609,14 +609,14 @@ func TestArrayDefaults(t *testing.T) {
 	assert.NotEmpty(t, cfg.Metadata.Priority.ID)
 }
 
-// TestHeadlessConfig tests DMM headless browser configuration
-func TestHeadlessConfig(t *testing.T) {
+// TestBrowserConfig tests DMM headless browser configuration
+func TestBrowserConfig(t *testing.T) {
 	yamlContent := `
 scrapers:
   dmm:
     enabled: true
-    enable_headless: true
-    headless_timeout: 45
+    enable_browser: true
+    browser_timeout: 45
 `
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "headless.yaml")
@@ -628,8 +628,8 @@ scrapers:
 	require.NoError(t, err)
 
 	assert.True(t, cfg.Scrapers.DMM.Enabled)
-	assert.True(t, cfg.Scrapers.DMM.EnableHeadless)
-	assert.Equal(t, 45, cfg.Scrapers.DMM.HeadlessTimeout)
+	assert.True(t, cfg.Scrapers.DMM.EnableBrowser)
+	assert.Equal(t, 45, cfg.Scrapers.DMM.BrowserTimeout)
 }
 
 // TestMediaInfoConfig tests MediaInfo configuration

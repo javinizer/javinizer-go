@@ -55,7 +55,7 @@ RUN CGO_ENABLED=1 GOOS=linux \
     -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} \
     -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE}" \
     -o javinizer \
-    ./cmd/cli
+    ./cmd/javinizer
 
 # ==============================================================================
 # Stage 3: Runtime
@@ -69,7 +69,7 @@ LABEL maintainer="javinizer@example.com" \
 # Working directory is now /javinizer (app state location)
 WORKDIR /javinizer
 
-# Install runtime dependencies including Chromium for headless browser
+# Install runtime dependencies including Chromium for browser automation
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \

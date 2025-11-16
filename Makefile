@@ -91,15 +91,15 @@ LDFLAGS_RELEASE := -ldflags "\
 # Build the application (single binary with version info)
 build:
 	@echo "Building javinizer $(VERSION) (commit: $(COMMIT))..."
-	go build $(LDFLAGS) -o bin/javinizer ./cmd/cli
+	go build $(LDFLAGS) -o bin/javinizer ./cmd/javinizer
 
 # Run the CLI (primary target)
 run:
-	go run ./cmd/cli
+	go run ./cmd/javinizer
 
 # Run the API server using subcommand
 run-api:
-	go run ./cmd/cli api
+	go run ./cmd/javinizer api
 
 # Run tests
 test:
@@ -173,7 +173,7 @@ deps:
 
 # Install the binary
 install:
-	go build -o $(GOPATH)/bin/javinizer ./cmd/cli
+	go build -o $(GOPATH)/bin/javinizer ./cmd/javinizer
 
 # Format code
 fmt:
@@ -189,7 +189,7 @@ lint:
 
 # Generate Swagger API documentation
 swagger:
-	swag init -g cmd/cli/api.go -o docs/swagger
+	swag init -g cmd/javinizer/commands/api/command.go -o docs/swagger
 
 # Alias for backward compatibility
 docs: swagger
@@ -216,17 +216,17 @@ web-clean:
 
 build-cli-linux:
 	@echo "Building CLI for Linux (amd64) - $(VERSION)..."
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build $(LDFLAGS_RELEASE) -o bin/javinizer-linux-amd64 ./cmd/cli
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build $(LDFLAGS_RELEASE) -o bin/javinizer-linux-amd64 ./cmd/javinizer
 
 build-cli-darwin:
 	@echo "Building CLI for macOS - $(VERSION)..."
-	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS_RELEASE) -o bin/javinizer-darwin-amd64 ./cmd/cli
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS_RELEASE) -o bin/javinizer-darwin-arm64 ./cmd/cli
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS_RELEASE) -o bin/javinizer-darwin-amd64 ./cmd/javinizer
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS_RELEASE) -o bin/javinizer-darwin-arm64 ./cmd/javinizer
 	lipo -create bin/javinizer-darwin-amd64 bin/javinizer-darwin-arm64 -output bin/javinizer-darwin-universal
 
 build-cli-windows:
 	@echo "Building CLI for Windows - $(VERSION)..."
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build $(LDFLAGS_RELEASE) -o bin/javinizer-windows-amd64.exe ./cmd/cli
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build $(LDFLAGS_RELEASE) -o bin/javinizer-windows-amd64.exe ./cmd/javinizer
 
 build-cli-all: build-cli-linux build-cli-darwin build-cli-windows
 	@echo "All CLI binaries built successfully!"
