@@ -1,5 +1,9 @@
 package models
 
+// All tests in this package are safe for parallel execution (no shared state).
+// Pure validation logic with no database writes or global config modifications.
+// Reference: Architecture Decision 8 (concurrent testing with -race flag)
+
 import (
 	_ "embed"
 	"encoding/json"
@@ -284,6 +288,7 @@ func TestScraperResultCreation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := tt.builder()
 
 			// Validate ScraperResult
@@ -398,6 +403,7 @@ func TestScraperResultJSONMarshal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Marshal to JSON
 			jsonData, err := json.Marshal(tt.scraperResult)
 			require.NoError(t, err, "JSON marshaling should not error")
@@ -506,6 +512,7 @@ func TestScraperResultJSONUnmarshal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var result ScraperResult
 			err := json.Unmarshal([]byte(tt.jsonString), &result)
 
@@ -564,6 +571,7 @@ func TestScraperResultGoldenFiles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var result ScraperResult
 			err := json.Unmarshal(tt.goldenData, &result)
 			require.NoError(t, err, "Golden file should unmarshal successfully")
@@ -589,6 +597,7 @@ func TestScraperInterfaceCompliance(t *testing.T) {
 	// The actual MockScraper is in internal/mocks/Scraper.go
 
 	t.Run("interface contract validation", func(t *testing.T) {
+		t.Parallel()
 		// Verify the Scraper interface exists and has correct method signatures
 		var _ Scraper = (*mockScraperForTest)(nil)
 	})
@@ -696,6 +705,7 @@ func TestActressInfoValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validateActressInfo(tt.actress)
 
 			if tt.wantErr {
@@ -739,6 +749,7 @@ func TestActressInfoJSONMarshal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Marshal to JSON
 			jsonData, err := json.Marshal(tt.actress)
 			require.NoError(t, err, "JSON marshaling should not error")
@@ -801,6 +812,7 @@ func TestActressInfoFullNameMethod(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			fullName := tt.actress.FullName()
 			assert.Equal(t, tt.expectedName, fullName)
 		})
@@ -911,6 +923,7 @@ func TestFieldSpecificValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validateScraperResult(tt.result)
 
 			if tt.wantErr {

@@ -1,5 +1,9 @@
 package models
 
+// All tests in this package are safe for parallel execution (no shared state).
+// Pure validation logic with no database writes or global config modifications.
+// Reference: Architecture Decision 8 (concurrent testing with -race flag)
+
 import (
 	"encoding/json"
 	"reflect"
@@ -98,6 +102,7 @@ func TestMovieTagCreation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			mt := tt.builder()
 			err := validateMovieTag(mt)
 
@@ -139,6 +144,7 @@ func TestMovieTagJSONMarshal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Marshal to JSON
 			data, err := json.Marshal(tt.mt)
 			require.NoError(t, err)
@@ -206,6 +212,7 @@ func TestMovieTagGORMTags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			field, found := mtType.FieldByName(tt.fieldName)
 			require.True(t, found, "Field %s not found", tt.fieldName)
 

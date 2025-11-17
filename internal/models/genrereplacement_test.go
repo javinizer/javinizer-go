@@ -1,5 +1,9 @@
 package models
 
+// All tests in this package are safe for parallel execution (no shared state).
+// Pure validation logic with no database writes or global config modifications.
+// Reference: Architecture Decision 8 (concurrent testing with -race flag)
+
 import (
 	"encoding/json"
 	"reflect"
@@ -141,6 +145,7 @@ func TestGenreReplacementCreation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			gr := tt.builder()
 			err := validateGenreReplacement(gr)
 
@@ -193,6 +198,7 @@ func TestGenreReplacementJSONMarshal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Marshal to JSON
 			data, err := json.Marshal(tt.gr)
 			require.NoError(t, err)
@@ -249,6 +255,7 @@ func TestGenreReplacementGORMTags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			field, found := grType.FieldByName(tt.fieldName)
 			require.True(t, found, "Field %s not found", tt.fieldName)
 

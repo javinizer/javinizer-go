@@ -1,5 +1,9 @@
 package image
 
+// All tests in this package are safe for parallel execution.
+// Each subtest uses isolated afero.MemMapFs instances with no shared state.
+// Reference: Architecture Decision 8 (concurrent testing with -race flag)
+
 import (
 	"embed"
 	"image"
@@ -65,10 +69,6 @@ func writeTestFixture(t *testing.T, memFs afero.Fs, fixtureName, dstPath string)
 
 // TestCropPosterFromCover tests the main cropping functionality with various image dimensions
 func TestCropPosterFromCover(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	tempDir := "/test"
-	require.NoError(t, fs.MkdirAll(tempDir, 0755))
-
 	tests := []struct {
 		name           string
 		coverWidth     int
@@ -122,6 +122,13 @@ func TestCropPosterFromCover(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create isolated filesystem for this subtest
+			fs := afero.NewMemMapFs()
+			tempDir := "/test"
+			require.NoError(t, fs.MkdirAll(tempDir, 0755))
+
 			coverPath := filepath.Join(tempDir, tt.name+"_cover.jpg")
 			posterPath := filepath.Join(tempDir, tt.name+"_poster.jpg")
 
@@ -174,18 +181,14 @@ func TestCropPosterFromCover(t *testing.T) {
 
 // TestCropPosterFromCover_ErrorCases tests error handling scenarios
 func TestCropPosterFromCover_ErrorCases(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	tempDir := "/test"
-	require.NoError(t, fs.MkdirAll(tempDir, 0755))
-
 	tests := []struct {
 		name          string
-		setupFunc     func() (coverPath, posterPath string)
+		setupFunc     func(fs afero.Fs, tempDir string) (coverPath, posterPath string)
 		expectedError string
 	}{
 		{
 			name: "nonexistent cover file",
-			setupFunc: func() (string, string) {
+			setupFunc: func(fs afero.Fs, tempDir string) (string, string) {
 				return filepath.Join(tempDir, "nonexistent.jpg"),
 					filepath.Join(tempDir, "poster.jpg")
 			},
@@ -193,7 +196,7 @@ func TestCropPosterFromCover_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "invalid cover image",
-			setupFunc: func() (string, string) {
+			setupFunc: func(fs afero.Fs, tempDir string) (string, string) {
 				coverPath := filepath.Join(tempDir, "invalid.jpg")
 				// Create a file with invalid image data
 				err := afero.WriteFile(fs, coverPath, []byte("not an image"), 0644)
@@ -208,7 +211,14 @@ func TestCropPosterFromCover_ErrorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			coverPath, posterPath := tt.setupFunc()
+			t.Parallel()
+
+			// Create isolated filesystem for this subtest
+			fs := afero.NewMemMapFs()
+			tempDir := "/test"
+			require.NoError(t, fs.MkdirAll(tempDir, 0755))
+
+			coverPath, posterPath := tt.setupFunc(fs, tempDir)
 
 			err := CropPosterFromCover(fs, coverPath, posterPath)
 
@@ -224,10 +234,6 @@ func TestCropPosterFromCover_ErrorCases(t *testing.T) {
 // standard Go image libraries (image.NewRGBA panics on negative dims, creates 0-size for zero).
 // The production code now validates dimensions after decode to prevent division-by-zero.
 func TestCropPosterFromCover_InvalidDimensions(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	tempDir := "/test"
-	require.NoError(t, fs.MkdirAll(tempDir, 0755))
-
 	tests := []struct {
 		name        string
 		width       int
@@ -260,6 +266,13 @@ func TestCropPosterFromCover_InvalidDimensions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create isolated filesystem for this subtest
+			fs := afero.NewMemMapFs()
+			tempDir := "/test"
+			require.NoError(t, fs.MkdirAll(tempDir, 0755))
+
 			coverPath := filepath.Join(tempDir, tt.name+"_cover.jpg")
 			posterPath := filepath.Join(tempDir, tt.name+"_poster.jpg")
 
@@ -291,10 +304,6 @@ func TestCropPosterFromCover_InvalidDimensions(t *testing.T) {
 
 // TestCropPosterFromCover_AspectRatioEdgeCases tests behavior at aspect ratio boundaries
 func TestCropPosterFromCover_AspectRatioEdgeCases(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	tempDir := "/test"
-	require.NoError(t, fs.MkdirAll(tempDir, 0755))
-
 	tests := []struct {
 		name        string
 		width       int
@@ -335,6 +344,13 @@ func TestCropPosterFromCover_AspectRatioEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create isolated filesystem for this subtest
+			fs := afero.NewMemMapFs()
+			tempDir := "/test"
+			require.NoError(t, fs.MkdirAll(tempDir, 0755))
+
 			coverPath := filepath.Join(tempDir, tt.name+"_cover.jpg")
 			posterPath := filepath.Join(tempDir, tt.name+"_poster.jpg")
 
@@ -360,10 +376,6 @@ func TestCropPosterFromCover_AspectRatioEdgeCases(t *testing.T) {
 
 // TestCropPosterFromCover_ResizeLogic tests image resizing when dimensions exceed MaxPosterHeight
 func TestCropPosterFromCover_ResizeLogic(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	tempDir := "/test"
-	require.NoError(t, fs.MkdirAll(tempDir, 0755))
-
 	tests := []struct {
 		name            string
 		coverWidth      int
@@ -396,6 +408,13 @@ func TestCropPosterFromCover_ResizeLogic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create isolated filesystem for this subtest
+			fs := afero.NewMemMapFs()
+			tempDir := "/test"
+			require.NoError(t, fs.MkdirAll(tempDir, 0755))
+
 			coverPath := filepath.Join(tempDir, tt.name+"_cover.jpg")
 			posterPath := filepath.Join(tempDir, tt.name+"_poster.jpg")
 
@@ -497,10 +516,6 @@ func BenchmarkCropTypicalImage(b *testing.B) {
 
 // TestCropPosterFromCover_MalformedImages tests error handling for malformed image files
 func TestCropPosterFromCover_MalformedImages(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	tempDir := "/test"
-	require.NoError(t, fs.MkdirAll(tempDir, 0755))
-
 	tests := []struct {
 		name          string
 		fixture       string
@@ -530,6 +545,13 @@ func TestCropPosterFromCover_MalformedImages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create isolated filesystem for this subtest
+			fs := afero.NewMemMapFs()
+			tempDir := "/test"
+			require.NoError(t, fs.MkdirAll(tempDir, 0755))
+
 			coverPath := filepath.Join(tempDir, tt.fixture)
 			posterPath := filepath.Join(tempDir, tt.name+"_poster.jpg")
 
@@ -551,42 +573,50 @@ func TestCropPosterFromCover_MalformedImages(t *testing.T) {
 
 // TestCropPosterFromCover_ResourceCleanup tests that file handles are properly closed on errors
 func TestCropPosterFromCover_ResourceCleanup(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	tempDir := "/test"
-	require.NoError(t, fs.MkdirAll(tempDir, 0755))
-
-	// Write embedded malformed test fixture into MemMapFs for third test
-	testdataPath := filepath.Join(tempDir, "corrupt_header.jpg")
-	writeTestFixture(t, fs, "corrupt_header.jpg", testdataPath)
-
 	// Test multiple error conditions in sequence to ensure no resource leaks
 	tests := []struct {
 		name          string
-		coverPath     string
+		setupFunc     func(fs afero.Fs, tempDir string) string
 		expectedError string
 	}{
 		{
-			name:          "nonexistent file (first attempt)",
-			coverPath:     filepath.Join(tempDir, "nonexistent1.jpg"),
+			name: "nonexistent file (first attempt)",
+			setupFunc: func(fs afero.Fs, tempDir string) string {
+				return filepath.Join(tempDir, "nonexistent1.jpg")
+			},
 			expectedError: "failed to open cover image",
 		},
 		{
-			name:          "nonexistent file (second attempt)",
-			coverPath:     filepath.Join(tempDir, "nonexistent2.jpg"),
+			name: "nonexistent file (second attempt)",
+			setupFunc: func(fs afero.Fs, tempDir string) string {
+				return filepath.Join(tempDir, "nonexistent2.jpg")
+			},
 			expectedError: "failed to open cover image",
 		},
 		{
-			name:          "malformed image (third attempt)",
-			coverPath:     testdataPath,
+			name: "malformed image (third attempt)",
+			setupFunc: func(fs afero.Fs, tempDir string) string {
+				testdataPath := filepath.Join(tempDir, "corrupt_header.jpg")
+				writeTestFixture(t, fs, "corrupt_header.jpg", testdataPath)
+				return testdataPath
+			},
 			expectedError: "failed to decode cover image",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create isolated filesystem for this subtest
+			fs := afero.NewMemMapFs()
+			tempDir := "/test"
+			require.NoError(t, fs.MkdirAll(tempDir, 0755))
+
+			coverPath := tt.setupFunc(fs, tempDir)
 			posterPath := filepath.Join(tempDir, tt.name+"_poster.jpg")
 
-			err := CropPosterFromCover(fs, tt.coverPath, posterPath)
+			err := CropPosterFromCover(fs, coverPath, posterPath)
 
 			assert.Error(t, err, "Should return error")
 			assert.Contains(t, err.Error(), tt.expectedError,
@@ -607,18 +637,14 @@ func TestCropPosterFromCover_ResourceCleanup(t *testing.T) {
 // so we test actual filesystem permission scenarios instead of afero simulation.
 // Future refactoring to use afero.Fs interface would enable better test isolation.
 func TestCropPosterFromCover_PermissionErrors(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	tempDir := "/test"
-	require.NoError(t, fs.MkdirAll(tempDir, 0755))
-
 	tests := []struct {
 		name          string
-		setupFunc     func() (string, string)
+		setupFunc     func(tempDir string) (string, string)
 		expectedError string
 	}{
 		{
 			name: "nonexistent cover file (permission-like error)",
-			setupFunc: func() (string, string) {
+			setupFunc: func(tempDir string) (string, string) {
 				return filepath.Join(tempDir, "nonexistent.jpg"),
 					filepath.Join(tempDir, "poster.jpg")
 			},
@@ -629,7 +655,14 @@ func TestCropPosterFromCover_PermissionErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			coverPath, posterPath := tt.setupFunc()
+			t.Parallel()
+
+			// Create isolated filesystem for this subtest
+			fs := afero.NewMemMapFs()
+			tempDir := "/test"
+			require.NoError(t, fs.MkdirAll(tempDir, 0755))
+
+			coverPath, posterPath := tt.setupFunc(tempDir)
 
 			err := CropPosterFromCover(fs, coverPath, posterPath)
 

@@ -1,5 +1,9 @@
 package models
 
+// All tests in this package are safe for parallel execution (no shared state).
+// Pure validation logic with no database writes or global config modifications.
+// Reference: Architecture Decision 8 (concurrent testing with -race flag)
+
 import (
 	_ "embed"
 	"encoding/json"
@@ -171,6 +175,7 @@ func TestActressCreation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			actress := tt.builder()
 
 			// Validate actress
@@ -321,6 +326,7 @@ func TestDMMIDDeduplication(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := isDuplicateByDMMID(tt.actress1, tt.actress2)
 			assert.Equal(t, tt.isDuplicate, result, tt.description)
 		})
@@ -425,6 +431,7 @@ func TestActressJSONMarshaling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Marshal actress to JSON
 			actual, err := json.MarshalIndent(tt.actress, "", "  ")
 			require.NoError(t, err, "Failed to marshal actress to JSON")
@@ -530,6 +537,7 @@ func TestActressJSONUnmarshaling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var actress Actress
 			err := json.Unmarshal([]byte(tt.json), &actress)
 
@@ -578,6 +586,7 @@ func TestActressGORMTags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			field, found := actressType.FieldByName(tt.fieldName)
 			require.True(t, found, "Field %s should exist in Actress struct", tt.fieldName)
 
@@ -591,6 +600,7 @@ func TestActressGORMTags(t *testing.T) {
 
 	// Verify timestamp fields exist (CreatedAt, UpdatedAt)
 	t.Run("timestamp fields exist", func(t *testing.T) {
+		t.Parallel()
 		_, foundCreated := actressType.FieldByName("CreatedAt")
 		_, foundUpdated := actressType.FieldByName("UpdatedAt")
 		assert.True(t, foundCreated, "CreatedAt field should exist")
@@ -658,6 +668,7 @@ func TestActressFullNameMethod(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := tt.actress.FullName()
 			assert.Equal(t, tt.expectedName, result)
 		})

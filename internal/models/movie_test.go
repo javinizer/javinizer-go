@@ -1,5 +1,9 @@
 package models
 
+// All tests in this package are safe for parallel execution (no shared state).
+// Pure validation logic with no database writes or global config modifications.
+// Reference: Architecture Decision 8 (concurrent testing with -race flag)
+
 import (
 	_ "embed"
 	"encoding/json"
@@ -87,6 +91,7 @@ func TestMovieCreation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			movie := tt.builder()
 
 			// Validate movie
@@ -185,6 +190,7 @@ func TestContentIDValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validateContentID(tt.contentID)
 
 			if tt.want {
@@ -244,6 +250,7 @@ func validateContentID(contentID string) error {
 // TestMovieJSONMarshaling tests JSON serialization and deserialization (AC-2.3.3)
 func TestMovieJSONMarshaling(t *testing.T) {
 	t.Run("marshal full movie to JSON", func(t *testing.T) {
+		t.Parallel()
 		// Create a movie with all fields
 		releaseDate := time.Date(2023, 5, 15, 0, 0, 0, 0, time.UTC)
 		createdAt := time.Date(2023, 1, 15, 10, 30, 0, 0, time.UTC)
@@ -315,6 +322,7 @@ func TestMovieJSONMarshaling(t *testing.T) {
 	})
 
 	t.Run("marshal minimal movie to JSON", func(t *testing.T) {
+		t.Parallel()
 		movie := &Movie{
 			ContentID: "ipx00123",
 			Title:     "Test Movie Minimal",
@@ -335,6 +343,7 @@ func TestMovieJSONMarshaling(t *testing.T) {
 	})
 
 	t.Run("unmarshal valid JSON to Movie struct", func(t *testing.T) {
+		t.Parallel()
 		var movie Movie
 		err := json.Unmarshal(movieFullGolden, &movie)
 
@@ -350,6 +359,7 @@ func TestMovieJSONMarshaling(t *testing.T) {
 	})
 
 	t.Run("unmarshal invalid JSON returns error", func(t *testing.T) {
+		t.Parallel()
 		invalidJSON := []byte(`{"content_id": 123, "title": "Test"}`)
 		var movie Movie
 		err := json.Unmarshal(invalidJSON, &movie)
@@ -361,6 +371,7 @@ func TestMovieJSONMarshaling(t *testing.T) {
 	})
 
 	t.Run("nil ReleaseDate pointer handles correctly", func(t *testing.T) {
+		t.Parallel()
 		movie := &Movie{
 			ContentID:   "ipx00123",
 			Title:       "Test Movie",
@@ -377,6 +388,7 @@ func TestMovieJSONMarshaling(t *testing.T) {
 	})
 
 	t.Run("Screenshots array serializes to JSON array", func(t *testing.T) {
+		t.Parallel()
 		movie := &Movie{
 			ContentID: "ipx00123",
 			Title:     "Test Movie",
@@ -399,6 +411,7 @@ func TestMovieJSONMarshaling(t *testing.T) {
 	})
 
 	t.Run("Actresses and Genres relationships serialize as arrays", func(t *testing.T) {
+		t.Parallel()
 		movie := &Movie{
 			ContentID: "ipx00123",
 			Title:     "Test Movie",
@@ -432,6 +445,7 @@ func TestMovieJSONMarshaling(t *testing.T) {
 // TestGORMTags tests GORM struct tag validation using reflection (AC-2.3.4)
 func TestGORMTags(t *testing.T) {
 	t.Run("ContentID has primaryKey tag", func(t *testing.T) {
+		t.Parallel()
 		movieType := reflect.TypeOf(Movie{})
 		field, found := movieType.FieldByName("ContentID")
 		require.True(t, found, "ContentID field should exist")
@@ -441,6 +455,7 @@ func TestGORMTags(t *testing.T) {
 	})
 
 	t.Run("ID has index tag", func(t *testing.T) {
+		t.Parallel()
 		movieType := reflect.TypeOf(Movie{})
 		field, found := movieType.FieldByName("ID")
 		require.True(t, found, "ID field should exist")
@@ -450,6 +465,7 @@ func TestGORMTags(t *testing.T) {
 	})
 
 	t.Run("Actresses has many2many tag", func(t *testing.T) {
+		t.Parallel()
 		movieType := reflect.TypeOf(Movie{})
 		field, found := movieType.FieldByName("Actresses")
 		require.True(t, found, "Actresses field should exist")
@@ -460,6 +476,7 @@ func TestGORMTags(t *testing.T) {
 	})
 
 	t.Run("Genres has many2many tag", func(t *testing.T) {
+		t.Parallel()
 		movieType := reflect.TypeOf(Movie{})
 		field, found := movieType.FieldByName("Genres")
 		require.True(t, found, "Genres field should exist")
@@ -470,6 +487,7 @@ func TestGORMTags(t *testing.T) {
 	})
 
 	t.Run("Translations has foreignKey tag", func(t *testing.T) {
+		t.Parallel()
 		movieType := reflect.TypeOf(Movie{})
 		field, found := movieType.FieldByName("Translations")
 		require.True(t, found, "Translations field should exist")
@@ -480,6 +498,7 @@ func TestGORMTags(t *testing.T) {
 	})
 
 	t.Run("Screenshots has serializer:json tag", func(t *testing.T) {
+		t.Parallel()
 		movieType := reflect.TypeOf(Movie{})
 		field, found := movieType.FieldByName("Screenshots")
 		require.True(t, found, "Screenshots field should exist")
@@ -492,6 +511,7 @@ func TestGORMTags(t *testing.T) {
 // TestFieldValidation tests business logic validation for Movie fields (AC-2.3.5)
 func TestFieldValidation(t *testing.T) {
 	t.Run("ReleaseDate in future", func(t *testing.T) {
+		t.Parallel()
 		futureDate := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC) // Fixed future date
 		movie := &Movie{
 			ContentID:   "ipx00123",
@@ -505,6 +525,7 @@ func TestFieldValidation(t *testing.T) {
 	})
 
 	t.Run("ReleaseDate before 1900", func(t *testing.T) {
+		t.Parallel()
 		oldDate := time.Date(1899, 12, 31, 0, 0, 0, 0, time.UTC)
 		movie := &Movie{
 			ContentID:   "ipx00123",
@@ -518,6 +539,7 @@ func TestFieldValidation(t *testing.T) {
 	})
 
 	t.Run("Runtime negative value", func(t *testing.T) {
+		t.Parallel()
 		movie := &Movie{
 			ContentID: "ipx00123",
 			Title:     "Test Movie",
@@ -530,6 +552,7 @@ func TestFieldValidation(t *testing.T) {
 	})
 
 	t.Run("RatingScore out of range high", func(t *testing.T) {
+		t.Parallel()
 		movie := &Movie{
 			ContentID:   "ipx00123",
 			Title:       "Test Movie",
@@ -542,6 +565,7 @@ func TestFieldValidation(t *testing.T) {
 	})
 
 	t.Run("RatingScore out of range low", func(t *testing.T) {
+		t.Parallel()
 		movie := &Movie{
 			ContentID:   "ipx00123",
 			Title:       "Test Movie",
@@ -554,6 +578,7 @@ func TestFieldValidation(t *testing.T) {
 	})
 
 	t.Run("RatingVotes negative", func(t *testing.T) {
+		t.Parallel()
 		movie := &Movie{
 			ContentID:   "ipx00123",
 			Title:       "Test Movie",
@@ -566,6 +591,7 @@ func TestFieldValidation(t *testing.T) {
 	})
 
 	t.Run("Empty arrays are valid", func(t *testing.T) {
+		t.Parallel()
 		movie := &Movie{
 			ContentID:   "ipx00123",
 			Title:       "Test Movie",
@@ -579,6 +605,7 @@ func TestFieldValidation(t *testing.T) {
 	})
 
 	t.Run("Very long Description is valid", func(t *testing.T) {
+		t.Parallel()
 		longDesc := make([]byte, 10000)
 		for i := range longDesc {
 			longDesc[i] = 'a'
@@ -595,6 +622,7 @@ func TestFieldValidation(t *testing.T) {
 	})
 
 	t.Run("Unicode in Title is valid", func(t *testing.T) {
+		t.Parallel()
 		movie := &Movie{
 			ContentID: "ipx00123",
 			Title:     "テスト映画 Test Movie 测试电影",
