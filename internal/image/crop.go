@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
-	"os"
 
 	_ "image/png" // Register PNG decoder
 
+	"github.com/spf13/afero"
 	"golang.org/x/image/draw"
 )
 
@@ -29,9 +29,9 @@ const (
 // - If result exceeds MaxPosterHeight, resize maintaining aspect ratio
 //
 // This ensures good results for both wide JAV covers and square promotional images
-func CropPosterFromCover(coverPath, posterPath string) error {
+func CropPosterFromCover(fs afero.Fs, coverPath, posterPath string) error {
 	// Open and decode the cover image
-	coverFile, err := os.Open(coverPath)
+	coverFile, err := fs.Open(coverPath)
 	if err != nil {
 		return fmt.Errorf("failed to open cover image: %w", err)
 	}
@@ -46,6 +46,11 @@ func CropPosterFromCover(coverPath, posterPath string) error {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
+
+	// Validate dimensions to prevent division by zero
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("invalid image dimensions: %dx%d", width, height)
+	}
 
 	// Calculate aspect ratio to determine crop strategy
 	aspectRatio := float64(width) / float64(height)
@@ -112,7 +117,7 @@ func CropPosterFromCover(coverPath, posterPath string) error {
 	}
 
 	// Create output file
-	posterFile, err := os.Create(posterPath)
+	posterFile, err := fs.Create(posterPath)
 	if err != nil {
 		return fmt.Errorf("failed to create poster file: %w", err)
 	}

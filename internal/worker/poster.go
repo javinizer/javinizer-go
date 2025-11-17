@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/afero"
+
 	"github.com/javinizer/javinizer-go/internal/config"
 	imageutil "github.com/javinizer/javinizer-go/internal/image"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -113,7 +115,7 @@ func GenerateTempPoster(
 	}
 
 	// Crop the poster using the smart cropping algorithm
-	if err := imageutil.CropPosterFromCover(tempFullPath, tempCroppedPath); err != nil {
+	if err := imageutil.CropPosterFromCover(afero.NewOsFs(), tempFullPath, tempCroppedPath); err != nil {
 		os.Remove(tempFullPath)
 		os.Remove(tempCroppedPath)
 		return "", fmt.Errorf("failed to crop poster: %w", err)
@@ -234,7 +236,7 @@ func GenerateCroppedPoster(
 	tempCroppedPath := tmpCropped.Name()
 	tmpCropped.Close() // Close immediately as CropPosterFromCover will create the file
 
-	if err := imageutil.CropPosterFromCover(tempDownloadPath, tempCroppedPath); err != nil {
+	if err := imageutil.CropPosterFromCover(afero.NewOsFs(), tempDownloadPath, tempCroppedPath); err != nil {
 		os.Remove(tempDownloadPath)
 		os.Remove(tempCroppedPath)
 		return "", fmt.Errorf("failed to crop poster: %w", err)

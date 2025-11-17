@@ -195,7 +195,7 @@ func (d *Downloader) DownloadPoster(movie *models.Movie, destDir string) (*Downl
 	}
 
 	// Crop the poster from the downloaded image
-	if err := imageutil.CropPosterFromCover(tempPath, destPath); err != nil {
+	if err := imageutil.CropPosterFromCover(d.fs, tempPath, destPath); err != nil {
 		d.fs.Remove(tempPath) // Clean up temp file
 		result.Error = fmt.Errorf("failed to crop poster: %w", err)
 		result.Downloaded = false
