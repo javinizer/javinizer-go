@@ -1,0 +1,50 @@
+{
+  "source": "r18dev",
+  "source_url": "https://r18.dev/videos/vod/movies/detail/-/id=ipx00123/",
+  "language": "en",
+  "id": "IPX-123",
+  "content_id": "ipx00123",
+  "title": "Test Movie from R18Dev",
+  "original_title": "テストムービー from R18Dev",
+  "description": "A comprehensive test movie scraped from r18.dev with full metadata including multiple actresses, genres, and media URLs.",
+  "release_date": "2023-05-15T00:00:00Z",
+  "runtime": 120,
+  "director": "Test Director",
+  "maker": "Test Studio",
+  "label": "Test Label",
+  "series": "Test Series",
+  "rating": {
+    "score": 4.5,
+    "votes": 123
+  },
+  "actresses": [
+    {
+      "dmm_id": 123456,
+      "first_name": "Yui",
+      "last_name": "Hatano",
+      "japanese_name": "波多野結衣",
+      "thumb_url": "https://example.com/actress1_thumb.jpg"
+    },
+    {
+      "dmm_id": 789012,
+      "first_name": "Ai",
+      "last_name": "Hoshina",
+      "japanese_name": "星名愛",
+      "thumb_url": "https://example.com/actress2_thumb.jpg"
+    }
+  ],
+  "genres": [
+    "Drama",
+    "Romance",
+    "Documentary"
+  ],
+  "poster_url": "https://example.com/poster.jpg",
+  "cover_url": "https://example.com/cover.jpg",
+  "should_crop_poster": true,
+  "screenshot_urls": [
+    "https://example.com/screenshot1.jpg",
+    "https://example.com/screenshot2.jpg",
+    "https://example.com/screenshot3.jpg"
+  ],
+  "trailer_url": "https://example.com/trailer.mp4"
+}

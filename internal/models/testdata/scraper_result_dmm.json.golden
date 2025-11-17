@@ -1,0 +1,43 @@
+{
+  "source": "dmm",
+  "source_url": "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00123/",
+  "language": "ja",
+  "id": "IPX-123",
+  "content_id": "ipx00123",
+  "title": "テストムービー from DMM",
+  "original_title": "テストムービー from DMM",
+  "description": "DMMからスクレイピングされたテストムービー。日本語のメタデータを含みます。",
+  "release_date": "2023-05-15T00:00:00Z",
+  "runtime": 120,
+  "director": "テスト監督",
+  "maker": "テストスタジオ",
+  "label": "テストレーベル",
+  "series": "テストシリーズ",
+  "rating": {
+    "score": 4.3,
+    "votes": 456
+  },
+  "actresses": [
+    {
+      "dmm_id": 123456,
+      "first_name": "",
+      "last_name": "",
+      "japanese_name": "波多野結衣",
+      "thumb_url": "https://pics.dmm.co.jp/mono/actjpgs/hatano_yui.jpg"
+    }
+  ],
+  "genres": [
+    "ドラマ",
+    "ロマンス",
+    "単体作品",
+    "ハイビジョン"
+  ],
+  "poster_url": "https://pics.dmm.co.jp/digital/video/ipx00123/ipx00123pl.jpg",
+  "cover_url": "https://pics.dmm.co.jp/digital/video/ipx00123/ipx00123ps.jpg",
+  "should_crop_poster": false,
+  "screenshot_urls": [
+    "https://pics.dmm.co.jp/digital/video/ipx00123/ipx00123jp-1.jpg",
+    "https://pics.dmm.co.jp/digital/video/ipx00123/ipx00123jp-2.jpg"
+  ],
+  "trailer_url": ""
+}
