@@ -11,6 +11,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const (
+	// testConnTimeout is the maximum time to wait for WebSocket connections in tests
+	// Slightly longer timeout for CI environments where connections may be slower
+	testConnTimeout = 2 * time.Second
+)
+
 func TestNewHub(t *testing.T) {
 	hub := NewHub()
 
@@ -478,15 +484,17 @@ func createTestConnections(t *testing.T) (*websocket.Conn, *websocket.Conn, *htt
 		WriteBufferSize: 1024,
 	}
 
-	var serverConn *websocket.Conn
+	// Use channel to safely communicate server connection from handler goroutine
+	serverConnChan := make(chan *websocket.Conn, 1)
 
 	// Create test HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		serverConn, err = upgrader.Upgrade(w, r, nil)
+		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			t.Fatalf("Failed to upgrade connection: %v", err)
+			t.Errorf("Failed to upgrade connection: %v", err)
+			return
 		}
+		serverConnChan <- conn
 	}))
 
 	// Create client connection
@@ -496,15 +504,13 @@ func createTestConnections(t *testing.T) (*websocket.Conn, *websocket.Conn, *htt
 		t.Fatalf("Failed to dial websocket: %v", err)
 	}
 
-	// Wait for server connection to be established
-	timeout := time.After(time.Second)
-	for serverConn == nil {
-		select {
-		case <-timeout:
-			t.Fatal("Timeout waiting for server connection")
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
+	// Wait for server connection to be established (with timeout)
+	var serverConn *websocket.Conn
+	select {
+	case serverConn = <-serverConnChan:
+		// Connection established successfully
+	case <-time.After(testConnTimeout):
+		t.Fatal("Timeout waiting for server connection")
 	}
 
 	return serverConn, clientConn, server

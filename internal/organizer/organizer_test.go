@@ -1,7 +1,6 @@
 package organizer
 
 import (
-	"github.com/spf13/afero"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/spf13/afero"
 )
 
 func createTestMovie() *models.Movie {

@@ -51,12 +51,19 @@ func (h *Hub) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			// Context cancelled, clean up all clients
+			// Snapshot clients first to minimize lock duration
 			h.mu.Lock()
+			clients := make([]*Client, 0, len(h.clients))
 			for client := range h.clients {
-				close(client.send)
-				delete(h.clients, client)
+				clients = append(clients, client)
 			}
+			h.clients = make(map[*Client]bool)
 			h.mu.Unlock()
+
+			// Clean up clients without holding lock
+			for _, client := range clients {
+				close(client.send)
+			}
 			logging.Infof("WebSocket hub stopped")
 			return
 
@@ -76,17 +83,35 @@ func (h *Hub) Run(ctx context.Context) {
 			logging.Infof("WebSocket client disconnected. Total clients: %d", len(h.clients))
 
 		case message := <-h.broadcast:
+			// Phase 1: Collect clients under read lock (prevents deadlock during channel sends)
 			h.mu.RLock()
+			clients := make([]*Client, 0, len(h.clients))
 			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
-					// Client's send channel is full, close it
-					close(client.send)
-					delete(h.clients, client)
-				}
+				clients = append(clients, client)
 			}
 			h.mu.RUnlock()
+
+			// Phase 2: Send to clients without holding lock (channel sends can block)
+			var toRemove []*Client
+			for _, client := range clients {
+				select {
+				case client.send <- message:
+					// Message sent successfully
+				default:
+					// Client's send channel is full, mark for removal
+					close(client.send)
+					toRemove = append(toRemove, client)
+				}
+			}
+
+			// Phase 3: Remove disconnected clients with brief write lock
+			if len(toRemove) > 0 {
+				h.mu.Lock()
+				for _, client := range toRemove {
+					delete(h.clients, client)
+				}
+				h.mu.Unlock()
+			}
 		}
 	}
 }
