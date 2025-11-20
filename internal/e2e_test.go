@@ -1,6 +1,7 @@
 package internal_test
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -289,7 +290,7 @@ func TestFullWorkflow(t *testing.T) {
 
 	// Step 8: Test downloader (dry run with mock URLs)
 	t.Log("Step 8: Testing downloader (mock)")
-	_ = downloader.NewDownloader(afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent)
+	_ = downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent)
 
 	for id, movie := range movies {
 		if movie.CoverURL == "" {

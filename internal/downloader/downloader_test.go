@@ -62,7 +62,7 @@ func TestDownloader_DownloadCover(t *testing.T) {
 		FanartFormat:  "<ID>-fanart.jpg",
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadCover(movie, tmpDir)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestDownloader_DownloadCover_Disabled(t *testing.T) {
 		DownloadCover: false,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadCover(movie, tmpDir)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestDownloader_DownloadCover_AlreadyExists(t *testing.T) {
 		FanartFormat:  "<ID>-fanart.jpg",
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	// Create existing file
 	existingPath := filepath.Join(tmpDir, "IPX-535-fanart.jpg")
@@ -173,7 +173,7 @@ func TestDownloader_DownloadExtrafanart(t *testing.T) {
 		ScreenshotPadding:   2,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	results, err := downloader.DownloadExtrafanart(movie, tmpDir)
 	if err != nil {
@@ -216,7 +216,7 @@ func TestDownloader_DownloadTrailer(t *testing.T) {
 		DownloadTrailer: true,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadTrailer(movie, tmpDir)
 	if err != nil {
@@ -262,7 +262,7 @@ func TestDownloader_DownloadActressImages(t *testing.T) {
 		DownloadActress: true,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	results, err := downloader.DownloadActressImages(movie, tmpDir)
 	if err != nil {
@@ -304,7 +304,7 @@ func TestDownloader_Download_BadStatusCode(t *testing.T) {
 		DownloadCover: true,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadCover(movie, tmpDir)
 	if err == nil {
@@ -356,7 +356,7 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 		},
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	// Part 1 should download everything
 	resultsPart1, err := downloader.DownloadAll(movie, tmpDir, 1)
@@ -415,7 +415,7 @@ func TestDownloader_DownloadAll(t *testing.T) {
 		DownloadActress:     true,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	results, err := downloader.DownloadAll(movie, tmpDir, 0) // Part 0 = single file
 	if err != nil {
@@ -476,7 +476,7 @@ func TestDownloader_generateFilename(t *testing.T) {
 		ActressFolder:    ".actors",
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	movie := createTestMovie()
 
@@ -543,7 +543,7 @@ func TestDownloader_generateFilenameActress(t *testing.T) {
 		ActressFolder:    ".actors",
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	actressMovie := &models.Movie{
 		ID:    "IPX-535",
@@ -624,7 +624,7 @@ func TestDownloader_SetDownloadExtrafanart(t *testing.T) {
 		DownloadExtrafanart: false,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	// Verify initial state
 	if downloader.config.DownloadExtrafanart {
@@ -671,7 +671,7 @@ func TestDownloader_DownloadPoster_WithPosterURL(t *testing.T) {
 		PosterFormat:   "<ID>-poster.jpg",
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadPoster(movie, tmpDir)
 	if err != nil {
@@ -710,7 +710,7 @@ func TestDownloader_DownloadPoster_Disabled(t *testing.T) {
 		DownloadPoster: false,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadPoster(movie, tmpDir)
 	if err != nil {
@@ -734,7 +734,7 @@ func TestDownloader_DownloadExtrafanart_Disabled(t *testing.T) {
 		DownloadExtrafanart: false,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	results, err := downloader.DownloadExtrafanart(movie, tmpDir)
 	if err != nil {
@@ -756,7 +756,7 @@ func TestDownloader_DownloadExtrafanart_EmptyScreenshots(t *testing.T) {
 		ScreenshotFolder:    "extrafanart",
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	results, err := downloader.DownloadExtrafanart(movie, tmpDir)
 	if err != nil {
@@ -795,7 +795,7 @@ func TestDownloader_DownloadExtrafanart_PartialFailure(t *testing.T) {
 		ScreenshotFolder:    "extrafanart",
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	results, err := downloader.DownloadExtrafanart(movie, tmpDir)
 	if err != nil {
@@ -834,7 +834,7 @@ func TestDownloader_DownloadTrailer_Disabled(t *testing.T) {
 		DownloadTrailer: false,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadTrailer(movie, tmpDir)
 	if err != nil {
@@ -855,7 +855,7 @@ func TestDownloader_DownloadTrailer_EmptyURL(t *testing.T) {
 		DownloadTrailer: true,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadTrailer(movie, tmpDir)
 	if err != nil {
@@ -875,7 +875,7 @@ func TestDownloader_DownloadActressImages_Disabled(t *testing.T) {
 		DownloadActress: false,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	results, err := downloader.DownloadActressImages(movie, tmpDir)
 	if err != nil {
@@ -897,7 +897,7 @@ func TestDownloader_DownloadActressImages_EmptyActresses(t *testing.T) {
 		ActressFolder:   ".actors",
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	results, err := downloader.DownloadActressImages(movie, tmpDir)
 	if err != nil {
@@ -927,7 +927,7 @@ func TestDownloader_DownloadActressImages_SkipEmptyThumbURL(t *testing.T) {
 		ActressFolder:   ".actors",
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	results, err := downloader.DownloadActressImages(movie, tmpDir)
 	if err != nil {
@@ -953,7 +953,7 @@ func TestDownloader_Download_InvalidURL(t *testing.T) {
 		DownloadCover: true,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadCover(movie, tmpDir)
 	if err == nil {
@@ -983,7 +983,7 @@ func TestDownloader_Download_ServerError(t *testing.T) {
 		DownloadCover: true,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadCover(movie, tmpDir)
 	if err == nil {
@@ -1017,7 +1017,13 @@ func TestDownloader_Download_Timeout(t *testing.T) {
 		DownloadTimeout: 1, // 1 second timeout
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	// Create HTTP client with timeout for this test
+	httpClient, err := NewHTTPClientForDownloader(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create HTTP client: %v", err)
+	}
+
+	downloader := NewDownloader(httpClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadCover(movie, tmpDir)
 	if err == nil {
@@ -1048,7 +1054,7 @@ func TestDownloader_Download_WithUserAgent(t *testing.T) {
 	}
 
 	expectedUserAgent := "test-custom-agent/1.0"
-	downloader := NewDownloader(afero.NewOsFs(), cfg, expectedUserAgent)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, expectedUserAgent)
 
 	_, err := downloader.DownloadCover(movie, tmpDir)
 	if err != nil {
@@ -1060,27 +1066,45 @@ func TestDownloader_Download_WithUserAgent(t *testing.T) {
 	}
 }
 
-func TestDownloader_NewDownloader_DefaultTimeout(t *testing.T) {
+func TestDownloader_NewHTTPClientForDownloader_DefaultTimeout(t *testing.T) {
 	cfg := &config.OutputConfig{
 		DownloadTimeout: 0, // Should default to 60
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	client, err := NewHTTPClientForDownloader(cfg)
+	if err != nil {
+		t.Fatalf("NewHTTPClientForDownloader failed: %v", err)
+	}
 
-	if downloader.httpClient.Timeout != 60*time.Second {
-		t.Errorf("Expected default timeout 60s, got %v", downloader.httpClient.Timeout)
+	// Type assert to *http.Client to check timeout
+	httpClient, ok := client.(*http.Client)
+	if !ok {
+		t.Fatalf("Expected *http.Client, got %T", client)
+	}
+
+	if httpClient.Timeout != 60*time.Second {
+		t.Errorf("Expected default timeout 60s, got %v", httpClient.Timeout)
 	}
 }
 
-func TestDownloader_NewDownloader_CustomTimeout(t *testing.T) {
+func TestDownloader_NewHTTPClientForDownloader_CustomTimeout(t *testing.T) {
 	cfg := &config.OutputConfig{
 		DownloadTimeout: 30,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	client, err := NewHTTPClientForDownloader(cfg)
+	if err != nil {
+		t.Fatalf("NewHTTPClientForDownloader failed: %v", err)
+	}
 
-	if downloader.httpClient.Timeout != 30*time.Second {
-		t.Errorf("Expected timeout 30s, got %v", downloader.httpClient.Timeout)
+	// Type assert to *http.Client to check timeout
+	httpClient, ok := client.(*http.Client)
+	if !ok {
+		t.Fatalf("Expected *http.Client, got %T", client)
+	}
+
+	if httpClient.Timeout != 30*time.Second {
+		t.Errorf("Expected timeout 30s, got %v", httpClient.Timeout)
 	}
 }
 
@@ -1096,7 +1120,7 @@ func TestDownloader_DownloadAll_AllDisabled(t *testing.T) {
 		DownloadActress:     false,
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	results, err := downloader.DownloadAll(movie, tmpDir, 0)
 	if err != nil {
@@ -1194,7 +1218,7 @@ func TestNewDownloaderWithNFOConfig(t *testing.T) {
 				DownloadTimeout: 30,
 			}
 
-			downloader := NewDownloaderWithNFOConfig(afero.NewMemMapFs(), cfg, "test-agent", tt.actorJapaneseNames, tt.actorFirstNameOrder)
+			downloader := NewDownloaderWithNFOConfig(http.DefaultClient, afero.NewMemMapFs(), cfg, "test-agent", tt.actorJapaneseNames, tt.actorFirstNameOrder)
 
 			if downloader == nil {
 				t.Fatal("NewDownloaderWithNFOConfig returned nil")
@@ -1212,8 +1236,9 @@ func TestNewDownloaderWithNFOConfig(t *testing.T) {
 				t.Errorf("Expected userAgent=%q, got %q", "test-agent", downloader.userAgent)
 			}
 
-			if downloader.httpClient.Timeout != 30*time.Second {
-				t.Errorf("Expected timeout=30s, got %v", downloader.httpClient.Timeout)
+			// HTTP client timeout checking moved to TestDownloader_NewHTTPClientForDownloader_CustomTimeout
+			if downloader.httpClient == nil {
+				t.Error("Expected httpClient to be set, got nil")
 			}
 		})
 	}
@@ -1323,7 +1348,7 @@ func TestFormatActressName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.OutputConfig{}
-			downloader := NewDownloaderWithNFOConfig(afero.NewMemMapFs(), cfg, "test", tt.useJapanese, tt.firstNameOrder)
+			downloader := NewDownloaderWithNFOConfig(http.DefaultClient, afero.NewMemMapFs(), cfg, "test", tt.useJapanese, tt.firstNameOrder)
 
 			result := downloader.formatActressName(tt.actress)
 
@@ -1361,7 +1386,7 @@ func TestDownloader_DownloadPoster_WithCropping(t *testing.T) {
 		PosterFormat:   "<ID>-poster.jpg",
 	}
 
-	downloader := NewDownloader(afero.NewOsFs(), cfg, "test-agent")
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
 
 	result, err := downloader.DownloadPoster(movie, tmpDir)
 	if err != nil {
@@ -1450,7 +1475,7 @@ func TestDownloader_DownloadActressImages_WithNFOConfig(t *testing.T) {
 				ActressFolder:   ".actors",
 			}
 
-			downloader := NewDownloaderWithNFOConfig(afero.NewMemMapFs(), cfg, "test", tt.useJapanese, tt.firstNameOrder)
+			downloader := NewDownloaderWithNFOConfig(http.DefaultClient, afero.NewMemMapFs(), cfg, "test", tt.useJapanese, tt.firstNameOrder)
 
 			results, err := downloader.DownloadActressImages(movie, testDir)
 			if err != nil {

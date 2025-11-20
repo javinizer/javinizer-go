@@ -278,7 +278,19 @@ func processUpdateJob(job *worker.BatchJob, cfg *config.Config, db *database.DB)
 func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB, ctx context.Context) {
 	// Initialize components
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfo.ConfigFromAppConfig(&cfg.Metadata.NFO, &cfg.Output, &cfg.Metadata, db))
-	dl := downloader.NewDownloaderWithNFOConfig(afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
+
+	// Initialize HTTP client for downloader
+	httpClient, err := downloader.NewHTTPClientForDownloader(&cfg.Output)
+	if err != nil {
+		wsHub.BroadcastProgress(&ws.ProgressMessage{
+			JobID:    job.ID,
+			Status:   "error",
+			Progress: 0,
+			Message:  fmt.Sprintf("Failed to create HTTP client: %v", err),
+		})
+		return
+	}
+	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
 
 	// Broadcast update started
 	wsHub.BroadcastProgress(&ws.ProgressMessage{
@@ -530,7 +542,19 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination string, copyOnly bool, db *database.DB, cfg *config.Config) {
 	// Initialize organizer, downloader, and NFO generator
 	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)
-	dl := downloader.NewDownloaderWithNFOConfig(afero.NewOsFs(), &cfg.Output, "Javinizer/1.0", cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
+
+	// Initialize HTTP client for downloader
+	httpClient, err := downloader.NewHTTPClientForDownloader(&cfg.Output)
+	if err != nil {
+		wsHub.BroadcastProgress(&ws.ProgressMessage{
+			JobID:    job.ID,
+			Status:   "error",
+			Progress: 0,
+			Message:  fmt.Sprintf("Failed to create HTTP client: %v", err),
+		})
+		return
+	}
+	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, "Javinizer/1.0", cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfo.ConfigFromAppConfig(&cfg.Metadata.NFO, &cfg.Output, &cfg.Metadata, db))
 
 	// Broadcast organization started

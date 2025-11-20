@@ -119,7 +119,13 @@ func run(cmd *cobra.Command, args []string, configFile string) error {
 	}
 	fileOrganizer := organizer.NewOrganizer(afero.NewOsFs(), &deps.Config.Output)
 	nfoGenerator := nfo.NewGenerator(afero.NewOsFs(), nfo.ConfigFromAppConfig(&deps.Config.Metadata.NFO, &deps.Config.Output, &deps.Config.Metadata, deps.DB))
-	mediaDownloader := downloader.NewDownloaderWithNFOConfig(afero.NewOsFs(), &deps.Config.Output, deps.Config.Scrapers.UserAgent, deps.Config.Metadata.NFO.ActressLanguageJA, deps.Config.Metadata.NFO.FirstNameOrder)
+
+	// Initialize HTTP client for downloader
+	httpClient, err := downloader.NewHTTPClientForDownloader(&deps.Config.Output)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP client: %w", err)
+	}
+	mediaDownloader := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &deps.Config.Output, deps.Config.Scrapers.UserAgent, deps.Config.Metadata.NFO.ActressLanguageJA, deps.Config.Metadata.NFO.FirstNameOrder)
 
 	// Print configuration
 	fmt.Println("=== Javinizer Update ===")

@@ -203,8 +203,14 @@ func run(cmd *cobra.Command, args []string) error {
 	// Initialize aggregator
 	agg := aggregator.NewWithDatabase(cfg, db)
 
+	// Initialize HTTP client for downloader
+	httpClient, err := downloader.NewHTTPClientForDownloader(&cfg.Output)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP client: %w", err)
+	}
+
 	// Initialize downloader
-	dl := downloader.NewDownloaderWithNFOConfig(afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
+	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
 
 	// Initialize organizer
 	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)

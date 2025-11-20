@@ -22,7 +22,7 @@ import (
 type Downloader struct {
 	fs                  afero.Fs
 	config              *config.OutputConfig
-	httpClient          *http.Client
+	httpClient          httpclient.HTTPClient
 	userAgent           string
 	actorJapaneseNames  bool // Use Japanese names for actress files
 	actorFirstNameOrder bool // true = FirstName LastName, false = LastName FirstName
@@ -50,8 +50,8 @@ const (
 	MediaTypeActress     MediaType = "actress"
 )
 
-// NewDownloader creates a new media downloader
-func NewDownloader(fs afero.Fs, cfg *config.OutputConfig, userAgent string) *Downloader {
+// NewHTTPClientForDownloader creates an HTTP client for production use with proxy and timeout configuration
+func NewHTTPClientForDownloader(cfg *config.OutputConfig) (httpclient.HTTPClient, error) {
 	// Use configured timeout, default to 60 seconds if not set
 	timeout := cfg.DownloadTimeout
 	if timeout <= 0 {
@@ -84,6 +84,11 @@ func NewDownloader(fs afero.Fs, cfg *config.OutputConfig, userAgent string) *Dow
 		logging.Infof("Downloader: Using proxy %s", httpclient.SanitizeProxyURL(cfg.DownloadProxy.URL))
 	}
 
+	return client, nil
+}
+
+// NewDownloader creates a new media downloader
+func NewDownloader(client httpclient.HTTPClient, fs afero.Fs, cfg *config.OutputConfig, userAgent string) *Downloader {
 	return &Downloader{
 		fs:                  fs,
 		config:              cfg,
@@ -95,8 +100,8 @@ func NewDownloader(fs afero.Fs, cfg *config.OutputConfig, userAgent string) *Dow
 }
 
 // NewDownloaderWithNFOConfig creates a new media downloader with NFO config for actress name formatting
-func NewDownloaderWithNFOConfig(fs afero.Fs, cfg *config.OutputConfig, userAgent string, actorJapaneseNames, actorFirstNameOrder bool) *Downloader {
-	d := NewDownloader(fs, cfg, userAgent)
+func NewDownloaderWithNFOConfig(client httpclient.HTTPClient, fs afero.Fs, cfg *config.OutputConfig, userAgent string, actorJapaneseNames, actorFirstNameOrder bool) *Downloader {
+	d := NewDownloader(client, fs, cfg, userAgent)
 	d.actorJapaneseNames = actorJapaneseNames
 	d.actorFirstNameOrder = actorFirstNameOrder
 	return d

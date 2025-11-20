@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -234,7 +235,7 @@ func TestDownloadTask_Execute(t *testing.T) {
 				DownloadCover:  true,
 				DownloadPoster: true,
 			}
-			dl := downloader.NewDownloader(afero.NewOsFs(), outputCfg, "test-agent")
+			dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent")
 
 			// Create task
 			task := NewDownloadTask(tt.movie, tmpDir, dl, tracker, tt.dryRun, tt.partNumber)
@@ -282,7 +283,7 @@ func TestDownloadTask_Execute_Cancellation(t *testing.T) {
 		DownloadCover:  true,
 		DownloadPoster: true,
 	}
-	dl := downloader.NewDownloader(afero.NewOsFs(), outputCfg, "test-agent")
+	dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent")
 
 	movie := &models.Movie{
 		ID:       "IPX-999",
@@ -809,7 +810,7 @@ func TestProcessFileTask_Execute_DisabledSteps(t *testing.T) {
 				},
 			}
 
-			dl := downloader.NewDownloader(afero.NewOsFs(), &cfg.Output, "test-agent")
+			dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), &cfg.Output, "test-agent")
 			org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)
 			nfoCfg := &nfo.Config{}
 			nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfoCfg)
@@ -888,7 +889,7 @@ func TestNewTaskConstructors(t *testing.T) {
 
 	t.Run("NewDownloadTask", func(t *testing.T) {
 		outputCfg := &config.OutputConfig{}
-		dl := downloader.NewDownloader(afero.NewOsFs(), outputCfg, "test-agent")
+		dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent")
 		movie := &models.Movie{ID: "IPX-001"}
 
 		task := NewDownloadTask(movie, "/tmp", dl, tracker, false, 0)
@@ -936,7 +937,7 @@ func TestNewTaskConstructors(t *testing.T) {
 		movieRepo := database.NewMovieRepository(db)
 		agg := aggregator.New(cfg)
 		outputCfg := &config.OutputConfig{}
-		dl := downloader.NewDownloader(afero.NewOsFs(), outputCfg, "test-agent")
+		dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent")
 		org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg)
 		nfoCfg := &nfo.Config{}
 		gen := nfo.NewGenerator(afero.NewOsFs(), nfoCfg)
