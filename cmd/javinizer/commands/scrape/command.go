@@ -46,16 +46,10 @@ func NewCommand() *cobra.Command {
 	return scrapeCmd
 }
 
-func runScrape(cmd *cobra.Command, args []string, configFile string) error {
-	id := args[0]
-
-	// Load configuration
-	cfg, err := config.LoadOrCreate(configFile)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Apply CLI flag overrides to config
+// applyFlagOverrides applies CLI flag overrides to the config.
+// This is extracted for testability (Story 5.4 - Epic 5).
+func applyFlagOverrides(cmd *cobra.Command, cfg *config.Config) {
+	// Scrape actress flags
 	if cmd.Flags().Changed("scrape-actress") {
 		if val, _ := cmd.Flags().GetBool("scrape-actress"); val {
 			cfg.Scrapers.DMM.ScrapeActress = true
@@ -66,6 +60,7 @@ func runScrape(cmd *cobra.Command, args []string, configFile string) error {
 			cfg.Scrapers.DMM.ScrapeActress = false
 		}
 	}
+
 	// Browser mode flags (new) - take precedence over deprecated flags
 	if cmd.Flags().Changed("browser") {
 		if val, _ := cmd.Flags().GetBool("browser"); val {
@@ -97,6 +92,8 @@ func runScrape(cmd *cobra.Command, args []string, configFile string) error {
 			cfg.Scrapers.DMM.BrowserTimeout = val
 		}
 	}
+
+	// Actress database flags
 	if cmd.Flags().Changed("actress-db") {
 		if val, _ := cmd.Flags().GetBool("actress-db"); val {
 			cfg.Metadata.ActressDatabase.Enabled = true
@@ -107,6 +104,8 @@ func runScrape(cmd *cobra.Command, args []string, configFile string) error {
 			cfg.Metadata.ActressDatabase.Enabled = false
 		}
 	}
+
+	// Genre replacement flags
 	if cmd.Flags().Changed("genre-replacement") {
 		if val, _ := cmd.Flags().GetBool("genre-replacement"); val {
 			cfg.Metadata.GenreReplacement.Enabled = true
@@ -117,6 +116,19 @@ func runScrape(cmd *cobra.Command, args []string, configFile string) error {
 			cfg.Metadata.GenreReplacement.Enabled = false
 		}
 	}
+}
+
+func runScrape(cmd *cobra.Command, args []string, configFile string) error {
+	id := args[0]
+
+	// Load configuration
+	cfg, err := config.LoadOrCreate(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Apply CLI flag overrides to config
+	applyFlagOverrides(cmd, cfg)
 
 	// Initialize dependencies
 	deps, err := commandutil.NewDependencies(cfg)
