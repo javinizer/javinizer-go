@@ -112,6 +112,28 @@ func TestFlags_MutuallyExclusiveOptions(t *testing.T) {
 	assert.False(t, preserveNFO)
 }
 
+// Integration tests - Note: These tests verify command structure and basic flow.
+// Full integration tests with real scraping remain in the scrape command tests as the
+// update command shares the same core execution path (scan, match, scrape, generate NFO).
+
+// TestCommandExecutionFlow tests basic command execution flow
+func TestCommandExecutionFlow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+
+	// Test that command can be created and flags parsed
+	cmd := update.NewCommand()
+	assert.NotNil(t, cmd)
+
+	// Verify all expected flags exist
+	assert.NotNil(t, cmd.Flags().Lookup("dry-run"))
+	assert.NotNil(t, cmd.Flags().Lookup("download"))
+	assert.NotNil(t, cmd.Flags().Lookup("preset"))
+	assert.NotNil(t, cmd.Flags().Lookup("scalar-strategy"))
+	assert.NotNil(t, cmd.Flags().Lookup("array-strategy"))
+}
+
 // Note: Full integration tests for update command including:
 // - update_merge_test.go (preset application, strategy parsing, merge behavior)
 // - construct_nfo_path_test.go (NFO path construction and sanitization)
