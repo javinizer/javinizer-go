@@ -130,8 +130,9 @@ bench:
 # Uses go run to execute go-acc from project dependencies (no global install needed)
 # Version is pinned to match go.mod for reproducible builds
 # Uses -count=1 to disable test caching and ensure fresh coverage data
+# Excludes: mocks (generated code), tui (interactive UI - manual testing only)
 coverage:
-	@go run github.com/ory/go-acc@v0.2.8 --covermode count -o coverage.out ./... -- -count=1
+	@go run github.com/ory/go-acc@v0.2.8 --covermode count --ignore mocks,tui -o coverage.out ./... -- -count=1
 
 # Open coverage report in browser
 coverage-html: coverage
@@ -208,6 +209,7 @@ mocks:
 		sed -i '' 's/^package models$$/package mocks/' "$$file"; \
 		sed -i '' 's/^package database$$/package mocks/' "$$file"; \
 		sed -i '' 's/^package httpclient$$/package mocks/' "$$file"; \
+		sed -i '' 's/^package aggregator$$/package mocks/' "$$file"; \
 	done
 	@echo "Mock generation complete! Generated mocks in internal/mocks/"
 
