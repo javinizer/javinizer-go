@@ -34,7 +34,12 @@ type Model struct {
 	// Configuration
 	config *config.Config
 
-	// View state
+	// Business state (extracted - see state.go for testable functions)
+	// NOTE: This field represents the MVP pattern separation (Story 9.2)
+	// Pure state management functions are in state.go for unit testing
+	state *State
+
+	// View state (Bubble Tea specific - remains here)
 	currentView ViewMode
 	width       int
 	height      int
@@ -154,6 +159,7 @@ type LogEntry struct {
 func New(cfg *config.Config) *Model {
 	m := &Model{
 		config:        cfg,
+		state:         NewState(), // Initialize business state (Story 9.2)
 		currentView:   ViewBrowser,
 		files:         make([]FileItem, 0),
 		selectedFiles: make(map[string]bool),
