@@ -12,9 +12,9 @@ type State struct {
 	CurrentView ViewMode
 
 	// File browser state
-	Cursor       int
-	FileCount    int
-	SelectedIdx  int // Currently selected file index in browser
+	Cursor      int
+	FileCount   int
+	SelectedIdx int // Currently selected file index in browser
 
 	// Modal states
 	ShowingFolderPicker bool

@@ -26,7 +26,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ProgressMsg:
-		m.UpdateProgress(worker.ProgressUpdate{
+		// Delegate to handler for business logic
+		progressUpdate := worker.ProgressUpdate{
 			TaskID:    msg.TaskID,
 			Type:      msg.Type,
 			Status:    msg.Status,
@@ -35,7 +36,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			BytesDone: msg.BytesDone,
 			Error:     msg.Error,
 			Timestamp: msg.Timestamp,
-		})
+		}
+		m.UpdateProgress(progressUpdate)
 		// Continue waiting for more progress updates
 		cmds = append(cmds, waitForProgress(m.progressChan))
 		return m, tea.Batch(cmds...)
@@ -112,29 +114,37 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "?":
-		// Toggle help view
+		// Toggle help view - delegate to state.go
+		previousView := m.currentView
 		if m.currentView == ViewHelp {
-			m.currentView = ViewBrowser
-		} else {
-			m.currentView = ViewHelp
+			previousView = ViewBrowser
 		}
+		newState := ToggleHelp(State{CurrentView: m.currentView}, previousView)
+		m.currentView = newState.CurrentView
 		return m, nil
 
 	case "1", "b":
-		// 'b' for browser (also works as dismiss for completion banner)
-		m.currentView = ViewBrowser
+		// 'b' for browser (also works as dismiss for completion banner)  - delegate to state.go
+		newState := SwitchToView(State{CurrentView: m.currentView}, ViewBrowser)
+		m.currentView = newState.CurrentView
 		return m, nil
 
 	case "2":
-		m.currentView = ViewDashboard
+		// Delegate to state.go
+		newState := SwitchToView(State{CurrentView: m.currentView}, ViewDashboard)
+		m.currentView = newState.CurrentView
 		return m, nil
 
 	case "3":
-		m.currentView = ViewLogs
+		// Delegate to state.go
+		newState := SwitchToView(State{CurrentView: m.currentView}, ViewLogs)
+		m.currentView = newState.CurrentView
 		return m, nil
 
 	case "4":
-		m.currentView = ViewSettings
+		// Delegate to state.go
+		newState := SwitchToView(State{CurrentView: m.currentView}, ViewSettings)
+		m.currentView = newState.CurrentView
 		return m, nil
 
 	case "d":
@@ -145,11 +155,9 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "tab":
-		// Cycle through views (Browser -> Dashboard -> Logs -> Settings -> Browser)
-		m.currentView = (m.currentView + 1) % 5
-		if m.currentView == ViewHelp {
-			m.currentView = ViewBrowser
-		}
+		// Cycle through views (Browser -> Dashboard -> Logs -> Settings -> Browser) - delegate to state.go
+		newState := CycleView(State{CurrentView: m.currentView})
+		m.currentView = newState.CurrentView
 		return m, nil
 	}
 

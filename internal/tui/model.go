@@ -336,21 +336,13 @@ func (m *Model) AddLog(level, message string) {
 
 // UpdateProgress updates task progress
 func (m *Model) UpdateProgress(update worker.ProgressUpdate) {
-	// Update or create task progress
+	// Track new tasks for ordering
 	if _, exists := m.tasks[update.TaskID]; !exists {
 		m.taskOrder = append(m.taskOrder, update.TaskID)
 	}
 
-	m.tasks[update.TaskID] = &worker.TaskProgress{
-		ID:        update.TaskID,
-		Type:      update.Type,
-		Status:    update.Status,
-		Progress:  update.Progress,
-		Message:   update.Message,
-		BytesDone: update.BytesDone,
-		UpdatedAt: update.Timestamp,
-		Error:     update.Error,
-	}
+	// Delegate to handler for business logic (immutable task map update)
+	m.tasks = HandleProgressUpdate(m.tasks, update)
 
 	// Update task list component
 	if m.taskList != nil {

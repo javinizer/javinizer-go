@@ -23,12 +23,12 @@ func TestNewState(t *testing.T) {
 
 func TestSwitchToView(t *testing.T) {
 	tests := []struct {
-		name            string
-		initialView     ViewMode
-		targetView      ViewMode
-		expectedView    ViewMode
-		expectedCursor  int
-		shouldChange    bool
+		name           string
+		initialView    ViewMode
+		targetView     ViewMode
+		expectedView   ViewMode
+		expectedCursor int
+		shouldChange   bool
 	}{
 		{
 			name:           "switch from Browser to Dashboard",
