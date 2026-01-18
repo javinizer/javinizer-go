@@ -23,9 +23,10 @@
 		onFileSelect?: (files: string[]) => void;
 		onPathChange?: (path: string) => void;
 		multiSelect?: boolean;
+		folderOnly?: boolean;  // When true, only allows folder navigation (no file selection)
 	}
 
-	let { initialPath = '', onFileSelect, onPathChange, multiSelect = true }: Props = $props();
+	let { initialPath = '', onFileSelect, onPathChange, multiSelect = true, folderOnly = false }: Props = $props();
 
 	let currentPath = $state(initialPath);
 	let items: FileInfo[] = $state([]);
@@ -80,7 +81,8 @@
 		if (item.is_dir) {
 			browse(item.path);
 			selectedFiles.clear();
-		} else {
+		} else if (!folderOnly) {
+			// Only allow file selection if not in folderOnly mode
 			toggleFileSelection(item.path);
 		}
 	}
@@ -208,8 +210,8 @@
 		</div>
 	{/if}
 
-	<!-- Selection Controls -->
-	{#if items.length > 0 && fileCount > 0}
+	<!-- Selection Controls (hidden in folderOnly mode) -->
+	{#if items.length > 0 && fileCount > 0 && !folderOnly}
 		<div class="mb-4 pb-4 border-b flex items-center justify-between gap-4">
 			<div class="flex items-center gap-2 text-sm text-muted-foreground">
 				<span class="font-medium">{fileCount} files</span>
@@ -276,16 +278,47 @@
 			</div>
 		{:else}
 			{#each filteredItems() as item}
-				<button
-					onclick={() => handleItemClick(item)}
-					class="w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 cursor-pointer
-						{selectedFiles.has(item.path)
-							? 'bg-primary/10 border-2 border-primary shadow-sm'
-							: 'border-2 border-transparent hover:border-accent hover:bg-accent/50 hover:shadow-md'}"
-				>
-					{#if item.is_dir}
+				{#if item.is_dir}
+					<!-- Directories are always clickable -->
+					<button
+						onclick={() => handleItemClick(item)}
+						class="w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 cursor-pointer
+							border-2 border-transparent hover:border-accent hover:bg-accent/50 hover:shadow-md"
+					>
 						<Folder class="h-5 w-5 text-blue-500 transition-transform group-hover:scale-110" />
-					{:else}
+						<div class="flex-1 text-left">
+							<div class="font-medium text-blue-600 dark:text-blue-400">
+								{item.name}
+							</div>
+						</div>
+					</button>
+				{:else if folderOnly}
+					<!-- Files in folderOnly mode: non-interactive display -->
+					<div
+						class="w-full flex items-center gap-3 p-3 rounded-lg border-2 border-transparent opacity-50"
+					>
+						<File class="h-5 w-5 text-muted-foreground flex-shrink-0" />
+						<div class="flex-1 text-left">
+							<div class="font-medium text-muted-foreground">
+								{item.name}
+							</div>
+							<div class="text-xs text-muted-foreground mt-0.5">
+								{formatBytes(item.size)}
+								{#if item.movie_id}
+									<span class="ml-2 text-green-600/50 font-medium">• {item.movie_id}</span>
+								{/if}
+							</div>
+						</div>
+					</div>
+				{:else}
+					<!-- Files in normal mode: selectable -->
+					<button
+						onclick={() => handleItemClick(item)}
+						class="w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 cursor-pointer
+							{selectedFiles.has(item.path)
+								? 'bg-primary/10 border-2 border-primary shadow-sm'
+								: 'border-2 border-transparent hover:border-accent hover:bg-accent/50 hover:shadow-md'}"
+					>
 						<!-- Checkbox for files -->
 						{#if selectedFiles.has(item.path)}
 							<CheckSquare class="h-5 w-5 text-primary flex-shrink-0" />
@@ -296,28 +329,25 @@
 						<File
 							class="h-5 w-5 transition-transform group-hover:scale-110 {item.matched ? 'text-green-500' : 'text-muted-foreground'}"
 						/>
-					{/if}
-
-					<div class="flex-1 text-left">
-						<div class="font-medium {item.is_dir ? 'text-blue-600 dark:text-blue-400' : ''}">
-							{item.name}
-						</div>
-						{#if !item.is_dir}
+						<div class="flex-1 text-left">
+							<div class="font-medium">
+								{item.name}
+							</div>
 							<div class="text-xs text-muted-foreground mt-0.5">
 								{formatBytes(item.size)}
 								{#if item.movie_id}
 									<span class="ml-2 text-green-600 font-medium">• {item.movie_id}</span>
 								{/if}
 							</div>
-						{/if}
-					</div>
-				</button>
+						</div>
+					</button>
+				{/if}
 			{/each}
 		{/if}
 	</div>
 
-	<!-- Selection Summary -->
-	{#if selectedFiles.size > 0}
+	<!-- Selection Summary (hidden in folderOnly mode) -->
+	{#if selectedFiles.size > 0 && !folderOnly}
 		<div class="mt-4 pt-4 border-t bg-accent/30 -mx-4 -mb-4 px-4 py-3 rounded-b-lg">
 			<div class="flex items-center justify-between mb-2">
 				<span class="text-sm font-medium flex items-center gap-2">

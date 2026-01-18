@@ -689,6 +689,7 @@
 					onFileSelect={handleInputSelect}
 					onPathChange={handleInputPathChange}
 					multiSelect={false}
+					folderOnly={true}
 				/>
 			</div>
 
@@ -746,6 +747,7 @@
 					onFileSelect={handleDestinationSelect}
 					onPathChange={handleDestinationPathChange}
 					multiSelect={false}
+					folderOnly={true}
 				/>
 			</div>
 
