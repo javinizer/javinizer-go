@@ -50,6 +50,9 @@
 			  })
 			: null
 	);
+
+	// Get icon component
+	const Icon = $derived(sourceConfig.icon);
 </script>
 
 <span
@@ -58,7 +61,7 @@
 		? `${field}: ${sourceConfig.label}${showConfidence ? ` (${(source.confidence * 100).toFixed(0)}% confidence)` : ''}${lastUpdated ? ` - Updated ${lastUpdated}` : ''}`
 		: `Source: ${sourceConfig.label}${showConfidence ? ` (${(source.confidence * 100).toFixed(0)}% confidence)` : ''}${lastUpdated ? ` - Updated ${lastUpdated}` : ''}`}
 >
-	<svelte:component this={sourceConfig.icon} class="h-3 w-3" />
+	<Icon class="h-3 w-3" />
 	<span>{sourceConfig.label}</span>
 	{#if showConfidence}
 		<span class="ml-1 {confidenceColor}">

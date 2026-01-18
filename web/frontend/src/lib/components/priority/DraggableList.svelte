@@ -82,7 +82,6 @@
 			ondrop={() => handleDrop(index)}
 			ondragend={handleDragEnd}
 			role="listitem"
-			tabindex="0"
 		>
 			{#if !disabled}
 				<GripVertical class="h-5 w-5 text-muted-foreground cursor-grab active:cursor-grabbing" />

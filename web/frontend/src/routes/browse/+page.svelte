@@ -28,9 +28,12 @@
 	let availableScrapers: Scraper[] = $state([]);
 	let selectedScrapers: string[] = $state([]);
 	let showScraperSelector = $state(false);
+	type ScalarStrategy = 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
+	type ArrayStrategy = 'merge' | 'replace';
+
 	let selectedPreset: string | undefined = $state(undefined);  // Merge strategy preset: conservative, gap-fill, aggressive
-	let scalarStrategy: string = $state('prefer-nfo');  // For scalar fields: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
-	let arrayStrategy: string = $state('merge');        // For array fields: merge, replace
+	let scalarStrategy: ScalarStrategy = $state('prefer-nfo');  // For scalar fields
+	let arrayStrategy: ArrayStrategy = $state('merge');        // For array fields
 	let showOptionsPanel = $state(false);  // Expandable options panel in sticky bar
 
 	// localStorage keys
@@ -158,7 +161,7 @@
 				destination: isUpdateMode ? undefined : (destinationPath.trim() || undefined),
 				update: isUpdateMode,
 				selected_scrapers: showScraperSelector ? selectedScrapers : undefined,
-				preset: isUpdateMode ? (selectedPreset as any) : undefined,
+				preset: isUpdateMode ? (selectedPreset as 'conservative' | 'gap-fill' | 'aggressive' | undefined) : undefined,
 				scalar_strategy: isUpdateMode ? scalarStrategy : undefined,
 				array_strategy: isUpdateMode ? arrayStrategy : undefined
 			});

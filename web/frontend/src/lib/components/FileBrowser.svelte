@@ -48,7 +48,7 @@
 		scanLoading = false
 	}: Props = $props();
 
-	let currentPath = $state(initialPath);
+	let currentPath = $state('');
 	let items: FileInfo[] = $state([]);
 
 	// Internal Set derived from external array for efficient lookups
@@ -59,8 +59,16 @@
 	let pathParts = $derived(currentPath.split('/').filter((p) => p));
 
 	// Editable path input state
-	let pathInputValue = $state(initialPath);
+	let pathInputValue = $state('');
 	let isPathEditing = $state(false);
+
+	// Sync path state when initialPath changes
+	$effect(() => {
+		if (initialPath && !currentPath) {
+			currentPath = initialPath;
+			pathInputValue = initialPath;
+		}
+	});
 
 	// Scan options
 	let recursiveScan = $state(false);

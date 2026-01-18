@@ -9,6 +9,7 @@
 		class?: string;
 		onclick?: () => void;
 		children?: any;
+		title?: string;
 	}
 
 	let {
@@ -18,7 +19,8 @@
 		type = 'button',
 		class: className,
 		onclick,
-		children
+		children,
+		title
 	}: Props = $props();
 
 	const variants = {
@@ -42,6 +44,7 @@
 <button
 	{type}
 	{disabled}
+	{title}
 	onclick={onclick}
 	class={cn(
 		'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',

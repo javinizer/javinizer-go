@@ -123,6 +123,7 @@
 			<div class="space-y-2">
 				{#each selectedScrapers as scraper, index}
 					<div
+						role="listitem"
 						draggable={!disabled}
 						ondragstart={() => handleDragStart(index)}
 						ondragover={(e) => handleDragOver(e, index)}

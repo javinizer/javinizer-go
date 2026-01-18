@@ -11,7 +11,7 @@
 
 	let { movie, onUpdate }: Props = $props();
 
-	let actresses = $state<Actress[]>(movie.actresses || []);
+	let actresses = $state<Actress[]>([]);
 	let showEditModal = $state(false);
 	let editingIndex = $state<number | null>(null);
 	let editingActress = $state<Actress>({

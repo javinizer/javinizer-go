@@ -53,10 +53,11 @@
 	let fileStatuses = $state<Map<string, {status: string, error?: string}>>(new Map());
 
 	// Determine which panels to show based on download settings
-	const showCoverPanel = $derived(config?.Output?.DownloadCover ?? true);
-	const showPosterPanel = $derived(config?.Output?.DownloadPoster ?? true);
-	const showTrailerPanel = $derived(config?.Output?.DownloadTrailer ?? false);
-	const showScreenshotsPanel = $derived(config?.Output?.DownloadExtrafanart ?? false);
+	// Config uses snake_case JSON property names
+	const showCoverPanel = $derived(config?.output?.download_cover ?? true);
+	const showPosterPanel = $derived(config?.output?.download_poster ?? true);
+	const showTrailerPanel = $derived(config?.output?.download_trailer ?? true);
+	const showScreenshotsPanel = $derived(config?.output?.download_extrafanart ?? true);
 
 	// Image viewer state (unified for screenshots and cover)
 	let showImageViewer = $state(false);
@@ -98,9 +99,12 @@
 	let manualSearchMode = $state(false);
 	let manualSearchInput = $state('');
 	// Merge strategies for update mode (two independent options)
+	type ScalarStrategy = '' | 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
+	type ArrayStrategy = '' | 'merge' | 'replace';
+
 	let rescrapePreset: string | undefined = $state(undefined);  // Merge strategy preset: conservative, gap-fill, aggressive
-	let rescrapeScalarStrategy = $state('prefer-nfo');  // For scalar fields: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
-	let rescrapeArrayStrategy = $state('merge');        // For array fields: merge, replace
+	let rescrapeScalarStrategy: ScalarStrategy = $state('prefer-nfo');  // For scalar fields
+	let rescrapeArrayStrategy: ArrayStrategy = $state('merge');        // For array fields
 
 	// Apply preset to rescrape scalar and array strategies
 	function applyRescrapePreset(preset: string) {
@@ -362,7 +366,7 @@
 				force: true,
 				selected_scrapers: rescrapeSelectedScrapers,
 				manual_search_input: manualSearchMode ? manualSearchInput.trim() : undefined,
-				preset: rescrapePreset as any,
+				preset: rescrapePreset as 'conservative' | 'gap-fill' | 'aggressive' | undefined,
 				scalar_strategy: rescrapeScalarStrategy !== '' ? rescrapeScalarStrategy : undefined,
 				array_strategy: rescrapeArrayStrategy !== '' ? rescrapeArrayStrategy : undefined
 			});

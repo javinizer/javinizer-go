@@ -14,10 +14,10 @@
 
 	let { movie, displayPosterUrl, onUpdate }: Props = $props();
 
-	let screenshots = $state<string[]>(movie.screenshot_urls || []);
-	let posterUrl = $state(movie.poster_url || '');
-	let coverUrl = $state(movie.cover_url || '');
-	let trailerUrl = $state(movie.trailer_url || '');
+	let screenshots = $state<string[]>([]);
+	let posterUrl = $state('');
+	let coverUrl = $state('');
+	let trailerUrl = $state('');
 	let newScreenshotUrl = $state('');
 
 	// Screenshot viewer modal state

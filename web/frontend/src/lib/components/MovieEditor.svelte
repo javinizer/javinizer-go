@@ -10,13 +10,13 @@
 
 	let { movie, originalMovie, onUpdate }: Props = $props();
 
-	// Create a local editable copy
-	let editedMovie = $state({ ...movie });
+	// Create a local editable copy - initialized by effect
+	let editedMovie = $state<Movie>({} as Movie);
 
 	// Genre input state
 	let newGenreInput = $state('');
 
-	// Sync editedMovie when movie prop changes
+	// Sync editedMovie when movie prop changes (including initial mount)
 	$effect(() => {
 		editedMovie = { ...movie };
 	});

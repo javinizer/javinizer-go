@@ -36,7 +36,7 @@
 		warning: 'text-yellow-500'
 	};
 
-	const Icon = icons[type];
+	const Icon = $derived(icons[type]);
 
 	onMount(() => {
 		if (duration > 0) {

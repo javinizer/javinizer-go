@@ -16,7 +16,16 @@
 		children
 	}: Props = $props();
 
-	let expanded = $state(defaultExpanded);
+	let expanded = $state(false);
+	let initialized = $state(false);
+
+	// Initialize expanded state from prop only once
+	$effect(() => {
+		if (!initialized) {
+			expanded = defaultExpanded;
+			initialized = true;
+		}
+	});
 
 	function toggle() {
 		expanded = !expanded;

@@ -11,7 +11,7 @@
 
 	let { show = $bindable(false), images, initialIndex = 0, title, onClose }: Props = $props();
 
-	let currentIndex = $state(initialIndex);
+	let currentIndex = $state(0);
 	let zoom = $state(1); // Changed to decimal scale (1 = 100%)
 	let panX = $state(0);
 	let panY = $state(0);

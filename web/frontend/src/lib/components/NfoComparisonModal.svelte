@@ -341,7 +341,7 @@
 				<div class="flex gap-3">
 					<Button variant="secondary" onclick={onClose}>Close</Button>
 					{#if onApplyMerge && comparison.merged_data}
-						<Button variant="primary" onclick={onApplyMerge}>Apply Merge</Button>
+						<Button variant="default" onclick={onApplyMerge}>Apply Merge</Button>
 					{/if}
 				</div>
 			</div>
