@@ -206,7 +206,9 @@ func (s *Scraper) ResolveContentID(id string) (string, error) {
 				urlCID, cleanURLCID, searchQuery, cleanSearchID, contentID)
 
 			// Match against our search ID (with zeros, without zeros, and normalized)
-			if cleanURLCID == searchQuery || cleanURLCID == cleanSearchID || cleanURLCID == contentID {
+			// Also match variant suffixes (a, b, c) - DMM uses these for different versions
+			// Example: akdl229a matches akdl229, ipx535b matches ipx535
+			if matchesWithVariantSuffix(cleanURLCID, searchQuery, cleanSearchID, contentID) {
 				// Build full URL if it's a relative path
 				fullURL := ""
 				if strings.HasPrefix(href, "/") {
@@ -1590,6 +1592,29 @@ func cleanString(s string) string {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
 	return s
+}
+
+// matchesWithVariantSuffix checks if urlCID matches any of the search IDs,
+// allowing for single-letter variant suffixes (a, b, c, d, etc.) that DMM uses
+// to indicate different versions of the same video.
+// Examples: akdl229a matches akdl229, ipx535b matches ipx535
+func matchesWithVariantSuffix(urlCID string, searchIDs ...string) bool {
+	for _, searchID := range searchIDs {
+		// Exact match
+		if urlCID == searchID {
+			return true
+		}
+
+		// Check if urlCID is searchID + single letter suffix
+		// Only match single lowercase letters a-z as variant suffixes
+		if len(urlCID) == len(searchID)+1 && strings.HasPrefix(urlCID, searchID) {
+			suffix := urlCID[len(searchID):]
+			if len(suffix) == 1 && suffix[0] >= 'a' && suffix[0] <= 'z' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // hiraganaToRomaji converts hiragana to romaji using Nihon-shiki romanization

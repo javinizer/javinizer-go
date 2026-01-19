@@ -1653,3 +1653,115 @@ func TestGetURL_NoRepository(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "movie not found on DMM")
 }
+
+// TestMatchesWithVariantSuffix verifies matching with single-letter variant suffixes
+func TestMatchesWithVariantSuffix(t *testing.T) {
+	tests := []struct {
+		name      string
+		urlCID    string
+		searchIDs []string
+		want      bool
+	}{
+		// Exact matches
+		{
+			name:      "exact match single ID",
+			urlCID:    "akdl229",
+			searchIDs: []string{"akdl229"},
+			want:      true,
+		},
+		{
+			name:      "exact match multiple IDs",
+			urlCID:    "ipx535",
+			searchIDs: []string{"akdl229", "ipx535", "sone860"},
+			want:      true,
+		},
+		// Variant suffix matches (the main feature)
+		{
+			name:      "variant suffix a - real case AKDL-229",
+			urlCID:    "akdl229a",
+			searchIDs: []string{"akdl229"},
+			want:      true,
+		},
+		{
+			name:      "variant suffix b",
+			urlCID:    "ipx535b",
+			searchIDs: []string{"ipx535"},
+			want:      true,
+		},
+		{
+			name:      "variant suffix z",
+			urlCID:    "sone860z",
+			searchIDs: []string{"sone860"},
+			want:      true,
+		},
+		{
+			name:      "variant match in multiple search IDs",
+			urlCID:    "akdl229a",
+			searchIDs: []string{"akdl229", "akdl00229", "notmatch"},
+			want:      true,
+		},
+		// Should NOT match
+		{
+			name:      "no match different IDs",
+			urlCID:    "xyz123",
+			searchIDs: []string{"akdl229", "ipx535"},
+			want:      false,
+		},
+		{
+			name:      "no match uppercase suffix",
+			urlCID:    "akdl229A",
+			searchIDs: []string{"akdl229"},
+			want:      false, // Only lowercase suffixes allowed
+		},
+		{
+			name:      "no match multi-character suffix",
+			urlCID:    "akdl229ab",
+			searchIDs: []string{"akdl229"},
+			want:      false, // Only single character suffix
+		},
+		{
+			name:      "no match numeric suffix",
+			urlCID:    "akdl2291",
+			searchIDs: []string{"akdl229"},
+			want:      false, // Only letters, not numbers
+		},
+		{
+			name:      "no match partial prefix",
+			urlCID:    "akdl22",
+			searchIDs: []string{"akdl229"},
+			want:      false,
+		},
+		{
+			name:      "no match longer base",
+			urlCID:    "akdl229",
+			searchIDs: []string{"akdl2290"},
+			want:      false,
+		},
+		// Edge cases
+		{
+			name:      "empty urlCID",
+			urlCID:    "",
+			searchIDs: []string{"akdl229"},
+			want:      false,
+		},
+		{
+			name:      "empty search IDs",
+			urlCID:    "akdl229a",
+			searchIDs: []string{},
+			want:      false,
+		},
+		{
+			name:      "single character urlCID with suffix",
+			urlCID:    "ab",
+			searchIDs: []string{"a"},
+			want:      true, // "b" is a valid single lowercase letter suffix
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesWithVariantSuffix(tt.urlCID, tt.searchIDs...)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
