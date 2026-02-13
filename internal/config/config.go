@@ -69,14 +69,15 @@ type SystemConfig struct {
 
 // ScrapersConfig holds scraper-specific settings
 type ScrapersConfig struct {
-	UserAgent             string       `yaml:"user_agent" json:"user_agent"`
-	Referer               string       `yaml:"referer" json:"referer"`                                 // Referer header for CDN compatibility (default: https://www.dmm.co.jp/)
-	TimeoutSeconds        int          `yaml:"timeout_seconds" json:"timeout_seconds"`                 // HTTP client timeout in seconds (default: 30)
-	RequestTimeoutSeconds int          `yaml:"request_timeout_seconds" json:"request_timeout_seconds"` // Overall request timeout in seconds (default: 60)
-	Priority              []string     `yaml:"priority" json:"priority"`                               // Global scraper priority order
-	Proxy                 ProxyConfig  `yaml:"proxy" json:"proxy"`                                     // HTTP/SOCKS5 proxy for scraper requests
-	R18Dev                R18DevConfig `yaml:"r18dev" json:"r18dev"`
-	DMM                   DMMConfig    `yaml:"dmm" json:"dmm"`
+	UserAgent             string        `yaml:"user_agent" json:"user_agent"`
+	Referer               string        `yaml:"referer" json:"referer"`                                 // Referer header for CDN compatibility (default: https://www.dmm.co.jp/)
+	TimeoutSeconds        int           `yaml:"timeout_seconds" json:"timeout_seconds"`                 // HTTP client timeout in seconds (default: 30)
+	RequestTimeoutSeconds int           `yaml:"request_timeout_seconds" json:"request_timeout_seconds"` // Overall request timeout in seconds (default: 60)
+	Priority              []string      `yaml:"priority" json:"priority"`                               // Global scraper priority order
+	Proxy                 ProxyConfig   `yaml:"proxy" json:"proxy"`                                     // HTTP/SOCKS5 proxy for scraper requests
+	R18Dev                R18DevConfig  `yaml:"r18dev" json:"r18dev"`
+	DMM                   DMMConfig     `yaml:"dmm" json:"dmm"`
+	MGStage               MGStageConfig `yaml:"mgstage" json:"mgstage"`
 }
 
 // R18DevConfig holds R18.dev scraper configuration
@@ -93,6 +94,12 @@ type DMMConfig struct {
 	ScrapeActress  bool `yaml:"scrape_actress" json:"scrape_actress"`
 	EnableBrowser  bool `yaml:"enable_browser" json:"enable_browser"`   // Enable browser mode for video.dmm.co.jp (JavaScript rendering)
 	BrowserTimeout int  `yaml:"browser_timeout" json:"browser_timeout"` // Timeout in seconds for browser operations (default: 30)
+}
+
+// MGStageConfig holds MGStage scraper configuration
+type MGStageConfig struct {
+	Enabled      bool `yaml:"enabled" json:"enabled"`
+	RequestDelay int  `yaml:"request_delay" json:"request_delay"` // Delay between requests in milliseconds (0 = no delay)
 }
 
 // ProxyConfig holds HTTP/SOCKS5 proxy configuration
@@ -277,6 +284,10 @@ func DefaultConfig() *Config {
 				Enabled:        false, // DMM site now redirects to JavaScript-rendered site
 				ScrapeActress:  false,
 				BrowserTimeout: 30, // Timeout for browser operations
+			},
+			MGStage: MGStageConfig{
+				Enabled:      false, // Opt-in, requires age verification cookie
+				RequestDelay: 500,   // 500ms default delay
 			},
 		},
 		Metadata: MetadataConfig{

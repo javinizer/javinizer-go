@@ -9,6 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
+	"github.com/javinizer/javinizer-go/internal/scraper/mgstage"
 	"github.com/javinizer/javinizer-go/internal/scraper/r18dev"
 )
 
@@ -96,6 +97,7 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 		contentIDRepo := database.NewContentIDMappingRepository(deps.DB)
 		registry.Register(r18dev.New(cfg))
 		registry.Register(dmm.New(cfg, contentIDRepo))
+		registry.Register(mgstage.New(cfg))
 
 		deps.ScraperRegistry = registry
 	}
