@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
+	"github.com/javinizer/javinizer-go/internal/scraper/mgstage"
 	"github.com/javinizer/javinizer-go/internal/scraper/r18dev"
 )
 
@@ -109,6 +110,20 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 						Unit:        "seconds",
 					},
 				}
+			case "mgstage":
+				displayName = "MGStage"
+				// MGStage scraper options
+				options = []ScraperOption{
+					{
+						Key:         "request_delay",
+						Label:       "Request delay",
+						Description: "Delay between requests to avoid rate limiting (0 = no delay)",
+						Type:        "number",
+						Min:         ptrInt(0),
+						Max:         ptrInt(5000),
+						Unit:        "ms",
+					},
+				}
 			}
 
 			scrapers = append(scrapers, ScraperInfo{
@@ -200,6 +215,7 @@ func reloadComponents(deps *ServerDependencies, newCfg *config.Config) error {
 	// Register scrapers with new config
 	newRegistry.Register(r18dev.New(newCfg))
 	newRegistry.Register(dmm.New(newCfg, contentIDRepo))
+	newRegistry.Register(mgstage.New(newCfg))
 
 	// 2. Build new aggregator (outside lock)
 	logging.Debug("Reinitializing aggregator...")
@@ -241,4 +257,9 @@ func reloadComponents(deps *ServerDependencies, newCfg *config.Config) error {
 
 	logging.Info("✓ All components reloaded successfully")
 	return nil
+}
+
+// ptrInt returns a pointer to an int value
+func ptrInt(v int) *int {
+	return &v
 }

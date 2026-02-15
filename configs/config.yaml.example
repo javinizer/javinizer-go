@@ -42,6 +42,7 @@ scrapers:
     priority:
         - r18dev
         - dmm
+        - mgstage
     # HTTP/SOCKS5 proxy for all scraper requests (optional)
     proxy:
         enabled: false
@@ -58,6 +59,9 @@ scrapers:
         scrape_actress: false
         enable_browser: true      # Enable browser automation for JavaScript-rendered pages
         browser_timeout: 30       # Timeout in seconds for browser operations
+    mgstage:
+        enabled: false            # Opt-in: requires age verification cookie (adc=1)
+        request_delay: 500        # Delay between requests in milliseconds
 metadata:
     priority:
         actress:
