@@ -333,7 +333,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 	historyLogger := history.NewLogger(db)
 
 	// Initialize HTTP client for downloader
-	httpClient, err := downloader.NewHTTPClientForDownloader(&cfg.Output)
+	httpClient, err := downloader.NewHTTPClientForDownloader(cfg)
 	if err != nil {
 		wsHub.BroadcastProgress(&ws.ProgressMessage{
 			JobID:    job.ID,
@@ -624,7 +624,7 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 	historyLogger := history.NewLogger(db)
 
 	// Initialize HTTP client for downloader
-	httpClient, err := downloader.NewHTTPClientForDownloader(&cfg.Output)
+	httpClient, err := downloader.NewHTTPClientForDownloader(cfg)
 	if err != nil {
 		wsHub.BroadcastProgress(&ws.ProgressMessage{
 			JobID:    job.ID,

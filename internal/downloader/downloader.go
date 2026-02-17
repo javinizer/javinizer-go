@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -58,26 +59,40 @@ type MultipartInfo struct {
 }
 
 // NewHTTPClientForDownloader creates an HTTP client for production use with proxy and timeout configuration
-func NewHTTPClientForDownloader(cfg *config.OutputConfig) (httpclient.HTTPClient, error) {
+func NewHTTPClientForDownloader(cfg *config.Config) (httpclient.HTTPClient, error) {
+	outputCfg := &cfg.Output
 	// Use configured timeout, default to 60 seconds if not set
-	timeout := cfg.DownloadTimeout
+	timeout := outputCfg.DownloadTimeout
 	if timeout <= 0 {
 		timeout = 60
 	}
 
-	// Determine proxy config: use download_proxy if enabled, otherwise no proxy
-	proxyConfig := &cfg.DownloadProxy
-	if !proxyConfig.Enabled {
-		proxyConfig = nil // No proxy for downloads
+	timeoutDuration := time.Duration(timeout) * time.Second
+
+	adaptiveClient := &adaptiveDownloaderHTTPClient{
+		timeout: timeoutDuration,
+		cfg:     cfg,
+		clients: make(map[string]httpclient.HTTPClient),
 	}
 
-	// Create HTTP client with proxy support
-	client, err := httpclient.NewHTTPClient(proxyConfig, time.Duration(timeout)*time.Second)
+	// If download_proxy is explicitly configured, always use it.
+	if outputCfg.DownloadProxy.Enabled && outputCfg.DownloadProxy.URL != "" {
+		client, err := httpclient.NewHTTPClient(&outputCfg.DownloadProxy, timeoutDuration)
+		if err != nil {
+			logging.Errorf("Downloader: Failed to create download proxy client: %v, using direct client", err)
+		} else {
+			logging.Infof("Downloader: Using download proxy %s", httpclient.SanitizeProxyURL(outputCfg.DownloadProxy.URL))
+			adaptiveClient.forceClient = client
+			return adaptiveClient, nil
+		}
+	}
+
+	// Default direct client
+	directClient, err := httpclient.NewHTTPClient(nil, timeoutDuration)
 	if err != nil {
-		logging.Errorf("Downloader: Failed to create HTTP client with proxy: %v, using default", err)
-		// Fallback to client without proxy
-		client = &http.Client{
-			Timeout: time.Duration(timeout) * time.Second,
+		logging.Errorf("Downloader: Failed to create direct HTTP client: %v, using standard http client", err)
+		directClient = &http.Client{
+			Timeout: timeoutDuration,
 			Transport: &http.Transport{
 				MaxIdleConns:        10,
 				IdleConnTimeout:     30 * time.Second,
@@ -86,11 +101,120 @@ func NewHTTPClientForDownloader(cfg *config.OutputConfig) (httpclient.HTTPClient
 			},
 		}
 	}
+	adaptiveClient.directClient = directClient
 
-	if cfg.DownloadProxy.Enabled {
-		logging.Infof("Downloader: Using proxy %s", httpclient.SanitizeProxyURL(cfg.DownloadProxy.URL))
+	return adaptiveClient, nil
+}
+
+// adaptiveDownloaderHTTPClient routes media downloads through per-scraper proxies when needed.
+type adaptiveDownloaderHTTPClient struct {
+	timeout      time.Duration
+	cfg          *config.Config
+	forceClient  httpclient.HTTPClient // output.download_proxy, if configured
+	directClient httpclient.HTTPClient
+	mu           sync.Mutex
+	clients      map[string]httpclient.HTTPClient // keyed by proxy fingerprint
+}
+
+func (c *adaptiveDownloaderHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	// If explicit download_proxy is configured, always use it.
+	if c.forceClient != nil {
+		return c.forceClient.Do(req)
 	}
 
+	proxyCfg := c.selectProxyForRequest(req)
+	if proxyCfg == nil || !proxyCfg.Enabled || proxyCfg.URL == "" {
+		return c.directClient.Do(req)
+	}
+
+	client, err := c.getOrCreateProxyClient(proxyCfg)
+	if err != nil {
+		logging.Warnf("Downloader: Failed to create proxy client for %s: %v; falling back to direct", req.URL.Host, err)
+		return c.directClient.Do(req)
+	}
+
+	return client.Do(req)
+}
+
+func (c *adaptiveDownloaderHTTPClient) selectProxyForRequest(req *http.Request) *config.ProxyConfig {
+	if req == nil || req.URL == nil || c.cfg == nil {
+		return nil
+	}
+
+	host := strings.ToLower(req.URL.Hostname())
+	if host == "" {
+		return nil
+	}
+
+	switch {
+	case strings.HasSuffix(host, "jdbstatic.com") || strings.HasSuffix(host, "javdb.com"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.JavDB.DownloadProxy, c.cfg.Scrapers.JavDB.Proxy)
+	case strings.Contains(host, "javlibrary"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.JavLibrary.DownloadProxy, c.cfg.Scrapers.JavLibrary.Proxy)
+	case strings.Contains(host, "dmm"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.DMM.DownloadProxy, c.cfg.Scrapers.DMM.Proxy)
+	case strings.Contains(host, "mgstage"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.MGStage.DownloadProxy, c.cfg.Scrapers.MGStage.Proxy)
+	case strings.Contains(host, "r18.dev"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.R18Dev.DownloadProxy, c.cfg.Scrapers.R18Dev.Proxy)
+	}
+
+	// Fallback to global scraper proxy, if enabled.
+	if c.cfg.Scrapers.Proxy.Enabled && c.cfg.Scrapers.Proxy.URL != "" {
+		return &c.cfg.Scrapers.Proxy
+	}
+	return nil
+}
+
+func (c *adaptiveDownloaderHTTPClient) resolveScraperDownloadProxy(downloadOverride, scraperProxy *config.ProxyConfig) *config.ProxyConfig {
+	// Explicit scraper-level download proxy configuration:
+	// - enabled=false => disable download proxy for this scraper
+	// - enabled=true + use_main_proxy=true => reuse scraper main proxy settings
+	// - enabled=true + explicit URL => use dedicated download proxy settings
+	if downloadOverride != nil {
+		if !downloadOverride.Enabled {
+			return nil
+		}
+
+		if downloadOverride.UseMainProxy {
+			resolved := config.ResolveScraperProxy(c.cfg.Scrapers.Proxy, scraperProxy)
+			if resolved != nil && resolved.Enabled && resolved.URL != "" {
+				return resolved
+			}
+			return nil
+		}
+
+		resolved := config.ResolveScraperProxy(c.cfg.Scrapers.Proxy, downloadOverride)
+		if resolved != nil && resolved.Enabled && resolved.URL != "" {
+			return resolved
+		}
+		return nil
+	}
+
+	// Backward-compatible fallback: scraper request proxy also applies to downloads.
+	resolved := config.ResolveScraperProxy(c.cfg.Scrapers.Proxy, scraperProxy)
+	if resolved != nil && resolved.Enabled && resolved.URL != "" {
+		return resolved
+	}
+	return nil
+}
+
+func (c *adaptiveDownloaderHTTPClient) getOrCreateProxyClient(proxyCfg *config.ProxyConfig) (httpclient.HTTPClient, error) {
+	key := fmt.Sprintf("%s|%s|%s", proxyCfg.URL, proxyCfg.Username, proxyCfg.Password)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if client, ok := c.clients[key]; ok {
+		return client, nil
+	}
+
+	client, err := httpclient.NewHTTPClient(proxyCfg, c.timeout)
+	if err != nil {
+		return nil, err
+	}
+	c.clients[key] = client
+	logging.Infof("Downloader: Using scraper-level proxy for media host via %s", httpclient.SanitizeProxyURL(proxyCfg.URL))
 	return client, nil
 }
 

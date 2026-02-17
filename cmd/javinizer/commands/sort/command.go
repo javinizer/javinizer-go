@@ -106,7 +106,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	nfoGenerator := nfo.NewGenerator(afero.NewOsFs(), nfo.ConfigFromAppConfig(&deps.Config.Metadata.NFO, &deps.Config.Output, &deps.Config.Metadata, deps.DB))
 
 	// Initialize HTTP client for downloader
-	httpClient, err := downloader.NewHTTPClientForDownloader(&deps.Config.Output)
+	httpClient, err := downloader.NewHTTPClientForDownloader(deps.Config)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP client: %w", err)
 	}

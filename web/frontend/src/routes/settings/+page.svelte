@@ -159,10 +159,51 @@
 		return Number.isNaN(parsed) ? undefined : parsed;
 	}
 
-	function isOptionDisabled(optionKey: string): boolean {
-		if (optionKey === 'proxy.enabled') {
-			return !(config?.scrapers?.proxy?.enabled ?? false);
+	function isOptionDisabled(scraperName: string, optionKey: string): boolean {
+		const globalProxyEnabled = config?.scrapers?.proxy?.enabled ?? false;
+		const scraperCfg = config?.scrapers?.[scraperName] ?? {};
+
+		if (optionKey.startsWith('proxy.')) {
+			if (!globalProxyEnabled) return true;
+
+			const scraperProxyEnabled = scraperCfg?.proxy?.enabled ?? false;
+			if (optionKey === 'proxy.enabled') return false;
+			if (!scraperProxyEnabled) return true;
+
+			if (
+				(optionKey === 'proxy.url' || optionKey === 'proxy.username' || optionKey === 'proxy.password') &&
+				(scraperCfg?.proxy?.use_main_proxy ?? false)
+			) {
+				return true;
+			}
+
+			if (optionKey.startsWith('proxy.flaresolverr.')) {
+				if (optionKey === 'proxy.flaresolverr.enabled') return false;
+				return !(scraperCfg?.proxy?.flaresolverr?.enabled ?? false);
+			}
+
+			return false;
 		}
+
+		if (optionKey.startsWith('download_proxy.')) {
+			if (!globalProxyEnabled) return true;
+
+			const downloadProxyEnabled = scraperCfg?.download_proxy?.enabled ?? false;
+			if (optionKey === 'download_proxy.enabled') return false;
+			if (!downloadProxyEnabled) return true;
+
+			if (
+				(optionKey === 'download_proxy.url' ||
+					optionKey === 'download_proxy.username' ||
+					optionKey === 'download_proxy.password') &&
+				(scraperCfg?.download_proxy?.use_main_proxy ?? false)
+			) {
+				return true;
+			}
+
+			return false;
+		}
+
 		return false;
 	}
 
@@ -511,11 +552,11 @@
 																<input
 																	type="checkbox"
 																	checked={getOptionValue(scraper.name, option.key)}
-																	disabled={isOptionDisabled(option.key)}
+																	disabled={isOptionDisabled(scraper.name, option.key)}
 																	onchange={(e) => setOptionValue(scraper.name, option.key, e.currentTarget.checked)}
 																	class="rounded"
 																/>
-																<span class="text-sm {isOptionDisabled(option.key) ? 'text-muted-foreground' : ''}">{option.label}</span>
+																<span class="text-sm {isOptionDisabled(scraper.name, option.key) ? 'text-muted-foreground' : ''}">{option.label}</span>
 															</label>
 															<p class="text-xs text-muted-foreground ml-6">
 																{option.description}
@@ -526,6 +567,7 @@
 																<select
 																	id="option-{scraper.name}-{option.key}"
 																	value={getOptionValue(scraper.name, option.key) ?? ''}
+																	disabled={isOptionDisabled(scraper.name, option.key)}
 																	onchange={(e) => setOptionValue(scraper.name, option.key, e.currentTarget.value)}
 																	class="w-48 px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-background text-sm"
 																>
@@ -544,6 +586,7 @@
 																	id="option-{scraper.name}-{option.key}"
 																	type={option.type === 'password' ? 'password' : 'text'}
 																	value={getOptionValue(scraper.name, option.key) ?? ''}
+																	disabled={isOptionDisabled(scraper.name, option.key)}
 																	oninput={(e) => setOptionValue(scraper.name, option.key, e.currentTarget.value)}
 																	class="w-full max-w-md px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-background text-sm"
 																/>
@@ -559,6 +602,7 @@
 																		id="option-{scraper.name}-{option.key}"
 																		type="number"
 																		value={getOptionValue(scraper.name, option.key) ?? ''}
+																		disabled={isOptionDisabled(scraper.name, option.key)}
 																		oninput={(e) => setOptionValue(scraper.name, option.key, parseOptionNumber(e.currentTarget.value))}
 																		min={option.min || 0}
 																		max={option.max || 999}
@@ -1171,6 +1215,7 @@
 						description="Proxy server URL (e.g., http://proxy.example.com:8080 or socks5://localhost:1080)"
 						value={config.scrapers.proxy?.url ?? ""}
 						placeholder="http://proxy.example.com:8080"
+						disabled={!(config.scrapers.proxy?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.scrapers.proxy) config.scrapers.proxy = {};
 							config.scrapers.proxy.url = val;
@@ -1182,6 +1227,7 @@
 						description="Username for authenticated proxy (optional)"
 						value={config.scrapers.proxy?.username ?? ""}
 						placeholder=""
+						disabled={!(config.scrapers.proxy?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.scrapers.proxy) config.scrapers.proxy = {};
 							config.scrapers.proxy.username = val;
@@ -1192,6 +1238,7 @@
 						label="Proxy password"
 						description="Password for authenticated proxy (optional)"
 						value={config.scrapers.proxy?.password ?? ""}
+						disabled={!(config.scrapers.proxy?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.scrapers.proxy) config.scrapers.proxy = {};
 							config.scrapers.proxy.password = val;
@@ -1199,7 +1246,7 @@
 					/>
 
 					<div class="pt-2">
-						<Button variant="outline" size="sm" onclick={() => runProxyTest('direct')} disabled={testingProxy || loading || saving}>
+						<Button variant="outline" size="sm" onclick={() => runProxyTest('direct')} disabled={testingProxy || loading || saving || !(config.scrapers.proxy?.enabled ?? false)}>
 							{#snippet children()}
 								<RefreshCw class={`h-4 w-4 mr-2 ${testingProxy ? 'animate-spin' : ''}`} />
 								{testingProxy ? 'Testing Proxy...' : 'Test Scraper Proxy'}
@@ -1213,6 +1260,7 @@
 						label="Enable FlareSolverr"
 						description="Use FlareSolverr to bypass Cloudflare protection (required for JavLibrary). Run FlareSolverr via Docker: docker run -p 8191:8191 ghcr.io/flaresolverr/flaresolverr:latest"
 						checked={config.scrapers.proxy?.flaresolverr?.enabled ?? false}
+						disabled={!(config.scrapers.proxy?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.scrapers.proxy) config.scrapers.proxy = {};
 							if (!config.scrapers.proxy.flaresolverr) config.scrapers.proxy.flaresolverr = {};
@@ -1225,6 +1273,7 @@
 						description="FlareSolverr API endpoint"
 						value={config.scrapers.proxy?.flaresolverr?.url ?? "http://localhost:8191/v1"}
 						placeholder="http://localhost:8191/v1"
+						disabled={!(config.scrapers.proxy?.enabled ?? false) || !(config.scrapers.proxy?.flaresolverr?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.scrapers.proxy) config.scrapers.proxy = {};
 							if (!config.scrapers.proxy.flaresolverr) config.scrapers.proxy.flaresolverr = {};
@@ -1239,6 +1288,7 @@
 						min={5}
 						max={300}
 						unit="seconds"
+						disabled={!(config.scrapers.proxy?.enabled ?? false) || !(config.scrapers.proxy?.flaresolverr?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.scrapers.proxy) config.scrapers.proxy = {};
 							if (!config.scrapers.proxy.flaresolverr) config.scrapers.proxy.flaresolverr = {};
@@ -1252,6 +1302,7 @@
 						value={config.scrapers.proxy?.flaresolverr?.max_retries ?? 3}
 						min={0}
 						max={10}
+						disabled={!(config.scrapers.proxy?.enabled ?? false) || !(config.scrapers.proxy?.flaresolverr?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.scrapers.proxy) config.scrapers.proxy = {};
 							if (!config.scrapers.proxy.flaresolverr) config.scrapers.proxy.flaresolverr = {};
@@ -1266,6 +1317,7 @@
 						min={60}
 						max={3600}
 						unit="seconds"
+						disabled={!(config.scrapers.proxy?.enabled ?? false) || !(config.scrapers.proxy?.flaresolverr?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.scrapers.proxy) config.scrapers.proxy = {};
 							if (!config.scrapers.proxy.flaresolverr) config.scrapers.proxy.flaresolverr = {};
@@ -1274,7 +1326,7 @@
 					/>
 
 					<div class="pt-2">
-						<Button variant="outline" size="sm" onclick={() => runProxyTest('flaresolverr')} disabled={testingFlareSolverr || loading || saving}>
+						<Button variant="outline" size="sm" onclick={() => runProxyTest('flaresolverr')} disabled={testingFlareSolverr || loading || saving || !(config.scrapers.proxy?.enabled ?? false) || !(config.scrapers.proxy?.flaresolverr?.enabled ?? false)}>
 							{#snippet children()}
 								<RefreshCw class={`h-4 w-4 mr-2 ${testingFlareSolverr ? 'animate-spin' : ''}`} />
 								{testingFlareSolverr ? 'Testing FlareSolverr...' : 'Test FlareSolverr'}
@@ -1299,6 +1351,7 @@
 						description="Proxy server URL for downloads (leave empty to use no proxy for downloads)"
 						value={config.output.download_proxy?.url ?? ""}
 						placeholder="http://proxy.example.com:8080"
+						disabled={!(config.output.download_proxy?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.output.download_proxy) config.output.download_proxy = {};
 							config.output.download_proxy.url = val;
@@ -1310,6 +1363,7 @@
 						description="Username for authenticated download proxy (optional)"
 						value={config.output.download_proxy?.username ?? ""}
 						placeholder=""
+						disabled={!(config.output.download_proxy?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.output.download_proxy) config.output.download_proxy = {};
 							config.output.download_proxy.username = val;
@@ -1320,6 +1374,7 @@
 						label="Download proxy password"
 						description="Password for authenticated download proxy (optional)"
 						value={config.output.download_proxy?.password ?? ""}
+						disabled={!(config.output.download_proxy?.enabled ?? false)}
 						onchange={(val) => {
 							if (!config.output.download_proxy) config.output.download_proxy = {};
 							config.output.download_proxy.password = val;

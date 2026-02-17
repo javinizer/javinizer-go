@@ -91,48 +91,53 @@ type ScrapersConfig struct {
 // R18DevConfig holds R18.dev scraper configuration
 type R18DevConfig struct {
 	Enabled           bool         `yaml:"enabled" json:"enabled"`
-	RequestDelay      int          `yaml:"request_delay" json:"request_delay"`             // Delay between requests in milliseconds (0 = no delay)
-	MaxRetries        int          `yaml:"max_retries" json:"max_retries"`                 // Maximum number of retry attempts for rate-limited requests
-	RespectRetryAfter bool         `yaml:"respect_retry_after" json:"respect_retry_after"` // Whether to respect Retry-After header from server
-	Proxy             *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`         // Optional scraper-specific proxy override
+	RequestDelay      int          `yaml:"request_delay" json:"request_delay"`                       // Delay between requests in milliseconds (0 = no delay)
+	MaxRetries        int          `yaml:"max_retries" json:"max_retries"`                           // Maximum number of retry attempts for rate-limited requests
+	RespectRetryAfter bool         `yaml:"respect_retry_after" json:"respect_retry_after"`           // Whether to respect Retry-After header from server
+	Proxy             *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
+	DownloadProxy     *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
 // DMMConfig holds DMM/Fanza scraper configuration
 type DMMConfig struct {
 	Enabled        bool         `yaml:"enabled" json:"enabled"`
 	ScrapeActress  bool         `yaml:"scrape_actress" json:"scrape_actress"`
-	EnableBrowser  bool         `yaml:"enable_browser" json:"enable_browser"`   // Enable browser mode for video.dmm.co.jp (JavaScript rendering)
-	BrowserTimeout int          `yaml:"browser_timeout" json:"browser_timeout"` // Timeout in seconds for browser operations (default: 30)
-	Proxy          *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"` // Optional scraper-specific proxy override
+	EnableBrowser  bool         `yaml:"enable_browser" json:"enable_browser"`                     // Enable browser mode for video.dmm.co.jp (JavaScript rendering)
+	BrowserTimeout int          `yaml:"browser_timeout" json:"browser_timeout"`                   // Timeout in seconds for browser operations (default: 30)
+	Proxy          *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
+	DownloadProxy  *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
 // MGStageConfig holds MGStage scraper configuration
 type MGStageConfig struct {
-	Enabled      bool         `yaml:"enabled" json:"enabled"`
-	RequestDelay int          `yaml:"request_delay" json:"request_delay"`     // Delay between requests in milliseconds (0 = no delay)
-	Proxy        *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"` // Optional scraper-specific proxy override
+	Enabled       bool         `yaml:"enabled" json:"enabled"`
+	RequestDelay  int          `yaml:"request_delay" json:"request_delay"`                       // Delay between requests in milliseconds (0 = no delay)
+	Proxy         *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
+	DownloadProxy *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
 // JavLibraryConfig holds JavLibrary scraper configuration
 type JavLibraryConfig struct {
 	Enabled         bool         `yaml:"enabled" json:"enabled"`
-	Language        string       `yaml:"language" json:"language"`                 // Language code: en, ja, cn, tw (default: en)
-	RequestDelay    int          `yaml:"request_delay" json:"request_delay"`       // Delay between requests in milliseconds (0 = no delay)
-	BaseURL         string       `yaml:"base_url" json:"base_url"`                 // Base URL for JavLibrary
-	CfClearance     string       `yaml:"cf_clearance" json:"cf_clearance"`         // Cloudflare clearance cookie (deprecated, use FlareSolverr)
-	CfBm            string       `yaml:"cf_bm" json:"cf_bm"`                       // Cloudflare Bot Management cookie (deprecated)
-	UserAgent       string       `yaml:"user_agent" json:"user_agent"`             // Custom user agent (optional)
-	UseFlareSolverr bool         `yaml:"use_flaresolverr" json:"use_flaresolverr"` // Enable FlareSolverr for Cloudflare bypass
-	Proxy           *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`   // Optional scraper-specific proxy override
+	Language        string       `yaml:"language" json:"language"`                                 // Language code: en, ja, cn, tw (default: en)
+	RequestDelay    int          `yaml:"request_delay" json:"request_delay"`                       // Delay between requests in milliseconds (0 = no delay)
+	BaseURL         string       `yaml:"base_url" json:"base_url"`                                 // Base URL for JavLibrary
+	CfClearance     string       `yaml:"cf_clearance" json:"cf_clearance"`                         // Cloudflare clearance cookie (deprecated, use FlareSolverr)
+	CfBm            string       `yaml:"cf_bm" json:"cf_bm"`                                       // Cloudflare Bot Management cookie (deprecated)
+	UserAgent       string       `yaml:"user_agent" json:"user_agent"`                             // Custom user agent (optional)
+	UseFlareSolverr bool         `yaml:"use_flaresolverr" json:"use_flaresolverr"`                 // Enable FlareSolverr for Cloudflare bypass
+	Proxy           *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
+	DownloadProxy   *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
 // JavDBConfig holds JavDB scraper configuration
 type JavDBConfig struct {
 	Enabled         bool         `yaml:"enabled" json:"enabled"`
-	RequestDelay    int          `yaml:"request_delay" json:"request_delay"`       // Delay between requests in milliseconds (0 = no delay)
-	BaseURL         string       `yaml:"base_url" json:"base_url"`                 // Base URL for JavDB
-	UseFlareSolverr bool         `yaml:"use_flaresolverr" json:"use_flaresolverr"` // Enable FlareSolverr for Cloudflare bypass
-	Proxy           *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`   // Optional scraper-specific proxy override
+	RequestDelay    int          `yaml:"request_delay" json:"request_delay"`                       // Delay between requests in milliseconds (0 = no delay)
+	BaseURL         string       `yaml:"base_url" json:"base_url"`                                 // Base URL for JavDB
+	UseFlareSolverr bool         `yaml:"use_flaresolverr" json:"use_flaresolverr"`                 // Enable FlareSolverr for Cloudflare bypass
+	Proxy           *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
+	DownloadProxy   *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
 // FlareSolverrConfig holds FlareSolverr configuration for bypassing Cloudflare
@@ -146,11 +151,12 @@ type FlareSolverrConfig struct {
 
 // ProxyConfig holds HTTP/SOCKS5 proxy configuration
 type ProxyConfig struct {
-	Enabled      bool               `yaml:"enabled" json:"enabled"`           // Enable proxy for HTTP requests
-	URL          string             `yaml:"url" json:"url"`                   // Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
-	Username     string             `yaml:"username" json:"username"`         // Optional proxy authentication username
-	Password     string             `yaml:"password" json:"password"`         // Optional proxy authentication password
-	FlareSolverr FlareSolverrConfig `yaml:"flaresolverr" json:"flaresolverr"` // FlareSolverr for Cloudflare bypass
+	Enabled      bool               `yaml:"enabled" json:"enabled"`               // Enable proxy for HTTP requests
+	UseMainProxy bool               `yaml:"use_main_proxy" json:"use_main_proxy"` // Reuse global scrapers.proxy settings
+	URL          string             `yaml:"url" json:"url"`                       // Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
+	Username     string             `yaml:"username" json:"username"`             // Optional proxy authentication username
+	Password     string             `yaml:"password" json:"password"`             // Optional proxy authentication password
+	FlareSolverr FlareSolverrConfig `yaml:"flaresolverr" json:"flaresolverr"`     // FlareSolverr for Cloudflare bypass
 }
 
 // MetadataConfig holds metadata aggregation settings
@@ -582,11 +588,19 @@ func (c *Config) Validate() error {
 func ResolveScraperProxy(global ProxyConfig, scraperOverride *ProxyConfig) *ProxyConfig {
 	resolved := global
 	if scraperOverride != nil {
-		resolved = *scraperOverride
-		// If scraper-specific proxy override omits FlareSolverr settings entirely,
-		// inherit the global FlareSolverr config so URL/timeout are not lost.
-		if isZeroFlareSolverrConfig(scraperOverride.FlareSolverr) {
-			resolved.FlareSolverr = global.FlareSolverr
+		if scraperOverride.UseMainProxy {
+			// Reuse global proxy settings but allow scraper-level FlareSolverr override.
+			resolved = global
+			if !isZeroFlareSolverrConfig(scraperOverride.FlareSolverr) {
+				resolved.FlareSolverr = scraperOverride.FlareSolverr
+			}
+		} else {
+			resolved = *scraperOverride
+			// If scraper-specific proxy override omits FlareSolverr settings entirely,
+			// inherit the global FlareSolverr config so URL/timeout are not lost.
+			if isZeroFlareSolverrConfig(scraperOverride.FlareSolverr) {
+				resolved.FlareSolverr = global.FlareSolverr
+			}
 		}
 	}
 	return &resolved

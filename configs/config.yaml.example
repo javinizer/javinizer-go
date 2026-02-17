@@ -66,7 +66,15 @@ scrapers:
         # Optional per-scraper proxy override (if omitted, uses scrapers.proxy above)
         # proxy:
         #   enabled: true
+        #   use_main_proxy: false   # true = reuse scrapers.proxy values below
         #   url: "http://dmm-proxy.example.com:8080"
+        #   username: ""
+        #   password: ""
+        # Optional per-scraper download proxy override (used for covers/posters/screenshots/trailers)
+        # download_proxy:
+        #   enabled: true
+        #   use_main_proxy: true    # true = reuse DMM proxy settings above
+        #   url: "http://dmm-download-proxy.example.com:8080"
         #   username: ""
         #   password: ""
     mgstage:
@@ -75,7 +83,13 @@ scrapers:
         # Optional per-scraper proxy override (if omitted, uses scrapers.proxy above)
         # proxy:
         #   enabled: true
+        #   use_main_proxy: false
         #   url: "http://mgstage-proxy.example.com:8080"
+        # Optional per-scraper download proxy override
+        # download_proxy:
+        #   enabled: true
+        #   use_main_proxy: true
+        #   url: "http://mgstage-download-proxy.example.com:8080"
     javlibrary:
         enabled: false
         # Frontend scraper options:
@@ -89,6 +103,7 @@ scrapers:
         # Optional per-scraper proxy + FlareSolverr override
         # proxy:
         #   enabled: true
+        #   use_main_proxy: false
         #   url: "http://javlibrary-proxy.example.com:8080"
         #   username: ""
         #   password: ""
@@ -98,6 +113,13 @@ scrapers:
         #     timeout: 30
         #     max_retries: 3
         #     session_ttl: 300
+        # Optional per-scraper download proxy override
+        # download_proxy:
+        #   enabled: true
+        #   use_main_proxy: true
+        #   url: "http://javlibrary-download-proxy.example.com:8080"
+        #   username: ""
+        #   password: ""
     javdb:
         enabled: false
         request_delay: 1000
@@ -106,6 +128,7 @@ scrapers:
         # Optional per-scraper proxy + FlareSolverr override
         # proxy:
         #   enabled: true
+        #   use_main_proxy: false
         #   url: "http://javdb-proxy.example.com:8080"
         #   flaresolverr:
         #     enabled: true
@@ -113,6 +136,13 @@ scrapers:
         #     timeout: 30
         #     max_retries: 3
         #     session_ttl: 300
+        # Optional per-scraper download proxy override
+        # download_proxy:
+        #   enabled: true
+        #   use_main_proxy: true
+        #   url: "http://javdb-download-proxy.example.com:8080"
+        #   username: ""
+        #   password: ""
 metadata:
     priority:
         actress:

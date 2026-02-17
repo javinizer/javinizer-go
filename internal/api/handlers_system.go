@@ -88,15 +88,8 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 			switch name {
 			case "r18dev":
 				displayName = "R18.dev"
-				// R18Dev has no additional options
-				options = []ScraperOption{
-					{
-						Key:         "proxy.enabled",
-						Label:       "Use proxy",
-						Description: "Use scraper-specific proxy settings for this scraper (requires global scraper proxy to be enabled)",
-						Type:        "boolean",
-					},
-				}
+				options = append(options, scraperProxyOptions(false)...)
+				options = append(options, scraperDownloadProxyOptions()...)
 			case "dmm":
 				displayName = "DMM/Fanza"
 				// DMM scraper options
@@ -124,13 +117,9 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 						Max:         &maxTimeout,
 						Unit:        "seconds",
 					},
-					{
-						Key:         "proxy.enabled",
-						Label:       "Use proxy",
-						Description: "Use scraper-specific proxy settings for this scraper (requires global scraper proxy to be enabled)",
-						Type:        "boolean",
-					},
 				}
+				options = append(options, scraperProxyOptions(false)...)
+				options = append(options, scraperDownloadProxyOptions()...)
 			case "mgstage":
 				displayName = "MGStage"
 				// MGStage scraper options
@@ -144,13 +133,9 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 						Max:         ptrInt(5000),
 						Unit:        "ms",
 					},
-					{
-						Key:         "proxy.enabled",
-						Label:       "Use proxy",
-						Description: "Use scraper-specific proxy settings for this scraper (requires global scraper proxy to be enabled)",
-						Type:        "boolean",
-					},
 				}
+				options = append(options, scraperProxyOptions(false)...)
+				options = append(options, scraperDownloadProxyOptions()...)
 			case "javlibrary":
 				displayName = "JavLibrary"
 				options = []ScraperOption{
@@ -187,70 +172,9 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 						Description: "Route requests through FlareSolverr to bypass Cloudflare protection (requires FlareSolverr to be configured in Proxy settings)",
 						Type:        "boolean",
 					},
-					{
-						Key:         "proxy.enabled",
-						Label:       "Proxy override enabled",
-						Description: "Use scraper-specific proxy settings instead of global scrapers.proxy",
-						Type:        "boolean",
-					},
-					{
-						Key:         "proxy.url",
-						Label:       "Proxy URL override",
-						Description: "Scraper-specific proxy URL (http://... or socks5://...)",
-						Type:        "string",
-					},
-					{
-						Key:         "proxy.username",
-						Label:       "Proxy username override",
-						Description: "Optional username for scraper-specific proxy authentication",
-						Type:        "string",
-					},
-					{
-						Key:         "proxy.password",
-						Label:       "Proxy password override",
-						Description: "Optional password for scraper-specific proxy authentication",
-						Type:        "password",
-					},
-					{
-						Key:         "proxy.flaresolverr.enabled",
-						Label:       "FlareSolverr override enabled",
-						Description: "Use scraper-specific FlareSolverr settings instead of global scrapers.proxy.flaresolverr",
-						Type:        "boolean",
-					},
-					{
-						Key:         "proxy.flaresolverr.url",
-						Label:       "FlareSolverr URL override",
-						Description: "Scraper-specific FlareSolverr endpoint (e.g., http://flaresolverr:8191/v1)",
-						Type:        "string",
-					},
-					{
-						Key:         "proxy.flaresolverr.timeout",
-						Label:       "FlareSolverr timeout override",
-						Description: "Scraper-specific FlareSolverr timeout",
-						Type:        "number",
-						Min:         ptrInt(1),
-						Max:         ptrInt(300),
-						Unit:        "seconds",
-					},
-					{
-						Key:         "proxy.flaresolverr.max_retries",
-						Label:       "FlareSolverr retries override",
-						Description: "Scraper-specific FlareSolverr retry attempts",
-						Type:        "number",
-						Min:         ptrInt(0),
-						Max:         ptrInt(10),
-						Unit:        "attempts",
-					},
-					{
-						Key:         "proxy.flaresolverr.session_ttl",
-						Label:       "FlareSolverr session TTL override",
-						Description: "Scraper-specific FlareSolverr session lifetime",
-						Type:        "number",
-						Min:         ptrInt(60),
-						Max:         ptrInt(3600),
-						Unit:        "seconds",
-					},
 				}
+				options = append(options, scraperProxyOptions(true)...)
+				options = append(options, scraperDownloadProxyOptions()...)
 			case "javdb":
 				displayName = "JavDB"
 				options = []ScraperOption{
@@ -275,70 +199,9 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 						Description: "Route requests through FlareSolverr to bypass Cloudflare protection (often needed for JavDB)",
 						Type:        "boolean",
 					},
-					{
-						Key:         "proxy.enabled",
-						Label:       "Proxy override enabled",
-						Description: "Use scraper-specific proxy settings instead of global scrapers.proxy",
-						Type:        "boolean",
-					},
-					{
-						Key:         "proxy.url",
-						Label:       "Proxy URL override",
-						Description: "Scraper-specific proxy URL (http://... or socks5://...)",
-						Type:        "string",
-					},
-					{
-						Key:         "proxy.username",
-						Label:       "Proxy username override",
-						Description: "Optional username for scraper-specific proxy authentication",
-						Type:        "string",
-					},
-					{
-						Key:         "proxy.password",
-						Label:       "Proxy password override",
-						Description: "Optional password for scraper-specific proxy authentication",
-						Type:        "password",
-					},
-					{
-						Key:         "proxy.flaresolverr.enabled",
-						Label:       "FlareSolverr override enabled",
-						Description: "Use scraper-specific FlareSolverr settings instead of global scrapers.proxy.flaresolverr",
-						Type:        "boolean",
-					},
-					{
-						Key:         "proxy.flaresolverr.url",
-						Label:       "FlareSolverr URL override",
-						Description: "Scraper-specific FlareSolverr endpoint (e.g., http://flaresolverr:8191/v1)",
-						Type:        "string",
-					},
-					{
-						Key:         "proxy.flaresolverr.timeout",
-						Label:       "FlareSolverr timeout override",
-						Description: "Scraper-specific FlareSolverr timeout",
-						Type:        "number",
-						Min:         ptrInt(1),
-						Max:         ptrInt(300),
-						Unit:        "seconds",
-					},
-					{
-						Key:         "proxy.flaresolverr.max_retries",
-						Label:       "FlareSolverr retries override",
-						Description: "Scraper-specific FlareSolverr retry attempts",
-						Type:        "number",
-						Min:         ptrInt(0),
-						Max:         ptrInt(10),
-						Unit:        "attempts",
-					},
-					{
-						Key:         "proxy.flaresolverr.session_ttl",
-						Label:       "FlareSolverr session TTL override",
-						Description: "Scraper-specific FlareSolverr session lifetime",
-						Type:        "number",
-						Min:         ptrInt(60),
-						Max:         ptrInt(3600),
-						Unit:        "seconds",
-					},
 				}
+				options = append(options, scraperProxyOptions(true)...)
+				options = append(options, scraperDownloadProxyOptions()...)
 			}
 
 			scrapers = append(scrapers, ScraperInfo{
@@ -609,6 +472,122 @@ func reloadComponents(deps *ServerDependencies, newCfg *config.Config) error {
 
 	logging.Info("✓ All components reloaded successfully")
 	return nil
+}
+
+func scraperProxyOptions(includeFlareSolverr bool) []ScraperOption {
+	options := []ScraperOption{
+		{
+			Key:         "proxy.enabled",
+			Label:       "Proxy override enabled",
+			Description: "Enable scraper-specific proxy usage (requires global Scraper Proxy to be enabled)",
+			Type:        "boolean",
+		},
+		{
+			Key:         "proxy.use_main_proxy",
+			Label:       "Reuse main proxy",
+			Description: "Reuse global scrapers.proxy settings for this scraper",
+			Type:        "boolean",
+		},
+		{
+			Key:         "proxy.url",
+			Label:       "Proxy URL override",
+			Description: "Scraper-specific proxy URL (http://... or socks5://...)",
+			Type:        "string",
+		},
+		{
+			Key:         "proxy.username",
+			Label:       "Proxy username override",
+			Description: "Optional username for scraper-specific proxy authentication",
+			Type:        "string",
+		},
+		{
+			Key:         "proxy.password",
+			Label:       "Proxy password override",
+			Description: "Optional password for scraper-specific proxy authentication",
+			Type:        "password",
+		},
+	}
+
+	if !includeFlareSolverr {
+		return options
+	}
+
+	return append(options,
+		ScraperOption{
+			Key:         "proxy.flaresolverr.enabled",
+			Label:       "FlareSolverr override enabled",
+			Description: "Use scraper-specific FlareSolverr settings instead of global scrapers.proxy.flaresolverr",
+			Type:        "boolean",
+		},
+		ScraperOption{
+			Key:         "proxy.flaresolverr.url",
+			Label:       "FlareSolverr URL override",
+			Description: "Scraper-specific FlareSolverr endpoint (e.g., http://flaresolverr:8191/v1)",
+			Type:        "string",
+		},
+		ScraperOption{
+			Key:         "proxy.flaresolverr.timeout",
+			Label:       "FlareSolverr timeout override",
+			Description: "Scraper-specific FlareSolverr timeout",
+			Type:        "number",
+			Min:         ptrInt(1),
+			Max:         ptrInt(300),
+			Unit:        "seconds",
+		},
+		ScraperOption{
+			Key:         "proxy.flaresolverr.max_retries",
+			Label:       "FlareSolverr retries override",
+			Description: "Scraper-specific FlareSolverr retry attempts",
+			Type:        "number",
+			Min:         ptrInt(0),
+			Max:         ptrInt(10),
+			Unit:        "attempts",
+		},
+		ScraperOption{
+			Key:         "proxy.flaresolverr.session_ttl",
+			Label:       "FlareSolverr session TTL override",
+			Description: "Scraper-specific FlareSolverr session lifetime",
+			Type:        "number",
+			Min:         ptrInt(60),
+			Max:         ptrInt(3600),
+			Unit:        "seconds",
+		},
+	)
+}
+
+func scraperDownloadProxyOptions() []ScraperOption {
+	return []ScraperOption{
+		{
+			Key:         "download_proxy.enabled",
+			Label:       "Download proxy enabled",
+			Description: "Enable scraper-specific proxy usage for downloading cover/poster/screenshots/trailer",
+			Type:        "boolean",
+		},
+		{
+			Key:         "download_proxy.use_main_proxy",
+			Label:       "Download: reuse main proxy",
+			Description: "Reuse this scraper's main proxy settings for downloads",
+			Type:        "boolean",
+		},
+		{
+			Key:         "download_proxy.url",
+			Label:       "Download proxy URL override",
+			Description: "Scraper-specific download proxy URL (http://... or socks5://...)",
+			Type:        "string",
+		},
+		{
+			Key:         "download_proxy.username",
+			Label:       "Download proxy username override",
+			Description: "Optional username for scraper-specific download proxy authentication",
+			Type:        "string",
+		},
+		{
+			Key:         "download_proxy.password",
+			Label:       "Download proxy password override",
+			Description: "Optional password for scraper-specific download proxy authentication",
+			Type:        "password",
+		},
+	}
 }
 
 // ptrInt returns a pointer to an int value

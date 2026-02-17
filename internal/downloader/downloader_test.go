@@ -1177,7 +1177,9 @@ func TestDownloader_Download_Timeout(t *testing.T) {
 	}
 
 	// Create HTTP client with timeout for this test
-	httpClient, err := NewHTTPClientForDownloader(cfg)
+	httpClient, err := NewHTTPClientForDownloader(&config.Config{
+		Output: *cfg,
+	})
 	if err != nil {
 		t.Fatalf("Failed to create HTTP client: %v", err)
 	}
@@ -1226,8 +1228,10 @@ func TestDownloader_Download_WithUserAgent(t *testing.T) {
 }
 
 func TestDownloader_NewHTTPClientForDownloader_DefaultTimeout(t *testing.T) {
-	cfg := &config.OutputConfig{
-		DownloadTimeout: 0, // Should default to 60
+	cfg := &config.Config{
+		Output: config.OutputConfig{
+			DownloadTimeout: 0, // Should default to 60
+		},
 	}
 
 	client, err := NewHTTPClientForDownloader(cfg)
@@ -1235,20 +1239,21 @@ func TestDownloader_NewHTTPClientForDownloader_DefaultTimeout(t *testing.T) {
 		t.Fatalf("NewHTTPClientForDownloader failed: %v", err)
 	}
 
-	// Type assert to *http.Client to check timeout
-	httpClient, ok := client.(*http.Client)
+	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
 	if !ok {
-		t.Fatalf("Expected *http.Client, got %T", client)
+		t.Fatalf("Expected *adaptiveDownloaderHTTPClient, got %T", client)
 	}
 
-	if httpClient.Timeout != 60*time.Second {
-		t.Errorf("Expected default timeout 60s, got %v", httpClient.Timeout)
+	if adaptiveClient.timeout != 60*time.Second {
+		t.Errorf("Expected default timeout 60s, got %v", adaptiveClient.timeout)
 	}
 }
 
 func TestDownloader_NewHTTPClientForDownloader_CustomTimeout(t *testing.T) {
-	cfg := &config.OutputConfig{
-		DownloadTimeout: 30,
+	cfg := &config.Config{
+		Output: config.OutputConfig{
+			DownloadTimeout: 30,
+		},
 	}
 
 	client, err := NewHTTPClientForDownloader(cfg)
@@ -1256,14 +1261,90 @@ func TestDownloader_NewHTTPClientForDownloader_CustomTimeout(t *testing.T) {
 		t.Fatalf("NewHTTPClientForDownloader failed: %v", err)
 	}
 
-	// Type assert to *http.Client to check timeout
-	httpClient, ok := client.(*http.Client)
+	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
 	if !ok {
-		t.Fatalf("Expected *http.Client, got %T", client)
+		t.Fatalf("Expected *adaptiveDownloaderHTTPClient, got %T", client)
 	}
 
-	if httpClient.Timeout != 30*time.Second {
-		t.Errorf("Expected timeout 30s, got %v", httpClient.Timeout)
+	if adaptiveClient.timeout != 30*time.Second {
+		t.Errorf("Expected timeout 30s, got %v", adaptiveClient.timeout)
+	}
+}
+
+func TestAdaptiveDownloader_SelectProxyForRequest_UsesScraperDownloadOverride(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Scrapers.Proxy = config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://global-proxy.example.com:8080",
+	}
+	cfg.Scrapers.JavDB.Proxy = &config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://javdb-main-proxy.example.com:8080",
+	}
+	cfg.Scrapers.JavDB.DownloadProxy = &config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://javdb-download-proxy.example.com:8080",
+	}
+
+	client := &adaptiveDownloaderHTTPClient{cfg: cfg}
+	req := httptest.NewRequest(http.MethodGet, "https://c0.jdbstatic.com/samples/x.jpg", nil)
+
+	resolved := client.selectProxyForRequest(req)
+	if resolved == nil {
+		t.Fatal("Expected proxy to be selected")
+	}
+	if resolved.URL != "http://javdb-download-proxy.example.com:8080" {
+		t.Fatalf("Expected scraper download proxy URL, got %q", resolved.URL)
+	}
+}
+
+func TestAdaptiveDownloader_SelectProxyForRequest_ReusesMainProxyWhenRequested(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Scrapers.Proxy = config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://global-proxy.example.com:8080",
+	}
+	cfg.Scrapers.JavDB.Proxy = &config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://javdb-main-proxy.example.com:8080",
+	}
+	cfg.Scrapers.JavDB.DownloadProxy = &config.ProxyConfig{
+		Enabled:      true,
+		UseMainProxy: true,
+	}
+
+	client := &adaptiveDownloaderHTTPClient{cfg: cfg}
+	req := httptest.NewRequest(http.MethodGet, "https://javdb.com/v/mgnl032", nil)
+
+	resolved := client.selectProxyForRequest(req)
+	if resolved == nil {
+		t.Fatal("Expected proxy to be selected")
+	}
+	if resolved.URL != "http://javdb-main-proxy.example.com:8080" {
+		t.Fatalf("Expected scraper main proxy URL, got %q", resolved.URL)
+	}
+}
+
+func TestAdaptiveDownloader_SelectProxyForRequest_DisablesProxyWhenDownloadOverrideDisabled(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Scrapers.Proxy = config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://global-proxy.example.com:8080",
+	}
+	cfg.Scrapers.JavDB.Proxy = &config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://javdb-main-proxy.example.com:8080",
+	}
+	cfg.Scrapers.JavDB.DownloadProxy = &config.ProxyConfig{
+		Enabled: false,
+	}
+
+	client := &adaptiveDownloaderHTTPClient{cfg: cfg}
+	req := httptest.NewRequest(http.MethodGet, "https://c0.jdbstatic.com/samples/x.jpg", nil)
+
+	resolved := client.selectProxyForRequest(req)
+	if resolved != nil {
+		t.Fatalf("Expected no proxy due to explicit disabled download override, got %q", resolved.URL)
 	}
 }
 
