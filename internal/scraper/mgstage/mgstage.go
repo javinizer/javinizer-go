@@ -1,6 +1,7 @@
 package mgstage
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -18,7 +19,7 @@ import (
 
 const (
 	baseURL    = "https://www.mgstage.com"
-	searchURL  = baseURL + "/search/cSearch.php?search_word=%s"
+	searchURL  = baseURL + "/search/cSearch.php?search_word=%s&type=top&page=1&list_cnt=120"
 	productURL = baseURL + "/product/product_detail/%s/"
 )
 
@@ -26,6 +27,7 @@ const (
 type Scraper struct {
 	client          *resty.Client
 	enabled         bool
+	usingProxy      bool
 	requestDelay    time.Duration
 	lastRequestTime atomic.Value // stores time.Time of last request for rate limiting
 }
@@ -75,6 +77,7 @@ func New(cfg *config.Config) *Scraper {
 	scraper := &Scraper{
 		client:       client,
 		enabled:      cfg.Scrapers.MGStage.Enabled,
+		usingProxy:   proxyConfig.Enabled && strings.TrimSpace(proxyConfig.URL) != "",
 		requestDelay: requestDelay,
 	}
 
@@ -114,7 +117,19 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	}
 
 	if resp.StatusCode() != 200 {
-		return "", fmt.Errorf("MGStage search returned status code %d", resp.StatusCode())
+		// Search can be blocked while direct product URLs still work.
+		// Try direct URL fallback before returning hard failure.
+		directURL := fmt.Sprintf(productURL, id)
+		s.waitForRateLimit()
+
+		directResp, directErr := s.client.R().Get(directURL)
+		s.updateLastRequestTime()
+
+		if directErr == nil && directResp.StatusCode() == 200 {
+			return directURL, nil
+		}
+
+		return "", s.httpStatusError("search", resp.StatusCode())
 	}
 
 	// Parse search results to find product URL
@@ -125,7 +140,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 
 	// Look for product links in search results
 	var foundURL string
-	normalizedID := strings.ToLower(strings.ReplaceAll(id, "-", ""))
+	normalizedID := normalizeIDForSearch(id)
 
 	doc.Find("a[href*='/product/product_detail/']").Each(func(i int, sel *goquery.Selection) {
 		if foundURL != "" {
@@ -137,9 +152,9 @@ func (s *Scraper) GetURL(id string) (string, error) {
 			return
 		}
 
-		// Check if the link contains our ID
-		hrefLower := strings.ToLower(href)
-		if strings.Contains(hrefLower, normalizedID) {
+		// Match by normalized product ID extracted from URL path.
+		hrefID := extractIDFromURL(href)
+		if hrefID != "" && normalizeIDForSearch(hrefID) == normalizedID {
 			// Make URL absolute if needed
 			if strings.HasPrefix(href, "/") {
 				foundURL = baseURL + href
@@ -184,7 +199,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	}
 
 	if resp.StatusCode() != 200 {
-		return nil, fmt.Errorf("MGStage returned status code %d", resp.StatusCode())
+		return nil, s.httpStatusError("detail", resp.StatusCode())
 	}
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
@@ -308,6 +323,18 @@ func (s *Scraper) waitForRateLimit() {
 // updateLastRequestTime updates the timestamp of the last request
 func (s *Scraper) updateLastRequestTime() {
 	s.lastRequestTime.Store(time.Now())
+}
+
+func (s *Scraper) httpStatusError(stage string, statusCode int) error {
+	msg := fmt.Sprintf("MGStage %s returned status code %d", stage, statusCode)
+	if statusCode == 403 {
+		if s.usingProxy {
+			msg += " (proxy likely blocked by MGStage; disable proxy for this scraper or use a different proxy)"
+		} else {
+			msg += " (access blocked by MGStage)"
+		}
+	}
+	return errors.New(msg)
 }
 
 // normalizeIDForSearch normalizes ID for MGStage search

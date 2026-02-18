@@ -92,7 +92,7 @@ func NewHTTPClientForDownloader(cfg *config.Config) (httpclient.HTTPClient, erro
 
 	// Default behavior: when global scraper proxy is enabled, use it for all downloads.
 	// Keep adaptive routing only when scraper-level download overrides are configured.
-	resolvedGlobalProxy := config.ResolveScraperProxy(cfg.Scrapers.Proxy, nil)
+	resolvedGlobalProxy := config.ResolveGlobalProxy(cfg.Scrapers.Proxy)
 	if resolvedGlobalProxy != nil && resolvedGlobalProxy.Enabled && resolvedGlobalProxy.URL != "" && !hasScraperDownloadProxyOverrides(cfg) {
 		client, err := httpclient.NewHTTPClient(resolvedGlobalProxy, timeoutDuration)
 		if err != nil {

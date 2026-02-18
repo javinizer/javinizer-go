@@ -659,44 +659,56 @@ func validateProxyProfileRef(path string, proxyCfg *ProxyConfig, profiles map[st
 }
 
 // ResolveScraperProxy returns the effective proxy config for a scraper.
-// If scraperOverride is nil, the global proxy config is used.
+// Scraper proxy usage is opt-in: a scraper override must be present and enabled.
+// When enabled, missing URL/credentials inherit from global proxy defaults.
 func ResolveScraperProxy(global ProxyConfig, scraperOverride *ProxyConfig) *ProxyConfig {
+	// No scraper override means scraper proxy usage is disabled.
+	if scraperOverride == nil || !scraperOverride.Enabled {
+		return &ProxyConfig{}
+	}
+
 	globalResolved := resolveGlobalProxy(global)
-	resolved := globalResolved
-	if scraperOverride != nil {
-		if scraperOverride.UseMainProxy {
-			// Reuse global proxy settings but allow scraper-level FlareSolverr override.
-			resolved = globalResolved
-			if scraperOverride.Profile != "" {
-				applyNamedProxyProfile(&resolved, global.Profiles, scraperOverride.Profile)
-			}
-			if !isZeroFlareSolverrConfig(scraperOverride.FlareSolverr) {
-				resolved.FlareSolverr = scraperOverride.FlareSolverr
-			}
-		} else {
-			resolved = *scraperOverride
-			if resolved.Profile != "" {
-				applyNamedProxyProfile(&resolved, global.Profiles, resolved.Profile)
-			}
-			// If proxy is enabled but URL is omitted, inherit global proxy
-			// credentials so users can toggle per-scraper proxy usage without
-			// duplicating global proxy values.
-			if resolved.Enabled && resolved.URL == "" {
-				resolved.URL = globalResolved.URL
-				if resolved.Username == "" {
-					resolved.Username = globalResolved.Username
-				}
-				if resolved.Password == "" {
-					resolved.Password = globalResolved.Password
-				}
-			}
-			// If scraper-specific proxy override omits FlareSolverr settings entirely,
-			// inherit the global FlareSolverr config so URL/timeout are not lost.
-			if isZeroFlareSolverrConfig(scraperOverride.FlareSolverr) {
-				resolved.FlareSolverr = globalResolved.FlareSolverr
-			}
+	resolved := *scraperOverride
+
+	if scraperOverride.UseMainProxy {
+		// Reuse global proxy settings but allow scraper-level FlareSolverr override.
+		resolved = globalResolved
+		if scraperOverride.Profile != "" {
+			applyNamedProxyProfile(&resolved, global.Profiles, scraperOverride.Profile)
+		}
+		if !isZeroFlareSolverrConfig(scraperOverride.FlareSolverr) {
+			resolved.FlareSolverr = scraperOverride.FlareSolverr
+		}
+		return &resolved
+	}
+
+	if resolved.Profile != "" {
+		applyNamedProxyProfile(&resolved, global.Profiles, resolved.Profile)
+	}
+	// If proxy is enabled but URL is omitted, inherit global proxy
+	// credentials so users can toggle per-scraper proxy usage without
+	// duplicating global proxy values.
+	if resolved.URL == "" {
+		resolved.URL = globalResolved.URL
+		if resolved.Username == "" {
+			resolved.Username = globalResolved.Username
+		}
+		if resolved.Password == "" {
+			resolved.Password = globalResolved.Password
 		}
 	}
+	// If scraper-specific proxy override omits FlareSolverr settings entirely,
+	// inherit the global FlareSolverr config so URL/timeout are not lost.
+	if isZeroFlareSolverrConfig(scraperOverride.FlareSolverr) {
+		resolved.FlareSolverr = globalResolved.FlareSolverr
+	}
+	return &resolved
+}
+
+// ResolveGlobalProxy returns the effective global proxy config, including the
+// selected default profile when configured.
+func ResolveGlobalProxy(global ProxyConfig) *ProxyConfig {
+	resolved := resolveGlobalProxy(global)
 	return &resolved
 }
 

@@ -2,11 +2,14 @@ package mgstage
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
@@ -745,4 +748,35 @@ func ExampleNew() {
 		// Use the scraper
 		fmt.Println("MGStage scraper is enabled")
 	}
+}
+
+func TestGetURL_ForbiddenWithProxyHint(t *testing.T) {
+	client := resty.New()
+	client.SetTransport(&statusRoundTripper{statusCode: http.StatusForbidden})
+
+	scraper := &Scraper{
+		client:       client,
+		enabled:      true,
+		usingProxy:   true,
+		requestDelay: 0,
+	}
+	scraper.lastRequestTime.Store(time.Time{})
+
+	_, err := scraper.GetURL("SIRO-5615")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status code 403")
+	assert.Contains(t, err.Error(), "proxy likely blocked")
+}
+
+type statusRoundTripper struct {
+	statusCode int
+}
+
+func (s *statusRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: s.statusCode,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader("")),
+		Request:    req,
+	}, nil
 }
