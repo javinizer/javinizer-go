@@ -270,9 +270,59 @@ type MetadataConfig struct {
 	ActressDatabase  ActressDatabaseConfig  `yaml:"actress_database" json:"actress_database"`   // Actress image database (SQLite-backed)
 	GenreReplacement GenreReplacementConfig `yaml:"genre_replacement" json:"genre_replacement"` // Genre replacement/normalization (SQLite-backed)
 	TagDatabase      TagDatabaseConfig      `yaml:"tag_database" json:"tag_database"`           // Per-movie tag database (SQLite-backed)
+	Translation      TranslationConfig      `yaml:"translation" json:"translation"`             // Metadata translation pipeline
 	IgnoreGenres     []string               `yaml:"ignore_genres" json:"ignore_genres"`
 	RequiredFields   []string               `yaml:"required_fields" json:"required_fields"`
 	NFO              NFOConfig              `yaml:"nfo" json:"nfo"`
+}
+
+// TranslationConfig holds metadata translation settings.
+type TranslationConfig struct {
+	Enabled                 bool                    `yaml:"enabled" json:"enabled"`                                     // Enable metadata translation after aggregation
+	Provider                string                  `yaml:"provider" json:"provider"`                                   // openai, deepl, google
+	SourceLanguage          string                  `yaml:"source_language" json:"source_language"`                     // Source language code (e.g., en, ja, auto)
+	TargetLanguage          string                  `yaml:"target_language" json:"target_language"`                     // Target language code (e.g., en, ja, zh)
+	TimeoutSeconds          int                     `yaml:"timeout_seconds" json:"timeout_seconds"`                     // Request timeout in seconds
+	ApplyToPrimary          bool                    `yaml:"apply_to_primary" json:"apply_to_primary"`                   // Replace primary movie metadata with translated text
+	OverwriteExistingTarget bool                    `yaml:"overwrite_existing_target" json:"overwrite_existing_target"` // Overwrite target-language translation if already present
+	Fields                  TranslationFieldsConfig `yaml:"fields" json:"fields"`                                       // Per-field translation controls
+	OpenAI                  OpenAITranslationConfig `yaml:"openai" json:"openai"`                                       // OpenAI/OpenAI-compatible provider settings
+	DeepL                   DeepLTranslationConfig  `yaml:"deepl" json:"deepl"`                                         // DeepL provider settings
+	Google                  GoogleTranslationConfig `yaml:"google" json:"google"`                                       // Google provider settings
+}
+
+// TranslationFieldsConfig controls which metadata fields are translated.
+type TranslationFieldsConfig struct {
+	Title         bool `yaml:"title" json:"title"`
+	OriginalTitle bool `yaml:"original_title" json:"original_title"`
+	Description   bool `yaml:"description" json:"description"`
+	Director      bool `yaml:"director" json:"director"`
+	Maker         bool `yaml:"maker" json:"maker"`
+	Label         bool `yaml:"label" json:"label"`
+	Series        bool `yaml:"series" json:"series"`
+	Genres        bool `yaml:"genres" json:"genres"`
+	Actresses     bool `yaml:"actresses" json:"actresses"`
+}
+
+// OpenAITranslationConfig holds OpenAI-compatible API settings.
+type OpenAITranslationConfig struct {
+	BaseURL string `yaml:"base_url" json:"base_url"` // OpenAI-compatible base URL (e.g., https://api.openai.com/v1)
+	APIKey  string `yaml:"api_key" json:"api_key"`   // API key for the provider
+	Model   string `yaml:"model" json:"model"`       // Model name (e.g., gpt-4o-mini)
+}
+
+// DeepLTranslationConfig holds DeepL provider settings.
+type DeepLTranslationConfig struct {
+	Mode    string `yaml:"mode" json:"mode"`         // free or pro
+	BaseURL string `yaml:"base_url" json:"base_url"` // Optional override (defaults to mode-specific endpoint)
+	APIKey  string `yaml:"api_key" json:"api_key"`   // DeepL API key
+}
+
+// GoogleTranslationConfig holds Google Translate provider settings.
+type GoogleTranslationConfig struct {
+	Mode    string `yaml:"mode" json:"mode"`         // free or paid
+	BaseURL string `yaml:"base_url" json:"base_url"` // Optional override
+	APIKey  string `yaml:"api_key" json:"api_key"`   // Required for paid mode
 }
 
 // PriorityConfig defines which scraper to prefer for each field
@@ -532,6 +582,41 @@ func DefaultConfig() *Config {
 			TagDatabase: TagDatabaseConfig{
 				Enabled: false, // Opt-in feature for per-movie custom tags
 			},
+			Translation: TranslationConfig{
+				Enabled:                 false, // Opt-in to avoid API calls unless explicitly configured
+				Provider:                "openai",
+				SourceLanguage:          "en",
+				TargetLanguage:          "ja",
+				TimeoutSeconds:          60,
+				ApplyToPrimary:          true,
+				OverwriteExistingTarget: true,
+				Fields: TranslationFieldsConfig{
+					Title:         true,
+					OriginalTitle: true,
+					Description:   true,
+					Director:      true,
+					Maker:         true,
+					Label:         true,
+					Series:        true,
+					Genres:        true,
+					Actresses:     true,
+				},
+				OpenAI: OpenAITranslationConfig{
+					BaseURL: "https://api.openai.com/v1",
+					APIKey:  "",
+					Model:   "gpt-4o-mini",
+				},
+				DeepL: DeepLTranslationConfig{
+					Mode:    "free",
+					BaseURL: "",
+					APIKey:  "",
+				},
+				Google: GoogleTranslationConfig{
+					Mode:    "free",
+					BaseURL: "",
+					APIKey:  "",
+				},
+			},
 			IgnoreGenres: []string{},
 			NFO: NFOConfig{
 				Enabled:              true,
@@ -756,6 +841,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("scrapers.referer must be a valid http(s) URL with a host")
 	}
 
+	if err := c.validateTranslationConfig(); err != nil {
+		return err
+	}
+
 	// Validate performance settings
 	if c.Performance.MaxWorkers < 1 || c.Performance.MaxWorkers > 100 {
 		return fmt.Errorf("performance.max_workers must be between 1 and 100")
@@ -767,6 +856,106 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("performance.update_interval must be between 10 and 5000")
 	}
 
+	return nil
+}
+
+func (c *Config) validateTranslationConfig() error {
+	t := &c.Metadata.Translation
+
+	// Apply defaults for omitted fields in partial configs.
+	if strings.TrimSpace(t.Provider) == "" {
+		t.Provider = "openai"
+	}
+	if strings.TrimSpace(t.SourceLanguage) == "" {
+		t.SourceLanguage = "auto"
+	}
+	if strings.TrimSpace(t.TargetLanguage) == "" {
+		t.TargetLanguage = "ja"
+	}
+	if t.TimeoutSeconds <= 0 {
+		t.TimeoutSeconds = 60
+	}
+	if strings.TrimSpace(t.OpenAI.BaseURL) == "" {
+		t.OpenAI.BaseURL = "https://api.openai.com/v1"
+	}
+	if strings.TrimSpace(t.OpenAI.Model) == "" {
+		t.OpenAI.Model = "gpt-4o-mini"
+	}
+	if strings.TrimSpace(t.DeepL.Mode) == "" {
+		t.DeepL.Mode = "free"
+	}
+	if strings.TrimSpace(t.Google.Mode) == "" {
+		t.Google.Mode = "free"
+	}
+
+	if !t.Enabled {
+		return nil
+	}
+
+	if t.TimeoutSeconds < 5 || t.TimeoutSeconds > 300 {
+		return fmt.Errorf("metadata.translation.timeout_seconds must be between 5 and 300")
+	}
+
+	if strings.TrimSpace(t.TargetLanguage) == "" {
+		return fmt.Errorf("metadata.translation.target_language is required when translation is enabled")
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(t.Provider))
+	t.Provider = provider
+	switch provider {
+	case "openai":
+		if strings.TrimSpace(t.OpenAI.APIKey) == "" {
+			return fmt.Errorf("metadata.translation.openai.api_key is required when provider=openai")
+		}
+		if strings.TrimSpace(t.OpenAI.Model) == "" {
+			return fmt.Errorf("metadata.translation.openai.model is required when provider=openai")
+		}
+		if err := validateHTTPBaseURL("metadata.translation.openai.base_url", t.OpenAI.BaseURL); err != nil {
+			return err
+		}
+	case "deepl":
+		mode := strings.ToLower(strings.TrimSpace(t.DeepL.Mode))
+		if mode != "free" && mode != "pro" {
+			return fmt.Errorf("metadata.translation.deepl.mode must be either 'free' or 'pro'")
+		}
+		t.DeepL.Mode = mode
+		if strings.TrimSpace(t.DeepL.APIKey) == "" {
+			return fmt.Errorf("metadata.translation.deepl.api_key is required when provider=deepl")
+		}
+		if strings.TrimSpace(t.DeepL.BaseURL) != "" {
+			if err := validateHTTPBaseURL("metadata.translation.deepl.base_url", t.DeepL.BaseURL); err != nil {
+				return err
+			}
+		}
+	case "google":
+		mode := strings.ToLower(strings.TrimSpace(t.Google.Mode))
+		if mode != "free" && mode != "paid" {
+			return fmt.Errorf("metadata.translation.google.mode must be either 'free' or 'paid'")
+		}
+		t.Google.Mode = mode
+		if mode == "paid" && strings.TrimSpace(t.Google.APIKey) == "" {
+			return fmt.Errorf("metadata.translation.google.api_key is required when provider=google and mode=paid")
+		}
+		if strings.TrimSpace(t.Google.BaseURL) != "" {
+			if err := validateHTTPBaseURL("metadata.translation.google.base_url", t.Google.BaseURL); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("metadata.translation.provider must be one of: openai, deepl, google")
+	}
+
+	return nil
+}
+
+func validateHTTPBaseURL(path, raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("%s must be a valid http(s) URL", path)
+	}
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("%s must be a valid http(s) URL", path)
+	}
 	return nil
 }
 

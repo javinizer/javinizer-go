@@ -301,6 +301,39 @@ metadata:
     tag_database:
         enabled: false  # Enable per-movie tag lookup (opt-in feature)
 
+    # Metadata translation pipeline
+    translation:
+        enabled: false                # Opt-in: disabled by default
+        provider: openai              # openai | deepl | google
+        source_language: ja           # e.g., en, ja, zh, auto
+        target_language: en           # e.g., en, ja, zh
+        timeout_seconds: 60
+        apply_to_primary: true        # Replace main metadata fields with translated text
+        overwrite_existing_target: true
+        fields:
+            title: true
+            original_title: true
+            description: true
+            director: true
+            maker: true
+            label: true
+            series: true
+            genres: true
+            actresses: true
+        openai:
+            # OpenAI-compatible endpoint (works with OpenAI, OpenRouter, and compatible providers)
+            base_url: https://api.openai.com/v1
+            api_key: ""               # Tip: set via OPENAI_API_KEY env var
+            model: gpt-4o-mini
+        deepl:
+            mode: free                # free | pro (API Free/Pro plans)
+            base_url: ""              # Optional override; defaults by mode
+            api_key: ""               # Tip: set via DEEPL_API_KEY env var
+        google:
+            mode: free                # free (public endpoint) | paid (Cloud Translation API)
+            base_url: ""              # Optional override
+            api_key: ""               # Required for paid mode (GOOGLE_TRANSLATE_API_KEY)
+
     # Genres to ignore/filter out. Supports both exact strings and regex patterns.
     # Patterns starting with ^, ending with $, or containing regex metacharacters are treated as regex.
     # Examples:

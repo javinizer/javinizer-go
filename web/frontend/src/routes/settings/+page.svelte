@@ -283,6 +283,48 @@
 		}
 	}
 
+	function ensureTranslationConfig(): void {
+		if (!config?.metadata) config.metadata = {};
+		if (!config.metadata.translation || typeof config.metadata.translation !== 'object') {
+			config.metadata.translation = {};
+		}
+
+		const translation = config.metadata.translation;
+		if (translation.enabled === undefined) translation.enabled = false;
+		if (!translation.provider) translation.provider = 'openai';
+		if (!translation.source_language) translation.source_language = 'en';
+		if (!translation.target_language) translation.target_language = 'ja';
+		if (!translation.timeout_seconds) translation.timeout_seconds = 60;
+		if (translation.apply_to_primary === undefined) translation.apply_to_primary = true;
+		if (translation.overwrite_existing_target === undefined) translation.overwrite_existing_target = true;
+
+		if (!translation.fields || typeof translation.fields !== 'object') translation.fields = {};
+		if (translation.fields.title === undefined) translation.fields.title = true;
+		if (translation.fields.original_title === undefined) translation.fields.original_title = true;
+		if (translation.fields.description === undefined) translation.fields.description = true;
+		if (translation.fields.director === undefined) translation.fields.director = true;
+		if (translation.fields.maker === undefined) translation.fields.maker = true;
+		if (translation.fields.label === undefined) translation.fields.label = true;
+		if (translation.fields.series === undefined) translation.fields.series = true;
+		if (translation.fields.genres === undefined) translation.fields.genres = true;
+		if (translation.fields.actresses === undefined) translation.fields.actresses = true;
+
+		if (!translation.openai || typeof translation.openai !== 'object') translation.openai = {};
+		if (!translation.openai.base_url) translation.openai.base_url = 'https://api.openai.com/v1';
+		if (!translation.openai.model) translation.openai.model = 'gpt-4o-mini';
+		if (!translation.openai.api_key) translation.openai.api_key = '';
+
+		if (!translation.deepl || typeof translation.deepl !== 'object') translation.deepl = {};
+		if (!translation.deepl.mode) translation.deepl.mode = 'free';
+		if (!translation.deepl.base_url) translation.deepl.base_url = '';
+		if (!translation.deepl.api_key) translation.deepl.api_key = '';
+
+		if (!translation.google || typeof translation.google !== 'object') translation.google = {};
+		if (!translation.google.mode) translation.google.mode = 'free';
+		if (!translation.google.base_url) translation.google.base_url = '';
+		if (!translation.google.api_key) translation.google.api_key = '';
+	}
+
 	function getProxyProfileNames(): string[] {
 		if (!config?.scrapers?.proxy?.profiles) return [];
 		return Object.keys(config.scrapers.proxy.profiles).sort();
@@ -622,6 +664,7 @@
 		try {
 			config = await apiClient.request('/api/v1/config');
 			ensureProxyProfilesInitialized();
+			ensureTranslationConfig();
 			stripLegacyDownloadProxyFields();
 			buildScraperList();
 		} catch (e) {
@@ -1341,6 +1384,291 @@
 						}}
 					/>
 				</SettingsSubsection>
+			</SettingsSection>
+
+			<!-- Translation Settings -->
+			<SettingsSection title="Translation Settings" description="Translate aggregated metadata to a target language using configurable providers" defaultExpanded={false}>
+				<SettingsSubsection title="General">
+					<FormToggle
+						label="Enable translation"
+						description="Translate metadata after aggregation and before saving to database"
+						checked={config.metadata.translation?.enabled ?? false}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							config.metadata.translation.enabled = val;
+						}}
+					/>
+
+					<div class="py-4 border-b border-border">
+						<label class="block text-sm font-medium mb-2" for="translation-provider">Provider</label>
+						<select
+							id="translation-provider"
+							bind:value={config.metadata.translation.provider}
+							class={inputClass}
+						>
+							<option value="openai">OpenAI-Compatible (OpenAI/OpenRouter/etc.)</option>
+							<option value="deepl">DeepL</option>
+							<option value="google">Google Translate</option>
+						</select>
+					</div>
+
+					<FormTextInput
+						label="Source language"
+						description="Source language code (use 'auto' when provider supports auto-detection)"
+						value={config.metadata.translation?.source_language ?? "en"}
+						placeholder="en"
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							config.metadata.translation.source_language = val.trim();
+						}}
+					/>
+
+					<FormTextInput
+						label="Target language"
+						description="Target language code for translated metadata"
+						value={config.metadata.translation?.target_language ?? "ja"}
+						placeholder="ja"
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							config.metadata.translation.target_language = val.trim();
+						}}
+					/>
+
+					<FormNumberInput
+						label="Timeout"
+						description="Maximum time to wait for translation API calls"
+						value={config.metadata.translation?.timeout_seconds ?? 60}
+						min={5}
+						max={300}
+						unit="seconds"
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							config.metadata.translation.timeout_seconds = val;
+						}}
+					/>
+
+					<FormToggle
+						label="Apply to primary metadata"
+						description="Replace primary movie fields with translated text"
+						checked={config.metadata.translation?.apply_to_primary ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							config.metadata.translation.apply_to_primary = val;
+						}}
+					/>
+
+					<FormToggle
+						label="Overwrite existing target translation"
+						description="Overwrite target-language translation entries already returned by scrapers"
+						checked={config.metadata.translation?.overwrite_existing_target ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							config.metadata.translation.overwrite_existing_target = val;
+						}}
+					/>
+				</SettingsSubsection>
+
+				<SettingsSubsection title="Field Selection">
+					<FormToggle
+						label="Translate title"
+						description="Translate the title field"
+						checked={config.metadata.translation?.fields?.title ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							if (!config.metadata.translation.fields) config.metadata.translation.fields = {};
+							config.metadata.translation.fields.title = val;
+						}}
+					/>
+					<FormToggle
+						label="Translate original title"
+						description="Translate the original title field"
+						checked={config.metadata.translation?.fields?.original_title ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							if (!config.metadata.translation.fields) config.metadata.translation.fields = {};
+							config.metadata.translation.fields.original_title = val;
+						}}
+					/>
+					<FormToggle
+						label="Translate description"
+						description="Translate the description field"
+						checked={config.metadata.translation?.fields?.description ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							if (!config.metadata.translation.fields) config.metadata.translation.fields = {};
+							config.metadata.translation.fields.description = val;
+						}}
+					/>
+					<FormToggle
+						label="Translate director"
+						description="Translate the director field"
+						checked={config.metadata.translation?.fields?.director ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							if (!config.metadata.translation.fields) config.metadata.translation.fields = {};
+							config.metadata.translation.fields.director = val;
+						}}
+					/>
+					<FormToggle
+						label="Translate maker"
+						description="Translate the maker/studio field"
+						checked={config.metadata.translation?.fields?.maker ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							if (!config.metadata.translation.fields) config.metadata.translation.fields = {};
+							config.metadata.translation.fields.maker = val;
+						}}
+					/>
+					<FormToggle
+						label="Translate label"
+						description="Translate the label field"
+						checked={config.metadata.translation?.fields?.label ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							if (!config.metadata.translation.fields) config.metadata.translation.fields = {};
+							config.metadata.translation.fields.label = val;
+						}}
+					/>
+					<FormToggle
+						label="Translate series"
+						description="Translate the series field"
+						checked={config.metadata.translation?.fields?.series ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							if (!config.metadata.translation.fields) config.metadata.translation.fields = {};
+							config.metadata.translation.fields.series = val;
+						}}
+					/>
+					<FormToggle
+						label="Translate genres"
+						description="Translate genre names"
+						checked={config.metadata.translation?.fields?.genres ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							if (!config.metadata.translation.fields) config.metadata.translation.fields = {};
+							config.metadata.translation.fields.genres = val;
+						}}
+					/>
+					<FormToggle
+						label="Translate actresses"
+						description="Translate actress names"
+						checked={config.metadata.translation?.fields?.actresses ?? true}
+						onchange={(val) => {
+							if (!config.metadata.translation) config.metadata.translation = {};
+							if (!config.metadata.translation.fields) config.metadata.translation.fields = {};
+							config.metadata.translation.fields.actresses = val;
+						}}
+					/>
+				</SettingsSubsection>
+
+				{#if config.metadata.translation?.provider === 'openai'}
+					<SettingsSubsection title="OpenAI-Compatible Provider">
+						<FormTextInput
+							label="Base URL"
+							description="OpenAI-compatible API base URL (works with OpenAI, OpenRouter, and compatible services)"
+							value={config.metadata.translation?.openai?.base_url ?? "https://api.openai.com/v1"}
+							placeholder="https://api.openai.com/v1"
+							onchange={(val) => {
+								if (!config.metadata.translation) config.metadata.translation = {};
+								if (!config.metadata.translation.openai) config.metadata.translation.openai = {};
+								config.metadata.translation.openai.base_url = val.trim();
+							}}
+						/>
+
+						<FormTextInput
+							label="Model"
+							description="Model name for translation requests"
+							value={config.metadata.translation?.openai?.model ?? "gpt-4o-mini"}
+							placeholder="gpt-4o-mini"
+							onchange={(val) => {
+								if (!config.metadata.translation) config.metadata.translation = {};
+								if (!config.metadata.translation.openai) config.metadata.translation.openai = {};
+								config.metadata.translation.openai.model = val.trim();
+							}}
+						/>
+
+						<FormPasswordInput
+							label="API Key"
+							description="API key for the configured OpenAI-compatible service"
+							value={config.metadata.translation?.openai?.api_key ?? ""}
+							onchange={(val) => {
+								if (!config.metadata.translation) config.metadata.translation = {};
+								if (!config.metadata.translation.openai) config.metadata.translation.openai = {};
+								config.metadata.translation.openai.api_key = val;
+							}}
+						/>
+					</SettingsSubsection>
+				{:else if config.metadata.translation?.provider === 'deepl'}
+					<SettingsSubsection title="DeepL Provider">
+						<div class="py-4 border-b border-border">
+							<label class="block text-sm font-medium mb-2" for="deepl-mode">Mode</label>
+							<select id="deepl-mode" bind:value={config.metadata.translation.deepl.mode} class={inputClass}>
+								<option value="free">Free API</option>
+								<option value="pro">Pro API</option>
+							</select>
+							<p class="text-xs text-muted-foreground mt-1">
+								Use <code>free</code> for DeepL API Free plan, or <code>pro</code> for paid DeepL API.
+							</p>
+						</div>
+
+						<FormTextInput
+							label="Base URL (optional)"
+							description="Optional DeepL endpoint override (leave blank to use mode defaults)"
+							value={config.metadata.translation?.deepl?.base_url ?? ""}
+							placeholder="https://api-free.deepl.com"
+							onchange={(val) => {
+								if (!config.metadata.translation) config.metadata.translation = {};
+								if (!config.metadata.translation.deepl) config.metadata.translation.deepl = {};
+								config.metadata.translation.deepl.base_url = val.trim();
+							}}
+						/>
+
+						<FormPasswordInput
+							label="API Key"
+							description="DeepL API key (required for both free and pro API modes)"
+							value={config.metadata.translation?.deepl?.api_key ?? ""}
+							onchange={(val) => {
+								if (!config.metadata.translation) config.metadata.translation = {};
+								if (!config.metadata.translation.deepl) config.metadata.translation.deepl = {};
+								config.metadata.translation.deepl.api_key = val;
+							}}
+						/>
+					</SettingsSubsection>
+				{:else if config.metadata.translation?.provider === 'google'}
+					<SettingsSubsection title="Google Provider">
+						<div class="py-4 border-b border-border">
+							<label class="block text-sm font-medium mb-2" for="google-mode">Mode</label>
+							<select id="google-mode" bind:value={config.metadata.translation.google.mode} class={inputClass}>
+								<option value="free">Free (public endpoint)</option>
+								<option value="paid">Paid (Cloud Translation API)</option>
+							</select>
+						</div>
+
+						<FormTextInput
+							label="Base URL (optional)"
+							description="Optional Google Translate endpoint override"
+							value={config.metadata.translation?.google?.base_url ?? ""}
+							placeholder="https://translation.googleapis.com"
+							onchange={(val) => {
+								if (!config.metadata.translation) config.metadata.translation = {};
+								if (!config.metadata.translation.google) config.metadata.translation.google = {};
+								config.metadata.translation.google.base_url = val.trim();
+							}}
+						/>
+
+						<FormPasswordInput
+							label="API Key"
+							description="Required only for paid mode"
+							value={config.metadata.translation?.google?.api_key ?? ""}
+							disabled={config.metadata.translation?.google?.mode !== 'paid'}
+							onchange={(val) => {
+								if (!config.metadata.translation) config.metadata.translation = {};
+								if (!config.metadata.translation.google) config.metadata.translation.google = {};
+								config.metadata.translation.google.api_key = val;
+							}}
+						/>
+					</SettingsSubsection>
+				{/if}
 			</SettingsSection>
 
 			<!-- NFO Settings -->

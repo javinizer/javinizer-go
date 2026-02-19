@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -9,8 +10,10 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/javinizer/javinizer-go/internal/translation"
 )
 
 // AggregatorInterface abstracts aggregator operations for dependency injection.
@@ -528,6 +531,8 @@ func (a *Aggregator) Aggregate(results []*models.ScraperResult) (*models.Movie, 
 		movie.SourceURL = results[0].SourceURL
 	}
 
+	a.applyConfiguredTranslation(movie)
+
 	// Generate display name from template if configured
 	if a.config.Metadata.NFO.DisplayName != "" {
 		ctx := template.NewContextFromMovie(movie)
@@ -673,6 +678,8 @@ func (a *Aggregator) AggregateWithPriority(results []*models.ScraperResult, cust
 		movie.SourceName = results[0].Source
 		movie.SourceURL = results[0].SourceURL
 	}
+
+	a.applyConfiguredTranslation(movie)
 
 	// Generate display name from template if configured
 	if a.config.Metadata.NFO.DisplayName != "" {
@@ -978,6 +985,101 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult) []models
 	}
 
 	return translations
+}
+
+func (a *Aggregator) applyConfiguredTranslation(movie *models.Movie) {
+	if a == nil || movie == nil || a.config == nil {
+		return
+	}
+
+	translationCfg := a.config.Metadata.Translation
+	if !translationCfg.Enabled {
+		return
+	}
+
+	timeout := translationCfg.TimeoutSeconds
+	if timeout <= 0 {
+		timeout = 60
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	service := translation.New(translationCfg)
+	translatedRecord, err := service.TranslateMovie(ctx, movie)
+	if err != nil {
+		id := movie.ID
+		if id == "" {
+			id = movie.ContentID
+		}
+		logging.Warnf("[%s] Metadata translation failed: %v", id, err)
+		return
+	}
+	if translatedRecord == nil {
+		return
+	}
+
+	movie.Translations = mergeOrAppendTranslation(
+		movie.Translations,
+		*translatedRecord,
+		translationCfg.OverwriteExistingTarget,
+	)
+}
+
+func mergeOrAppendTranslation(
+	existing []models.MovieTranslation,
+	incoming models.MovieTranslation,
+	overwrite bool,
+) []models.MovieTranslation {
+	targetLanguage := strings.ToLower(strings.TrimSpace(incoming.Language))
+	if targetLanguage == "" {
+		return existing
+	}
+
+	for i := range existing {
+		if strings.ToLower(strings.TrimSpace(existing[i].Language)) != targetLanguage {
+			continue
+		}
+
+		if overwrite {
+			existing[i] = mergeTranslationFields(existing[i], incoming)
+		}
+		return existing
+	}
+
+	return append(existing, incoming)
+}
+
+func mergeTranslationFields(current, incoming models.MovieTranslation) models.MovieTranslation {
+	merged := current
+	merged.Language = incoming.Language
+
+	if incoming.Title != "" {
+		merged.Title = incoming.Title
+	}
+	if incoming.OriginalTitle != "" {
+		merged.OriginalTitle = incoming.OriginalTitle
+	}
+	if incoming.Description != "" {
+		merged.Description = incoming.Description
+	}
+	if incoming.Director != "" {
+		merged.Director = incoming.Director
+	}
+	if incoming.Maker != "" {
+		merged.Maker = incoming.Maker
+	}
+	if incoming.Label != "" {
+		merged.Label = incoming.Label
+	}
+	if incoming.Series != "" {
+		merged.Series = incoming.Series
+	}
+	if incoming.SourceName != "" {
+		merged.SourceName = incoming.SourceName
+	}
+
+	return merged
 }
 
 // applyGenreReplacement applies genre replacement if one exists

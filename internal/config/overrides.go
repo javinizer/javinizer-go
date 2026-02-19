@@ -44,6 +44,32 @@ func ApplyEnvironmentOverrides(cfg *Config) {
 		cfg.Logging.Output = strings.Join(newOutputs, ",")
 	}
 
+	// Translation provider credentials/settings
+	if provider := os.Getenv("TRANSLATION_PROVIDER"); provider != "" {
+		cfg.Metadata.Translation.Provider = strings.ToLower(strings.TrimSpace(provider))
+	}
+	if srcLang := os.Getenv("TRANSLATION_SOURCE_LANGUAGE"); srcLang != "" {
+		cfg.Metadata.Translation.SourceLanguage = strings.TrimSpace(srcLang)
+	}
+	if targetLang := os.Getenv("TRANSLATION_TARGET_LANGUAGE"); targetLang != "" {
+		cfg.Metadata.Translation.TargetLanguage = strings.TrimSpace(targetLang)
+	}
+	if openAIKey := os.Getenv("OPENAI_API_KEY"); openAIKey != "" {
+		cfg.Metadata.Translation.OpenAI.APIKey = strings.TrimSpace(openAIKey)
+	}
+	if openAIBaseURL := os.Getenv("OPENAI_BASE_URL"); openAIBaseURL != "" {
+		cfg.Metadata.Translation.OpenAI.BaseURL = strings.TrimSpace(openAIBaseURL)
+	}
+	if openAIModel := os.Getenv("OPENAI_MODEL"); openAIModel != "" {
+		cfg.Metadata.Translation.OpenAI.Model = strings.TrimSpace(openAIModel)
+	}
+	if deeplKey := os.Getenv("DEEPL_API_KEY"); deeplKey != "" {
+		cfg.Metadata.Translation.DeepL.APIKey = strings.TrimSpace(deeplKey)
+	}
+	if googleKey := os.Getenv("GOOGLE_TRANSLATE_API_KEY"); googleKey != "" {
+		cfg.Metadata.Translation.Google.APIKey = strings.TrimSpace(googleKey)
+	}
+
 	// Docker auto-detection
 	if len(cfg.API.Security.AllowedDirectories) == 0 {
 		if _, err := os.Stat("/media"); err == nil {
