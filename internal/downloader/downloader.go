@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -132,7 +133,12 @@ func hasScraperDownloadProxyOverrides(cfg *config.Config) bool {
 		cfg.Scrapers.DMM.DownloadProxy != nil ||
 		cfg.Scrapers.MGStage.DownloadProxy != nil ||
 		cfg.Scrapers.JavLibrary.DownloadProxy != nil ||
-		cfg.Scrapers.JavDB.DownloadProxy != nil
+		cfg.Scrapers.JavDB.DownloadProxy != nil ||
+		cfg.Scrapers.JavBus.DownloadProxy != nil ||
+		cfg.Scrapers.Jav321.DownloadProxy != nil ||
+		cfg.Scrapers.TokyoHot.DownloadProxy != nil ||
+		cfg.Scrapers.AVEntertainment.DownloadProxy != nil ||
+		cfg.Scrapers.DLGetchu.DownloadProxy != nil
 }
 
 // adaptiveDownloaderHTTPClient routes media downloads through per-scraper proxies when needed.
@@ -178,6 +184,16 @@ func (c *adaptiveDownloaderHTTPClient) selectProxyForRequest(req *http.Request) 
 	switch {
 	case strings.HasSuffix(host, "jdbstatic.com") || strings.HasSuffix(host, "javdb.com"):
 		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.JavDB.DownloadProxy, c.cfg.Scrapers.JavDB.Proxy)
+	case strings.HasSuffix(host, "javbus.com") || strings.HasSuffix(host, "javbus.org"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.JavBus.DownloadProxy, c.cfg.Scrapers.JavBus.Proxy)
+	case strings.HasSuffix(host, "jav321.com"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.Jav321.DownloadProxy, c.cfg.Scrapers.Jav321.Proxy)
+	case strings.HasSuffix(host, "tokyo-hot.com"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.TokyoHot.DownloadProxy, c.cfg.Scrapers.TokyoHot.Proxy)
+	case strings.HasSuffix(host, "aventertainments.com"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.AVEntertainment.DownloadProxy, c.cfg.Scrapers.AVEntertainment.Proxy)
+	case strings.HasSuffix(host, "dl.getchu.com") || strings.HasSuffix(host, "getchu.com"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.DLGetchu.DownloadProxy, c.cfg.Scrapers.DLGetchu.Proxy)
 	case strings.Contains(host, "javlibrary"):
 		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.JavLibrary.DownloadProxy, c.cfg.Scrapers.JavLibrary.Proxy)
 	case strings.Contains(host, "dmm"):
@@ -189,8 +205,9 @@ func (c *adaptiveDownloaderHTTPClient) selectProxyForRequest(req *http.Request) 
 	}
 
 	// Fallback to global scraper proxy, if enabled.
-	if c.cfg.Scrapers.Proxy.Enabled && c.cfg.Scrapers.Proxy.URL != "" {
-		return &c.cfg.Scrapers.Proxy
+	resolvedGlobalProxy := config.ResolveGlobalProxy(c.cfg.Scrapers.Proxy)
+	if resolvedGlobalProxy != nil && resolvedGlobalProxy.Enabled && resolvedGlobalProxy.URL != "" {
+		return resolvedGlobalProxy
 	}
 	return nil
 }
@@ -657,6 +674,9 @@ func (d *Downloader) download(url, destPath string, mediaType MediaType) (*Downl
 	if d.userAgent != "" {
 		req.Header.Set("User-Agent", d.userAgent)
 	}
+	if referer := resolveDownloadReferer(url); referer != "" {
+		req.Header.Set("Referer", referer)
+	}
 
 	// Execute request
 	resp, err := d.httpClient.Do(req)
@@ -809,6 +829,9 @@ func (d *Downloader) downloadSimple(ctx context.Context, url, destPath string) e
 	if d.userAgent != "" {
 		req.Header.Set("User-Agent", d.userAgent)
 	}
+	if referer := resolveDownloadReferer(url); referer != "" {
+		req.Header.Set("Referer", referer)
+	}
 
 	// Execute request
 	resp, err := d.httpClient.Do(req)
@@ -927,6 +950,33 @@ func validateURLScheme(urlStr string) error {
 	}
 
 	return nil
+}
+
+// resolveDownloadReferer selects a compatible Referer header for media downloads.
+// Priority:
+// 1) Known host overrides (hotlink-protected hosts)
+// 2) URL origin fallback
+func resolveDownloadReferer(downloadURL string) string {
+	parsedURL, err := url.Parse(downloadURL)
+	if err != nil {
+		return ""
+	}
+
+	host := strings.ToLower(parsedURL.Hostname())
+	switch {
+	case strings.HasSuffix(host, "jdbstatic.com"), strings.HasSuffix(host, "javdb.com"):
+		return "https://javdb.com/"
+	case strings.HasSuffix(host, "javbus.com"), strings.HasSuffix(host, "javbus.org"):
+		return "https://www.javbus.com/"
+	case strings.HasSuffix(host, "dmm.co.jp"), strings.HasSuffix(host, "dmm.com"), strings.Contains(host, ".dmm."):
+		return "https://www.dmm.co.jp/"
+	}
+
+	if (parsedURL.Scheme == "http" || parsedURL.Scheme == "https") && parsedURL.Host != "" {
+		return parsedURL.Scheme + "://" + parsedURL.Host + "/"
+	}
+
+	return ""
 }
 
 // GetImageExtension determines the image extension from a URL

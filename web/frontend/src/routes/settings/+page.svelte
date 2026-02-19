@@ -431,6 +431,10 @@
 			return false;
 		}
 
+		if (optionKey === 'fake_user_agent') {
+			return !(scraperCfg?.use_fake_user_agent ?? false);
+		}
+
 		return false;
 	}
 

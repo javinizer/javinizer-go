@@ -2,6 +2,7 @@
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
 	import type { Movie } from '$lib/api/types';
+	import { apiClient } from '$lib/api/client';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
 	import ImageViewer from './ImageViewer.svelte';
@@ -76,6 +77,13 @@
 
 	function closeViewer() {
 		showViewer = false;
+	}
+
+	function previewImageURL(url: string): string {
+		if (!url) return '';
+		if (url.startsWith('/api/v1/')) return url;
+		if (url.startsWith('/')) return url;
+		return apiClient.getPreviewImageURL(url);
 	}
 </script>
 
@@ -159,10 +167,10 @@
 						onclick={() => (showCoverViewer = true)}
 						class="w-full rounded border overflow-hidden hover:opacity-80 transition-opacity cursor-pointer"
 					>
-						<img
-							src={coverUrl}
-							alt="Cover"
-							class="w-full"
+							<img
+								src={previewImageURL(coverUrl)}
+								alt="Cover"
+								class="w-full"
 							onerror={(e) => {
 								const target = e.currentTarget as HTMLImageElement; target.style.display = 'none';
 							}}
@@ -262,7 +270,7 @@
 							class="w-full cursor-pointer hover:opacity-80 transition-opacity"
 						>
 							<img
-								src={url}
+								src={previewImageURL(url)}
 								alt="Screenshot {index + 1}"
 								class="w-full aspect-video object-cover rounded"
 								onerror={(e) => {
@@ -296,7 +304,7 @@
 <!-- Screenshot Viewer Modal -->
 <ImageViewer
 	bind:show={showViewer}
-	images={screenshots}
+	images={screenshots.map((url) => previewImageURL(url))}
 	initialIndex={viewerIndex}
 	onClose={closeViewer}
 />
@@ -304,7 +312,7 @@
 <!-- Cover Viewer Modal -->
 <ImageViewer
 	bind:show={showCoverViewer}
-	images={[coverUrl]}
+	images={[previewImageURL(coverUrl)]}
 	initialIndex={0}
 	title="Cover/Fanart"
 	onClose={() => (showCoverViewer = false)}

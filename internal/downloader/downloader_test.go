@@ -547,6 +547,49 @@ func TestGetImageExtension(t *testing.T) {
 	}
 }
 
+func TestResolveDownloadReferer(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+	}{
+		{
+			name:     "javbus host uses javbus referer",
+			url:      "https://www.javbus.com/pics/cover/77dp_b.jpg",
+			expected: "https://www.javbus.com/",
+		},
+		{
+			name:     "javdb static host uses javdb referer",
+			url:      "https://c0.jdbstatic.com/samples/abc.jpg",
+			expected: "https://javdb.com/",
+		},
+		{
+			name:     "dmm host uses dmm referer",
+			url:      "https://pics.dmm.co.jp/digital/video/118abp00880/118abp00880jp-1.jpg",
+			expected: "https://www.dmm.co.jp/",
+		},
+		{
+			name:     "unknown host falls back to origin",
+			url:      "https://images.example.com/a/b.jpg",
+			expected: "https://images.example.com/",
+		},
+		{
+			name:     "invalid url returns empty",
+			url:      "://invalid",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveDownloadReferer(tt.url)
+			if got != tt.expected {
+				t.Errorf("resolveDownloadReferer(%q) = %q, want %q", tt.url, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestDownloader_generateFilename(t *testing.T) {
 	cfg := &config.OutputConfig{
 		PosterFormat:     "<ID>-poster.jpg",

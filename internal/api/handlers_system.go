@@ -16,11 +16,16 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
+	"github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
 	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
+	"github.com/javinizer/javinizer-go/internal/scraper/jav321"
+	"github.com/javinizer/javinizer-go/internal/scraper/javbus"
 	"github.com/javinizer/javinizer-go/internal/scraper/javdb"
 	"github.com/javinizer/javinizer-go/internal/scraper/javlibrary"
 	"github.com/javinizer/javinizer-go/internal/scraper/mgstage"
 	"github.com/javinizer/javinizer-go/internal/scraper/r18dev"
+	"github.com/javinizer/javinizer-go/internal/scraper/tokyohot"
 )
 
 // Mutex to serialize config updates (prevents concurrent read-modify-write races)
@@ -86,11 +91,37 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 
 		// Use getter to get current registry (respects config reloads)
 		registry := deps.GetRegistry()
+		registered := registry.GetAll()
+		scraperByName := make(map[string]models.Scraper, len(registered))
+		for _, scraper := range registered {
+			scraperByName[scraper.Name()] = scraper
+		}
 
-		// Get all registered scrapers
-		for _, scraper := range registry.GetAll() {
-			name := scraper.Name()
+		// Build deterministic order:
+		// 1) config scrapers.priority order
+		// 2) any remaining registered scrapers (sorted by name)
+		orderedNames := make([]string, 0, len(scraperByName))
+		seen := make(map[string]bool, len(scraperByName))
+		if cfg != nil {
+			for _, name := range cfg.Scrapers.Priority {
+				if _, ok := scraperByName[name]; !ok || seen[name] {
+					continue
+				}
+				orderedNames = append(orderedNames, name)
+				seen[name] = true
+			}
+		}
+		remainingNames := make([]string, 0, len(scraperByName))
+		for name := range scraperByName {
+			if !seen[name] {
+				remainingNames = append(remainingNames, name)
+			}
+		}
+		sort.Strings(remainingNames)
+		orderedNames = append(orderedNames, remainingNames...)
 
+		for _, name := range orderedNames {
+			scraper := scraperByName[name]
 			// Map internal names to display names
 			displayName := name
 			var options []ScraperOption
@@ -98,6 +129,7 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 			switch name {
 			case "r18dev":
 				displayName = "R18.dev"
+				options = append(options, scraperFakeUserAgentOptions()...)
 				options = append(options, scraperProxyOptions(profileChoices)...)
 				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
 			case "dmm":
@@ -128,6 +160,7 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 						Unit:        "seconds",
 					},
 				}
+				options = append(options, scraperFakeUserAgentOptions()...)
 				options = append(options, scraperProxyOptions(profileChoices)...)
 				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
 			case "mgstage":
@@ -144,6 +177,7 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 						Unit:        "ms",
 					},
 				}
+				options = append(options, scraperFakeUserAgentOptions()...)
 				options = append(options, scraperProxyOptions(profileChoices)...)
 				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
 			case "javlibrary":
@@ -183,6 +217,7 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 						Type:        "boolean",
 					},
 				}
+				options = append(options, scraperFakeUserAgentOptions()...)
 				options = append(options, scraperProxyOptions(profileChoices)...)
 				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
 			case "javdb":
@@ -210,6 +245,155 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 						Type:        "boolean",
 					},
 				}
+				options = append(options, scraperFakeUserAgentOptions()...)
+				options = append(options, scraperProxyOptions(profileChoices)...)
+				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
+			case "javbus":
+				displayName = "JavBus"
+				options = []ScraperOption{
+					{
+						Key:         "language",
+						Label:       "Language",
+						Description: "Language for metadata output",
+						Type:        "select",
+						Choices: []ScraperChoice{
+							{Value: "ja", Label: "Japanese"},
+							{Value: "en", Label: "English"},
+							{Value: "zh", Label: "Chinese"},
+						},
+					},
+					{
+						Key:         "request_delay",
+						Label:       "Request delay",
+						Description: "Delay between requests to avoid rate limiting",
+						Type:        "number",
+						Min:         ptrInt(0),
+						Max:         ptrInt(5000),
+						Unit:        "ms",
+					},
+					{
+						Key:         "base_url",
+						Label:       "Base URL",
+						Description: "JavBus base URL (leave default unless you need a mirror/domain override)",
+						Type:        "string",
+					},
+					{
+						Key:         "cookie_phpsessid",
+						Label:       "PHPSESSID cookie",
+						Description: "Optional JavBus session cookie value after passing site verification/challenge",
+						Type:        "password",
+					},
+				}
+				options = append(options, scraperFakeUserAgentOptions()...)
+				options = append(options, scraperProxyOptions(profileChoices)...)
+				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
+			case "jav321":
+				displayName = "Jav321"
+				options = []ScraperOption{
+					{
+						Key:         "request_delay",
+						Label:       "Request delay",
+						Description: "Delay between requests to avoid rate limiting",
+						Type:        "number",
+						Min:         ptrInt(0),
+						Max:         ptrInt(5000),
+						Unit:        "ms",
+					},
+					{
+						Key:         "base_url",
+						Label:       "Base URL",
+						Description: "Jav321 base URL",
+						Type:        "string",
+					},
+				}
+				options = append(options, scraperFakeUserAgentOptions()...)
+				options = append(options, scraperProxyOptions(profileChoices)...)
+				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
+			case "tokyohot":
+				displayName = "Tokyo-Hot"
+				options = []ScraperOption{
+					{
+						Key:         "language",
+						Label:       "Language",
+						Description: "Language for metadata output",
+						Type:        "select",
+						Choices: []ScraperChoice{
+							{Value: "ja", Label: "Japanese"},
+							{Value: "en", Label: "English"},
+							{Value: "zh", Label: "Chinese"},
+						},
+					},
+					{
+						Key:         "request_delay",
+						Label:       "Request delay",
+						Description: "Delay between requests to avoid rate limiting",
+						Type:        "number",
+						Min:         ptrInt(0),
+						Max:         ptrInt(5000),
+						Unit:        "ms",
+					},
+					{
+						Key:         "base_url",
+						Label:       "Base URL",
+						Description: "Tokyo-Hot base URL",
+						Type:        "string",
+					},
+				}
+				options = append(options, scraperFakeUserAgentOptions()...)
+				options = append(options, scraperProxyOptions(profileChoices)...)
+				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
+			case "aventertainment":
+				displayName = "AV Entertainment"
+				options = []ScraperOption{
+					{
+						Key:         "language",
+						Label:       "Language",
+						Description: "Language for metadata output",
+						Type:        "select",
+						Choices: []ScraperChoice{
+							{Value: "en", Label: "English"},
+							{Value: "ja", Label: "Japanese"},
+						},
+					},
+					{
+						Key:         "request_delay",
+						Label:       "Request delay",
+						Description: "Delay between requests to avoid rate limiting",
+						Type:        "number",
+						Min:         ptrInt(0),
+						Max:         ptrInt(5000),
+						Unit:        "ms",
+					},
+					{
+						Key:         "base_url",
+						Label:       "Base URL",
+						Description: "AV Entertainment base URL",
+						Type:        "string",
+					},
+				}
+				options = append(options, scraperFakeUserAgentOptions()...)
+				options = append(options, scraperProxyOptions(profileChoices)...)
+				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
+			case "dlgetchu":
+				displayName = "DLGetchu"
+				options = []ScraperOption{
+					{
+						Key:         "request_delay",
+						Label:       "Request delay",
+						Description: "Delay between requests to avoid rate limiting",
+						Type:        "number",
+						Min:         ptrInt(0),
+						Max:         ptrInt(5000),
+						Unit:        "ms",
+					},
+					{
+						Key:         "base_url",
+						Label:       "Base URL",
+						Description: "DLGetchu base URL",
+						Type:        "string",
+					},
+				}
+				options = append(options, scraperFakeUserAgentOptions()...)
 				options = append(options, scraperProxyOptions(profileChoices)...)
 				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
 			}
@@ -280,7 +464,7 @@ func testProxy(deps *ServerDependencies) gin.HandlerFunc {
 
 			userAgent := deps.GetConfig().Scrapers.UserAgent
 			if userAgent == "" {
-				userAgent = "Javinizer (+https://github.com/javinizer/Javinizer)"
+				userAgent = config.DefaultUserAgent
 			}
 
 			httpResp, err := client.R().
@@ -432,10 +616,15 @@ func reloadComponents(deps *ServerDependencies, newCfg *config.Config) error {
 	newRegistry.Register(dmm.New(newCfg, contentIDRepo))
 	newRegistry.Register(mgstage.New(newCfg))
 	newRegistry.Register(javdb.New(newCfg))
+	newRegistry.Register(javbus.New(newCfg))
+	newRegistry.Register(jav321.New(newCfg))
+	newRegistry.Register(tokyohot.New(newCfg))
+	newRegistry.Register(aventertainment.New(newCfg))
+	newRegistry.Register(dlgetchu.New(newCfg))
 
 	// Register JavLibrary scraper (may return error if language is invalid)
 	javLibraryProxy := config.ResolveScraperProxy(newCfg.Scrapers.Proxy, newCfg.Scrapers.JavLibrary.Proxy)
-	javlib, err := javlibrary.New(&newCfg.Scrapers.JavLibrary, javLibraryProxy)
+	javlib, err := javlibrary.New(&newCfg.Scrapers.JavLibrary, javLibraryProxy, newCfg.Scrapers.UserAgent)
 	if err != nil {
 		logging.Warnf("Failed to initialize JavLibrary scraper: %v", err)
 	} else {
@@ -498,6 +687,23 @@ func scraperProxyOptions(profileChoices []ScraperChoice) []ScraperOption {
 			Description: "Optional scraper-specific proxy profile (leave empty to inherit global default profile)",
 			Type:        "select",
 			Choices:     profileChoices,
+		},
+	}
+}
+
+func scraperFakeUserAgentOptions() []ScraperOption {
+	return []ScraperOption{
+		{
+			Key:         "use_fake_user_agent",
+			Label:       "Use fake User-Agent",
+			Description: "Use a browser-like User-Agent string for this scraper",
+			Type:        "boolean",
+		},
+		{
+			Key:         "fake_user_agent",
+			Label:       "Fake User-Agent",
+			Description: "Optional custom fake User-Agent (leave empty to use default browser User-Agent)",
+			Type:        "string",
 		},
 	}
 }

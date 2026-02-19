@@ -17,9 +17,15 @@
 
 	// Helper to format scraper names
 	function formatScraperName(name: string): string {
-		if (name === 'dmm') return 'DMM';
+		if (name === 'dmm') return 'DMM/Fanza';
 		if (name === 'r18dev') return 'R18.dev';
 		if (name === 'javlibrary') return 'JavLibrary';
+		if (name === 'javdb') return 'JavDB';
+		if (name === 'javbus') return 'JavBus';
+		if (name === 'jav321') return 'Jav321';
+		if (name === 'tokyohot') return 'Tokyo-Hot';
+		if (name === 'aventertainment') return 'AV Entertainment';
+		if (name === 'dlgetchu') return 'DLGetchu';
 		return name.charAt(0).toUpperCase() + name.slice(1);
 	}
 </script>

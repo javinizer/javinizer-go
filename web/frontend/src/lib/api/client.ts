@@ -74,6 +74,11 @@ class APIClient {
 		return this.request<HealthResponse>('/health');
 	}
 
+	// Build proxy URL for previewing remote images via backend (handles hotlink-protected hosts)
+	getPreviewImageURL(imageURL: string): string {
+		return `${this.baseURL}/api/v1/temp/image?url=${encodeURIComponent(imageURL)}`;
+	}
+
 	// Get current working directory
 	async getCurrentWorkingDirectory(): Promise<{ path: string }> {
 		return this.request<{ path: string }>('/api/v1/cwd');

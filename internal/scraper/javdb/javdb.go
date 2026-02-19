@@ -60,10 +60,11 @@ func New(cfg *config.Config) *Scraper {
 		fs = nil
 	}
 
-	userAgent := cfg.Scrapers.UserAgent
-	if userAgent == "" {
-		userAgent = "Javinizer (+https://github.com/javinizer/Javinizer)"
-	}
+	userAgent := config.ResolveScraperUserAgent(
+		cfg.Scrapers.UserAgent,
+		scraperCfg.UseFakeUserAgent,
+		scraperCfg.FakeUserAgent,
+	)
 
 	client.SetHeader("User-Agent", userAgent)
 	client.SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")

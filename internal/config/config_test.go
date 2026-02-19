@@ -207,3 +207,51 @@ scrapers:
 		t.Error("Expected default max workers for unspecified field")
 	}
 }
+
+func TestResolveScraperUserAgent(t *testing.T) {
+	tests := []struct {
+		name       string
+		globalUA   string
+		useFake    bool
+		fakeUA     string
+		expectedUA string
+	}{
+		{
+			name:       "global user-agent when fake disabled",
+			globalUA:   "Javinizer-Test-UA",
+			useFake:    false,
+			fakeUA:     "",
+			expectedUA: "Javinizer-Test-UA",
+		},
+		{
+			name:       "default true user-agent when global empty",
+			globalUA:   "",
+			useFake:    false,
+			fakeUA:     "",
+			expectedUA: DefaultUserAgent,
+		},
+		{
+			name:       "default fake user-agent when enabled but custom empty",
+			globalUA:   "ignored",
+			useFake:    true,
+			fakeUA:     "",
+			expectedUA: DefaultFakeUserAgent,
+		},
+		{
+			name:       "custom fake user-agent when enabled",
+			globalUA:   "ignored",
+			useFake:    true,
+			fakeUA:     "Mozilla/5.0 Test",
+			expectedUA: "Mozilla/5.0 Test",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveScraperUserAgent(tt.globalUA, tt.useFake, tt.fakeUA)
+			if got != tt.expectedUA {
+				t.Errorf("expected user-agent %q, got %q", tt.expectedUA, got)
+			}
+		})
+	}
+}

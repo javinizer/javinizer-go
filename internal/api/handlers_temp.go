@@ -1,12 +1,16 @@
 package api
 
 import (
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/downloader"
 )
 
 // serveTempPoster serves temporarily cropped posters from data/temp/posters/
@@ -87,4 +91,102 @@ func serveCroppedPoster() gin.HandlerFunc {
 		c.Header("Cache-Control", "public, max-age=86400")
 		c.File(posterPath)
 	}
+}
+
+// serveTempImage proxies remote images for preview UI.
+// This is used for hotlink-protected sources (e.g., JavBus) where direct browser loads may return 403.
+func serveTempImage(deps *ServerDependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		rawURL := strings.TrimSpace(c.Query("url"))
+		if rawURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "url query parameter is required"})
+			return
+		}
+
+		parsedURL, err := url.Parse(rawURL)
+		if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid image url"})
+			return
+		}
+
+		cfg := deps.GetConfig()
+		httpClient, err := downloader.NewHTTPClientForDownloader(cfg)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create http client"})
+			return
+		}
+
+		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, parsedURL.String(), nil)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create request"})
+			return
+		}
+
+		userAgent := cfg.Scrapers.UserAgent
+		if userAgent == "" {
+			userAgent = config.DefaultUserAgent
+		}
+		req.Header.Set("User-Agent", userAgent)
+		req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+		if referer := resolveTempImageReferer(parsedURL.String(), cfg.Scrapers.Referer); referer != "" {
+			req.Header.Set("Referer", referer)
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "image source returned non-200 status"})
+			return
+		}
+
+		contentType := resp.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "image/jpeg"
+		}
+
+		c.Header("Content-Type", contentType)
+		c.Header("Cache-Control", "private, max-age=300")
+
+		if _, err := io.Copy(c.Writer, resp.Body); err != nil {
+			c.AbortWithStatus(http.StatusBadGateway)
+			return
+		}
+	}
+}
+
+// resolveTempImageReferer selects a compatible Referer for preview image proxy requests.
+// Priority:
+// 1) Known host overrides
+// 2) Configured referer
+// 3) URL origin fallback
+func resolveTempImageReferer(downloadURL, configuredReferer string) string {
+	parsedURL, err := url.Parse(downloadURL)
+	if err != nil {
+		return configuredReferer
+	}
+
+	host := strings.ToLower(parsedURL.Hostname())
+	switch {
+	case strings.HasSuffix(host, "jdbstatic.com"), strings.HasSuffix(host, "javdb.com"):
+		return "https://javdb.com/"
+	case strings.HasSuffix(host, "javbus.com"), strings.HasSuffix(host, "javbus.org"):
+		return "https://www.javbus.com/"
+	case strings.HasSuffix(host, "dmm.co.jp"), strings.HasSuffix(host, "dmm.com"), strings.Contains(host, ".dmm."):
+		return "https://www.dmm.co.jp/"
+	}
+
+	if configuredReferer != "" {
+		return configuredReferer
+	}
+
+	if (parsedURL.Scheme == "http" || parsedURL.Scheme == "https") && parsedURL.Host != "" {
+		return parsedURL.Scheme + "://" + parsedURL.Host + "/"
+	}
+
+	return ""
 }

@@ -289,6 +289,8 @@ func resolvePosterReferer(downloadURL, configuredReferer string) string {
 	switch {
 	case strings.HasSuffix(host, "jdbstatic.com"), strings.HasSuffix(host, "javdb.com"):
 		return "https://javdb.com/"
+	case strings.HasSuffix(host, "javbus.com"), strings.HasSuffix(host, "javbus.org"):
+		return "https://www.javbus.com/"
 	}
 
 	if configuredReferer != "" {

@@ -48,11 +48,11 @@ func New(cfg *config.Config) *Scraper {
 		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
 	}
 
-	// Set user agent
-	userAgent := cfg.Scrapers.UserAgent
-	if userAgent == "" {
-		userAgent = "Javinizer (+https://github.com/javinizer/Javinizer)"
-	}
+	userAgent := config.ResolveScraperUserAgent(
+		cfg.Scrapers.UserAgent,
+		cfg.Scrapers.MGStage.UseFakeUserAgent,
+		cfg.Scrapers.MGStage.FakeUserAgent,
+	)
 	client.SetHeader("User-Agent", userAgent)
 
 	// Add browser-like headers

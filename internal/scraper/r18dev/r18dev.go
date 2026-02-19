@@ -48,11 +48,11 @@ func New(cfg *config.Config) *Scraper {
 		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
 	}
 
-	// Set user agent
-	userAgent := cfg.Scrapers.UserAgent
-	if userAgent == "" {
-		userAgent = "Javinizer (+https://github.com/javinizer/Javinizer)"
-	}
+	userAgent := config.ResolveScraperUserAgent(
+		cfg.Scrapers.UserAgent,
+		cfg.Scrapers.R18Dev.UseFakeUserAgent,
+		cfg.Scrapers.R18Dev.FakeUserAgent,
+	)
 	client.SetHeader("User-Agent", userAgent)
 
 	// Add browser-like headers to help bypass protection

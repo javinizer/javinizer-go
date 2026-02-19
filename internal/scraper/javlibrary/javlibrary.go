@@ -28,8 +28,9 @@ type Scraper struct {
 	language     string
 }
 
-// New creates a new JavLibrary scraper
-func New(cfg *config.JavLibraryConfig, proxyConfig *config.ProxyConfig) (*Scraper, error) {
+// New creates a new JavLibrary scraper.
+// globalUserAgent is optional for backward compatibility with existing callers.
+func New(cfg *config.JavLibraryConfig, proxyConfig *config.ProxyConfig, globalUserAgent ...string) (*Scraper, error) {
 	client, fs, err := httpclient.NewRestyClientWithFlareSolverr(
 		proxyConfig,
 		30*time.Second,
@@ -55,10 +56,20 @@ func New(cfg *config.JavLibraryConfig, proxyConfig *config.ProxyConfig) (*Scrape
 		return nil, fmt.Errorf("unsupported JavLibrary language %q (supported: %v)", language, SupportedLanguages)
 	}
 
-	// Apply custom user agent if configured
-	if cfg.UserAgent != "" {
-		client.SetHeader("User-Agent", cfg.UserAgent)
+	effectiveGlobalUA := ""
+	if len(globalUserAgent) > 0 {
+		effectiveGlobalUA = globalUserAgent[0]
 	}
+	// Legacy per-scraper user_agent field takes precedence when configured.
+	userAgent := strings.TrimSpace(cfg.UserAgent)
+	if userAgent == "" {
+		userAgent = config.ResolveScraperUserAgent(
+			effectiveGlobalUA,
+			cfg.UseFakeUserAgent,
+			cfg.FakeUserAgent,
+		)
+	}
+	client.SetHeader("User-Agent", userAgent)
 
 	if usingProxy {
 		logging.Infof("JavLibrary: Using proxy %s", httpclient.SanitizeProxyURL(proxyConfig.URL))

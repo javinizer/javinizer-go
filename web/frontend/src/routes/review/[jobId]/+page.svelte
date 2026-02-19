@@ -577,10 +577,17 @@
 		return editedMovies.has(filePath);
 	}
 
+	function previewImageURL(url: string | undefined): string {
+		if (!url) return '';
+		if (url.startsWith('/api/v1/')) return url;
+		if (url.startsWith('/')) return url;
+		return apiClient.getPreviewImageURL(url);
+	}
+
 	// Image viewer functions
 	function openScreenshotViewer(index: number) {
 		if (!currentMovie?.screenshot_urls) return;
-		imageViewerImages = currentMovie.screenshot_urls;
+		imageViewerImages = currentMovie.screenshot_urls.map((url) => previewImageURL(url));
 		imageViewerIndex = index;
 		imageViewerTitle = undefined;
 		showImageViewer = true;
@@ -588,7 +595,7 @@
 
 	function openCoverViewer() {
 		if (!currentMovie?.cover_url) return;
-		imageViewerImages = [currentMovie.cover_url];
+		imageViewerImages = [previewImageURL(currentMovie.cover_url)];
 		imageViewerIndex = 0;
 		imageViewerTitle = 'Cover/Fanart';
 		showImageViewer = true;
@@ -855,7 +862,7 @@
 									class="cursor-pointer hover:opacity-80 transition-opacity w-full"
 								>
 									<img
-										src={currentMovie.cover_url}
+										src={previewImageURL(currentMovie.cover_url)}
 										alt="Cover"
 										class="rounded border object-contain"
 										style="max-width: 100%; max-height: 400px; width: auto;"
@@ -901,7 +908,7 @@
 										class="cursor-pointer hover:opacity-80 transition-opacity"
 									>
 										<img
-											src={url}
+											src={previewImageURL(url)}
 											alt="Screenshot"
 											class="w-full aspect-video object-cover rounded border"
 											onerror={(e) => {

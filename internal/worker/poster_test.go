@@ -31,6 +31,12 @@ func TestResolvePosterReferer(t *testing.T) {
 			expected:   "https://javdb.com/",
 		},
 		{
+			name:       "javbus host overrides configured referer",
+			url:        "https://www.javbus.com/pics/cover/77dp_b.jpg",
+			configured: "https://www.dmm.co.jp/",
+			expected:   "https://www.javbus.com/",
+		},
+		{
 			name:       "configured referer used for other hosts",
 			url:        "https://example.com/cover.jpg",
 			configured: "https://www.dmm.co.jp/",

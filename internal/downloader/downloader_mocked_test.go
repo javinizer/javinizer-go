@@ -317,6 +317,62 @@ func TestDownload_UserAgent(t *testing.T) {
 	assert.True(t, result.Downloaded)
 }
 
+func TestDownload_RefererHeader(t *testing.T) {
+	goldenPath := filepath.Join("testdata", "poster.jpg.golden")
+	goldenData, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("Failed to load golden file: %v", err)
+	}
+
+	tests := []struct {
+		name            string
+		url             string
+		expectedReferer string
+	}{
+		{
+			name:            "javbus media uses javbus referer",
+			url:             "https://www.javbus.com/pics/cover/77dp_b.jpg",
+			expectedReferer: "https://www.javbus.com/",
+		},
+		{
+			name:            "javdb media uses javdb referer",
+			url:             "https://c0.jdbstatic.com/samples/abc.jpg",
+			expectedReferer: "https://javdb.com/",
+		},
+		{
+			name:            "unknown host falls back to origin",
+			url:             "https://images.example.com/a/b.jpg",
+			expectedReferer: "https://images.example.com/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockHTTP := mocks.NewMockHTTPClient(t)
+			memFS := afero.NewMemMapFs()
+			destPath := "/tmp/test.jpg"
+
+			mockHTTP.EXPECT().
+				Do(mock.MatchedBy(func(req *http.Request) bool {
+					return req.URL.String() == tt.url &&
+						req.Header.Get("Referer") == tt.expectedReferer
+				})).
+				Return(&http.Response{
+					StatusCode: 200,
+					Body:       io.NopCloser(bytes.NewReader(goldenData)),
+				}, nil).
+				Once()
+
+			cfg := &config.OutputConfig{DownloadTimeout: 60}
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+
+			result, err := downloader.download(tt.url, destPath, MediaTypePoster)
+			assert.NoError(t, err)
+			assert.True(t, result.Downloaded)
+		})
+	}
+}
+
 // TestDownload_ContextUsage tests that download respects context cancellation
 func TestDownload_ContextUsage(t *testing.T) {
 	// Note: The current implementation uses context.Background() internally

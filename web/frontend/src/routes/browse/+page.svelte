@@ -531,7 +531,7 @@
 </div>
 
 <!-- Sticky Bottom Action Bar -->
-<div class="fixed bottom-0 left-0 right-0 bg-background border-t shadow-lg z-40">
+<div class="sticky bottom-0 left-0 right-0 bg-background border-t shadow-lg z-40">
 	<!-- Expandable Options Panel -->
 	{#if showOptionsPanel}
 		<div class="border-b bg-accent/20" transition:slide|local={{ duration: 180, easing: quintOut }}>

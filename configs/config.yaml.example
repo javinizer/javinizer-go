@@ -47,6 +47,11 @@ scrapers:
         - mgstage
         - javlibrary
         - javdb
+        - javbus
+        - jav321
+        - tokyohot
+        - aventertainment
+        - dlgetchu
     # HTTP/SOCKS5 proxy settings and reusable profiles
     proxy:
         enabled: false
@@ -69,11 +74,15 @@ scrapers:
         request_delay: 1500          # Delay between requests in milliseconds (1.5 seconds to stay under 10 req/15s limit)
         max_retries: 3               # Retry up to 3 times on rate limit (429)
         respect_retry_after: true    # Respect Retry-After header from server
+        use_fake_user_agent: false   # Keep false to report true Javinizer user-agent for scraper-friendly sites
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
     dmm:
         enabled: true
         scrape_actress: false
         enable_browser: true      # Enable browser automation for JavaScript-rendered pages
         browser_timeout: 30       # Timeout in seconds for browser operations
+        use_fake_user_agent: false
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
         # Optional per-scraper proxy override using profile selection
         # proxy:
         #   enabled: true
@@ -85,6 +94,8 @@ scrapers:
     mgstage:
         enabled: false            # Opt-in: requires age verification cookie (adc=1)
         request_delay: 500        # Delay between requests in milliseconds
+        use_fake_user_agent: false
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
         # Optional per-scraper proxy override
         # proxy:
         #   enabled: true
@@ -103,6 +114,8 @@ scrapers:
         request_delay: 1000
         base_url: "http://www.javlibrary.com"
         use_flaresolverr: true
+        use_fake_user_agent: true
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
         # Optional per-scraper proxy override (FlareSolverr uses global scrapers.proxy.flaresolverr)
         # proxy:
         #   enabled: true
@@ -116,7 +129,85 @@ scrapers:
         request_delay: 1000
         base_url: "https://javdb.com"
         use_flaresolverr: true
+        use_fake_user_agent: true
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
         # Optional per-scraper proxy override (FlareSolverr uses global scrapers.proxy.flaresolverr)
+        # proxy:
+        #   enabled: true
+        #   profile: "backup"
+        # Optional per-scraper download proxy override
+        # download_proxy:
+        #   enabled: true
+        #   profile: "backup"
+    javbus:
+        enabled: false
+        language: ja
+        request_delay: 1000
+        base_url: "https://www.javbus.com"
+        use_fake_user_agent: true
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+        # Optional: session cookie after passing JavBus verification challenge.
+        # age=verified, dv=1, existmag=mag are applied automatically by scraper.
+        cookie_phpsessid: ""
+        # Optional per-scraper proxy override
+        # proxy:
+        #   enabled: true
+        #   profile: "backup"
+        # Optional per-scraper download proxy override
+        # download_proxy:
+        #   enabled: true
+        #   profile: "backup"
+    jav321:
+        enabled: false
+        request_delay: 1000
+        base_url: "https://jp.jav321.com"
+        use_fake_user_agent: false
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+        # Optional per-scraper proxy override
+        # proxy:
+        #   enabled: true
+        #   profile: "backup"
+        # Optional per-scraper download proxy override
+        # download_proxy:
+        #   enabled: true
+        #   profile: "backup"
+    tokyohot:
+        enabled: false
+        language: ja
+        request_delay: 1000
+        base_url: "https://www.tokyo-hot.com"
+        use_fake_user_agent: false
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+        # Optional per-scraper proxy override
+        # proxy:
+        #   enabled: true
+        #   profile: "backup"
+        # Optional per-scraper download proxy override
+        # download_proxy:
+        #   enabled: true
+        #   profile: "backup"
+    aventertainment:
+        enabled: false
+        language: en
+        request_delay: 1000
+        base_url: "https://www.aventertainments.com"
+        use_fake_user_agent: false
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+        # Optional per-scraper proxy override
+        # proxy:
+        #   enabled: true
+        #   profile: "backup"
+        # Optional per-scraper download proxy override
+        # download_proxy:
+        #   enabled: true
+        #   profile: "backup"
+    dlgetchu:
+        enabled: false
+        request_delay: 1000
+        base_url: "http://dl.getchu.com"
+        use_fake_user_agent: false
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+        # Optional per-scraper proxy override
         # proxy:
         #   enabled: true
         #   profile: "backup"

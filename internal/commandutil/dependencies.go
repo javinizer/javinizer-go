@@ -7,11 +7,18 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
+	"github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
 	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
+	"github.com/javinizer/javinizer-go/internal/scraper/jav321"
+	"github.com/javinizer/javinizer-go/internal/scraper/javbus"
 	"github.com/javinizer/javinizer-go/internal/scraper/javdb"
+	"github.com/javinizer/javinizer-go/internal/scraper/javlibrary"
 	"github.com/javinizer/javinizer-go/internal/scraper/mgstage"
 	"github.com/javinizer/javinizer-go/internal/scraper/r18dev"
+	"github.com/javinizer/javinizer-go/internal/scraper/tokyohot"
 )
 
 // DependenciesInterface abstracts Dependencies for test injection.
@@ -100,6 +107,18 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 		registry.Register(dmm.New(cfg, contentIDRepo))
 		registry.Register(mgstage.New(cfg))
 		registry.Register(javdb.New(cfg))
+		registry.Register(javbus.New(cfg))
+		registry.Register(jav321.New(cfg))
+		registry.Register(tokyohot.New(cfg))
+		registry.Register(aventertainment.New(cfg))
+		registry.Register(dlgetchu.New(cfg))
+		javLibraryProxy := config.ResolveScraperProxy(cfg.Scrapers.Proxy, cfg.Scrapers.JavLibrary.Proxy)
+		javlib, err := javlibrary.New(&cfg.Scrapers.JavLibrary, javLibraryProxy, cfg.Scrapers.UserAgent)
+		if err != nil {
+			logging.Warnf("Failed to initialize JavLibrary scraper: %v", err)
+		} else {
+			registry.Register(javlib)
+		}
 
 		deps.ScraperRegistry = registry
 	}

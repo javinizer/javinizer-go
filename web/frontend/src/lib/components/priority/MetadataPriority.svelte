@@ -52,6 +52,19 @@
 		return config?.scrapers?.priority || [];
 	}
 
+	function formatScraperName(name: string): string {
+		if (name === 'dmm') return 'DMM/Fanza';
+		if (name === 'r18dev') return 'R18.dev';
+		if (name === 'javlibrary') return 'JavLibrary';
+		if (name === 'javdb') return 'JavDB';
+		if (name === 'javbus') return 'JavBus';
+		if (name === 'jav321') return 'Jav321';
+		if (name === 'tokyohot') return 'Tokyo-Hot';
+		if (name === 'aventertainment') return 'AV Entertainment';
+		if (name === 'dlgetchu') return 'DLGetchu';
+		return name;
+	}
+
 	// Helper to get field priority (either custom or global)
 	// Empty arrays mean "use global", same as undefined
 	function getFieldPriority(fieldKey: string): string[] {
@@ -269,7 +282,7 @@
 			>
 				{#snippet children({ item })}
 					<span class="font-medium">
-						{item === 'dmm' ? 'DMM/Fanza' : item === 'r18dev' ? 'R18.dev' : item === 'javlibrary' ? 'JavLibrary' : item}
+						{formatScraperName(item)}
 					</span>
 				{/snippet}
 			</DraggableList>
@@ -349,7 +362,7 @@
 					>
 						{#snippet children({ item })}
 							<span class="font-medium">
-								{item === 'dmm' ? 'DMM/Fanza' : item === 'r18dev' ? 'R18.dev' : item === 'javlibrary' ? 'JavLibrary' : item}
+								{formatScraperName(item)}
 							</span>
 						{/snippet}
 					</DraggableList>

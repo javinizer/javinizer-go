@@ -367,6 +367,7 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 		v1.POST("/batch/:id/update", updateBatchJob(deps))
 		// Temp resource endpoints (for review page preview)
 		v1.GET("/temp/posters/:jobId/:filename", serveTempPoster())
+		v1.GET("/temp/image", serveTempImage(deps))
 		// Persistent resource endpoints (for cropped posters stored in database)
 		v1.GET("/posters/:filename", serveCroppedPoster())
 

@@ -30,13 +30,18 @@ scrapers:
 
 	assert.Equal(t, CurrentConfigVersion, cfg.ConfigVersion)
 	assert.Equal(t, 7777, cfg.Server.Port)
-	assert.Equal(t, []string{"r18dev", "dmm", "mgstage", "javlibrary", "javdb"}, cfg.Scrapers.Priority)
+	assert.Equal(t, []string{"r18dev", "dmm", "mgstage", "javlibrary", "javdb", "javbus", "jav321", "tokyohot", "aventertainment", "dlgetchu"}, cfg.Scrapers.Priority)
 
 	saved, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(saved), "config_version: 1")
 	assert.Contains(t, string(saved), "javlibrary")
 	assert.Contains(t, string(saved), "javdb")
+	assert.Contains(t, string(saved), "javbus")
+	assert.Contains(t, string(saved), "jav321")
+	assert.Contains(t, string(saved), "tokyohot")
+	assert.Contains(t, string(saved), "aventertainment")
+	assert.Contains(t, string(saved), "dlgetchu")
 }
 
 func TestLoadOrCreateSkipsMigrationForCurrentVersion(t *testing.T) {
@@ -97,4 +102,9 @@ scrapers:
 	assert.Contains(t, savedText, "config_version: 1")
 	assert.Contains(t, savedText, "javlibrary")
 	assert.Contains(t, savedText, "javdb")
+	assert.Contains(t, savedText, "javbus")
+	assert.Contains(t, savedText, "jav321")
+	assert.Contains(t, savedText, "tokyohot")
+	assert.Contains(t, savedText, "aventertainment")
+	assert.Contains(t, savedText, "dlgetchu")
 }

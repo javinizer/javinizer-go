@@ -1,0 +1,387 @@
+package dlgetchu
+
+import (
+	"fmt"
+	"net/url"
+	"path"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/go-resty/resty/v2"
+	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"golang.org/x/net/html/charset"
+)
+
+const defaultBaseURL = "http://dl.getchu.com"
+
+var (
+	itemIDRegex      = regexp.MustCompile(`(?i)(?:作品ID[:：]\s*|id=|/item)(\d{4,})`)
+	descriptionRegex = regexp.MustCompile(`(?is)作品内容</td>(.*?)</td>`)
+	releaseDateRegex = regexp.MustCompile(`(\d{4}/\d{2}/\d{2})`)
+	runtimeRegex     = regexp.MustCompile(`([０-９\s]{1,3})分`)
+	makerRegex       = regexp.MustCompile(`(?is)dojin_circle_detail\.php\?id=\d+[^>]*>([^<]+)</a>`) //nolint:gocritic
+	genreRegex       = regexp.MustCompile(`(?is)genre_id=\d+[^>]*>([^<]+)</a>`)                     //nolint:gocritic
+	coverRegex       = regexp.MustCompile(`(?i)(/data/item_img/[^\"']+/\d+top\.jpg)`)
+	screenshotRegex  = regexp.MustCompile(`(?i)"(/data/item_img/[^\"']+\.(?:jpg|jpeg|webp))"\s+class="highslide"`)
+	detailLinkRegex  = regexp.MustCompile(`https?://dl\.getchu\.com/i/item\d+`)
+	detailPathLinkRe = regexp.MustCompile(`(?i)/i/item\d+`)
+)
+
+// Scraper implements the DLgetchu scraper.
+type Scraper struct {
+	client          *resty.Client
+	enabled         bool
+	baseURL         string
+	requestDelay    time.Duration
+	lastRequestTime atomic.Value
+}
+
+// New creates a new DLgetchu scraper.
+func New(cfg *config.Config) *Scraper {
+	scraperCfg := cfg.Scrapers.DLGetchu
+	proxyCfg := config.ResolveScraperProxy(cfg.Scrapers.Proxy, scraperCfg.Proxy)
+
+	client, err := httpclient.NewRestyClient(proxyCfg, 30*time.Second, 3)
+	usingProxy := err == nil && proxyCfg.Enabled && strings.TrimSpace(proxyCfg.URL) != ""
+	if err != nil {
+		logging.Errorf("DLgetchu: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
+		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
+	}
+
+	userAgent := config.ResolveScraperUserAgent(
+		cfg.Scrapers.UserAgent,
+		scraperCfg.UseFakeUserAgent,
+		scraperCfg.FakeUserAgent,
+	)
+	client.SetHeader("User-Agent", userAgent)
+	client.SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	client.SetHeader("Accept-Language", "ja,en-US;q=0.8,en;q=0.6")
+	client.SetHeader("Connection", "keep-alive")
+	client.SetHeader("Upgrade-Insecure-Requests", "1")
+
+	base := strings.TrimSpace(scraperCfg.BaseURL)
+	if base == "" {
+		base = defaultBaseURL
+	}
+	base = strings.TrimRight(base, "/")
+
+	s := &Scraper{
+		client:       client,
+		enabled:      scraperCfg.Enabled,
+		baseURL:      base,
+		requestDelay: time.Duration(scraperCfg.RequestDelay) * time.Millisecond,
+	}
+	s.lastRequestTime.Store(time.Time{})
+
+	if usingProxy {
+		logging.Infof("DLgetchu: Using proxy %s", httpclient.SanitizeProxyURL(proxyCfg.URL))
+	}
+
+	return s
+}
+
+// Name returns scraper identifier.
+func (s *Scraper) Name() string { return "dlgetchu" }
+
+// IsEnabled returns whether scraper is enabled.
+func (s *Scraper) IsEnabled() bool { return s.enabled }
+
+// GetURL resolves detail URL for an ID.
+func (s *Scraper) GetURL(id string) (string, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", fmt.Errorf("movie ID cannot be empty")
+	}
+	if isHTTPURL(id) {
+		return id, nil
+	}
+
+	if numericID := extractNumericID(id); numericID != "" {
+		candidate := fmt.Sprintf("%s/i/item%s", s.baseURL, numericID)
+		_, status, err := s.fetchPage(candidate)
+		if err == nil && status == 200 {
+			return candidate, nil
+		}
+	}
+
+	for _, searchURL := range []string{
+		fmt.Sprintf("%s/?search_keyword=%s", s.baseURL, url.QueryEscape(id)),
+		fmt.Sprintf("%s/gcosin/?search_keyword=%s", s.baseURL, url.QueryEscape(id)),
+		fmt.Sprintf("%s/gcosl/?search_keyword=%s", s.baseURL, url.QueryEscape(id)),
+	} {
+		html, status, err := s.fetchPage(searchURL)
+		if err != nil || status != 200 {
+			continue
+		}
+
+		if link := findFirstDetailLink(html, s.baseURL); link != "" {
+			return link, nil
+		}
+	}
+
+	return "", fmt.Errorf("movie %s not found on DLgetchu (this scraper may require a direct DLgetchu URL)", id)
+}
+
+// Search scrapes metadata from DLgetchu.
+func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
+	if !s.enabled {
+		return nil, fmt.Errorf("DLgetchu scraper is disabled")
+	}
+
+	detailURL, err := s.GetURL(id)
+	if err != nil {
+		return nil, err
+	}
+
+	html, status, err := s.fetchPage(detailURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch DLgetchu detail page: %w", err)
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("DLgetchu returned status code %d", status)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse DLgetchu detail page: %w", err)
+	}
+
+	return parseDetailPage(doc, html, detailURL, id), nil
+}
+
+func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackID string) *models.ScraperResult {
+	result := &models.ScraperResult{
+		Source:    "dlgetchu",
+		SourceURL: sourceURL,
+		Language:  "ja",
+	}
+
+	result.ID = extractNumericID(html)
+	if result.ID == "" {
+		result.ID = extractNumericID(sourceURL)
+	}
+	if result.ID == "" {
+		result.ID = extractNumericID(fallbackID)
+	}
+	if result.ID == "" {
+		result.ID = strings.TrimSpace(fallbackID)
+	}
+	result.ContentID = result.ID
+
+	title := cleanString(doc.Find("meta[property='og:title']").AttrOr("content", ""))
+	if title == "" {
+		title = cleanString(doc.Find("title").First().Text())
+	}
+	result.Title = title
+	result.OriginalTitle = title
+
+	if m := releaseDateRegex.FindStringSubmatch(html); len(m) > 1 {
+		raw := strings.ReplaceAll(m[1], "/", "-")
+		if t, err := time.Parse("2006-01-02", raw); err == nil {
+			result.ReleaseDate = &t
+		}
+	}
+
+	if m := runtimeRegex.FindStringSubmatch(html); len(m) > 1 {
+		raw := normalizeFullWidthDigits(m[1])
+		if v, err := strconv.Atoi(strings.TrimSpace(strings.ReplaceAll(raw, " ", ""))); err == nil {
+			result.Runtime = v
+		}
+	}
+
+	if m := descriptionRegex.FindStringSubmatch(html); len(m) > 1 {
+		result.Description = cleanString(stripTags(m[1]))
+	}
+	if result.Description == "" {
+		result.Description = cleanString(doc.Find("meta[name='description']").AttrOr("content", ""))
+	}
+
+	if m := makerRegex.FindStringSubmatch(html); len(m) > 1 {
+		result.Maker = cleanString(stripTags(m[1]))
+	}
+
+	result.Genres = extractGenres(html)
+
+	if m := coverRegex.FindStringSubmatch(html); len(m) > 1 {
+		result.CoverURL = resolveURL(sourceURL, m[1])
+	}
+	result.PosterURL = result.CoverURL
+	result.ScreenshotURL = extractScreenshots(html, sourceURL)
+	result.ShouldCropPoster = true
+
+	if result.Title == "" {
+		result.Title = result.ID
+		result.OriginalTitle = result.ID
+	}
+
+	return result
+}
+
+func extractGenres(html string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0)
+	for _, m := range genreRegex.FindAllStringSubmatch(html, -1) {
+		if len(m) <= 1 {
+			continue
+		}
+		g := cleanString(stripTags(m[1]))
+		if g == "" || seen[g] {
+			continue
+		}
+		seen[g] = true
+		out = append(out, g)
+	}
+	return out
+}
+
+func extractScreenshots(html, base string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0)
+	for _, m := range screenshotRegex.FindAllStringSubmatch(html, -1) {
+		if len(m) <= 1 {
+			continue
+		}
+		u := resolveURL(base, m[1])
+		if u == "" || seen[u] {
+			continue
+		}
+		seen[u] = true
+		out = append(out, u)
+	}
+	return out
+}
+
+func findFirstDetailLink(html, base string) string {
+	if m := detailLinkRegex.FindStringSubmatch(html); len(m) > 0 {
+		return m[0]
+	}
+	if m := detailPathLinkRe.FindStringSubmatch(html); len(m) > 0 {
+		return resolveURL(base, m[0])
+	}
+	return ""
+}
+
+func extractNumericID(v string) string {
+	if m := itemIDRegex.FindStringSubmatch(v); len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+func normalizeFullWidthDigits(v string) string {
+	replacer := strings.NewReplacer(
+		"０", "0",
+		"１", "1",
+		"２", "2",
+		"３", "3",
+		"４", "4",
+		"５", "5",
+		"６", "6",
+		"７", "7",
+		"８", "8",
+		"９", "9",
+	)
+	return replacer.Replace(v)
+}
+
+func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
+	s.waitForRateLimit()
+	defer s.updateLastRequestTime()
+
+	resp, err := s.client.R().Get(targetURL)
+	if err != nil {
+		return "", 0, err
+	}
+
+	decoded, err := decodeBody(resp)
+	if err != nil {
+		return resp.String(), resp.StatusCode(), nil
+	}
+	return decoded, resp.StatusCode(), nil
+}
+
+func decodeBody(resp *resty.Response) (string, error) {
+	body := resp.Body()
+	if len(body) == 0 {
+		return "", nil
+	}
+	contentType := resp.Header().Get("Content-Type")
+	enc, _, _ := charset.DetermineEncoding(body, contentType)
+	decoded, err := enc.NewDecoder().Bytes(body)
+	if err != nil {
+		return "", err
+	}
+	return string(decoded), nil
+}
+
+func (s *Scraper) waitForRateLimit() {
+	if s.requestDelay <= 0 {
+		return
+	}
+	lastReq := s.lastRequestTime.Load()
+	if lastReq == nil {
+		return
+	}
+	lastTime, ok := lastReq.(time.Time)
+	if !ok || lastTime.IsZero() {
+		return
+	}
+	if elapsed := time.Since(lastTime); elapsed < s.requestDelay {
+		time.Sleep(s.requestDelay - elapsed)
+	}
+}
+
+func (s *Scraper) updateLastRequestTime() {
+	s.lastRequestTime.Store(time.Now())
+}
+
+func resolveURL(base, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "//") {
+		return "https:" + raw
+	}
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		return raw
+	}
+	baseURL, err := url.Parse(base)
+	if err != nil {
+		return raw
+	}
+	if strings.HasPrefix(raw, "/") {
+		baseURL.Path = raw
+		baseURL.RawQuery = ""
+		return baseURL.String()
+	}
+	baseURL.Path = path.Join(path.Dir(baseURL.Path), raw)
+	return baseURL.String()
+}
+
+func stripTags(v string) string {
+	re := regexp.MustCompile(`(?s)<[^>]*>`) //nolint:gocritic
+	return re.ReplaceAllString(v, "")
+}
+
+func cleanString(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.ReplaceAll(v, "\u00a0", " ")
+	v = strings.Join(strings.Fields(v), " ")
+	return v
+}
+
+func isHTTPURL(v string) bool {
+	u, err := url.Parse(strings.TrimSpace(v))
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}

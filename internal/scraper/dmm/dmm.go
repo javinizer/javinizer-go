@@ -65,11 +65,11 @@ func New(cfg *config.Config, contentIDRepo *database.ContentIDMappingRepository)
 		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
 	}
 
-	// Set user agent
-	userAgent := cfg.Scrapers.UserAgent
-	if userAgent == "" {
-		userAgent = "Javinizer (+https://github.com/javinizer/Javinizer)"
-	}
+	userAgent := config.ResolveScraperUserAgent(
+		cfg.Scrapers.UserAgent,
+		cfg.Scrapers.DMM.UseFakeUserAgent,
+		cfg.Scrapers.DMM.FakeUserAgent,
+	)
 	client.SetHeader("User-Agent", userAgent)
 
 	// Add browser-like headers to help with scraping
