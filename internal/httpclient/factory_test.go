@@ -322,6 +322,21 @@ func TestNewRestyClient_NilConfig(t *testing.T) {
 	}
 }
 
+func TestNewRestyClientNoProxy(t *testing.T) {
+	client := NewRestyClientNoProxy(30*time.Second, 2)
+	if client == nil {
+		t.Fatal("Expected valid no-proxy resty client")
+	}
+
+	transport, ok := client.GetClient().Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Expected *http.Transport, got %T", client.GetClient().Transport)
+	}
+	if transport.Proxy != nil {
+		t.Error("Expected no-proxy transport (Proxy=nil)")
+	}
+}
+
 func TestSanitizeProxyURL_WithCredentials(t *testing.T) {
 	tests := []struct {
 		name     string

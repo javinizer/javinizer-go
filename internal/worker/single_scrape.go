@@ -54,6 +54,15 @@ func scraperSearchWithContext(ctx context.Context, scraper models.Scraper, id st
 	}
 }
 
+func scraperListContains(scrapers []string, target string) bool {
+	for _, scraper := range scrapers {
+		if strings.EqualFold(strings.TrimSpace(scraper), target) {
+			return true
+		}
+	}
+	return false
+}
+
 // RunBatchScrapeOnce performs a single scrape operation for a file within a batch job context
 // This function extracts the core scraping logic that can be reused for both initial batch scraping
 // and rescraping operations.
@@ -350,9 +359,13 @@ func RunBatchScrapeOnce(
 
 	// Step 3: Perform DMM content-ID resolution (only if not using manual query)
 	var resolvedID string
-	if queryOverride == "" {
+	shouldResolveDMMContentID := queryOverride == "" && (len(selectedScrapers) == 0 || scraperListContains(selectedScrapers, "dmm"))
+	if shouldResolveDMMContentID {
 		if dmmScraper, exists := registry.Get("dmm"); exists {
-			if dmmScraperTyped, ok := dmmScraper.(*dmm.Scraper); ok {
+			if !dmmScraper.IsEnabled() {
+				logging.Debugf("[Batch %s] File %d: DMM scraper disabled, skipping content-ID resolution", job.ID, fileIndex)
+				resolvedID = movieID
+			} else if dmmScraperTyped, ok := dmmScraper.(*dmm.Scraper); ok {
 				contentID, err := dmmScraperTyped.ResolveContentID(movieID)
 				if err != nil {
 					logging.Debugf("[Batch %s] File %d: DMM content-ID resolution failed for %s: %v, using original ID",
@@ -372,7 +385,10 @@ func RunBatchScrapeOnce(
 			resolvedID = movieID
 		}
 	} else {
-		// Manual query - use as-is without resolution
+		// Manual query OR custom scraper set that does not include DMM.
+		if queryOverride == "" && len(selectedScrapers) > 0 && !scraperListContains(selectedScrapers, "dmm") {
+			logging.Debugf("[Batch %s] File %d: Skipping DMM content-ID resolution (DMM not selected in custom scrapers)", job.ID, fileIndex)
+		}
 		resolvedID = movieID
 	}
 

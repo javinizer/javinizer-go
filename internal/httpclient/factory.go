@@ -123,6 +123,23 @@ func NewRestyClient(proxyConfig *config.ProxyConfig, timeout time.Duration, retr
 	return client, nil
 }
 
+// NewRestyClientNoProxy creates a resty.Client that explicitly bypasses
+// environment proxy variables by using a no-proxy transport.
+func NewRestyClientNoProxy(timeout time.Duration, retries int) *resty.Client {
+	client := resty.New()
+	client.SetTimeout(timeout)
+	client.SetRetryCount(retries)
+
+	transport, err := NewTransport(nil)
+	if err != nil {
+		logging.Warnf("HTTP client: failed to create explicit no-proxy transport, using Resty default transport: %v", err)
+		return client
+	}
+
+	client.SetTransport(transport)
+	return client
+}
+
 // ============================================
 // FlareSolverr Integration
 // ============================================
@@ -183,13 +200,7 @@ func NewFlareSolverr(cfg *config.FlareSolverrConfig) (*FlareSolverr, error) {
 		return nil, fmt.Errorf("FlareSolverr URL is required")
 	}
 
-	client := resty.New()
-	client.SetTimeout(time.Duration(cfg.Timeout) * time.Second)
-	client.SetRetryCount(cfg.MaxRetries)
-	// FlareSolverr API calls should not inherit proxy env vars.
-	if transport, err := NewTransport(nil); err == nil {
-		client.SetTransport(transport)
-	}
+	client := NewRestyClientNoProxy(time.Duration(cfg.Timeout)*time.Second, cfg.MaxRetries)
 
 	return &FlareSolverr{
 		client:     client,
@@ -345,16 +356,10 @@ func (fs *FlareSolverr) ResolveURLWithSession(targetURL, sessionID string) (stri
 
 // NewRestyClientWithFlareSolverr creates a resty.Client with optional FlareSolverr support
 func NewRestyClientWithFlareSolverr(proxyConfig *config.ProxyConfig, timeout time.Duration, retries int) (*resty.Client, *FlareSolverr, error) {
-	// Base transport (with proxy if configured)
-	transport, err := NewTransport(proxyConfig)
+	client, err := NewRestyClient(proxyConfig, timeout, retries)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	client := resty.New()
-	client.SetTimeout(timeout)
-	client.SetRetryCount(retries)
-	client.SetTransport(transport)
 
 	// If no proxy config was provided, return plain client without FlareSolverr.
 	if proxyConfig == nil {

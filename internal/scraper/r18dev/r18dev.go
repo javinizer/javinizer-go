@@ -44,11 +44,8 @@ func New(cfg *config.Config) *Scraper {
 		3,
 	)
 	if err != nil {
-		logging.Errorf("R18Dev: Failed to create HTTP client with proxy: %v, using default", err)
-		// Fallback to client without proxy
-		client = resty.New()
-		client.SetTimeout(30 * time.Second)
-		client.SetRetryCount(3)
+		logging.Errorf("R18Dev: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
+		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
 	}
 
 	// Set user agent

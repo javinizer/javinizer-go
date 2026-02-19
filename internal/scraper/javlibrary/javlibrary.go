@@ -35,8 +35,11 @@ func New(cfg *config.JavLibraryConfig, proxyConfig *config.ProxyConfig) (*Scrape
 		30*time.Second,
 		3,
 	)
+	usingProxy := err == nil && proxyConfig != nil && proxyConfig.Enabled && strings.TrimSpace(proxyConfig.URL) != ""
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP client: %w", err)
+		logging.Errorf("JavLibrary: Failed to create HTTP client with proxy/flaresolverr: %v, using explicit no-proxy fallback", err)
+		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
+		fs = nil
 	}
 
 	baseURL := cfg.BaseURL
@@ -55,6 +58,13 @@ func New(cfg *config.JavLibraryConfig, proxyConfig *config.ProxyConfig) (*Scrape
 	// Apply custom user agent if configured
 	if cfg.UserAgent != "" {
 		client.SetHeader("User-Agent", cfg.UserAgent)
+	}
+
+	if usingProxy {
+		logging.Infof("JavLibrary: Using proxy %s", httpclient.SanitizeProxyURL(proxyConfig.URL))
+	}
+	if cfg.UseFlareSolverr && fs == nil {
+		logging.Warn("JavLibrary: use_flaresolverr=true but no FlareSolverr client is configured")
 	}
 
 	return &Scraper{

@@ -42,12 +42,10 @@ func New(cfg *config.Config) *Scraper {
 		30*time.Second,
 		3,
 	)
+	usingProxy := err == nil && proxyConfig.Enabled && strings.TrimSpace(proxyConfig.URL) != ""
 	if err != nil {
-		logging.Errorf("MGStage: Failed to create HTTP client with proxy: %v, using default", err)
-		// Fallback to client without proxy
-		client = resty.New()
-		client.SetTimeout(30 * time.Second)
-		client.SetRetryCount(3)
+		logging.Errorf("MGStage: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
+		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
 	}
 
 	// Set user agent
@@ -77,7 +75,7 @@ func New(cfg *config.Config) *Scraper {
 	scraper := &Scraper{
 		client:       client,
 		enabled:      cfg.Scrapers.MGStage.Enabled,
-		usingProxy:   proxyConfig.Enabled && strings.TrimSpace(proxyConfig.URL) != "",
+		usingProxy:   usingProxy,
 		requestDelay: requestDelay,
 	}
 
@@ -237,11 +235,7 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 	result.OriginalTitle = title
 
 	// Extract description
-	doc.Find("p.txt.introduction").Each(func(i int, sel *goquery.Selection) {
-		if result.Description == "" {
-			result.Description = cleanString(sel.Text())
-		}
-	})
+	result.Description = extractDescription(doc)
 
 	// Extract release date
 	dateStr := extractTableValue(doc, "配信開始日：")
@@ -680,6 +674,41 @@ func extractTrailerURL(doc *goquery.Document, client *resty.Client) string {
 	// MGStage typically uses: /sample/{id}/{id}.ism or similar patterns
 	// For now, return empty as trailer extraction requires site-specific knowledge
 	// that may change. Users can add trailers manually or use other scrapers.
+	return ""
+}
+
+func extractDescription(doc *goquery.Document) string {
+	if doc == nil {
+		return ""
+	}
+
+	// MGStage markup changes frequently; try multiple selectors in order.
+	// Current SIRO pages commonly render synopsis in #introduction dd.
+	selectors := []string{
+		"p.txt.introduction",
+		"#introduction .txt.introduction",
+		"#introduction dd",
+	}
+
+	for _, selector := range selectors {
+		text := cleanString(doc.Find(selector).First().Text())
+		if text != "" {
+			return text
+		}
+	}
+
+	// Fallback to meta description fields.
+	for _, selector := range []string{"meta[property='og:description']", "meta[name='Description']"} {
+		content, exists := doc.Find(selector).First().Attr("content")
+		if !exists {
+			continue
+		}
+		text := cleanString(content)
+		if text != "" {
+			return text
+		}
+	}
+
 	return ""
 }
 

@@ -709,6 +709,38 @@ func TestParseHTML(t *testing.T) {
 	assert.Equal(t, time.May, result.ReleaseDate.Month())
 }
 
+func TestParseHTML_DescriptionFromIntroductionDD(t *testing.T) {
+	productHTML := `<html>
+<head>
+<title>SIRO-5615 Sample Movie | MGStage</title>
+<meta property="og:description" content="Meta fallback description">
+</head>
+<body>
+<table>
+<tr><th>品番：</th><td>SIRO-5615</td></tr>
+</table>
+<dl id="introduction">
+	<dd>
+		<p class="txt introduction"><p>今回応募していただいたのは【りりか 20歳 学生】</p></p>
+	</dd>
+</dl>
+</body>
+</html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(productHTML))
+	require.NoError(t, err)
+
+	cfg := testConfig()
+	scraper := New(cfg)
+
+	result, err := scraper.parseHTML(doc, "https://www.mgstage.com/product/product_detail/SIRO-5615/")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	assert.Equal(t, "SIRO-5615", result.ID)
+	assert.Contains(t, result.Description, "りりか 20歳 学生")
+}
+
 // TestParseHTMLMinimal tests parsing with minimal data
 func TestParseHTMLMinimal(t *testing.T) {
 	minimalHTML := `<html>

@@ -61,11 +61,8 @@ func New(cfg *config.Config, contentIDRepo *database.ContentIDMappingRepository)
 		3,
 	)
 	if err != nil {
-		logging.Errorf("DMM: Failed to create HTTP client with proxy: %v, using default", err)
-		// Fallback to client without proxy
-		client = resty.New()
-		client.SetTimeout(30 * time.Second)
-		client.SetRetryCount(3)
+		logging.Errorf("DMM: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
+		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
 	}
 
 	// Set user agent
@@ -1258,9 +1255,12 @@ func (s *Scraper) tryActressThumbURLs(firstName, lastName string, dmmID int) str
 
 	// Create a client that doesn't follow redirects for URL testing
 	// We want to detect 302s and only accept exact 200 responses
-	testClient := resty.New().
-		SetRedirectPolicy(resty.NoRedirectPolicy()).
-		SetTimeout(5 * time.Second)
+	testClient, err := httpclient.NewRestyClient(s.proxyConfig, 5*time.Second, 0)
+	if err != nil {
+		logging.Debugf("DMM: Failed to create thumbnail probe client with scraper proxy: %v, using explicit no-proxy fallback", err)
+		testClient = httpclient.NewRestyClientNoProxy(5*time.Second, 0)
+	}
+	testClient.SetRedirectPolicy(resty.NoRedirectPolicy())
 
 	// Test each candidate URL
 	for _, url := range candidates {

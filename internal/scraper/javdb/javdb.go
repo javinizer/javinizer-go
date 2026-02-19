@@ -53,11 +53,10 @@ func New(cfg *config.Config) *Scraper {
 	proxyCfg := config.ResolveScraperProxy(cfg.Scrapers.Proxy, scraperCfg.Proxy)
 
 	client, fs, err := httpclient.NewRestyClientWithFlareSolverr(proxyCfg, 30*time.Second, 3)
+	usingProxy := err == nil && proxyCfg.Enabled && strings.TrimSpace(proxyCfg.URL) != ""
 	if err != nil {
-		logging.Errorf("JavDB: Failed to create HTTP client with proxy/flaresolverr: %v, using default", err)
-		client = resty.New()
-		client.SetTimeout(30 * time.Second)
-		client.SetRetryCount(3)
+		logging.Errorf("JavDB: Failed to create HTTP client with proxy/flaresolverr: %v, using explicit no-proxy fallback", err)
+		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
 		fs = nil
 	}
 
@@ -88,7 +87,7 @@ func New(cfg *config.Config) *Scraper {
 
 	s.lastRequestTime.Store(time.Time{})
 
-	if proxyCfg.Enabled {
+	if usingProxy {
 		logging.Infof("JavDB: Using proxy %s", httpclient.SanitizeProxyURL(proxyCfg.URL))
 	}
 	if scraperCfg.UseFlareSolverr && fs == nil {
