@@ -36,6 +36,24 @@ func TestResolveSearchQuery(t *testing.T) {
 			wantMatch: true,
 		},
 		{
+			name:      "onepon date token in noisy filename",
+			input:     "/media/unsorted/050419_844-1pondo/050419_844-1pon-1080p.mp4",
+			wantQuery: "1pon_050419_844",
+			wantMatch: true,
+		},
+		{
+			name:      "bare onepon-style date token",
+			input:     "050419_844",
+			wantQuery: "1pon_050419_844",
+			wantMatch: true,
+		},
+		{
+			name:      "carib date token in noisy filename",
+			input:     "/media/unsorted/021226_001-carib/021226_001-carib-720p.mp4",
+			wantQuery: "carib_021226_001",
+			wantMatch: true,
+		},
+		{
 			name:      "standard id not handled by resolver hook",
 			input:     "IPX-535",
 			wantQuery: "",

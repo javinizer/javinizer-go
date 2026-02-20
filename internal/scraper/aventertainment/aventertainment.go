@@ -27,6 +27,7 @@ var (
 	standardIDRegex  = regexp.MustCompile(`(?i)^([a-z]{2,12}[-_]\d{2,8}[a-z]?)$`)
 	compactIDRegex   = regexp.MustCompile(`(?i)^([a-z]{2,12}\d{2,8}[a-z]?)$`)
 	onePondoRegex    = regexp.MustCompile(`(?i)^1pon[_-](\d{6})[_-](\d{3})$`)
+	onePondoDateIDRe = regexp.MustCompile(`(?i)(?:^|[^0-9])(\d{6})[_-](\d{3})(?:[^0-9]|$)`)
 	caribRegex       = regexp.MustCompile(`(?i)^carib(?:bean)?[_-](\d{6})[_-](\d{3})$`)
 	runtimeClockRe   = regexp.MustCompile(`(\d{1,2}):(\d{2})(?::\d{2})?`)
 	runtimeMinuteRe  = regexp.MustCompile(`(?i)(\d{1,3})\s*(?:min|minutes|分)`)
@@ -112,6 +113,20 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	// Caribbeancom style IDs (example: carib_020326_001)
 	if m := caribRegex.FindStringSubmatch(norm); len(m) == 3 {
 		return "carib_" + m[1] + "_" + m[2], true
+	}
+
+	// Flexible 1Pondo/Caribbean style date IDs embedded in filenames
+	// (examples: 050419_844-1pon-1080p, 021226_001-carib-720p).
+	if m := onePondoDateIDRe.FindStringSubmatch(norm); len(m) == 3 {
+		if strings.Contains(norm, "carib") {
+			return "carib_" + m[1] + "_" + m[2], true
+		}
+		if strings.Contains(norm, "1pon") || strings.Contains(norm, "1pondo") {
+			return "1pon_" + m[1] + "_" + m[2], true
+		}
+		// Default to 1Pondo for bare YYMMDD_NNN tokens so files like
+		// "050419_844.mp4" can still be resolved by AVEntertainment.
+		return "1pon_" + m[1] + "_" + m[2], true
 	}
 
 	return "", false
@@ -946,6 +961,7 @@ func normalizeResolverInput(input string) string {
 	}
 
 	// Allow passing full paths/filenames; resolver operates on basename without extension.
+	input = strings.ReplaceAll(input, "\\", "/")
 	base := path.Base(input)
 	ext := path.Ext(base)
 	if ext != "" {
