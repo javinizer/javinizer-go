@@ -229,6 +229,121 @@ func TestCropPosterFromCover_ErrorCases(t *testing.T) {
 	}
 }
 
+func TestCropPosterWithBounds(t *testing.T) {
+	t.Parallel()
+
+	fs := afero.NewMemMapFs()
+	tempDir := "/test"
+	require.NoError(t, fs.MkdirAll(tempDir, 0755))
+
+	coverPath := filepath.Join(tempDir, "cover.jpg")
+	posterPath := filepath.Join(tempDir, "poster.jpg")
+
+	// Build a 100x100 image with color quadrants so crop location can be verified.
+	img := image.NewRGBA(image.Rect(0, 0, 100, 100))
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 100; x++ {
+			switch {
+			case x < 50 && y < 50:
+				img.Set(x, y, color.RGBA{R: 255, A: 255})
+			case x >= 50 && y < 50:
+				img.Set(x, y, color.RGBA{G: 255, A: 255})
+			case x < 50 && y >= 50:
+				img.Set(x, y, color.RGBA{B: 255, A: 255})
+			default:
+				img.Set(x, y, color.RGBA{R: 255, G: 255, A: 255})
+			}
+		}
+	}
+
+	f, err := fs.Create(coverPath)
+	require.NoError(t, err)
+	require.NoError(t, jpeg.Encode(f, img, &jpeg.Options{Quality: 95}))
+	require.NoError(t, f.Close())
+
+	// Crop the top-right (green) quadrant.
+	err = CropPosterWithBounds(fs, coverPath, posterPath, 50, 0, 100, 50)
+	require.NoError(t, err)
+
+	outFile, err := fs.Open(posterPath)
+	require.NoError(t, err)
+	defer outFile.Close()
+
+	outImg, _, err := image.Decode(outFile)
+	require.NoError(t, err)
+	outBounds := outImg.Bounds()
+	assert.Equal(t, 50, outBounds.Dx())
+	assert.Equal(t, 50, outBounds.Dy())
+
+	// Sample center pixel; JPEG compression may vary, so use a threshold.
+	r, g, b, _ := outImg.At(25, 25).RGBA()
+	assert.Less(t, r, uint32(15000))
+	assert.Greater(t, g, uint32(45000))
+	assert.Less(t, b, uint32(15000))
+}
+
+func TestCropPosterWithBounds_InvalidBounds(t *testing.T) {
+	t.Parallel()
+
+	fs := afero.NewMemMapFs()
+	tempDir := "/test"
+	require.NoError(t, fs.MkdirAll(tempDir, 0755))
+
+	coverPath := filepath.Join(tempDir, "cover.jpg")
+	posterPath := filepath.Join(tempDir, "poster.jpg")
+	createTestImage(t, fs, coverPath, 200, 100, color.RGBA{R: 200, A: 255})
+
+	tests := []struct {
+		name  string
+		left  int
+		top   int
+		right int
+		bot   int
+		err   string
+	}{
+		{
+			name:  "negative left",
+			left:  -1,
+			top:   0,
+			right: 100,
+			bot:   100,
+			err:   "crop bounds out of range",
+		},
+		{
+			name:  "right past width",
+			left:  0,
+			top:   0,
+			right: 300,
+			bot:   100,
+			err:   "crop bounds out of range",
+		},
+		{
+			name:  "empty width",
+			left:  50,
+			top:   0,
+			right: 50,
+			bot:   100,
+			err:   "invalid crop bounds",
+		},
+		{
+			name:  "empty height",
+			left:  0,
+			top:   80,
+			right: 100,
+			bot:   80,
+			err:   "invalid crop bounds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := CropPosterWithBounds(fs, coverPath, posterPath, tt.left, tt.top, tt.right, tt.bot)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.err)
+		})
+	}
+}
+
 // TestCropPosterFromCover_InvalidDimensions tests edge cases with minimal and invalid dimensions
 // Note: Creating truly zero-dimension images programmatically is not straightforward with
 // standard Go image libraries (image.NewRGBA panics on negative dims, creates 0-size for zero).

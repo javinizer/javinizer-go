@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
+	imageutil "github.com/javinizer/javinizer-go/internal/image"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -489,6 +490,139 @@ func updateBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 			}
 		}
 		c.JSON(200, MovieResponse{Movie: req.Movie})
+	}
+}
+
+// updateBatchMoviePosterCrop godoc
+// @Summary Update manual poster crop in batch job
+// @Description Re-crop a temp poster for the review page using fixed-size crop coordinates
+// @Tags web
+// @Accept json
+// @Produce json
+// @Param id path string true "Job ID"
+// @Param movieId path string true "Movie ID"
+// @Param request body PosterCropRequest true "Crop coordinates"
+// @Success 200 {object} PosterCropResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/v1/batch/{id}/movies/{movieId}/poster-crop [post]
+func updateBatchMoviePosterCrop(deps *ServerDependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		jobID := c.Param("id")
+		movieID := c.Param("movieId")
+
+		if movieID != filepath.Base(movieID) || movieID == "" || movieID == "." {
+			c.JSON(404, ErrorResponse{Error: "Movie not found in job"})
+			return
+		}
+
+		var req PosterCropRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		job, ok := deps.JobQueue.GetJobPointer(jobID)
+		if !ok {
+			c.JSON(404, ErrorResponse{Error: "Job not found"})
+			return
+		}
+
+		status := job.GetStatus()
+
+		// Collect all file paths for this movie ID (handles multipart files)
+		var filePaths []string
+		for filePath, result := range status.Results {
+			if result.MovieID == movieID {
+				filePaths = append(filePaths, filePath)
+			}
+		}
+
+		// If not found by FileResult.MovieID, match by actual Movie.ID (content ID resolution case)
+		if len(filePaths) == 0 {
+			for filePath, result := range status.Results {
+				if result.Data == nil {
+					continue
+				}
+				if m, ok := result.Data.(*models.Movie); ok && m.ID == movieID {
+					filePaths = append(filePaths, filePath)
+				}
+			}
+		}
+
+		if len(filePaths) == 0 {
+			c.JSON(404, ErrorResponse{Error: fmt.Sprintf("Movie %s not found in job", movieID)})
+			return
+		}
+
+		posterID := movieID
+		if firstResult, exists := status.Results[filePaths[0]]; exists && firstResult != nil && firstResult.Data != nil {
+			if m, ok := firstResult.Data.(*models.Movie); ok && m.ID != "" {
+				posterID = m.ID
+			}
+		}
+
+		if posterID != filepath.Base(posterID) || posterID == "" || posterID == "." {
+			c.JSON(400, ErrorResponse{Error: "Invalid movie ID for poster crop"})
+			return
+		}
+
+		tempPosterDir := filepath.Join("data", "temp", "posters", jobID)
+		sourcePath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
+		if _, err := os.Stat(sourcePath); err != nil {
+			// Fallback for older jobs where full image was already cleaned up.
+			sourcePath = filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
+		}
+
+		if _, err := os.Stat(sourcePath); err != nil {
+			c.JSON(404, ErrorResponse{Error: "Source poster not found for manual crop"})
+			return
+		}
+
+		croppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
+
+		// Defense in depth: ensure both paths are inside tempPosterDir.
+		cleanTempDir := filepath.Clean(tempPosterDir) + string(os.PathSeparator)
+		cleanSourcePath := filepath.Clean(sourcePath)
+		cleanCroppedPath := filepath.Clean(croppedPath)
+		if !strings.HasPrefix(cleanSourcePath, cleanTempDir) || !strings.HasPrefix(cleanCroppedPath, cleanTempDir) {
+			c.JSON(400, ErrorResponse{Error: "Invalid poster crop path"})
+			return
+		}
+
+		left := req.X
+		top := req.Y
+		right := req.X + req.Width
+		bottom := req.Y + req.Height
+
+		if err := imageutil.CropPosterWithBounds(afero.NewOsFs(), sourcePath, croppedPath, left, top, right, bottom); err != nil {
+			c.JSON(400, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		croppedURL := fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg", jobID, posterID)
+
+		// Keep job state consistent so response payloads always point to the latest temp crop.
+		for _, filePath := range filePaths {
+			err := job.AtomicUpdateFileResult(filePath, func(current *worker.FileResult) (*worker.FileResult, error) {
+				movie, ok := current.Data.(*models.Movie)
+				if !ok || movie == nil {
+					return current, nil
+				}
+				movie.CroppedPosterURL = croppedURL
+				movie.ShouldCropPoster = false
+				current.Data = movie
+				current.MovieID = movie.ID
+				return current, nil
+			})
+			if err != nil {
+				logging.Errorf("Failed to update poster crop in job state for %s: %v", filePath, err)
+				c.JSON(500, ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
+				return
+			}
+		}
+
+		c.JSON(200, PosterCropResponse{CroppedPosterURL: croppedURL})
 	}
 }
 

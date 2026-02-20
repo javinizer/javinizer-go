@@ -129,9 +129,6 @@ func GenerateTempPoster(
 		return "", fmt.Errorf("failed to crop poster: %w", err)
 	}
 
-	// Clean up the full image after successful crop
-	os.Remove(tempFullPath)
-
 	// Update movie metadata to indicate poster is already cropped
 	// This prevents CSS-based cropping in the frontend
 	movie.ShouldCropPoster = false

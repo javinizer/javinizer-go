@@ -3,6 +3,9 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -321,6 +324,99 @@ func TestUpdateBatchMovie(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpdateBatchMoviePosterCrop(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tempDir := t.TempDir()
+	originalWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tempDir))
+	defer os.Chdir(originalWd)
+
+	cfg := &config.Config{}
+	deps := createTestDeps(t, cfg, "")
+
+	job := deps.JobQueue.CreateJob([]string{"/path/to/IPX-535.mp4"})
+	job.UpdateFileResult("/path/to/IPX-535.mp4", &worker.FileResult{
+		FilePath:  "/path/to/IPX-535.mp4",
+		MovieID:   "IPX-535",
+		Status:    worker.JobStatusCompleted,
+		Data:      &models.Movie{ID: "IPX-535", Title: "Test Movie"},
+		StartedAt: time.Now(),
+	})
+
+	posterDir := filepath.Join("data", "temp", "posters", job.ID)
+	require.NoError(t, os.MkdirAll(posterDir, 0755))
+
+	fullPosterPath := filepath.Join(posterDir, "IPX-535-full.jpg")
+	fullImg := image.NewRGBA(image.Rect(0, 0, 1000, 600))
+	for y := 0; y < 600; y++ {
+		for x := 0; x < 1000; x++ {
+			fullImg.Set(x, y, color.RGBA{R: 200, G: 120, B: 40, A: 255})
+		}
+	}
+	f, err := os.Create(fullPosterPath)
+	require.NoError(t, err)
+	require.NoError(t, jpeg.Encode(f, fullImg, &jpeg.Options{Quality: 95}))
+	require.NoError(t, f.Close())
+
+	router := gin.New()
+	router.POST("/batch/:id/movies/:movieId/poster-crop", updateBatchMoviePosterCrop(deps))
+
+	t.Run("successfully updates crop", func(t *testing.T) {
+		body, err := json.Marshal(PosterCropRequest{
+			X:      350,
+			Y:      0,
+			Width:  472,
+			Height: 600,
+		})
+		require.NoError(t, err)
+
+		req := httptest.NewRequest("POST", "/batch/"+job.ID+"/movies/IPX-535/poster-crop", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, 200, w.Code, "Response body: %s", w.Body.String())
+
+		var resp PosterCropResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "/api/v1/temp/posters/"+job.ID+"/IPX-535.jpg", resp.CroppedPosterURL)
+
+		croppedPath := filepath.Join(posterDir, "IPX-535.jpg")
+		_, err = os.Stat(croppedPath)
+		require.NoError(t, err)
+
+		out, err := os.Open(croppedPath)
+		require.NoError(t, err)
+		defer out.Close()
+		outImg, _, err := image.Decode(out)
+		require.NoError(t, err)
+		b := outImg.Bounds()
+		assert.True(t, b.Dx() > 0)
+		assert.True(t, b.Dy() > 0)
+		assert.LessOrEqual(t, b.Dy(), 500, "manual crop should respect max poster height")
+	})
+
+	t.Run("rejects out-of-range crop", func(t *testing.T) {
+		body, err := json.Marshal(PosterCropRequest{
+			X:      900,
+			Y:      0,
+			Width:  500,
+			Height: 600,
+		})
+		require.NoError(t, err)
+
+		req := httptest.NewRequest("POST", "/batch/"+job.ID+"/movies/IPX-535/poster-crop", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, 400, w.Code)
+		assert.Contains(t, w.Body.String(), "crop bounds out of range")
+	})
 }
 
 func TestOrganizeJob(t *testing.T) {

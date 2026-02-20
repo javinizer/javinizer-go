@@ -31,26 +31,9 @@ const (
 //
 // This ensures good results for both wide JAV covers and square promotional images
 func CropPosterFromCover(fs afero.Fs, coverPath, posterPath string) error {
-	// Open and decode the cover image
-	coverFile, err := fs.Open(coverPath)
+	img, width, height, err := decodePosterSource(fs, coverPath)
 	if err != nil {
-		return fmt.Errorf("failed to open cover image: %w", err)
-	}
-	defer coverFile.Close()
-
-	img, format, err := image.Decode(coverFile)
-	if err != nil {
-		return fmt.Errorf("failed to decode cover image: %w", err)
-	}
-
-	// Get image dimensions
-	bounds := img.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
-
-	// Validate dimensions to prevent division by zero
-	if width <= 0 || height <= 0 {
-		return fmt.Errorf("invalid image dimensions: %dx%d", width, height)
+		return err
 	}
 
 	// Calculate aspect ratio to determine crop strategy
@@ -89,6 +72,52 @@ func CropPosterFromCover(fs afero.Fs, coverPath, posterPath string) error {
 		bottom = top + cropHeight
 	}
 
+	return cropAndWritePoster(fs, img, posterPath, left, top, right, bottom)
+}
+
+// CropPosterWithBounds crops a cover image using explicit pixel bounds.
+// Bounds are in source-image pixels and must be within the image dimensions.
+func CropPosterWithBounds(fs afero.Fs, coverPath, posterPath string, left, top, right, bottom int) error {
+	img, width, height, err := decodePosterSource(fs, coverPath)
+	if err != nil {
+		return err
+	}
+
+	if left < 0 || top < 0 || right > width || bottom > height {
+		return fmt.Errorf("crop bounds out of range: left=%d top=%d right=%d bottom=%d image=%dx%d",
+			left, top, right, bottom, width, height)
+	}
+	if left >= right || top >= bottom {
+		return fmt.Errorf("invalid crop bounds: left=%d top=%d right=%d bottom=%d",
+			left, top, right, bottom)
+	}
+
+	return cropAndWritePoster(fs, img, posterPath, left, top, right, bottom)
+}
+
+func decodePosterSource(fs afero.Fs, coverPath string) (image.Image, int, int, error) {
+	coverFile, err := fs.Open(coverPath)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to open cover image: %w", err)
+	}
+	defer coverFile.Close()
+
+	img, _, err := image.Decode(coverFile)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to decode cover image: %w", err)
+	}
+
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width <= 0 || height <= 0 {
+		return nil, 0, 0, fmt.Errorf("invalid image dimensions: %dx%d", width, height)
+	}
+
+	return img, width, height, nil
+}
+
+func cropAndWritePoster(fs afero.Fs, img image.Image, posterPath string, left, top, right, bottom int) error {
 	// Create cropped image
 	croppedBounds := image.Rect(0, 0, right-left, bottom-top)
 	cropped := image.NewRGBA(croppedBounds)
@@ -117,21 +146,16 @@ func CropPosterFromCover(fs afero.Fs, coverPath, posterPath string) error {
 		finalImage = resized
 	}
 
-	// Create output file
 	posterFile, err := fs.Create(posterPath)
 	if err != nil {
 		return fmt.Errorf("failed to create poster file: %w", err)
 	}
 	defer posterFile.Close()
 
-	// Encode as JPEG with high quality
 	opts := &jpeg.Options{Quality: 95}
 	if err := jpeg.Encode(posterFile, finalImage, opts); err != nil {
 		return fmt.Errorf("failed to encode poster image: %w", err)
 	}
-
-	// Log format for debugging
-	_ = format
 
 	return nil
 }

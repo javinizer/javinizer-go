@@ -241,6 +241,19 @@ type UpdateMovieRequest struct {
 	Movie *models.Movie `json:"movie" binding:"required"`
 }
 
+// PosterCropRequest represents manual poster crop coordinates in source-image pixels.
+type PosterCropRequest struct {
+	X      int `json:"x" binding:"min=0"`
+	Y      int `json:"y" binding:"min=0"`
+	Width  int `json:"width" binding:"min=1"`
+	Height int `json:"height" binding:"min=1"`
+}
+
+// PosterCropResponse returns the updated temp cropped poster URL.
+type PosterCropResponse struct {
+	CroppedPosterURL string `json:"cropped_poster_url"`
+}
+
 // RescrapeRequest represents a request to rescrape with specific scrapers
 type RescrapeRequest struct {
 	SelectedScrapers []string `json:"selected_scrapers" binding:"required" example:"r18dev,dmm"`

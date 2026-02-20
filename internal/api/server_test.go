@@ -79,6 +79,7 @@ func TestNewServer(t *testing.T) {
 		"/api/v1/batch/:id",
 		"/api/v1/batch/:id/cancel",
 		"/api/v1/batch/:id/movies/:movieId",
+		"/api/v1/batch/:id/movies/:movieId/poster-crop",
 		"/api/v1/batch/:id/movies/:movieId/preview",
 		"/api/v1/batch/:id/organize",
 	}

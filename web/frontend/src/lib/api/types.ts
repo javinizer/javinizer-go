@@ -55,6 +55,17 @@ export interface RescrapeRequest {
 	force?: boolean;
 }
 
+export interface PosterCropRequest {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+export interface PosterCropResponse {
+	cropped_poster_url: string;
+}
+
 export interface BatchRescrapeRequest {
 	force?: boolean;
 	selected_scrapers?: string[];

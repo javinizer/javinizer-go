@@ -3,6 +3,7 @@
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
 	import { fade, scale, slide } from 'svelte/transition';
+	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { apiClient } from '$lib/api/client';
@@ -99,6 +100,50 @@
 	// Preview screenshot expansion state
 	let showAllPreviewScreenshots = $state(false);
 
+	interface PosterPreviewOverride {
+		url: string;
+		version: number;
+	}
+
+	interface PosterCropBox {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+	}
+
+	interface PosterCropMetrics {
+		sourceWidth: number;
+		sourceHeight: number;
+		displayWidth: number;
+		displayHeight: number;
+		imageOffsetX: number;
+		imageOffsetY: number;
+	}
+
+	interface PosterCropState {
+		xRatio: number;
+		yRatio: number;
+		widthRatio: number;
+		heightRatio: number;
+	}
+
+	// Manual poster crop state
+	let showPosterCropModal = $state(false);
+	let posterCropSaving = $state(false);
+	let posterCropLoadError = $state<string | null>(null);
+	let cropSourceURL = $state('');
+	let cropStageElement = $state<HTMLDivElement | null>(null);
+	let cropImageElement = $state<HTMLImageElement | null>(null);
+	let cropMetrics = $state<PosterCropMetrics | null>(null);
+	let cropBox = $state<PosterCropBox | null>(null);
+	let cropDragState = $state<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+	let posterPreviewOverrides = $state<Map<string, PosterPreviewOverride>>(new Map());
+	let posterCropStates = $state<Map<string, PosterCropState>>(new Map());
+
+	const LANDSCAPE_CROP_WIDTH_RATIO = 0.472;
+	const POSTER_TARGET_ASPECT_RATIO = 2 / 3;
+
 	// Rescrape modal state
 	let availableScrapers: Scraper[] = $state([]);
 	let showRescrapeModal = $state(false);
@@ -189,9 +234,21 @@
 			: null
 	);
 
-	// Use cropped_poster_url if available (persisted cropped posters), otherwise use poster_url
+	// Use manual override if available, then cropped_poster_url, then poster_url.
+	// Manual overrides add a cache-buster so updated temp posters refresh immediately.
 	const displayPosterUrl = $derived<string | undefined>(
-		currentMovie?.cropped_poster_url || currentMovie?.poster_url
+		(() => {
+			if (!currentMovie || !currentResult) return undefined;
+
+			const override = posterPreviewOverrides.get(currentResult.file_path);
+			const baseURL = override?.url || currentMovie.cropped_poster_url || currentMovie.poster_url;
+			if (!baseURL) return undefined;
+
+			if (!override) return baseURL;
+
+			const separator = baseURL.includes('?') ? '&' : '?';
+			return `${baseURL}${separator}v=${override.version}`;
+		})()
 	);
 
 	async function fetchJob() {
@@ -686,6 +743,237 @@
 		return apiClient.getPreviewImageURL(url);
 	}
 
+	function clamp(value: number, min: number, max: number): number {
+		return Math.min(max, Math.max(min, value));
+	}
+
+	function normalizeCropBox(box: PosterCropBox, metrics: PosterCropMetrics): PosterCropState {
+		return {
+			xRatio: box.x / metrics.sourceWidth,
+			yRatio: box.y / metrics.sourceHeight,
+			widthRatio: box.width / metrics.sourceWidth,
+			heightRatio: box.height / metrics.sourceHeight
+		};
+	}
+
+	function restoreCropBox(state: PosterCropState, sourceWidth: number, sourceHeight: number): PosterCropBox {
+		const width = clamp(Math.round(state.widthRatio * sourceWidth), 1, sourceWidth);
+		const height = clamp(Math.round(state.heightRatio * sourceHeight), 1, sourceHeight);
+		const maxX = Math.max(0, sourceWidth - width);
+		const maxY = Math.max(0, sourceHeight - height);
+
+		return {
+			x: clamp(Math.round(state.xRatio * sourceWidth), 0, maxX),
+			y: clamp(Math.round(state.yRatio * sourceHeight), 0, maxY),
+			width,
+			height
+		};
+	}
+
+	function getDefaultPosterCropBox(sourceWidth: number, sourceHeight: number): PosterCropBox {
+		const sourceAspect = sourceWidth / sourceHeight;
+
+		if (sourceAspect > 1.2) {
+			const width = Math.max(1, Math.round(sourceWidth * LANDSCAPE_CROP_WIDTH_RATIO));
+			return {
+				x: sourceWidth - width,
+				y: 0,
+				width,
+				height: sourceHeight
+			};
+		}
+
+		let width = sourceWidth;
+		let height = sourceHeight;
+		if (sourceAspect > POSTER_TARGET_ASPECT_RATIO) {
+			width = Math.max(1, Math.round(sourceHeight * POSTER_TARGET_ASPECT_RATIO));
+		} else {
+			height = Math.max(1, Math.round(sourceWidth / POSTER_TARGET_ASPECT_RATIO));
+		}
+
+		return {
+			x: Math.max(0, Math.floor((sourceWidth - width) / 2)),
+			y: Math.max(0, Math.floor((sourceHeight - height) / 2)),
+			width,
+			height
+		};
+	}
+
+	function refreshPosterCropMetrics() {
+		if (!cropImageElement || !cropMetrics) return;
+		const displayWidth = cropImageElement.clientWidth;
+		const displayHeight = cropImageElement.clientHeight;
+		if (displayWidth <= 0 || displayHeight <= 0) return;
+
+		cropMetrics = {
+			...cropMetrics,
+			displayWidth,
+			displayHeight,
+			imageOffsetX: cropImageElement.offsetLeft,
+			imageOffsetY: cropImageElement.offsetTop
+		};
+	}
+
+	function handlePosterCropImageLoad() {
+		posterCropLoadError = null;
+		if (!cropImageElement) return;
+
+		const sourceWidth = cropImageElement.naturalWidth;
+		const sourceHeight = cropImageElement.naturalHeight;
+		if (sourceWidth <= 0 || sourceHeight <= 0) {
+			posterCropLoadError = 'Failed to read poster dimensions';
+			return;
+		}
+
+		const displayWidth = cropImageElement.clientWidth;
+		const displayHeight = cropImageElement.clientHeight;
+		if (displayWidth <= 0 || displayHeight <= 0) {
+			posterCropLoadError = 'Failed to measure poster layout';
+			return;
+		}
+
+		cropMetrics = {
+			sourceWidth,
+			sourceHeight,
+			displayWidth,
+			displayHeight,
+			imageOffsetX: cropImageElement.offsetLeft,
+			imageOffsetY: cropImageElement.offsetTop
+		};
+
+		const savedCrop = currentResult ? posterCropStates.get(currentResult.file_path) : undefined;
+		cropBox = savedCrop
+			? restoreCropBox(savedCrop, sourceWidth, sourceHeight)
+			: getDefaultPosterCropBox(sourceWidth, sourceHeight);
+
+		refreshPosterCropMetrics();
+	}
+
+	function handlePosterCropImageError() {
+		if (currentMovie && cropSourceURL.includes('-full.jpg')) {
+			const fallbackURL = `/api/v1/temp/posters/${jobId}/${currentMovie.id}.jpg`;
+			cropSourceURL = `${fallbackURL}?v=${Date.now()}`;
+			return;
+		}
+
+		posterCropLoadError = 'Poster source is not available for manual cropping';
+		cropMetrics = null;
+		cropBox = null;
+	}
+
+	function openPosterCropModal() {
+		if (!currentMovie) return;
+		const fullPosterURL = `/api/v1/temp/posters/${jobId}/${currentMovie.id}-full.jpg`;
+		cropSourceURL = `${fullPosterURL}?v=${Date.now()}`;
+		posterCropLoadError = null;
+		cropMetrics = null;
+		cropBox = null;
+		cropDragState = null;
+		showPosterCropModal = true;
+	}
+
+	function closePosterCropModal() {
+		stopPosterCropDrag();
+		showPosterCropModal = false;
+	}
+
+	function startPosterCropDrag(event: MouseEvent) {
+		if (!browser || event.button !== 0 || !cropMetrics || !cropBox) return;
+		event.preventDefault();
+
+		cropDragState = {
+			startX: event.clientX,
+			startY: event.clientY,
+			originX: cropBox.x,
+			originY: cropBox.y
+		};
+
+		window.addEventListener('mousemove', movePosterCropBox);
+		window.addEventListener('mouseup', stopPosterCropDrag);
+	}
+
+	function movePosterCropBox(event: MouseEvent) {
+		if (!cropDragState || !cropMetrics || !cropBox) return;
+		event.preventDefault();
+		refreshPosterCropMetrics();
+
+		const scaleX = cropMetrics.displayWidth / cropMetrics.sourceWidth;
+		const scaleY = cropMetrics.displayHeight / cropMetrics.sourceHeight;
+		if (scaleX <= 0 || scaleY <= 0) return;
+
+		const deltaXSource = (event.clientX - cropDragState.startX) / scaleX;
+		const deltaYSource = (event.clientY - cropDragState.startY) / scaleY;
+
+		const maxX = Math.max(0, cropMetrics.sourceWidth - cropBox.width);
+		const maxY = Math.max(0, cropMetrics.sourceHeight - cropBox.height);
+
+		cropBox = {
+			...cropBox,
+			x: clamp(Math.round(cropDragState.originX + deltaXSource), 0, maxX),
+			y: clamp(Math.round(cropDragState.originY + deltaYSource), 0, maxY)
+		};
+	}
+
+	function stopPosterCropDrag() {
+		cropDragState = null;
+		if (!browser) return;
+		window.removeEventListener('mousemove', movePosterCropBox);
+		window.removeEventListener('mouseup', stopPosterCropDrag);
+	}
+
+	function resetPosterCropBox() {
+		if (!cropMetrics) return;
+		cropBox = getDefaultPosterCropBox(cropMetrics.sourceWidth, cropMetrics.sourceHeight);
+	}
+
+	function getPosterCropOverlayStyle(): string {
+		if (!cropMetrics || !cropBox) return '';
+
+		const scaleX = cropMetrics.displayWidth / cropMetrics.sourceWidth;
+		const scaleY = cropMetrics.displayHeight / cropMetrics.sourceHeight;
+		const left = Math.round(cropMetrics.imageOffsetX + cropBox.x * scaleX);
+		const top = Math.round(cropMetrics.imageOffsetY + cropBox.y * scaleY);
+		const width = Math.round(cropBox.width * scaleX);
+		const height = Math.round(cropBox.height * scaleY);
+
+		return `left:${left}px;top:${top}px;width:${width}px;height:${height}px;box-shadow:0 0 0 9999px rgba(0,0,0,0.45);`;
+	}
+
+	async function applyPosterCrop() {
+		if (!currentMovie || !currentResult || !cropBox || posterCropSaving) return;
+
+		posterCropSaving = true;
+		try {
+			const response = await apiClient.updateBatchMoviePosterCrop(jobId, currentMovie.id, {
+				x: cropBox.x,
+				y: cropBox.y,
+				width: cropBox.width,
+				height: cropBox.height
+			});
+
+			const nextOverrides = new Map(posterPreviewOverrides);
+			nextOverrides.set(currentResult.file_path, {
+				url: response.cropped_poster_url,
+				version: Date.now()
+			});
+			posterPreviewOverrides = nextOverrides;
+
+			if (cropMetrics) {
+				const nextCropStates = new Map(posterCropStates);
+				nextCropStates.set(currentResult.file_path, normalizeCropBox(cropBox, cropMetrics));
+				posterCropStates = nextCropStates;
+			}
+
+			toastStore.success('Poster crop updated');
+			closePosterCropModal();
+		} catch (e) {
+			const errorMessage = e instanceof Error ? e.message : 'Failed to update poster crop';
+			toastStore.error(errorMessage);
+		} finally {
+			posterCropSaving = false;
+		}
+	}
+
 	// Image viewer functions
 	function openScreenshotViewer(index: number) {
 		if (!currentMovie?.screenshot_urls) return;
@@ -715,11 +1003,23 @@
 		if (urlDestination) {
 			destinationPath = urlDestination;
 		}
+
+		const handleResize = () => {
+			if (showPosterCropModal) {
+				refreshPosterCropMetrics();
+			}
+		};
+		window.addEventListener('resize', handleResize);
+
+		return () => {
+			window.removeEventListener('resize', handleResize);
+		};
 	});
 
 	onDestroy(() => {
 		clearOrganizePollTimer();
 		clearOrganizeCompletionTimer();
+		stopPosterCropDrag();
 	});
 </script>
 
@@ -919,9 +1219,22 @@
 					<!-- Poster Image -->
 					{#if showPosterPanel}
 						<Card class="p-4">
-							<h3 class="font-semibold mb-3 text-sm">
-								Poster{currentMovie.should_crop_poster ? ' (Cropped)' : ''}
-							</h3>
+							<div class="flex items-center justify-between gap-2 mb-3">
+								<h3 class="font-semibold text-sm">
+									Poster{currentMovie.should_crop_poster ? ' (Cropped)' : ''}
+								</h3>
+								<Button
+									size="sm"
+									variant="outline"
+									onclick={openPosterCropModal}
+									disabled={!currentMovie.id}
+									class="text-xs"
+								>
+									{#snippet children()}
+										Adjust Crop
+									{/snippet}
+								</Button>
+							</div>
 							{#if displayPosterUrl}
 								<div class="w-full aspect-2/3 overflow-hidden rounded border relative">
 									{#if currentMovie.should_crop_poster && !currentMovie.cropped_poster_url}
@@ -1373,6 +1686,87 @@
 	title={imageViewerTitle}
 	onClose={closeImageViewer}
 />
+
+<!-- Poster Crop Modal -->
+{#if showPosterCropModal}
+	<div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" use:portalToBody in:fade|local={{ duration: 140 }} out:fade|local={{ duration: 120 }}>
+		<div
+			class="w-full max-w-5xl"
+			in:scale|local={{ start: 0.97, duration: 180, easing: quintOut }}
+			out:scale|local={{ start: 1, opacity: 0.7, duration: 130, easing: quintOut }}
+		>
+			<Card class="w-full flex flex-col max-h-[92vh]">
+				<div class="p-4 border-b flex items-center justify-between">
+					<div>
+						<h2 class="text-lg font-semibold">Adjust Poster Crop</h2>
+						<p class="text-xs text-muted-foreground">Drag the fixed crop box to choose the area to keep.</p>
+					</div>
+					<Button variant="ghost" size="icon" onclick={closePosterCropModal} disabled={posterCropSaving}>
+						{#snippet children()}
+							<X class="h-4 w-4" />
+						{/snippet}
+					</Button>
+				</div>
+
+				<div class="flex-1 min-h-0 overflow-hidden">
+					<div bind:this={cropStageElement} class="relative w-full h-full p-10 bg-black/40 border-y min-h-[280px] flex items-center justify-center overflow-hidden">
+						<img
+							bind:this={cropImageElement}
+							src={cropSourceURL}
+							alt="Poster crop source"
+							class="block max-w-full max-h-full select-none"
+							draggable="false"
+							onload={handlePosterCropImageLoad}
+							onerror={handlePosterCropImageError}
+						/>
+						{#if cropMetrics && cropBox}
+							<div
+								class="absolute border-2 border-white cursor-move touch-none"
+								style={getPosterCropOverlayStyle()}
+								onmousedown={startPosterCropDrag}
+								aria-label="Poster crop selection"
+								role="button"
+								tabindex="-1"
+							>
+								<div class="absolute -bottom-7 right-0 bg-black/75 text-white text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap">
+									{cropBox.width} x {cropBox.height}
+								</div>
+							</div>
+						{/if}
+						{#if posterCropLoadError}
+							<div class="absolute top-3 left-3 right-3 rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive z-10">
+								{posterCropLoadError}
+							</div>
+						{/if}
+					</div>
+				</div>
+
+				<div class="p-4 border-t flex items-center justify-between gap-2">
+					<Button variant="outline" onclick={resetPosterCropBox} disabled={!cropMetrics || posterCropSaving}>
+						{#snippet children()}
+							Reset Position
+						{/snippet}
+					</Button>
+					<div class="flex items-center gap-2">
+						<Button variant="outline" onclick={closePosterCropModal} disabled={posterCropSaving}>
+							{#snippet children()}Cancel{/snippet}
+						</Button>
+						<Button onclick={applyPosterCrop} disabled={!cropBox || !!posterCropLoadError || posterCropSaving}>
+							{#snippet children()}
+								{#if posterCropSaving}
+									<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+									Applying...
+								{:else}
+									Apply Crop
+								{/if}
+							{/snippet}
+						</Button>
+					</div>
+				</div>
+			</Card>
+		</div>
+	</div>
+{/if}
 
 <!-- Rescrape Modal -->
 {#if showRescrapeModal}

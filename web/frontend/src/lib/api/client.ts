@@ -19,6 +19,8 @@ import type {
 	ScrapeRequest,
 	BatchRescrapeRequest,
 	BatchRescrapeResponse,
+	PosterCropRequest,
+	PosterCropResponse,
 	Config,
 	ProxyTestRequest,
 	ProxyTestResponse,
@@ -131,6 +133,14 @@ class APIClient {
 		return this.request<{ movie: Movie }>(`/api/v1/batch/${jobId}/movies/${movieId}`, {
 			method: 'PATCH',
 			body: JSON.stringify({ movie })
+		});
+	}
+
+	// Update manual poster crop for a movie in batch review
+	async updateBatchMoviePosterCrop(jobId: string, movieId: string, crop: PosterCropRequest): Promise<PosterCropResponse> {
+		return this.request<PosterCropResponse>(`/api/v1/batch/${jobId}/movies/${movieId}/poster-crop`, {
+			method: 'POST',
+			body: JSON.stringify(crop)
 		});
 	}
 
