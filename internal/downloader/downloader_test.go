@@ -1436,6 +1436,29 @@ func TestAdaptiveDownloader_SelectProxyForRequest_AVEntertainmentNoScraperProxyU
 	}
 }
 
+func TestAdaptiveDownloader_SelectProxyForRequest_CaribbeancomUsesScraperProxy(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Scrapers.Proxy = config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://global-proxy.example.com:8080",
+	}
+	cfg.Scrapers.Caribbeancom.Proxy = &config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://caribbeancom-proxy.example.com:8080",
+	}
+
+	client := &adaptiveDownloaderHTTPClient{cfg: cfg}
+	req := httptest.NewRequest(http.MethodGet, "https://www.caribbeancom.com/moviepages/120614-753/images/l_l.jpg", nil)
+
+	resolved := client.selectProxyForRequest(req)
+	if resolved == nil {
+		t.Fatal("Expected scraper proxy for caribbeancom host")
+	}
+	if resolved.URL != "http://caribbeancom-proxy.example.com:8080" {
+		t.Fatalf("Expected caribbeancom scraper proxy URL, got %q", resolved.URL)
+	}
+}
+
 func TestAdaptiveDownloader_SelectProxyForRequest_UnknownHostFallsBackToGlobal(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Scrapers.Proxy = config.ProxyConfig{

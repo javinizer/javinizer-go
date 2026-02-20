@@ -289,6 +289,34 @@ func TestGetAvailableScrapers(t *testing.T) {
 				assert.True(t, optionKeys["download_proxy.profile"])
 			},
 		},
+		{
+			name: "caribbeancom scraper with options",
+			scrapers: []models.Scraper{
+				&mockScraper{name: "caribbeancom", enabled: true},
+			},
+			expectedStatus: 200,
+			validateFn: func(t *testing.T, resp AvailableScrapersResponse) {
+				require.Len(t, resp.Scrapers, 1)
+				assert.Equal(t, "caribbeancom", resp.Scrapers[0].Name)
+				assert.Equal(t, "Caribbeancom", resp.Scrapers[0].DisplayName)
+				assert.True(t, resp.Scrapers[0].Enabled)
+				assert.Len(t, resp.Scrapers[0].Options, 9)
+
+				optionKeys := make(map[string]bool)
+				for _, opt := range resp.Scrapers[0].Options {
+					optionKeys[opt.Key] = true
+				}
+				assert.True(t, optionKeys["language"])
+				assert.True(t, optionKeys["request_delay"])
+				assert.True(t, optionKeys["base_url"])
+				assert.True(t, optionKeys["use_fake_user_agent"])
+				assert.True(t, optionKeys["fake_user_agent"])
+				assert.True(t, optionKeys["proxy.enabled"])
+				assert.True(t, optionKeys["proxy.profile"])
+				assert.True(t, optionKeys["download_proxy.enabled"])
+				assert.True(t, optionKeys["download_proxy.profile"])
+			},
+		},
 	}
 
 	for _, tt := range tests {

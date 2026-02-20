@@ -21,6 +21,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
+	"github.com/javinizer/javinizer-go/internal/scraper/caribbeancom"
 	"github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
 	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
 	"github.com/javinizer/javinizer-go/internal/scraper/jav321"
@@ -423,6 +424,38 @@ func getAvailableScrapers(deps *ServerDependencies) gin.HandlerFunc {
 				options = append(options, scraperFakeUserAgentOptions()...)
 				options = append(options, scraperProxyOptions(profileChoices)...)
 				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
+			case "caribbeancom":
+				displayName = "Caribbeancom"
+				options = []ScraperOption{
+					{
+						Key:         "language",
+						Label:       "Language",
+						Description: "Language for metadata output",
+						Type:        "select",
+						Choices: []ScraperChoice{
+							{Value: "ja", Label: "Japanese"},
+							{Value: "en", Label: "English"},
+						},
+					},
+					{
+						Key:         "request_delay",
+						Label:       "Request delay",
+						Description: "Delay between requests to avoid rate limiting",
+						Type:        "number",
+						Min:         ptrInt(0),
+						Max:         ptrInt(5000),
+						Unit:        "ms",
+					},
+					{
+						Key:         "base_url",
+						Label:       "Base URL",
+						Description: "Caribbeancom base URL",
+						Type:        "string",
+					},
+				}
+				options = append(options, scraperFakeUserAgentOptions()...)
+				options = append(options, scraperProxyOptions(profileChoices)...)
+				options = append(options, scraperDownloadProxyOptions(profileChoices)...)
 			}
 
 			scrapers = append(scrapers, ScraperInfo{
@@ -705,6 +738,7 @@ func reloadComponents(deps *ServerDependencies, newCfg *config.Config) error {
 	newRegistry.Register(tokyohot.New(newCfg))
 	newRegistry.Register(aventertainment.New(newCfg))
 	newRegistry.Register(dlgetchu.New(newCfg))
+	newRegistry.Register(caribbeancom.New(newCfg))
 
 	// Register JavLibrary scraper (may return error if language is invalid)
 	javLibraryProxy := config.ResolveScraperProxy(newCfg.Scrapers.Proxy, newCfg.Scrapers.JavLibrary.Proxy)

@@ -27,6 +27,7 @@
 		if (name === 'tokyohot') return 'Tokyo-Hot';
 		if (name === 'aventertainment') return 'AV Entertainment';
 		if (name === 'dlgetchu') return 'DLGetchu';
+		if (name === 'caribbeancom') return 'Caribbeancom';
 		return name.charAt(0).toUpperCase() + name.slice(1);
 	}
 </script>

@@ -53,6 +53,7 @@ scrapers:
         - tokyohot
         - aventertainment
         - dlgetchu
+        - caribbeancom
     # HTTP/SOCKS5 proxy settings and reusable profiles
     proxy:
         enabled: false
@@ -219,6 +220,21 @@ scrapers:
         enabled: false
         request_delay: 1000
         base_url: "http://dl.getchu.com"
+        use_fake_user_agent: false
+        fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+        # Optional per-scraper proxy override
+        # proxy:
+        #   enabled: true
+        #   profile: "backup"
+        # Optional per-scraper download proxy override
+        # download_proxy:
+        #   enabled: true
+        #   profile: "backup"
+    caribbeancom:
+        enabled: false
+        language: ja
+        request_delay: 1000
+        base_url: "https://www.caribbeancom.com"
         use_fake_user_agent: false
         fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
         # Optional per-scraper proxy override

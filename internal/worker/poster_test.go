@@ -44,6 +44,12 @@ func TestResolvePosterReferer(t *testing.T) {
 			expected:   "https://www.aventertainments.com/",
 		},
 		{
+			name:       "caribbeancom host overrides configured referer",
+			url:        "https://www.caribbeancom.com/moviepages/120614-753/images/l_l.jpg",
+			configured: "https://www.dmm.co.jp/",
+			expected:   "https://www.caribbeancom.com/",
+		},
+		{
 			name:       "dmm host override applies",
 			url:        "https://pics.dmm.co.jp/digital/video/118abp00880/118abp00880pl.jpg",
 			configured: "https://example.com/",
