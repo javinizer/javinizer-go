@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
+	"github.com/javinizer/javinizer-go/internal/scraper/caribbeancom"
 	"github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
 	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
 	"github.com/javinizer/javinizer-go/internal/scraper/jav321"
@@ -114,6 +115,7 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 		registry.Register(tokyohot.New(cfg))
 		registry.Register(aventertainment.New(cfg))
 		registry.Register(dlgetchu.New(cfg))
+		registry.Register(caribbeancom.New(cfg))
 		javLibraryProxy := config.ResolveScraperProxy(cfg.Scrapers.Proxy, cfg.Scrapers.JavLibrary.Proxy)
 		javlib, err := javlibrary.New(&cfg.Scrapers.JavLibrary, javLibraryProxy, cfg.Scrapers.UserAgent)
 		if err != nil {

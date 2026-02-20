@@ -163,6 +163,8 @@ func (c *adaptiveDownloaderHTTPClient) selectProxyForRequest(req *http.Request) 
 		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.AVEntertainment.DownloadProxy, c.cfg.Scrapers.AVEntertainment.Proxy)
 	case strings.HasSuffix(host, "dl.getchu.com") || strings.HasSuffix(host, "getchu.com"):
 		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.DLGetchu.DownloadProxy, c.cfg.Scrapers.DLGetchu.Proxy)
+	case strings.HasSuffix(host, "caribbeancom.com"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.Caribbeancom.DownloadProxy, c.cfg.Scrapers.Caribbeancom.Proxy)
 	case strings.HasSuffix(host, "libredmm.com"):
 		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.LibreDMM.DownloadProxy, c.cfg.Scrapers.LibreDMM.Proxy)
 	case strings.Contains(host, "javlibrary"):
@@ -942,6 +944,8 @@ func ResolveMediaReferer(downloadURL, configuredReferer string) string {
 		return "https://www.javbus.com/"
 	case strings.HasSuffix(host, "aventertainments.com"):
 		return "https://www.aventertainments.com/"
+	case strings.HasSuffix(host, "caribbeancom.com"):
+		return "https://www.caribbeancom.com/"
 	case strings.HasSuffix(host, "libredmm.com"):
 		return "https://www.libredmm.com/"
 	case strings.HasSuffix(host, "dmm.co.jp"), strings.HasSuffix(host, "dmm.com"), strings.Contains(host, ".dmm."):

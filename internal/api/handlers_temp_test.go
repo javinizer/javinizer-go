@@ -311,6 +311,12 @@ func TestResolveTempImageReferer(t *testing.T) {
 			expected:   "https://www.aventertainments.com/",
 		},
 		{
+			name:       "caribbeancom override",
+			imageURL:   "https://www.caribbeancom.com/moviepages/120614-753/images/l_l.jpg",
+			configured: "https://example.com/",
+			expected:   "https://www.caribbeancom.com/",
+		},
+		{
 			name:       "configured fallback",
 			imageURL:   "https://images.example.com/a.jpg",
 			configured: "https://configured.example.com/",

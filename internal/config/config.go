@@ -99,6 +99,7 @@ type ScrapersConfig struct {
 	TokyoHot              TokyoHotConfig        `yaml:"tokyohot" json:"tokyohot"`
 	AVEntertainment       AVEntertainmentConfig `yaml:"aventertainment" json:"aventertainment"`
 	DLGetchu              DLGetchuConfig        `yaml:"dlgetchu" json:"dlgetchu"`
+	Caribbeancom          CaribbeancomConfig    `yaml:"caribbeancom" json:"caribbeancom"`
 }
 
 // R18DevConfig holds R18.dev scraper configuration
@@ -227,6 +228,18 @@ type DLGetchuConfig struct {
 	Enabled          bool         `yaml:"enabled" json:"enabled"`
 	RequestDelay     int          `yaml:"request_delay" json:"request_delay"`                       // Delay between requests in milliseconds (0 = no delay)
 	BaseURL          string       `yaml:"base_url" json:"base_url"`                                 // Base URL for DLgetchu
+	UseFakeUserAgent bool         `yaml:"use_fake_user_agent" json:"use_fake_user_agent"`           // Use browser-like User-Agent header for this scraper
+	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                   // Optional custom fake User-Agent (defaults to built-in browser UA)
+	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
+	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+}
+
+// CaribbeancomConfig holds Caribbeancom scraper configuration
+type CaribbeancomConfig struct {
+	Enabled          bool         `yaml:"enabled" json:"enabled"`
+	Language         string       `yaml:"language" json:"language"`                                 // Language code: ja, en (default: ja)
+	RequestDelay     int          `yaml:"request_delay" json:"request_delay"`                       // Delay between requests in milliseconds (0 = no delay)
+	BaseURL          string       `yaml:"base_url" json:"base_url"`                                 // Base URL for Caribbeancom
 	UseFakeUserAgent bool         `yaml:"use_fake_user_agent" json:"use_fake_user_agent"`           // Use browser-like User-Agent header for this scraper
 	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                   // Optional custom fake User-Agent (defaults to built-in browser UA)
 	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
@@ -548,6 +561,12 @@ func DefaultConfig() *Config {
 				RequestDelay: 1000,
 				BaseURL:      "http://dl.getchu.com",
 			},
+			Caribbeancom: CaribbeancomConfig{
+				Enabled:      false,
+				Language:     "ja",
+				RequestDelay: 1000,
+				BaseURL:      "https://www.caribbeancom.com",
+			},
 		},
 		Metadata: MetadataConfig{
 			Priority: PriorityConfig{
@@ -709,6 +728,7 @@ func migrateToV1(cfg *Config) error {
 		"tokyohot",
 		"aventertainment",
 		"dlgetchu",
+		"caribbeancom",
 	}
 	existing := cfg.Scrapers.Priority
 	if len(existing) == 0 {
@@ -838,6 +858,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Scrapers.DLGetchu.Proxy != nil {
 		if err := validateFlareSolverrConfig("scrapers.dlgetchu.proxy.flaresolverr", c.Scrapers.DLGetchu.Proxy.FlareSolverr); err != nil {
+			return err
+		}
+	}
+	if c.Scrapers.Caribbeancom.Proxy != nil {
+		if err := validateFlareSolverrConfig("scrapers.caribbeancom.proxy.flaresolverr", c.Scrapers.Caribbeancom.Proxy.FlareSolverr); err != nil {
 			return err
 		}
 	}
@@ -1008,6 +1033,9 @@ func validateProxyProfileConfig(c *Config) error {
 	if err := validateProxyProfileRef("scrapers.dlgetchu.proxy", c.Scrapers.DLGetchu.Proxy, profiles); err != nil {
 		return err
 	}
+	if err := validateProxyProfileRef("scrapers.caribbeancom.proxy", c.Scrapers.Caribbeancom.Proxy, profiles); err != nil {
+		return err
+	}
 	if err := validateProxyProfileRef("output.download_proxy", &c.Output.DownloadProxy, profiles); err != nil {
 		return err
 	}
@@ -1042,6 +1070,9 @@ func validateProxyProfileConfig(c *Config) error {
 		return err
 	}
 	if err := validateProxyProfileRef("scrapers.dlgetchu.download_proxy", c.Scrapers.DLGetchu.DownloadProxy, profiles); err != nil {
+		return err
+	}
+	if err := validateProxyProfileRef("scrapers.caribbeancom.download_proxy", c.Scrapers.Caribbeancom.DownloadProxy, profiles); err != nil {
 		return err
 	}
 
