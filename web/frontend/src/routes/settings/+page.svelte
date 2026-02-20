@@ -795,7 +795,7 @@
 </script>
 
 <div class="container mx-auto px-4 py-8">
-	<div class="max-w-4xl mx-auto space-y-6">
+	<div class="max-w-7xl mx-auto space-y-6">
 		<!-- Header -->
 		<div class="space-y-4">
 			<div class="flex items-center gap-3">
