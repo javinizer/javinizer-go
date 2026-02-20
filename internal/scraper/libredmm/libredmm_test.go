@@ -264,6 +264,16 @@ func TestNormalizeLibredmmScreenshotURL(t *testing.T) {
 			in:   "https://pics.dmm.co.jp/digital/video/118abp00880/118abp00880jp-2.jpg",
 			want: "https://pics.dmm.co.jp/digital/video/118abp880/118abp880jp-2.jpg",
 		},
+		{
+			name: "keeps at least three digits in prefixed content id segments",
+			in:   "https://pics.dmm.co.jp/digital/video/118abw00013/118abw00013jp-1.jpg",
+			want: "https://pics.dmm.co.jp/digital/video/118abw013/118abw013jp-1.jpg",
+		},
+		{
+			name: "keeps single digit prefixed content id segments",
+			in:   "https://pics.dmm.co.jp/digital/video/1mgnl00134/1mgnl00134jp-1.jpg",
+			want: "https://pics.dmm.co.jp/digital/video/1mgnl00134/1mgnl00134jp-1.jpg",
+		},
 	}
 
 	for _, tt := range tests {

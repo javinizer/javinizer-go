@@ -28,7 +28,7 @@ const (
 
 var (
 	cidRegex                 = regexp.MustCompile(`(?i)(?:^|[?&])(cid|id)=([^&]+)`)
-	dmmPrefixedCIDRegex      = regexp.MustCompile(`^(\d+[a-z]+)0+(\d+.*)$`)
+	dmmPrefixedCIDRegex      = regexp.MustCompile(`^(\d{3,}[a-z]+)0+(\d+.*)$`)
 	dmmSampleFilenamePattern = regexp.MustCompile(`(?i)\.jpe?g$`)
 )
 
@@ -604,7 +604,15 @@ func canonicalizeDMMPrefixedContentID(seg string) string {
 	}
 
 	if matches := dmmPrefixedCIDRegex.FindStringSubmatch(lower); len(matches) == 3 {
-		seg = matches[1] + matches[2]
+		tail := matches[2]
+		digitPrefixLen := 0
+		for digitPrefixLen < len(tail) && tail[digitPrefixLen] >= '0' && tail[digitPrefixLen] <= '9' {
+			digitPrefixLen++
+		}
+		if digitPrefixLen > 0 && digitPrefixLen < 3 {
+			tail = strings.Repeat("0", 3-digitPrefixLen) + tail
+		}
+		seg = matches[1] + tail
 	}
 
 	return seg + suffix + ext
