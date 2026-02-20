@@ -688,6 +688,32 @@ func TestExtractActressesFromStreamingPage_HeadingFallback(t *testing.T) {
 	assert.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/test_cast.jpg", actresses[0].ThumbURL)
 }
 
+func TestExtractActressesFromStreamingPage_SkipsRecommendationOnlyLinks(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			DMM: config.DMMConfig{
+				Enabled:       true,
+				ScrapeActress: true,
+			},
+		},
+	}
+	scraper := New(cfg, nil)
+
+	html := `<html><body>
+		<div class="recommend-list">
+			<a href="/av/list/?actress=1044099&i3_ref=recommend">美園和花</a>
+			<a href="/av/list/?actress=1099472&i3_ref=recommend">瀬戸環奈</a>
+			<a href="/av/list/?actress=1054998&i3_ref=recommend">松本いちか</a>
+		</div>
+	</body></html>`
+
+	doc, err := parseHTMLString(html)
+	require.NoError(t, err)
+
+	actresses := scraper.extractActressesFromStreamingPage(doc)
+	assert.Len(t, actresses, 0)
+}
+
 // TestExtractGenres verifies genre extraction
 func TestExtractGenres(t *testing.T) {
 	tests := []struct {

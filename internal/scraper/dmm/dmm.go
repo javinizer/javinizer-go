@@ -1150,27 +1150,10 @@ func (s *Scraper) extractActressesFromStreamingPage(doc *goquery.Document) []mod
 		}
 	}
 
-	// Strategy 2: If no actresses found in metadata sections, fall back to all actress links
-	// but limit to a reasonable number (first 6) to avoid including too many recommendations
-	logging.Debug("DMM Streaming: No actresses found in metadata sections, using fallback strategy")
-
-	count := 0
-	maxActresses := 6 // Reasonable limit to avoid including too many recommendations
-
-	doc.Find(actressLinkSelector).Each(func(i int, sel *goquery.Selection) {
-		if count >= maxActresses {
-			return
-		}
-
-		actress := s.extractActressFromLink(sel)
-		if actress.DMMID > 0 {
-			if !upsertActressInfo(&actresses, actressIndexByID, actress) {
-				return
-			}
-			count++
-			logging.Debugf("DMM Streaming: Actress extracted (fallback) - Name: %s, ID: %d", actress.FullName(), actress.DMMID)
-		}
-	})
+	// Strategy 2 intentionally does not scrape all actress links on the page.
+	// video.dmm.co.jp pages often contain recommendation rails with many actress links,
+	// which causes false positives for the current title.
+	logging.Debug("DMM Streaming: No reliable cast section found; skipping global actress-link fallback")
 
 	return actresses
 }
