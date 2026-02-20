@@ -2,12 +2,15 @@ package dmm
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -179,6 +182,11 @@ func TestNormalizeContentID(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestBuildResolveContentIDSearchQueries(t *testing.T) {
+	queries := buildResolveContentIDSearchQueries("CLT-069", normalizeContentID("CLT-069"))
+	assert.Equal(t, []string{"clt069", "clt00069", "clt69", "clt-069"}, queries)
 }
 
 // TestNormalizeID verifies ID normalization (reverse of normalizeContentID)
@@ -1636,6 +1644,51 @@ func TestResolveContentID_NoRepository(t *testing.T) {
 	assert.Contains(t, err.Error(), "content ID repository not available")
 }
 
+func TestResolveContentID_UsesSearchQueryVariations(t *testing.T) {
+	dbCfg := &config.Config{
+		Database: config.DatabaseConfig{
+			Type: "sqlite",
+			DSN:  ":memory:",
+		},
+		Logging: config.LoggingConfig{
+			Level: "error",
+		},
+	}
+
+	db, err := database.New(dbCfg)
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, db.AutoMigrate())
+
+	repo := database.NewContentIDMappingRepository(db)
+	scraper := New(&config.Config{
+		Scrapers: config.ScrapersConfig{
+			DMM: config.DMMConfig{
+				Enabled: true,
+			},
+		},
+	}, repo)
+
+	transport := &searchVariationRoundTripper{
+		responseByQuery: map[string]string{
+			"clt069": `<html><body><p>No matching anchors</p></body></html>`,
+			"clt00069": `<html><body>
+				<a href="/digital/videoa/-/detail/=/cid=clt00069/">CLT-069 result</a>
+			</body></html>`,
+		},
+	}
+	scraper.client.SetTransport(transport)
+
+	contentID, err := scraper.ResolveContentID("CLT-069")
+	require.NoError(t, err)
+	assert.Equal(t, "clt00069", contentID)
+	assert.Equal(t, []string{"clt069", "clt00069"}, transport.requestedQueries)
+
+	cached, err := repo.FindBySearchID("CLT-069")
+	require.NoError(t, err)
+	assert.Equal(t, "clt00069", cached.ContentID)
+}
+
 // TestGetURL_NoRepository verifies error when repository is nil
 func TestGetURL_NoRepository(t *testing.T) {
 	cfg := &config.Config{
@@ -1652,6 +1705,42 @@ func TestGetURL_NoRepository(t *testing.T) {
 	_, err := scraper.GetURL("ipx-535")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "movie not found on DMM")
+}
+
+type searchVariationRoundTripper struct {
+	responseByQuery  map[string]string
+	requestedQueries []string
+}
+
+func (rt *searchVariationRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	query := extractSearchQueryFromPath(req.URL.Path)
+	rt.requestedQueries = append(rt.requestedQueries, query)
+
+	body, ok := rt.responseByQuery[query]
+	if !ok {
+		body = "<html><body></body></html>"
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}, nil
+}
+
+func extractSearchQueryFromPath(path string) string {
+	marker := "searchstr="
+	idx := strings.Index(path, marker)
+	if idx == -1 {
+		return ""
+	}
+
+	remaining := path[idx+len(marker):]
+	if slashIdx := strings.Index(remaining, "/"); slashIdx != -1 {
+		return remaining[:slashIdx]
+	}
+	return remaining
 }
 
 // TestMatchesWithVariantSuffix verifies matching with single-letter variant suffixes
