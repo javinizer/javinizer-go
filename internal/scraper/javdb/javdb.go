@@ -881,7 +881,7 @@ func extractStringList(sel *goquery.Selection) []string {
 	}
 
 	raw := cleanString(sel.Text())
-	if raw == "" {
+	if raw == "" || isNotAvailableValue(raw) {
 		return nil
 	}
 	parts := strings.FieldsFunc(raw, func(r rune) bool {
@@ -889,12 +889,35 @@ func extractStringList(sel *goquery.Selection) []string {
 	})
 	for _, p := range parts {
 		v := cleanString(p)
-		if v != "" && !seen[v] {
+		if v == "" || isNotAvailableValue(v) {
+			continue
+		}
+		if !seen[v] {
 			seen[v] = true
 			values = append(values, v)
 		}
 	}
+	if len(values) == 0 {
+		return nil
+	}
 	return values
+}
+
+func isNotAvailableValue(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return false
+	}
+
+	normalized = strings.ReplaceAll(normalized, " ", "")
+	normalized = strings.ReplaceAll(normalized, "／", "/")
+
+	switch normalized {
+	case "n/a", "n.a.", "na", "none", "null", "nil", "notavailable", "notapplicable", "無し", "なし", "-", "--":
+		return true
+	default:
+		return false
+	}
 }
 
 func extractFirstURL(doc *goquery.Document, selectors []string, baseURL string) string {

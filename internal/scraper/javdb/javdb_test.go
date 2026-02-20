@@ -182,6 +182,55 @@ func TestSearch_Success_EnglishLabels(t *testing.T) {
 	assert.Less(t, result.Actresses[0].DMMID, 0)
 }
 
+func TestSearch_ActorNAIsIgnored(t *testing.T) {
+	searchHTML := `
+<html>
+	<body>
+		<div class="movie-list">
+			<div class="item">
+				<a href="/v/naact">
+					<div class="video-title"><strong>GPTPJ-018</strong> Sample Title</div>
+				</a>
+			</div>
+		</div>
+	</body>
+</html>
+`
+	detailHTML := `
+<html>
+	<body>
+		<h2 class="title is-4"><strong>GPTPJ-018</strong> Sample Title</h2>
+		<div class="movie-panel-info">
+			<div class="panel-block"><strong>ID:</strong><span class="value">GPTPJ-018</span></div>
+			<div class="panel-block"><strong>Actor(s):</strong><span class="value">N/A</span></div>
+		</div>
+	</body>
+</html>
+`
+
+	client := resty.New()
+	client.SetTransport(&staticRoundTripper{
+		responses: map[string]string{
+			"https://javdb.test/search?q=GPTPJ-018&f=all": searchHTML,
+			"https://javdb.test/v/naact":                  detailHTML,
+		},
+	})
+
+	scraper := &Scraper{
+		client:       client,
+		cfg:          &config.JavDBConfig{Enabled: true},
+		enabled:      true,
+		baseURL:      "https://javdb.test",
+		requestDelay: 0,
+	}
+	scraper.lastRequestTime.Store(time.Time{})
+
+	result, err := scraper.Search("GPTPJ-018")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Len(t, result.Actresses, 0)
+}
+
 func TestSearch_ScreenshotSkipsLoginLink(t *testing.T) {
 	searchHTML := `
 <html><body><div class="movie-list"><div class="item"><a href="/v/img123"><div class="video-title"><strong>ABC-123</strong> Movie</div></a></div></div></body></html>
