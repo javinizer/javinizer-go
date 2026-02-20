@@ -225,6 +225,245 @@ func TestSearch_ScreenshotSkipsLoginLink(t *testing.T) {
 	assert.Equal(t, "https://img.example.com/shot1.jpg", result.ScreenshotURL[0])
 }
 
+func TestSearch_PrefersExactIDOverVariant(t *testing.T) {
+	searchHTML := `
+<html>
+	<body>
+		<div class="movie-list">
+			<div class="item">
+				<a href="/v/variant">
+					<div class="video-title"><strong>ABP-880A</strong> Variant Title</div>
+					<div class="uid">ABP-880A</div>
+				</a>
+			</div>
+			<div class="item">
+				<a href="/v/exact">
+					<div class="video-title"><strong>ABP-880</strong> Exact Title</div>
+					<div class="uid">ABP-880</div>
+				</a>
+			</div>
+		</div>
+	</body>
+</html>
+`
+	variantDetailHTML := `
+<html>
+	<body>
+		<h2 class="title is-4"><strong>ABP-880A</strong> Variant Title</h2>
+		<div class="movie-panel-info">
+			<div class="panel-block"><strong>演員:</strong><span class="value"><a>Wrong Actress 1</a><a>Wrong Actress 2</a></span></div>
+		</div>
+	</body>
+</html>
+`
+	exactDetailHTML := `
+<html>
+	<body>
+		<h2 class="title is-4"><strong>ABP-880</strong> Exact Title</h2>
+		<div class="movie-panel-info">
+			<div class="panel-block"><strong>演員:</strong><span class="value"><a>Correct Actress</a></span></div>
+		</div>
+	</body>
+</html>
+`
+
+	client := resty.New()
+	client.SetTransport(&staticRoundTripper{
+		responses: map[string]string{
+			"https://javdb.test/search?q=ABP-880&f=all": searchHTML,
+			"https://javdb.test/v/variant":              variantDetailHTML,
+			"https://javdb.test/v/exact":                exactDetailHTML,
+		},
+	})
+
+	scraper := &Scraper{
+		client:       client,
+		cfg:          &config.JavDBConfig{Enabled: true},
+		enabled:      true,
+		baseURL:      "https://javdb.test",
+		requestDelay: 0,
+	}
+	scraper.lastRequestTime.Store(time.Time{})
+
+	result, err := scraper.Search("ABP-880")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	assert.Equal(t, "ABP-880", result.ID)
+	assert.Equal(t, "Exact Title", result.Title)
+	require.Len(t, result.Actresses, 1)
+	assert.Equal(t, "Correct Actress", result.Actresses[0].JapaneseName)
+}
+
+func TestSearch_FiltersMaleActorsFromActresses(t *testing.T) {
+	searchHTML := `
+<html>
+	<body>
+		<div class="movie-list">
+			<div class="item">
+				<a href="/v/mixcast">
+					<div class="video-title"><strong>ABP-880</strong> Mix Cast</div>
+					<div class="uid">ABP-880</div>
+				</a>
+			</div>
+		</div>
+	</body>
+</html>
+`
+	detailHTML := `
+<html>
+	<body>
+		<h2 class="title is-4"><strong>ABP-880</strong> Mix Cast</h2>
+		<div class="movie-panel-info">
+			<div class="panel-block">
+				<strong>Actor(s):</strong>
+				<span class="value">
+					<span><a title="female">Correct Actress</a> ♀</span>
+					<span><a title="male">Wrong Male 1</a> ♂</span>
+					<span><a class="gender-male">Wrong Male 2</a></span>
+				</span>
+			</div>
+		</div>
+	</body>
+</html>
+`
+
+	client := resty.New()
+	client.SetTransport(&staticRoundTripper{
+		responses: map[string]string{
+			"https://javdb.test/search?q=ABP-880&f=all": searchHTML,
+			"https://javdb.test/v/mixcast":              detailHTML,
+		},
+	})
+
+	scraper := &Scraper{
+		client:       client,
+		cfg:          &config.JavDBConfig{Enabled: true},
+		enabled:      true,
+		baseURL:      "https://javdb.test",
+		requestDelay: 0,
+	}
+	scraper.lastRequestTime.Store(time.Time{})
+
+	result, err := scraper.Search("ABP-880")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.Len(t, result.Actresses, 1)
+	assert.Equal(t, "Correct Actress", result.Actresses[0].JapaneseName)
+}
+
+func TestSearch_PrefersFemaleActressRowOverGenericCast(t *testing.T) {
+	searchHTML := `
+<html>
+	<body>
+		<div class="movie-list">
+			<div class="item">
+				<a href="/v/femalefirst">
+					<div class="video-title"><strong>ABP-880</strong> Mix Cast</div>
+					<div class="uid">ABP-880</div>
+				</a>
+			</div>
+		</div>
+	</body>
+</html>
+`
+	detailHTML := `
+<html>
+	<body>
+		<h2 class="title is-4"><strong>ABP-880</strong> Mix Cast</h2>
+		<div class="movie-panel-info">
+			<div class="panel-block"><strong>女優:</strong><span class="value"><a>河合あすな</a></span></div>
+			<div class="panel-block"><strong>演員:</strong><span class="value"><a>タツ</a><a>小田切ジュン</a><a>石川サダフミ</a><a>河合あすな</a></span></div>
+		</div>
+	</body>
+</html>
+`
+
+	client := resty.New()
+	client.SetTransport(&staticRoundTripper{
+		responses: map[string]string{
+			"https://javdb.test/search?q=ABP-880&f=all": searchHTML,
+			"https://javdb.test/v/femalefirst":          detailHTML,
+		},
+	})
+
+	scraper := &Scraper{
+		client:       client,
+		cfg:          &config.JavDBConfig{Enabled: true},
+		enabled:      true,
+		baseURL:      "https://javdb.test",
+		requestDelay: 0,
+	}
+	scraper.lastRequestTime.Store(time.Time{})
+
+	result, err := scraper.Search("ABP-880")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.Len(t, result.Actresses, 1)
+	assert.Equal(t, "河合あすな", result.Actresses[0].JapaneseName)
+}
+
+func TestSearch_UsesSymbolGenderMarkersForCast(t *testing.T) {
+	searchHTML := `
+<html>
+	<body>
+		<div class="movie-list">
+			<div class="item">
+				<a href="/v/symbolcast">
+					<div class="video-title"><strong>ABP-880</strong> Symbol Cast</div>
+					<div class="uid">ABP-880</div>
+				</a>
+			</div>
+		</div>
+	</body>
+</html>
+`
+	detailHTML := `
+<html>
+	<body>
+		<h2 class="title is-4"><strong>ABP-880</strong> Symbol Cast</h2>
+		<div class="movie-panel-info">
+			<div class="panel-block">
+				<strong>演員:</strong>
+				<span class="value">
+					<a>タツ</a><strong class="symbol male">♂</strong>
+					<a>小田切ジュン</a><strong class="symbol male">♂</strong>
+					<a>石川サダフミ</a><strong class="symbol male">♂</strong>
+					<a>河合あすな</a><strong class="symbol female">♀</strong>
+				</span>
+			</div>
+		</div>
+	</body>
+</html>
+`
+
+	client := resty.New()
+	client.SetTransport(&staticRoundTripper{
+		responses: map[string]string{
+			"https://javdb.test/search?q=ABP-880&f=all": searchHTML,
+			"https://javdb.test/v/symbolcast":           detailHTML,
+		},
+	})
+
+	scraper := &Scraper{
+		client:       client,
+		cfg:          &config.JavDBConfig{Enabled: true},
+		enabled:      true,
+		baseURL:      "https://javdb.test",
+		requestDelay: 0,
+	}
+	scraper.lastRequestTime.Store(time.Time{})
+
+	result, err := scraper.Search("ABP-880")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.Len(t, result.Actresses, 1)
+	assert.Equal(t, "河合あすな", result.Actresses[0].JapaneseName)
+}
+
 type staticRoundTripper struct {
 	responses map[string]string
 }

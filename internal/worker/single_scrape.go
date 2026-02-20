@@ -259,6 +259,8 @@ func RunBatchScrapeOnce(
 
 			// CACHE HIT NFO MERGE: Merge cached data with existing NFO if updateMode is true
 			movieToReturn := cached
+			fieldSources := buildFieldSourcesFromCachedMovie(cached)
+			actressSources := buildActressSourcesFromCachedMovie(cached)
 			if updateMode && cfg != nil {
 				logging.Debugf("[Batch %s] File %d: Update mode enabled with cache hit, checking for existing NFO to merge", job.ID, fileIndex)
 
@@ -347,6 +349,8 @@ func RunBatchScrapeOnce(
 							logging.Warnf("[Batch %s] File %d: Failed to merge NFO data for %s: %v (using cached data only)", job.ID, fileIndex, cached.ID, err)
 						} else {
 							movieToReturn = mergeResult.Merged
+							fieldSources = applyNFOMergeProvenance(fieldSources, mergeResult.Provenance)
+							actressSources = applyActressMergeProvenance(actressSources, mergeResult.Provenance, movieToReturn.Actresses)
 							logging.Infof("[Batch %s] File %d: NFO merge complete for cached %s: %d from cache, %d from NFO, %d conflicts resolved",
 								job.ID, fileIndex, cached.ID, mergeResult.Stats.FromScraper, mergeResult.Stats.FromNFO, mergeResult.Stats.ConflictsResolved)
 
@@ -375,13 +379,15 @@ func RunBatchScrapeOnce(
 
 			now := time.Now()
 			fileResult := &FileResult{
-				FilePath:    filePath,
-				MovieID:     movieID,
-				Status:      JobStatusCompleted,
-				Data:        movieToReturn,
-				PosterError: posterErr,
-				StartedAt:   startTime,
-				EndedAt:     &now,
+				FilePath:       filePath,
+				MovieID:        movieID,
+				Status:         JobStatusCompleted,
+				Data:           movieToReturn,
+				FieldSources:   fieldSources,
+				ActressSources: actressSources,
+				PosterError:    posterErr,
+				StartedAt:      startTime,
+				EndedAt:        &now,
 			}
 
 			// Populate multi-part fields (only valid if not using query override)
@@ -627,6 +633,10 @@ func RunBatchScrapeOnce(
 	logging.Debugf("[Batch %s] File %d: Aggregation complete - Title: %s, Maker: %s, Actresses: %d, Genres: %d",
 		job.ID, fileIndex, movie.Title, movie.Maker, len(movie.Actresses), len(movie.Genres))
 
+	// Track which scraper won each field for frontend debugging display.
+	fieldSources := buildFieldSourcesFromScrapeResults(results, agg.GetResolvedPriorities(), selectedScrapers)
+	actressSources := buildActressSourcesFromScrapeResults(results, agg.GetResolvedPriorities(), selectedScrapers, movie.Actresses)
+
 	// Set original filename for tracking
 	movie.OriginalFileName = filepath.Base(filePath)
 
@@ -719,6 +729,8 @@ func RunBatchScrapeOnce(
 					logging.Warnf("[Batch %s] File %d: Failed to merge NFO data for %s: %v (using scraper data only)", job.ID, fileIndex, movie.ID, err)
 				} else {
 					movie = mergeResult.Merged
+					fieldSources = applyNFOMergeProvenance(fieldSources, mergeResult.Provenance)
+					actressSources = applyActressMergeProvenance(actressSources, mergeResult.Provenance, movie.Actresses)
 					logging.Infof("[Batch %s] File %d: NFO merge complete for %s: %d from scraper, %d from NFO, %d conflicts resolved",
 						job.ID, fileIndex, movie.ID, mergeResult.Stats.FromScraper, mergeResult.Stats.FromNFO, mergeResult.Stats.ConflictsResolved)
 
@@ -835,13 +847,15 @@ func RunBatchScrapeOnce(
 	// Step 10: Create completed FileResult (caller will update job state)
 	now := time.Now()
 	fileResult := &FileResult{
-		FilePath:    filePath,
-		MovieID:     movieID,
-		Status:      JobStatusCompleted,
-		Data:        finalMovie,
-		PosterError: posterErr,
-		StartedAt:   startTime,
-		EndedAt:     &now,
+		FilePath:       filePath,
+		MovieID:        movieID,
+		Status:         JobStatusCompleted,
+		Data:           finalMovie,
+		FieldSources:   fieldSources,
+		ActressSources: actressSources,
+		PosterError:    posterErr,
+		StartedAt:      startTime,
+		EndedAt:        &now,
 	}
 
 	// Populate multi-part fields (only valid if not using query override)

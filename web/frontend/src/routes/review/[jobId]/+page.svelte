@@ -53,11 +53,14 @@
 	let showTrailerModal = $state(false);
 	let preview: OrganizePreviewResponse | null = $state(null);
 	let isUpdateMode = $derived($page.url.searchParams.get('update') === 'true');
+	let showFieldScraperSources = $state(false);
+	const SHOW_FIELD_SCRAPER_SOURCES_KEY = 'javinizer.review.showFieldScraperSources';
 
 	// Organize operation state
 	let organizeProgress = $state(0);
 	let organizeStatus = $state<'idle' | 'organizing' | 'completed' | 'failed'>('idle');
 	let fileStatuses = $state<Map<string, {status: string, error?: string}>>(new Map());
+	let expectedOrganizeFilePaths = $state<string[]>([]);
 	const ORGANIZE_POLL_INTERVAL_MS = 1500;
 	const ORGANIZE_POLL_TIMEOUT_MS = 10 * 60 * 1000;
 	let organizePollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -301,6 +304,14 @@
 		}
 	}
 
+	function getOrganizeEligibleFilePaths(batchJob: BatchJobResponse | null): string[] {
+		if (!batchJob) return [];
+		const excluded = batchJob.excluded || {};
+		return Object.entries(batchJob.results || {})
+			.filter(([filePath, result]) => !excluded[filePath] && result.status === 'completed' && !!result.data)
+			.map(([filePath]) => filePath);
+	}
+
 	function finalizeOrganizeSuccess(message?: string) {
 		if (organizeStatus !== 'organizing' || organizeCompletionTimer !== null) {
 			return;
@@ -316,6 +327,16 @@
 
 			organizeStatus = 'completed';
 			organizing = false;
+
+			// WebSocket messages can be dropped/reconnected; if no per-file statuses
+			// arrived, synthesize successful entries from known eligible files.
+			if (fileStatuses.size === 0 && expectedOrganizeFilePaths.length > 0) {
+				const synthesized = new Map<string, {status: string, error?: string}>();
+				for (const filePath of expectedOrganizeFilePaths) {
+					synthesized.set(filePath, {status: 'success'});
+				}
+				fileStatuses = synthesized;
+			}
 
 			const failures = Array.from(fileStatuses.values()).filter((s) => s.status === 'failed').length;
 			if (failures === 0) {
@@ -398,6 +419,14 @@
 	$effect(() => {
 		currentMovieIndex; // track dependency
 		showFullSourcePath = false;
+	});
+
+	$effect(() => {
+		if (!browser) return;
+		localStorage.setItem(
+			SHOW_FIELD_SCRAPER_SOURCES_KEY,
+			showFieldScraperSources ? 'true' : 'false'
+		);
 	});
 
 	// Subscribe to WebSocket messages during organize operation
@@ -545,7 +574,9 @@
 				// Create new result object to trigger reactivity
 				newResults[filePath] = {
 					...newResults[filePath],
-					data: updatedMovie
+					data: updatedMovie,
+					field_sources: response.field_sources ?? newResults[filePath].field_sources,
+					actress_sources: response.actress_sources ?? newResults[filePath].actress_sources
 				};
 
 				// Create new job object to trigger Svelte reactivity
@@ -601,6 +632,7 @@
 		organizing = true;
 		organizeProgress = 0;
 		fileStatuses = new Map();
+		expectedOrganizeFilePaths = getOrganizeEligibleFilePaths(job);
 		clearOrganizePollTimer();
 		clearOrganizeCompletionTimer();
 
@@ -634,6 +666,7 @@
 		organizing = true;
 		organizeProgress = 0;
 		fileStatuses = new Map();
+		expectedOrganizeFilePaths = getOrganizeEligibleFilePaths(job);
 		clearOrganizePollTimer();
 		clearOrganizeCompletionTimer();
 
@@ -998,6 +1031,10 @@
 	onMount(() => {
 		fetchJob();
 		fetchConfig();
+		if (browser) {
+			showFieldScraperSources =
+				localStorage.getItem(SHOW_FIELD_SCRAPER_SOURCES_KEY) === 'true';
+		}
 		// Get destination from URL params if provided
 		const urlDestination = $page.url.searchParams.get('destination');
 		if (urlDestination) {
@@ -1147,6 +1184,7 @@
 			{#if organizeStatus === 'completed'}
 				{@const failures = Array.from(fileStatuses.values()).filter(s => s.status === 'failed')}
 				{@const successes = Array.from(fileStatuses.values()).filter(s => s.status === 'success')}
+				{@const successCount = successes.length > 0 ? successes.length : expectedOrganizeFilePaths.length}
 
 				{#if failures.length === 0}
 					<Card class="p-6 border-green-500 bg-green-50">
@@ -1157,7 +1195,7 @@
 									{isUpdateMode ? 'Update Complete!' : 'Organization Complete!'}
 								</h3>
 								<p class="text-sm text-green-800 mb-3">
-									All {successes.length} file(s) {isUpdateMode ? 'updated' : 'organized'} successfully
+									All {successCount} file(s) {isUpdateMode ? 'updated' : 'organized'} successfully
 								</p>
 								<p class="text-xs text-green-700">
 									Redirecting to browse page in a few seconds...
@@ -1570,7 +1608,16 @@
 						<div class="space-y-4">
 							<div class="flex items-center justify-between">
 								<h2 class="text-xl font-semibold">Movie Metadata</h2>
-								<div class="flex gap-2">
+								<div class="flex items-center gap-3">
+									<label class="inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+										<input
+											type="checkbox"
+											bind:checked={showFieldScraperSources}
+											class="w-3.5 h-3.5 text-primary bg-gray-100 border-gray-300 rounded focus:ring-primary focus:ring-2"
+										/>
+										Show scraper per field
+									</label>
+									<div class="flex gap-2">
 									<Button
 										variant="outline"
 										size="sm"
@@ -1593,6 +1640,7 @@
 											Reset to Original
 										{/snippet}
 									</Button>
+									</div>
 								</div>
 							</div>
 
@@ -1600,13 +1648,20 @@
 								movie={currentMovie!}
 								originalMovie={currentResult.data!}
 								onUpdate={updateCurrentMovie}
+								fieldSources={currentResult.field_sources}
+								showFieldSources={showFieldScraperSources}
 							/>
 						</div>
 					</Card>
 
 					<!-- Actresses -->
 					<Card class="p-6">
-						<ActressEditor movie={currentMovie!} onUpdate={updateCurrentMovie} />
+						<ActressEditor
+							movie={currentMovie!}
+							onUpdate={updateCurrentMovie}
+							actressSources={currentResult.actress_sources}
+							showFieldSources={showFieldScraperSources}
+						/>
 					</Card>
 
 					<!-- Screenshots & Media -->
@@ -1633,6 +1688,8 @@
 											movie={currentMovie!}
 											displayPosterUrl={displayPosterUrl}
 											onUpdate={updateCurrentMovie}
+											fieldSources={currentResult.field_sources}
+											showFieldSources={showFieldScraperSources}
 										/>
 									</div>
 								{/if}

@@ -198,16 +198,18 @@ type OrganizePreviewResponse struct {
 
 // BatchFileResult wraps worker.FileResult with additional API-specific fields
 type BatchFileResult struct {
-	FilePath    string      `json:"file_path"`
-	MovieID     string      `json:"movie_id"`
-	Status      string      `json:"status"`
-	Error       string      `json:"error,omitempty"`
-	Data        interface{} `json:"data,omitempty"` // Movie data
-	StartedAt   string      `json:"started_at"`
-	EndedAt     *string     `json:"ended_at,omitempty"`
-	IsMultiPart bool        `json:"is_multi_part,omitempty"`
-	PartNumber  int         `json:"part_number,omitempty"`
-	PartSuffix  string      `json:"part_suffix,omitempty"`
+	FilePath       string            `json:"file_path"`
+	MovieID        string            `json:"movie_id"`
+	Status         string            `json:"status"`
+	Error          string            `json:"error,omitempty"`
+	FieldSources   map[string]string `json:"field_sources,omitempty"`   // Field-level source by scraper/NFO
+	ActressSources map[string]string `json:"actress_sources,omitempty"` // Actress-level source by scraper/NFO
+	Data           interface{}       `json:"data,omitempty"`            // Movie data
+	StartedAt      string            `json:"started_at"`
+	EndedAt        *string           `json:"ended_at,omitempty"`
+	IsMultiPart    bool              `json:"is_multi_part,omitempty"`
+	PartNumber     int               `json:"part_number,omitempty"`
+	PartSuffix     string            `json:"part_suffix,omitempty"`
 }
 
 // BatchJobResponse represents a batch job status
@@ -272,7 +274,9 @@ type BatchRescrapeRequest struct {
 
 // BatchRescrapeResponse represents a batch rescrape response with movie
 type BatchRescrapeResponse struct {
-	Movie *models.Movie `json:"movie"`
+	Movie          *models.Movie     `json:"movie"`
+	FieldSources   map[string]string `json:"field_sources,omitempty"`
+	ActressSources map[string]string `json:"actress_sources,omitempty"`
 }
 
 // NFOComparisonRequest represents a request to compare NFO with scraped data

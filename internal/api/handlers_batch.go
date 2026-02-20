@@ -351,16 +351,18 @@ func getBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 			}
 
 			results[filePath] = &BatchFileResult{
-				FilePath:    fileResult.FilePath,
-				MovieID:     fileResult.MovieID,
-				Status:      string(fileResult.Status),
-				Error:       fileResult.Error,
-				Data:        fileResult.Data,
-				StartedAt:   fileResult.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-				EndedAt:     endedAt,
-				IsMultiPart: fileResult.IsMultiPart,
-				PartNumber:  fileResult.PartNumber,
-				PartSuffix:  fileResult.PartSuffix,
+				FilePath:       fileResult.FilePath,
+				MovieID:        fileResult.MovieID,
+				Status:         string(fileResult.Status),
+				Error:          fileResult.Error,
+				FieldSources:   fileResult.FieldSources,
+				ActressSources: fileResult.ActressSources,
+				Data:           fileResult.Data,
+				StartedAt:      fileResult.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+				EndedAt:        endedAt,
+				IsMultiPart:    fileResult.IsMultiPart,
+				PartNumber:     fileResult.PartNumber,
+				PartSuffix:     fileResult.PartSuffix,
 			}
 		}
 

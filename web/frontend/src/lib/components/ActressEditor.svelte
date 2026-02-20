@@ -11,9 +11,11 @@
 	interface Props {
 		movie: Movie;
 		onUpdate: (movie: Movie) => void;
+		actressSources?: Record<string, string>;
+		showFieldSources?: boolean;
 	}
 
-	let { movie, onUpdate }: Props = $props();
+	let { movie, onUpdate, actressSources, showFieldSources = false }: Props = $props();
 
 	let actresses = $state<Actress[]>([]);
 	let showEditModal = $state(false);
@@ -145,6 +147,57 @@
 			showSearchResults = false;
 		}, 200);
 	}
+
+	function normalizeName(value: string | undefined): string {
+		if (!value) return '';
+		return value.trim().toLowerCase().split(/\s+/).filter(Boolean).join(' ');
+	}
+
+	function actressKey(actress: Actress): string {
+		if (actress.dmm_id && actress.dmm_id > 0) return `dmmid:${actress.dmm_id}`;
+		const japanese = normalizeName(actress.japanese_name);
+		if (japanese) return `name:${japanese}`;
+		const firstLast = normalizeName(`${actress.first_name || ''} ${actress.last_name || ''}`);
+		if (firstLast) return `name:${firstLast}`;
+		const lastFirst = normalizeName(`${actress.last_name || ''} ${actress.first_name || ''}`);
+		if (lastFirst) return `name:${lastFirst}`;
+		return '';
+	}
+
+	function sourceText(rawSource: string | undefined): string | null {
+		if (!rawSource) return null;
+		const source = rawSource.trim();
+		if (!source) return null;
+
+		const normalized = source.toLowerCase();
+		if (normalized === 'nfo') return 'via NFO';
+		if (normalized === 'merged') return 'via merged data';
+		if (normalized === 'empty') return 'empty';
+		return `via ${source}`;
+	}
+
+	function sourceForActress(actress: Actress): string | null {
+		if (!showFieldSources || !actressSources) return null;
+
+		const primaryKey = actressKey(actress);
+		const rawSource = primaryKey ? actressSources[primaryKey] : undefined;
+		if (rawSource) return sourceText(rawSource);
+
+		// Fallback checks for alternate name-key combinations when backend/frontend
+		// normalization differs slightly after user edits.
+		const altKeys = [
+			`name:${normalizeName(actress.japanese_name)}`,
+			`name:${normalizeName(`${actress.first_name || ''} ${actress.last_name || ''}`)}`,
+			`name:${normalizeName(`${actress.last_name || ''} ${actress.first_name || ''}`)}`
+		].filter((key) => key !== 'name:');
+
+		for (const key of altKeys) {
+			const altSource = actressSources[key];
+			if (altSource) return sourceText(altSource);
+		}
+
+		return null;
+	}
 </script>
 
 <div class="space-y-4">
@@ -200,6 +253,9 @@
 								<p class="text-xs text-muted-foreground truncate" title={actress.japanese_name}>
 									{actress.japanese_name}
 								</p>
+							{/if}
+							{#if sourceForActress(actress)}
+								<p class="text-xs text-muted-foreground">{sourceForActress(actress)}</p>
 							{/if}
 						</div>
 
