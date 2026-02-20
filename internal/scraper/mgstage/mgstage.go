@@ -217,9 +217,11 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 	}
 
 	// Extract ID from URL or page
-	result.ID = extractIDFromURL(sourceURL)
-	if result.ID == "" {
-		result.ID = extractTableValue(doc, "品番：")
+	urlID := extractIDFromURL(sourceURL)
+	result.ID = urlID
+	tableID := extractTableValue(doc, "品番：")
+	if tableID != "" {
+		result.ID = tableID
 	}
 
 	// Set ContentID to same as ID for MGStage (they use standard DVD-style IDs)
@@ -283,6 +285,19 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 
 	// Extract trailer URL
 	result.TrailerURL = extractTrailerURL(doc, s.client)
+
+	// Guard against generic MGStage landing/search pages that can return 200
+	// with site-wide title/description and no product metadata.
+	if !hasProductSignals(result, tableID) {
+		lookupID := result.ID
+		if lookupID == "" {
+			lookupID = urlID
+		}
+		if lookupID == "" {
+			lookupID = "unknown"
+		}
+		return nil, models.NewScraperNotFoundError("MGStage", fmt.Sprintf("movie %s not found on MGStage", lookupID))
+	}
 
 	return result, nil
 }
@@ -703,7 +718,7 @@ func extractDescription(doc *goquery.Document) string {
 			continue
 		}
 		text := cleanString(content)
-		if text != "" {
+		if text != "" && !isGenericMGStageDescription(text) {
 			return text
 		}
 	}
@@ -753,5 +768,64 @@ func cleanTitle(title string) string {
 	title = strings.TrimSuffix(title, " - MGStage")
 	title = strings.TrimSuffix(title, "- MGStage")
 
-	return cleanString(title)
+	cleaned := cleanString(title)
+	if isGenericMGStageTitle(cleaned) {
+		return ""
+	}
+
+	return cleaned
+}
+
+func hasProductSignals(result *models.ScraperResult, tableID string) bool {
+	if result == nil {
+		return false
+	}
+
+	if tableID != "" {
+		return true
+	}
+
+	if result.Title != "" && result.Title != result.ID {
+		return true
+	}
+	if result.Description != "" {
+		return true
+	}
+	if result.Runtime > 0 || result.ReleaseDate != nil {
+		return true
+	}
+	if result.Maker != "" || result.Label != "" || result.Series != "" {
+		return true
+	}
+	if len(result.Genres) > 0 || len(result.Actresses) > 0 {
+		return true
+	}
+	if result.CoverURL != "" || result.PosterURL != "" || len(result.ScreenshotURL) > 0 {
+		return true
+	}
+
+	return false
+}
+
+func isGenericMGStageTitle(title string) bool {
+	title = cleanString(title)
+	if title == "" {
+		return false
+	}
+
+	if title == "エロ動画・アダルトビデオ -MGS動画＜プレステージ グループ＞" {
+		return true
+	}
+
+	return strings.Contains(title, "MGS動画") && strings.Contains(title, "エロ動画・アダルトビデオ")
+}
+
+func isGenericMGStageDescription(description string) bool {
+	description = cleanString(description)
+	if description == "" {
+		return false
+	}
+
+	return strings.Contains(description, "MGS動画") &&
+		(strings.Contains(description, "エロ動画") || strings.Contains(description, "アダルトビデオ"))
 }

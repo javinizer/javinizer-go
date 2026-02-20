@@ -35,6 +35,7 @@ var (
 	// After prefix cleaning, ID format is: letters + digits + optional suffix
 	normalizeIDRegex        = regexp.MustCompile(`^([a-z]+)(\d+)(.*)$`)
 	normalizeContentIDRegex = regexp.MustCompile(`^([a-z]+)(\d+)(.*)$`)
+	contentIDUnpadRegex     = regexp.MustCompile(`^([a-z]+)0*(\d+.*)$`)
 	// Generalized prefix cleaning for DMM content IDs (leading digits OR h_<digits>)
 	cleanPrefixRegex = regexp.MustCompile(`^(?:\d+|h_\d+)?([a-z]+\d+.*)$`)
 )
@@ -125,115 +126,55 @@ func (s *Scraper) ResolveContentID(id string) (string, error) {
 
 	logging.Debugf("DMM: Content-id not cached for %s, attempting to resolve via search", id)
 
-	// 2. Try to scrape DMM search page
-	// Use the original ID (with zeros) for search to get precise results
-	// Remove hyphen but keep zeros: "MDB-087" -> "mdb087"
+	// 2. Try multiple DMM search query variations.
+	// Example fallback: CLT-069 -> clt069, clt00069, clt69.
+	contentID := normalizeContentID(id)
 	searchQuery := strings.ToLower(strings.ReplaceAll(id, "-", ""))
-	contentID := normalizeContentID(id) // Still needed for comparison
-	searchURLFormatted := fmt.Sprintf(searchURL, searchQuery)
-
-	// Fetch the search page (cookies are set globally on the client)
-	resp, err := s.client.R().Get(searchURLFormatted)
-	if err != nil {
-		return "", fmt.Errorf("DMM search unavailable (possible geo-restriction or network error): %w", err)
-	}
-
-	// Check for explicit geo-blocking or access denial
-	if resp.StatusCode() == 403 || resp.StatusCode() == 451 {
-		return "", models.NewScraperStatusError(
-			"DMM",
-			resp.StatusCode(),
-			fmt.Sprintf("DMM access blocked (status %d, likely geo-restriction)", resp.StatusCode()),
-		)
-	}
-
-	if resp.StatusCode() != 200 {
-		return "", models.NewScraperStatusError(
-			"DMM",
-			resp.StatusCode(),
-			fmt.Sprintf("DMM search returned status code %d", resp.StatusCode()),
-		)
-	}
-
-	// 3. Parse search results to extract actual content-id
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
-	if err != nil {
-		return "", fmt.Errorf("failed to parse DMM search results: %w", err)
-	}
-
-	// Extract content-id and URL from various DMM link types
-	// Collect ALL candidates to choose the best one (shortest ID preferred)
-	type candidate struct {
-		contentID string
-		url       string
-		length    int
-	}
-	candidates := make([]candidate, 0)
-	cleanSearchID := regexp.MustCompile(`^([a-z]+)0*(\d+.*)$`).ReplaceAllString(contentID, "$1$2")
+	cleanSearchID := normalizedContentIDWithoutPadding(contentID)
+	matchIDs := uniqueNonEmptyStrings([]string{searchQuery, cleanSearchID, contentID})
+	searchQueries := buildResolveContentIDSearchQueries(id, contentID)
 
 	logging.Debugf("DMM: Searching for matches to searchQuery=%s, cleanSearchID=%s or contentID=%s", searchQuery, cleanSearchID, contentID)
 
-	doc.Find("a").Each(func(i int, sel *goquery.Selection) {
-		href, exists := sel.Attr("href")
-		if !exists {
-			return
+	candidates := make([]contentIDCandidate, 0)
+	for _, query := range searchQueries {
+		searchURLFormatted := fmt.Sprintf(searchURL, query)
+		logging.Debugf("DMM: Resolving content-id using search query variation: %s", query)
+
+		// Fetch the search page (cookies are set globally on the client)
+		resp, err := s.client.R().Get(searchURLFormatted)
+		if err != nil {
+			return "", fmt.Errorf("DMM search unavailable (possible geo-restriction or network error): %w", err)
 		}
 
-		var urlCID string
-
-		// Check for various DMM link patterns:
-		// 1. Physical DVD: /mono/dvd/-/detail/=/cid=XXX
-		// 2. Digital video: /digital/videoa/-/detail/=/cid=XXX
-		// 3. Monthly subscription: /monthly/standard/-/detail/=/cid=XXX
-		// 4. Video streaming: video.dmm.co.jp/av/content/?id=XXX
-		if strings.Contains(href, "cid=") {
-			// Extract CID from www.dmm.co.jp links
-			cidRegex := regexp.MustCompile(`cid=([^/?&]+)`)
-			matches := cidRegex.FindStringSubmatch(href)
-			if len(matches) > 1 {
-				urlCID = matches[1]
-			}
-		} else if strings.Contains(href, "video.dmm.co.jp") && strings.Contains(href, "id=") {
-			// Extract ID from video.dmm.co.jp links
-			idRegex := regexp.MustCompile(`id=([^/?&]+)`)
-			matches := idRegex.FindStringSubmatch(href)
-			if len(matches) > 1 {
-				urlCID = matches[1]
-			}
+		// Check for explicit geo-blocking or access denial
+		if resp.StatusCode() == 403 || resp.StatusCode() == 451 {
+			return "", models.NewScraperStatusError(
+				"DMM",
+				resp.StatusCode(),
+				fmt.Sprintf("DMM access blocked (status %d, likely geo-restriction)", resp.StatusCode()),
+			)
 		}
 
-		if urlCID != "" {
-			// Clean the CID from URL using precompiled regex for consistency and performance
-			// Strips DMM prefixes: "9ipx535" -> "ipx535", "h_796san167" -> "san167"
-			// Normalize to lowercase and remove hyphens before regex (cleanPrefixRegex expects lowercase)
-			normalizedHrefCID := strings.ToLower(strings.ReplaceAll(urlCID, "-", ""))
-			cleanURLCID := cleanPrefixRegex.ReplaceAllString(normalizedHrefCID, "$1")
-
-			logging.Debugf("DMM: Found urlCID=%s, cleanURLCID=%s (comparing with searchQuery=%s, cleanSearchID=%s, contentID=%s)",
-				urlCID, cleanURLCID, searchQuery, cleanSearchID, contentID)
-
-			// Match against our search ID (with zeros, without zeros, and normalized)
-			// Also match variant suffixes (a, b, c) - DMM uses these for different versions
-			// Example: akdl229a matches akdl229, ipx535b matches ipx535
-			if matchesWithVariantSuffix(cleanURLCID, searchQuery, cleanSearchID, contentID) {
-				// Build full URL if it's a relative path
-				fullURL := ""
-				if strings.HasPrefix(href, "/") {
-					fullURL = "https://www.dmm.co.jp" + href
-				} else if strings.HasPrefix(href, "http") {
-					fullURL = href
-				}
-
-				// Store canonical (cleaned) content ID for consistency downstream
-				candidates = append(candidates, candidate{
-					contentID: cleanURLCID,
-					url:       fullURL,
-					length:    len(cleanURLCID),
-				})
-				logging.Debugf("DMM: ✓ Found candidate %s (canonical: %s, length: %d), URL: %s", urlCID, cleanURLCID, len(cleanURLCID), fullURL)
-			}
+		if resp.StatusCode() != 200 {
+			return "", models.NewScraperStatusError(
+				"DMM",
+				resp.StatusCode(),
+				fmt.Sprintf("DMM search returned status code %d", resp.StatusCode()),
+			)
 		}
-	})
+
+		// Parse search results to extract actual content-id.
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+		if err != nil {
+			return "", fmt.Errorf("failed to parse DMM search results: %w", err)
+		}
+
+		candidates = append(candidates, extractContentIDCandidates(doc, matchIDs)...)
+		if len(candidates) > 0 {
+			break
+		}
+	}
 
 	if len(candidates) == 0 {
 		return "", models.NewScraperNotFoundError("DMM", "no matching content-id found in DMM search results")
@@ -268,6 +209,118 @@ func (s *Scraper) ResolveContentID(id string) (string, error) {
 	}
 
 	return foundContentID, nil
+}
+
+type contentIDCandidate struct {
+	contentID string
+	url       string
+	length    int
+}
+
+func buildResolveContentIDSearchQueries(id string, normalizedContentID string) []string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	searchID := strings.ReplaceAll(id, "-", "")
+	contentID := strings.ToLower(strings.TrimSpace(normalizedContentID))
+	cleanContentID := normalizedContentIDWithoutPadding(contentID)
+
+	return uniqueNonEmptyStrings([]string{
+		searchID,
+		contentID,
+		cleanContentID,
+		id,
+	})
+}
+
+func normalizedContentIDWithoutPadding(contentID string) string {
+	contentID = strings.ToLower(strings.TrimSpace(contentID))
+	if contentID == "" {
+		return ""
+	}
+	return contentIDUnpadRegex.ReplaceAllString(contentID, "$1$2")
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	uniqueValues := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		uniqueValues = append(uniqueValues, value)
+	}
+
+	return uniqueValues
+}
+
+func extractContentIDCandidates(doc *goquery.Document, searchIDs []string) []contentIDCandidate {
+	candidates := make([]contentIDCandidate, 0)
+	if doc == nil || len(searchIDs) == 0 {
+		return candidates
+	}
+
+	doc.Find("a").Each(func(i int, sel *goquery.Selection) {
+		href, exists := sel.Attr("href")
+		if !exists {
+			return
+		}
+
+		var urlCID string
+
+		// Check for various DMM link patterns:
+		// 1. Physical DVD: /mono/dvd/-/detail/=/cid=XXX
+		// 2. Digital video: /digital/videoa/-/detail/=/cid=XXX
+		// 3. Monthly subscription: /monthly/standard/-/detail/=/cid=XXX
+		// 4. Video streaming: video.dmm.co.jp/av/content/?id=XXX
+		if strings.Contains(href, "cid=") {
+			// Extract CID from www.dmm.co.jp links
+			cidRegex := regexp.MustCompile(`cid=([^/?&]+)`)
+			matches := cidRegex.FindStringSubmatch(href)
+			if len(matches) > 1 {
+				urlCID = matches[1]
+			}
+		} else if strings.Contains(href, "video.dmm.co.jp") && strings.Contains(href, "id=") {
+			// Extract ID from video.dmm.co.jp links
+			idRegex := regexp.MustCompile(`id=([^/?&]+)`)
+			matches := idRegex.FindStringSubmatch(href)
+			if len(matches) > 1 {
+				urlCID = matches[1]
+			}
+		}
+
+		if urlCID == "" {
+			return
+		}
+
+		// Clean the CID from URL using precompiled regex for consistency and performance
+		// Strips DMM prefixes: "9ipx535" -> "ipx535", "h_796san167" -> "san167"
+		// Normalize to lowercase and remove hyphens before regex (cleanPrefixRegex expects lowercase)
+		normalizedHrefCID := strings.ToLower(strings.ReplaceAll(urlCID, "-", ""))
+		cleanURLCID := cleanPrefixRegex.ReplaceAllString(normalizedHrefCID, "$1")
+		if !matchesWithVariantSuffix(cleanURLCID, searchIDs...) {
+			return
+		}
+
+		// Build full URL if it's a relative path
+		fullURL := ""
+		if strings.HasPrefix(href, "/") {
+			fullURL = "https://www.dmm.co.jp" + href
+		} else if strings.HasPrefix(href, "http") {
+			fullURL = href
+		}
+
+		// Store canonical (cleaned) content ID for consistency downstream
+		candidates = append(candidates, contentIDCandidate{
+			contentID: cleanURLCID,
+			url:       fullURL,
+			length:    len(cleanURLCID),
+		})
+		logging.Debugf("DMM: ✓ Found candidate %s (canonical: %s, length: %d), URL: %s", urlCID, cleanURLCID, len(cleanURLCID), fullURL)
+	})
+
+	return candidates
 }
 
 // GetURL attempts to find the URL for a given movie ID using DMM search

@@ -224,6 +224,11 @@ func TestCleanTitle(t *testing.T) {
 			input: "Title Text：サイト名",
 			want:  "Title Text",
 		},
+		{
+			name:  "drops generic mgstage landing title",
+			input: "エロ動画・アダルトビデオ -MGS動画＜プレステージ グループ＞",
+			want:  "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -739,6 +744,32 @@ func TestParseHTML_DescriptionFromIntroductionDD(t *testing.T) {
 
 	assert.Equal(t, "SIRO-5615", result.ID)
 	assert.Contains(t, result.Description, "りりか 20歳 学生")
+}
+
+func TestParseHTML_GenericLandingPageReturnsNotFound(t *testing.T) {
+	landingHTML := `<html>
+<head>
+<title>エロ動画・アダルトビデオ -MGS動画＜プレステージ グループ＞</title>
+<meta property="og:description" content="エロ動画・アダルトビデオのMGS動画＜プレステージ グループ＞">
+</head>
+<body>
+<p>Landing page content without product metadata</p>
+</body>
+</html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(landingHTML))
+	require.NoError(t, err)
+
+	cfg := testConfig()
+	scraper := New(cfg)
+
+	result, err := scraper.parseHTML(doc, "https://www.mgstage.com/product/product_detail/clt-069/")
+	require.Error(t, err)
+	assert.Nil(t, result)
+
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
 }
 
 // TestParseHTMLMinimal tests parsing with minimal data
