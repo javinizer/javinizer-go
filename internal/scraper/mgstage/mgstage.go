@@ -238,7 +238,16 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	return s.parseHTML(doc, url)
+	result, err := s.parseHTML(doc, url)
+	if err != nil {
+		return nil, err
+	}
+
+	if !mgstageIDsMatch(id, result.ID) {
+		return nil, models.NewScraperNotFoundError("MGStage", fmt.Sprintf("movie %s not found on MGStage", strings.TrimSpace(id)))
+	}
+
+	return result, nil
 }
 
 // parseHTML extracts metadata from MGStage HTML
@@ -843,12 +852,6 @@ func hasProductSignals(result *models.ScraperResult, tableID string) bool {
 		return true
 	}
 
-	if result.Title != "" && result.Title != result.ID {
-		return true
-	}
-	if result.Description != "" {
-		return true
-	}
 	if result.Runtime > 0 || result.ReleaseDate != nil {
 		return true
 	}
@@ -863,6 +866,15 @@ func hasProductSignals(result *models.ScraperResult, tableID string) bool {
 	}
 
 	return false
+}
+
+func mgstageIDsMatch(requestedID, parsedID string) bool {
+	requested := normalizeIDForSearch(strings.TrimSpace(requestedID))
+	parsed := normalizeIDForSearch(strings.TrimSpace(parsedID))
+	if requested == "" || parsed == "" {
+		return false
+	}
+	return requested == parsed
 }
 
 func isGenericMGStageTitle(title string) bool {

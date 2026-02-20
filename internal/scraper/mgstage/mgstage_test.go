@@ -824,6 +824,57 @@ func TestParseHTML_GenericLandingPageReturnsNotFound(t *testing.T) {
 	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
 }
 
+func TestSearch_MismatchedDetailIDReturnsNotFound(t *testing.T) {
+	searchURI := "/search/cSearch.php?search_word=gptpj018&type=top&page=1&list_cnt=120"
+	detailURI := "/product/product_detail/GPTPJ-018/"
+
+	detailHTML := `<html>
+<head><title>OTHER-999 Sample Movie | MGStage</title></head>
+<body>
+<table>
+<tr><th>品番：</th><td>OTHER-999</td></tr>
+</table>
+</body>
+</html>`
+
+	client := resty.New()
+	client.SetTransport(&routeRoundTripper{
+		routes: map[string]mockHTTPResponse{
+			searchURI: {
+				statusCode: http.StatusOK,
+				body:       `<html><body><p>no exact match</p></body></html>`,
+			},
+			detailURI: {
+				statusCode: http.StatusOK,
+				body:       detailHTML,
+			},
+		},
+	})
+
+	scraper := &Scraper{
+		client:       client,
+		enabled:      true,
+		requestDelay: 0,
+	}
+	scraper.lastRequestTime.Store(time.Time{})
+
+	result, err := scraper.Search("GPTPJ-018")
+	require.Error(t, err)
+	assert.Nil(t, result)
+
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
+}
+
+func TestHasProductSignals_TitleOnlyReturnsFalse(t *testing.T) {
+	result := &models.ScraperResult{
+		ID:    "GPTPJ-018",
+		Title: "Search Results Page",
+	}
+	assert.False(t, hasProductSignals(result, ""))
+}
+
 // TestParseHTMLMinimal tests parsing with minimal data
 func TestParseHTMLMinimal(t *testing.T) {
 	minimalHTML := `<html>
@@ -887,11 +938,37 @@ type statusRoundTripper struct {
 	statusCode int
 }
 
+type mockHTTPResponse struct {
+	statusCode int
+	body       string
+}
+
+type routeRoundTripper struct {
+	routes map[string]mockHTTPResponse
+}
+
 func (s *statusRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return &http.Response{
 		StatusCode: s.statusCode,
 		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader("")),
+		Request:    req,
+	}, nil
+}
+
+func (r *routeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	route, ok := r.routes[req.URL.RequestURI()]
+	if !ok {
+		route = mockHTTPResponse{
+			statusCode: http.StatusNotFound,
+			body:       "",
+		}
+	}
+
+	return &http.Response{
+		StatusCode: route.statusCode,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(route.body)),
 		Request:    req,
 	}, nil
 }
