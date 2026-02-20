@@ -194,7 +194,9 @@ func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, BatchRescrapeResponse{
-			Movie: movie,
+			Movie:          movie,
+			FieldSources:   result.FieldSources,
+			ActressSources: result.ActressSources,
 		})
 	}
 }

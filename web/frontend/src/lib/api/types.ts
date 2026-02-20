@@ -77,6 +77,8 @@ export interface BatchRescrapeRequest {
 
 export interface BatchRescrapeResponse {
 	movie: Movie;
+	field_sources?: Record<string, string>;
+	actress_sources?: Record<string, string>;
 }
 
 export interface DataSource {
@@ -132,6 +134,8 @@ export interface FileResult {
 	movie_id: string;
 	status: string;
 	error?: string;
+	field_sources?: Record<string, string>;
+	actress_sources?: Record<string, string>;
 	data?: Movie;
 	started_at: string;
 	ended_at?: string;

@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"golang.org/x/net/html"
 )
 
 const (
@@ -184,7 +185,10 @@ func (s *Scraper) findDetailURL(id string) (string, error) {
 	}
 
 	targetID := normalizeIDForCompare(id)
-	var foundURL string
+	var (
+		foundURL  string
+		bestMatch idMatchType
+	)
 
 	doc.Find(".movie-list .item").EachWithBreak(func(i int, item *goquery.Selection) bool {
 		link := item.Find("a[href]").First()
@@ -200,8 +204,12 @@ func (s *Scraper) findDetailURL(id string) (string, error) {
 		}
 
 		for _, c := range candidates {
-			if idsMatch(c, targetID) {
+			match := idMatchRank(c, targetID)
+			if match > bestMatch {
+				bestMatch = match
 				foundURL = resolveURL(s.baseURL, href)
+			}
+			if match == idMatchExact {
 				return false
 			}
 		}
@@ -335,6 +343,8 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 	}
 	result.Description = description
 
+	hasFemaleActressRow := false
+
 	doc.Find(".movie-panel-info .panel-block").Each(func(_ int, block *goquery.Selection) {
 		label := normalizeLabel(block.Find("strong").First().Text())
 		valueNode := block.Find(".value").First()
@@ -364,8 +374,25 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 			result.Series = extractFirstText(valueNode)
 		case labelContains(label, "評分", "评分", "rating", "score"):
 			result.Rating = parseRating(valueText)
-		case labelContains(label, "演員", "演员", "actor", "actress"):
-			result.Actresses = extractActresses(valueNode)
+		default:
+			switch classifyCastLabel(label) {
+			case castLabelFemale:
+				if actresses := extractActresses(valueNode); len(actresses) > 0 {
+					result.Actresses = actresses
+					hasFemaleActressRow = true
+				}
+			case castLabelGeneric:
+				// Generic cast rows may include male actors. Use only as fallback
+				// when no female-specific row was found.
+				if hasFemaleActressRow || len(result.Actresses) > 0 {
+					return
+				}
+				if actresses := extractActresses(valueNode); len(actresses) > 0 {
+					result.Actresses = actresses
+				}
+			case castLabelMale:
+				// Explicit male actor rows should not be merged into actresses.
+			}
 		case labelContains(label, "類別", "类别", "genre", "tag", "tags"):
 			result.Genres = extractStringList(valueNode)
 		}
@@ -412,22 +439,39 @@ func normalizeIDForCompare(id string) string {
 }
 
 func idsMatch(candidate, target string) bool {
+	return idMatchRank(candidate, target) != idMatchNone
+}
+
+type idMatchType int
+
+const (
+	idMatchNone idMatchType = iota
+	idMatchVariant
+	idMatchNormalized
+	idMatchExact
+)
+
+func idMatchRank(candidate, target string) idMatchType {
 	c := normalizeIDForCompare(candidate)
 	t := normalizeIDForCompare(target)
 	if c == "" || t == "" {
-		return false
+		return idMatchNone
 	}
 	if c == t {
-		return true
+		return idMatchExact
 	}
 
 	cNoPadding := trimNumericPadding(c)
 	tNoPadding := trimNumericPadding(t)
 	if cNoPadding == tNoPadding {
-		return true
+		return idMatchNormalized
 	}
 
-	return trimVariantSuffix(cNoPadding) == trimVariantSuffix(tNoPadding)
+	if trimVariantSuffix(cNoPadding) == trimVariantSuffix(tNoPadding) {
+		return idMatchVariant
+	}
+
+	return idMatchNone
 }
 
 func trimNumericPadding(id string) string {
@@ -506,6 +550,28 @@ func labelContains(label string, keys ...string) bool {
 	return false
 }
 
+type castLabelKind int
+
+const (
+	castLabelUnknown castLabelKind = iota
+	castLabelMale
+	castLabelGeneric
+	castLabelFemale
+)
+
+func classifyCastLabel(label string) castLabelKind {
+	if labelContains(label, "male actor", "male actors", "男優", "男演员", "男演員") {
+		return castLabelMale
+	}
+	if labelContains(label, "女優", "女优", "actress", "actress(es)") {
+		return castLabelFemale
+	}
+	if labelContains(label, "演員", "演员", "actor", "actor(s)", "出演者", "cast") {
+		return castLabelGeneric
+	}
+	return castLabelUnknown
+}
+
 func extractFirstText(sel *goquery.Selection) string {
 	if text := cleanString(sel.Find("a").First().Text()); text != "" {
 		return text
@@ -568,20 +634,205 @@ func parseRating(s string) *models.Rating {
 }
 
 func extractActresses(sel *goquery.Selection) []models.ActressInfo {
-	names := extractStringList(sel)
-	if len(names) == 0 {
-		return nil
+	actresses := make([]models.ActressInfo, 0)
+	seen := make(map[string]bool)
+	type actressCandidate struct {
+		name          string
+		genderHint    string // "female", "male", or ""
+		maleHeuristic bool
 	}
-	actresses := make([]models.ActressInfo, 0, len(names))
-	for _, n := range names {
+	candidates := make([]actressCandidate, 0)
+	hasSymbolGender := false
+
+	sel.Find("a").Each(func(_ int, a *goquery.Selection) {
+		name := cleanString(a.Text())
+		if name == "" || seen[name] {
+			return
+		}
+		genderHint := genderHintFromSymbolSibling(a)
+		if genderHint != "" {
+			hasSymbolGender = true
+		}
+		candidates = append(candidates, actressCandidate{
+			name:          name,
+			genderHint:    genderHint,
+			maleHeuristic: isLikelyMaleActorLink(a),
+		})
+	})
+
+	for _, c := range candidates {
+		if hasSymbolGender {
+			// When symbol markers are present, trust them as source of truth.
+			if c.genderHint != "female" {
+				continue
+			}
+		} else if c.genderHint == "male" || c.maleHeuristic {
+			continue
+		}
+
+		if seen[c.name] {
+			continue
+		}
+		seen[c.name] = true
 		actresses = append(actresses, models.ActressInfo{
 			// JavDB doesn't expose DMM actress IDs; use a stable negative surrogate so
 			// multiple actresses can coexist under the DB's unique dmm_id constraint.
-			DMMID:        syntheticActressID(n),
-			JapaneseName: n,
+			DMMID:        syntheticActressID(c.name),
+			JapaneseName: c.name,
 		})
 	}
+
+	// Fallback to plain text parsing when no links are available.
+	if len(actresses) == 0 {
+		names := extractStringList(sel)
+		for _, n := range names {
+			if seen[n] {
+				continue
+			}
+			seen[n] = true
+			actresses = append(actresses, models.ActressInfo{
+				DMMID:        syntheticActressID(n),
+				JapaneseName: n,
+			})
+		}
+	}
+
+	if len(actresses) == 0 {
+		return nil
+	}
 	return actresses
+}
+
+func isLikelyMaleActorLink(sel *goquery.Selection) bool {
+	classAttr := strings.ToLower(sel.AttrOr("class", ""))
+	if strings.Contains(classAttr, "male") || strings.Contains(classAttr, "gender-male") {
+		return true
+	}
+
+	for _, attr := range []string{"data-gender", "gender", "title", "aria-label"} {
+		v := strings.ToLower(strings.TrimSpace(sel.AttrOr(attr, "")))
+		if hasWordToken(v, "male") || strings.Contains(v, "男優") || strings.Contains(v, "男演员") || strings.Contains(v, "男演員") {
+			return true
+		}
+	}
+
+	// Common patterns: male marker appears near the anchor in sibling text.
+	context := strings.ToLower(cleanString(sel.Parent().Text()))
+	if context == "" {
+		context = strings.ToLower(cleanString(sel.Text()))
+	}
+
+	hasMaleMarker := strings.Contains(context, "♂") ||
+		hasWordToken(context, "male") ||
+		strings.Contains(context, "男優") ||
+		strings.Contains(context, "男演员") ||
+		strings.Contains(context, "男演員")
+
+	hasFemaleMarker := strings.Contains(context, "♀") ||
+		hasWordToken(context, "female") ||
+		strings.Contains(context, "女優") ||
+		strings.Contains(context, "女优")
+
+	if hasMaleMarker && !hasFemaleMarker {
+		return true
+	}
+
+	return false
+}
+
+func genderHintFromSymbolSibling(sel *goquery.Selection) string {
+	if sel == nil || len(sel.Nodes) == 0 {
+		return ""
+	}
+	node := sel.Nodes[0]
+
+	if hint := scanSymbolSibling(node, true); hint != "" {
+		return hint
+	}
+	if hint := scanSymbolSibling(node, false); hint != "" {
+		return hint
+	}
+	return ""
+}
+
+func scanSymbolSibling(anchor *html.Node, forward bool) string {
+	step := func(n *html.Node) *html.Node {
+		if forward {
+			return n.NextSibling
+		}
+		return n.PrevSibling
+	}
+
+	for n := step(anchor); n != nil; n = step(n) {
+		if n.Type == html.ElementNode && strings.EqualFold(n.Data, "a") {
+			break
+		}
+		if n.Type != html.ElementNode || !strings.EqualFold(n.Data, "strong") {
+			continue
+		}
+
+		classAttr := strings.ToLower(strings.TrimSpace(nodeAttr(n, "class")))
+		if !strings.Contains(classAttr, "symbol") {
+			continue
+		}
+
+		if strings.Contains(classAttr, "female") {
+			return "female"
+		}
+		if strings.Contains(classAttr, "male") {
+			return "male"
+		}
+
+		text := strings.TrimSpace(nodeText(n))
+		switch {
+		case strings.Contains(text, "♀"):
+			return "female"
+		case strings.Contains(text, "♂"):
+			return "male"
+		}
+	}
+	return ""
+}
+
+func nodeAttr(n *html.Node, key string) string {
+	for _, attr := range n.Attr {
+		if strings.EqualFold(attr.Key, key) {
+			return attr.Val
+		}
+	}
+	return ""
+}
+
+func nodeText(n *html.Node) string {
+	if n == nil {
+		return ""
+	}
+	var b strings.Builder
+	var walk func(*html.Node)
+	walk = func(cur *html.Node) {
+		if cur == nil {
+			return
+		}
+		if cur.Type == html.TextNode {
+			b.WriteString(cur.Data)
+		}
+		for child := cur.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(n)
+	return b.String()
+}
+
+func hasWordToken(text, token string) bool {
+	for _, part := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	}) {
+		if part == token {
+			return true
+		}
+	}
+	return false
 }
 
 func syntheticActressID(name string) int {

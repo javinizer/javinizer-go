@@ -26,17 +26,19 @@ const (
 
 // FileResult represents the result of processing a single file
 type FileResult struct {
-	FilePath    string      `json:"file_path"`
-	MovieID     string      `json:"movie_id"`
-	Status      JobStatus   `json:"status"`
-	Error       string      `json:"error,omitempty"`
-	PosterError *string     `json:"poster_error,omitempty"` // Optional error from poster generation
-	Data        interface{} `json:"data,omitempty"`
-	StartedAt   time.Time   `json:"started_at"`
-	EndedAt     *time.Time  `json:"ended_at,omitempty"`
-	IsMultiPart bool        `json:"is_multi_part,omitempty"`
-	PartNumber  int         `json:"part_number,omitempty"`
-	PartSuffix  string      `json:"part_suffix,omitempty"`
+	FilePath       string            `json:"file_path"`
+	MovieID        string            `json:"movie_id"`
+	Status         JobStatus         `json:"status"`
+	Error          string            `json:"error,omitempty"`
+	PosterError    *string           `json:"poster_error,omitempty"`    // Optional error from poster generation
+	FieldSources   map[string]string `json:"field_sources,omitempty"`   // Field -> scraper/NFO source
+	ActressSources map[string]string `json:"actress_sources,omitempty"` // Actress-key -> scraper/NFO source
+	Data           interface{}       `json:"data,omitempty"`
+	StartedAt      time.Time         `json:"started_at"`
+	EndedAt        *time.Time        `json:"ended_at,omitempty"`
+	IsMultiPart    bool              `json:"is_multi_part,omitempty"`
+	PartNumber     int               `json:"part_number,omitempty"`
+	PartSuffix     string            `json:"part_suffix,omitempty"`
 }
 
 // BatchJob represents a batch processing job
@@ -220,6 +222,18 @@ func (job *BatchJob) AtomicUpdateFileResult(filePath string, updateFn func(*File
 		s := *current.PosterError
 		copied.PosterError = &s
 	}
+	if current.FieldSources != nil {
+		copied.FieldSources = make(map[string]string, len(current.FieldSources))
+		for k, v := range current.FieldSources {
+			copied.FieldSources[k] = v
+		}
+	}
+	if current.ActressSources != nil {
+		copied.ActressSources = make(map[string]string, len(current.ActressSources))
+		for k, v := range current.ActressSources {
+			copied.ActressSources[k] = v
+		}
+	}
 
 	// Apply the update function
 	updated, err := updateFn(&copied)
@@ -375,6 +389,18 @@ func (job *BatchJob) GetStatus() *BatchJob {
 		if v.PosterError != nil {
 			s := *v.PosterError
 			copyResult.PosterError = &s
+		}
+		if v.FieldSources != nil {
+			copyResult.FieldSources = make(map[string]string, len(v.FieldSources))
+			for sourceField, sourceName := range v.FieldSources {
+				copyResult.FieldSources[sourceField] = sourceName
+			}
+		}
+		if v.ActressSources != nil {
+			copyResult.ActressSources = make(map[string]string, len(v.ActressSources))
+			for actressKey, sourceName := range v.ActressSources {
+				copyResult.ActressSources[actressKey] = sourceName
+			}
 		}
 
 		// Deep copy the Data payload if it's a *models.Movie to prevent shared mutable state

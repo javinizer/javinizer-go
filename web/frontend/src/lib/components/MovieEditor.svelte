@@ -6,9 +6,11 @@
 		movie: Movie;
 		originalMovie: Movie;
 		onUpdate: (movie: Movie) => void;
+		fieldSources?: Record<string, string>;
+		showFieldSources?: boolean;
 	}
 
-	let { movie, originalMovie, onUpdate }: Props = $props();
+	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false }: Props = $props();
 
 	// Create a local editable copy - initialized by effect
 	let editedMovie = $state<Movie>({} as Movie);
@@ -24,6 +26,24 @@
 	// Track which fields have been modified
 	function isModified(field: keyof Movie): boolean {
 		return editedMovie[field] !== originalMovie[field];
+	}
+
+	function sourceText(...fieldKeys: string[]): string | null {
+		if (!showFieldSources || !fieldSources) return null;
+		for (const fieldKey of fieldKeys) {
+			const rawSource = fieldSources[fieldKey];
+			if (!rawSource) continue;
+
+			const source = rawSource.trim();
+			if (!source) continue;
+
+			const normalized = source.toLowerCase();
+			if (normalized === 'nfo') return 'via NFO';
+			if (normalized === 'merged') return 'via merged data';
+			if (normalized === 'empty') return 'empty';
+			return `via ${source}`;
+		}
+		return null;
 	}
 
 	function handleDateChange(e: Event) {
@@ -82,6 +102,9 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Movie ID
+				{#if sourceText('id')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('id')}</span>
+				{/if}
 				{#if isModified('id')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -98,6 +121,9 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Content ID
+				{#if sourceText('content_id')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('content_id')}</span>
+				{/if}
 				{#if isModified('content_id')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -114,6 +140,9 @@
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Title
+				{#if sourceText('title', 'display_name')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('title', 'display_name')}</span>
+				{/if}
 				{#if isModified('title')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -133,6 +162,9 @@
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Original Title (Japanese)
+				{#if sourceText('original_title')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('original_title')}</span>
+				{/if}
 				{#if isModified('original_title')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -149,6 +181,9 @@
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Description
+				{#if sourceText('description')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('description')}</span>
+				{/if}
 				{#if isModified('description')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -165,6 +200,9 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Release Date
+				{#if sourceText('release_date')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('release_date')}</span>
+				{/if}
 				{#if isModified('release_date')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -181,6 +219,9 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Runtime (minutes)
+				{#if sourceText('runtime')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('runtime')}</span>
+				{/if}
 				{#if isModified('runtime')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -198,6 +239,9 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Director
+				{#if sourceText('director')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('director')}</span>
+				{/if}
 				{#if isModified('director')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -214,6 +258,9 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Studio / Maker
+				{#if sourceText('maker')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('maker')}</span>
+				{/if}
 				{#if isModified('maker')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -230,6 +277,9 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Label
+				{#if sourceText('label')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('label')}</span>
+				{/if}
 				{#if isModified('label')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -246,6 +296,9 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Series
+				{#if sourceText('series')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('series')}</span>
+				{/if}
 				{#if isModified('series')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -262,6 +315,9 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Rating Score (0-10)
+				{#if sourceText('rating_score')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('rating_score')}</span>
+				{/if}
 				{#if isModified('rating_score')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -290,6 +346,9 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Rating Votes
+				{#if sourceText('rating_votes')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('rating_votes')}</span>
+				{/if}
 				{#if isModified('rating_votes')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}
@@ -309,6 +368,9 @@
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Genres
+				{#if sourceText('genres')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('genres')}</span>
+				{/if}
 				{#if isModified('genres')}
 					<CircleAlert class="h-3 w-3 text-orange-600" />
 				{/if}

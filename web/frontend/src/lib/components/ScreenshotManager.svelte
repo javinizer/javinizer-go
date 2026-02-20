@@ -13,9 +13,11 @@
 		movie: Movie;
 		displayPosterUrl?: string;
 		onUpdate: (movie: Movie) => void;
+		fieldSources?: Record<string, string>;
+		showFieldSources?: boolean;
 	}
 
-	let { movie, displayPosterUrl, onUpdate }: Props = $props();
+	let { movie, displayPosterUrl, onUpdate, fieldSources, showFieldSources = false }: Props = $props();
 
 	let screenshots = $state<string[]>([]);
 	let posterUrl = $state('');
@@ -85,15 +87,40 @@
 		if (url.startsWith('/')) return url;
 		return apiClient.getPreviewImageURL(url);
 	}
+
+	function sourceText(fieldKey: string): string | null {
+		if (!showFieldSources || !fieldSources) return null;
+		const rawSource = fieldSources[fieldKey];
+		if (!rawSource) return null;
+
+		const source = rawSource.trim();
+		if (!source) return null;
+
+		const normalized = source.toLowerCase();
+		if (normalized === 'nfo') return 'via NFO';
+		if (normalized === 'merged') return 'via merged data';
+		if (normalized === 'empty') return 'empty';
+		return `via ${source}`;
+	}
 </script>
 
 <div class="space-y-6">
 	<!-- Poster Image -->
 	<div>
-		<h3 class="text-lg font-semibold mb-3">Poster Image</h3>
+		<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+			<span>Poster Image</span>
+			{#if sourceText('poster_url')}
+				<span class="text-xs font-normal text-muted-foreground">{sourceText('poster_url')}</span>
+			{/if}
+		</h3>
 		<div class="space-y-3">
 			<div>
-				<label for="poster-url" class="text-sm font-medium mb-1 block">Poster URL</label>
+				<label for="poster-url" class="text-sm font-medium mb-1 block">
+					Poster URL
+					{#if sourceText('poster_url')}
+						<span class="text-xs font-normal text-muted-foreground ml-2">{sourceText('poster_url')}</span>
+					{/if}
+				</label>
 				<input
 					id="poster-url"
 					type="url"
@@ -148,10 +175,20 @@
 
 	<!-- Cover/Fanart Image -->
 	<div>
-		<h3 class="text-lg font-semibold mb-3">Cover/Fanart Image</h3>
+		<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+			<span>Cover/Fanart Image</span>
+			{#if sourceText('cover_url')}
+				<span class="text-xs font-normal text-muted-foreground">{sourceText('cover_url')}</span>
+			{/if}
+		</h3>
 		<div class="space-y-3">
 			<div>
-				<label for="cover-url" class="text-sm font-medium mb-1 block">Cover URL</label>
+				<label for="cover-url" class="text-sm font-medium mb-1 block">
+					Cover URL
+					{#if sourceText('cover_url')}
+						<span class="text-xs font-normal text-muted-foreground ml-2">{sourceText('cover_url')}</span>
+					{/if}
+				</label>
 				<input
 					id="cover-url"
 					type="url"
@@ -192,10 +229,20 @@
 
 	<!-- Trailer -->
 	<div>
-		<h3 class="text-lg font-semibold mb-3">Trailer</h3>
+		<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+			<span>Trailer</span>
+			{#if sourceText('trailer_url')}
+				<span class="text-xs font-normal text-muted-foreground">{sourceText('trailer_url')}</span>
+			{/if}
+		</h3>
 		<div class="space-y-3">
 			<div>
-				<label for="trailer-url" class="text-sm font-medium mb-1 block">Trailer URL</label>
+				<label for="trailer-url" class="text-sm font-medium mb-1 block">
+					Trailer URL
+					{#if sourceText('trailer_url')}
+						<span class="text-xs font-normal text-muted-foreground ml-2">{sourceText('trailer_url')}</span>
+					{/if}
+				</label>
 				<input
 					id="trailer-url"
 					type="url"
@@ -233,7 +280,12 @@
 	<!-- Screenshots -->
 	<div>
 		<div class="flex items-center justify-between mb-3">
-			<h3 class="text-lg font-semibold">Screenshots ({screenshots.length})</h3>
+			<h3 class="text-lg font-semibold flex items-center gap-2">
+				<span>Screenshots ({screenshots.length})</span>
+				{#if sourceText('screenshot_urls')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('screenshot_urls')}</span>
+				{/if}
+			</h3>
 		</div>
 
 		<!-- Add Screenshot Form -->
