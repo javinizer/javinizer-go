@@ -186,7 +186,7 @@ deps:
 
 # Install the binary
 install:
-	go build -o $(GOPATH)/bin/javinizer ./cmd/javinizer
+	go build $(LDFLAGS) -o $(GOPATH)/bin/javinizer ./cmd/javinizer
 
 # Format code
 fmt:

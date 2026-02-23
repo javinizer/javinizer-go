@@ -46,6 +46,7 @@
 
 	const wsState = $derived($websocketStore);
 	const recentRunCount = $derived(recentRuns.length);
+	const releaseVersion = $derived(health?.version ?? 'unknown');
 
 	const sevenDayMetrics = $derived.by(() => {
 		const now = Date.now();
@@ -500,6 +501,8 @@
 			<div class="flex items-center gap-2">
 				<Clock3 class="h-3.5 w-3.5" />
 				<span>WebSocket messages: {wsState.messages.length}</span>
+				<span>•</span>
+				<span>Version: {releaseVersion}</span>
 			</div>
 			<div>
 				{refreshing ? 'Refreshing dashboard...' : 'Dashboard ready'}

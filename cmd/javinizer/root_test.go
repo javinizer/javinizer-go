@@ -6,6 +6,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/version"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,7 +38,7 @@ func TestRootCommand_SubcommandCount(t *testing.T) {
 
 func TestRootCommand_SubcommandNames(t *testing.T) {
 	// Test that all expected subcommands are present
-	expectedCommands := []string{"api", "genre", "history", "info", "init", "scrape", "sort", "tag", "tui", "update"}
+	expectedCommands := []string{"api", "genre", "history", "info", "init", "scrape", "sort", "tag", "tui", "update", "version"}
 
 	subcommands := rootCmd.Commands()
 	commandNames := make(map[string]bool)
@@ -69,6 +70,19 @@ func TestRootCommand_VersionTemplate(t *testing.T) {
 	assert.Contains(t, infoVersion, "commit:", "version.Info() should contain commit info")
 	assert.Contains(t, infoVersion, "built:", "version.Info() should contain build date")
 	assert.Contains(t, infoVersion, "go:", "version.Info() should contain Go version")
+}
+
+func TestShouldSkipConfigInit(t *testing.T) {
+	assert.True(t, shouldSkipConfigInit(&cobra.Command{Use: "version"}))
+	assert.True(t, shouldSkipConfigInit(&cobra.Command{Use: "help"}))
+	assert.True(t, shouldSkipConfigInit(&cobra.Command{Use: "completion"}))
+
+	cmd := &cobra.Command{Use: "scrape"}
+	cmd.Flags().Bool("version", false, "show version")
+	require.NoError(t, cmd.Flags().Set("version", "true"))
+	assert.True(t, shouldSkipConfigInit(cmd))
+
+	assert.False(t, shouldSkipConfigInit(&cobra.Command{Use: "scrape"}))
 }
 
 // Item 2: Global persistent flags tests

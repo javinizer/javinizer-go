@@ -7,8 +7,11 @@ import (
 
 // HealthResponse represents the health check response
 type HealthResponse struct {
-	Status   string   `json:"status" example:"ok"`
-	Scrapers []string `json:"scrapers" example:"r18dev,dmm"`
+	Status    string   `json:"status" example:"ok"`
+	Scrapers  []string `json:"scrapers" example:"r18dev,dmm"`
+	Version   string   `json:"version" example:"v1.2.3"`
+	Commit    string   `json:"commit" example:"abc123def456"`
+	BuildDate string   `json:"build_date" example:"2026-02-23T00:00:00Z"`
 }
 
 // ScrapeRequest represents the scrape request payload
