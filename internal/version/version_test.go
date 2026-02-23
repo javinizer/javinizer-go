@@ -1,6 +1,7 @@
 package version
 
 import (
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -131,6 +132,135 @@ func TestShort_DevVersionCommitShortening(t *testing.T) {
 	commitPart := strings.TrimPrefix(got, "dev-")
 	if len(commitPart) != 7 {
 		t.Errorf("Short() dev version should have 7-char commit hash, got %d chars: %q", len(commitPart), commitPart)
+	}
+}
+
+func TestShort_DevVersionCommitShort(t *testing.T) {
+	origVersion := Version
+	origCommit := Commit
+	defer func() {
+		Version = origVersion
+		Commit = origCommit
+	}()
+
+	Version = "dev"
+	Commit = "abc"
+
+	got := Short()
+	want := "dev-abc"
+
+	if got != want {
+		t.Errorf("Short() with short commit = %q, want %q", got, want)
+	}
+}
+
+func TestShort_DevVersionDirtyCommit(t *testing.T) {
+	origVersion := Version
+	origCommit := Commit
+	defer func() {
+		Version = origVersion
+		Commit = origCommit
+	}()
+
+	Version = "dev"
+	Commit = "1234567890abcdef-dirty"
+
+	got := Short()
+	want := "dev-1234567-dirty"
+
+	if got != want {
+		t.Errorf("Short() with dirty commit = %q, want %q", got, want)
+	}
+}
+
+func TestApplyBuildInfo(t *testing.T) {
+	origVersion := Version
+	origCommit := Commit
+	origBuildDate := BuildDate
+	defer func() {
+		Version = origVersion
+		Commit = origCommit
+		BuildDate = origBuildDate
+	}()
+
+	tests := []struct {
+		name      string
+		version   string
+		commit    string
+		buildDate string
+		info      *debug.BuildInfo
+		wantVer   string
+		wantCom   string
+		wantDate  string
+	}{
+		{
+			name:      "uses module version when current version is dev",
+			version:   "dev",
+			commit:    "unknown",
+			buildDate: "unknown",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Version: "v1.2.3"},
+				Settings: []debug.BuildSetting{
+					{Key: "vcs.revision", Value: "abcdef1234567890"},
+					{Key: "vcs.time", Value: "2026-02-23T00:00:00Z"},
+				},
+			},
+			wantVer:  "v1.2.3",
+			wantCom:  "abcdef1234567890",
+			wantDate: "2026-02-23T00:00:00Z",
+		},
+		{
+			name:      "keeps ldflags values when already set",
+			version:   "v9.9.9",
+			commit:    "deadbee",
+			buildDate: "2025-01-01",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Version: "v1.2.3"},
+				Settings: []debug.BuildSetting{
+					{Key: "vcs.revision", Value: "abcdef1234567890"},
+					{Key: "vcs.time", Value: "2026-02-23T00:00:00Z"},
+				},
+			},
+			wantVer:  "v9.9.9",
+			wantCom:  "deadbee",
+			wantDate: "2025-01-01",
+		},
+		{
+			name:      "marks commit dirty when vcs modified",
+			version:   "dev",
+			commit:    "unknown",
+			buildDate: "unknown",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Version: "(devel)"},
+				Settings: []debug.BuildSetting{
+					{Key: "vcs.revision", Value: "abcdef1234567890"},
+					{Key: "vcs.modified", Value: "true"},
+				},
+			},
+			wantVer:  "dev",
+			wantCom:  "abcdef1234567890-dirty",
+			wantDate: "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			Version = tt.version
+			Commit = tt.commit
+			BuildDate = tt.buildDate
+
+			applyBuildInfo(tt.info)
+
+			if Version != tt.wantVer {
+				t.Errorf("Version = %q, want %q", Version, tt.wantVer)
+			}
+			if Commit != tt.wantCom {
+				t.Errorf("Commit = %q, want %q", Commit, tt.wantCom)
+			}
+			if BuildDate != tt.wantDate {
+				t.Errorf("BuildDate = %q, want %q", BuildDate, tt.wantDate)
+			}
+		})
 	}
 }
 

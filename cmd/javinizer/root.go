@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/tag"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/tui"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/update"
+	versioncmd "github.com/javinizer/javinizer-go/cmd/javinizer/commands/version"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/version"
@@ -44,8 +45,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "configs/config.yaml", "config file path")
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "enable debug logging")
 
-	// Initialize configuration before command execution
-	cobra.OnInitialize(initConfig)
+	// Initialize configuration for commands that need it.
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if shouldSkipConfigInit(cmd) {
+			return
+		}
+		initConfig()
+	}
 
 	// Add all subcommands
 	rootCmd.AddCommand(
@@ -59,7 +65,23 @@ func init() {
 		tag.NewCommand(),
 		tui.NewCommand(),
 		update.NewCommand(),
+		versioncmd.NewCommand(),
 	)
+}
+
+func shouldSkipConfigInit(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+
+	// Built-in/help/version paths should not require config or logger setup.
+	if cmd.Name() == "version" || cmd.Name() == "help" || cmd.Name() == "completion" {
+		return true
+	}
+
+	// `javinizer --version` should stay lightweight and side-effect free.
+	versionFlag := cmd.Flags().Lookup("version")
+	return versionFlag != nil && versionFlag.Changed
 }
 
 // Execute runs the root command

@@ -32,6 +32,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scraper/mgstage"
 	"github.com/javinizer/javinizer-go/internal/scraper/r18dev"
 	"github.com/javinizer/javinizer-go/internal/scraper/tokyohot"
+	"github.com/javinizer/javinizer-go/internal/version"
 )
 
 // Mutex to serialize config updates (prevents concurrent read-modify-write races)
@@ -55,8 +56,11 @@ func healthCheck(deps *ServerDependencies) gin.HandlerFunc {
 			scrapers = append(scrapers, s.Name())
 		}
 		c.JSON(200, HealthResponse{
-			Status:   "ok",
-			Scrapers: scrapers,
+			Status:    "ok",
+			Scrapers:  scrapers,
+			Version:   version.Short(),
+			Commit:    version.Commit,
+			BuildDate: version.BuildDate,
 		})
 	}
 }

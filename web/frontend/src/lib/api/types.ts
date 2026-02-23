@@ -244,6 +244,9 @@ export interface ErrorResponse {
 export interface HealthResponse {
 	status: string;
 	scrapers: string[];
+	version?: string;
+	commit?: string;
+	build_date?: string;
 }
 
 export interface OrganizeRequest {

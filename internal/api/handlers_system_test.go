@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -105,6 +106,9 @@ func TestHealthCheck(t *testing.T) {
 
 			assert.Equal(t, "ok", response.Status)
 			assert.ElementsMatch(t, tt.expectedScrapers, response.Scrapers)
+			assert.Equal(t, version.Short(), response.Version)
+			assert.Equal(t, version.Commit, response.Commit)
+			assert.Equal(t, version.BuildDate, response.BuildDate)
 		})
 	}
 }
@@ -788,6 +792,9 @@ func TestHealthCheck_WithDisabledScrapers(t *testing.T) {
 
 	assert.Equal(t, "ok", response.Status)
 	assert.Empty(t, response.Scrapers, "Disabled scrapers should not appear in health check")
+	assert.Equal(t, version.Short(), response.Version)
+	assert.Equal(t, version.Commit, response.Commit)
+	assert.Equal(t, version.BuildDate, response.BuildDate)
 }
 
 // TestGetConfig_EmptyConfig tests getting an empty config
@@ -980,6 +987,9 @@ func TestHealthCheck_MultipleCalls(t *testing.T) {
 
 		assert.Equal(t, "ok", response.Status)
 		assert.Contains(t, response.Scrapers, "r18dev")
+		assert.Equal(t, version.Short(), response.Version)
+		assert.Equal(t, version.Commit, response.Commit)
+		assert.Equal(t, version.BuildDate, response.BuildDate)
 	}
 }
 
