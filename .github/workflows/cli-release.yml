@@ -3,21 +3,164 @@ name: CLI Binary Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
   workflow_dispatch:
+    inputs:
+      release_type:
+        description: Release mode
+        required: true
+        type: choice
+        default: snapshot
+        options:
+          - stable
+          - prerelease
+          - snapshot
+      version:
+        description: Optional version/tag (e.g. v1.2.3 or v1.2.3-rc.1)
+        required: false
+        type: string
+      create_release:
+        description: Create or update GitHub release
+        required: true
+        type: boolean
+        default: true
+      draft:
+        description: Mark release as draft (manual runs only)
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+  packages: write
 
 env:
   BINARY_NAME: javinizer
+  GO_VERSION: '1.25.x'
 
 jobs:
-  # ============================================================================
-  # Linux AMD64 Build
-  # ============================================================================
-  build-linux-amd64:
+  prepare-release:
+    name: Prepare release metadata
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      release_name: ${{ steps.meta.outputs.release_name }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      draft: ${{ steps.meta.outputs.draft }}
+      create_release: ${{ steps.meta.outputs.create_release }}
+      build_date: ${{ steps.meta.outputs.build_date }}
+      commit: ${{ steps.meta.outputs.commit }}
+    steps:
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          event_name="${GITHUB_EVENT_NAME}"
+          build_date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          commit="${GITHUB_SHA}"
+
+          if [[ "${event_name}" == "push" ]]; then
+            version="${GITHUB_REF_NAME}"
+            create_release="true"
+            draft="false"
+            if [[ "${version}" == *-* ]]; then
+              prerelease="true"
+            else
+              prerelease="false"
+            fi
+          else
+            release_type="${{ inputs.release_type }}"
+            input_version="${{ inputs.version }}"
+            create_release="${{ inputs.create_release }}"
+            draft="${{ inputs.draft }}"
+
+            case "${release_type}" in
+              stable)
+                if [[ -z "${input_version}" ]]; then
+                  echo "Stable releases require a version like v1.2.3" >&2
+                  exit 1
+                fi
+                version="${input_version}"
+                prerelease="false"
+                ;;
+              prerelease)
+                if [[ -z "${input_version}" ]]; then
+                  echo "Pre-releases require a version like v1.2.3-rc.1" >&2
+                  exit 1
+                fi
+                version="${input_version}"
+                prerelease="true"
+                ;;
+              snapshot)
+                if [[ -n "${input_version}" ]]; then
+                  version="${input_version}"
+                else
+                  version="v0.0.0-snapshot.$(date -u '+%Y%m%d%H%M%S')-${GITHUB_SHA::7}"
+                fi
+                prerelease="true"
+                ;;
+              *)
+                echo "Unknown release type: ${release_type}" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "${release_type}" == "stable" && "${version}" == *-* ]]; then
+              echo "Stable release version must not include prerelease suffix: ${version}" >&2
+              exit 1
+            fi
+          fi
+
+          if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version does not match expected format: ${version}" >&2
+            exit 1
+          fi
+
+          release_name="Javinizer ${version}"
+          if [[ "${prerelease}" == "true" ]]; then
+            release_name="${release_name} (Pre-release)"
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${version}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+          echo "draft=${draft}" >> "$GITHUB_OUTPUT"
+          echo "create_release=${create_release}" >> "$GITHUB_OUTPUT"
+          echo "build_date=${build_date}" >> "$GITHUB_OUTPUT"
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+
+          echo "Resolved metadata:"
+          echo "  version=${version}"
+          echo "  prerelease=${prerelease}"
+          echo "  draft=${draft}"
+          echo "  create_release=${create_release}"
+
+  build-linux:
+    name: Build ${{ matrix.id }}
+    needs: prepare-release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-amd64
+            runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            artifact_suffix: linux-amd64
+            build_deps: build-essential
+            cc: ''
+          - id: linux-arm64
+            runner: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            artifact_suffix: linux-arm64
+            build_deps: gcc-aarch64-linux-gnu
+            cc: aarch64-linux-gnu-gcc
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,82 +168,44 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: ${{ env.GO_VERSION }}
 
-      - name: Install dependencies
+      - name: Install build dependencies
+        if: runner.os == 'Linux' && matrix.build_deps != ''
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential
+          sudo apt-get install -y ${{ matrix.build_deps }}
 
       - name: Build binary
+        shell: bash
         env:
-          CGO_ENABLED: 1
-          GOOS: linux
-          GOARCH: amd64
+          CGO_ENABLED: '1'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.cc }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          COMMIT: ${{ needs.prepare-release.outputs.commit }}
+          BUILD_DATE: ${{ needs.prepare-release.outputs.build_date }}
         run: |
-          VERSION=${{ github.ref_name }}
-          COMMIT=${{ github.sha }}
-          BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')
-          go build -ldflags="-w -s \
+          set -euo pipefail
+          mkdir -p dist
+          output="${{ env.BINARY_NAME }}-${VERSION}-${{ matrix.artifact_suffix }}"
+
+          go build -trimpath -ldflags="-w -s \
             -X github.com/javinizer/javinizer-go/internal/version.Version=${VERSION} \
             -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} \
             -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE}" \
-            -o ${{ env.BINARY_NAME }}-${{ github.ref_name }}-linux-amd64 ./cmd/cli
+            -o "dist/${output}" ./cmd/javinizer
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: javinizer-linux-amd64
-          path: ${{ env.BINARY_NAME }}-${{ github.ref_name }}-linux-amd64
+          name: ${{ matrix.id }}
+          path: dist/*
 
-  # ============================================================================
-  # Linux ARM64 Build (using QEMU)
-  # ============================================================================
-  build-linux-arm64:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-
-      - name: Install cross-compile dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
-      - name: Build binary
-        env:
-          CGO_ENABLED: 1
-          GOOS: linux
-          GOARCH: arm64
-          CC: aarch64-linux-gnu-gcc
-        run: |
-          VERSION=${{ github.ref_name }}
-          COMMIT=${{ github.sha }}
-          BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')
-          go build -ldflags="-w -s \
-            -X github.com/javinizer/javinizer-go/internal/version.Version=${VERSION} \
-            -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} \
-            -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE}" \
-            -o ${{ env.BINARY_NAME }}-${{ github.ref_name }}-linux-arm64 ./cmd/cli
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: javinizer-linux-arm64
-          path: ${{ env.BINARY_NAME }}-${{ github.ref_name }}-linux-arm64
-
-  # ============================================================================
-  # macOS Build (Intel + Apple Silicon + Universal)
-  # ============================================================================
   build-darwin:
+    name: Build darwin binaries
+    needs: prepare-release
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -109,62 +214,51 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: ${{ env.GO_VERSION }}
 
-      - name: Set build variables
-        id: build_vars
-        run: |
-          echo "VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          echo "COMMIT=${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')" >> $GITHUB_OUTPUT
-
-      - name: Build AMD64 (Intel)
+      - name: Build AMD64 and ARM64 binaries
+        shell: bash
         env:
-          CGO_ENABLED: 1
-          GOOS: darwin
-          GOARCH: amd64
+          CGO_ENABLED: '1'
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          COMMIT: ${{ needs.prepare-release.outputs.commit }}
+          BUILD_DATE: ${{ needs.prepare-release.outputs.build_date }}
         run: |
-          go build -ldflags="-w -s \
-            -X github.com/javinizer/javinizer-go/internal/version.Version=${{ steps.build_vars.outputs.VERSION }} \
-            -X github.com/javinizer/javinizer-go/internal/version.Commit=${{ steps.build_vars.outputs.COMMIT }} \
-            -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${{ steps.build_vars.outputs.BUILD_DATE }}" \
-            -o ${{ env.BINARY_NAME }}-amd64 ./cmd/cli
+          set -euo pipefail
+          mkdir -p dist
 
-      - name: Build ARM64 (Apple Silicon)
+          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-w -s \
+            -X github.com/javinizer/javinizer-go/internal/version.Version=${VERSION} \
+            -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} \
+            -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE}" \
+            -o "dist/${{ env.BINARY_NAME }}-${VERSION}-darwin-amd64" ./cmd/javinizer
+
+          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-w -s \
+            -X github.com/javinizer/javinizer-go/internal/version.Version=${VERSION} \
+            -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} \
+            -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE}" \
+            -o "dist/${{ env.BINARY_NAME }}-${VERSION}-darwin-arm64" ./cmd/javinizer
+
+      - name: Create universal binary
+        shell: bash
         env:
-          CGO_ENABLED: 1
-          GOOS: darwin
-          GOARCH: arm64
+          VERSION: ${{ needs.prepare-release.outputs.version }}
         run: |
-          go build -ldflags="-w -s \
-            -X github.com/javinizer/javinizer-go/internal/version.Version=${{ steps.build_vars.outputs.VERSION }} \
-            -X github.com/javinizer/javinizer-go/internal/version.Commit=${{ steps.build_vars.outputs.COMMIT }} \
-            -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${{ steps.build_vars.outputs.BUILD_DATE }}" \
-            -o ${{ env.BINARY_NAME }}-arm64 ./cmd/cli
+          set -euo pipefail
+          lipo -create \
+            "dist/${{ env.BINARY_NAME }}-${VERSION}-darwin-amd64" \
+            "dist/${{ env.BINARY_NAME }}-${VERSION}-darwin-arm64" \
+            -output "dist/${{ env.BINARY_NAME }}-${VERSION}-darwin-universal"
 
-      - name: Create Universal Binary
-        run: |
-          lipo -create ${{ env.BINARY_NAME }}-amd64 ${{ env.BINARY_NAME }}-arm64 \
-            -output ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-universal
-
-      - name: Rename architecture-specific binaries
-        run: |
-          mv ${{ env.BINARY_NAME }}-amd64 ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-amd64
-          mv ${{ env.BINARY_NAME }}-arm64 ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-arm64
-
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: javinizer-darwin
-          path: |
-            ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-amd64
-            ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-arm64
-            ${{ env.BINARY_NAME }}-${{ github.ref_name }}-darwin-universal
+          name: darwin
+          path: dist/*
 
-  # ============================================================================
-  # Windows Build
-  # ============================================================================
-  build-windows:
+  build-windows-amd64:
+    name: Build windows-amd64
+    needs: prepare-release
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -173,58 +267,144 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Build binary
+        shell: pwsh
         env:
-          CGO_ENABLED: 1
+          CGO_ENABLED: '1'
           GOOS: windows
           GOARCH: amd64
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          COMMIT: ${{ needs.prepare-release.outputs.commit }}
+          BUILD_DATE: ${{ needs.prepare-release.outputs.build_date }}
         run: |
-          $VERSION = "${{ github.ref_name }}"
-          $COMMIT = "${{ github.sha }}"
-          $BUILD_DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd_HH:mm:ss")
-          go build -ldflags="-w -s -X github.com/javinizer/javinizer-go/internal/version.Version=${VERSION} -X github.com/javinizer/javinizer-go/internal/version.Commit=${COMMIT} -X github.com/javinizer/javinizer-go/internal/version.BuildDate=${BUILD_DATE}" -o ${{ env.BINARY_NAME }}-${{ github.ref_name }}-windows-amd64.exe ./cmd/cli
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $output = "${{ env.BINARY_NAME }}-$env:VERSION-windows-amd64.exe"
+          go build -trimpath -ldflags "-w -s -X github.com/javinizer/javinizer-go/internal/version.Version=$env:VERSION -X github.com/javinizer/javinizer-go/internal/version.Commit=$env:COMMIT -X github.com/javinizer/javinizer-go/internal/version.BuildDate=$env:BUILD_DATE" -o "dist/$output" ./cmd/javinizer
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: javinizer-windows-amd64
-          path: ${{ env.BINARY_NAME }}-${{ github.ref_name }}-windows-amd64.exe
+          name: windows-amd64
+          path: dist/*
 
-  # ============================================================================
-  # Create Release and Upload Binaries
-  # ============================================================================
-  create-release:
-    needs: [build-linux-amd64, build-linux-arm64, build-darwin, build-windows]
+  build-docker:
+    name: Build/push Docker image (GHCR)
+    needs: prepare-release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Derive stable semver tags
+        id: semver
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ needs.prepare-release.outputs.version }}'
+          core="${version#v}"
+          major=""
+          minor=""
+
+          if [[ "${version}" != *-* ]]; then
+            IFS='.' read -r major minor _ <<< "${core}"
+          fi
+
+          echo "major=${major}" >> "$GITHUB_OUTPUT"
+          echo "minor=${minor}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        if: needs.prepare-release.outputs.create_release == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=${{ needs.prepare-release.outputs.version }}
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest,enable=${{ needs.prepare-release.outputs.prerelease != 'true' }}
+            type=raw,value=v${{ steps.semver.outputs.major }},enable=${{ needs.prepare-release.outputs.prerelease != 'true' && steps.semver.outputs.major != '' }}
+            type=raw,value=v${{ steps.semver.outputs.major }}.${{ steps.semver.outputs.minor }},enable=${{ needs.prepare-release.outputs.prerelease != 'true' && steps.semver.outputs.major != '' && steps.semver.outputs.minor != '' }}
+
+      - name: Build and (optionally) push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ needs.prepare-release.outputs.create_release == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.prepare-release.outputs.version }}
+            COMMIT=${{ needs.prepare-release.outputs.commit }}
+            BUILD_DATE=${{ needs.prepare-release.outputs.build_date }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  create-release:
+    name: Create GitHub release
+    needs: [prepare-release, build-linux, build-darwin, build-windows-amd64, build-docker]
+    runs-on: ubuntu-latest
+    steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
 
-      - name: Organize artifacts
+      - name: Consolidate release files
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p ./release
-          find ./artifacts -type f -exec mv {} ./release/ \;
+          find ./artifacts -type f -exec cp {} ./release/ \;
           ls -lh ./release/
 
       - name: Generate checksums
+        shell: bash
         run: |
+          set -euo pipefail
           cd ./release
           sha256sum * > checksums.txt
           cat checksums.txt
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload release bundle artifact
+        uses: actions/upload-artifact@v4
         with:
+          name: release-bundle-${{ needs.prepare-release.outputs.version }}
+          path: ./release/*
+
+      - name: Publish GitHub release
+        if: needs.prepare-release.outputs.create_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare-release.outputs.tag_name }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.prepare-release.outputs.release_name }}
           files: ./release/*
           generate_release_notes: true
-          draft: false
-          prerelease: false
+          draft: ${{ needs.prepare-release.outputs.draft == 'true' }}
+          prerelease: ${{ needs.prepare-release.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

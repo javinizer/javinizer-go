@@ -2,7 +2,7 @@
 
 A modern, high-performance Go implementation of Javinizer - a metadata scraper and file organizer for Japanese Adult Videos (JAV).
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Test & Coverage](https://github.com/javinizer/javinizer-go/actions/workflows/test.yml/badge.svg)](https://github.com/javinizer/javinizer-go/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/javinizer/javinizer-go/branch/master/graph/badge.svg)](https://codecov.io/gh/javinizer/javinizer-go)
@@ -59,7 +59,11 @@ A modern, high-performance Go implementation of Javinizer - a metadata scraper a
 # https://github.com/javinizer/javinizer-go/releases
 
 # Or build from source
-go install github.com/javinizer/javinizer-go/cmd/cli@latest
+go install github.com/javinizer/javinizer-go/cmd/javinizer@latest
+
+# Verify installed version/build
+javinizer --version
+javinizer version --short
 ```
 
 **Initialize**:
@@ -117,20 +121,20 @@ Comprehensive documentation available in the `/docs` folder:
 4. **[Template System](./docs/04-template-system.md)** - Customize naming formats
 5. **[Genre Management](./docs/05-genre-management.md)** - Genre replacement guide
 6. **[Database Schema](./docs/06-database-schema.md)** - Database structure and queries
-7. **[API Reference](./docs/07-api-reference.md)** - REST API (planned)
+7. **[API Reference](./docs/07-api-reference.md)** - REST API reference
 8. **[Migration Guide](./docs/08-migration-guide.md)** - From PowerShell version
 9. **[Development](./docs/09-development.md)** - Contributing guide
 10. **[Troubleshooting](./docs/10-troubleshooting.md)** - Common issues and solutions
 11. **[TUI Guide](./docs/11-tui.md)** - Interactive Terminal User Interface
-12. **[Testing Guide](./docs/13-testing-guide.md)** - Test coverage, CI/CD, and best practices
-13. **[Local CI Testing](./docs/14-local-ci-testing.md)** - Run GitHub Actions checks locally
+12. **[Testing Guide](./docs/12-testing-guide.md)** - Test coverage, CI/CD, and best practices
+13. **[Local CI Testing](./docs/13-local-ci-testing.md)** - Run GitHub Actions checks locally
 
 ## Project Structure
 
 ```
 javinizer-go/
 ├── cmd/
-│   └── cli/              # Main application (CLI + API server)
+│   └── javinizer/        # Main application (CLI + API server)
 ├── internal/
 │   ├── aggregator/       # Metadata aggregation
 │   ├── config/           # Configuration management
@@ -229,6 +233,29 @@ javinizer scrape ABW-001
 javinizer sort ~/Videos
 ```
 
+## Releases
+
+Javinizer supports stable releases, prereleases, and snapshot/manual releases via GitHub Actions.
+
+- **Stable release**: push tag like `v1.2.3`
+- **Pre-release**: push tag like `v1.2.3-rc.1` (or `-alpha`, `-beta`)
+- **Manual snapshot**: run `CLI Binary Release` workflow via `workflow_dispatch`
+
+All release builds publish:
+- Cross-platform CLI binaries (Linux/macOS/Windows)
+- SHA256 checksums
+- Multi-arch Docker image to GHCR (`linux/amd64`, `linux/arm64`)
+
+Docker image tags include:
+- Version tag (for example `v1.2.3` or `v1.2.3-rc.1`)
+- Commit SHA tag (`sha-<shortsha>`)
+- Stable releases also publish `latest`, `v<major>`, and `v<major>.<minor>`
+
+Example GHCR image:
+```bash
+docker pull ghcr.io/javinizer/javinizer-go:v1.2.3
+```
+
 ## Performance
 
 Javinizer Go is significantly faster than the PowerShell version:
@@ -268,16 +295,15 @@ Javinizer Go is significantly faster than the PowerShell version:
 - **Worker pool for parallel task execution**
 - **Real-time progress tracking and statistics**
 - **REST API server** (`javinizer api`)
-- Comprehensive documentation (11 guides + TUI guide)
+- **Web frontend** for browsing, review, history, and settings
+- Comprehensive documentation (13 guides)
 - Integration and unit testing
 
 ### Planned 📋
-- Web UI
-- WebSocket support for real-time updates
-- Additional scrapers (JAVLibrary, etc.)
+- Additional scrapers and provider enhancements
 - Batch processing improvements
 - Plugin system
-- Docker support
+- Release automation refinements
 
 ## Testing
 
@@ -295,7 +321,7 @@ make coverage
 # View coverage in browser
 make coverage-html
 
-# Check if coverage meets 60% threshold
+# Check if coverage meets threshold (75%)
 make coverage-check
 
 # Run race detector on concurrent code
@@ -307,7 +333,7 @@ make ci
 
 ### Coverage Status
 
-- **Current Coverage:** 60%+ (enforced in CI)
+- **Current Coverage:** 75%+ threshold enforced in CI
 - **Target Coverage:** 75%+
 - **Critical Packages:** 85%+ (worker, aggregator, matcher, organizer)
 
@@ -339,7 +365,7 @@ The hook automatically checks:
 - Fast unit tests
 - Build verification
 
-For complete testing documentation, see **[Testing Guide](./docs/13-testing-guide.md)**.
+For complete testing documentation, see **[Testing Guide](./docs/12-testing-guide.md)**.
 
 ## Contributing
 
@@ -352,7 +378,7 @@ Contributions welcome!
 5. Run `make ci` to verify all checks pass
 6. Submit a pull request
 
-See **[Development Guide](./docs/09-development.md)** and **[Testing Guide](./docs/13-testing-guide.md)** for details.
+See **[Development Guide](./docs/09-development.md)** and **[Testing Guide](./docs/12-testing-guide.md)** for details.
 
 ## Compatibility
 
