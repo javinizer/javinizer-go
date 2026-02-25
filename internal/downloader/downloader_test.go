@@ -1459,6 +1459,52 @@ func TestAdaptiveDownloader_SelectProxyForRequest_CaribbeancomUsesScraperProxy(t
 	}
 }
 
+func TestAdaptiveDownloader_SelectProxyForRequest_FC2NoScraperProxyUsesDirect(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Scrapers.Proxy = config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://global-proxy.example.com:8080",
+	}
+	cfg.Scrapers.FC2.Proxy = &config.ProxyConfig{
+		Enabled: false,
+	}
+
+	client := &adaptiveDownloaderHTTPClient{cfg: cfg}
+	req := httptest.NewRequest(http.MethodGet, "https://contents-thumbnail2.fc2.com/w1280/storage201000.contents.fc2.com/file/x.jpg", nil)
+
+	resolved := client.selectProxyForRequest(req)
+	if resolved != nil {
+		t.Fatalf("Expected direct download for FC2 host when scraper proxy is disabled, got %q", resolved.URL)
+	}
+}
+
+func TestAdaptiveDownloader_SelectProxyForRequest_FC2DownloadOverrideWins(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Scrapers.Proxy = config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://global-proxy.example.com:8080",
+	}
+	cfg.Scrapers.FC2.Proxy = &config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://fc2-main-proxy.example.com:8080",
+	}
+	cfg.Scrapers.FC2.DownloadProxy = &config.ProxyConfig{
+		Enabled: true,
+		URL:     "http://fc2-download-proxy.example.com:8080",
+	}
+
+	client := &adaptiveDownloaderHTTPClient{cfg: cfg}
+	req := httptest.NewRequest(http.MethodGet, "https://storage201000.contents.fc2.com/file/x.jpg", nil)
+
+	resolved := client.selectProxyForRequest(req)
+	if resolved == nil {
+		t.Fatal("Expected FC2 download proxy to be selected")
+	}
+	if resolved.URL != "http://fc2-download-proxy.example.com:8080" {
+		t.Fatalf("Expected FC2 download proxy URL, got %q", resolved.URL)
+	}
+}
+
 func TestAdaptiveDownloader_SelectProxyForRequest_UnknownHostFallsBackToGlobal(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Scrapers.Proxy = config.ProxyConfig{

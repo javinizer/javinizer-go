@@ -165,6 +165,8 @@ func (c *adaptiveDownloaderHTTPClient) selectProxyForRequest(req *http.Request) 
 		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.DLGetchu.DownloadProxy, c.cfg.Scrapers.DLGetchu.Proxy)
 	case strings.HasSuffix(host, "caribbeancom.com"):
 		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.Caribbeancom.DownloadProxy, c.cfg.Scrapers.Caribbeancom.Proxy)
+	case strings.HasSuffix(host, "fc2.com"):
+		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.FC2.DownloadProxy, c.cfg.Scrapers.FC2.Proxy)
 	case strings.HasSuffix(host, "libredmm.com"):
 		return c.resolveScraperDownloadProxy(c.cfg.Scrapers.LibreDMM.DownloadProxy, c.cfg.Scrapers.LibreDMM.Proxy)
 	case strings.Contains(host, "javlibrary"):
