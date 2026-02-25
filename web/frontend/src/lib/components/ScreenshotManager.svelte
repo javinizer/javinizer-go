@@ -65,6 +65,20 @@
 		screenshots = screenshots.filter((_, i) => i !== index);
 	}
 
+	function removeAllScreenshots() {
+		if (screenshots.length === 0) return;
+
+		const confirmed = typeof window === 'undefined'
+			? true
+			: window.confirm(`Remove all ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}?`);
+
+		if (!confirmed) return;
+
+		screenshots = [];
+		showViewer = false;
+		viewerIndex = 0;
+	}
+
 	function handleKeyPress(e: KeyboardEvent) {
 		if (e.key === 'Enter') {
 			addScreenshot();
@@ -286,6 +300,20 @@
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('screenshot_urls')}</span>
 				{/if}
 			</h3>
+			{#if screenshots.length > 0}
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={removeAllScreenshots}
+					class="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+					title="Remove all screenshots"
+				>
+					{#snippet children()}
+						<Trash2 class="h-4 w-4" />
+						Remove All
+					{/snippet}
+				</Button>
+			{/if}
 		</div>
 
 		<!-- Add Screenshot Form -->
