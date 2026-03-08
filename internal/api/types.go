@@ -243,6 +243,26 @@ type BrowseResponse struct {
 	Items       []FileInfo `json:"items"`
 }
 
+// PathAutocompleteRequest represents a partial path autocomplete request.
+type PathAutocompleteRequest struct {
+	Path  string `json:"path" binding:"required" example:"/path/to/vid"`
+	Limit int    `json:"limit,omitempty" example:"10"`
+}
+
+// PathAutocompleteSuggestion represents a single autocomplete suggestion.
+type PathAutocompleteSuggestion struct {
+	Name  string `json:"name" example:"videos"`
+	Path  string `json:"path" example:"/path/to/videos"`
+	IsDir bool   `json:"is_dir" example:"true"`
+}
+
+// PathAutocompleteResponse represents directory suggestions for a partial path.
+type PathAutocompleteResponse struct {
+	InputPath   string                       `json:"input_path" example:"/path/to/vid"`
+	BasePath    string                       `json:"base_path" example:"/path/to"`
+	Suggestions []PathAutocompleteSuggestion `json:"suggestions"`
+}
+
 // UpdateMovieRequest represents the update movie request payload
 type UpdateMovieRequest struct {
 	Movie *models.Movie `json:"movie" binding:"required"`

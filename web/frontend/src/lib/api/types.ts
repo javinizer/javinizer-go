@@ -32,6 +32,23 @@ export interface BrowseResponse {
 	items: FileInfo[];
 }
 
+export interface PathAutocompleteRequest {
+	path: string;
+	limit?: number;
+}
+
+export interface PathAutocompleteSuggestion {
+	name: string;
+	path: string;
+	is_dir: boolean;
+}
+
+export interface PathAutocompleteResponse {
+	input_path: string;
+	base_path: string;
+	suggestions: PathAutocompleteSuggestion[];
+}
+
 export interface ScrapeRequest {
 	id: string;
 	force?: boolean;

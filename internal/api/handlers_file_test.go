@@ -583,6 +583,108 @@ func TestBrowseDirectory_ParentPathCalculation(t *testing.T) {
 	assert.Equal(t, tempDir, response.ParentPath)
 }
 
+func TestAutocompletePath(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(tempDir, "archive"), 0755))
+	require.NoError(t, os.Mkdir(filepath.Join(tempDir, "unsorted"), 0755))
+	require.NoError(t, os.Mkdir(filepath.Join(tempDir, "unsorted-4k"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "unsorted.txt"), []byte("test"), 0644))
+	require.NoError(t, os.Mkdir(filepath.Join(tempDir, "unsorted", "incoming"), 0755))
+	require.NoError(t, os.Mkdir(filepath.Join(tempDir, "unsorted", "processed"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "unsorted", "video.mp4"), []byte("test"), 0644))
+
+	cfg := config.DefaultConfig()
+	cfg.API.Security.AllowedDirectories = []string{tempDir}
+	canonicalTempDir, err := filepath.EvalSymlinks(tempDir)
+	require.NoError(t, err)
+
+	deps := &ServerDependencies{}
+	deps.SetConfig(cfg)
+
+	router := gin.New()
+	router.POST("/browse/autocomplete", autocompletePath(deps))
+
+	t.Run("matches partial final segment", func(t *testing.T) {
+		reqBody := PathAutocompleteRequest{
+			Path:  filepath.Join(tempDir, "uns"),
+			Limit: 10,
+		}
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest("POST", "/browse/autocomplete", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, 200, w.Code, w.Body.String())
+
+		var response PathAutocompleteResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		require.Equal(t, canonicalTempDir, response.BasePath)
+		require.Len(t, response.Suggestions, 2)
+		assert.Equal(t, "unsorted", response.Suggestions[0].Name)
+		assert.Equal(t, filepath.Join(canonicalTempDir, "unsorted"), response.Suggestions[0].Path)
+		assert.Equal(t, "unsorted-4k", response.Suggestions[1].Name)
+		assert.Equal(t, filepath.Join(canonicalTempDir, "unsorted-4k"), response.Suggestions[1].Path)
+	})
+
+	t.Run("trailing separator lists child directories only", func(t *testing.T) {
+		reqBody := PathAutocompleteRequest{
+			Path: filepath.Join(tempDir, "unsorted") + string(os.PathSeparator),
+		}
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest("POST", "/browse/autocomplete", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, 200, w.Code, w.Body.String())
+
+		var response PathAutocompleteResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		require.Equal(t, filepath.Join(canonicalTempDir, "unsorted"), response.BasePath)
+		require.Len(t, response.Suggestions, 2)
+		assert.Equal(t, "incoming", response.Suggestions[0].Name)
+		assert.Equal(t, "processed", response.Suggestions[1].Name)
+	})
+}
+
+func TestAutocompletePath_PathTraversalPrevention(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cfg := config.DefaultConfig()
+	cfg.API.Security.AllowedDirectories = []string{tempDir}
+
+	deps := &ServerDependencies{}
+	deps.SetConfig(cfg)
+
+	router := gin.New()
+	router.POST("/browse/autocomplete", autocompletePath(deps))
+
+	reqBody := PathAutocompleteRequest{
+		Path: filepath.Join(tempDir, "..", "etc"),
+	}
+	body, err := json.Marshal(reqBody)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("POST", "/browse/autocomplete", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.True(t, w.Code == 400 || w.Code == 403, "expected security rejection, got %d", w.Code)
+
+	var response ErrorResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.NotEmpty(t, response.Error)
+}
+
 func TestScanDirectory_LargeDirectory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large directory test in short mode")
