@@ -360,6 +360,7 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 		v1.GET("/cwd", getCurrentWorkingDirectory(deps))
 		v1.POST("/scan", scanDirectory(deps))
 		v1.POST("/browse", browseDirectory(deps))
+		v1.POST("/browse/autocomplete", autocompletePath(deps))
 
 		// Batch endpoints
 		v1.POST("/batch/scrape", batchScrape(deps))

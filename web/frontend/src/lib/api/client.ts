@@ -3,6 +3,8 @@ import type {
 	ScanResponse,
 	BrowseRequest,
 	BrowseResponse,
+	PathAutocompleteRequest,
+	PathAutocompleteResponse,
 	BatchScrapeRequest,
 	BatchScrapeResponse,
 	BatchJobResponse,
@@ -103,6 +105,14 @@ class APIClient {
 	// Browse filesystem
 	async browse(request: BrowseRequest): Promise<BrowseResponse> {
 		return this.request<BrowseResponse>('/api/v1/browse', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		});
+	}
+
+	// Autocomplete a partial filesystem path
+	async autocompletePath(request: PathAutocompleteRequest): Promise<PathAutocompleteResponse> {
+		return this.request<PathAutocompleteResponse>('/api/v1/browse/autocomplete', {
 			method: 'POST',
 			body: JSON.stringify(request)
 		});
