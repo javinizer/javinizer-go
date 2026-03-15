@@ -55,8 +55,13 @@ func NewCommand() *cobra.Command {
 	tuiCmd.Flags().BoolP("recursive", "r", true, "Scan directories recursively")
 	tuiCmd.Flags().BoolP("move", "m", false, "Move files instead of copying")
 	tuiCmd.Flags().BoolP("dry-run", "n", false, "Preview operations without making changes")
+	tuiCmd.Flags().String("link-mode", "none", "Link mode for copy operations: none, hard, soft")
 	tuiCmd.Flags().Bool("extrafanart", false, "Download extrafanart (screenshots)")
 	tuiCmd.Flags().StringSliceP("scrapers", "p", nil, "Scraper priority (comma-separated, e.g., 'r18dev,dmm')")
+	tuiCmd.Flags().Bool("update-mode", false, "Update mode: merge metadata with existing NFO and skip file organization")
+	tuiCmd.Flags().String("preset", "", "Merge strategy preset: conservative, gap-fill, or aggressive (used in update mode)")
+	tuiCmd.Flags().String("scalar-strategy", "prefer-nfo", "Scalar field merge strategy for update mode")
+	tuiCmd.Flags().String("array-strategy", "merge", "Array field merge strategy for update mode")
 
 	return tuiCmd
 }
@@ -79,9 +84,28 @@ func run(cmd *cobra.Command, args []string) error {
 	destPath, _ := cmd.Flags().GetString("dest")
 	moveFiles, _ := cmd.Flags().GetBool("move")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	linkModeRaw, _ := cmd.Flags().GetString("link-mode")
 	downloadExtrafanart, _ := cmd.Flags().GetBool("extrafanart")
 	scraperPriority, _ := cmd.Flags().GetStringSlice("scrapers")
+	updateMode, _ := cmd.Flags().GetBool("update-mode")
+	preset, _ := cmd.Flags().GetString("preset")
+	scalarStrategy, _ := cmd.Flags().GetString("scalar-strategy")
+	arrayStrategy, _ := cmd.Flags().GetString("array-strategy")
 	verboseFlag, _ := cmd.Flags().GetBool("verbose")
+
+	linkMode, err := organizer.ParseLinkMode(linkModeRaw)
+	if err != nil {
+		return err
+	}
+	if moveFiles && linkMode != organizer.LinkModeNone {
+		return fmt.Errorf("--link-mode can only be used when --move is disabled")
+	}
+	if preset != "" {
+		scalarStrategy, arrayStrategy, err = nfo.ApplyPreset(preset, scalarStrategy, arrayStrategy)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Default destination is same as source
 	if destPath == "" {
@@ -266,6 +290,10 @@ func run(cmd *cobra.Command, args []string) error {
 		destPath,
 		moveFiles,
 	)
+	processor.SetConfig(cfg)
+	processor.SetLinkMode(linkMode)
+	processor.SetUpdateMode(updateMode)
+	processor.SetMergeStrategies(scalarStrategy, arrayStrategy)
 
 	// Set worker pool and progress channel in model
 	model.SetWorkerPool(workerPool, progressChan)
@@ -278,6 +306,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Set dry-run mode AFTER processor is set so it propagates correctly
 	model.SetDryRun(dryRun)
+	model.SetUpdateMode(updateMode)
 
 	// Log initial state
 	model.AddLog("info", fmt.Sprintf("Scanned %d files", len(scanResult.Files)))

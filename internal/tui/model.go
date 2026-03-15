@@ -413,6 +413,7 @@ func (m *Model) SetProcessor(processor *ProcessingCoordinator) {
 	// Sync dry-run state to processor
 	if m.processor != nil {
 		m.processor.SetDryRun(m.dryRun)
+		m.processor.SetUpdateMode(m.updateMode)
 	}
 }
 
@@ -431,6 +432,20 @@ func (m *Model) SetDryRun(dryRun bool) {
 	}
 	if dryRun {
 		m.AddLog("info", "DRY RUN mode enabled - no changes will be made")
+	}
+}
+
+// SetUpdateMode sets update mode and syncs it to processor.
+func (m *Model) SetUpdateMode(updateMode bool) {
+	m.updateMode = updateMode
+	if updateMode {
+		m.organizeEnabled = false
+	}
+	if m.processor != nil {
+		m.processor.SetUpdateMode(updateMode)
+		if updateMode {
+			m.processor.SetOrganizeEnabled(false)
+		}
 	}
 }
 

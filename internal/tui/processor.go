@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -34,6 +35,11 @@ type ProcessingCoordinator struct {
 	downloadEnabled       bool
 	organizeEnabled       bool
 	nfoEnabled            bool
+	linkMode              organizer.LinkMode
+	updateMode            bool
+	scalarStrategy        string
+	arrayStrategy         string
+	cfg                   *config.Config
 	customScraperPriority []string // Optional custom scraper priority (nil = use default)
 }
 
@@ -72,6 +78,9 @@ func NewProcessingCoordinator(
 		downloadEnabled: true,
 		organizeEnabled: true,
 		nfoEnabled:      true,
+		linkMode:        organizer.LinkModeNone,
+		scalarStrategy:  "prefer-nfo",
+		arrayStrategy:   "merge",
 	}
 }
 
@@ -133,6 +142,31 @@ func (pc *ProcessingCoordinator) SetForceUpdate(forceUpdate bool) {
 // SetForceRefresh sets whether to force refresh from scrapers (clear cache)
 func (pc *ProcessingCoordinator) SetForceRefresh(forceRefresh bool) {
 	pc.forceRefresh = forceRefresh
+}
+
+// SetLinkMode sets how copy operations materialize files (copy/hardlink/softlink).
+// Link mode is ignored when move mode is enabled.
+func (pc *ProcessingCoordinator) SetLinkMode(mode organizer.LinkMode) {
+	if !mode.IsValid() {
+		mode = organizer.LinkModeNone
+	}
+	pc.linkMode = mode
+}
+
+// SetUpdateMode sets whether update-mode merge behavior is enabled.
+func (pc *ProcessingCoordinator) SetUpdateMode(enabled bool) {
+	pc.updateMode = enabled
+}
+
+// SetMergeStrategies sets scalar/array merge behavior for update mode.
+func (pc *ProcessingCoordinator) SetMergeStrategies(scalarStrategy, arrayStrategy string) {
+	pc.scalarStrategy = scalarStrategy
+	pc.arrayStrategy = arrayStrategy
+}
+
+// SetConfig provides runtime config for template-aware NFO merge path resolution.
+func (pc *ProcessingCoordinator) SetConfig(cfg *config.Config) {
+	pc.cfg = cfg
 }
 
 // SetCustomScrapers sets custom scraper priority for manual search
@@ -216,6 +250,11 @@ func (pc *ProcessingCoordinator) ProcessFiles(
 		// Submit a composite task that handles all operations sequentially
 		// Type assertions needed for pool.Submit and progressTracker to pass to worker.NewProcessFileTask
 		// (worker package expects concrete types)
+		taskOpts := []worker.ProcessFileOption{
+			worker.WithLinkMode(pc.linkMode),
+			worker.WithUpdateMerge(pc.updateMode, pc.scalarStrategy, pc.arrayStrategy, pc.cfg),
+		}
+
 		processTask := worker.NewProcessFileTask(
 			match,
 			pc.registry,
@@ -235,6 +274,7 @@ func (pc *ProcessingCoordinator) ProcessFiles(
 			pc.organizeEnabled,
 			pc.nfoEnabled,
 			customScrapers,
+			taskOpts...,
 		)
 
 		if err := pc.pool.Submit(processTask); err != nil {

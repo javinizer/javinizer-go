@@ -563,7 +563,7 @@ func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 
 		case 9:
-			m.updateMode = !m.updateMode
+			m.SetUpdateMode(!m.updateMode)
 			// When update mode is enabled, disable file organization
 			// When update mode is disabled, re-enable file organization
 			if m.updateMode {

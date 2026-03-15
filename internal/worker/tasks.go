@@ -3,10 +3,12 @@ package worker
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -14,6 +16,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
+	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/spf13/afero"
 )
 
 // ScrapeTask scrapes metadata for a JAV ID
@@ -321,6 +325,7 @@ type OrganizeTask struct {
 	movie           *models.Movie
 	destPath        string
 	moveFiles       bool
+	linkMode        organizer.LinkMode
 	forceUpdate     bool
 	organizer       *organizer.Organizer
 	progressTracker *ProgressTracker
@@ -337,10 +342,15 @@ func NewOrganizeTask(
 	org *organizer.Organizer,
 	progressTracker *ProgressTracker,
 	dryRun bool,
+	linkModes ...organizer.LinkMode,
 ) *OrganizeTask {
 	operation := "copy"
 	if moveFiles {
 		operation = "move"
+	}
+	linkMode := organizer.LinkModeNone
+	if len(linkModes) > 0 && linkModes[0].IsValid() {
+		linkMode = linkModes[0]
 	}
 
 	desc := fmt.Sprintf("Organizing %s (%s)", match.File.Name, operation)
@@ -358,6 +368,7 @@ func NewOrganizeTask(
 		movie:           movie,
 		destPath:        destPath,
 		moveFiles:       moveFiles,
+		linkMode:        linkMode,
 		forceUpdate:     forceUpdate,
 		organizer:       org,
 		progressTracker: progressTracker,
@@ -398,6 +409,10 @@ func (t *OrganizeTask) Execute(ctx context.Context) error {
 		operation := "copy"
 		if t.moveFiles {
 			operation = "move"
+		} else if t.linkMode == organizer.LinkModeHard {
+			operation = "hardlink"
+		} else if t.linkMode == organizer.LinkModeSoft {
+			operation = "softlink"
 		}
 
 		logging.Debugf("[%s] DRY RUN mode - would %s file to %s", t.movie.ID, operation, plan.TargetPath)
@@ -417,9 +432,13 @@ func (t *OrganizeTask) Execute(ctx context.Context) error {
 		logging.Debugf("[%s] Executing MOVE operation", t.movie.ID)
 		result, execErr = t.organizer.Execute(plan, false)
 	} else {
-		// Copy copies instead of moving
-		logging.Debugf("[%s] Executing COPY operation", t.movie.ID)
-		result, execErr = t.organizer.Copy(plan, false)
+		if t.linkMode == organizer.LinkModeNone {
+			logging.Debugf("[%s] Executing COPY operation", t.movie.ID)
+			result, execErr = t.organizer.Copy(plan, false)
+		} else {
+			logging.Debugf("[%s] Executing %s operation", t.movie.ID, t.linkMode)
+			result, execErr = t.organizer.CopyWithLinkMode(plan, false, t.linkMode)
+		}
 	}
 
 	if execErr != nil {
@@ -526,7 +545,57 @@ type ProcessFileTask struct {
 	downloadEnabled       bool
 	organizeEnabled       bool
 	nfoEnabled            bool
+	linkMode              organizer.LinkMode
+	updateMode            bool
+	scalarStrategy        string
+	arrayStrategy         string
+	cfg                   *config.Config
 	customScraperPriority []string // Optional custom scraper priority (nil = use default)
+}
+
+// ProcessFileOptions holds optional settings for process file tasks.
+type ProcessFileOptions struct {
+	LinkMode       organizer.LinkMode
+	UpdateMode     bool
+	ScalarStrategy string
+	ArrayStrategy  string
+	Config         *config.Config
+}
+
+// ProcessFileOption configures optional behavior for a process file task.
+type ProcessFileOption func(*ProcessFileOptions)
+
+func defaultProcessFileOptions() ProcessFileOptions {
+	return ProcessFileOptions{
+		LinkMode:       organizer.LinkModeNone,
+		UpdateMode:     false,
+		ScalarStrategy: "prefer-nfo",
+		ArrayStrategy:  "merge",
+		Config:         nil,
+	}
+}
+
+// WithLinkMode sets copy link behavior for organize operations.
+func WithLinkMode(mode organizer.LinkMode) ProcessFileOption {
+	return func(opts *ProcessFileOptions) {
+		if mode.IsValid() {
+			opts.LinkMode = mode
+		}
+	}
+}
+
+// WithUpdateMerge enables update-mode merge logic and merge strategy options.
+func WithUpdateMerge(enabled bool, scalarStrategy, arrayStrategy string, cfg *config.Config) ProcessFileOption {
+	return func(opts *ProcessFileOptions) {
+		opts.UpdateMode = enabled
+		if scalarStrategy != "" {
+			opts.ScalarStrategy = scalarStrategy
+		}
+		if arrayStrategy != "" {
+			opts.ArrayStrategy = arrayStrategy
+		}
+		opts.Config = cfg
+	}
 }
 
 // NewProcessFileTask creates a new composite task for processing a file
@@ -549,10 +618,17 @@ func NewProcessFileTask(
 	organizeEnabled bool,
 	nfoEnabled bool,
 	customScraperPriority []string, // Optional custom scraper priority (nil = use default)
+	options ...ProcessFileOption,
 ) *ProcessFileTask {
 	desc := fmt.Sprintf("Processing %s", match.ID)
 	if dryRun {
 		desc = "[DRY RUN] " + desc
+	}
+	opts := defaultProcessFileOptions()
+	for _, option := range options {
+		if option != nil {
+			option(&opts)
+		}
 	}
 
 	return &ProcessFileTask{
@@ -578,6 +654,11 @@ func NewProcessFileTask(
 		downloadEnabled:       downloadEnabled,
 		organizeEnabled:       organizeEnabled,
 		nfoEnabled:            nfoEnabled,
+		linkMode:              opts.LinkMode,
+		updateMode:            opts.UpdateMode,
+		scalarStrategy:        opts.ScalarStrategy,
+		arrayStrategy:         opts.ArrayStrategy,
+		cfg:                   opts.Config,
 		customScraperPriority: customScraperPriority,
 	}
 }
@@ -687,10 +768,18 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	// Determine target directory from organizer plan
-	// This ensures all files go to the same folder
+	// In update mode, merge scraped data with existing NFO before generating outputs.
+	if t.updateMode {
+		movie = t.mergeWithExistingNFO(movie)
+	}
+
+	// Determine target directory.
+	// In update mode, always keep metadata/media alongside the existing source file.
 	var targetDir string
-	if t.organizeEnabled {
+	if t.updateMode {
+		targetDir = filepath.Dir(t.match.File.Path)
+	} else if t.organizeEnabled {
+		// Use organizer plan to keep metadata/media aligned with final video location.
 		plan, err := t.organizer.Plan(t.match, movie, t.destPath, t.forceUpdate)
 		if err != nil {
 			return fmt.Errorf("failed to plan organization: %w", err)
@@ -750,7 +839,8 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 	}
 
 	// Step 4: Organize file (move/copy video file to target directory)
-	if t.organizeEnabled {
+	// Update mode is in-place metadata refresh and never reorganizes files.
+	if t.organizeEnabled && !t.updateMode {
 		organizeTask := NewOrganizeTask(
 			t.match,
 			movie,
@@ -760,6 +850,7 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 			t.organizer,
 			t.progressTracker,
 			t.dryRun,
+			t.linkMode,
 		)
 		if err := organizeTask.Execute(ctx); err != nil {
 			return fmt.Errorf("organize failed: %w", err)
@@ -772,4 +863,102 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 	}
 	t.progressTracker.Update(t.id, 1.0, finalMsg, 0)
 	return nil
+}
+
+// mergeWithExistingNFO merges scraped metadata with an existing NFO when update mode is enabled.
+// If no NFO exists or parsing/merge fails, it returns the original movie unchanged.
+func (t *ProcessFileTask) mergeWithExistingNFO(movie *models.Movie) *models.Movie {
+	if movie == nil || t.cfg == nil {
+		return movie
+	}
+
+	sourceDir := filepath.Dir(t.match.File.Path)
+	tmplCtx := template.NewContextFromMovie(movie)
+	tmplCtx.GroupActress = t.cfg.Output.GroupActress
+	if t.cfg.Metadata.NFO.PerFile && t.match.IsMultiPart {
+		tmplCtx.PartNumber = t.match.PartNumber
+		tmplCtx.PartSuffix = t.match.PartSuffix
+		tmplCtx.IsMultiPart = true
+	}
+
+	templateEngine := template.NewEngine()
+	nfoFilename, err := templateEngine.Execute(t.cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
+	if err != nil {
+		logging.Warnf("[%s] Failed to execute NFO filename template: %v, using default", movie.ID, err)
+		sanitized := template.SanitizeFilename(movie.ID)
+		if sanitized == "" {
+			sanitized = "metadata"
+		}
+		nfoFilename = sanitized + ".nfo"
+	} else {
+		basename := nfoFilename
+		lower := strings.ToLower(basename)
+		if strings.HasSuffix(lower, ".nfo") {
+			basename = basename[:len(basename)-4]
+		}
+		sanitized := template.SanitizeFilename(basename)
+		if sanitized == "" {
+			sanitized = template.SanitizeFilename(movie.ID)
+			if sanitized == "" {
+				sanitized = "metadata"
+			}
+		}
+		nfoFilename = sanitized + ".nfo"
+	}
+
+	nfoPath := filepath.Join(sourceDir, nfoFilename)
+
+	legacyPaths := []string{}
+	if nfoFilename != movie.ID+".nfo" {
+		legacyPaths = append(legacyPaths, filepath.Join(sourceDir, movie.ID+".nfo"))
+	}
+	if t.cfg.Metadata.NFO.PerFile && t.match.IsMultiPart {
+		videoName := strings.TrimSuffix(filepath.Base(t.match.File.Path), filepath.Ext(t.match.File.Path))
+		videoNFO := filepath.Join(sourceDir, videoName+".nfo")
+		if videoNFO != nfoPath {
+			legacyPaths = append(legacyPaths, videoNFO)
+		}
+	}
+
+	foundPath := ""
+	if _, err := os.Stat(nfoPath); err == nil {
+		foundPath = nfoPath
+	} else {
+		for _, legacyPath := range legacyPaths {
+			if _, err := os.Stat(legacyPath); err == nil {
+				foundPath = legacyPath
+				break
+			}
+		}
+	}
+	if foundPath == "" {
+		return movie
+	}
+
+	parseResult, err := nfo.ParseNFO(afero.NewOsFs(), foundPath)
+	if err != nil {
+		logging.Warnf("[%s] Failed to parse existing NFO %s: %v", movie.ID, foundPath, err)
+		return movie
+	}
+
+	scalar := nfo.ParseScalarStrategy(t.scalarStrategy)
+	mergeArrays := nfo.ParseArrayStrategy(t.arrayStrategy)
+	mergeResult, err := nfo.MergeMovieMetadataWithOptions(movie, parseResult.Movie, scalar, mergeArrays)
+	if err != nil {
+		logging.Warnf("[%s] Failed to merge NFO data: %v", movie.ID, err)
+		return movie
+	}
+
+	merged := mergeResult.Merged
+	titleAlreadyTemplated := strings.HasPrefix(merged.Title, "["+merged.ID+"]")
+	if titleAlreadyTemplated {
+		merged.DisplayName = merged.Title
+	} else if t.cfg.Metadata.NFO.DisplayName != "" {
+		ctx := template.NewContextFromMovie(merged)
+		if displayName, err := templateEngine.Execute(t.cfg.Metadata.NFO.DisplayName, ctx); err == nil {
+			merged.DisplayName = displayName
+		}
+	}
+
+	return merged
 }

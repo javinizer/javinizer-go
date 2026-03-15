@@ -154,6 +154,57 @@ func TestNewProcessFileTask(t *testing.T) {
 		assert.NotNil(t, task)
 		// Task creation should succeed with selective operations
 	})
+
+	t.Run("Applies link and update merge options", func(t *testing.T) {
+		progressChan := make(chan ProgressUpdate, 10)
+		tracker := NewProgressTracker(progressChan)
+
+		match := matcher.MatchResult{
+			ID: "IPX-999",
+			File: scanner.FileInfo{
+				Name: "ipx-999.mp4",
+				Path: "/source/ipx-999.mp4",
+			},
+		}
+
+		registry := models.NewScraperRegistry()
+		agg := &aggregator.Aggregator{}
+		movieRepo := &database.MovieRepository{}
+		dl := &downloader.Downloader{}
+		org := organizer.NewOrganizer(afero.NewMemMapFs(), &config.OutputConfig{})
+		nfoGen := nfo.NewGenerator(afero.NewMemMapFs(), &nfo.Config{})
+		cfg := &config.Config{}
+
+		task := NewProcessFileTask(
+			match,
+			registry,
+			agg,
+			movieRepo,
+			dl,
+			org,
+			nfoGen,
+			"/dest",
+			false,
+			false,
+			false,
+			tracker,
+			false,
+			true,
+			true,
+			true,
+			true,
+			nil,
+			WithLinkMode(organizer.LinkModeHard),
+			WithUpdateMerge(true, "prefer-scraper", "replace", cfg),
+		)
+
+		assert.NotNil(t, task)
+		assert.Equal(t, organizer.LinkModeHard, task.linkMode)
+		assert.True(t, task.updateMode)
+		assert.Equal(t, "prefer-scraper", task.scalarStrategy)
+		assert.Equal(t, "replace", task.arrayStrategy)
+		assert.Equal(t, cfg, task.cfg)
+	})
 }
 
 func TestProcessFileTask_Execute_DryRun(t *testing.T) {
