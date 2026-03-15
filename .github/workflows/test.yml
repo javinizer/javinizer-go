@@ -103,6 +103,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
+      with:
+        fetch-depth: 2
 
     - name: Set up Go
       uses: actions/setup-go@v6
@@ -119,7 +121,9 @@ jobs:
         # Go 1.25 in go.mod requires a golangci-lint binary built with Go 1.25+.
         # v2.4.0+ satisfies this; pin to avoid v1 fallback from older action versions.
         version: v2.4.0
-        args: --timeout=5m
+        # The repository currently has historical lint debt; enforce on new changes only.
+        # Requires fetch-depth >= 2 to resolve HEAD~1.
+        args: --timeout=5m --new-from-rev=HEAD~1
 
     - name: Check formatting
       run: |
