@@ -36,23 +36,15 @@ func isDirAllowed(dir string, allow, deny []string) bool {
 	d := filepath.Clean(expandedDir)
 
 	// Resolve symlinks for the checked directory (security: prevent symlink traversal)
-	resolved := d
 	absPath, err := filepath.Abs(d)
 	if err != nil {
 		// Fail closed: deny access if absolute path resolution fails
 		return false
 	}
-
-	// Try to resolve symlinks, but allow validation even if path doesn't exist yet
-	// (e.g., during batch job setup before files are downloaded)
-	if realPath, err := filepath.EvalSymlinks(absPath); err == nil {
-		resolved = realPath
-	} else if !os.IsNotExist(err) {
-		// Fail closed: deny access if symlink resolution fails for reasons other than non-existence
+	resolved, err := canonicalizePath(absPath)
+	if err != nil {
+		// Fail closed: deny access if canonicalization fails
 		return false
-	} else {
-		// Path doesn't exist yet - use absolute path for validation
-		resolved = absPath
 	}
 
 	// Get built-in denied directories (system directories that should never be accessed)
@@ -62,12 +54,11 @@ func isDirAllowed(dir string, allow, deny []string) bool {
 	for _, blocked := range builtInDenied {
 		cleanBlocked := filepath.Clean(blocked)
 		if absBlocked, err := filepath.Abs(cleanBlocked); err == nil {
-			// Resolve symlink for blocked path if it exists
-			realBlocked := absBlocked
-			if resolvedBlocked, err := filepath.EvalSymlinks(absBlocked); err == nil {
-				realBlocked = resolvedBlocked
+			realBlocked, err := canonicalizePath(absBlocked)
+			if err != nil {
+				continue
 			}
-			if strings.HasPrefix(resolved, realBlocked+string(os.PathSeparator)) || resolved == realBlocked {
+			if isPathWithin(resolved, realBlocked) {
 				return false
 			}
 		}
@@ -78,12 +69,11 @@ func isDirAllowed(dir string, allow, deny []string) bool {
 		expandedBlocked := expandHomeDir(blocked)
 		cleanBlocked := filepath.Clean(expandedBlocked)
 		if absBlocked, err := filepath.Abs(cleanBlocked); err == nil {
-			// Resolve symlink for blocked path if it exists
-			realBlocked := absBlocked
-			if resolvedBlocked, err := filepath.EvalSymlinks(absBlocked); err == nil {
-				realBlocked = resolvedBlocked
+			realBlocked, err := canonicalizePath(absBlocked)
+			if err != nil {
+				continue
 			}
-			if strings.HasPrefix(resolved, realBlocked+string(os.PathSeparator)) || resolved == realBlocked {
+			if isPathWithin(resolved, realBlocked) {
 				return false
 			}
 		}
@@ -100,18 +90,61 @@ func isDirAllowed(dir string, allow, deny []string) bool {
 		expandedAllowed := expandHomeDir(allowed)
 		cleanAllowed := filepath.Clean(expandedAllowed)
 		if absAllowed, err := filepath.Abs(cleanAllowed); err == nil {
-			// Resolve symlink for allowed path if it exists
-			realAllowed := absAllowed
-			if resolvedAllowed, err := filepath.EvalSymlinks(absAllowed); err == nil {
-				realAllowed = resolvedAllowed
+			realAllowed, err := canonicalizePath(absAllowed)
+			if err != nil {
+				continue
 			}
-			if strings.HasPrefix(resolved, realAllowed+string(os.PathSeparator)) || resolved == realAllowed {
+			if isPathWithin(resolved, realAllowed) {
 				return true
 			}
 		}
 	}
 
 	return false
+}
+
+// canonicalizePath resolves symlinks and canonicalizes non-existent child paths by
+// resolving the nearest existing ancestor. This keeps path checks consistent across
+// platforms where temp paths may include symlinked segments (e.g., /var -> /private/var on macOS).
+func canonicalizePath(absPath string) (string, error) {
+	realPath, err := filepath.EvalSymlinks(absPath)
+	if err == nil {
+		return realPath, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	// For non-existent paths, resolve the nearest existing parent and append missing segments.
+	current := absPath
+	missingSegments := make([]string, 0, 4)
+	for {
+		parent := filepath.Dir(current)
+		if parent == current {
+			// Should not happen in practice (root should exist), but fail open to absolute path fallback.
+			return absPath, nil
+		}
+
+		missingSegments = append(missingSegments, filepath.Base(current))
+		current = parent
+
+		if _, statErr := os.Lstat(current); statErr == nil {
+			resolvedParent, resolveErr := filepath.EvalSymlinks(current)
+			if resolveErr != nil {
+				return "", resolveErr
+			}
+			for i := len(missingSegments) - 1; i >= 0; i-- {
+				resolvedParent = filepath.Join(resolvedParent, missingSegments[i])
+			}
+			return resolvedParent, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", statErr
+		}
+	}
+}
+
+func isPathWithin(path, base string) bool {
+	return strings.HasPrefix(path, base+string(os.PathSeparator)) || path == base
 }
 
 // discoverSiblingParts finds all multi-part files with the same base movie ID in the parent directories.

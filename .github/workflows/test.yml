@@ -7,6 +7,7 @@ on:
     branches: [ master, main, develop ]
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
   GO_VERSION_FILE: go.mod
 
 jobs:
@@ -17,10 +18,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: ${{ env.GO_VERSION_FILE }}
         cache: true
@@ -50,7 +51,7 @@ jobs:
 
     - name: Upload coverage to Codecov
       if: steps.detect.outputs.running_in_act != 'true'
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         file: ./coverage.out
         flags: unittests
@@ -61,7 +62,7 @@ jobs:
 
     - name: Archive coverage report
       if: steps.detect.outputs.running_in_act != 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: coverage-report
         path: coverage.out
@@ -80,10 +81,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: ${{ env.GO_VERSION_FILE }}
         cache: true
@@ -101,10 +102,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: ${{ env.GO_VERSION_FILE }}
         cache: true
@@ -113,9 +114,11 @@ jobs:
       run: make vet
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v8
       with:
-        version: latest
+        # Go 1.25 in go.mod requires a golangci-lint binary built with Go 1.25+.
+        # v2.4.0+ satisfies this; pin to avoid v1 fallback from older action versions.
+        version: v2.4.0
         args: --timeout=5m
 
     - name: Check formatting
@@ -133,10 +136,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: ${{ env.GO_VERSION_FILE }}
         cache: true
@@ -162,7 +165,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Resolve tracked version
       id: version

@@ -926,7 +926,7 @@ func TestIsDirAllowed_Allowlist(t *testing.T) {
 		{
 			name:     "subdirectory of allowed",
 			dir:      filepath.Join(allowedDir1, "subdir"),
-			expected: false, // Will be denied since it doesn't exist (isDirAllowed uses EvalSymlinks which fails for non-existent paths)
+			expected: true, // Non-existent subdirectory is allowed when its parent is allowed
 		},
 	}
 

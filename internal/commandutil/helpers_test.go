@@ -120,7 +120,7 @@ func TestGenerateNFOs(t *testing.T) {
 		assert.Equal(t, 1, count, "Should generate 1 NFO")
 
 		// Verify NFO file was created
-		nfoPath := filepath.Join(tmpDir, "ipx-123.nfo")
+		nfoPath := filepath.Join(tmpDir, "IPX-123.nfo")
 		assert.FileExists(t, nfoPath, "NFO file should be created")
 	})
 
@@ -182,8 +182,8 @@ func TestGenerateNFOs(t *testing.T) {
 		assert.Equal(t, 2, count, "Should generate 2 NFOs (one per part)")
 
 		// Verify NFO files were created with part suffixes
-		nfoPath1 := filepath.Join(tmpDir, "ipx-123-pt1.nfo")
-		nfoPath2 := filepath.Join(tmpDir, "ipx-123-pt2.nfo")
+		nfoPath1 := filepath.Join(tmpDir, "IPX-123-pt1.nfo")
+		nfoPath2 := filepath.Join(tmpDir, "IPX-123-pt2.nfo")
 		assert.FileExists(t, nfoPath1, "Part 1 NFO should be created")
 		assert.FileExists(t, nfoPath2, "Part 2 NFO should be created")
 	})
@@ -243,7 +243,7 @@ func TestGenerateNFOs(t *testing.T) {
 		assert.Equal(t, 1, count, "Should generate 1 shared NFO")
 
 		// Verify only one NFO file was created (without part suffix)
-		nfoPath := filepath.Join(tmpDir, "ipx-123.nfo")
+		nfoPath := filepath.Join(tmpDir, "IPX-123.nfo")
 		assert.FileExists(t, nfoPath, "Shared NFO should be created")
 	})
 
@@ -284,7 +284,7 @@ func TestGenerateNFOs(t *testing.T) {
 		assert.Equal(t, 1, count, "Should return count even in dry run")
 
 		// Verify NO NFO file was actually created
-		nfoPath := filepath.Join(tmpDir, "ipx-123.nfo")
+		nfoPath := filepath.Join(tmpDir, "IPX-123.nfo")
 		assert.NoFileExists(t, nfoPath, "NFO should not be created in dry run mode")
 	})
 
@@ -332,7 +332,7 @@ func TestGenerateNFOs(t *testing.T) {
 		assert.Equal(t, 1, count, "Should generate NFO in organized folder")
 
 		// Verify NFO was created in the organized destination (not source)
-		nfoPath := filepath.Join(destPath, "IPX-123", "ipx-123.nfo")
+		nfoPath := filepath.Join(destPath, "IPX-123", "IPX-123.nfo")
 		assert.FileExists(t, nfoPath, "NFO should be in organized folder")
 	})
 
@@ -368,7 +368,7 @@ func TestGenerateNFOs(t *testing.T) {
 		assert.Equal(t, 1, count, "Should generate NFO for movie with matches, skip others")
 
 		// Verify only IPX-456 NFO was created
-		nfoPath456 := filepath.Join(tmpDir, "ipx-456.nfo")
+		nfoPath456 := filepath.Join(tmpDir, "IPX-456.nfo")
 		assert.FileExists(t, nfoPath456, "IPX-456 NFO should be created")
 	})
 }
