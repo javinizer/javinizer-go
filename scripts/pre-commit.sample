@@ -50,7 +50,7 @@ echo ""
 
 # Check 4: Build verification
 echo -e "${BLUE}[4/4] Verifying build...${NC}"
-if ! go build -o /tmp/javinizer-test ./cmd/cli 2>&1; then
+if ! go build -o /tmp/javinizer-test ./cmd/javinizer 2>&1; then
     echo -e "${RED}✗ Build failed${NC}"
     exit 1
 fi

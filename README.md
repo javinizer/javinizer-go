@@ -7,6 +7,13 @@ A modern, high-performance Go implementation of Javinizer - a metadata scraper a
 [![Test & Coverage](https://github.com/javinizer/javinizer-go/actions/workflows/test.yml/badge.svg)](https://github.com/javinizer/javinizer-go/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/javinizer/javinizer-go/branch/master/graph/badge.svg)](https://codecov.io/gh/javinizer/javinizer-go)
 
+## Current Status
+
+- **Tracked version:** `v0.1.0-alpha`
+- **Release flow:** push a semver tag (`vX.Y.Z` or prerelease like `vX.Y.Z-alpha`) to build binaries, Docker images, checksums, and a GitHub release.
+- **Docker image:** built as multi-arch (`linux/amd64`, `linux/arm64`) and includes frontend assets.
+- **Quality gates:** CI runs tests, coverage threshold (`75%`), race tests, linting, and Docker build verification.
+
 ## Features
 
 ✅ **Multi-Source Scraping**
@@ -48,6 +55,11 @@ A modern, high-performance Go implementation of Javinizer - a metadata scraper a
 - Real-time progress tracking
 - Concurrent processing with worker pool
 - Live operation logs and statistics
+
+✅ **API + Web Frontend**
+- API server via `javinizer api`
+- Frontend bundled in Docker/release builds
+- Browser-based review/history/settings workflows
 
 ## Quick Start
 
@@ -110,6 +122,48 @@ javinizer api
 # Custom host/port
 javinizer api --host 0.0.0.0 --port 9000
 ```
+
+## Execute Locally (Simple)
+
+```bash
+# 1) Install deps
+make deps
+
+# 2) Build binary
+make build
+
+# 3) Initialize config/data
+./bin/javinizer init
+
+# 4) Run API + web UI (http://localhost:8080)
+./bin/javinizer api
+```
+
+For local metadata processing in terminal:
+```bash
+./bin/javinizer sort /path/to/media --dry-run
+./bin/javinizer sort /path/to/media
+```
+
+## Deploy (Simple)
+
+### Docker Runtime
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v $(pwd)/javinizer-data:/javinizer \
+  -v /path/to/media:/media \
+  ghcr.io/javinizer/javinizer-go:v0.1.0-alpha
+```
+
+Then open `http://localhost:8080`.
+
+### Release Deployment
+
+1. Update `internal/version/version.txt`.
+2. Push a tag like `v0.1.0-alpha` (or stable `v0.1.0`).
+3. GitHub Actions `CLI Binary Release` publishes binaries + Docker image + release assets.
 
 ## Documentation
 

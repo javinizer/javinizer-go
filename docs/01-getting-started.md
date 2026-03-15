@@ -61,7 +61,7 @@ Javinizer Go is a modern, high-performance metadata scraper and file organizer f
 
 2. Build the binary:
    ```bash
-   go build -o bin/javinizer ./cmd/cli
+   go build -o bin/javinizer ./cmd/javinizer
    ```
 
 3. Run the binary:

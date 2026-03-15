@@ -93,34 +93,34 @@ go tool cover -html=coverage.out
 | **Critical packages** | 85%+ | Core business logic, data integrity |
 | - `internal/worker` | 85% | Concurrent task execution, critical for reliability |
 | - `internal/aggregator` | 85% | Metadata merging logic |
-| - `internal/matcher` | 90% | JAV ID extraction (currently 94.6%) |
+| - `internal/matcher` | 90% | JAV ID extraction |
 | - `internal/organizer` | 85% | File organization, data safety |
 | - `internal/scanner` | 85% | File discovery |
 | **Important packages** | 70%+ | User-facing features |
-| - `internal/scraper/*` | 70% | External data fetching (currently 0% - needs work) |
-| - `internal/nfo` | 75% | NFO generation (currently 77.6%) |
-| - `internal/downloader` | 75% | Asset downloads (currently 74.2%) |
+| - `internal/scraper/*` | 70% | External data fetching |
+| - `internal/nfo` | 75% | NFO generation |
+| - `internal/downloader` | 75% | Asset downloads |
 | **Supporting packages** | 50%+ | Configuration, models, utilities |
 | - `internal/config` | 50% | Simple struct initialization |
 | - `internal/models` | 50% | Data structures |
-| - `internal/template` | 60% | Template rendering (currently 66%) |
+| - `internal/template` | 60% | Template rendering |
 | **Minimal coverage acceptable** | 30%+ | UI, CLI, manual testing preferred |
 | - `internal/tui` | 30% | Bubble Tea UI (complex to test) |
-| - `cmd/cli` | 40% | CLI commands (integration tests preferred) |
-| - `internal/api` | 60% | API handlers (currently 0% - needs work) |
+| - `cmd/javinizer/commands/*` | 40% | CLI command handlers (integration tests preferred) |
+| - `internal/api` | 60% | API handlers |
 
 ### Coverage Gaps to Address
 
-**High Priority** (0% coverage, critical functionality):
-1. `internal/scraper/dmm` - DMM scraper implementation
-2. `internal/scraper/r18dev` - R18.dev scraper implementation
-3. `internal/api` - API handlers (security concern)
-4. `cmd/cli` - CLI commands
+**High Priority** (critical paths to strengthen):
+1. `internal/worker` - batch execution and error classification branches
+2. `internal/api` - request validation and edge-case responses
+3. `cmd/javinizer/commands/*` - command argument/flag behavior
+4. `internal/scraper/*` - network failure and parser fallback paths
 
-**Medium Priority** (low coverage):
-5. `internal/config` (23.1%) - Configuration loading
-6. `internal/database` (23.5%) - Database operations
-7. `internal/mediainfo` (22.9%) - Media information parsing
+**Medium Priority**:
+5. `internal/database` - persistence and migration edge cases
+6. `internal/mediainfo` - malformed input handling
+7. `internal/translation` - provider fallback/error branches
 
 ## Test Types
 
@@ -517,7 +517,7 @@ func runScrape(cmd *cobra.Command, args []string, configFile string) error {
 **Testing Strategy:**
 - **Export Run()**: Tests business logic (cache, scraping, aggregation) WITHOUT console output
 - **Keep private runScrape()**: Console output remains untestable (I/O operations)
-- **Result**: 5.4% coverage on Run() (limited by architectural constraint), 60% on runScrape(), 24.2% overall package coverage
+- **Result**: improved command-package testability by isolating business logic from console output formatting.
 
 **Example Test:**
 
@@ -1215,7 +1215,7 @@ func TestTUI_TaskSubmissionFlow_Integration(t *testing.T) {
 **Total:** 76 tests achieving 100% coverage on testable TUI code
 
 **Why TUI is Excluded from Overall Coverage:**
-TUI package excluded via `make coverage --ignore tui` because:
+TUI package is excluded by default in the `make coverage` target because:
 1. Visual rendering (view.go, styles.go) cannot be unit tested
 2. Bubble Tea framework integration requires manual QA
 3. Testable business logic measured separately (achieved 100%)
@@ -1256,12 +1256,12 @@ func TestSomething(t *testing.T) {
 
 ### GitHub Actions Workflow
 
-The project uses `.github/workflows/test.yml` with 4 parallel jobs:
+The project uses `.github/workflows/test.yml` with 5 parallel jobs:
 
 1. **Unit Tests & Coverage**
    - Runs all tests
    - Generates coverage report
-   - Enforces 60% minimum coverage
+   - Enforces 75% minimum coverage
    - Uploads to Codecov
 
 2. **Race Detector Tests**
@@ -1277,11 +1277,15 @@ The project uses `.github/workflows/test.yml` with 4 parallel jobs:
    - Builds CLI binary
    - Verifies executable creation
 
+5. **Docker Build Verification**
+   - Builds Docker image
+   - Verifies embedded version metadata
+
 ### CI Failure Scenarios
 
 | Failure | Cause | Fix |
 |---------|-------|-----|
-| Coverage check failed | Coverage below 60% | Add tests or justify lower coverage |
+| Coverage check failed | Coverage below 75% | Add tests or justify lower coverage |
 | Race detector failure | Data race detected | Fix concurrent access, add mutexes |
 | Linting failure | Code quality issues | Run `make lint` and fix issues |
 | Formatting failure | Code not formatted | Run `make fmt` |
@@ -1339,9 +1343,6 @@ ls -la coverage.out
 
 # Regenerate coverage
 make coverage
-
-# If go-acc is missing, install it
-go install github.com/ory/go-acc@latest
 ```
 
 ### Race Detector Failures
@@ -1373,13 +1374,10 @@ go test -short ./...
 
 ```bash
 # Ensure you're using same coverage threshold
-./scripts/check_coverage.sh 60 coverage.out
+./scripts/check_coverage.sh 75 coverage.out
 
-# Check if go-acc is installed
-command -v go-acc
-
-# Regenerate with go-acc
-go-acc -covermode=count -coverprofile=coverage.out ./...
+# Regenerate coverage with the project target
+make coverage
 ```
 
 ### Pre-commit Hook Not Running
@@ -1421,7 +1419,7 @@ cat .git/hooks/pre-commit
 When adding new features:
 
 1. Write tests covering the new functionality
-2. Ensure `make coverage-check` passes (60%+ coverage)
+2. Ensure `make coverage-check` passes (75%+ coverage)
 3. Run `make test-race` if your code involves concurrency
 4. Run `make ci` to verify all CI checks pass locally
 5. Include test coverage information in your PR description

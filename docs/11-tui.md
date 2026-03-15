@@ -17,10 +17,10 @@ The Javinizer TUI (Terminal User Interface) provides an interactive way to brows
 
 ```bash
 # Build from source
-go build -o javinizer ./cmd/cli
+go build -o javinizer ./cmd/javinizer
 
 # Or install directly
-go install github.com/javinizer/javinizer-go/cmd/cli@latest
+go install github.com/javinizer/javinizer-go/cmd/javinizer@latest
 ```
 
 ## Usage

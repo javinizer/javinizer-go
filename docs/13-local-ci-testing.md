@@ -212,7 +212,7 @@ The pre-commit hook automatically runs:
 gofmt -l .           # Formatting check
 go vet ./...         # Static analysis
 go test -short ./... # Fast tests
-go build ./cmd/cli   # Build verification
+go build ./cmd/javinizer   # Build verification
 ```
 
 To bypass (use sparingly):

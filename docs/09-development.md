@@ -7,33 +7,43 @@ Guide for contributing to and developing Javinizer Go.
 ```
 javinizer-go/
 ├── cmd/
-│   ├── api/              # API server (planned)
-│   └── cli/              # CLI application
+│   └── javinizer/        # CLI + API entrypoint
 ├── internal/
 │   ├── aggregator/       # Metadata aggregation
+│   ├── api/              # API handlers
 │   ├── config/           # Configuration management
 │   ├── database/         # Database layer (GORM)
 │   ├── downloader/       # Media downloads
+│   ├── history/          # History tracking
+│   ├── httpclient/       # HTTP client + FlareSolverr support
+│   ├── image/            # Image processing
+│   ├── imageutil/        # Image utilities
+│   ├── logging/          # Logging
 │   ├── matcher/          # File/ID matching
+│   ├── mediainfo/        # MediaInfo extraction
 │   ├── models/           # Data models
 │   ├── nfo/              # NFO generation
 │   ├── organizer/        # File organization
 │   ├── scanner/          # File scanning
 │   ├── scraper/          # Scrapers
-│   │   ├── dmm/          # DMM/Fanza
-│   │   └── r18dev/       # R18.dev
-│   └── template/         # Template engine
+│   ├── template/         # Template engine
+│   ├── translation/      # Translation service
+│   ├── tui/              # Terminal UI
+│   ├── version/          # Version metadata
+│   ├── websocket/        # Websocket hub
+│   └── worker/           # Concurrent workers
+├── web/                  # Frontend source
 ├── configs/              # Default configuration
 ├── data/                 # Runtime data
 ├── docs/                 # Documentation
-└── tests/                # Integration tests
+└── scripts/              # Dev/CI helper scripts
 ```
 
 ## Development Setup
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.25+
 - Git
 - SQLite3 (for DB inspection)
 
@@ -48,7 +58,7 @@ cd javinizer-go
 go mod download
 
 # Build
-go build -o bin/javinizer ./cmd/cli
+go build -o bin/javinizer ./cmd/javinizer
 
 # Run
 ./bin/javinizer --help
@@ -120,7 +130,7 @@ func (s *Scraper) GetURL(id string) string {
 ### 2. Register Scraper
 
 ```go
-// cmd/cli/main.go
+// cmd/javinizer/root.go
 import "github.com/javinizer/javinizer-go/internal/scraper/newscraper"
 
 registry := models.NewScraperRegistry()
@@ -134,20 +144,20 @@ registry.Register(newscraper.New(cfg))  // Add here
 ### Build for Current Platform
 
 ```bash
-go build -o bin/javinizer ./cmd/cli
+go build -o bin/javinizer ./cmd/javinizer
 ```
 
 ### Cross-Compile
 
 ```bash
 # Linux
-GOOS=linux GOARCH=amd64 go build -o bin/javinizer-linux-amd64 ./cmd/cli
+GOOS=linux GOARCH=amd64 go build -o bin/javinizer-linux-amd64 ./cmd/javinizer
 
 # macOS
-GOOS=darwin GOARCH=amd64 go build -o bin/javinizer-darwin-amd64 ./cmd/cli
+GOOS=darwin GOARCH=amd64 go build -o bin/javinizer-darwin-amd64 ./cmd/javinizer
 
 # Windows
-GOOS=windows GOARCH=amd64 go build -o bin/javinizer-windows-amd64.exe ./cmd/cli
+GOOS=windows GOARCH=amd64 go build -o bin/javinizer-windows-amd64.exe ./cmd/javinizer
 ```
 
 ## Contributing
