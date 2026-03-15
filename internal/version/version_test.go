@@ -275,3 +275,34 @@ func TestGoVersion(t *testing.T) {
 		t.Errorf("GoVersion should start with 'go', got %q", GoVersion)
 	}
 }
+
+func TestApplyTrackedVersion(t *testing.T) {
+	origVersion := Version
+	origTracked := trackedVersion
+	defer func() {
+		Version = origVersion
+		trackedVersion = origTracked
+	}()
+
+	t.Run("uses tracked version when build version is default", func(t *testing.T) {
+		Version = "dev"
+		trackedVersion = "v2.3.4-dev\n"
+
+		applyTrackedVersion()
+
+		if Version != "v2.3.4-dev" {
+			t.Fatalf("Version = %q, want %q", Version, "v2.3.4-dev")
+		}
+	})
+
+	t.Run("keeps explicit build version", func(t *testing.T) {
+		Version = "v9.9.9"
+		trackedVersion = "v2.3.4-dev"
+
+		applyTrackedVersion()
+
+		if Version != "v9.9.9" {
+			t.Fatalf("Version = %q, want %q", Version, "v9.9.9")
+		}
+	})
+}

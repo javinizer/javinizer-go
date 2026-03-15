@@ -36,7 +36,7 @@ permissions:
 
 env:
   BINARY_NAME: javinizer
-  GO_VERSION: '1.25.x'
+  GO_VERSION_FILE: go.mod
 
 jobs:
   prepare-release:
@@ -44,6 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
+      tracked_version: ${{ steps.meta.outputs.tracked_version }}
       tag_name: ${{ steps.meta.outputs.tag_name }}
       release_name: ${{ steps.meta.outputs.release_name }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
@@ -52,6 +53,9 @@ jobs:
       build_date: ${{ steps.meta.outputs.build_date }}
       commit: ${{ steps.meta.outputs.commit }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Resolve release metadata
         id: meta
         shell: bash
@@ -61,6 +65,12 @@ jobs:
           event_name="${GITHUB_EVENT_NAME}"
           build_date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           commit="${GITHUB_SHA}"
+          tracked_version="$(tr -d '[:space:]' < internal/version/version.txt)"
+
+          if [[ -z "${tracked_version}" ]]; then
+            echo "Tracked version file is empty" >&2
+            exit 1
+          fi
 
           if [[ "${event_name}" == "push" ]]; then
             version="${GITHUB_REF_NAME}"
@@ -119,12 +129,20 @@ jobs:
             exit 1
           fi
 
+          if [[ "${event_name}" == "push" || "${release_type:-snapshot}" != "snapshot" ]]; then
+            if [[ "${tracked_version}" != "${version}" ]]; then
+              echo "Tracked version (${tracked_version}) does not match requested release version (${version})" >&2
+              exit 1
+            fi
+          fi
+
           release_name="Javinizer ${version}"
           if [[ "${prerelease}" == "true" ]]; then
             release_name="${release_name} (Pre-release)"
           fi
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tracked_version=${tracked_version}" >> "$GITHUB_OUTPUT"
           echo "tag_name=${version}" >> "$GITHUB_OUTPUT"
           echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
           echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
@@ -168,7 +186,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: ${{ env.GO_VERSION_FILE }}
 
       - name: Install build dependencies
         if: runner.os == 'Linux' && matrix.build_deps != ''
@@ -214,7 +232,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: ${{ env.GO_VERSION_FILE }}
 
       - name: Build AMD64 and ARM64 binaries
         shell: bash
@@ -267,7 +285,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: ${{ env.GO_VERSION_FILE }}
 
       - name: Build binary
         shell: pwsh

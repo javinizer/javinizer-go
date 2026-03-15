@@ -23,10 +23,13 @@ make test
 # Run tests with coverage report (uses go-acc automatically via go run)
 make coverage
 
+# Run faster local coverage report (short mode)
+make coverage-fast
+
 # View coverage in browser
 make coverage-html
 
-# Check if coverage meets threshold (25%)
+# Check if coverage meets threshold (75%)
 make coverage-check
 ```
 
@@ -40,7 +43,7 @@ This project uses `go run` to execute development tools without requiring global
 - ✅ Consistent across all environments
 - ✅ Works in CI/CD automatically
 
-The `make coverage` command automatically runs `go run github.com/ory/go-acc@latest` which provides better coverage aggregation across multi-package projects compared to standard `go test`.
+The `make coverage` command runs strict coverage via `go-acc` (used by CI/release gates). For faster local iteration, use `make coverage-fast`.
 
 ### All Test Commands
 
@@ -51,10 +54,11 @@ The `make coverage` command automatically runs `go run github.com/ory/go-acc@lat
 | `make test-race` | Run race detector on concurrent packages | Before committing concurrent code changes |
 | `make test-verbose` | Run tests with verbose output and no caching | Debugging test failures |
 | `make bench` | Run benchmark tests | Performance testing |
-| `make coverage` | Generate coverage.out file | Get coverage data |
+| `make coverage` | Generate strict coverage.out file (go-acc) | CI/release-quality coverage |
+| `make coverage-fast` | Generate faster local coverage.out file | Daily local iteration |
 | `make coverage-html` | Open HTML coverage report in browser | Visual coverage analysis |
 | `make coverage-func` | Display function-by-function coverage breakdown | Identify specific gaps |
-| `make coverage-check` | Verify coverage meets 60% threshold | Pre-push validation |
+| `make coverage-check` | Verify coverage meets 75% threshold | Pre-push validation |
 | `make ci` | Run full CI suite (vet + lint + coverage + race) | Before opening PR |
 
 ### Running Specific Package Tests
@@ -78,8 +82,8 @@ go tool cover -html=coverage.out
 
 ### Overall Project Coverage
 
-- **Current Baseline:** 60% (enforced in CI)
-- **Short-term Goal:** 75%
+- **Current Baseline:** 75% (enforced in CI)
+- **Short-term Goal:** 80%
 - **Long-term Target:** 80%+
 
 ### Per-Package Coverage Expectations

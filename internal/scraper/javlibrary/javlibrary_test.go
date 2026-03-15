@@ -1,6 +1,7 @@
 package javlibrary_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -8,6 +9,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func requireJavLibraryIntegration(t *testing.T) {
+	t.Helper()
+
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	if os.Getenv("JAVINIZER_RUN_FLARESOLVERR_TESTS") != "1" {
+		t.Skip("set JAVINIZER_RUN_FLARESOLVERR_TESTS=1 to run JavLibrary integration tests")
+	}
+}
 
 func TestNewScraper(t *testing.T) {
 	tests := []struct {
@@ -235,9 +248,7 @@ func TestScraper_SearchDisabled(t *testing.T) {
 // Integration test that requires a running FlareSolverr instance
 // Run with: go test -v -timeout 120s ./internal/scraper/javlibrary/... -run TestIntegration_Search
 func TestIntegration_Search(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	requireJavLibraryIntegration(t)
 
 	cfg := config.JavLibraryConfig{
 		Enabled:         true,

@@ -68,9 +68,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ==============================================================================
 FROM alpine:3.21
 
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+
 LABEL maintainer="javinizer@example.com" \
       description="JAV metadata scraper and organizer" \
-      version="1.0.0"
+      org.opencontainers.image.title="Javinizer" \
+      org.opencontainers.image.description="JAV metadata scraper and organizer" \
+      org.opencontainers.image.source="https://github.com/javinizer/javinizer-go" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      version="${VERSION}"
 
 # Working directory is now /javinizer (app state location)
 WORKDIR /javinizer

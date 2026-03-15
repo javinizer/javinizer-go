@@ -25,7 +25,7 @@ FAILED_JOBS=()
 
 # Job 1: Unit Tests & Coverage
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Job 1/4: Unit Tests & Coverage${NC}"
+echo -e "${BLUE}Job 1/5: Unit Tests & Coverage${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -60,8 +60,8 @@ fi
 rm -f "$COVERAGE_LOG"
 echo ""
 
-echo -e "${YELLOW}→ Checking coverage threshold (25%)...${NC}"
-if ./scripts/check_coverage.sh 25 coverage.out; then
+echo -e "${YELLOW}→ Checking coverage threshold (75%)...${NC}"
+if ./scripts/check_coverage.sh 75 coverage.out; then
     echo ""
 else
     FAILED_JOBS+=("Unit Tests - Coverage Threshold")
@@ -70,7 +70,7 @@ echo ""
 
 # Job 2: Race Detector Tests
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Job 2/4: Race Detector Tests${NC}"
+echo -e "${BLUE}Job 2/5: Race Detector Tests${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -85,7 +85,7 @@ echo ""
 
 # Job 3: Linting & Code Quality
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Job 3/4: Linting & Code Quality${NC}"
+echo -e "${BLUE}Job 3/5: Linting & Code Quality${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -126,7 +126,7 @@ echo ""
 
 # Job 4: Build Verification
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Job 4/4: Build Verification${NC}"
+echo -e "${BLUE}Job 4/5: Build Verification${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -145,6 +145,48 @@ else
     FAILED_JOBS+=("Build")
 fi
 echo ""
+
+# Job 5: Docker Build Verification
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}Job 5/5: Docker Build Verification${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+if command -v docker >/dev/null 2>&1 && docker version >/dev/null 2>&1; then
+    DOCKER_LOG=$(mktemp)
+    BUILD_DATE="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    VERSION="$(./scripts/version.sh)"
+
+    echo -e "${YELLOW}→ Building Docker image...${NC}"
+    if docker build \
+        --build-arg VERSION="${VERSION}" \
+        --build-arg COMMIT="local" \
+        --build-arg BUILD_DATE="${BUILD_DATE}" \
+        -t javinizer:ci-local \
+        . > "${DOCKER_LOG}" 2>&1; then
+        echo -e "${GREEN}✓ Docker build passed${NC}"
+    else
+        echo -e "${RED}✗ Docker build failed${NC}"
+        tail -20 "${DOCKER_LOG}"
+        FAILED_JOBS+=("Docker Build")
+    fi
+    rm -f "${DOCKER_LOG}"
+    echo ""
+
+    if [ ${#FAILED_JOBS[@]} -eq 0 ]; then
+        echo -e "${YELLOW}→ Verifying Docker image version output...${NC}"
+        if docker run --rm --entrypoint /usr/local/bin/javinizer javinizer:ci-local version --short; then
+            echo -e "${GREEN}✓ Docker image version output verified${NC}"
+        else
+            echo -e "${RED}✗ Docker image version verification failed${NC}"
+            FAILED_JOBS+=("Docker Version Verification")
+        fi
+        echo ""
+    fi
+else
+    echo -e "${YELLOW}⚠ Docker unavailable (skipping Docker build verification)${NC}"
+    echo ""
+fi
 
 # Summary
 echo -e "${BOLD}========================================${NC}"

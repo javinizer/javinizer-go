@@ -1,6 +1,7 @@
 package httpclient_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -10,12 +11,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestFlareSolverr_RealConnection is an integration test that tests actual FlareSolverr connection
-// Run with: go test -v ./internal/httpclient/... -run TestFlareSolverr_RealConnection
-func TestFlareSolverr_RealConnection(t *testing.T) {
+func requireFlareSolverrIntegration(t *testing.T) {
+	t.Helper()
+
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+
+	if os.Getenv("JAVINIZER_RUN_FLARESOLVERR_TESTS") != "1" {
+		t.Skip("set JAVINIZER_RUN_FLARESOLVERR_TESTS=1 to run FlareSolverr integration tests")
+	}
+}
+
+// TestFlareSolverr_RealConnection is an integration test that tests actual FlareSolverr connection
+// Run with: go test -v ./internal/httpclient/... -run TestFlareSolverr_RealConnection
+func TestFlareSolverr_RealConnection(t *testing.T) {
+	requireFlareSolverrIntegration(t)
 
 	t.Log("Starting FlareSolverr integration test...")
 
@@ -106,9 +117,7 @@ func TestFlareSolverr_RealConnection(t *testing.T) {
 // TestFlareSolverr_JavLibraryConnection tests actual JavLibrary connection via FlareSolverr
 // Run with: go test -v ./internal/httpclient/... -run TestFlareSolverr_JavLibraryConnection
 func TestFlareSolverr_JavLibraryConnection(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
+	requireFlareSolverrIntegration(t)
 
 	t.Log("Starting JavLibrary FlareSolverr integration test...")
 

@@ -10,11 +10,12 @@ This guide explains how to run GitHub Actions CI checks locally before pushing c
 make simulate-ci
 ```
 
-This runs **all 4 GitHub Actions jobs** locally with colored output:
+This runs **all 5 GitHub Actions jobs** locally with colored output:
 - ✅ Unit Tests & Coverage
 - ✅ Race Detector Tests
 - ✅ Linting & Code Quality
 - ✅ Build Verification
+- ✅ Docker Build Verification
 
 **Example output:**
 ```
@@ -23,7 +24,7 @@ This runs **all 4 GitHub Actions jobs** locally with colored output:
 ========================================
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Job 1/4: Unit Tests & Coverage
+Job 1/5: Unit Tests & Coverage
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 → Running unit tests...
@@ -32,12 +33,12 @@ Job 1/4: Unit Tests & Coverage
 → Generating coverage report...
 ✓ Coverage report generated
 
-→ Checking coverage threshold (25%)...
+→ Checking coverage threshold (75%)...
 ✓ Coverage check PASSED
-  27.6% >= 25%
+  78.4% >= 75%
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Job 2/4: Race Detector Tests
+Job 2/5: Race Detector Tests
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 → Running race detector on concurrent packages...
@@ -68,12 +69,13 @@ make simulate-ci
 **What it checks:**
 - Dependencies download
 - Unit tests pass
-- Coverage generation and threshold (25%)
+- Coverage generation and threshold (75%)
 - Race detector on concurrent packages
 - go vet static analysis
 - golangci-lint (if installed)
 - Code formatting (gofmt)
 - Build success and binary creation
+- Docker image build and version metadata
 
 **When to use:**
 - Before pushing to GitHub
@@ -126,6 +128,7 @@ make lint
 
 # Coverage
 make coverage
+make coverage-fast      # Faster local coverage iteration
 make coverage-html      # View in browser
 make coverage-check     # Check threshold
 ```
@@ -279,7 +282,7 @@ go test -timeout=10m ./...
 
 ### Coverage Check Failing
 
-If coverage is below 25%, you have options:
+If coverage is below 75%, you have options:
 ```bash
 # View coverage to see what needs tests
 make coverage-html

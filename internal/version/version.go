@@ -1,6 +1,7 @@
 package version
 
 import (
+	_ "embed"
 	"fmt"
 	"runtime"
 	"runtime/debug"
@@ -22,10 +23,14 @@ var (
 	GoVersion = runtime.Version()
 )
 
+//go:embed version.txt
+var trackedVersion string
+
 func init() {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		applyBuildInfo(info)
 	}
+	applyTrackedVersion()
 }
 
 // applyBuildInfo populates version metadata from Go build info when ldflags
@@ -57,6 +62,16 @@ func applyBuildInfo(info *debug.BuildInfo) {
 		Commit != "unknown" &&
 		!strings.HasSuffix(Commit, "-dirty") {
 		Commit += "-dirty"
+	}
+}
+
+func applyTrackedVersion() {
+	if Version != "" && Version != "dev" {
+		return
+	}
+
+	if tracked := strings.TrimSpace(trackedVersion); tracked != "" {
+		Version = tracked
 	}
 }
 

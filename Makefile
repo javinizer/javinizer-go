@@ -1,5 +1,5 @@
 .PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean
-.PHONY: coverage coverage-html coverage-check coverage-func ci simulate-ci
+.PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci simulate-ci
 .PHONY: fmt lint vet swagger docs mocks
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
@@ -28,7 +28,8 @@ help:
 	@echo "  make bench              - Run benchmarks"
 	@echo ""
 	@echo "Coverage:"
-	@echo "  make coverage           - Generate coverage report (coverage.out)"
+	@echo "  make coverage           - Generate strict coverage report for CI/release (coverage.out)"
+	@echo "  make coverage-fast      - Generate faster local coverage report (coverage.out)"
 	@echo "  make coverage-html      - Open coverage report in browser"
 	@echo "  make coverage-func      - Display function-by-function coverage"
 	@echo "  make coverage-check     - Enforce 75%% minimum coverage threshold"
@@ -73,9 +74,10 @@ help:
 	@echo ""
 
 # Version information (can be overridden)
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION_FILE := internal/version/version.txt
+VERSION ?= $(shell ./scripts/version.sh)
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_DATE := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+BUILD_DATE := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 # Build flags
 LDFLAGS := -ldflags "\
@@ -136,13 +138,20 @@ test-verbose:
 bench:
 	go test -bench=. -benchmem ./...
 
-# Generate coverage report using go-acc (more reliable for multi-package projects)
+# Generate strict coverage report using go-acc (used by CI/release)
 # Uses go run to execute go-acc from project dependencies (no global install needed)
 # Version is pinned to match go.mod for reproducible builds
-# Uses -count=1 to disable test caching and ensure fresh coverage data
 # Excludes: mocks (generated), tui (interactive UI), docs (generated API docs), testutil (test helpers)
 coverage:
+	@rm -f coverage.out
 	@go run github.com/ory/go-acc@v0.2.8 --covermode count --ignore mocks,tui,docs,testutil -o coverage.out ./... -- -count=1
+
+# Generate faster local coverage report (package-level, short mode)
+# This is optimized for iteration speed and is not used for CI threshold enforcement.
+coverage-fast:
+	@rm -f coverage.out
+	@pkgs=$$(go list ./... | grep -Ev '/(mocks|tui|docs|testutil)(/|$$)'); \
+	go test -short -covermode=count -coverprofile=coverage.out -count=1 $$pkgs
 
 # Open coverage report in browser
 coverage-html: coverage
@@ -283,7 +292,7 @@ act-lint:
 
 act-docker:
 	@echo "Running Docker build workflow locally..."
-	@act -W .github/workflows/docker-test.yml
+	@act -W .github/workflows/test.yml -j docker-build
 
 act-cli-release:
 	@echo "Testing CLI release workflow locally..."
@@ -376,10 +385,10 @@ docker-stop:
 docker-logs:
 	docker logs -f $(DOCKER_CONTAINER_NAME)
 
-# Run tests inside Docker container
-docker-test:
-	@echo "Running tests in Docker container..."
-	docker run --rm $(DOCKER_FULL_IMAGE) go test -v ./...
+# Validate Docker image metadata and startup
+docker-test: docker-build
+	@echo "Validating Docker image version output..."
+	docker run --rm --entrypoint /usr/local/bin/javinizer $(DOCKER_FULL_IMAGE) version --short
 
 # Clean Docker images and containers
 docker-clean:
@@ -440,7 +449,7 @@ docker-help:
 	@echo "  make docker-run                - Run container (detached, port 8080)"
 	@echo "  make docker-stop               - Stop and remove container"
 	@echo "  make docker-logs               - View container logs"
-	@echo "  make docker-test               - Run tests in container"
+	@echo "  make docker-test               - Validate Docker image version metadata"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make docker-clean              - Remove images and containers"

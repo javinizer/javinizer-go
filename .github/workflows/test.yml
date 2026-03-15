@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ master, main, develop ]
 
+env:
+  GO_VERSION_FILE: go.mod
+
 jobs:
   # Job 1: Fast unit tests and coverage
   test:
@@ -19,7 +22,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.22.x'  # Use stable release version
+        go-version-file: ${{ env.GO_VERSION_FILE }}
         cache: true
 
     - name: Detect act environment
@@ -82,7 +85,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.22.x'  # Use stable release version
+        go-version-file: ${{ env.GO_VERSION_FILE }}
         cache: true
 
     - name: Download dependencies
@@ -103,7 +106,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.22.x'  # Use stable release version
+        go-version-file: ${{ env.GO_VERSION_FILE }}
         cache: true
 
     - name: Run go vet
@@ -135,7 +138,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.22.x'  # Use stable release version
+        go-version-file: ${{ env.GO_VERSION_FILE }}
         cache: true
 
     - name: Download dependencies
@@ -152,3 +155,51 @@ jobs:
         fi
         chmod +x bin/javinizer
         ./bin/javinizer --version || echo "Version check completed"
+
+  docker-build:
+    name: Docker Build Verification
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Resolve tracked version
+      id: version
+      run: |
+        version="$(tr -d '[:space:]' < internal/version/version.txt)"
+        if [ -z "$version" ]; then
+          echo "Tracked version file is empty"
+          exit 1
+        fi
+        echo "value=$version" >> "$GITHUB_OUTPUT"
+
+    - name: Resolve build date
+      id: build_date
+      run: echo "value=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: linux/amd64
+        load: true
+        push: false
+        tags: javinizer:test
+        build-args: |
+          VERSION=${{ steps.version.outputs.value }}
+          COMMIT=${{ github.sha }}
+          BUILD_DATE=${{ steps.build_date.outputs.value }}
+
+    - name: Verify Docker metadata and version output
+      run: |
+        docker run --rm --entrypoint /usr/local/bin/javinizer javinizer:test version --short
+        image_version="$(docker inspect javinizer:test --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')"
+        if [ "$image_version" != "${{ steps.version.outputs.value }}" ]; then
+          echo "Docker image label version mismatch: $image_version"
+          exit 1
+        fi

@@ -237,6 +237,7 @@ javinizer sort ~/Videos
 
 Javinizer supports stable releases, prereleases, and snapshot/manual releases via GitHub Actions.
 
+- Update `internal/version/version.txt` before cutting a stable or prerelease tag. Release CI validates that the tracked version matches the tag being published.
 - **Stable release**: push tag like `v1.2.3`
 - **Pre-release**: push tag like `v1.2.3-rc.1` (or `-alpha`, `-beta`)
 - **Manual snapshot**: run `CLI Binary Release` workflow via `workflow_dispatch`
@@ -318,6 +319,9 @@ make test
 # Run tests with coverage report
 make coverage
 
+# Run faster local coverage report (short mode)
+make coverage-fast
+
 # View coverage in browser
 make coverage-html
 
@@ -339,7 +343,7 @@ make ci
 
 ### Development Tools
 
-The project uses `go run` to execute development tools (like `go-acc` for coverage) without requiring global installation. All tool dependencies are tracked in `tools.go` and `go.mod`, ensuring consistent versions across all environments and CI/CD.
+The project uses `go run` to execute development tools (like `go-acc` for strict coverage) without requiring global installation. All tool dependencies are tracked in `tools.go` and `go.mod`, ensuring consistent versions across all environments and CI/CD.
 
 **Setup:**
 ```bash
@@ -347,7 +351,8 @@ The project uses `go run` to execute development tools (like `go-acc` for covera
 make deps
 
 # That's it! Tools work automatically via go run
-make coverage  # Uses go-acc via go run
+make coverage       # Strict CI/release coverage (go-acc)
+make coverage-fast  # Faster local coverage iteration
 ```
 
 ### Pre-commit Hooks
