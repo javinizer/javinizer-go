@@ -40,20 +40,20 @@ func captureOutput(t *testing.T, fn func()) (string, string) {
 
 	go func() {
 		var buf bytes.Buffer
-		io.Copy(&buf, rOut)
+		_, _ = io.Copy(&buf, rOut)
 		outC <- buf.String()
 	}()
 
 	go func() {
 		var buf bytes.Buffer
-		io.Copy(&buf, rErr)
+		_, _ = io.Copy(&buf, rErr)
 		errC <- buf.String()
 	}()
 
 	fn()
 
-	wOut.Close()
-	wErr.Close()
+	require.NoError(t, wOut.Close())
+	require.NoError(t, wErr.Close())
 
 	return <-outC, <-errC
 }
@@ -79,7 +79,7 @@ func setupHistoryTestDB(t *testing.T) (configPath string, dbPath string) {
 	require.NoError(t, err)
 	err = db.AutoMigrate()
 	require.NoError(t, err)
-	db.Close()
+	_ = db.Close()
 
 	return configPath, dbPath
 }
@@ -114,7 +114,9 @@ func TestRunHistoryList_MultipleOperations(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
@@ -151,7 +153,9 @@ func TestRunHistoryList_WithLimit(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	for i := 1; i <= 5; i++ {
@@ -183,7 +187,9 @@ func TestRunHistoryList_FilterByOperation(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
@@ -217,11 +223,13 @@ func TestRunHistoryList_FilterByStatus(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
-	logger.LogScrape("IPX-001", "http://example.com", nil, nil)
-	logger.LogScrape("IPX-002", "http://example.com", nil, fmt.Errorf("scrape failed"))
+	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
+	require.NoError(t, logger.LogScrape("IPX-002", "http://example.com", nil, fmt.Errorf("scrape failed")))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -248,10 +256,12 @@ func TestRunHistoryList_DryRunFlag(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
-	logger.LogOrganize("IPX-001", "/src", "/dest", true, nil)
+	require.NoError(t, logger.LogOrganize("IPX-001", "/src", "/dest", true, nil))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -300,15 +310,17 @@ func TestRunHistoryStats_MultipleOperations(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
-	logger.LogScrape("IPX-001", "http://example.com", nil, nil)
-	logger.LogScrape("IPX-002", "http://example.com", nil, nil)
-	logger.LogScrape("IPX-003", "http://example.com", nil, fmt.Errorf("failed"))
-	logger.LogOrganize("IPX-001", "/src", "/dest", false, nil)
-	logger.LogDownload("IPX-001", "http://example.com/cover.jpg", "/path", "cover", nil)
-	logger.LogNFO("IPX-001", "/path", nil)
+	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
+	require.NoError(t, logger.LogScrape("IPX-002", "http://example.com", nil, nil))
+	require.NoError(t, logger.LogScrape("IPX-003", "http://example.com", nil, fmt.Errorf("failed")))
+	require.NoError(t, logger.LogOrganize("IPX-001", "/src", "/dest", false, nil))
+	require.NoError(t, logger.LogDownload("IPX-001", "http://example.com/cover.jpg", "/path", "cover", nil))
+	require.NoError(t, logger.LogNFO("IPX-001", "/path", nil))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -340,14 +352,16 @@ func TestRunHistoryStats_Percentages(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	for i := 0; i < 8; i++ {
-		logger.LogScrape(fmt.Sprintf("IPX-%03d", i), "http://example.com", nil, nil)
+		_ = logger.LogScrape(fmt.Sprintf("IPX-%03d", i), "http://example.com", nil, nil)
 	}
 	for i := 0; i < 2; i++ {
-		logger.LogScrape(fmt.Sprintf("IPX-%03d", i+10), "http://example.com", nil, fmt.Errorf("failed"))
+		_ = logger.LogScrape(fmt.Sprintf("IPX-%03d", i+10), "http://example.com", nil, fmt.Errorf("failed"))
 	}
 
 	rootCmd := &cobra.Command{Use: "root"}
@@ -375,7 +389,9 @@ func TestRunHistoryMovie_Success(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
@@ -412,7 +428,9 @@ func TestRunHistoryMovie_NotFound(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
@@ -441,7 +459,9 @@ func TestRunHistoryMovie_WithPaths(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	require.NoError(t, logger.LogOrganize("IPX-001", "/source/file.mp4", "/destination/file.mp4", false, nil))
@@ -471,10 +491,12 @@ func TestRunHistoryMovie_WithError(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
-	logger.LogScrape("IPX-001", "http://example.com", nil, fmt.Errorf("network timeout"))
+	_ = logger.LogScrape("IPX-001", "http://example.com", nil, fmt.Errorf("network timeout"))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -520,7 +542,9 @@ func TestRunHistoryClean_WithRecords(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
@@ -548,7 +572,9 @@ func TestRunHistoryClean_CustomDays(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
@@ -577,7 +603,9 @@ func TestRunHistoryMovie_AllFields(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	err = logger.LogOrganize("IPX-123", "/old/path/file.mp4", "/new/path/file.mp4", true, nil)
@@ -611,7 +639,9 @@ func TestRunHistoryMovie_FailedStatus(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	testError := fmt.Errorf("Test error")
@@ -643,7 +673,9 @@ func TestRunHistoryMovie_RevertedStatus(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	err = logger.LogRevert("IPX-123", "/old/path", "/reverted/from", nil)
@@ -674,7 +706,9 @@ func TestRunHistoryMovie_EmptyMetadata(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 	err = logger.LogOrganize("IPX-123", "/old", "/new", false, nil)
@@ -723,7 +757,9 @@ func TestRunHistoryStats_MultipleOperationTypes(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 
@@ -781,7 +817,9 @@ func TestRunHistoryStats_TimeRanges(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	logger := historyinternal.NewLogger(db)
 
@@ -790,7 +828,7 @@ func TestRunHistoryStats_TimeRanges(t *testing.T) {
 	err = logger.LogScrape("OLD-123", "http://test.com", nil, nil)
 	require.NoError(t, err)
 
-	db.DB.Exec("UPDATE histories SET created_at = ? WHERE movie_id = ?", now.Add(-48*time.Hour), "OLD-123")
+	db.Exec("UPDATE histories SET created_at = ? WHERE movie_id = ?", now.Add(-48*time.Hour), "OLD-123")
 
 	err = logger.LogOrganize("NEW-456", "/old", "/new", false, nil)
 	require.NoError(t, err)

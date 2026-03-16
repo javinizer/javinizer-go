@@ -21,7 +21,7 @@ func TestLoadGoldenFile_Success(t *testing.T) {
 	goldenPath := filepath.Join(testdataDir, "test_success.golden")
 	err = os.WriteFile(goldenPath, goldenContent, 0644)
 	require.NoError(t, err)
-	defer os.Remove(goldenPath)
+	defer func() { _ = os.Remove(goldenPath) }()
 
 	// Test loading
 	content := LoadGoldenFile(t, "test_success.golden")
@@ -38,7 +38,7 @@ func TestLoadGoldenFile_EmptyFile(t *testing.T) {
 	goldenPath := filepath.Join(testdataDir, "test_empty.golden")
 	err = os.WriteFile(goldenPath, []byte{}, 0644)
 	require.NoError(t, err)
-	defer os.Remove(goldenPath)
+	defer func() { _ = os.Remove(goldenPath) }()
 
 	content := LoadGoldenFile(t, "test_empty.golden")
 	assert.Empty(t, content)
@@ -54,7 +54,7 @@ func TestLoadGoldenFile_UnicodeContent(t *testing.T) {
 	goldenPath := filepath.Join(testdataDir, "test_unicode.golden")
 	err = os.WriteFile(goldenPath, unicodeContent, 0644)
 	require.NoError(t, err)
-	defer os.Remove(goldenPath)
+	defer func() { _ = os.Remove(goldenPath) }()
 
 	content := LoadGoldenFile(t, "test_unicode.golden")
 	assert.Equal(t, unicodeContent, content)
@@ -71,7 +71,7 @@ func TestLoadGoldenFile_LargeFile(t *testing.T) {
 	goldenPath := filepath.Join(testdataDir, "test_large.golden")
 	err = os.WriteFile(goldenPath, largeContent, 0644)
 	require.NoError(t, err)
-	defer os.Remove(goldenPath)
+	defer func() { _ = os.Remove(goldenPath) }()
 
 	content := LoadGoldenFile(t, "test_large.golden")
 	assert.Equal(t, largeContent, content)
@@ -88,7 +88,7 @@ func TestCompareGoldenFile_Match(t *testing.T) {
 	goldenPath := filepath.Join(testdataDir, "test_match.golden")
 	err = os.WriteFile(goldenPath, goldenContent, 0644)
 	require.NoError(t, err)
-	defer os.Remove(goldenPath)
+	defer func() { _ = os.Remove(goldenPath) }()
 
 	// Should not fail with matching content
 	CompareGoldenFile(t, "test_match.golden", goldenContent)
@@ -103,7 +103,7 @@ func TestCompareGoldenFile_EmptyMatch(t *testing.T) {
 	goldenPath := filepath.Join(testdataDir, "test_empty_match.golden")
 	err = os.WriteFile(goldenPath, []byte{}, 0644)
 	require.NoError(t, err)
-	defer os.Remove(goldenPath)
+	defer func() { _ = os.Remove(goldenPath) }()
 
 	CompareGoldenFile(t, "test_empty_match.golden", []byte{})
 }
@@ -113,12 +113,12 @@ func TestUpdateGoldenFile_CreateNew(t *testing.T) {
 	// Cleanup any existing testdata directory first
 	testdataDir := "testdata"
 	goldenPath := filepath.Join(testdataDir, "test_new.golden")
-	os.Remove(goldenPath) // Remove if exists from previous test
+	_ = os.Remove(goldenPath) // Remove if exists from previous test
 
 	content := []byte("new golden file content")
 	err := UpdateGoldenFile("test_new.golden", content)
 	require.NoError(t, err)
-	defer os.Remove(goldenPath)
+	defer func() { _ = os.Remove(goldenPath) }()
 
 	// Verify file was created
 	assert.FileExists(t, goldenPath)
@@ -140,7 +140,7 @@ func TestUpdateGoldenFile_OverwriteExisting(t *testing.T) {
 	goldenPath := filepath.Join(testdataDir, "test_overwrite.golden")
 	err = os.WriteFile(goldenPath, initialContent, 0644)
 	require.NoError(t, err)
-	defer os.Remove(goldenPath)
+	defer func() { _ = os.Remove(goldenPath) }()
 
 	// Overwrite with new content
 	newContent := []byte("overwritten content")
@@ -163,7 +163,7 @@ func TestUpdateGoldenFile_CreateDirectory(t *testing.T) {
 	content := []byte("test content")
 	err := UpdateGoldenFile("test_mkdir.golden", content)
 	require.NoError(t, err)
-	defer os.Remove(goldenPath)
+	defer func() { _ = os.Remove(goldenPath) }()
 
 	// Verify testdata directory exists
 	info, err := os.Stat(testdataDir)

@@ -1771,7 +1771,7 @@ func TestResolveContentID_UsesSearchQueryVariations(t *testing.T) {
 
 	db, err := database.New(dbCfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	require.NoError(t, db.AutoMigrate())
 
 	repo := database.NewContentIDMappingRepository(db)

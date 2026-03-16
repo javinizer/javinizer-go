@@ -171,7 +171,7 @@ func TestScraper_Search_Success(t *testing.T) {
 		if r.URL.Path == "/videos/vod/movies/detail/-/dvd_id=ipx535/json" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write(loadTestData(t, "ipx535_dvdid_response.json"))
+			_, _ = w.Write(loadTestData(t, "ipx535_dvdid_response.json"))
 			return
 		}
 
@@ -179,7 +179,7 @@ func TestScraper_Search_Success(t *testing.T) {
 			r.URL.Path == "/videos/vod/movies/detail/-/combined=ipx535/json" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write(loadTestData(t, "ipx535_full_response.json"))
+			_, _ = w.Write(loadTestData(t, "ipx535_full_response.json"))
 			return
 		}
 
@@ -1696,11 +1696,11 @@ func TestSearch_Success(t *testing.T) {
 		if strings.Contains(r.URL.Path, "dvd_id") {
 			// Return DVD ID lookup response
 			w.Header().Set("Content-Type", "application/json")
-			w.Write(loadTestData(t, "ipx535_dvdid_response.json"))
+			_, _ = w.Write(loadTestData(t, "ipx535_dvdid_response.json"))
 		} else if strings.Contains(r.URL.Path, "combined") {
 			// Return full movie data
 			w.Header().Set("Content-Type", "application/json")
-			w.Write(loadTestData(t, "ipx535_full_response.json"))
+			_, _ = w.Write(loadTestData(t, "ipx535_full_response.json"))
 		} else {
 			http.NotFound(w, r)
 		}

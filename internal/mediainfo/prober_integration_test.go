@@ -19,7 +19,7 @@ func TestProberRegistry_ProbeWithFallback_UnsupportedFormat(t *testing.T) {
 
 	f, err := os.Open(unknownPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	cfg := DefaultMediaInfoConfig()
 	registry := NewProberRegistry(cfg)
@@ -39,7 +39,7 @@ func TestProberRegistry_ProbeWithFallback_SmallFile(t *testing.T) {
 
 	f, err := os.Open(smallPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	cfg := DefaultMediaInfoConfig()
 	registry := NewProberRegistry(cfg)

@@ -115,7 +115,7 @@ func run(cmd *cobra.Command, args []string) error {
 	// Load config
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -142,7 +142,7 @@ func run(cmd *cobra.Command, args []string) error {
 			logCfg.Level = "debug"
 		}
 		if err := logging.InitLogger(logCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 			os.Exit(1)
 		}
 	}
@@ -179,7 +179,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	if err != nil {
 		logging.Errorf("Scan failed: %v", err)
-		fmt.Fprintf(os.Stderr, "Failed to scan directory: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Failed to scan directory: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -189,7 +189,7 @@ func run(cmd *cobra.Command, args []string) error {
 	fileMatcher, err := matcher.NewMatcher(&cfg.Matching)
 	if err != nil {
 		logging.Errorf("Failed to create matcher: %v", err)
-		fmt.Fprintf(os.Stderr, "Failed to create matcher: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Failed to create matcher: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -216,10 +216,10 @@ func run(cmd *cobra.Command, args []string) error {
 	db, err := database.New(cfg)
 	if err != nil {
 		logging.Errorf("Failed to connect to database: %v", err)
-		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.AutoMigrate(); err != nil {
 		logging.Errorf("Failed to run migrations: %v", err)
@@ -331,7 +331,7 @@ func run(cmd *cobra.Command, args []string) error {
 	finalModel, err := p.Run()
 	if err != nil {
 		logging.Errorf("TUI error: %v", err)
-		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -339,7 +339,7 @@ func run(cmd *cobra.Command, args []string) error {
 	if m, ok := finalModel.(*tui.Model); ok {
 		if m.Error() != nil {
 			logging.Errorf("TUI exited with error: %v", m.Error())
-			fmt.Fprintf(os.Stderr, "Error: %v\n", m.Error())
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", m.Error())
 			os.Exit(1)
 		}
 	}

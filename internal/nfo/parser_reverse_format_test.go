@@ -26,7 +26,7 @@ func TestReverseFormatNFO_Integration(t *testing.T) {
 	testFile := "/tmp/test_reverse_format_nfo.xml"
 	err := os.WriteFile(testFile, []byte(nfoContent), 0644)
 	require.NoError(t, err, "Should create test file")
-	defer os.Remove(testFile)
+	defer func() { _ = os.Remove(testFile) }()
 
 	// Parse the reverse format NFO
 	result, err := ParseNFO(afero.NewOsFs(), testFile)

@@ -22,7 +22,7 @@ func TestActressRepository(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewActressRepository(db)

@@ -333,7 +333,9 @@ func TestUpdateBatchMoviePosterCrop(t *testing.T) {
 	originalWd, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(tempDir))
-	defer os.Chdir(originalWd)
+	defer func() {
+		_ = os.Chdir(originalWd)
+	}()
 
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
@@ -391,7 +393,9 @@ func TestUpdateBatchMoviePosterCrop(t *testing.T) {
 
 		out, err := os.Open(croppedPath)
 		require.NoError(t, err)
-		defer out.Close()
+		defer func() {
+			_ = out.Close()
+		}()
 		outImg, _, err := image.Decode(out)
 		require.NoError(t, err)
 		b := outImg.Bounds()

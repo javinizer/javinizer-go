@@ -174,7 +174,7 @@ func TestGetOptimalPosterURL_WithHTTPServer(t *testing.T) {
 				}
 				w.Header().Set("Content-Type", "image/jpeg")
 				w.WriteHeader(http.StatusOK)
-				w.Write(tt.posterImageData)
+				_, _ = w.Write(tt.posterImageData)
 			}))
 			defer server.Close()
 
@@ -273,7 +273,7 @@ func TestGetImageDimensions(t *testing.T) {
 				imageData := createTestJPEG(t, tt.imageWidth, tt.imageHeight)
 				w.Header().Set("Content-Type", "image/jpeg")
 				w.WriteHeader(http.StatusOK)
-				w.Write(imageData)
+				_, _ = w.Write(imageData)
 			}))
 			defer server.Close()
 
@@ -308,7 +308,7 @@ func TestGetImageDimensions_WithNilClient(t *testing.T) {
 		imageData := createTestJPEG(t, 640, 480)
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.WriteHeader(http.StatusOK)
-		w.Write(imageData)
+		_, _ = w.Write(imageData)
 	}))
 	defer server.Close()
 
@@ -329,7 +329,7 @@ func TestGetImageDimensions_InvalidImage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("not an image"))
+		_, _ = w.Write([]byte("not an image"))
 	}))
 	defer server.Close()
 

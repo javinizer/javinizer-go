@@ -24,6 +24,31 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// Keep legacy helper symbols reachable for external test-package reuse.
+var (
+	_ = setupTestDB
+	_ = setupMockScraperRegistry
+	_ = setupMockScraperRegistryWithError
+	_ = createTestVideoFile
+	_ = createTestMovieFiles
+	_ = executeCmdWithOutput
+	_ = assertMovieInDB
+	_ = assertMovieNotInDB
+	_ = assertFileExists
+	_ = assertFileNotExists
+	_ = insertTestMovie
+	_ = countMoviesInDB
+	_ = countTagsForMovie
+	_ = setupTestDatabaseWithData
+	_ = createTestDirectoryStructure
+	_ = createTestDependenciesWithRealScrapers
+	_ = resetLoggerForTests
+	_ = (*mockScraper)(nil).Name
+	_ = (*mockScraper)(nil).Search
+	_ = (*mockScraper)(nil).GetURL
+	_ = (*mockScraper)(nil).IsEnabled
+)
+
 // setupTestDB creates an in-memory SQLite database with GORM migrations.
 // It returns a configured *gorm.DB ready for testing.
 //
@@ -366,15 +391,15 @@ func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 
 	go func() {
 		var buf bytes.Buffer
-		io.Copy(&buf, rOut)
-		rOut.Close()
+		_, _ = io.Copy(&buf, rOut)
+		_ = rOut.Close()
 		outChan <- buf.String()
 	}()
 
 	go func() {
 		var buf bytes.Buffer
-		io.Copy(&buf, rErr)
-		rErr.Close()
+		_, _ = io.Copy(&buf, rErr)
+		_ = rErr.Close()
 		errChan <- buf.String()
 	}()
 
@@ -382,8 +407,8 @@ func captureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 	fn()
 
 	// Close writers to signal goroutines
-	wOut.Close()
-	wErr.Close()
+	_ = wOut.Close()
+	_ = wErr.Close()
 
 	// Get captured output
 	stdout = <-outChan

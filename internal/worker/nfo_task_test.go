@@ -367,8 +367,8 @@ func TestNFOTask_ErrorHandling(t *testing.T) {
 		// when the generator tries to create files inside it
 		tempFile, err := os.CreateTemp("", "not-a-dir-*.txt")
 		require.NoError(t, err)
-		tempFile.Close()
-		defer os.Remove(tempFile.Name())
+		_ = tempFile.Close()
+		defer func() { _ = os.Remove(tempFile.Name()) }()
 
 		// Use the file path as targetDir - this will consistently fail
 		// when generator tries to create subdirectories/files inside it

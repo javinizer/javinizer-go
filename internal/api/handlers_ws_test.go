@@ -138,7 +138,7 @@ func TestWebSocketHub(t *testing.T) {
 	}
 
 	// Broadcasting should not panic even with no clients
-	hub.BroadcastProgress(msg)
+	require.NoError(t, hub.BroadcastProgress(msg))
 }
 
 // TestWebSocketUpgrader tests the WebSocket upgrader configuration
@@ -218,7 +218,7 @@ func TestWebSocketBroadcastMessage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Broadcast should not panic (even with no connected clients)
-			hub.BroadcastProgress(tt.message)
+			require.NoError(t, hub.BroadcastProgress(tt.message))
 
 			// Give time for message to be processed
 			time.Sleep(5 * time.Millisecond)
@@ -246,7 +246,7 @@ func TestWebSocketConnectionHandling(t *testing.T) {
 		Message: "Connection handling test",
 	}
 
-	hub.BroadcastProgress(msg)
+	require.NoError(t, hub.BroadcastProgress(msg))
 	time.Sleep(5 * time.Millisecond)
 }
 
@@ -323,7 +323,7 @@ func TestWebSocketHubInitialization(t *testing.T) {
 
 	// Test that broadcast doesn't panic
 	assert.NotPanics(t, func() {
-		hub.BroadcastProgress(&ws.ProgressMessage{
+		_ = hub.BroadcastProgress(&ws.ProgressMessage{
 			JobID:   "init-test",
 			Status:  "testing",
 			Message: "Hub initialization test",
@@ -392,7 +392,7 @@ func TestWebSocketMessageFormat(t *testing.T) {
 			if tt.valid {
 				// Should not panic when broadcasting
 				assert.NotPanics(t, func() {
-					hub.BroadcastProgress(tt.message)
+					_ = hub.BroadcastProgress(tt.message)
 				})
 			}
 			time.Sleep(5 * time.Millisecond)
@@ -443,7 +443,7 @@ func BenchmarkWebSocketBroadcast(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		hub.BroadcastProgress(msg)
+		_ = hub.BroadcastProgress(msg)
 	}
 }
 
@@ -490,7 +490,7 @@ func TestWebSocketIntegration(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	// Test broadcast still works
-	hub.BroadcastProgress(&ws.ProgressMessage{
+	_ = hub.BroadcastProgress(&ws.ProgressMessage{
 		JobID:   "integration-test",
 		Status:  "testing",
 		Message: "Integration test message",
@@ -512,7 +512,7 @@ func TestWebSocketConcurrentBroadcasts(t *testing.T) {
 			defer func() { done <- true }()
 
 			for j := 0; j < 10; j++ {
-				hub.BroadcastProgress(&ws.ProgressMessage{
+				_ = hub.BroadcastProgress(&ws.ProgressMessage{
 					JobID:    string(rune('a' + id)),
 					Status:   "processing",
 					Progress: float64(j * 10),
@@ -601,7 +601,7 @@ func connectWebSocket(t *testing.T, serverURL string) *websocket.Conn {
 
 // readMessage reads a message from WebSocket with timeout
 func readMessage(t *testing.T, conn *websocket.Conn, timeout time.Duration) *ws.ProgressMessage {
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(timeout)))
 
 	_, data, err := conn.ReadMessage()
 	if err != nil {
@@ -634,7 +634,9 @@ func TestWebSocketRealClientConnection(t *testing.T) {
 
 	// AC-3.2.1: Single client connects and receives messages
 	client := connectWebSocket(t, server.URL)
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	// Give client time to register with hub
 	time.Sleep(50 * time.Millisecond)
@@ -703,7 +705,7 @@ func TestWebSocketMultipleClients(t *testing.T) {
 	defer func() {
 		for _, client := range clients {
 			if client != nil {
-				client.Close()
+				_ = client.Close()
 			}
 		}
 	}()
@@ -733,7 +735,7 @@ func TestWebSocketMultipleClients(t *testing.T) {
 
 	// Cleanup with graceful disconnect
 	for _, client := range clients {
-		client.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		require.NoError(t, client.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")))
 	}
 
 	time.Sleep(100 * time.Millisecond) // AC-3.2.3: Verify cleanup
@@ -755,7 +757,9 @@ func TestWebSocketMessageOrdering(t *testing.T) {
 	defer server.Close()
 
 	client := connectWebSocket(t, server.URL)
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -850,7 +854,7 @@ func TestWebSocketConcurrentConnections(t *testing.T) {
 	defer func() {
 		for _, client := range clients {
 			if client != nil {
-				client.Close()
+				_ = client.Close()
 			}
 		}
 	}()
@@ -884,7 +888,7 @@ func TestWebSocketConcurrentConnections(t *testing.T) {
 
 	// Cleanup
 	for _, client := range clients {
-		client.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		require.NoError(t, client.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")))
 	}
 
 	time.Sleep(100 * time.Millisecond) // AC-3.2.3: Verify cleanup
@@ -920,16 +924,18 @@ func TestWebSocketHubThreadSafety(t *testing.T) {
 
 			// Broadcast some messages
 			for j := 0; j < 5; j++ {
-				hub.BroadcastProgress(&ws.ProgressMessage{
+				if err := hub.BroadcastProgress(&ws.ProgressMessage{
 					JobID:    "thread-safety-test",
 					Status:   "testing",
 					Progress: float64(id*5 + j),
 					Message:  "Concurrent operations",
-				})
+				}); err != nil {
+					t.Errorf("broadcast failed: %v", err)
+				}
 			}
 
 			// Disconnect client
-			client.Close()
+			_ = client.Close()
 		}(i)
 	}
 
@@ -949,7 +955,7 @@ func TestWebSocketMessageSchemaValidation(t *testing.T) {
 	defer server.Close()
 
 	client := connectWebSocket(t, server.URL)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -1020,8 +1026,8 @@ func TestWebSocketGracefulShutdown(t *testing.T) {
 
 	// AC-3.2.3: Close clients first before canceling context
 	for _, client := range clients {
-		client.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-		client.Close()
+		require.NoError(t, client.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")))
+		_ = client.Close()
 	}
 
 	// Give time for client cleanup

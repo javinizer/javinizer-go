@@ -424,20 +424,20 @@ func (d *Downloader) DownloadPoster(movie *models.Movie, destDir string, multipa
 	tempPath := destPath + ".full.tmp"
 	result, err := d.download(posterURL, tempPath, MediaTypePoster)
 	if err != nil || !result.Downloaded {
-		d.fs.Remove(tempPath) // Clean up if exists
+		_ = d.fs.Remove(tempPath) // Clean up if exists
 		return result, err
 	}
 
 	// Crop the poster from the downloaded image
 	if err := imageutil.CropPosterFromCover(d.fs, tempPath, destPath); err != nil {
-		d.fs.Remove(tempPath) // Clean up temp file
+		_ = d.fs.Remove(tempPath) // Clean up temp file
 		result.Error = fmt.Errorf("failed to crop poster: %w", err)
 		result.Downloaded = false
 		return result, result.Error
 	}
 
 	// Clean up the temporary full image
-	d.fs.Remove(tempPath)
+	_ = d.fs.Remove(tempPath)
 
 	// Update result with final path and size
 	if info, err := d.fs.Stat(destPath); err == nil {
@@ -699,7 +699,9 @@ func (d *Downloader) download(url, destPath string, mediaType MediaType) (*Downl
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
@@ -719,10 +721,13 @@ func (d *Downloader) download(url, destPath string, mediaType MediaType) (*Downl
 
 	// Download to temp file
 	written, err := io.Copy(outFile, resp.Body)
-	outFile.Close()
+	closeErr := outFile.Close()
+	if err == nil && closeErr != nil {
+		err = closeErr
+	}
 
 	if err != nil {
-		d.fs.Remove(tempPath)
+		_ = d.fs.Remove(tempPath)
 		result.Error = fmt.Errorf("failed to write file: %w", err)
 		result.Duration = time.Since(startTime)
 		return result, result.Error
@@ -730,7 +735,7 @@ func (d *Downloader) download(url, destPath string, mediaType MediaType) (*Downl
 
 	// Rename temp file to final destination
 	if err := d.fs.Rename(tempPath, destPath); err != nil {
-		d.fs.Remove(tempPath)
+		_ = d.fs.Remove(tempPath)
 		result.Error = fmt.Errorf("failed to rename file: %w", err)
 		result.Duration = time.Since(startTime)
 		return result, result.Error
@@ -852,7 +857,9 @@ func (d *Downloader) downloadSimple(ctx context.Context, url, destPath string) e
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Check status code and return status error
 	if resp.StatusCode != http.StatusOK {
@@ -868,16 +875,19 @@ func (d *Downloader) downloadSimple(ctx context.Context, url, destPath string) e
 
 	// Download to temp file
 	_, err = io.Copy(outFile, resp.Body)
-	outFile.Close()
+	closeErr := outFile.Close()
+	if err == nil && closeErr != nil {
+		err = closeErr
+	}
 
 	if err != nil {
-		d.fs.Remove(tempPath)
+		_ = d.fs.Remove(tempPath)
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
 	// Rename temp file to final destination
 	if err := d.fs.Rename(tempPath, destPath); err != nil {
-		d.fs.Remove(tempPath)
+		_ = d.fs.Remove(tempPath)
 		return fmt.Errorf("failed to rename file: %w", err)
 	}
 
@@ -1038,7 +1048,7 @@ func CleanupPartialDownloads(fs afero.Fs, dir string) error {
 
 		if strings.HasSuffix(entry.Name(), ".tmp") {
 			path := filepath.Join(dir, entry.Name())
-			fs.Remove(path) // Ignore errors
+			_ = fs.Remove(path) // Ignore errors
 		}
 	}
 

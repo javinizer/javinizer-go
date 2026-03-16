@@ -137,7 +137,7 @@ func TestRun_CacheHit(t *testing.T) {
 	}
 
 	configPath, db := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Pre-populate database with test movie
 	movieRepo := database.NewMovieRepository(db)
@@ -159,7 +159,7 @@ func TestRun_CacheHit(t *testing.T) {
 		ScraperRegistry: registry,
 	})
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Run without force refresh - should hit cache
 	movie, results, err := scrape.Run(cmd, []string{"IPX-123"}, configPath, deps)
@@ -179,7 +179,7 @@ func TestRun_ForceRefresh(t *testing.T) {
 	}
 
 	configPath, db := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Pre-populate database with test movie
 	movieRepo := database.NewMovieRepository(db)
@@ -188,7 +188,7 @@ func TestRun_ForceRefresh(t *testing.T) {
 
 	// Create command with force flag
 	cmd := scrape.NewCommand()
-	cmd.Flags().Set("force", "true")
+	require.NoError(t, cmd.Flags().Set("force", "true"))
 
 	// Create test config
 	cfg, err := config.Load(configPath)
@@ -204,7 +204,7 @@ func TestRun_ForceRefresh(t *testing.T) {
 		ScraperRegistry: registry,
 	})
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Run with force refresh - should ignore cache
 	movie, results, err := scrape.Run(cmd, []string{"IPX-123"}, configPath, deps)
@@ -226,11 +226,11 @@ func TestRun_CustomScrapers(t *testing.T) {
 	}
 
 	configPath, db := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create command with custom scrapers flag
 	cmd := scrape.NewCommand()
-	cmd.Flags().Set("scrapers", "mock2")
+	require.NoError(t, cmd.Flags().Set("scrapers", "mock2"))
 
 	// Create test config
 	cfg, err := config.Load(configPath)
@@ -248,7 +248,7 @@ func TestRun_CustomScrapers(t *testing.T) {
 		ScraperRegistry: registry,
 	})
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Run with custom scrapers - should only use mock2
 	movie, results, err := scrape.Run(cmd, []string{"TEST-001"}, configPath, deps)
@@ -294,11 +294,11 @@ matching:
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	require.NoError(t, db.AutoMigrate())
 
 	cmd := scrape.NewCommand()
-	cmd.Flags().Set("scrapers", "mock2")
+	require.NoError(t, cmd.Flags().Set("scrapers", "mock2"))
 
 	registry := models.NewScraperRegistry()
 	registry.Register(NewMockScraper("mock1"))
@@ -309,7 +309,7 @@ matching:
 		ScraperRegistry: registry,
 	})
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	movie, results, err := scrape.Run(cmd, []string{"TEST-002"}, configPath, deps)
 	require.NoError(t, err)
@@ -329,7 +329,7 @@ func TestRun_EmptyResults(t *testing.T) {
 	}
 
 	configPath, db := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create command
 	cmd := scrape.NewCommand()
@@ -348,7 +348,7 @@ func TestRun_EmptyResults(t *testing.T) {
 		ScraperRegistry: registry,
 	})
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Run with failing scraper - should get error
 	movie, results, err := scrape.Run(cmd, []string{"TEST-001"}, configPath, deps)
@@ -367,7 +367,7 @@ func TestRun_Aggregation(t *testing.T) {
 	}
 
 	configPath, db := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create command
 	cmd := scrape.NewCommand()
@@ -388,7 +388,7 @@ func TestRun_Aggregation(t *testing.T) {
 		ScraperRegistry: registry,
 	})
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Run with multiple scrapers - should aggregate results
 	movie, results, err := scrape.Run(cmd, []string{"TEST-001"}, configPath, deps)
@@ -410,7 +410,7 @@ func TestRun_DatabaseSave(t *testing.T) {
 	}
 
 	configPath, db := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create command
 	cmd := scrape.NewCommand()
@@ -429,7 +429,7 @@ func TestRun_DatabaseSave(t *testing.T) {
 		ScraperRegistry: registry,
 	})
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Run scrape - should save to database
 	movie, results, err := scrape.Run(cmd, []string{"TEST-SAVE"}, configPath, deps)
@@ -455,11 +455,11 @@ func TestRun_FlagOverrides(t *testing.T) {
 	}
 
 	configPath, db := setupTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create command with flag overrides
 	cmd := scrape.NewCommand()
-	cmd.Flags().Set("scrape-actress", "true")
+	_ = cmd.Flags().Set("scrape-actress", "true")
 
 	// Create test config
 	cfg, err := config.Load(configPath)
@@ -478,7 +478,7 @@ func TestRun_FlagOverrides(t *testing.T) {
 		ScraperRegistry: registry,
 	})
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Run scrape - ApplyFlagOverrides should be called
 	movie, results, err := scrape.Run(cmd, []string{"TEST-001"}, configPath, deps)

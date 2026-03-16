@@ -108,7 +108,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Initialize components
 	movieRepo := database.NewMovieRepository(deps.DB)
@@ -141,7 +141,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return err
 	}
-	if matches == nil || len(matches) == 0 {
+	if len(matches) == 0 {
 		return nil
 	}
 
@@ -150,7 +150,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return err
 	}
-	if movies == nil || len(movies) == 0 {
+	if len(movies) == 0 {
 		return nil
 	}
 

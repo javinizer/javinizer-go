@@ -20,7 +20,7 @@ func TestActressAliasRepository(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Run migrations
 	err = db.AutoMigrate()

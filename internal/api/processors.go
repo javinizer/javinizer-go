@@ -26,6 +26,12 @@ import (
 	"github.com/spf13/afero"
 )
 
+func broadcastProgress(msg *ws.ProgressMessage) {
+	if err := wsHub.BroadcastProgress(msg); err != nil {
+		logging.Warnf("Failed to broadcast progress update for job %s: %v", msg.JobID, err)
+	}
+}
+
 // processBatchJob processes a batch scraping job (metadata only, no file organization)
 // using concurrent worker pool for improved performance.
 // If updateMode is true, will also download media files and generate NFOs in place without moving files.
@@ -149,7 +155,9 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 	}
 
 	// Wait for all tasks to complete
-	pool.Wait()
+	if err := pool.Wait(); err != nil {
+		logging.Warnf("Worker pool completed with task failures: %v", err)
+	}
 
 	// Mark job as completed (don't auto-process update mode - wait for user to review and click "Update")
 	job.MarkCompleted()
@@ -182,7 +190,7 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 	//   3. On server restart (for orphaned posters)
 
 	// Broadcast final completion
-	wsHub.BroadcastProgress(&ws.ProgressMessage{
+	broadcastProgress(&ws.ProgressMessage{
 		JobID:    job.ID,
 		Status:   "completed",
 		Progress: 100,
@@ -246,46 +254,6 @@ func copyTempCroppedPoster(job *worker.BatchJob, movie *models.Movie, destDir st
 	return true
 }
 
-// downloadMediaFiles downloads all configured media files for a movie
-// destDir is where files should be downloaded to
-// Note: This function is called without multipart context (single file operations)
-func downloadMediaFiles(dl *downloader.Downloader, movie *models.Movie, destDir string, cfg *config.Config) {
-	// Download poster (may be skipped if temp poster was already copied)
-	if cfg.Output.DownloadPoster {
-		if _, err := dl.DownloadPoster(movie, destDir, nil); err != nil {
-			logging.Errorf("Failed to download poster for %s: %v", movie.ID, err)
-		}
-	}
-
-	// Download cover
-	if cfg.Output.DownloadCover {
-		if _, err := dl.DownloadCover(movie, destDir, nil); err != nil {
-			logging.Errorf("Failed to download cover for %s: %v", movie.ID, err)
-		}
-	}
-
-	// Download screenshots
-	if cfg.Output.DownloadExtrafanart {
-		if _, err := dl.DownloadExtrafanart(movie, destDir, nil); err != nil {
-			logging.Errorf("Failed to download screenshots for %s: %v", movie.ID, err)
-		}
-	}
-
-	// Download trailer
-	if cfg.Output.DownloadTrailer {
-		if _, err := dl.DownloadTrailer(movie, destDir, nil); err != nil {
-			logging.Errorf("Failed to download trailer for %s: %v", movie.ID, err)
-		}
-	}
-
-	// Download actress images
-	if cfg.Output.DownloadActress {
-		if _, err := dl.DownloadActressImages(movie, destDir); err != nil {
-			logging.Errorf("Failed to download actress images for %s: %v", movie.ID, err)
-		}
-	}
-}
-
 // downloadMediaFilesWithHistory downloads all configured media files and logs to history
 // multipart can be nil for single-file operations
 func downloadMediaFilesWithHistory(dl *downloader.Downloader, movie *models.Movie, destDir string, cfg *config.Config, historyLogger *history.Logger, multipart *downloader.MultipartInfo) {
@@ -329,7 +297,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 	// Initialize HTTP client for downloader
 	httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(cfg, registry)
 	if err != nil {
-		wsHub.BroadcastProgress(&ws.ProgressMessage{
+		broadcastProgress(&ws.ProgressMessage{
 			JobID:    job.ID,
 			Status:   "error",
 			Progress: 0,
@@ -341,7 +309,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
 
 	// Broadcast update started
-	wsHub.BroadcastProgress(&ws.ProgressMessage{
+	broadcastProgress(&ws.ProgressMessage{
 		JobID:    job.ID,
 		Status:   "updating",
 		Progress: 0,
@@ -358,7 +326,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 
 	// Guard against division by zero when no files were successfully scraped
 	if totalFiles == 0 {
-		wsHub.BroadcastProgress(&ws.ProgressMessage{
+		broadcastProgress(&ws.ProgressMessage{
 			JobID:    job.ID,
 			Status:   "update_completed",
 			Progress: 100,
@@ -375,7 +343,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		select {
 		case <-ctx.Done():
 			job.MarkCancelled()
-			wsHub.BroadcastProgress(&ws.ProgressMessage{
+			broadcastProgress(&ws.ProgressMessage{
 				JobID:    job.ID,
 				Status:   "cancelled",
 				Progress: float64(processedFiles) / float64(totalFiles) * 100,
@@ -585,7 +553,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 
 		// Broadcast progress with error status if errors occurred
 		if hasErrors {
-			wsHub.BroadcastProgress(&ws.ProgressMessage{
+			broadcastProgress(&ws.ProgressMessage{
 				JobID:    job.ID,
 				FilePath: filePath,
 				Status:   "failed",
@@ -594,7 +562,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 				Error:    errorMsg,
 			})
 		} else {
-			wsHub.BroadcastProgress(&ws.ProgressMessage{
+			broadcastProgress(&ws.ProgressMessage{
 				JobID:    job.ID,
 				FilePath: filePath,
 				Status:   "updated",
@@ -605,7 +573,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 	}
 
 	// Broadcast completion
-	wsHub.BroadcastProgress(&ws.ProgressMessage{
+	broadcastProgress(&ws.ProgressMessage{
 		JobID:    job.ID,
 		Status:   "update_completed",
 		Progress: 100,
@@ -621,7 +589,7 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 	historyLogger := history.NewLogger(db)
 	linkMode, err := organizer.ParseLinkMode(linkModeRaw)
 	if err != nil {
-		wsHub.BroadcastProgress(&ws.ProgressMessage{
+		broadcastProgress(&ws.ProgressMessage{
 			JobID:    job.ID,
 			Status:   "error",
 			Progress: 0,
@@ -634,7 +602,7 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 	// Initialize HTTP client for downloader
 	httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(cfg, registry)
 	if err != nil {
-		wsHub.BroadcastProgress(&ws.ProgressMessage{
+		broadcastProgress(&ws.ProgressMessage{
 			JobID:    job.ID,
 			Status:   "error",
 			Progress: 0,
@@ -647,7 +615,7 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfo.ConfigFromAppConfig(&cfg.Metadata.NFO, &cfg.Output, &cfg.Metadata, db))
 
 	// Broadcast organization started
-	wsHub.BroadcastProgress(&ws.ProgressMessage{
+	broadcastProgress(&ws.ProgressMessage{
 		JobID:    job.ID,
 		Status:   "organizing",
 		Progress: 0,
@@ -704,7 +672,7 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 				logging.Warnf("Failed to log history for %s: %v", filePath, logErr)
 			}
 
-			wsHub.BroadcastProgress(&ws.ProgressMessage{
+			broadcastProgress(&ws.ProgressMessage{
 				JobID:    job.ID,
 				FilePath: filePath,
 				Status:   "failed",
@@ -768,7 +736,7 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 
 		organized++
 
-		wsHub.BroadcastProgress(&ws.ProgressMessage{
+		broadcastProgress(&ws.ProgressMessage{
 			JobID:    job.ID,
 			FilePath: filePath,
 			Status:   "organized",
@@ -778,7 +746,7 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 	}
 
 	// Broadcast final completion
-	wsHub.BroadcastProgress(&ws.ProgressMessage{
+	broadcastProgress(&ws.ProgressMessage{
 		JobID:    job.ID,
 		Status:   "organization_completed",
 		Progress: 100,
@@ -1017,7 +985,7 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 
 	// Generate screenshot names using template engine (same as downloader)
 	screenshots := []string{}
-	if movie.Screenshots != nil && len(movie.Screenshots) > 0 {
+	if len(movie.Screenshots) > 0 {
 		for i := range movie.Screenshots {
 			ctx.Index = i + 1 // Set index for template
 			screenshotName, err := templateEngine.Execute(cfg.Output.ScreenshotFormat, ctx)

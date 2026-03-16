@@ -22,7 +22,9 @@ func TestServeTempPoster(t *testing.T) {
 	originalWd, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(tempDir))
-	defer os.Chdir(originalWd)
+	defer func() {
+		_ = os.Chdir(originalWd)
+	}()
 
 	// Create data/temp/posters/test-job-id directory
 	jobID := "test-job-id"
@@ -106,7 +108,9 @@ func TestServeTempPoster_PathTraversalDefenseInDepth(t *testing.T) {
 	originalWd, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(tempDir))
-	defer os.Chdir(originalWd)
+	defer func() {
+		_ = os.Chdir(originalWd)
+	}()
 
 	// Create the directory structure
 	jobID := "test-job"
@@ -139,7 +143,7 @@ func TestServeCroppedPoster(t *testing.T) {
 	originalWd, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(tempDir))
-	defer os.Chdir(originalWd)
+	defer func() { _ = os.Chdir(originalWd) }()
 
 	// Create data/posters directory
 	posterDir := filepath.Join("data", "posters")
@@ -215,7 +219,7 @@ func TestServeCroppedPoster_PathTraversalDefenseInDepth(t *testing.T) {
 	originalWd, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(tempDir))
-	defer os.Chdir(originalWd)
+	defer func() { _ = os.Chdir(originalWd) }()
 
 	// Create data/posters directory
 	posterDir := filepath.Join("data", "posters")
@@ -246,7 +250,7 @@ func TestServeTempPoster_ValidJpgExtensions(t *testing.T) {
 	originalWd, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(tempDir))
-	defer os.Chdir(originalWd)
+	defer func() { _ = os.Chdir(originalWd) }()
 
 	jobID := "test-job"
 	posterDir := filepath.Join("data", "temp", "posters", jobID)

@@ -15,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
 )
 
 type testDownloadProxyResolver struct {
@@ -66,7 +67,7 @@ func TestDownloader_DownloadCover(t *testing.T) {
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("fake image data"))
+		_, _ = w.Write([]byte("fake image data"))
 	}))
 	defer server.Close()
 
@@ -171,7 +172,7 @@ func TestDownloader_DownloadCover_AlreadyExists(t *testing.T) {
 func TestDownloader_DownloadExtrafanart(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("screenshot data"))
+		_, _ = w.Write([]byte("screenshot data"))
 	}))
 	defer server.Close()
 
@@ -221,7 +222,7 @@ func TestDownloader_DownloadExtrafanart(t *testing.T) {
 func TestDownloader_DownloadTrailer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("fake video data"))
+		_, _ = w.Write([]byte("fake video data"))
 	}))
 	defer server.Close()
 
@@ -266,7 +267,7 @@ func TestDownloader_DownloadTrailer(t *testing.T) {
 func TestDownloader_DownloadActressImages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("actress image"))
+		_, _ = w.Write([]byte("actress image"))
 	}))
 	defer server.Close()
 
@@ -341,7 +342,7 @@ func TestDownloader_DownloadAll_MultiPartFilenames(t *testing.T) {
 	// Test that multipart templates produce correct filenames
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("fake image data"))
+		_, _ = w.Write([]byte("fake image data"))
 	}))
 	defer server.Close()
 
@@ -399,7 +400,7 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 	// Set up mock HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("fake image data"))
+		_, _ = w.Write([]byte("fake image data"))
 	}))
 	defer server.Close()
 
@@ -490,7 +491,7 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 func TestDownloader_DownloadAll(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test data"))
+		_, _ = w.Write([]byte("test data"))
 	}))
 	defer server.Close()
 
@@ -882,7 +883,7 @@ func TestDownloader_DownloadPoster_WithPosterURL(t *testing.T) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.WriteHeader(http.StatusOK)
 		// Encode as JPEG
-		jpeg.Encode(w, img, &jpeg.Options{Quality: 85})
+		require.NoError(t, jpeg.Encode(w, img, &jpeg.Options{Quality: 85}))
 	}))
 	defer server.Close()
 
@@ -1002,7 +1003,7 @@ func TestDownloader_DownloadExtrafanart_PartialFailure(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("screenshot data"))
+		_, _ = w.Write([]byte("screenshot data"))
 	}))
 	defer server.Close()
 
@@ -1136,7 +1137,7 @@ func TestDownloader_DownloadActressImages_EmptyActresses(t *testing.T) {
 func TestDownloader_DownloadActressImages_SkipEmptyThumbURL(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("actress image"))
+		_, _ = w.Write([]byte("actress image"))
 	}))
 	defer server.Close()
 
@@ -1228,7 +1229,7 @@ func TestDownloader_Download_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("data"))
+		_, _ = w.Write([]byte("data"))
 	}))
 	defer server.Close()
 
@@ -1266,7 +1267,7 @@ func TestDownloader_Download_WithUserAgent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userAgent = r.Header.Get("User-Agent")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("data"))
+		_, _ = w.Write([]byte("data"))
 	}))
 	defer server.Close()
 
@@ -1983,7 +1984,7 @@ func TestDownloader_DownloadPoster_WithCropping(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.WriteHeader(http.StatusOK)
-		jpeg.Encode(w, img, &jpeg.Options{Quality: 85})
+		require.NoError(t, jpeg.Encode(w, img, &jpeg.Options{Quality: 85}))
 	}))
 	defer server.Close()
 
@@ -2033,7 +2034,7 @@ func TestDownloader_DownloadPoster_WithCropping(t *testing.T) {
 func TestDownloader_DownloadActressImages_WithNFOConfig(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("actress image"))
+		_, _ = w.Write([]byte("actress image"))
 	}))
 	defer server.Close()
 
@@ -2119,7 +2120,7 @@ func BenchmarkDownload(b *testing.B) {
 		// Generate 1MB response body
 		data := make([]byte, 1024*1024) // 1MB
 		w.WriteHeader(http.StatusOK)
-		w.Write(data)
+		_, _ = w.Write(data)
 	}))
 	defer server.Close()
 

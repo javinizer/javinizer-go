@@ -338,7 +338,7 @@ func extractDetailLinks(html, base string) []string {
 		if href == "" {
 			return
 		}
-		if !(strings.Contains(href, "/ppv/detail") || strings.Contains(href, "new_detail") || strings.Contains(href, "product_lists")) {
+		if !strings.Contains(href, "/ppv/detail") && !strings.Contains(href, "new_detail") && !strings.Contains(href, "product_lists") {
 			return
 		}
 		full := resolveURL(base, href)
@@ -735,10 +735,7 @@ func isAVEBonusScreenshotURL(raw string) bool {
 	// Bonus screenshots are gallery "extra file" images with numbered file names:
 	// /vodimages/gallery/large/<content_id>/<nnn>.webp
 	re := regexp.MustCompile(`(?i)/vodimages/gallery/large/[a-z0-9_-]+/\d{2,4}\.(jpg|jpeg|png|webp)$`)
-	if re.MatchString(path) {
-		return true
-	}
-	return false
+	return re.MatchString(path)
 }
 
 func (s *Scraper) applyLanguage(rawURL string) string {

@@ -282,11 +282,6 @@ func (r *MovieRepository) Upsert(movie *models.Movie) error {
 	})
 }
 
-// ensureGenresExist ensures all genres exist in DB, gets or creates them
-func (r *MovieRepository) ensureGenresExist(genres []models.Genre) error {
-	return r.ensureGenresExistTx(r.db.DB, genres)
-}
-
 // ensureGenresExistTx ensures all genres exist in DB using the provided transaction
 func (r *MovieRepository) ensureGenresExistTx(tx *gorm.DB, genres []models.Genre) error {
 	for i := range genres {
@@ -335,10 +330,6 @@ func (r *MovieRepository) mergeActressData(existing *models.Actress, new models.
 	}
 
 	return needsUpdate
-}
-
-func (r *MovieRepository) ensureActressesExist(actresses []models.Actress) error {
-	return r.ensureActressesExistTx(r.db.DB, actresses)
 }
 
 func (r *MovieRepository) ensureActressesExistTx(tx *gorm.DB, actresses []models.Actress) error {
@@ -648,7 +639,7 @@ func (r *ActressRepository) SearchPagedSorted(query string, limit, offset int, s
 	sortBy, sortOrder = normalizeActressSort(sortBy, sortOrder)
 	searchPattern := "%" + query + "%"
 
-	dbq := r.db.DB.Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
+	dbq := r.db.Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
 		searchPattern, searchPattern, searchPattern)
 	for _, clause := range actressOrderClauses(sortBy, sortOrder) {
 		dbq = dbq.Order(clause)

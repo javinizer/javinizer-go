@@ -44,7 +44,7 @@ func run(cmd *cobra.Command, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Run database migrations
 	if err := deps.DB.AutoMigrate(); err != nil {

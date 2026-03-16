@@ -448,16 +448,10 @@ func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.settingsCursor > 0 {
 			m.settingsCursor--
 		}
-		if m.settingsView != nil {
-			// Settings view doesn't need explicit cursor update
-		}
 
 	case "down", "j":
 		if m.settingsCursor < maxSettings {
 			m.settingsCursor++
-		}
-		if m.settingsView != nil {
-			// Settings view doesn't need explicit cursor update
 		}
 
 	case " ", "space":

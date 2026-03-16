@@ -69,7 +69,7 @@ func TestFullWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Run migrations
 	if err := db.AutoMigrate(); err != nil {

@@ -145,7 +145,9 @@ func TestValidateNFOPath_TildeExpansion(t *testing.T) {
 
 	// Create a subdirectory in home for testing
 	testSubdir := filepath.Join(homeDir, ".javinizer-test-nfo-validation")
-	defer os.RemoveAll(testSubdir)
+	defer func() {
+		_ = os.RemoveAll(testSubdir)
+	}()
 
 	require.NoError(t, os.Mkdir(testSubdir, 0755))
 

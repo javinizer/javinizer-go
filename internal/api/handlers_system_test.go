@@ -439,7 +439,9 @@ func startTestForwardProxy(t *testing.T) *httptest.Server {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		for k, vals := range resp.Header {
 			for _, v := range vals {

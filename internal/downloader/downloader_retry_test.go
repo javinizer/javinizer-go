@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestDownloadWithRetry_TransientErrors tests retry sequences with transient errors
@@ -677,7 +678,7 @@ func TestDownloadWithRetry_InvalidURLScheme(t *testing.T) {
 
 			// For valid URLs, pre-create the file so download is skipped
 			if !tt.wantErr {
-				afero.WriteFile(memFS, "/tmp/output.jpg", []byte("test"), 0644)
+				require.NoError(t, afero.WriteFile(memFS, "/tmp/output.jpg", []byte("test"), 0644))
 			}
 
 			cfg := &config.OutputConfig{DownloadTimeout: 60}

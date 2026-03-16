@@ -44,20 +44,20 @@ func CaptureOutput(t *testing.T, fn func()) (stdout, stderr string) {
 
 	go func() {
 		var buf bytes.Buffer
-		io.Copy(&buf, rOut)
+		_, _ = io.Copy(&buf, rOut)
 		outC <- buf.String()
 	}()
 
 	go func() {
 		var buf bytes.Buffer
-		io.Copy(&buf, rErr)
+		_, _ = io.Copy(&buf, rErr)
 		errC <- buf.String()
 	}()
 
 	fn()
 
-	wOut.Close()
-	wErr.Close()
+	_ = wOut.Close()
+	_ = wErr.Close()
 
 	return <-outC, <-errC
 }
@@ -108,7 +108,7 @@ func SetupTestDB(t *testing.T) (configPath string, dbPath string) {
 	require.NoError(t, err, "Failed to create database")
 	err = db.AutoMigrate()
 	require.NoError(t, err, "Failed to run migrations")
-	db.Close()
+	_ = db.Close()
 
 	return configPath, dbPath
 }
@@ -145,7 +145,7 @@ func SetupTestDBWithConfig(t *testing.T, customizeFn func(*config.Config)) (conf
 	require.NoError(t, err, "Failed to create database")
 	err = db.AutoMigrate()
 	require.NoError(t, err, "Failed to run migrations")
-	db.Close()
+	_ = db.Close()
 
 	return configPath, dbPath
 }

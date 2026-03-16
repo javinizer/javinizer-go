@@ -513,7 +513,7 @@ func TestScrapeTask_Execute_DryRun(t *testing.T) {
 	// Initialize database
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	movieRepo := database.NewMovieRepository(db)
 
@@ -570,7 +570,7 @@ func TestScrapeTask_Execute_ForceRefresh(t *testing.T) {
 	// Initialize database
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Run migrations
 	err = db.AutoMigrate()
@@ -638,7 +638,7 @@ func TestScrapeTask_Execute_Cache(t *testing.T) {
 	// Initialize database
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Run migrations
 	err = db.AutoMigrate()
@@ -715,7 +715,7 @@ func TestScrapeTask_Execute_Cancellation(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	movieRepo := database.NewMovieRepository(db)
 	agg := aggregator.New(cfg)
@@ -792,7 +792,7 @@ func TestProcessFileTask_Execute_DisabledSteps(t *testing.T) {
 
 			db, err := database.New(cfg)
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 
 			movieRepo := database.NewMovieRepository(db)
 			agg := aggregator.New(cfg)
@@ -862,7 +862,7 @@ func TestNewTaskConstructors(t *testing.T) {
 			Database: config.DatabaseConfig{DSN: ":memory:"},
 		}
 		db, _ := database.New(cfg)
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 		movieRepo := database.NewMovieRepository(db)
 		agg := aggregator.New(cfg)
 
@@ -879,7 +879,7 @@ func TestNewTaskConstructors(t *testing.T) {
 			Database: config.DatabaseConfig{DSN: ":memory:"},
 		}
 		db, _ := database.New(cfg)
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 		movieRepo := database.NewMovieRepository(db)
 		agg := aggregator.New(cfg)
 
@@ -933,7 +933,7 @@ func TestNewTaskConstructors(t *testing.T) {
 		}
 		registry := models.NewScraperRegistry()
 		db, _ := database.New(cfg)
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 		movieRepo := database.NewMovieRepository(db)
 		agg := aggregator.New(cfg)
 		outputCfg := &config.OutputConfig{}

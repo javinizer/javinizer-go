@@ -29,9 +29,9 @@ func TestSearch(t *testing.T) {
 			if got := r.URL.Query().Get("q"); got != "N1234" {
 				t.Fatalf("query q = %q, want N1234", got)
 			}
-			fmt.Fprint(w, `<html><body><a href="/product/N1234/">N1234 Amazing Movie</a></body></html>`)
+			_, _ = fmt.Fprint(w, `<html><body><a href="/product/N1234/">N1234 Amazing Movie</a></body></html>`)
 		case "/product/N1234/":
-			fmt.Fprint(w, `<html><head><title>Amazing Movie | Tokyo-Hot</title></head><body>
+			_, _ = fmt.Fprint(w, `<html><head><title>Amazing Movie | Tokyo-Hot</title></head><body>
 <dl class="info">
   <dt>Product ID</dt><dd>N1234</dd>
   <dt>Release</dt><dd>2026/02/14</dd>

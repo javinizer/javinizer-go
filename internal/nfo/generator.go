@@ -391,7 +391,7 @@ func (g *Generator) WriteNFO(nfo *Movie, path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create NFO file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Write XML header
 	if _, err := file.WriteString(xml.Header); err != nil {

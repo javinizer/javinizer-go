@@ -105,7 +105,7 @@ func TestGenerateCroppedPoster_Success(t *testing.T) {
 			0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3F, 0x00,
 			0xFF, 0xD9, // EOI marker
 		}
-		w.Write(jpeg)
+		_, _ = w.Write(jpeg)
 	}))
 	defer testServer.Close()
 
@@ -127,7 +127,7 @@ func TestGenerateCroppedPoster_Success(t *testing.T) {
 	if err == nil {
 		// Cleanup if somehow it succeeded
 		posterPath := filepath.Join("data", "posters", "TEST-001.jpg")
-		os.Remove(posterPath)
+		_ = os.Remove(posterPath)
 	}
 }
 
@@ -163,7 +163,7 @@ func TestGenerateCroppedPoster_HTTPError(t *testing.T) {
 	posterPath := filepath.Join("data", "posters", "TEST-002.jpg")
 	if _, err := os.Stat(posterPath); !os.IsNotExist(err) {
 		t.Error("Expected no poster file to be created on HTTP error")
-		os.Remove(posterPath) // Cleanup if it exists
+		_ = os.Remove(posterPath) // Cleanup if it exists
 	}
 }
 
@@ -205,7 +205,7 @@ func TestGenerateCroppedPoster_ContextCancellation(t *testing.T) {
 	posterPath := filepath.Join("data", "posters", "TEST-003.jpg")
 	if _, err := os.Stat(posterPath); !os.IsNotExist(err) {
 		t.Error("Expected no poster file to be created on cancellation")
-		os.Remove(posterPath) // Cleanup if it exists
+		_ = os.Remove(posterPath) // Cleanup if it exists
 	}
 }
 

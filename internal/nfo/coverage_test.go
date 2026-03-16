@@ -61,7 +61,7 @@ func TestConfigFromAppConfig_WithDatabase(t *testing.T) {
 	}
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	require.NoError(t, db.AutoMigrate())
 
 	appCfg := &config.NFOConfig{
@@ -93,7 +93,7 @@ func TestConfigFromAppConfig_DatabaseDisabled(t *testing.T) {
 	}
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	appCfg := &config.NFOConfig{
 		FilenameTemplate: "<ID>.nfo",
@@ -189,7 +189,7 @@ func TestWriteNFO_ErrorPaths(t *testing.T) {
 
 		// Restore permissions in cleanup
 		t.Cleanup(func() {
-			os.Chmod(readOnlyDir, 0755)
+			_ = os.Chmod(readOnlyDir, 0755)
 		})
 
 		nfo := &Movie{
@@ -250,7 +250,7 @@ func TestExtractStreamDetails(t *testing.T) {
 
 		// Even with valid path, should not include stream details
 		tmpFile := filepath.Join(t.TempDir(), "video.mp4")
-		os.WriteFile(tmpFile, []byte("fake video"), 0644)
+		_ = os.WriteFile(tmpFile, []byte("fake video"), 0644)
 
 		nfo := genNoStream.MovieToNFO(movie, tmpFile)
 
@@ -445,7 +445,7 @@ func TestMovieToNFO_DatabaseTags(t *testing.T) {
 	}
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	require.NoError(t, db.AutoMigrate())
 
 	// Create tag repository
@@ -492,7 +492,7 @@ func TestMovieToNFO_TagDeduplication(t *testing.T) {
 	}
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	require.NoError(t, db.AutoMigrate())
 
 	tagRepo := database.NewMovieTagRepository(db)

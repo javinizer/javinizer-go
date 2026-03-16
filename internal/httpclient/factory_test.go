@@ -21,7 +21,7 @@ func TestNewTransport_NoProxy(t *testing.T) {
 	// Transport should be successfully created
 	// DialContext will be set by DefaultTransport.Clone(), which is expected
 	if transport == nil {
-		t.Error("Expected valid transport")
+		t.Fatal("Expected valid transport")
 	}
 	if transport.Proxy != nil {
 		t.Error("Expected transport.Proxy to be nil when proxy is not configured")
@@ -41,7 +41,7 @@ func TestNewTransport_ProxyDisabled(t *testing.T) {
 
 	// Even with URL set, disabled means URL is ignored
 	if transport == nil {
-		t.Error("Expected valid transport when proxy disabled")
+		t.Fatal("Expected valid transport when proxy disabled")
 	}
 	if transport.Proxy != nil {
 		t.Error("Expected transport.Proxy to be nil when proxy is disabled")
@@ -192,7 +192,7 @@ func TestNewTransport_EmptyURL(t *testing.T) {
 
 	// Empty URL with enabled should still create valid transport (no-op proxy config)
 	if transport == nil {
-		t.Error("Expected valid transport for empty URL")
+		t.Fatal("Expected valid transport for empty URL")
 	}
 	if transport.Proxy != nil {
 		t.Error("Expected transport.Proxy to be nil when proxy URL is empty")
@@ -293,7 +293,7 @@ func TestNewTransport_NilConfig(t *testing.T) {
 
 	// Nil config should create valid transport with defaults
 	if transport == nil {
-		t.Error("Expected valid transport with nil config")
+		t.Fatal("Expected valid transport with nil config")
 	}
 	if transport.Proxy != nil {
 		t.Error("Expected transport.Proxy to be nil for nil config")

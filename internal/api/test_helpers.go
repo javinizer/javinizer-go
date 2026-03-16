@@ -12,8 +12,7 @@ import (
 )
 
 var (
-	wsTestOnce sync.Once
-	wsTestMu   sync.Mutex
+	wsTestMu sync.Mutex
 )
 
 // cleanupServerHub cleans up the global hub created by NewServer

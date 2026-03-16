@@ -1,6 +1,8 @@
 package httpclient_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -75,7 +77,7 @@ func (s *ExampleScraper) fetchMultiplePages(urls []string) (map[string]string, e
 			// Fall back to individual requests
 			return s.fetchMultiplePagesDirect(urls)
 		}
-		defer s.flaresolverr.DestroySession(sessionID)
+		defer func() { _ = s.flaresolverr.DestroySession(sessionID) }()
 
 		// Fetch all pages using the same session
 		for _, url := range urls {
@@ -154,5 +156,23 @@ func TestExampleScraper_NoFlareSolverr(t *testing.T) {
 
 	if scraper.flaresolverr != nil {
 		t.Error("FlareSolverr should be disabled but is not nil")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	_, err = scraper.fetchPage(server.URL)
+	if err != nil {
+		t.Fatalf("fetchPage failed: %v", err)
+	}
+
+	pages, err := scraper.fetchMultiplePages([]string{server.URL})
+	if err != nil {
+		t.Fatalf("fetchMultiplePages failed: %v", err)
+	}
+	if len(pages) != 1 {
+		t.Fatalf("expected 1 page result, got %d", len(pages))
 	}
 }

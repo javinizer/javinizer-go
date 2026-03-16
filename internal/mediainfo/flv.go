@@ -86,7 +86,7 @@ func analyzeFLV(f *os.File) (*VideoInfo, error) {
 	}
 
 	// Seek to data offset
-	f.Seek(int64(header.DataOffset), io.SeekStart)
+	_, _ = f.Seek(int64(header.DataOffset), io.SeekStart)
 
 	// Read first PreviousTagSize (always 0)
 	if err := binary.Read(f, binary.BigEndian, &header.PrevTagSize); err != nil {
@@ -126,11 +126,11 @@ func analyzeFLV(f *os.File) (*VideoInfo, error) {
 				bytesConsumed := currentPos - startPos
 				bytesRemaining := int64(tag.DataSize) - bytesConsumed
 				if bytesRemaining > 0 {
-					f.Seek(bytesRemaining, io.SeekCurrent)
+					_, _ = f.Seek(bytesRemaining, io.SeekCurrent)
 				}
 			} else {
 				// Skip tag data if metadata already found
-				f.Seek(int64(tag.DataSize), io.SeekCurrent)
+				_, _ = f.Seek(int64(tag.DataSize), io.SeekCurrent)
 			}
 
 		case 9: // Video
@@ -139,10 +139,10 @@ func analyzeFLV(f *os.File) (*VideoInfo, error) {
 				// FLV video tag format: bits 7-4 = frame type, bits 3-0 = codec ID
 				info.VideoCodec = mapFLVVideoCodec(codecID & 0x0F)
 				// Seek back 1 byte
-				f.Seek(-1, io.SeekCurrent)
+				_, _ = f.Seek(-1, io.SeekCurrent)
 			}
 			// Skip tag data
-			f.Seek(int64(tag.DataSize), io.SeekCurrent)
+			_, _ = f.Seek(int64(tag.DataSize), io.SeekCurrent)
 
 		case 8: // Audio
 			if info.AudioCodec == "" {
@@ -158,14 +158,14 @@ func analyzeFLV(f *os.File) (*VideoInfo, error) {
 				info.AudioChannels = int(soundType) + 1 // 0 = mono, 1 = stereo
 
 				// Seek back 1 byte
-				f.Seek(-1, io.SeekCurrent)
+				_, _ = f.Seek(-1, io.SeekCurrent)
 			}
 			// Skip tag data
-			f.Seek(int64(tag.DataSize), io.SeekCurrent)
+			_, _ = f.Seek(int64(tag.DataSize), io.SeekCurrent)
 
 		default:
 			// Skip unknown tag types
-			f.Seek(int64(tag.DataSize), io.SeekCurrent)
+			_, _ = f.Seek(int64(tag.DataSize), io.SeekCurrent)
 		}
 
 		// Read PreviousTagSize for next tag
@@ -249,18 +249,25 @@ func parseAMF0(f *os.File, dataSize uint32) (map[string]interface{}, error) {
 	amfType, _ := readByte(f)
 	if amfType == 0x02 { // String type
 		var strLen uint16
-		binary.Read(f, binary.BigEndian, &strLen)
-		f.Seek(int64(strLen), io.SeekCurrent) // Skip string
+		if err := binary.Read(f, binary.BigEndian, &strLen); err != nil {
+			return metadata, fmt.Errorf("failed to read AMF string length: %w", err)
+		}
+		if _, err := f.Seek(int64(strLen), io.SeekCurrent); err != nil {
+			return metadata, fmt.Errorf("failed to skip AMF string: %w", err)
+		}
 	}
 
 	// Read ECMA array or object
 	amfType, _ = readByte(f)
-	if amfType == 0x08 { // ECMA array
+	switch amfType {
+	case 0x08: // ECMA array
 		var arrayLen uint32
-		binary.Read(f, binary.BigEndian, &arrayLen)
-	} else if amfType == 0x03 { // Object
+		if err := binary.Read(f, binary.BigEndian, &arrayLen); err != nil {
+			return metadata, fmt.Errorf("failed to read AMF array length: %w", err)
+		}
+	case 0x03: // Object
 		// Continue parsing
-	} else {
+	default:
 		return metadata, fmt.Errorf("unexpected AMF type: %d", amfType)
 	}
 
@@ -280,65 +287,75 @@ func parseAMF0(f *os.File, dataSize uint32) (map[string]interface{}, error) {
 		if nameLen == 0 {
 			// End of object marker
 			var endMarker uint8
-			binary.Read(f, binary.BigEndian, &endMarker)
+			if err := binary.Read(f, binary.BigEndian, &endMarker); err != nil {
+				return metadata, fmt.Errorf("failed to read AMF end marker: %w", err)
+			}
 			if endMarker == 0x09 {
 				break
 			}
 		}
 
 		nameBytes := make([]byte, nameLen)
-		f.Read(nameBytes)
+		if _, err := f.Read(nameBytes); err != nil {
+			return metadata, fmt.Errorf("failed to read AMF property name: %w", err)
+		}
 		name := string(nameBytes)
 
 		// Read property value
 		var valueType uint8
-		binary.Read(f, binary.BigEndian, &valueType)
+		if err := binary.Read(f, binary.BigEndian, &valueType); err != nil {
+			return metadata, fmt.Errorf("failed to read AMF value type: %w", err)
+		}
 
 		switch valueType {
 		case 0x00: // Number (float64)
 			var value float64
-			binary.Read(f, binary.BigEndian, &value)
+			_ = binary.Read(f, binary.BigEndian, &value)
 			metadata[name] = value
 
 		case 0x01: // Boolean
 			var value uint8
-			binary.Read(f, binary.BigEndian, &value)
+			_ = binary.Read(f, binary.BigEndian, &value)
 			metadata[name] = value != 0
 
 		case 0x02: // String
 			var strLen uint16
-			binary.Read(f, binary.BigEndian, &strLen)
+			if err := binary.Read(f, binary.BigEndian, &strLen); err != nil {
+				return metadata, fmt.Errorf("failed to read AMF string value length: %w", err)
+			}
 			strBytes := make([]byte, strLen)
-			f.Read(strBytes)
+			if _, err := f.Read(strBytes); err != nil {
+				return metadata, fmt.Errorf("failed to read AMF string value: %w", err)
+			}
 			metadata[name] = string(strBytes)
 
 		case 0x08: // ECMA array - skip entire array
 			var arrayLen uint32
-			binary.Read(f, binary.BigEndian, &arrayLen)
+			_ = binary.Read(f, binary.BigEndian, &arrayLen)
 			// Skip to end marker (would need recursive parsing)
 			// For now, seek to endPos to avoid corruption
-			f.Seek(endPos, io.SeekStart)
+			_, _ = f.Seek(endPos, io.SeekStart)
 			return metadata, nil
 
 		case 0x0A: // Strict array
 			var arrayLen uint32
-			binary.Read(f, binary.BigEndian, &arrayLen)
+			_ = binary.Read(f, binary.BigEndian, &arrayLen)
 			// Skip array elements - would need recursive parsing
-			f.Seek(endPos, io.SeekStart)
+			_, _ = f.Seek(endPos, io.SeekStart)
 			return metadata, nil
 
 		case 0x0B: // Date
 			// Date is 8 bytes (double) + 2 bytes (timezone)
-			f.Seek(10, io.SeekCurrent)
+			_, _ = f.Seek(10, io.SeekCurrent)
 
 		case 0x03: // Object
 			// Skip nested object - would need recursive parsing
-			f.Seek(endPos, io.SeekStart)
+			_, _ = f.Seek(endPos, io.SeekStart)
 			return metadata, nil
 
 		default:
 			// Unknown type - seek to end to avoid corruption
-			f.Seek(endPos, io.SeekStart)
+			_, _ = f.Seek(endPos, io.SeekStart)
 			return metadata, nil
 		}
 	}

@@ -357,9 +357,10 @@ func (m *Model) UpdateProgress(update worker.ProgressUpdate) {
 	}
 
 	// Log progress if significant
-	if update.Status == worker.TaskStatusSuccess {
+	switch update.Status {
+	case worker.TaskStatusSuccess:
 		m.AddLog("info", update.Message)
-	} else if update.Status == worker.TaskStatusFailed {
+	case worker.TaskStatusFailed:
 		m.AddLog("error", update.Message)
 	}
 }
@@ -770,7 +771,11 @@ func buildFileTree(basePath string, files []scanner.FileInfo, matchMap map[strin
 
 		// Track all directories between file and base path
 		current := dir
-		for current != absBasePath && current != "." && current != "/" && filepath.HasPrefix(current, absBasePath) {
+		for current != absBasePath && current != "." && current != "/" {
+			rel, err := filepath.Rel(absBasePath, current)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				break
+			}
 			allDirs[current] = true
 			parent := filepath.Dir(current)
 			if parent == current {

@@ -37,7 +37,7 @@ func TestSaveFileWriteError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Restore permissions in cleanup
-	defer os.Chmod(dirPath, 0755)
+	defer func() { _ = os.Chmod(dirPath, 0755) }()
 
 	cfg := DefaultConfig()
 	err = Save(cfg, cfgPath)
@@ -64,7 +64,7 @@ func TestLoadOrCreateSaveError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Restore permissions in cleanup
-	defer os.Chmod(tmpDir, 0755)
+	defer func() { _ = os.Chmod(tmpDir, 0755) }()
 
 	// Should fail due to permission error (either on read attempt or save attempt)
 	_, err = LoadOrCreate(cfgPath)

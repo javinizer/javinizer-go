@@ -37,20 +37,20 @@ func captureOutput(t *testing.T, fn func()) (string, string) {
 
 	go func() {
 		var buf bytes.Buffer
-		io.Copy(&buf, rOut)
+		_, _ = io.Copy(&buf, rOut)
 		outC <- buf.String()
 	}()
 
 	go func() {
 		var buf bytes.Buffer
-		io.Copy(&buf, rErr)
+		_, _ = io.Copy(&buf, rErr)
 		errC <- buf.String()
 	}()
 
 	fn()
 
-	wOut.Close()
-	wErr.Close()
+	_ = wOut.Close()
+	_ = wErr.Close()
 
 	return <-outC, <-errC
 }
@@ -141,7 +141,7 @@ func TestRunInit_DatabaseMigrations(t *testing.T) {
 	// Connect to the created database
 	db, err := database.New(cfgLoaded)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Verify critical tables exist by attempting to query them
 	// If migrations failed, these queries would fail

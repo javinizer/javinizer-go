@@ -57,8 +57,13 @@ func newMockMovieRepo() *database.MovieRepository {
 		},
 	}
 
-	db, _ := database.New(cfg)
-	db.AutoMigrate()
+	db, err := database.New(cfg)
+	if err != nil {
+		panic(err)
+	}
+	if err := db.AutoMigrate(); err != nil {
+		panic(err)
+	}
 	return database.NewMovieRepository(db)
 }
 
@@ -74,8 +79,13 @@ func newMockActressRepo() *database.ActressRepository {
 		},
 	}
 
-	db, _ := database.New(cfg)
-	db.AutoMigrate()
+	db, err := database.New(cfg)
+	if err != nil {
+		panic(err)
+	}
+	if err := db.AutoMigrate(); err != nil {
+		panic(err)
+	}
 	return database.NewActressRepository(db)
 }
 

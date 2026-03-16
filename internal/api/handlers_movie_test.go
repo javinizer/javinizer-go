@@ -20,7 +20,7 @@ func TestScrapeMovie(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestBody    interface{}
-		setupData      func(*database.MovieRepository)
+		setupData      func(*testing.T, *database.MovieRepository)
 		setupScraper   func(*models.ScraperRegistry)
 		expectedStatus int
 		validateFn     func(*testing.T, *ScrapeResponse)
@@ -30,7 +30,7 @@ func TestScrapeMovie(t *testing.T) {
 			requestBody: ScrapeRequest{
 				ID: "IPX-535",
 			},
-			setupData: func(repo *database.MovieRepository) {
+			setupData: func(_ *testing.T, repo *database.MovieRepository) {
 				// Empty - not cached
 			},
 			setupScraper: func(registry *models.ScraperRegistry) {
@@ -57,11 +57,11 @@ func TestScrapeMovie(t *testing.T) {
 			requestBody: ScrapeRequest{
 				ID: "IPX-535",
 			},
-			setupData: func(repo *database.MovieRepository) {
-				repo.Upsert(&models.Movie{
+			setupData: func(t *testing.T, repo *database.MovieRepository) {
+				require.NoError(t, repo.Upsert(&models.Movie{
 					ID:    "IPX-535",
 					Title: "Cached Movie",
-				})
+				}))
 			},
 			setupScraper:   func(registry *models.ScraperRegistry) {},
 			expectedStatus: 200,
@@ -75,7 +75,7 @@ func TestScrapeMovie(t *testing.T) {
 			requestBody: map[string]string{
 				"invalid": "data",
 			},
-			setupData:      func(repo *database.MovieRepository) {},
+			setupData:      func(_ *testing.T, repo *database.MovieRepository) {},
 			setupScraper:   func(registry *models.ScraperRegistry) {},
 			expectedStatus: 400,
 		},
@@ -84,7 +84,7 @@ func TestScrapeMovie(t *testing.T) {
 			requestBody: ScrapeRequest{
 				ID: "INVALID-123",
 			},
-			setupData: func(repo *database.MovieRepository) {},
+			setupData: func(_ *testing.T, repo *database.MovieRepository) {},
 			setupScraper: func(registry *models.ScraperRegistry) {
 				registry.Register(&mockScraperWithResults{
 					name:    "r18dev",
@@ -105,7 +105,7 @@ func TestScrapeMovie(t *testing.T) {
 			}
 
 			deps := createTestDeps(t, cfg, "")
-			tt.setupData(deps.MovieRepo)
+			tt.setupData(t, deps.MovieRepo)
 			tt.setupScraper(deps.Registry)
 
 			router := gin.New()
@@ -142,18 +142,18 @@ func TestGetMovie(t *testing.T) {
 	tests := []struct {
 		name           string
 		movieID        string
-		setupData      func(*database.MovieRepository)
+		setupData      func(*testing.T, *database.MovieRepository)
 		expectedStatus int
 		validateFn     func(*testing.T, *MovieResponse)
 	}{
 		{
 			name:    "get existing movie",
 			movieID: "IPX-535",
-			setupData: func(repo *database.MovieRepository) {
-				repo.Upsert(&models.Movie{
+			setupData: func(t *testing.T, repo *database.MovieRepository) {
+				require.NoError(t, repo.Upsert(&models.Movie{
 					ID:    "IPX-535",
 					Title: "Test Movie",
-				})
+				}))
 			},
 			expectedStatus: 200,
 			validateFn: func(t *testing.T, resp *MovieResponse) {
@@ -164,7 +164,7 @@ func TestGetMovie(t *testing.T) {
 		{
 			name:           "movie not found",
 			movieID:        "NONEXISTENT-123",
-			setupData:      func(repo *database.MovieRepository) {},
+			setupData:      func(_ *testing.T, repo *database.MovieRepository) {},
 			expectedStatus: 404,
 		},
 	}
@@ -173,7 +173,7 @@ func TestGetMovie(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{}
 			deps := createTestDeps(t, cfg, "")
-			tt.setupData(deps.MovieRepo)
+			tt.setupData(t, deps.MovieRepo)
 
 			router := gin.New()
 			router.GET("/movie/:id", getMovie(deps))
@@ -198,15 +198,15 @@ func TestGetMovie(t *testing.T) {
 func TestListMovies(t *testing.T) {
 	tests := []struct {
 		name           string
-		setupData      func(*database.MovieRepository)
+		setupData      func(*testing.T, *database.MovieRepository)
 		expectedStatus int
 		validateFn     func(*testing.T, *MoviesResponse)
 	}{
 		{
 			name: "list multiple movies",
-			setupData: func(repo *database.MovieRepository) {
-				repo.Upsert(&models.Movie{ContentID: "ipx535", ID: "IPX-535", Title: "Movie 1"})
-				repo.Upsert(&models.Movie{ContentID: "abc123", ID: "ABC-123", Title: "Movie 2"})
+			setupData: func(t *testing.T, repo *database.MovieRepository) {
+				require.NoError(t, repo.Upsert(&models.Movie{ContentID: "ipx535", ID: "IPX-535", Title: "Movie 1"}))
+				require.NoError(t, repo.Upsert(&models.Movie{ContentID: "abc123", ID: "ABC-123", Title: "Movie 2"}))
 			},
 			expectedStatus: 200,
 			validateFn: func(t *testing.T, resp *MoviesResponse) {
@@ -216,7 +216,7 @@ func TestListMovies(t *testing.T) {
 		},
 		{
 			name:           "list empty database",
-			setupData:      func(repo *database.MovieRepository) {},
+			setupData:      func(_ *testing.T, repo *database.MovieRepository) {},
 			expectedStatus: 200,
 			validateFn: func(t *testing.T, resp *MoviesResponse) {
 				assert.Empty(t, resp.Movies)
@@ -228,7 +228,7 @@ func TestListMovies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{}
 			deps := createTestDeps(t, cfg, "")
-			tt.setupData(deps.MovieRepo)
+			tt.setupData(t, deps.MovieRepo)
 
 			router := gin.New()
 			router.GET("/movies", listMovies(deps))

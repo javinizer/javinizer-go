@@ -18,7 +18,7 @@ func TestRescrapeMovie(t *testing.T) {
 		name           string
 		movieID        string
 		requestBody    interface{}
-		setupData      func(*ServerDependencies)
+		setupData      func(*testing.T, *ServerDependencies)
 		setupScraper   func(*models.ScraperRegistry)
 		expectedStatus int
 		validateFn     func(*testing.T, *httptest.ResponseRecorder)
@@ -30,12 +30,12 @@ func TestRescrapeMovie(t *testing.T) {
 				SelectedScrapers: []string{"r18dev"},
 				Force:            true,
 			},
-			setupData: func(deps *ServerDependencies) {
+			setupData: func(t *testing.T, deps *ServerDependencies) {
 				// Pre-populate with cached movie
-				deps.MovieRepo.Upsert(&models.Movie{
+				require.NoError(t, deps.MovieRepo.Upsert(&models.Movie{
 					ID:    "IPX-123",
 					Title: "Old Title",
-				})
+				}))
 			},
 			setupScraper: func(registry *models.ScraperRegistry) {
 				registry.Register(&mockScraperWithResults{
@@ -64,11 +64,11 @@ func TestRescrapeMovie(t *testing.T) {
 				SelectedScrapers: []string{"dmm"},
 				Force:            false,
 			},
-			setupData: func(deps *ServerDependencies) {
-				deps.MovieRepo.Upsert(&models.Movie{
+			setupData: func(t *testing.T, deps *ServerDependencies) {
+				require.NoError(t, deps.MovieRepo.Upsert(&models.Movie{
 					ID:    "IPX-456",
 					Title: "Cached Title",
-				})
+				}))
 			},
 			setupScraper: func(registry *models.ScraperRegistry) {
 				registry.Register(&mockScraperWithResults{
@@ -95,7 +95,7 @@ func TestRescrapeMovie(t *testing.T) {
 			requestBody: map[string]string{
 				"invalid": "field",
 			},
-			setupData:      func(deps *ServerDependencies) {},
+			setupData:      func(_ *testing.T, deps *ServerDependencies) {},
 			setupScraper:   func(registry *models.ScraperRegistry) {},
 			expectedStatus: 400,
 		},
@@ -106,7 +106,7 @@ func TestRescrapeMovie(t *testing.T) {
 				SelectedScrapers: []string{},
 				Force:            false,
 			},
-			setupData:      func(deps *ServerDependencies) {},
+			setupData:      func(_ *testing.T, deps *ServerDependencies) {},
 			setupScraper:   func(registry *models.ScraperRegistry) {},
 			expectedStatus: 400,
 			validateFn: func(t *testing.T, w *httptest.ResponseRecorder) {
@@ -123,7 +123,7 @@ func TestRescrapeMovie(t *testing.T) {
 				SelectedScrapers: []string{"r18dev", "dmm"},
 				Force:            false,
 			},
-			setupData: func(deps *ServerDependencies) {},
+			setupData: func(_ *testing.T, deps *ServerDependencies) {},
 			setupScraper: func(registry *models.ScraperRegistry) {
 				registry.Register(&mockScraperWithResults{
 					name:    "r18dev",
@@ -152,7 +152,7 @@ func TestRescrapeMovie(t *testing.T) {
 				SelectedScrapers: []string{"r18dev", "dmm"},
 				Force:            false,
 			},
-			setupData: func(deps *ServerDependencies) {},
+			setupData: func(_ *testing.T, deps *ServerDependencies) {},
 			setupScraper: func(registry *models.ScraperRegistry) {
 				// First scraper fails
 				registry.Register(&mockScraperWithResults{
@@ -192,7 +192,7 @@ func TestRescrapeMovie(t *testing.T) {
 			}
 
 			deps := createTestDeps(t, cfg, "")
-			tt.setupData(deps)
+			tt.setupData(t, deps)
 			tt.setupScraper(deps.Registry)
 
 			router := gin.New()

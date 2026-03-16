@@ -189,31 +189,24 @@ func NewClient(conn *websocket.Conn) *Client {
 // WritePump pumps messages from the hub to the websocket connection
 func (c *Client) WritePump() {
 	defer func() {
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 
-	for {
-		select {
-		case message, ok := <-c.send:
-			if !ok {
-				// The hub closed the channel
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
-
-			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-				logging.Errorf("Error writing to websocket: %v", err)
-				return
-			}
+	for message := range c.send {
+		if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			logging.Errorf("Error writing to websocket: %v", err)
+			return
 		}
 	}
+	// The hub closed the channel.
+	_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 }
 
 // ReadPump pumps messages from the websocket connection to the hub
 func (c *Client) ReadPump(hub *Hub) {
 	defer func() {
 		hub.Unregister(c)
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 
 	for {

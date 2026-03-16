@@ -22,7 +22,7 @@ func TestGenreRepository(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewGenreRepository(db)
@@ -85,7 +85,7 @@ func TestGenreRepository(t *testing.T) {
 
 		db2, err := New(cfg)
 		require.NoError(t, err)
-		defer db2.Close()
+		defer func() { _ = db2.Close() }()
 
 		require.NoError(t, db2.AutoMigrate())
 		repo2 := NewGenreRepository(db2)
@@ -109,7 +109,7 @@ func TestGenreReplacementRepository(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewGenreReplacementRepository(db)
@@ -260,7 +260,7 @@ func TestGenreReplacementRepository(t *testing.T) {
 
 		db2, err := New(cfg)
 		require.NoError(t, err)
-		defer db2.Close()
+		defer func() { _ = db2.Close() }()
 
 		require.NoError(t, db2.AutoMigrate())
 		repo2 := NewGenreReplacementRepository(db2)

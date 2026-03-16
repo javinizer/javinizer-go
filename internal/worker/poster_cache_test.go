@@ -63,7 +63,7 @@ func TestPosterRegenerationOnCacheHit(t *testing.T) {
 		posterDownloadCount++
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write(testImageData)
+		_, _ = w.Write(testImageData)
 	}))
 	defer testServer.Close()
 
@@ -89,7 +89,7 @@ func TestPosterRegenerationOnCacheHit(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err, "Failed to create database")
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = db.AutoMigrate()
 	require.NoError(t, err, "Failed to migrate database")

@@ -589,7 +589,7 @@ func TestProcessFileTask_ConcurrentExecution(t *testing.T) {
 				nil, // no custom scraper priority
 			)
 
-			pool.Submit(task)
+			_ = pool.Submit(task)
 		}
 
 		err := pool.Wait()

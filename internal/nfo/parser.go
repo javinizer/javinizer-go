@@ -30,7 +30,7 @@ func ParseNFO(fs afero.Fs, filePath string) (*ParseResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read NFO file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Limit reader to prevent memory exhaustion on large files
 	limited := io.LimitReader(f, maxNFOSize)

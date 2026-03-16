@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestDownload_Success tests successful download scenarios using MockHTTPClient
@@ -75,7 +76,7 @@ func TestDownload_Success(t *testing.T) {
 
 			// For "skip - file already exists" test, pre-create the file
 			if tt.wantDownloaded == false && tt.name == "skip - file already exists" {
-				afero.WriteFile(memFS, tt.destPath, goldenData, 0644)
+				require.NoError(t, afero.WriteFile(memFS, tt.destPath, goldenData, 0644))
 			}
 
 			// Configure mock expectations only if we expect a download

@@ -106,7 +106,7 @@ func TestNewWithOptions_InjectedRepositories(t *testing.T) {
 	}
 	db, err := database.New(dbCfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	require.NoError(t, db.AutoMigrate())
 
 	genreRepo := database.NewGenreReplacementRepository(db)
@@ -143,7 +143,7 @@ func TestNewWithOptions_CachePrecedence(t *testing.T) {
 	}
 	db, err := database.New(dbCfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	require.NoError(t, db.AutoMigrate())
 
 	genreRepo := database.NewGenreReplacementRepository(db)
@@ -189,7 +189,7 @@ func TestNewWithDatabase_BackwardCompatibility(t *testing.T) {
 	}
 	db, err := database.New(dbCfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	require.NoError(t, db.AutoMigrate())
 
 	// Populate database with test data

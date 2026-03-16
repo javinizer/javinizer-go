@@ -188,10 +188,8 @@ func TestScanAndMatch_WithSkippedFiles(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, scanResult)
 
-		// Should have skipped the small file (checking scanResult.Skipped is sufficient)
-		if len(scanResult.Skipped) > 0 {
-			// Success - small file was skipped due to size
-		}
+		// Should have skipped the small file due to size filtering
+		assert.GreaterOrEqual(t, len(scanResult.Skipped), 1)
 	})
 }
 

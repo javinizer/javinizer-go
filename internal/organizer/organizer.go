@@ -419,7 +419,7 @@ func (o *Organizer) Execute(plan *OrganizePlan, dryRun bool) (*OrganizeResult, e
 		if oldFileName != plan.TargetFile {
 			if err := o.fs.Rename(currentFilePath, plan.TargetPath); err != nil {
 				// Try to rollback directory rename on file rename failure
-				o.fs.Rename(plan.TargetDir, plan.OldDir)
+				_ = o.fs.Rename(plan.TargetDir, plan.OldDir)
 				result.Error = fmt.Errorf("failed to rename file after directory rename: %w", err)
 				return result, result.Error
 			}
@@ -661,14 +661,14 @@ func (o *Organizer) CopyWithLinkMode(plan *OrganizePlan, dryRun bool, linkMode L
 			result.Error = fmt.Errorf("failed to open source file: %w", err)
 			return result, result.Error
 		}
-		defer sourceFile.Close()
+		defer func() { _ = sourceFile.Close() }()
 
 		targetFile, err := o.fs.Create(plan.TargetPath)
 		if err != nil {
 			result.Error = fmt.Errorf("failed to create target file: %w", err)
 			return result, result.Error
 		}
-		defer targetFile.Close()
+		defer func() { _ = targetFile.Close() }()
 
 		// Copy data
 		if _, err := io.Copy(targetFile, sourceFile); err != nil {
@@ -729,7 +729,7 @@ func (o *Organizer) Revert(result *OrganizeResult) error {
 
 	// Try to remove the directory if it's empty
 	dir := filepath.Dir(result.NewPath)
-	o.fs.Remove(dir) // Ignore error - directory might not be empty
+	_ = o.fs.Remove(dir) // Ignore error - directory might not be empty
 
 	return nil
 }
@@ -793,13 +793,7 @@ func (o *Organizer) CleanEmptyDirectories(path string, baseDir string) error {
 		return err
 	}
 
-	for {
-		// CRITICAL: Check if we've reached baseDir BEFORE attempting removal
-		if dir == baseDir {
-			// Don't remove the base directory itself
-			break
-		}
-
+	for dir != baseDir {
 		// Check if directory is empty
 		entries, err := afero.ReadDir(o.fs, dir)
 		if err != nil {

@@ -100,7 +100,7 @@ func decodePosterSource(fs afero.Fs, coverPath string) (image.Image, int, int, e
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("failed to open cover image: %w", err)
 	}
-	defer coverFile.Close()
+	defer func() { _ = coverFile.Close() }()
 
 	img, _, err := image.Decode(coverFile)
 	if err != nil {
@@ -150,7 +150,7 @@ func cropAndWritePoster(fs afero.Fs, img image.Image, posterPath string, left, t
 	if err != nil {
 		return fmt.Errorf("failed to create poster file: %w", err)
 	}
-	defer posterFile.Close()
+	defer func() { _ = posterFile.Close() }()
 
 	opts := &jpeg.Options{Quality: 95}
 	if err := jpeg.Encode(posterFile, finalImage, opts); err != nil {

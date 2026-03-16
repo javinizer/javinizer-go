@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -443,33 +442,6 @@ func TestOrganizeTask_Execute_MoveVsCopy(t *testing.T) {
 	})
 }
 
-// mockOrganizeTask is a simplified mock for testing task interface
-type mockOrganizeTask struct {
-	BaseTask
-	shouldFail      bool
-	executeCalled   bool
-	progressTracker *ProgressTracker
-}
-
-func (m *mockOrganizeTask) Execute(ctx context.Context) error {
-	m.executeCalled = true
-	m.progressTracker.Update(m.id, 0.5, "Mocking organize", 0)
-
-	// Check for context cancellation
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	if m.shouldFail {
-		return errors.New("mock organize failed")
-	}
-
-	m.progressTracker.Update(m.id, 1.0, "Mock complete", 0)
-	return nil
-}
-
 func TestOrganizeTask_Interface(t *testing.T) {
 	t.Run("Implements Task interface", func(t *testing.T) {
 		progressChan := make(chan ProgressUpdate, 10)
@@ -556,7 +528,7 @@ func TestOrganizeTask_ConcurrentExecution(t *testing.T) {
 			movie := &models.Movie{ID: fmt.Sprintf("IPX-%d", i)}
 
 			task := NewOrganizeTask(match, movie, tmpDir, false, false, org, tracker, true)
-			pool.Submit(task)
+			_ = pool.Submit(task)
 		}
 
 		err := pool.Wait()

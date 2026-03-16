@@ -124,7 +124,7 @@ func getImageDimensions(url string, client *http.Client) (width, height int, err
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to fetch image: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, 0, fmt.Errorf("image not found (status %d)", resp.StatusCode)

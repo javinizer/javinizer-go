@@ -316,7 +316,7 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 			setupNFO: func() string {
 				nfoPath := filepath.Join(tempDir, "test.nfo")
 				content := `<?xml version="1.0" encoding="UTF-8"?><movie><title>Test</title></movie>`
-				os.WriteFile(nfoPath, []byte(content), 0644)
+				_ = os.WriteFile(nfoPath, []byte(content), 0644)
 				return nfoPath
 			},
 			movieID:       "IPX-001",
@@ -347,7 +347,7 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 			setupNFO: func() string {
 				nfoPath := filepath.Join(tempDir, "malformed.nfo")
 				content := `<movie><title>Unclosed tag`
-				os.WriteFile(nfoPath, []byte(content), 0644)
+				_ = os.WriteFile(nfoPath, []byte(content), 0644)
 				return nfoPath
 			},
 			movieID:        "IPX-001",
@@ -362,7 +362,7 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 			setupNFO: func() string {
 				nfoPath := filepath.Join(tempDir, "noscrape.nfo")
 				content := `<?xml version="1.0" encoding="UTF-8"?><movie><title>Test</title></movie>`
-				os.WriteFile(nfoPath, []byte(content), 0644)
+				_ = os.WriteFile(nfoPath, []byte(content), 0644)
 				return nfoPath
 			},
 			movieID:       "INVALID-999",

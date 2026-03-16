@@ -22,7 +22,7 @@ metadata:
 	if err := os.WriteFile(tmpFile, []byte(newConfig), 0644); err != nil {
 		t.Fatalf("Failed to write config: %v", err)
 	}
-	defer os.Remove(tmpFile)
+	defer func() { _ = os.Remove(tmpFile) }()
 
 	// Load config
 	cfg, err := Load(tmpFile)
@@ -64,7 +64,7 @@ metadata:
 	if err := os.WriteFile(tmpFile, []byte(oldConfig), 0644); err != nil {
 		t.Fatalf("Failed to write config: %v", err)
 	}
-	defer os.Remove(tmpFile)
+	defer func() { _ = os.Remove(tmpFile) }()
 
 	// Load config - old field names should be ignored, defaults used
 	cfg, err := Load(tmpFile)

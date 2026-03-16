@@ -31,7 +31,7 @@ func (m *MockScraper) Search(id string) (*models.ScraperResult, error) { return 
 func TestScrapeTask_ForceRefresh(t *testing.T) {
 	// Setup test database
 	testDBPath := filepath.Join(os.TempDir(), "test_force_refresh.db")
-	defer os.Remove(testDBPath)
+	defer func() { _ = os.Remove(testDBPath) }()
 
 	dbCfg := &config.Config{
 		Database: config.DatabaseConfig{
@@ -53,7 +53,7 @@ func TestScrapeTask_ForceRefresh(t *testing.T) {
 
 	db, err := database.New(dbCfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Run migrations
 	err = db.AutoMigrate()
@@ -171,7 +171,7 @@ func TestScrapeTask_ForceRefresh(t *testing.T) {
 // TestMovieRepository_DeleteWithTranslations tests that Delete removes translations
 func TestMovieRepository_DeleteWithTranslations(t *testing.T) {
 	testDBPath := filepath.Join(os.TempDir(), "test_delete_translations.db")
-	defer os.Remove(testDBPath)
+	defer func() { _ = os.Remove(testDBPath) }()
 
 	dbCfg := &config.Config{
 		Database: config.DatabaseConfig{
@@ -182,7 +182,7 @@ func TestMovieRepository_DeleteWithTranslations(t *testing.T) {
 
 	db, err := database.New(dbCfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = db.AutoMigrate()
 	require.NoError(t, err)
@@ -230,7 +230,7 @@ func TestMovieRepository_DeleteWithTranslations(t *testing.T) {
 func TestScrapeTask_ForceRefresh_NotInCache(t *testing.T) {
 	// Setup test database
 	testDBPath := filepath.Join(os.TempDir(), "test_force_refresh_not_in_cache.db")
-	defer os.Remove(testDBPath)
+	defer func() { _ = os.Remove(testDBPath) }()
 
 	dbCfg := &config.Config{
 		Database: config.DatabaseConfig{
@@ -252,7 +252,7 @@ func TestScrapeTask_ForceRefresh_NotInCache(t *testing.T) {
 
 	db, err := database.New(dbCfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Run migrations
 	err = db.AutoMigrate()

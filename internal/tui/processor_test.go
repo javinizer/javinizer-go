@@ -80,7 +80,7 @@ func TestSetGetCustomScrapers_DefensiveCopy(t *testing.T) {
 			assert.Equal(t, tt.expectedGet, got)
 
 			// Verify modifying returned slice doesn't affect internal state
-			if got != nil && len(got) > 0 {
+			if len(got) > 0 {
 				got[0] = "external-modification"
 				gotAgain := pc.GetCustomScrapers()
 				assert.Equal(t, tt.expectedGet, gotAgain, "Internal state should not be affected by external modification")

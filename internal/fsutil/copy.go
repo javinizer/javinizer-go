@@ -25,7 +25,7 @@ func CopyFileAtomic(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open source file: %w", err)
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	// Get source file permissions
 	srcInfo, err := srcFile.Stat()
@@ -51,18 +51,18 @@ func CopyFileAtomic(src, dst string) error {
 	closeErr := tmpFile.Close()
 
 	if err != nil {
-		os.Remove(tmpDst) // Clean up temp file on copy error
+		_ = os.Remove(tmpDst) // Clean up temp file on copy error
 		return fmt.Errorf("failed to copy data: %w", err)
 	}
 
 	if closeErr != nil {
-		os.Remove(tmpDst) // Clean up temp file on close error
+		_ = os.Remove(tmpDst) // Clean up temp file on close error
 		return fmt.Errorf("failed to close temp file: %w", closeErr)
 	}
 
 	// Preserve source file permissions
 	if err := os.Chmod(tmpDst, srcInfo.Mode().Perm()); err != nil {
-		os.Remove(tmpDst)
+		_ = os.Remove(tmpDst)
 		return fmt.Errorf("failed to set file permissions: %w", err)
 	}
 
@@ -74,23 +74,23 @@ func CopyFileAtomic(src, dst string) error {
 			if err != nil {
 				return err
 			}
-			defer in.Close()
+			defer func() { _ = in.Close() }()
 
 			out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm())
 			if err != nil {
 				return err
 			}
-			defer out.Close()
+			defer func() { _ = out.Close() }()
 
 			if _, err := io.Copy(out, in); err != nil {
 				return err
 			}
 			return nil
 		}(); copyErr != nil {
-			os.Remove(tmpDst)
+			_ = os.Remove(tmpDst)
 			return fmt.Errorf("failed to finalize copy (rename: %v, fallback: %v)", err, copyErr)
 		}
-		os.Remove(tmpDst)
+		_ = os.Remove(tmpDst)
 	}
 
 	return nil

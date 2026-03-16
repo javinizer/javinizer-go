@@ -130,13 +130,11 @@ func (l *Logger) LogNFO(movieID, nfoPath string, err error) error {
 
 // LogRevert logs a revert operation
 func (l *Logger) LogRevert(movieID, originalPath, revertedFrom string, err error) error {
-	status := "success"
+	status := "reverted"
 	errorMsg := ""
 	if err != nil {
 		status = "failed"
 		errorMsg = err.Error()
-	} else {
-		status = "reverted"
 	}
 
 	history := &models.History{

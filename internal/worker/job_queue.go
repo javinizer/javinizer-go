@@ -183,9 +183,10 @@ func (job *BatchJob) UpdateFileResult(filePath string, result *FileResult) {
 	completed := 0
 	failed := 0
 	for _, r := range job.Results {
-		if r.Status == JobStatusCompleted {
+		switch r.Status {
+		case JobStatusCompleted:
 			completed++
-		} else if r.Status == JobStatusFailed {
+		case JobStatusFailed:
 			failed++
 		}
 	}
@@ -248,9 +249,10 @@ func (job *BatchJob) AtomicUpdateFileResult(filePath string, updateFn func(*File
 	completed := 0
 	failed := 0
 	for _, r := range job.Results {
-		if r.Status == JobStatusCompleted {
+		switch r.Status {
+		case JobStatusCompleted:
 			completed++
-		} else if r.Status == JobStatusFailed {
+		case JobStatusFailed:
 			failed++
 		}
 	}

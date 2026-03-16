@@ -37,8 +37,8 @@ func setupTestDB(t *testing.T) (*database.DB, func()) {
 	require.NoError(t, err, "Failed to run migrations")
 
 	cleanup := func() {
-		db.Close()
-		os.RemoveAll(tmpDir)
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
 	}
 
 	return db, cleanup
@@ -437,11 +437,11 @@ func TestGetByOperation(t *testing.T) {
 	logger := NewLogger(db)
 
 	// Create different operation types
-	logger.LogOrganize("IPX-535", "/old/path.mp4", "/new/path.mp4", false, nil)
-	logger.LogOrganize("IPX-536", "/old/path2.mp4", "/new/path2.mp4", false, nil)
-	logger.LogScrape("IPX-535", "https://example.com", nil, nil)
-	logger.LogDownload("IPX-535", "https://example.com/cover.jpg", "/local/cover.jpg", "cover", nil)
-	logger.LogNFO("IPX-535", "/path/to/nfo", nil)
+	_ = logger.LogOrganize("IPX-535", "/old/path.mp4", "/new/path.mp4", false, nil)
+	_ = logger.LogOrganize("IPX-536", "/old/path2.mp4", "/new/path2.mp4", false, nil)
+	_ = logger.LogScrape("IPX-535", "https://example.com", nil, nil)
+	_ = logger.LogDownload("IPX-535", "https://example.com/cover.jpg", "/local/cover.jpg", "cover", nil)
+	_ = logger.LogNFO("IPX-535", "/path/to/nfo", nil)
 
 	// Get only scrape operations
 	scrapeRecords, err := logger.GetByOperation("scrape", 10)
@@ -493,10 +493,10 @@ func TestGetByStatus(t *testing.T) {
 	logger := NewLogger(db)
 
 	// Create records with different statuses
-	logger.LogOrganize("IPX-535", "/old/path.mp4", "/new/path.mp4", false, nil)
-	logger.LogOrganize("IPX-536", "/old/path.mp4", "/new/path.mp4", false, errors.New("error"))
-	logger.LogRevert("IPX-537", "/original/path.mp4", "/organized/path.mp4", nil)
-	logger.LogOrganize("IPX-538", "/old/path.mp4", "/new/path.mp4", false, nil)
+	_ = logger.LogOrganize("IPX-535", "/old/path.mp4", "/new/path.mp4", false, nil)
+	_ = logger.LogOrganize("IPX-536", "/old/path.mp4", "/new/path.mp4", false, errors.New("error"))
+	_ = logger.LogRevert("IPX-537", "/original/path.mp4", "/organized/path.mp4", nil)
+	_ = logger.LogOrganize("IPX-538", "/old/path.mp4", "/new/path.mp4", false, nil)
 
 	// Get only successful operations
 	successRecords, err := logger.GetByStatus("success", 10)
@@ -521,12 +521,12 @@ func TestGetStats(t *testing.T) {
 	logger := NewLogger(db)
 
 	// Create various records
-	logger.LogOrganize("IPX-535", "/old/path.mp4", "/new/path.mp4", false, nil)
-	logger.LogOrganize("IPX-536", "/old/path.mp4", "/new/path.mp4", false, errors.New("error"))
-	logger.LogScrape("IPX-535", "https://example.com", nil, nil)
-	logger.LogDownload("IPX-535", "https://example.com/cover.jpg", "/local/cover.jpg", "cover", nil)
-	logger.LogNFO("IPX-535", "/path/to/nfo", nil)
-	logger.LogRevert("IPX-535", "/original/path.mp4", "/organized/path.mp4", nil)
+	_ = logger.LogOrganize("IPX-535", "/old/path.mp4", "/new/path.mp4", false, nil)
+	_ = logger.LogOrganize("IPX-536", "/old/path.mp4", "/new/path.mp4", false, errors.New("error"))
+	_ = logger.LogScrape("IPX-535", "https://example.com", nil, nil)
+	_ = logger.LogDownload("IPX-535", "https://example.com/cover.jpg", "/local/cover.jpg", "cover", nil)
+	_ = logger.LogNFO("IPX-535", "/path/to/nfo", nil)
+	_ = logger.LogRevert("IPX-535", "/original/path.mp4", "/organized/path.mp4", nil)
 
 	stats, err := logger.GetStats()
 	require.NoError(t, err, "GetStats failed")
@@ -626,10 +626,10 @@ func TestMultipleMovies(t *testing.T) {
 	logger := NewLogger(db)
 
 	// Create records for multiple movies
-	logger.LogOrganize("IPX-535", "/old/path1.mp4", "/new/path1.mp4", false, nil)
-	logger.LogOrganize("IPX-536", "/old/path2.mp4", "/new/path2.mp4", false, nil)
-	logger.LogOrganize("IPX-535", "/old/path3.mp4", "/new/path3.mp4", false, nil)
-	logger.LogScrape("IPX-536", "https://example.com", nil, nil)
+	_ = logger.LogOrganize("IPX-535", "/old/path1.mp4", "/new/path1.mp4", false, nil)
+	_ = logger.LogOrganize("IPX-536", "/old/path2.mp4", "/new/path2.mp4", false, nil)
+	_ = logger.LogOrganize("IPX-535", "/old/path3.mp4", "/new/path3.mp4", false, nil)
+	_ = logger.LogScrape("IPX-536", "https://example.com", nil, nil)
 
 	// Get records for specific movie
 	ipx535Records, err := logger.GetByMovieID("IPX-535")
@@ -787,7 +787,7 @@ func BenchmarkLogOrganize(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.AutoMigrate(); err != nil {
 		b.Fatalf("Failed to run migrations: %v", err)
@@ -821,7 +821,7 @@ func BenchmarkGetStats(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.AutoMigrate(); err != nil {
 		b.Fatalf("Failed to run migrations: %v", err)
@@ -832,7 +832,7 @@ func BenchmarkGetStats(b *testing.B) {
 	// Populate with test data
 	for i := 0; i < 1000; i++ {
 		movieID := fmt.Sprintf("IPX-%d", i%100)
-		logger.LogOrganize(movieID, "/old/path.mp4", "/new/path.mp4", false, nil)
+		_ = logger.LogOrganize(movieID, "/old/path.mp4", "/new/path.mp4", false, nil)
 	}
 
 	b.ResetTimer()

@@ -95,7 +95,7 @@ func (r *ProberRegistry) ProbeWithFallback(f *os.File) (*VideoInfo, error) {
 	// Fallback to CLI if enabled
 	if r.cliProber != nil {
 		// Reset file pointer again for CLI
-		f.Seek(0, 0)
+		_, _ = f.Seek(0, 0)
 		return r.cliProber.Probe(f)
 	}
 

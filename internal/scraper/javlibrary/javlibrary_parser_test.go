@@ -77,19 +77,18 @@ func TestParseDetailPage(t *testing.T) {
 }
 
 func TestSearch_SearchResultFlow(t *testing.T) {
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/en/vl_searchbyid.php":
 			if got := r.URL.Query().Get("keyword"); got != "IPX-123" {
 				t.Fatalf("keyword = %q, want IPX-123", got)
 			}
-			fmt.Fprint(w, `<html><body><a href="?v=javli43uqe">result</a></body></html>`)
+			_, _ = fmt.Fprint(w, `<html><body><a href="?v=javli43uqe">result</a></body></html>`)
 		case "/en/":
 			if got := r.URL.Query().Get("v"); got != "javli43uqe" {
 				t.Fatalf("detail query v = %q, want javli43uqe", got)
 			}
-			fmt.Fprint(w, `<html><head><title>IPX-123 Search Flow Title - JAVLibrary</title></head><body>
+			_, _ = fmt.Fprint(w, `<html><head><title>IPX-123 Search Flow Title - JAVLibrary</title></head><body>
 <div id="video_info"></div>
 <a id="video_jacket" href="//images.example.com/ipx123pl.jpg"></a>
 <div id="video_date"><span class="text">2026-02-17</span></div>

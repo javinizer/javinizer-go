@@ -53,14 +53,14 @@ func TestGetURL(t *testing.T) {
 
 func TestSearchSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/search":
+		switch r.URL.Path {
+		case "/search":
 			assert.Equal(t, "IPX535", r.URL.Query().Get("q"))
 			assert.Equal(t, "json", r.URL.Query().Get("format"))
 			http.Redirect(w, r, "/movies/IPX-535.json", http.StatusFound)
-		case r.URL.Path == "/movies/IPX-535.json":
+		case "/movies/IPX-535.json":
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{
+			_, _ = fmt.Fprint(w, `{
 				"actresses": [{"name": "Momo Sakura", "image_url": "http://images.example.com/momo.jpg"}],
 				"cover_image_url": "https://images.example.com/cover.jpg",
 				"date": "2020-09-14T03:00:00.000-07:00",
@@ -117,12 +117,12 @@ func TestSearchSuccess(t *testing.T) {
 
 func TestSearchNormalizesDMMScreenshotURLs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/search":
+		switch r.URL.Path {
+		case "/search":
 			http.Redirect(w, r, "/movies/ABP-880.json", http.StatusFound)
-		case r.URL.Path == "/movies/ABP-880.json":
+		case "/movies/ABP-880.json":
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{
+			_, _ = fmt.Fprint(w, `{
 				"cover_image_url": "https://images.example.com/cover.jpg",
 				"normalized_id": "ABP-880",
 				"subtitle": "abp880",
@@ -161,13 +161,13 @@ func TestSearchNormalizesDMMScreenshotURLs(t *testing.T) {
 
 func TestSearchProcessingTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/search":
+		switch r.URL.Path {
+		case "/search":
 			http.Redirect(w, r, "/movies/ZZZ-99999.json", http.StatusFound)
-		case r.URL.Path == "/movies/ZZZ-99999.json":
+		case "/movies/ZZZ-99999.json":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
-			fmt.Fprint(w, `{"err":"processing"}`)
+			_, _ = fmt.Fprint(w, `{"err":"processing"}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -187,13 +187,13 @@ func TestSearchProcessingTimeout(t *testing.T) {
 
 func TestSearchHostUnavailable502(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/search":
+		switch r.URL.Path {
+		case "/search":
 			http.Redirect(w, r, "/movies/ABW-102.json", http.StatusFound)
-		case r.URL.Path == "/movies/ABW-102.json":
+		case "/movies/ABW-102.json":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprint(w, `{"err":"bad gateway"}`)
+			_, _ = fmt.Fprint(w, `{"err":"bad gateway"}`)
 		default:
 			http.NotFound(w, r)
 		}

@@ -228,10 +228,11 @@ func TestApplyScrapeFlagOverrides_ScrapeActress(t *testing.T) {
 			cmd.Flags().Bool("scrape-actress", false, "")
 			cmd.Flags().Bool("no-scrape-actress", false, "")
 
-			if tt.flag == "scrape-actress" {
-				cmd.Flags().Set("scrape-actress", tt.value)
-			} else if tt.flag == "no-scrape-actress" {
-				cmd.Flags().Set("no-scrape-actress", tt.value)
+			switch tt.flag {
+			case "scrape-actress":
+				_ = cmd.Flags().Set("scrape-actress", tt.value)
+			case "no-scrape-actress":
+				_ = cmd.Flags().Set("no-scrape-actress", tt.value)
 			}
 
 			cfg := DefaultConfig()
@@ -263,14 +264,15 @@ func TestApplyScrapeFlagOverrides_Browser(t *testing.T) {
 			cmd.Flags().Bool("browser", false, "")
 			cmd.Flags().Bool("no-browser", false, "")
 
-			if tt.flag == "browser" {
+			switch tt.flag {
+			case "browser":
 				if tt.value {
-					cmd.Flags().Set("browser", "true")
+					_ = cmd.Flags().Set("browser", "true")
 				} else {
-					cmd.Flags().Set("browser", "false")
+					_ = cmd.Flags().Set("browser", "false")
 				}
-			} else if tt.flag == "no-browser" {
-				cmd.Flags().Set("no-browser", "true")
+			case "no-browser":
+				_ = cmd.Flags().Set("no-browser", "true")
 			}
 
 			cfg := DefaultConfig()
@@ -299,13 +301,13 @@ func TestApplyScrapeFlagOverrides_BrowserTimeout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := &cobra.Command{}
 			cmd.Flags().Int("browser-timeout", 0, "")
-			cmd.Flags().Set("browser-timeout", string(rune(tt.timeout)+'0'))
+			_ = cmd.Flags().Set("browser-timeout", string(rune(tt.timeout)+'0'))
 
 			cfg := DefaultConfig()
 			originalTimeout := cfg.Scrapers.DMM.BrowserTimeout
 
 			// Set flag properly
-			cmd.Flags().Set("browser-timeout", "60")
+			_ = cmd.Flags().Set("browser-timeout", "60")
 			ApplyScrapeFlagOverrides(cmd, cfg)
 
 			// Since we set it to 60, expect 60
@@ -316,7 +318,7 @@ func TestApplyScrapeFlagOverrides_BrowserTimeout(t *testing.T) {
 			// Test zero timeout (should not override)
 			cmd2 := &cobra.Command{}
 			cmd2.Flags().Int("browser-timeout", 0, "")
-			cmd2.Flags().Set("browser-timeout", "0")
+			_ = cmd2.Flags().Set("browser-timeout", "0")
 
 			cfg2 := DefaultConfig()
 			ApplyScrapeFlagOverrides(cmd2, cfg2)
@@ -345,10 +347,11 @@ func TestApplyScrapeFlagOverrides_ActressDB(t *testing.T) {
 			cmd.Flags().Bool("actress-db", false, "")
 			cmd.Flags().Bool("no-actress-db", false, "")
 
-			if tt.flag == "actress-db" {
-				cmd.Flags().Set("actress-db", "true")
-			} else if tt.flag == "no-actress-db" {
-				cmd.Flags().Set("no-actress-db", "true")
+			switch tt.flag {
+			case "actress-db":
+				_ = cmd.Flags().Set("actress-db", "true")
+			case "no-actress-db":
+				_ = cmd.Flags().Set("no-actress-db", "true")
 			}
 
 			cfg := DefaultConfig()
@@ -378,10 +381,11 @@ func TestApplyScrapeFlagOverrides_GenreReplacement(t *testing.T) {
 			cmd.Flags().Bool("genre-replacement", false, "")
 			cmd.Flags().Bool("no-genre-replacement", false, "")
 
-			if tt.flag == "genre-replacement" {
-				cmd.Flags().Set("genre-replacement", "true")
-			} else if tt.flag == "no-genre-replacement" {
-				cmd.Flags().Set("no-genre-replacement", "true")
+			switch tt.flag {
+			case "genre-replacement":
+				_ = cmd.Flags().Set("genre-replacement", "true")
+			case "no-genre-replacement":
+				_ = cmd.Flags().Set("no-genre-replacement", "true")
 			}
 
 			cfg := DefaultConfig()
@@ -399,7 +403,7 @@ func TestBackwardCompatibilityFlags(t *testing.T) {
 	t.Run("deprecated headless flag", func(t *testing.T) {
 		cmd := &cobra.Command{}
 		cmd.Flags().Bool("headless", false, "")
-		cmd.Flags().Set("headless", "true")
+		_ = cmd.Flags().Set("headless", "true")
 
 		cfg := DefaultConfig()
 		ApplyScrapeFlagOverrides(cmd, cfg)
@@ -412,7 +416,7 @@ func TestBackwardCompatibilityFlags(t *testing.T) {
 	t.Run("deprecated no-headless flag", func(t *testing.T) {
 		cmd := &cobra.Command{}
 		cmd.Flags().Bool("no-headless", false, "")
-		cmd.Flags().Set("no-headless", "true")
+		_ = cmd.Flags().Set("no-headless", "true")
 
 		cfg := DefaultConfig()
 		cfg.Scrapers.DMM.EnableBrowser = true // Start with true
@@ -426,7 +430,7 @@ func TestBackwardCompatibilityFlags(t *testing.T) {
 	t.Run("deprecated headless-timeout flag", func(t *testing.T) {
 		cmd := &cobra.Command{}
 		cmd.Flags().Int("headless-timeout", 0, "")
-		cmd.Flags().Set("headless-timeout", "90")
+		_ = cmd.Flags().Set("headless-timeout", "90")
 
 		cfg := DefaultConfig()
 		ApplyScrapeFlagOverrides(cmd, cfg)
@@ -445,8 +449,8 @@ func TestFlagPrecedence(t *testing.T) {
 		cmd.Flags().Bool("headless", false, "")
 
 		// Set both flags
-		cmd.Flags().Set("headless", "false")
-		cmd.Flags().Set("browser", "true")
+		_ = cmd.Flags().Set("headless", "false")
+		_ = cmd.Flags().Set("browser", "true")
 
 		cfg := DefaultConfig()
 		ApplyScrapeFlagOverrides(cmd, cfg)
@@ -462,8 +466,8 @@ func TestFlagPrecedence(t *testing.T) {
 		cmd.Flags().Bool("no-browser", false, "")
 		cmd.Flags().Bool("no-headless", false, "")
 
-		cmd.Flags().Set("no-headless", "false") // This would keep it enabled
-		cmd.Flags().Set("no-browser", "true")   // This should disable
+		_ = cmd.Flags().Set("no-headless", "false") // This would keep it enabled
+		_ = cmd.Flags().Set("no-browser", "true")   // This should disable
 
 		cfg := DefaultConfig()
 		cfg.Scrapers.DMM.EnableBrowser = true
@@ -480,8 +484,8 @@ func TestFlagPrecedence(t *testing.T) {
 		cmd.Flags().Int("browser-timeout", 0, "")
 		cmd.Flags().Int("headless-timeout", 0, "")
 
-		cmd.Flags().Set("headless-timeout", "60")
-		cmd.Flags().Set("browser-timeout", "90")
+		_ = cmd.Flags().Set("headless-timeout", "60")
+		_ = cmd.Flags().Set("browser-timeout", "90")
 
 		cfg := DefaultConfig()
 		ApplyScrapeFlagOverrides(cmd, cfg)

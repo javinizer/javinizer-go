@@ -353,8 +353,8 @@ func TestClient_WritePump(t *testing.T) {
 		// Create a pipe to simulate a connection
 		serverConn, clientConn, httpServer := createTestConnections(t)
 		defer httpServer.Close()
-		defer serverConn.Close()
-		defer clientConn.Close()
+		defer func() { _ = serverConn.Close() }()
+		defer func() { _ = clientConn.Close() }()
 
 		wsClient := NewClient(clientConn)
 
@@ -392,7 +392,7 @@ func TestClient_WritePump(t *testing.T) {
 		// Create test connections
 		serverConn, clientConn, httpServer := createTestConnections(t)
 		defer httpServer.Close()
-		defer serverConn.Close()
+		defer func() { _ = serverConn.Close() }()
 
 		wsClient := NewClient(clientConn)
 
@@ -426,7 +426,7 @@ func TestClient_ReadPump(t *testing.T) {
 		// Create test connections
 		serverConn, clientConn, httpServer := createTestConnections(t)
 		defer httpServer.Close()
-		defer serverConn.Close()
+		defer func() { _ = serverConn.Close() }()
 
 		wsClient := NewClient(clientConn)
 		hub.Register(wsClient)
@@ -445,7 +445,7 @@ func TestClient_ReadPump(t *testing.T) {
 		}
 
 		// Close the connection from server side
-		serverConn.Close()
+		_ = serverConn.Close()
 
 		// ReadPump should exit and unregister
 		<-done
@@ -464,7 +464,7 @@ func TestClient_ReadPump(t *testing.T) {
 		hub.Register(wsClient)
 
 		// Close server immediately to trigger error
-		serverConn.Close()
+		_ = serverConn.Close()
 
 		// Run ReadPump - should exit gracefully
 		done := make(chan bool)

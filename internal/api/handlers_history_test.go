@@ -168,7 +168,9 @@ func TestGetHistory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db, repo := setupHistoryTestDB(t)
-			defer db.Close()
+			defer func() {
+				_ = db.Close()
+			}()
 
 			if tt.seedData {
 				seedHistoryData(t, repo)
@@ -234,7 +236,9 @@ func TestGetHistoryStats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db, repo := setupHistoryTestDB(t)
-			defer db.Close()
+			defer func() {
+				_ = db.Close()
+			}()
 
 			if tt.seedData {
 				seedHistoryData(t, repo)
@@ -297,7 +301,9 @@ func TestDeleteHistory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db, repo := setupHistoryTestDB(t)
-			defer db.Close()
+			defer func() {
+				_ = db.Close()
+			}()
 
 			if tt.seedData {
 				seedHistoryData(t, repo)
@@ -374,7 +380,9 @@ func TestDeleteHistoryBulk(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db, repo := setupHistoryTestDB(t)
-			defer db.Close()
+			defer func() {
+				_ = db.Close()
+			}()
 
 			if tt.seedData {
 				seedHistoryData(t, repo)
@@ -404,7 +412,9 @@ func TestHistoryRecordFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	db, repo := setupHistoryTestDB(t)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	// Create a record with all fields populated
 	record := &models.History{
@@ -450,15 +460,17 @@ func TestHistoryPaginationEdgeCases(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	db, repo := setupHistoryTestDB(t)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	// Create exactly 5 records
 	for i := 0; i < 5; i++ {
-		repo.Create(&models.History{
+		require.NoError(t, repo.Create(&models.History{
 			MovieID:   "TEST",
 			Operation: "scrape",
 			Status:    "success",
-		})
+		}))
 	}
 
 	router := gin.New()

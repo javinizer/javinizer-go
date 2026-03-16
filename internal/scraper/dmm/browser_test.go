@@ -20,10 +20,10 @@ func TestIsRunningInContainer(t *testing.T) {
 		{
 			name: "CHROME_BIN environment variable set",
 			setup: func() {
-				os.Setenv("CHROME_BIN", "/usr/bin/chromium")
+				_ = os.Setenv("CHROME_BIN", "/usr/bin/chromium")
 			},
 			cleanup: func() {
-				os.Unsetenv("CHROME_BIN")
+				_ = os.Unsetenv("CHROME_BIN")
 			},
 			expected:    true,
 			description: "Should detect container when CHROME_BIN is set",
@@ -31,10 +31,10 @@ func TestIsRunningInContainer(t *testing.T) {
 		{
 			name: "CHROME_PATH environment variable set",
 			setup: func() {
-				os.Setenv("CHROME_PATH", "/usr/bin/google-chrome")
+				_ = os.Setenv("CHROME_PATH", "/usr/bin/google-chrome")
 			},
 			cleanup: func() {
-				os.Unsetenv("CHROME_PATH")
+				_ = os.Unsetenv("CHROME_PATH")
 			},
 			expected:    true,
 			description: "Should detect container when CHROME_PATH is set",
@@ -43,8 +43,8 @@ func TestIsRunningInContainer(t *testing.T) {
 			name: "No container indicators",
 			setup: func() {
 				// Ensure env vars are not set
-				os.Unsetenv("CHROME_BIN")
-				os.Unsetenv("CHROME_PATH")
+				_ = os.Unsetenv("CHROME_BIN")
+				_ = os.Unsetenv("CHROME_PATH")
 			},
 			cleanup:     func() {},
 			expected:    false,
@@ -216,18 +216,18 @@ func TestFetchWithBrowser_ContainerMode(t *testing.T) {
 		{
 			name: "with CHROME_BIN set",
 			setup: func() {
-				os.Setenv("CHROME_BIN", "/usr/bin/chromium")
+				_ = os.Setenv("CHROME_BIN", "/usr/bin/chromium")
 			},
 			cleanup: func() {
-				os.Unsetenv("CHROME_BIN")
+				_ = os.Unsetenv("CHROME_BIN")
 			},
 			description: "Should use container mode when CHROME_BIN is set",
 		},
 		{
 			name: "without container indicators",
 			setup: func() {
-				os.Unsetenv("CHROME_BIN")
-				os.Unsetenv("CHROME_PATH")
+				_ = os.Unsetenv("CHROME_BIN")
+				_ = os.Unsetenv("CHROME_PATH")
 			},
 			cleanup:     func() {},
 			description: "Should use standard mode when no container indicators",

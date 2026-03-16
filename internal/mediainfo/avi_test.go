@@ -15,7 +15,9 @@ func createTestAVI(t *testing.T, tmpDir string, videoCodec string, audioFormatTa
 	aviPath := filepath.Join(tmpDir, "test.avi")
 	f, err := os.Create(aviPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	// RIFF header
 	writeBytes(t, f, []byte("RIFF"))
@@ -209,7 +211,9 @@ func TestAVIProber_Probe_InvalidRIFF(t *testing.T) {
 
 	f, err := os.Open(invalidPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	prober := NewAVIProber()
 	_, err = prober.Probe(f)
@@ -228,7 +232,9 @@ func TestAVIProber_Probe_NotAVI(t *testing.T) {
 
 	f, err := os.Open(notAVIPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	prober := NewAVIProber()
 	_, err = prober.Probe(f)
@@ -247,7 +253,7 @@ func TestAVIProber_Probe_TruncatedFile(t *testing.T) {
 
 	f, err := os.Open(truncatedPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	prober := NewAVIProber()
 	info, err := prober.Probe(f)
@@ -337,6 +343,12 @@ func TestMapAVIAudioCodec(t *testing.T) {
 // TestAVIProber_Probe_NegativeHeight is omitted as creating a minimal valid AVI
 // with proper RIFF/LIST nesting is complex. The negative height handling code path
 // in parseStrlList is covered by integration tests with real AVI files.
+
+func TestCreateTestAVIHelper(t *testing.T) {
+	aviPath := createTestAVI(t, t.TempDir(), "XVID", 0x0055)
+	_, err := os.Stat(aviPath)
+	require.NoError(t, err)
+}
 
 // Helper functions for writing binary data
 func writeBytes(t *testing.T, f *os.File, data []byte) {

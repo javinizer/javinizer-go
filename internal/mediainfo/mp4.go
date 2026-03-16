@@ -83,7 +83,7 @@ func analyzeMP4(f *os.File) (*VideoInfo, error) {
 
 			// Audio track
 			if handlerType == "soun" {
-				extractMP4AudioInfo(trak, info)
+				_ = extractMP4AudioInfo(trak, info)
 			}
 		}
 	}

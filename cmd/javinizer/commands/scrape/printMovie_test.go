@@ -1,9 +1,6 @@
 package scrape_test
 
 import (
-	"bytes"
-	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -11,31 +8,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 )
-
-// Helper function to capture stdout
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	defer func() {
-		os.Stdout = oldStdout
-	}()
-
-	outChan := make(chan string)
-	go func() {
-		var buf bytes.Buffer
-		io.Copy(&buf, r)
-		outChan <- buf.String()
-	}()
-
-	fn()
-	w.Close()
-
-	return <-outChan
-}
 
 // TestPrintMovie_CompleteData tests printing a movie with all fields populated
 func TestPrintMovie_CompleteData(t *testing.T) {

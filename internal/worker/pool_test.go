@@ -124,9 +124,9 @@ func TestPool_FailedTasks(t *testing.T) {
 	task2 := newMockTask("task-2", 50*time.Millisecond, true)
 	task3 := newMockTask("task-3", 50*time.Millisecond, false)
 
-	pool.Submit(task1)
-	pool.Submit(task2)
-	pool.Submit(task3)
+	_ = pool.Submit(task1)
+	_ = pool.Submit(task2)
+	_ = pool.Submit(task3)
 
 	err := pool.Wait()
 	if err == nil {
@@ -155,8 +155,8 @@ func TestPool_Stop(t *testing.T) {
 	task1 := newMockTask("task-1", 5*time.Second, false)
 	task2 := newMockTask("task-2", 5*time.Second, false)
 
-	pool.Submit(task1)
-	pool.Submit(task2)
+	_ = pool.Submit(task1)
+	_ = pool.Submit(task2)
 
 	// Stop immediately
 	pool.Stop()
@@ -200,8 +200,8 @@ func TestPool_ContextCancellation(t *testing.T) {
 	task1 := newMockTask("task-1", 2*time.Second, false)
 	task2 := newMockTask("task-2", 2*time.Second, false)
 
-	pool.Submit(task1)
-	pool.Submit(task2)
+	_ = pool.Submit(task1)
+	_ = pool.Submit(task2)
 
 	// Cancel via Stop
 	pool.Stop()
@@ -224,7 +224,7 @@ func TestPool_Stats(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		task := newMockTask(string(rune('A'+i)), 50*time.Millisecond, false)
 		tracker.Start(task.ID(), task.Type(), "Starting")
-		pool.Submit(task)
+		_ = pool.Submit(task)
 	}
 
 	// Wait a bit for tasks to start
@@ -236,7 +236,7 @@ func TestPool_Stats(t *testing.T) {
 		t.Error("Expected total tasks > 0")
 	}
 
-	pool.Wait()
+	_ = pool.Wait()
 
 	finalStats := pool.Stats()
 	if finalStats.Success == 0 {
@@ -263,13 +263,13 @@ func TestPool_RaceConditions(t *testing.T) {
 			for i := 0; i < tasksPerGoroutine; i++ {
 				taskID := string(rune('A'+goroutineID)) + string(rune('0'+i))
 				task := newMockTask(taskID, 10*time.Millisecond, false)
-				pool.Submit(task)
+				_ = pool.Submit(task)
 			}
 		}(g)
 	}
 
 	wg.Wait()
-	pool.Wait()
+	_ = pool.Wait()
 
 	stats := pool.Stats()
 	expectedTotal := numGoroutines * tasksPerGoroutine
@@ -291,7 +291,7 @@ func TestPool_ActiveWorkers(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		task := newMockTask(string(rune('A'+i)), 1*time.Second, false)
 		tracker.Start(task.ID(), task.Type(), "Starting")
-		pool.Submit(task)
+		_ = pool.Submit(task)
 	}
 
 	// Give tasks time to start

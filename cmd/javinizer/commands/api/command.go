@@ -114,7 +114,7 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 
 	// Run migrations
 	if err := db.AutoMigrate(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
@@ -154,7 +154,7 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 	// Initialize matcher
 	mat, err := matcher.NewMatcher(&cfg.Matching)
 	if err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to initialize matcher: %w", err)
 	}
 
@@ -188,7 +188,7 @@ func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) e
 	if err != nil {
 		log.Fatalf("Failed to initialize API dependencies: %v", err)
 	}
-	defer apiDeps.DB.Close()
+	defer func() { _ = apiDeps.DB.Close() }()
 
 	// Create and configure the server
 	router := api.NewServer(apiDeps)

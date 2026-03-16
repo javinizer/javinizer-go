@@ -404,7 +404,7 @@ func TestInitLogger_MkdirAllFailure(t *testing.T) {
 	}
 
 	// Restore permissions at end of test for cleanup
-	defer os.Chmod(readOnlyParent, 0755)
+	defer func() { _ = os.Chmod(readOnlyParent, 0755) }()
 
 	logFile := filepath.Join(readOnlyParent, "subdir", "test.log")
 

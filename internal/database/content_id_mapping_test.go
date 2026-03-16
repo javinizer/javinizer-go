@@ -23,7 +23,7 @@ func TestContentIDMappingRepository(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Run migrations
 	err = db.AutoMigrate()
@@ -177,7 +177,7 @@ func TestContentIDMappingRepository(t *testing.T) {
 
 		db2, err := New(cfg)
 		require.NoError(t, err)
-		defer db2.Close()
+		defer func() { _ = db2.Close() }()
 
 		err = db2.AutoMigrate()
 		require.NoError(t, err)

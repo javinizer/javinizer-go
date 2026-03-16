@@ -35,24 +35,6 @@ func (p *MKVProber) Probe(f *os.File) (*VideoInfo, error) {
 	return analyzeMKV(f)
 }
 
-// MKV EBML element IDs (from Matroska specification)
-const (
-	idSegment       = 0x18538067
-	idInfo          = 0x1549A966
-	idDuration      = 0x4489
-	idTimecodeScale = 0x2AD7B1
-	idTracks        = 0x1654AE6B
-	idTrackEntry    = 0xAE
-	idTrackType     = 0x83
-	idCodecID       = 0x86
-	idVideo         = 0xE0
-	idPixelWidth    = 0xB0
-	idPixelHeight   = 0xBA
-	idAudio         = 0xE1
-	idSamplingFreq  = 0xB5
-	idChannels      = 0x9F
-)
-
 // Matroska track types
 const (
 	trackTypeVideo    = 1
@@ -160,7 +142,7 @@ func analyzeMKV(f *os.File) (*VideoInfo, error) {
 // extractMKVPartial attempts to extract partial information if full EBML parse fails
 func extractMKVPartial(f *os.File, info *VideoInfo, fileSize int64) (*VideoInfo, error) {
 	// Reset file pointer
-	f.Seek(0, 0)
+	_, _ = f.Seek(0, 0)
 
 	// If full parse failed, we can't easily do partial parsing with ebml-go
 	// Return basic error - users should use properly formatted MKV files

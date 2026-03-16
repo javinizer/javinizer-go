@@ -25,10 +25,10 @@ func TestSearch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/") && r.URL.RawQuery == "search_keyword=ABC-123":
-			fmt.Fprint(w, `<html><body><a href="/i/item12345">Result</a></body></html>`)
+			_, _ = fmt.Fprint(w, `<html><body><a href="/i/item12345">Result</a></body></html>`)
 		case r.URL.Path == "/i/item12345":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprint(w, `<html><head>
+			_, _ = fmt.Fprint(w, `<html><head>
 <meta property="og:title" content="DLgetchu Sample Title">
 <meta name="description" content="Fallback description">
 </head><body>

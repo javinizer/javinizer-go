@@ -64,7 +64,7 @@ func TestCLIProber_Probe_Disabled(t *testing.T) {
 
 	f, err := os.Open(tmpFile)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	_, err = prober.Probe(f)
 	assert.Error(t, err)

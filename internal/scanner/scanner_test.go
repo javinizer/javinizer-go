@@ -44,10 +44,12 @@ func TestScanner_Scan(t *testing.T) {
 			t.Fatalf("Failed to create file: %v", err)
 		}
 		if err := file.Truncate(size); err != nil {
-			file.Close()
+			_ = file.Close()
 			t.Fatalf("Failed to set file size: %v", err)
 		}
-		file.Close()
+		if err := file.Close(); err != nil {
+			t.Fatalf("Failed to close file: %v", err)
+		}
 	}
 
 	t.Run("Scan with default config", func(t *testing.T) {
@@ -305,7 +307,9 @@ func TestScanner_ExcludePatterns(t *testing.T) {
 			}
 
 			// Clean up for next test
-			os.Remove(path)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("Failed to remove test file: %v", err)
+			}
 		})
 	}
 }
@@ -556,7 +560,9 @@ func TestScanner_ScanWithLimits_Errors(t *testing.T) {
 	if err := os.Chmod(unreadableDir, 0000); err != nil {
 		t.Skipf("Cannot change directory permissions: %v", err)
 	}
-	defer os.Chmod(unreadableDir, 0755) // Restore for cleanup
+	defer func() {
+		_ = os.Chmod(unreadableDir, 0755)
+	}() // Restore for cleanup
 
 	cfg := &config.MatchingConfig{
 		Extensions:      []string{".mp4"},
@@ -653,7 +659,9 @@ func TestScanner_ScanSingle_ErrorGettingFileInfo(t *testing.T) {
 	if err := os.Chmod(unreadableFile, 0000); err != nil {
 		t.Skip("Cannot change file permissions (possibly Windows)")
 	}
-	defer os.Chmod(unreadableFile, 0644) // Restore for cleanup
+	defer func() {
+		_ = os.Chmod(unreadableFile, 0644)
+	}() // Restore for cleanup
 
 	cfg := &config.MatchingConfig{
 		Extensions:      []string{".mp4"},
@@ -778,7 +786,9 @@ func TestScanner_shouldIncludeFile_CaseInsensitiveExtensions(t *testing.T) {
 			if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
 				t.Fatalf("Failed to create file: %v", err)
 			}
-			defer os.Remove(path)
+			defer func() {
+				_ = os.Remove(path)
+			}()
 
 			result := scanner.shouldIncludeFile(path, nil)
 			if result != tc.expected {
@@ -836,7 +846,9 @@ func TestScanner_shouldIncludeFile_MultipleDotsInFilename(t *testing.T) {
 			if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
 				t.Fatalf("Failed to create file: %v", err)
 			}
-			defer os.Remove(path)
+			defer func() {
+				_ = os.Remove(path)
+			}()
 
 			result := scanner.shouldIncludeFile(path, nil)
 			if result != tc.expected {
@@ -880,10 +892,10 @@ func TestScanner_shouldIncludeFile_MinSizeWithEntry(t *testing.T) {
 		t.Fatalf("Failed to create small file: %v", err)
 	}
 	if err := f1.Truncate(10 * 1024 * 1024); err != nil { // 10MB
-		f1.Close()
+		_ = f1.Close()
 		t.Fatalf("Failed to truncate small file: %v", err)
 	}
-	f1.Close()
+	_ = f1.Close()
 
 	largeFile := filepath.Join(tmpDir, "large.mp4")
 	f2, err := os.Create(largeFile)
@@ -891,10 +903,10 @@ func TestScanner_shouldIncludeFile_MinSizeWithEntry(t *testing.T) {
 		t.Fatalf("Failed to create large file: %v", err)
 	}
 	if err := f2.Truncate(100 * 1024 * 1024); err != nil { // 100MB
-		f2.Close()
+		_ = f2.Close()
 		t.Fatalf("Failed to truncate large file: %v", err)
 	}
-	f2.Close()
+	_ = f2.Close()
 
 	cfg := &config.MatchingConfig{
 		Extensions:      []string{".mp4"},
@@ -934,10 +946,10 @@ func TestScanner_shouldIncludeFile_MinSizeWithoutEntry(t *testing.T) {
 		t.Fatalf("Failed to create small file: %v", err)
 	}
 	if err := f.Truncate(10 * 1024 * 1024); err != nil { // 10MB
-		f.Close()
+		_ = f.Close()
 		t.Fatalf("Failed to truncate small file: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	cfg := &config.MatchingConfig{
 		Extensions:      []string{".mp4"},
@@ -1068,7 +1080,7 @@ func TestScanner_RelativePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get working directory: %v", err)
 	}
-	defer os.Chdir(originalDir)
+	defer func() { _ = os.Chdir(originalDir) }()
 
 	// Change to temp directory
 	if err := os.Chdir(tmpDir); err != nil {
@@ -1252,7 +1264,7 @@ func TestScanner_ScanSingle_ErrorReadingDirectory(t *testing.T) {
 	if err := os.Chmod(unreadableDir, 0000); err != nil {
 		t.Skipf("Cannot change directory permissions: %v", err)
 	}
-	defer os.Chmod(unreadableDir, 0755) // Restore for cleanup
+	defer func() { _ = os.Chmod(unreadableDir, 0755) }() // Restore for cleanup
 
 	cfg := &config.MatchingConfig{
 		Extensions:      []string{".mp4"},

@@ -67,7 +67,7 @@ func runAdd(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	repo := database.NewGenreReplacementRepository(deps.DB)
 
@@ -77,7 +77,7 @@ func runAdd(cmd *cobra.Command, args []string, configFile string) error {
 	}
 
 	if err := repo.Upsert(genreReplacement); err != nil {
-		return fmt.Errorf("Failed to add genre replacement: %v", err)
+		return fmt.Errorf("failed to add genre replacement: %v", err)
 	}
 
 	fmt.Printf("✅ Genre replacement added: '%s' → '%s'\n", original, replacement)
@@ -97,13 +97,13 @@ func runList(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	repo := database.NewGenreReplacementRepository(deps.DB)
 
 	replacements, err := repo.List()
 	if err != nil {
-		return fmt.Errorf("Failed to list genre replacements: %v", err)
+		return fmt.Errorf("failed to list genre replacements: %v", err)
 	}
 
 	if len(replacements) == 0 {
@@ -138,12 +138,12 @@ func runRemove(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	repo := database.NewGenreReplacementRepository(deps.DB)
 
 	if err := repo.Delete(original); err != nil {
-		return fmt.Errorf("Failed to remove genre replacement: %v", err)
+		return fmt.Errorf("failed to remove genre replacement: %v", err)
 	}
 
 	fmt.Printf("✅ Genre replacement removed: '%s'\n", original)

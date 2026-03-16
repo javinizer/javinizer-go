@@ -33,7 +33,7 @@ func TestActressAliasConversion(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = db.AutoMigrate()
 	require.NoError(t, err)
@@ -271,7 +271,7 @@ func TestActressAliasWithAggregate(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = db.AutoMigrate()
 	require.NoError(t, err)

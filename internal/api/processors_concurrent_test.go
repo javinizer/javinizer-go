@@ -47,14 +47,14 @@ func (s *stubScraper) Search(id string) (*models.ScraperResult, error) {
 		if len(firstPart) > 0 && len(secondPart) > 0 {
 			allLetters := true
 			for _, r := range firstPart {
-				if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')) {
+				if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') {
 					allLetters = false
 					break
 				}
 			}
 			allDigits := true
 			for _, r := range secondPart {
-				if !(r >= '0' && r <= '9') {
+				if r < '0' || r > '9' {
 					allDigits = false
 					break
 				}
@@ -137,7 +137,7 @@ func createTestFiles(t *testing.T, count int) ([]string, string) {
 		// Create empty file
 		file, err := os.Create(filePath)
 		require.NoError(t, err)
-		file.Close()
+		require.NoError(t, file.Close())
 
 		files = append(files, filePath)
 	}
@@ -167,30 +167,12 @@ func createInvalidTestFiles(t *testing.T, count int, tmpDir string) []string {
 
 		file, err := os.Create(filePath)
 		require.NoError(t, err)
-		file.Close()
+		require.NoError(t, file.Close())
 
 		files = append(files, filePath)
 	}
 
 	return files
-}
-
-// waitForJobCompletion waits for job to complete with timeout
-func waitForJobCompletion(t *testing.T, job *worker.BatchJob, timeout time.Duration) {
-	t.Helper()
-
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		status := job.GetStatus()
-		if status.Status == worker.JobStatusCompleted ||
-			status.Status == worker.JobStatusFailed ||
-			status.Status == worker.JobStatusCancelled {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	t.Fatalf("Job did not complete within %v timeout", timeout)
 }
 
 // TestProcessBatchJobConcurrent tests basic concurrent processing of multiple files
@@ -204,7 +186,9 @@ func TestProcessBatchJobConcurrent(t *testing.T) {
 
 	// Create test files
 	files, tmpDir := createTestFiles(t, 10)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
 
 	// Create test configuration
 	cfg := &config.Config{
@@ -286,7 +270,9 @@ func TestProcessBatchJobCancellation(t *testing.T) {
 
 	// Create many test files to ensure some are still running when cancelled
 	files, tmpDir := createTestFiles(t, 25)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
 
 	cfg := &config.Config{
 		Scrapers: config.ScrapersConfig{
@@ -365,7 +351,7 @@ func TestProcessBatchJobRaceConditions(t *testing.T) {
 
 	// Create test files
 	files, tmpDir := createTestFiles(t, 20)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := &config.Config{
 		Scrapers: config.ScrapersConfig{
@@ -541,7 +527,7 @@ func TestBatchScrapeTaskDatabaseSafety(t *testing.T) {
 
 	// Create multiple files with the same movie ID pattern to test concurrent database access
 	files, tmpDir := createTestFiles(t, 1)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create additional copies of the same file with different names but same ID pattern
 	// This simulates concurrent scraping of the same movie ID
@@ -557,8 +543,8 @@ func TestBatchScrapeTaskDatabaseSafety(t *testing.T) {
 		require.NoError(t, err)
 		dstFile, err := os.Create(filePath)
 		require.NoError(t, err)
-		srcFile.Close()
-		dstFile.Close()
+		require.NoError(t, srcFile.Close())
+		require.NoError(t, dstFile.Close())
 	}
 
 	files = append(files, additionalFiles...)
@@ -645,7 +631,7 @@ func TestWorkerPoolErrorHandling(t *testing.T) {
 
 	// Create mix of valid and invalid files
 	validFiles, tmpDir := createTestFiles(t, 5)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	invalidFiles := createInvalidTestFiles(t, 5, tmpDir)
 

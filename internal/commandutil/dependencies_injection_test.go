@@ -21,7 +21,7 @@ func TestNewDependenciesWithOptions_NilOptions(t *testing.T) {
 
 	deps, err := NewDependenciesWithOptions(cfg, nil)
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	assert.NotNil(t, deps.Config)
 	assert.NotNil(t, deps.DB, "DB should be initialized when opts is nil")
@@ -39,7 +39,7 @@ func TestNewDependenciesWithOptions_InjectedDB(t *testing.T) {
 	// Create a real DB to inject (simulating a test mock)
 	mockDB, err := database.New(cfg)
 	require.NoError(t, err)
-	defer mockDB.Close()
+	defer func() { _ = mockDB.Close() }()
 
 	opts := &DependenciesOptions{
 		DB: mockDB,
@@ -47,7 +47,7 @@ func TestNewDependenciesWithOptions_InjectedDB(t *testing.T) {
 
 	deps, err := NewDependenciesWithOptions(cfg, opts)
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	assert.NotNil(t, deps.Config)
 	assert.Equal(t, mockDB, deps.DB, "Injected DB should be used")
@@ -71,7 +71,7 @@ func TestNewDependenciesWithOptions_InjectedRegistry(t *testing.T) {
 
 	deps, err := NewDependenciesWithOptions(cfg, opts)
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	assert.NotNil(t, deps.Config)
 	assert.NotNil(t, deps.DB, "DB should still be initialized")
@@ -89,7 +89,7 @@ func TestNewDependenciesWithOptions_BothInjected(t *testing.T) {
 	// Create mocks
 	mockDB, err := database.New(cfg)
 	require.NoError(t, err)
-	defer mockDB.Close()
+	defer func() { _ = mockDB.Close() }()
 
 	mockRegistry := models.NewScraperRegistry()
 
@@ -100,7 +100,7 @@ func TestNewDependenciesWithOptions_BothInjected(t *testing.T) {
 
 	deps, err := NewDependenciesWithOptions(cfg, opts)
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	assert.NotNil(t, deps.Config)
 	assert.Equal(t, mockDB, deps.DB, "Injected DB should be used")
@@ -127,7 +127,7 @@ func TestDependenciesInterface_Compliance(t *testing.T) {
 
 	deps, err := NewDependencies(cfg)
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Verify interface compliance by assigning to interface type
 	var _ DependenciesInterface = deps
@@ -148,7 +148,7 @@ func TestGetConfig(t *testing.T) {
 
 	deps, err := NewDependencies(cfg)
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	assert.Equal(t, cfg, deps.GetConfig())
 }
@@ -163,7 +163,7 @@ func TestGetDB(t *testing.T) {
 
 	deps, err := NewDependencies(cfg)
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	db := deps.GetDB()
 	assert.NotNil(t, db)
@@ -180,7 +180,7 @@ func TestGetScraperRegistry(t *testing.T) {
 
 	deps, err := NewDependencies(cfg)
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	registry := deps.GetScraperRegistry()
 	assert.NotNil(t, registry)
@@ -198,7 +198,7 @@ func TestNewDependencies_BackwardCompatibility(t *testing.T) {
 	// This should behave exactly as before Epic 6 refactoring
 	deps, err := NewDependencies(cfg)
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	assert.NotNil(t, deps.Config)
 	assert.NotNil(t, deps.DB)
@@ -218,7 +218,7 @@ func TestNewDependenciesWithOptions_EmptyOptions(t *testing.T) {
 
 	deps, err := NewDependenciesWithOptions(cfg, opts)
 	require.NoError(t, err)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	assert.NotNil(t, deps.Config)
 	assert.NotNil(t, deps.DB, "DB should be initialized when opts fields are nil")

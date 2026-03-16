@@ -24,17 +24,17 @@ func testConfig(baseURL string) *config.Config {
 func TestSearch(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/search":
+		switch r.URL.Path {
+		case "/search":
 			if err := r.ParseForm(); err != nil {
 				t.Fatalf("parse form: %v", err)
 			}
 			if got := r.FormValue("sn"); got != "ABC-123" {
 				t.Fatalf("form sn = %q, want ABC-123", got)
 			}
-			fmt.Fprintf(w, `<html><body><div>ABC-123 Great Movie <a href="%s/video/abc123">details</a></div></body></html>`, server.URL)
-		case r.URL.Path == "/video/abc123":
-			fmt.Fprint(w, `<html><head>
+			_, _ = fmt.Fprintf(w, `<html><body><div>ABC-123 Great Movie <a href="%s/video/abc123">details</a></div></body></html>`, server.URL)
+		case "/video/abc123":
+			_, _ = fmt.Fprint(w, `<html><head>
 <meta property="og:title" content="Great Movie - JAV321">
 <meta property="og:description" content="This is a sufficiently long description for the Jav321 parser test case.">
 <meta property="og:image" content="/images/cover.jpg">

@@ -272,7 +272,7 @@ func (s *Service) translateWithOpenAI(ctx context.Context, sourceLang, targetLan
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -340,7 +340,7 @@ func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -426,7 +426,7 @@ func (s *Service) translateWithGooglePaid(ctx context.Context, sourceLang, targe
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -485,7 +485,7 @@ func (s *Service) translateWithGoogleFree(ctx context.Context, sourceLang, targe
 		}
 
 		respBody, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if readErr != nil {
 			return nil, readErr
 		}

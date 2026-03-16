@@ -150,7 +150,7 @@ func createTestAPIServer(t *testing.T) *internalapi.ServerDependencies {
 // TestAPIServer_HealthCheck tests the health check endpoint
 func TestAPIServer_HealthCheck(t *testing.T) {
 	deps := createTestAPIServer(t)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	router := internalapi.NewServer(deps)
 
@@ -170,7 +170,7 @@ func TestAPIServer_HealthCheck(t *testing.T) {
 // TestAPIServer_ListMovies tests the list movies endpoint
 func TestAPIServer_ListMovies(t *testing.T) {
 	deps := createTestAPIServer(t)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	// Insert test movie
 	movie := createTestMovie("IPX-123", "Test Movie")
@@ -197,7 +197,7 @@ func TestAPIServer_ListMovies(t *testing.T) {
 // TestAPIServer_GetMovie tests the get movie by ID endpoint
 func TestAPIServer_GetMovie(t *testing.T) {
 	deps := createTestAPIServer(t)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	// Insert test movie
 	movie := createTestMovie("IPX-123", "Test Movie")
@@ -224,7 +224,7 @@ func TestAPIServer_GetMovie(t *testing.T) {
 // TestAPIServer_GetMovie_NotFound tests 404 for non-existent movie
 func TestAPIServer_GetMovie_NotFound(t *testing.T) {
 	deps := createTestAPIServer(t)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	router := internalapi.NewServer(deps)
 
@@ -291,7 +291,7 @@ func TestRun_HostFlagOverride(t *testing.T) {
 
 	deps, err := api.Run(cmd, configPath, customHost, 0)
 	require.NoError(t, err)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	currentCfg := deps.GetConfig()
 	assert.Equal(t, customHost, currentCfg.Server.Host, "host should be overridden")
@@ -317,7 +317,7 @@ func TestRun_PortFlagOverride(t *testing.T) {
 
 	deps, err := api.Run(cmd, configPath, "", customPort)
 	require.NoError(t, err)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	currentCfg := deps.GetConfig()
 	assert.Equal(t, "localhost", currentCfg.Server.Host, "host should remain from config")
@@ -344,7 +344,7 @@ func TestRun_BothFlagsOverride(t *testing.T) {
 
 	deps, err := api.Run(cmd, configPath, customHost, customPort)
 	require.NoError(t, err)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	currentCfg := deps.GetConfig()
 	assert.Equal(t, customHost, currentCfg.Server.Host)
@@ -363,7 +363,7 @@ func TestRun_ConfigLoading(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	// Verify config is loaded
 	assert.Equal(t, configPath, deps.ConfigFile)
@@ -382,7 +382,7 @@ func TestRun_DatabaseInit(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	// Verify database is initialized
 	assert.NotNil(t, deps.DB)
@@ -405,7 +405,7 @@ func TestRun_ScraperRegistry(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	// Verify scraper registry
 	assert.NotNil(t, deps.Registry)
@@ -425,7 +425,7 @@ func TestRun_Repositories(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	// Verify repositories
 	assert.NotNil(t, deps.MovieRepo, "MovieRepository should be initialized")
@@ -449,7 +449,7 @@ func TestRun_Aggregator(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	assert.NotNil(t, deps.Aggregator, "Aggregator should be initialized")
 	assert.NotNil(t, deps.Matcher, "Matcher should be initialized")
@@ -467,7 +467,7 @@ func TestRun_JobQueue(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer deps.DB.Close()
+	defer func() { _ = deps.DB.Close() }()
 
 	assert.NotNil(t, deps.JobQueue, "JobQueue should be initialized")
 	jobs := deps.JobQueue.ListJobs()

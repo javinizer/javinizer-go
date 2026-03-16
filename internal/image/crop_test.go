@@ -34,7 +34,7 @@ func createTestImage(t *testing.T, fs afero.Fs, path string, width, height int, 
 
 	file, err := fs.Create(path)
 	require.NoError(t, err, "Failed to create test image")
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	err = jpeg.Encode(file, img, &jpeg.Options{Quality: 95})
 	require.NoError(t, err, "Failed to encode test image")
@@ -46,7 +46,7 @@ func getImageDimensions(t *testing.T, fs afero.Fs, path string) (int, int) {
 
 	file, err := fs.Open(path)
 	require.NoError(t, err, "Failed to open image")
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	img, _, err := image.Decode(file)
 	require.NoError(t, err, "Failed to decode image")
@@ -267,7 +267,7 @@ func TestCropPosterWithBounds(t *testing.T) {
 
 	outFile, err := fs.Open(posterPath)
 	require.NoError(t, err)
-	defer outFile.Close()
+	defer func() { _ = outFile.Close() }()
 
 	outImg, _, err := image.Decode(outFile)
 	require.NoError(t, err)
@@ -581,10 +581,10 @@ func BenchmarkCropLargeImage(b *testing.B) {
 		b.Fatalf("Failed to create benchmark image: %v", err)
 	}
 	if err := jpeg.Encode(file, img, &jpeg.Options{Quality: 95}); err != nil {
-		file.Close()
+		_ = file.Close()
 		b.Fatalf("Failed to encode benchmark image: %v", err)
 	}
-	file.Close()
+	_ = file.Close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -615,10 +615,10 @@ func BenchmarkCropTypicalImage(b *testing.B) {
 		b.Fatalf("Failed to create benchmark image: %v", err)
 	}
 	if err := jpeg.Encode(file, img, &jpeg.Options{Quality: 95}); err != nil {
-		file.Close()
+		_ = file.Close()
 		b.Fatalf("Failed to encode benchmark image: %v", err)
 	}
-	file.Close()
+	_ = file.Close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

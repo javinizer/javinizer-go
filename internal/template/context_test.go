@@ -485,14 +485,14 @@ func TestClone(t *testing.T) {
 			assert.Equal(t, tt.ctx.Genres, clone.Genres)
 
 			// Verify deep copy: modifying clone should not affect original
-			if clone.Actresses != nil && len(clone.Actresses) > 0 {
+			if len(clone.Actresses) > 0 {
 				originalFirst := tt.ctx.Actresses[0]
 				clone.Actresses[0] = "Modified Actress"
 				assert.Equal(t, originalFirst, tt.ctx.Actresses[0], "Original should not be modified")
 				assert.Equal(t, "Modified Actress", clone.Actresses[0], "Clone should be modified")
 			}
 
-			if clone.Genres != nil && len(clone.Genres) > 0 {
+			if len(clone.Genres) > 0 {
 				originalFirst := tt.ctx.Genres[0]
 				clone.Genres[0] = "Modified Genre"
 				assert.Equal(t, originalFirst, tt.ctx.Genres[0], "Original should not be modified")

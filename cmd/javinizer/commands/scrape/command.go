@@ -155,7 +155,7 @@ func Run(cmd *cobra.Command, args []string, configFile string, deps *commandutil
 		ownDeps = true
 	}
 	if ownDeps {
-		defer deps.Close()
+		defer func() { _ = deps.Close() }()
 	}
 
 	// Get force flag and scrapers override
@@ -487,7 +487,7 @@ func printMovie(movie *models.Movie, results []*models.ScraperResult) {
 	}
 
 	// Print Source URLs section (if we have scraperResults from fresh scrape)
-	if results != nil && len(results) > 0 {
+	if len(results) > 0 {
 		fmt.Println(strings.Repeat("-", maxLabelWidth+2) + " " + strings.Repeat("-", 100))
 		fmt.Println()
 		fmt.Println("Source URLs:")

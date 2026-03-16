@@ -38,20 +38,20 @@ func captureOutput(t *testing.T, fn func()) (string, string) {
 
 	go func() {
 		var buf bytes.Buffer
-		io.Copy(&buf, rOut)
+		_, _ = io.Copy(&buf, rOut)
 		outC <- buf.String()
 	}()
 
 	go func() {
 		var buf bytes.Buffer
-		io.Copy(&buf, rErr)
+		_, _ = io.Copy(&buf, rErr)
 		errC <- buf.String()
 	}()
 
 	fn()
 
-	wOut.Close()
-	wErr.Close()
+	require.NoError(t, wOut.Close())
+	require.NoError(t, wErr.Close())
 
 	return <-outC, <-errC
 }
@@ -77,7 +77,7 @@ func setupGenreTestDB(t *testing.T) (configPath string, dbPath string) {
 	require.NoError(t, err)
 	err = db.AutoMigrate()
 	require.NoError(t, err)
-	db.Close()
+	require.NoError(t, db.Close())
 
 	return configPath, dbPath
 }
@@ -113,7 +113,9 @@ func TestRunGenreAdd_Success(t *testing.T) {
 	require.NoError(t, err)
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	var replacement models.GenreReplacement
 	err = db.DB.Where("original = ?", "ドラマ").First(&replacement).Error
@@ -173,7 +175,9 @@ func TestRunGenreAdd_MultipleReplacements(t *testing.T) {
 	require.NoError(t, err)
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	repo := database.NewGenreReplacementRepository(db)
 	replacements, err := repo.List()
@@ -229,7 +233,7 @@ func TestRunGenreAdd_Duplicate(t *testing.T) {
 	require.NoError(t, err)
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var replacement models.GenreReplacement
 	err = db.DB.Where("original = ?", "ドラマ").First(&replacement).Error
@@ -339,7 +343,7 @@ func TestRunGenreRemove_Success(t *testing.T) {
 	require.NoError(t, err)
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var replacement models.GenreReplacement
 	err = db.DB.Where("original = ?", "ドラマ").First(&replacement).Error

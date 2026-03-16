@@ -277,7 +277,7 @@ func TestGenreAutoAdd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Run migrations
 	if err := db.AutoMigrate(); err != nil {
@@ -372,7 +372,7 @@ func TestGenreReplacementDisabledIgnoresExistingMappings(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	require.NoError(t, db.AutoMigrate())
 
 	repo := database.NewGenreReplacementRepository(db)
@@ -919,7 +919,7 @@ func TestAggregateConcurrentCacheAccess(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = db.AutoMigrate()
 	require.NoError(t, err)

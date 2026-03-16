@@ -90,7 +90,7 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 
 		// Run migrations
 		if err := db.AutoMigrate(); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("failed to run migrations: %w", err)
 		}
 

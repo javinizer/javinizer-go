@@ -170,7 +170,7 @@ func TestRun_Integration_DryRunMode(t *testing.T) {
 	require.NoError(t, os.WriteFile(videoFile, []byte("fake video"), 0644))
 
 	cmd := update.NewCommand()
-	cmd.Flags().Set("dry-run", "true")
+	_ = cmd.Flags().Set("dry-run", "true")
 
 	err := update.Run(cmd, []string{tmpDir}, configPath)
 	// Should succeed
@@ -218,7 +218,7 @@ func TestRun_Integration_PresetApplication(t *testing.T) {
 			require.NoError(t, os.WriteFile(textFile, []byte("not a video"), 0644))
 
 			cmd := update.NewCommand()
-			cmd.Flags().Set("preset", tt.preset)
+			_ = cmd.Flags().Set("preset", tt.preset)
 
 			err := update.Run(cmd, []string{tmpDir}, configPath)
 			// Should succeed (graceful exit when no videos found)
@@ -374,8 +374,8 @@ func TestRun_Integration_WithExistingNFO(t *testing.T) {
 	require.NoError(t, os.WriteFile(existingNFO, []byte(nfoContent), 0644))
 
 	cmd := update.NewCommand()
-	cmd.Flags().Set("scalar-strategy", "prefer-nfo")
-	cmd.Flags().Set("show-merge-stats", "true")
+	_ = cmd.Flags().Set("scalar-strategy", "prefer-nfo")
+	_ = cmd.Flags().Set("show-merge-stats", "true")
 
 	// This will exercise the NFO merge logic (lines 158-238)
 	err := update.Run(cmd, []string{tmpDir}, configPath)
@@ -448,8 +448,8 @@ func TestRun_Integration_MergeStrategies(t *testing.T) {
 			require.NoError(t, os.WriteFile(textFile, []byte("not a video"), 0644))
 
 			cmd := update.NewCommand()
-			cmd.Flags().Set("scalar-strategy", tt.scalarStrategy)
-			cmd.Flags().Set("array-strategy", tt.arrayStrategy)
+			_ = cmd.Flags().Set("scalar-strategy", tt.scalarStrategy)
+			_ = cmd.Flags().Set("array-strategy", tt.arrayStrategy)
 
 			err := update.Run(cmd, []string{tmpDir}, configPath)
 			// Should succeed (graceful exit when no videos found)
@@ -472,8 +472,8 @@ func TestRun_Integration_DownloadMediaEnabled(t *testing.T) {
 	require.NoError(t, os.WriteFile(videoFile, []byte("fake video"), 0644))
 
 	cmd := update.NewCommand()
-	cmd.Flags().Set("download", "true")
-	cmd.Flags().Set("dry-run", "false")
+	_ = cmd.Flags().Set("download", "true")
+	_ = cmd.Flags().Set("dry-run", "false")
 
 	// This will exercise the download media code path (lines 251-259)
 	err := update.Run(cmd, []string{tmpDir}, configPath)

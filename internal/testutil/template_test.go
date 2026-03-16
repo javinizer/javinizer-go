@@ -298,11 +298,6 @@ func TestComplexScenario(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Use additional fields to configure test behavior
-			if tt.setupMocks {
-				// Set up test mocks...
-			}
-
 			// Example test logic
 			got := len(tt.input) > 0
 			want := tt.want

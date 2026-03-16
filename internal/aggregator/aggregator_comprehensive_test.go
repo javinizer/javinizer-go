@@ -679,7 +679,7 @@ func TestApplyGenreReplacementWithDatabase(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = db.AutoMigrate()
 	require.NoError(t, err)
@@ -726,7 +726,7 @@ func TestApplyGenreReplacementAutoAdd(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = db.AutoMigrate()
 	require.NoError(t, err)
@@ -767,7 +767,7 @@ func TestReloadGenreReplacements(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = db.AutoMigrate()
 	require.NoError(t, err)
@@ -1054,7 +1054,7 @@ func TestAggregateGenresWithReplacement(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = db.AutoMigrate()
 	require.NoError(t, err)
@@ -1162,7 +1162,7 @@ func TestAggregateActressAliasConversion(t *testing.T) {
 
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = db.AutoMigrate()
 	require.NoError(t, err)

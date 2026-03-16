@@ -9,20 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// testDependencies wraps Dependencies to track Close calls
-type testDependencies struct {
-	*Dependencies
-	closeCalled *bool
-}
-
-func (td *testDependencies) Close() error {
-	*td.closeCalled = true
-	if td.Dependencies != nil && td.Dependencies.DB != nil {
-		return td.Dependencies.Close()
-	}
-	return nil
-}
-
 // TestRunWithDeps_Success tests successful execution with dependencies
 func TestRunWithDeps_Success(t *testing.T) {
 	tmpDir := t.TempDir()

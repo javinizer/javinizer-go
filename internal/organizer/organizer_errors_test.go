@@ -262,7 +262,7 @@ func TestOrganizer_Execute_PermissionErrors(t *testing.T) {
 		// Create read-only destination directory
 		readonlyDir := filepath.Join(tmpDir, "readonly-dest")
 		require.NoError(t, os.MkdirAll(readonlyDir, 0755))
-		defer os.Chmod(readonlyDir, 0755) // Restore permissions for cleanup
+		defer func() { _ = os.Chmod(readonlyDir, 0755) }() // Restore permissions for cleanup
 
 		// Make directory read-only (no write permission)
 		require.NoError(t, os.Chmod(readonlyDir, 0444))
@@ -304,7 +304,7 @@ func TestOrganizer_Execute_PermissionErrors(t *testing.T) {
 
 		// Make source file read-only
 		require.NoError(t, os.Chmod(sourceFile, 0444))
-		defer os.Chmod(sourceFile, 0644) // Restore for cleanup
+		defer func() { _ = os.Chmod(sourceFile, 0644) }() // Restore for cleanup
 
 		match := matcher.MatchResult{
 			File: scanner.FileInfo{
@@ -339,7 +339,7 @@ func TestOrganizer_Execute_PermissionErrors(t *testing.T) {
 
 		// Make source file unreadable (no read permission)
 		require.NoError(t, os.Chmod(sourceFile, 0000))
-		defer os.Chmod(sourceFile, 0644) // Restore for cleanup
+		defer func() { _ = os.Chmod(sourceFile, 0644) }() // Restore for cleanup
 
 		match := matcher.MatchResult{
 			File: scanner.FileInfo{
@@ -377,7 +377,7 @@ func TestOrganizer_Execute_PermissionErrors(t *testing.T) {
 		// Create read-only destination
 		readonlyDir := filepath.Join(tmpDir, "readonly-organize")
 		require.NoError(t, os.MkdirAll(readonlyDir, 0755))
-		defer os.Chmod(readonlyDir, 0755) // Restore permissions
+		defer func() { _ = os.Chmod(readonlyDir, 0755) }() // Restore permissions
 		require.NoError(t, os.Chmod(readonlyDir, 0444))
 
 		match := matcher.MatchResult{

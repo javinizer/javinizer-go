@@ -149,7 +149,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 // Search scrapes metadata from Caribbeancom.
 func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	if !s.enabled {
-		return nil, fmt.Errorf("Caribbeancom scraper is disabled")
+		return nil, fmt.Errorf("caribbeancom scraper is disabled")
 	}
 
 	detailURL, err := s.GetURL(id)
@@ -553,7 +553,7 @@ func (s *Scraper) applyLanguage(rawURL string) string {
 	}
 
 	port := u.Port()
-	host := u.Hostname()
+	host := "www.caribbeancom.com"
 	if s.language == "en" {
 		host = "en.caribbeancom.com"
 		if !strings.HasPrefix(u.Path, "/eng/") {
@@ -562,7 +562,6 @@ func (s *Scraper) applyLanguage(rawURL string) string {
 			}
 		}
 	} else {
-		host = "www.caribbeancom.com"
 		u.Path = strings.TrimPrefix(u.Path, "/eng")
 		if u.Path == "" {
 			u.Path = "/"

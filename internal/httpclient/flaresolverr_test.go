@@ -30,7 +30,7 @@ func TestResolveURL_ReusesPersistentSessionAndTTL(t *testing.T) {
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 
 		var req fsReq
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
@@ -215,7 +215,7 @@ func TestNewRestyClientWithFlareSolverr_RequestLevelProxy(t *testing.T) {
 	var captured map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		_ = json.NewDecoder(r.Body).Decode(&captured)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok","solution":{"response":"<html></html>","cookies":[],"userAgent":"ua"}}`))

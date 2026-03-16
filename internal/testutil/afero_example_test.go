@@ -91,7 +91,7 @@ func TestAferoFileOperations(t *testing.T) {
 	// Open file for reading
 	readFile, err := fs.Open(srcPath)
 	require.NoError(t, err)
-	defer readFile.Close()
+	defer func() { _ = readFile.Close() }()
 
 	// Read content back
 	readBuf := make([]byte, len(content))
@@ -107,7 +107,7 @@ func TestAferoFileOperations(t *testing.T) {
 
 	err = afero.WriteFile(fs, destPath, content, 0644)
 	require.NoError(t, err)
-	destFile.Close()
+	_ = destFile.Close()
 
 	// Verify both files exist
 	srcExists, _ := afero.Exists(fs, srcPath)

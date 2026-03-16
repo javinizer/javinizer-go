@@ -137,7 +137,9 @@ func serveTempImage(deps *ServerDependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
 			return
 		}
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 
 		if resp.StatusCode != http.StatusOK {
 			c.JSON(http.StatusBadGateway, gin.H{"error": "image source returned non-200 status"})

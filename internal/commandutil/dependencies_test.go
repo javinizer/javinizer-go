@@ -20,7 +20,7 @@ func TestNewDependencies_Success(t *testing.T) {
 	deps, err := NewDependencies(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	assert.NotNil(t, deps.Config)
 	assert.NotNil(t, deps.DB)
@@ -85,7 +85,7 @@ func TestNewDependencies_MigrationSuccess(t *testing.T) {
 	deps, err := NewDependencies(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Verify that tables were created by checking if we can query them
 	err = deps.DB.DB.Exec("SELECT COUNT(*) FROM movies").Error

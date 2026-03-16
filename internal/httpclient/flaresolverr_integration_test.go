@@ -94,7 +94,7 @@ func TestFlareSolverr_RealConnection(t *testing.T) {
 			t.Skip("cannot test session-based resolution without session creation")
 			return
 		}
-		defer fs.DestroySession(sessionID)
+		defer func() { _ = fs.DestroySession(sessionID) }()
 
 		targetURL := "https://httpbin.org/get"
 		html, cookies, err := fs.ResolveURLWithSession(targetURL, sessionID)

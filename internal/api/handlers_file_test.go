@@ -19,19 +19,19 @@ import (
 func TestScanDirectory(t *testing.T) {
 	tests := []struct {
 		name           string
-		setupFiles     func(string) string // Returns path to scan
+		setupFiles     func(*testing.T, string) string // Returns path to scan
 		requestBody    interface{}
 		expectedStatus int
 		validateFn     func(*testing.T, *ScanResponse)
 	}{
 		{
 			name: "scan directory with video files",
-			setupFiles: func(tempDir string) string {
+			setupFiles: func(t *testing.T, tempDir string) string {
 				// Create test video files
 				testFile1 := filepath.Join(tempDir, "IPX-535.mp4")
 				testFile2 := filepath.Join(tempDir, "ABC-123.mkv")
-				os.WriteFile(testFile1, []byte("test"), 0644)
-				os.WriteFile(testFile2, []byte("test"), 0644)
+				require.NoError(t, os.WriteFile(testFile1, []byte("test"), 0644))
+				require.NoError(t, os.WriteFile(testFile2, []byte("test"), 0644))
 				return tempDir
 			},
 			requestBody: func(path string) ScanRequest {
@@ -56,7 +56,7 @@ func TestScanDirectory(t *testing.T) {
 		},
 		{
 			name: "scan directory with date-based uncensored filenames",
-			setupFiles: func(tempDir string) string {
+			setupFiles: func(t *testing.T, tempDir string) string {
 				testFiles := []string{
 					"020326_001-1PON.mp4",
 					"020326_01-10MU.mp4",
@@ -64,7 +64,7 @@ func TestScanDirectory(t *testing.T) {
 				}
 				for _, file := range testFiles {
 					path := filepath.Join(tempDir, file)
-					os.WriteFile(path, []byte("test"), 0644)
+					require.NoError(t, os.WriteFile(path, []byte("test"), 0644))
 				}
 				return tempDir
 			},
@@ -89,7 +89,7 @@ func TestScanDirectory(t *testing.T) {
 		},
 		{
 			name: "scan non-existent directory",
-			setupFiles: func(tempDir string) string {
+			setupFiles: func(_ *testing.T, tempDir string) string {
 				return filepath.Join(tempDir, "nonexistent")
 			},
 			requestBody: func(path string) ScanRequest {
@@ -101,10 +101,10 @@ func TestScanDirectory(t *testing.T) {
 		},
 		{
 			name: "scan directory with non-video files",
-			setupFiles: func(tempDir string) string {
+			setupFiles: func(t *testing.T, tempDir string) string {
 				// Create non-video files
 				testFile := filepath.Join(tempDir, "document.txt")
-				os.WriteFile(testFile, []byte("test"), 0644)
+				require.NoError(t, os.WriteFile(testFile, []byte("test"), 0644))
 				return tempDir
 			},
 			requestBody: func(path string) ScanRequest {
@@ -120,7 +120,7 @@ func TestScanDirectory(t *testing.T) {
 		},
 		{
 			name: "invalid request - missing path",
-			setupFiles: func(tempDir string) string {
+			setupFiles: func(_ *testing.T, tempDir string) string {
 				return tempDir
 			},
 			requestBody:    map[string]string{},
@@ -131,7 +131,7 @@ func TestScanDirectory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tempDir := t.TempDir()
-			scanPath := tt.setupFiles(tempDir)
+			scanPath := tt.setupFiles(t, tempDir)
 
 			cfg := &config.Config{
 				Matching: config.MatchingConfig{
@@ -351,18 +351,18 @@ func TestGetCurrentWorkingDirectory(t *testing.T) {
 func TestBrowseDirectory(t *testing.T) {
 	tests := []struct {
 		name           string
-		setupFiles     func(string) string // Returns path to browse
+		setupFiles     func(*testing.T, string) string // Returns path to browse
 		requestBody    interface{}
 		expectedStatus int
 		validateFn     func(*testing.T, *BrowseResponse)
 	}{
 		{
 			name: "browse directory successfully",
-			setupFiles: func(tempDir string) string {
+			setupFiles: func(t *testing.T, tempDir string) string {
 				// Create test files and subdirectories
-				os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("test"), 0644)
-				os.WriteFile(filepath.Join(tempDir, "file2.mp4"), []byte("test"), 0644)
-				os.Mkdir(filepath.Join(tempDir, "subdir"), 0755)
+				require.NoError(t, os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("test"), 0644))
+				require.NoError(t, os.WriteFile(filepath.Join(tempDir, "file2.mp4"), []byte("test"), 0644))
+				require.NoError(t, os.Mkdir(filepath.Join(tempDir, "subdir"), 0755))
 				return tempDir
 			},
 			requestBody: func(path string) BrowseRequest {
@@ -394,7 +394,7 @@ func TestBrowseDirectory(t *testing.T) {
 		},
 		{
 			name: "browse non-existent directory",
-			setupFiles: func(tempDir string) string {
+			setupFiles: func(_ *testing.T, tempDir string) string {
 				return filepath.Join(tempDir, "nonexistent")
 			},
 			requestBody: func(path string) BrowseRequest {
@@ -404,9 +404,9 @@ func TestBrowseDirectory(t *testing.T) {
 		},
 		{
 			name: "browse file instead of directory",
-			setupFiles: func(tempDir string) string {
+			setupFiles: func(t *testing.T, tempDir string) string {
 				filePath := filepath.Join(tempDir, "file.txt")
-				os.WriteFile(filePath, []byte("test"), 0644)
+				require.NoError(t, os.WriteFile(filePath, []byte("test"), 0644))
 				return filePath
 			},
 			requestBody: func(path string) BrowseRequest {
@@ -416,7 +416,7 @@ func TestBrowseDirectory(t *testing.T) {
 		},
 		{
 			name: "browse with empty path defaults to cwd",
-			setupFiles: func(tempDir string) string {
+			setupFiles: func(_ *testing.T, tempDir string) string {
 				return ""
 			},
 			requestBody:    BrowseRequest{Path: ""},
@@ -427,7 +427,7 @@ func TestBrowseDirectory(t *testing.T) {
 		},
 		{
 			name: "invalid JSON",
-			setupFiles: func(tempDir string) string {
+			setupFiles: func(_ *testing.T, tempDir string) string {
 				return tempDir
 			},
 			requestBody:    "invalid json",
@@ -438,7 +438,7 @@ func TestBrowseDirectory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tempDir := t.TempDir()
-			browsePath := tt.setupFiles(tempDir)
+			browsePath := tt.setupFiles(t, tempDir)
 
 			cfg := config.DefaultConfig()
 
@@ -551,7 +551,7 @@ func TestBrowseDirectory_PathTraversalPrevention(t *testing.T) {
 func TestBrowseDirectory_ParentPathCalculation(t *testing.T) {
 	tempDir := t.TempDir()
 	subDir := filepath.Join(tempDir, "subdir")
-	os.Mkdir(subDir, 0755)
+	require.NoError(t, os.Mkdir(subDir, 0755))
 
 	cfg := config.DefaultConfig()
 	// Create minimal ServerDependencies for test
@@ -695,7 +695,7 @@ func TestScanDirectory_LargeDirectory(t *testing.T) {
 	// Create many files to test performance
 	for i := 0; i < 100; i++ {
 		filename := filepath.Join(tempDir, "IPX-"+string(rune(i+1))+".mp4")
-		os.WriteFile(filename, []byte("test"), 0644)
+		_ = os.WriteFile(filename, []byte("test"), 0644)
 	}
 
 	cfg := &config.Config{

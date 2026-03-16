@@ -182,9 +182,9 @@ func parseMediaInfoJSON(data []byte) (*VideoInfo, error) {
 func parseInt(s string) (int, error) {
 	// Remove spaces and common suffixes
 	s = strings.TrimSpace(s)
-	s = strings.Replace(s, " ", "", -1)
-	s = strings.Replace(s, "pixels", "", -1)
-	s = strings.Replace(s, "Hz", "", -1)
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "pixels", "")
+	s = strings.ReplaceAll(s, "Hz", "")
 
 	// Handle decimal notation (e.g., "1 920" or "1920.000")
 	if strings.Contains(s, ".") {
@@ -198,15 +198,15 @@ func parseInt(s string) (int, error) {
 // parseFloat parses string to float64
 func parseFloat(s string) (float64, error) {
 	s = strings.TrimSpace(s)
-	s = strings.Replace(s, " ", "", -1)
+	s = strings.ReplaceAll(s, " ", "")
 	return strconv.ParseFloat(s, 64)
 }
 
 // normalizeCodecName normalizes codec names from MediaInfo
 func normalizeCodecName(codec string) string {
 	codec = strings.ToLower(codec)
-	codec = strings.Replace(codec, " ", "_", -1)
-	codec = strings.Replace(codec, "/", "_", -1)
+	codec = strings.ReplaceAll(codec, " ", "_")
+	codec = strings.ReplaceAll(codec, "/", "_")
 
 	// Common mappings
 	switch {

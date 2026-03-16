@@ -75,11 +75,12 @@ func InitLogger(cfg *Config) error {
 			continue
 		}
 
-		if output == "stdout" {
+		switch output {
+		case "stdout":
 			writers = append(writers, os.Stdout)
-		} else if output == "stderr" {
+		case "stderr":
 			writers = append(writers, os.Stderr)
-		} else {
+		default:
 			// It's a file path - create directory if needed
 			dir := filepath.Dir(output)
 			if err := os.MkdirAll(dir, 0777); err != nil {
@@ -136,7 +137,7 @@ func InitLogger(cfg *Config) error {
 				for _, c := range state.closers {
 					if err := c.Close(); err != nil {
 						// Log to new logger (or stderr as fallback)
-						fmt.Fprintf(os.Stderr, "Warning: failed to close old log file: %v\n", err)
+						_, _ = fmt.Fprintf(os.Stderr, "Warning: failed to close old log file: %v\n", err)
 					}
 				}
 			}(prevState)
@@ -194,7 +195,7 @@ func CloseLogger() {
 	}
 	for _, c := range prevState.closers {
 		if err := c.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to close log file during shutdown: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: failed to close log file during shutdown: %v\n", err)
 		}
 	}
 }

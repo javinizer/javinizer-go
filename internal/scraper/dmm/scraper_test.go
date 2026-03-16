@@ -121,13 +121,13 @@ func TestScraperInterfaceMethodSignatures(t *testing.T) {
 	// GetURL(id string) (string, error)
 	// Note: We're not calling this because it would require HTTP setup
 	// Just verify the method exists and has correct signature
-	var getURLFunc func(string) (string, error) = scraper.GetURL
+	getURLFunc := scraper.GetURL
 	assert.NotNil(t, getURLFunc, "GetURL method should exist")
 
 	// Search(id string) (*models.ScraperResult, error)
 	// Note: We're not calling this because it would require HTTP setup
 	// Just verify the method exists and has correct signature
-	var searchFunc func(string) (*models.ScraperResult, error) = scraper.Search
+	searchFunc := scraper.Search
 	assert.NotNil(t, searchFunc, "Search method should exist")
 }
 

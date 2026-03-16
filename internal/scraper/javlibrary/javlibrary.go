@@ -264,9 +264,7 @@ func (s *Scraper) extractTitle(html string, id string) string {
 
 	// Strip the ID prefix (e.g., "IPX-123 " from the beginning)
 	idPrefix := id + " "
-	if strings.HasPrefix(title, idPrefix) {
-		title = strings.TrimPrefix(title, idPrefix)
-	}
+	title = strings.TrimPrefix(title, idPrefix)
 
 	return strings.TrimSpace(title)
 }

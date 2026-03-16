@@ -37,7 +37,7 @@ func setupTagTestDB(t *testing.T) (configPath string, dbPath string) {
 	require.NoError(t, err)
 	err = db.AutoMigrate()
 	require.NoError(t, err)
-	db.Close()
+	_ = db.Close()
 
 	return configPath, dbPath
 }

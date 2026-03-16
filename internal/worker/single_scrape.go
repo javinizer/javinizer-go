@@ -180,7 +180,7 @@ func RunBatchScrapeOnce(
 			// route non-standard formats to the right scraper.
 			movieID = rawFilenameQuery
 			if movieID == "" {
-				errMsg := "Could not extract movie ID from filename"
+				errMsg := "could not extract movie ID from filename"
 				logging.Debugf("[Batch %s] File %d: %s", job.ID, fileIndex, errMsg)
 
 				return nil, &FileResult{

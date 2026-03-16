@@ -406,6 +406,8 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 			result.Series = extractFirstText(valueNode)
 		case labelContains(label, "評分", "评分", "rating", "score"):
 			result.Rating = parseRating(valueText)
+		case labelContains(label, "類別", "类别", "genre", "tag", "tags"):
+			result.Genres = extractStringList(valueNode)
 		default:
 			switch classifyCastLabel(label) {
 			case castLabelFemale:
@@ -425,8 +427,6 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 			case castLabelMale:
 				// Explicit male actor rows should not be merged into actresses.
 			}
-		case labelContains(label, "類別", "类别", "genre", "tag", "tags"):
-			result.Genres = extractStringList(valueNode)
 		}
 	})
 

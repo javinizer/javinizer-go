@@ -52,7 +52,7 @@ func TestMovieRepository_Create(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewMovieRepository(db)
@@ -115,7 +115,7 @@ func TestMovieRepository_Update(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewMovieRepository(db)
@@ -152,7 +152,7 @@ func TestMovieRepository_FindByID(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewMovieRepository(db)
@@ -186,7 +186,7 @@ func TestMovieRepository_FindByContentID(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewMovieRepository(db)
@@ -222,7 +222,7 @@ func TestMovieRepository_Delete(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewMovieRepository(db)
@@ -277,7 +277,7 @@ func TestMovieRepository_List(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewMovieRepository(db)
@@ -314,7 +314,7 @@ func TestMovieRepository_List(t *testing.T) {
 
 		db2, err := New(cfg)
 		require.NoError(t, err)
-		defer db2.Close()
+		defer func() { _ = db2.Close() }()
 
 		require.NoError(t, db2.AutoMigrate())
 		repo2 := NewMovieRepository(db2)
@@ -338,7 +338,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewMovieRepository(db)
@@ -463,7 +463,7 @@ func TestMovieRepository_EnsureGenresExist(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewMovieRepository(db)
@@ -523,7 +523,7 @@ func TestMovieRepository_EnsureActressesExist(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 	repo := NewMovieRepository(db)

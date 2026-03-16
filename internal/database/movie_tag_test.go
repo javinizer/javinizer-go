@@ -21,7 +21,7 @@ func TestMovieTagRepository_AddTag(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 
@@ -57,16 +57,16 @@ func TestMovieTagRepository_GetTagsForMovie(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 
 	repo := NewMovieTagRepository(db)
 
 	// Add tags
-	repo.AddTag("IPX-535", "Favorite")
-	repo.AddTag("IPX-535", "Watched")
-	repo.AddTag("IPX-535", "Uncensored")
+	_ = repo.AddTag("IPX-535", "Favorite")
+	_ = repo.AddTag("IPX-535", "Watched")
+	_ = repo.AddTag("IPX-535", "Uncensored")
 
 	// Get tags
 	tags, err := repo.GetTagsForMovie("IPX-535")
@@ -95,15 +95,15 @@ func TestMovieTagRepository_RemoveTag(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 
 	repo := NewMovieTagRepository(db)
 
 	// Add and remove tag
-	repo.AddTag("IPX-535", "Favorite")
-	repo.AddTag("IPX-535", "Watched")
+	_ = repo.AddTag("IPX-535", "Favorite")
+	_ = repo.AddTag("IPX-535", "Watched")
 
 	err = repo.RemoveTag("IPX-535", "Favorite")
 	assert.NoError(t, err)
@@ -131,16 +131,16 @@ func TestMovieTagRepository_RemoveAllTags(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 
 	repo := NewMovieTagRepository(db)
 
 	// Add multiple tags
-	repo.AddTag("IPX-535", "Favorite")
-	repo.AddTag("IPX-535", "Watched")
-	repo.AddTag("IPX-535", "Uncensored")
+	_ = repo.AddTag("IPX-535", "Favorite")
+	_ = repo.AddTag("IPX-535", "Watched")
+	_ = repo.AddTag("IPX-535", "Uncensored")
 
 	// Remove all tags
 	err = repo.RemoveAllTags("IPX-535")
@@ -167,17 +167,17 @@ func TestMovieTagRepository_GetMoviesWithTag(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 
 	repo := NewMovieTagRepository(db)
 
 	// Add same tag to multiple movies
-	repo.AddTag("IPX-535", "Favorite")
-	repo.AddTag("ABC-123", "Favorite")
-	repo.AddTag("XYZ-789", "Favorite")
-	repo.AddTag("ABC-123", "Watched")
+	_ = repo.AddTag("IPX-535", "Favorite")
+	_ = repo.AddTag("ABC-123", "Favorite")
+	_ = repo.AddTag("XYZ-789", "Favorite")
+	_ = repo.AddTag("ABC-123", "Watched")
 
 	// Search
 	movies, err := repo.GetMoviesWithTag("Favorite")
@@ -212,17 +212,17 @@ func TestMovieTagRepository_ListAll(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 
 	repo := NewMovieTagRepository(db)
 
 	// Add tags for multiple movies
-	repo.AddTag("IPX-535", "Favorite")
-	repo.AddTag("IPX-535", "Watched")
-	repo.AddTag("ABC-123", "Favorite")
-	repo.AddTag("ABC-123", "Uncensored")
+	_ = repo.AddTag("IPX-535", "Favorite")
+	_ = repo.AddTag("IPX-535", "Watched")
+	_ = repo.AddTag("ABC-123", "Favorite")
+	_ = repo.AddTag("ABC-123", "Uncensored")
 
 	// List all
 	allTags, err := repo.ListAll()
@@ -253,17 +253,17 @@ func TestMovieTagRepository_GetUniqueTagsList(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 
 	repo := NewMovieTagRepository(db)
 
 	// Add duplicate tags across movies
-	repo.AddTag("IPX-535", "Favorite")
-	repo.AddTag("ABC-123", "Favorite")
-	repo.AddTag("IPX-535", "Watched")
-	repo.AddTag("XYZ-789", "Uncensored")
+	_ = repo.AddTag("IPX-535", "Favorite")
+	_ = repo.AddTag("ABC-123", "Favorite")
+	_ = repo.AddTag("IPX-535", "Watched")
+	_ = repo.AddTag("XYZ-789", "Uncensored")
 
 	// Get unique tags
 	tags, err := repo.GetUniqueTagsList()
@@ -274,9 +274,9 @@ func TestMovieTagRepository_GetUniqueTagsList(t *testing.T) {
 	assert.Contains(t, tags, "Uncensored")
 
 	// Test empty database
-	repo.RemoveAllTags("IPX-535")
-	repo.RemoveAllTags("ABC-123")
-	repo.RemoveAllTags("XYZ-789")
+	_ = repo.RemoveAllTags("IPX-535")
+	_ = repo.RemoveAllTags("ABC-123")
+	_ = repo.RemoveAllTags("XYZ-789")
 
 	tags, err = repo.GetUniqueTagsList()
 	require.NoError(t, err)
@@ -296,7 +296,7 @@ func TestMovieTagRepository_CaseSensitivity(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 
@@ -333,7 +333,7 @@ func TestMovieTagRepository_TagsWithSpaces(t *testing.T) {
 
 	db, err := New(cfg)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	require.NoError(t, db.AutoMigrate())
 

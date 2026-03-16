@@ -132,12 +132,13 @@ func analyzeAVI(f *os.File) (*VideoInfo, error) {
 
 			listTypeStr := string(listType[:])
 
-			if listTypeStr == "hdrl" {
+			switch listTypeStr {
+			case "hdrl":
 				// Header list - contains avih
 				if err := parseHdrlList(f, info, currentPos+4, chunk.Size-4); err != nil {
 					return nil, err
 				}
-			} else if listTypeStr == "strl" {
+			case "strl":
 				// Stream list - contains strh and strf
 				streamInfo, err := parseStrlList(f, currentPos+4, chunk.Size-4)
 				if err != nil {
@@ -159,10 +160,14 @@ func analyzeAVI(f *os.File) (*VideoInfo, error) {
 				}
 
 				// Seek to end of this LIST chunk
-				f.Seek(currentPos+int64(chunk.Size), io.SeekStart)
-			} else {
+				if _, err := f.Seek(currentPos+int64(chunk.Size), io.SeekStart); err != nil {
+					return nil, fmt.Errorf("failed to seek to end of stream list: %w", err)
+				}
+			default:
 				// Skip other LIST types
-				f.Seek(currentPos+int64(chunk.Size), io.SeekStart)
+				if _, err := f.Seek(currentPos+int64(chunk.Size), io.SeekStart); err != nil {
+					return nil, fmt.Errorf("failed to seek over list chunk: %w", err)
+				}
 			}
 
 		case "avih":
@@ -183,12 +188,16 @@ func analyzeAVI(f *os.File) (*VideoInfo, error) {
 
 		default:
 			// Skip unknown chunks
-			f.Seek(currentPos+int64(chunk.Size), io.SeekStart)
+			if _, err := f.Seek(currentPos+int64(chunk.Size), io.SeekStart); err != nil {
+				return nil, fmt.Errorf("failed to seek over unknown chunk: %w", err)
+			}
 		}
 
 		// Align to word boundary (RIFF chunks are word-aligned)
 		if chunk.Size%2 != 0 {
-			f.Seek(1, io.SeekCurrent)
+			if _, err := f.Seek(1, io.SeekCurrent); err != nil {
+				return nil, fmt.Errorf("failed to align to word boundary: %w", err)
+			}
 		}
 	}
 
@@ -251,12 +260,12 @@ func parseHdrlList(f *os.File, info *VideoInfo, startPos int64, size uint32) err
 		} else {
 			// Skip chunk
 			currentPos, _ := f.Seek(0, io.SeekCurrent)
-			f.Seek(currentPos+int64(chunk.Size), io.SeekStart)
+			_, _ = f.Seek(currentPos+int64(chunk.Size), io.SeekStart)
 		}
 
 		// Word alignment
 		if chunk.Size%2 != 0 {
-			f.Seek(1, io.SeekCurrent)
+			_, _ = f.Seek(1, io.SeekCurrent)
 		}
 	}
 
@@ -293,7 +302,8 @@ func parseStrlList(f *os.File, startPos int64, size uint32) (*streamInfo, error)
 			}
 
 			streamType := string(streamHeader.Type[:])
-			if streamType == "vids" {
+			switch streamType {
+			case "vids":
 				stream.isVideo = true
 				stream.codec = mapAVIVideoCodec(string(streamHeader.Handler[:]))
 
@@ -301,7 +311,7 @@ func parseStrlList(f *os.File, startPos int64, size uint32) (*streamInfo, error)
 				if streamHeader.Scale > 0 {
 					stream.frameRate = float64(streamHeader.Rate) / float64(streamHeader.Scale)
 				}
-			} else if streamType == "auds" {
+			case "auds":
 				stream.isAudio = true
 			}
 
@@ -362,16 +372,16 @@ func parseStrlList(f *os.File, startPos int64, size uint32) (*streamInfo, error)
 			}
 
 			// Seek to end of chunk
-			f.Seek(chunkDataPos+int64(chunk.Size), io.SeekStart)
+			_, _ = f.Seek(chunkDataPos+int64(chunk.Size), io.SeekStart)
 
 		default:
 			// Skip unknown chunks
-			f.Seek(chunkDataPos+int64(chunk.Size), io.SeekStart)
+			_, _ = f.Seek(chunkDataPos+int64(chunk.Size), io.SeekStart)
 		}
 
 		// Word alignment
 		if chunk.Size%2 != 0 {
-			f.Seek(1, io.SeekCurrent)
+			_, _ = f.Seek(1, io.SeekCurrent)
 		}
 	}
 

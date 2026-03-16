@@ -106,7 +106,9 @@ func runAdd(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() {
+		_ = deps.Close()
+	}()
 
 	repo := database.NewMovieTagRepository(deps.DB)
 
@@ -118,7 +120,7 @@ func runAdd(cmd *cobra.Command, args []string, configFile string) error {
 				logging.Warnf("Tag '%s' already exists for %s, skipping", tag, movieID)
 				continue
 			}
-			return fmt.Errorf("Failed to add tag '%s': %v", tag, err)
+			return fmt.Errorf("failed to add tag '%s': %v", tag, err)
 		}
 		addedTags = append(addedTags, tag)
 	}
@@ -146,7 +148,9 @@ func runList(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() {
+		_ = deps.Close()
+	}()
 
 	repo := database.NewMovieTagRepository(deps.DB)
 
@@ -155,7 +159,7 @@ func runList(cmd *cobra.Command, args []string, configFile string) error {
 		movieID := args[0]
 		tags, err := repo.GetTagsForMovie(movieID)
 		if err != nil {
-			return fmt.Errorf("Failed to get tags: %v", err)
+			return fmt.Errorf("failed to get tags: %v", err)
 		}
 
 		if len(tags) == 0 {
@@ -174,7 +178,7 @@ func runList(cmd *cobra.Command, args []string, configFile string) error {
 	// List all tag mappings
 	allTags, err := repo.ListAll()
 	if err != nil {
-		return fmt.Errorf("Failed to list tags: %v", err)
+		return fmt.Errorf("failed to list tags: %v", err)
 	}
 
 	if len(allTags) == 0 {
@@ -209,7 +213,9 @@ func runRemove(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() {
+		_ = deps.Close()
+	}()
 
 	repo := database.NewMovieTagRepository(deps.DB)
 
@@ -217,7 +223,7 @@ func runRemove(cmd *cobra.Command, args []string, configFile string) error {
 	if len(args) == 2 {
 		tag := args[1]
 		if err := repo.RemoveTag(movieID, tag); err != nil {
-			return fmt.Errorf("Failed to remove tag: %v", err)
+			return fmt.Errorf("failed to remove tag: %v", err)
 		}
 		fmt.Printf("✅ Removed tag '%s' from %s\n", tag, movieID)
 		return nil
@@ -225,7 +231,7 @@ func runRemove(cmd *cobra.Command, args []string, configFile string) error {
 
 	// Remove all tags
 	if err := repo.RemoveAllTags(movieID); err != nil {
-		return fmt.Errorf("Failed to remove tags: %v", err)
+		return fmt.Errorf("failed to remove tags: %v", err)
 	}
 	fmt.Printf("✅ Removed all tags from %s\n", movieID)
 
@@ -246,7 +252,7 @@ func runSearch(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	repo := database.NewMovieTagRepository(deps.DB)
 
@@ -280,7 +286,7 @@ func runAllTags(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	repo := database.NewMovieTagRepository(deps.DB)
 

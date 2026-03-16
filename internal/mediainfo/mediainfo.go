@@ -25,9 +25,6 @@ type VideoInfo struct {
 	Container string // "mp4", "mkv", "avi", etc.
 }
 
-// Global registry (initialized on first use)
-var defaultRegistry *ProberRegistry
-
 // Analyze extracts metadata from a video file using the ProberRegistry
 // Supports: MP4, MKV, MOV, AVI, FLV
 // Falls back to MediaInfo CLI if enabled and native parsers fail
@@ -43,7 +40,7 @@ func AnalyzeWithConfig(filePath string, cfg *MediaInfoConfig) (*VideoInfo, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Initialize registry if needed
 	if cfg == nil {

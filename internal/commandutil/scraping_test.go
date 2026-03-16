@@ -16,7 +16,7 @@ import (
 func TestScrapeMetadata_Success(t *testing.T) {
 	_, testCfg := createTestConfig(t)
 	deps := createTestDependencies(t, testCfg)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Create test matches
 	matches := []matcher.MatchResult{
@@ -53,7 +53,7 @@ func TestScrapeMetadata_Success(t *testing.T) {
 func TestScrapeMetadata_CacheHit(t *testing.T) {
 	_, testCfg := createTestConfig(t)
 	deps := createTestDependencies(t, testCfg)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Pre-populate cache
 	movieRepo := database.NewMovieRepository(deps.DB)
@@ -84,7 +84,7 @@ func TestScrapeMetadata_CacheHit(t *testing.T) {
 func TestScrapeMetadata_ForceRefresh(t *testing.T) {
 	_, testCfg := createTestConfig(t)
 	deps := createTestDependencies(t, testCfg)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Pre-populate cache
 	movieRepo := database.NewMovieRepository(deps.DB)
@@ -126,7 +126,7 @@ func TestScrapeMetadata_ForceRefresh(t *testing.T) {
 func TestScrapeMetadata_EmptyMatches(t *testing.T) {
 	_, testCfg := createTestConfig(t)
 	deps := createTestDependencies(t, testCfg)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	movieRepo := database.NewMovieRepository(deps.DB)
 	registry := models.NewScraperRegistry()
@@ -151,7 +151,7 @@ func TestScrapeMetadata_EmptyMatches(t *testing.T) {
 func TestScrapeMetadata_NoResults(t *testing.T) {
 	_, testCfg := createTestConfig(t)
 	deps := createTestDependencies(t, testCfg)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Create test matches
 	matches := []matcher.MatchResult{
@@ -186,7 +186,7 @@ func TestScrapeMetadata_NoResults(t *testing.T) {
 func TestScrapeMetadata_MultipleIDs(t *testing.T) {
 	_, testCfg := createTestConfig(t)
 	deps := createTestDependencies(t, testCfg)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Create test matches for multiple IDs
 	matches := []matcher.MatchResult{
@@ -224,7 +224,7 @@ func TestScrapeMetadata_MultipleIDs(t *testing.T) {
 func TestScrapeMetadata_MixedCacheAndScrape(t *testing.T) {
 	_, testCfg := createTestConfig(t)
 	deps := createTestDependencies(t, testCfg)
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// Pre-populate cache with one movie
 	movieRepo := database.NewMovieRepository(deps.DB)

@@ -16,7 +16,7 @@ func createTestFLV(t *testing.T, tmpDir string, videoCodecID uint8, audioCodecID
 	flvPath := filepath.Join(tmpDir, "test.flv")
 	f, err := os.Create(flvPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// FLV header
 	writeBytes(t, f, []byte("FLV"))
@@ -185,7 +185,7 @@ func TestFLVProber_Probe_WithMetadata(t *testing.T) {
 
 	f, err := os.Open(flvPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	prober := NewFLVProber()
 	info, err := prober.Probe(f)
@@ -205,7 +205,7 @@ func TestFLVProber_Probe_WithoutMetadata(t *testing.T) {
 
 	f, err := os.Open(flvPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	prober := NewFLVProber()
 	info, err := prober.Probe(f)
@@ -228,7 +228,7 @@ func TestFLVProber_Probe_InvalidSignature(t *testing.T) {
 
 	f, err := os.Open(invalidPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	prober := NewFLVProber()
 	_, err = prober.Probe(f)
@@ -246,7 +246,7 @@ func TestFLVProber_Probe_TruncatedHeader(t *testing.T) {
 
 	f, err := os.Open(truncatedPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	prober := NewFLVProber()
 	_, err = prober.Probe(f)
@@ -362,12 +362,12 @@ func TestReadFLVTag(t *testing.T) {
 	writeByte(t, f, 0)       // Timestamp extension
 	write24BitBE(t, f, 0)    // Stream ID
 
-	f.Close()
+	_ = f.Close()
 
 	// Reopen for reading
 	f, err = os.Open(testPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	tag, err := readFLVTag(f)
 	require.NoError(t, err)
@@ -386,7 +386,7 @@ func TestReadByte(t *testing.T) {
 
 	f, err := os.Open(testPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	b, err := readByte(f)
 	require.NoError(t, err)
@@ -434,12 +434,12 @@ func TestParseAMF0_SimpleProperties(t *testing.T) {
 	writeUint16BE(t, f, 0)
 	writeByte(t, f, 0x09)
 
-	f.Close()
+	_ = f.Close()
 
 	// Reopen for reading
 	f, err = os.Open(testPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fileInfo, err := f.Stat()
 	require.NoError(t, err)
@@ -507,11 +507,11 @@ func TestFLVProber_Probe_MalformedTags(t *testing.T) {
 	writeByte(t, f, 9) // Tag type
 	// Missing rest of tag header
 
-	f.Close()
+	_ = f.Close()
 
 	f, err = os.Open(flvPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	prober := NewFLVProber()
 	info, err := prober.Probe(f)
@@ -535,11 +535,11 @@ func TestParseAMF0_UnexpectedType(t *testing.T) {
 	// Invalid type (not ECMA array or Object)
 	writeByte(t, f, 0xFF) // Invalid type
 
-	f.Close()
+	_ = f.Close()
 
 	f, err = os.Open(testPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fileInfo, err := f.Stat()
 	require.NoError(t, err)
@@ -576,11 +576,11 @@ func TestParseAMF0_ECMAArray(t *testing.T) {
 	writeByte(t, f, 0x08) // ECMA array type
 	writeUint32BE(t, f, 0)
 
-	f.Close()
+	_ = f.Close()
 
 	f, err = os.Open(testPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fileInfo, err := f.Stat()
 	require.NoError(t, err)
@@ -610,11 +610,11 @@ func TestParseAMF0_StrictArray(t *testing.T) {
 	writeByte(t, f, 0x0A)  // Strict array type
 	writeUint32BE(t, f, 2) // Array length
 
-	f.Close()
+	_ = f.Close()
 
 	f, err = os.Open(testPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fileInfo, err := f.Stat()
 	require.NoError(t, err)
@@ -651,11 +651,11 @@ func TestParseAMF0_DateType(t *testing.T) {
 	writeUint16BE(t, f, 0)
 	writeByte(t, f, 0x09)
 
-	f.Close()
+	_ = f.Close()
 
 	f, err = os.Open(testPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fileInfo, err := f.Stat()
 	require.NoError(t, err)
@@ -685,11 +685,11 @@ func TestParseAMF0_NestedObject(t *testing.T) {
 	writeBytes(t, f, []byte("nested"))
 	writeByte(t, f, 0x03) // Nested object
 
-	f.Close()
+	_ = f.Close()
 
 	f, err = os.Open(testPath)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fileInfo, err := f.Stat()
 	require.NoError(t, err)

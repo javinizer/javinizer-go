@@ -151,14 +151,15 @@ func TestSearchActresses_SQLInjectionPrevention(t *testing.T) {
 			assert.Equal(t, 1, len(allActresses), "Database should be unaffected by SQL injection attempt")
 
 			// Verify response contract based on status code
-			if w.Code == 200 {
+			switch w.Code {
+			case 200:
 				// 200 response should be a valid JSON array (empty or matching query)
 				var actresses []models.Actress
 				err = json.Unmarshal(w.Body.Bytes(), &actresses)
 				require.NoError(t, err, "200 response should be valid JSON array")
 				// Malicious query shouldn't match real data - should be empty
 				assert.Empty(t, actresses, "Malicious query should not return data (would indicate SQL injection success)")
-			} else if w.Code == 400 {
+			case 400:
 				// 400 response should be a valid error JSON
 				var errResp ErrorResponse
 				err = json.Unmarshal(w.Body.Bytes(), &errResp)

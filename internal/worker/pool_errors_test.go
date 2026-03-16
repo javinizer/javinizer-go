@@ -18,9 +18,9 @@ func TestPool_Errors(t *testing.T) {
 		task1 := newMockTask("task-1", 50*time.Millisecond, false)
 		task2 := newMockTask("task-2", 50*time.Millisecond, false)
 
-		pool.Submit(task1)
-		pool.Submit(task2)
-		pool.Wait()
+		_ = pool.Submit(task1)
+		_ = pool.Submit(task2)
+		_ = pool.Wait()
 
 		errs := pool.Errors()
 		assert.Empty(t, errs, "Expected no errors when all tasks succeed")
@@ -36,10 +36,10 @@ func TestPool_Errors(t *testing.T) {
 		task2 := newMockTask("task-2", 50*time.Millisecond, true) // This will fail
 		task3 := newMockTask("task-3", 50*time.Millisecond, true) // This will fail too
 
-		pool.Submit(task1)
-		pool.Submit(task2)
-		pool.Submit(task3)
-		pool.Wait()
+		_ = pool.Submit(task1)
+		_ = pool.Submit(task2)
+		_ = pool.Submit(task3)
+		_ = pool.Wait()
 
 		errs := pool.Errors()
 		assert.Len(t, errs, 2, "Expected 2 errors from failed tasks")
@@ -52,8 +52,8 @@ func TestPool_Errors(t *testing.T) {
 		defer pool.Stop()
 
 		task := newMockTask("task-1", 50*time.Millisecond, true)
-		pool.Submit(task)
-		pool.Wait()
+		_ = pool.Submit(task)
+		_ = pool.Wait()
 
 		errs1 := pool.Errors()
 		errs2 := pool.Errors()
@@ -76,16 +76,16 @@ func TestPool_Errors(t *testing.T) {
 
 		// First batch
 		task1 := newMockTask("task-1", 50*time.Millisecond, true)
-		pool.Submit(task1)
-		pool.Wait()
+		_ = pool.Submit(task1)
+		_ = pool.Wait()
 
 		errs1 := pool.Errors()
 		assert.Len(t, errs1, 1, "Expected 1 error after first batch")
 
 		// Second batch
 		task2 := newMockTask("task-2", 50*time.Millisecond, true)
-		pool.Submit(task2)
-		pool.Wait()
+		_ = pool.Submit(task2)
+		_ = pool.Wait()
 
 		errs2 := pool.Errors()
 		assert.Len(t, errs2, 2, "Expected 2 errors accumulated from both batches")
@@ -101,10 +101,10 @@ func TestPool_Errors(t *testing.T) {
 		numTasks := 20
 		for i := 0; i < numTasks; i++ {
 			task := newMockTask(string(rune('A'+i)), 10*time.Millisecond, true)
-			pool.Submit(task)
+			_ = pool.Submit(task)
 		}
 
-		pool.Wait()
+		_ = pool.Wait()
 
 		errs := pool.Errors()
 		assert.Len(t, errs, numTasks, "Expected all task errors to be collected")
@@ -143,8 +143,8 @@ func TestPool_ErrorsWithContextCancellation(t *testing.T) {
 	task1 := newMockTask("task-1", 5*time.Second, false)
 	task2 := newMockTask("task-2", 5*time.Second, false)
 
-	pool.Submit(task1)
-	pool.Submit(task2)
+	_ = pool.Submit(task1)
+	_ = pool.Submit(task2)
 
 	// Cancel immediately
 	pool.Stop()

@@ -74,7 +74,7 @@ func runHistoryList(cmd *cobra.Command, args []string, configFile string) error 
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	logger := history.NewLogger(deps.DB)
 
@@ -125,9 +125,10 @@ func runHistoryList(cmd *cobra.Command, args []string, configFile string) error 
 		timeStr := record.CreatedAt.Format("2006-01-02 15:04:05")
 
 		statusIcon := "✅"
-		if record.Status == "failed" {
+		switch record.Status {
+		case "failed":
 			statusIcon = "❌"
-		} else if record.Status == "reverted" {
+		case "reverted":
 			statusIcon = "↩️"
 		}
 
@@ -162,7 +163,7 @@ func runHistoryStats(cmd *cobra.Command, args []string, configFile string) error
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	logger := history.NewLogger(deps.DB)
 
@@ -200,7 +201,7 @@ func runHistoryMovie(cmd *cobra.Command, args []string, configFile string) error
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	logger := history.NewLogger(deps.DB)
 
@@ -218,9 +219,10 @@ func runHistoryMovie(cmd *cobra.Command, args []string, configFile string) error
 
 	for _, record := range records {
 		statusIcon := "✅"
-		if record.Status == "failed" {
+		switch record.Status {
+		case "failed":
 			statusIcon = "❌"
-		} else if record.Status == "reverted" {
+		case "reverted":
 			statusIcon = "↩️"
 		}
 
@@ -264,7 +266,7 @@ func runHistoryClean(cmd *cobra.Command, args []string, configFile string) error
 	if err != nil {
 		return fmt.Errorf("failed to initialize dependencies: %w", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	logger := history.NewLogger(deps.DB)
 
