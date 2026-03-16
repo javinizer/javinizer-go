@@ -13,6 +13,23 @@ Guide for migrating from the original PowerShell Javinizer to Javinizer Go.
 | Cross-platform | Windows-focused | All platforms | Single binary |
 | Dependencies | PowerShell modules | None | Self-contained |
 
+## Performance Snapshot
+
+Approximate real-world behavior from project testing:
+
+| Operation | PowerShell | Go | Typical Improvement |
+|-----------|-----------|-----|---------------------|
+| Scraping | ~5s per ID | ~1.5s per ID | ~3x faster |
+| File operations | Slower | Faster | ~10x faster |
+| Metadata cache lookups | CSV-based | SQLite | Large improvement |
+| Startup | Slower module load | Native binary startup | Faster startup |
+
+## Compatibility Notes
+
+- NFO output is compatible with Kodi/Plex workflows.
+- Javinizer Go can be run alongside PowerShell Javinizer during migration.
+- Database/storage formats are different, so PowerShell and Go databases are not directly interchangeable.
+
 ## Migration Steps
 
 ### 1. Install Javinizer Go

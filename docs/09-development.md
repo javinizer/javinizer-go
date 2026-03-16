@@ -160,6 +160,43 @@ GOOS=darwin GOARCH=amd64 go build -o bin/javinizer-darwin-amd64 ./cmd/javinizer
 GOOS=windows GOARCH=amd64 go build -o bin/javinizer-windows-amd64.exe ./cmd/javinizer
 ```
 
+### Release Workflow (GitHub Actions)
+
+Release automation is handled by `.github/workflows/cli-release.yml`.
+
+1. Update `internal/version/version.txt` with the intended version.
+2. Push a semver tag for release builds:
+   - Stable: `vX.Y.Z`
+   - Pre-release: `vX.Y.Z-alpha`, `vX.Y.Z-beta`, `vX.Y.Z-rc.1`, etc.
+3. Workflow builds artifacts and publishes GitHub release assets.
+
+Manual dispatch (`workflow_dispatch`) also supports snapshot/stable/prerelease runs.
+
+### Nightly Builds
+
+- Nightly schedule runs daily at `00:00 UTC`.
+- Nightly runs are skipped when no release-impacting changes are detected in the previous 24 hours.
+- Nightly publishes Docker images only (no GitHub release assets).
+
+### Docker Tagging Rules
+
+Published tags are determined by release type:
+
+- Version tag: always (for example `v0.1.1`, `v0.1.1-alpha`, `v0.1.1-nightly.20260316`)
+- `latest`: published for versioned release builds
+- Stable-only aliases: `v<major>`, `v<major>.<minor>`
+- Nightly aliases: `nightly`, `nightly-YYYYMMDD`, and `sha-<shortsha>`
+
+### CI Quality Gates
+
+Main CI checks include:
+
+- Unit/integration tests
+- Coverage threshold enforcement
+- Race detector tests
+- Linting/static analysis
+- Build and Docker verification
+
 ## Contributing
 
 ### Workflow

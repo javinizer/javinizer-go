@@ -4,12 +4,44 @@ Javinizer Go is a modern, high-performance metadata scraper and file organizer f
 
 ## Table of Contents
 
+- [Feature Overview](#feature-overview)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Initial Setup](#initial-setup)
 - [Your First Scrape](#your-first-scrape)
 - [Your First Sort Operation](#your-first-sort-operation)
 - [Next Steps](#next-steps)
+
+## Feature Overview
+
+### Multi-Source Scraping
+
+- R18.dev scraper (fast JSON API)
+- DMM/Fanza scraper (HTML parsing + browser mode)
+- Additional optional scrapers (JavDB, JavLibrary, LibreDMM, and more)
+- Configurable metadata priority and aggregation
+- Database caching for fast repeat lookups
+
+### File Organization
+
+- Automatic JAV ID detection from filenames
+- Template-based folder/file naming
+- Nested subfolder hierarchies
+- Move/copy operations with conflict handling
+- Dry-run preview mode
+
+### Metadata and Media
+
+- Kodi/Plex-compatible NFO generation
+- Actress database support (including Japanese names)
+- Genre replacement system
+- Download support for cover, poster, fanart, trailer, and actress images
+
+### Interfaces
+
+- CLI commands
+- Interactive TUI workflow
+- API server + web frontend
 
 ## Prerequisites
 

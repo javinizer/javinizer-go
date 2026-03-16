@@ -525,7 +525,7 @@ func DefaultConfig() *Config {
 				BrowserTimeout: 30, // Timeout for browser operations
 			},
 			LibreDMM: LibreDMMConfig{
-				Enabled:      false,
+				Enabled:      true,
 				RequestDelay: 500,
 				BaseURL:      "https://www.libredmm.com",
 			},

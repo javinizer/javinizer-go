@@ -104,7 +104,7 @@ scrapers:
         use_fake_user_agent: false
         fake_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
     libredmm:
-        enabled: false
+        enabled: true
         request_delay: 500
         base_url: "https://www.libredmm.com"
         use_fake_user_agent: false

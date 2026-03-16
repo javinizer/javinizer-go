@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  schedule:
+    # Midnight UTC daily
+    - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
       release_type:
@@ -30,6 +33,10 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   packages: write
@@ -53,9 +60,15 @@ jobs:
       create_release: ${{ steps.meta.outputs.create_release }}
       build_date: ${{ steps.meta.outputs.build_date }}
       commit: ${{ steps.meta.outputs.commit }}
+      publish_latest: ${{ steps.meta.outputs.publish_latest }}
+      is_nightly: ${{ steps.meta.outputs.is_nightly }}
+      nightly_date: ${{ steps.meta.outputs.nightly_date }}
+      nightly_should_run: ${{ steps.meta.outputs.nightly_should_run }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Resolve release metadata
         id: meta
@@ -67,6 +80,7 @@ jobs:
           build_date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           commit="${GITHUB_SHA}"
           tracked_version="$(tr -d '[:space:]' < internal/version/version.txt)"
+          nightly_should_run="true"
 
           if [[ -z "${tracked_version}" ]]; then
             echo "Tracked version file is empty" >&2
@@ -77,16 +91,45 @@ jobs:
             version="${GITHUB_REF_NAME}"
             create_release="true"
             draft="false"
+            publish_latest="true"
+            is_nightly="false"
+            nightly_date=""
             if [[ "${version}" == *-* ]]; then
               prerelease="true"
             else
               prerelease="false"
+            fi
+          elif [[ "${event_name}" == "schedule" ]]; then
+            nightly_base="${tracked_version%%-*}"
+            if [[ -z "${nightly_base}" ]]; then
+              nightly_base="${tracked_version}"
+            fi
+            version="${nightly_base}-nightly.$(date -u '+%Y%m%d')"
+            create_release="false"
+            draft="false"
+            prerelease="true"
+            publish_latest="false"
+            is_nightly="true"
+            nightly_date="$(date -u '+%Y%m%d')"
+
+            since_ts="$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
+            changed_files="$(git log --since="${since_ts}" --name-only --pretty=format: -- . | sed '/^$/d' | sort -u)"
+            relevant_pattern='^(cmd/|internal/|Dockerfile$|go\.mod$|go\.sum$|internal/version/version\.txt$|\.github/workflows/cli-release\.yml$)'
+
+            if [[ -z "${changed_files}" ]]; then
+              nightly_should_run="false"
+              echo "No repository changes detected in the last 24h; skipping nightly build."
+            elif ! printf '%s\n' "${changed_files}" | grep -Eq "${relevant_pattern}"; then
+              nightly_should_run="false"
+              echo "No release-impacting changes detected in the last 24h; skipping nightly build."
             fi
           else
             release_type="${{ inputs.release_type }}"
             input_version="${{ inputs.version }}"
             create_release="${{ inputs.create_release }}"
             draft="${{ inputs.draft }}"
+            is_nightly="false"
+            nightly_date=""
 
             case "${release_type}" in
               stable)
@@ -96,6 +139,7 @@ jobs:
                 fi
                 version="${input_version}"
                 prerelease="false"
+                publish_latest="true"
                 ;;
               prerelease)
                 if [[ -z "${input_version}" ]]; then
@@ -104,6 +148,7 @@ jobs:
                 fi
                 version="${input_version}"
                 prerelease="true"
+                publish_latest="true"
                 ;;
               snapshot)
                 if [[ -n "${input_version}" ]]; then
@@ -112,6 +157,7 @@ jobs:
                   version="v0.0.0-snapshot.$(date -u '+%Y%m%d%H%M%S')-${GITHUB_SHA::7}"
                 fi
                 prerelease="true"
+                publish_latest="false"
                 ;;
               *)
                 echo "Unknown release type: ${release_type}" >&2
@@ -151,16 +197,24 @@ jobs:
           echo "create_release=${create_release}" >> "$GITHUB_OUTPUT"
           echo "build_date=${build_date}" >> "$GITHUB_OUTPUT"
           echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+          echo "publish_latest=${publish_latest}" >> "$GITHUB_OUTPUT"
+          echo "is_nightly=${is_nightly}" >> "$GITHUB_OUTPUT"
+          echo "nightly_date=${nightly_date}" >> "$GITHUB_OUTPUT"
+          echo "nightly_should_run=${nightly_should_run}" >> "$GITHUB_OUTPUT"
 
           echo "Resolved metadata:"
           echo "  version=${version}"
           echo "  prerelease=${prerelease}"
           echo "  draft=${draft}"
           echo "  create_release=${create_release}"
+          echo "  publish_latest=${publish_latest}"
+          echo "  is_nightly=${is_nightly}"
+          echo "  nightly_should_run=${nightly_should_run}"
 
   build-linux:
     name: Build ${{ matrix.id }}
     needs: prepare-release
+    if: needs.prepare-release.outputs.is_nightly != 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -225,6 +279,7 @@ jobs:
   build-darwin:
     name: Build darwin binaries
     needs: prepare-release
+    if: needs.prepare-release.outputs.is_nightly != 'true'
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -278,6 +333,7 @@ jobs:
   build-windows-amd64:
     name: Build windows-amd64
     needs: prepare-release
+    if: needs.prepare-release.outputs.is_nightly != 'true'
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -311,6 +367,7 @@ jobs:
   build-docker:
     name: Build/push Docker image (GHCR)
     needs: prepare-release
+    if: github.event_name != 'schedule' || needs.prepare-release.outputs.nightly_should_run == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -346,7 +403,7 @@ jobs:
           echo "minor=${minor}" >> "$GITHUB_OUTPUT"
 
       - name: Login to GHCR
-        if: needs.prepare-release.outputs.create_release == 'true'
+        if: needs.prepare-release.outputs.create_release == 'true' || needs.prepare-release.outputs.is_nightly == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -360,7 +417,10 @@ jobs:
           images: ${{ steps.image.outputs.name }}
           tags: |
             type=raw,value=${{ needs.prepare-release.outputs.version }}
-            type=raw,value=latest,enable=${{ needs.prepare-release.outputs.prerelease != 'true' }}
+            type=raw,value=latest,enable=${{ needs.prepare-release.outputs.publish_latest == 'true' }}
+            type=raw,value=nightly,enable=${{ needs.prepare-release.outputs.is_nightly == 'true' }}
+            type=raw,value=nightly-${{ needs.prepare-release.outputs.nightly_date }},enable=${{ needs.prepare-release.outputs.is_nightly == 'true' && needs.prepare-release.outputs.nightly_date != '' }}
+            type=sha,format=short,prefix=sha-,enable=${{ needs.prepare-release.outputs.is_nightly == 'true' }}
             type=raw,value=v${{ steps.semver.outputs.major }},enable=${{ needs.prepare-release.outputs.prerelease != 'true' && steps.semver.outputs.major != '' }}
             type=raw,value=v${{ steps.semver.outputs.major }}.${{ steps.semver.outputs.minor }},enable=${{ needs.prepare-release.outputs.prerelease != 'true' && steps.semver.outputs.major != '' && steps.semver.outputs.minor != '' }}
           labels: |
@@ -372,7 +432,7 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: ${{ needs.prepare-release.outputs.create_release == 'true' }}
+          push: ${{ needs.prepare-release.outputs.create_release == 'true' || needs.prepare-release.outputs.is_nightly == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
             ${{ steps.meta.outputs.labels }}
@@ -387,6 +447,7 @@ jobs:
   create-release:
     name: Create GitHub release
     needs: [prepare-release, build-linux, build-darwin, build-windows-amd64, build-docker]
+    if: needs.prepare-release.outputs.create_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download linux-amd64 artifact
