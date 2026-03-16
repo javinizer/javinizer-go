@@ -386,10 +386,29 @@ jobs:
     needs: [prepare-release, build-linux, build-darwin, build-windows-amd64, build-docker]
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v5
+      - name: Download linux-amd64 artifact
+        uses: actions/download-artifact@v6
         with:
-          path: ./artifacts
+          name: linux-amd64
+          path: ./artifacts/linux-amd64
+
+      - name: Download linux-arm64 artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: linux-arm64
+          path: ./artifacts/linux-arm64
+
+      - name: Download darwin artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: darwin
+          path: ./artifacts/darwin
+
+      - name: Download windows-amd64 artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: windows-amd64
+          path: ./artifacts/windows-amd64
 
       - name: Consolidate release files
         shell: bash
