@@ -360,10 +360,11 @@ jobs:
           images: ${{ steps.image.outputs.name }}
           tags: |
             type=raw,value=${{ needs.prepare-release.outputs.version }}
-            type=sha,format=short,prefix=sha-
             type=raw,value=latest,enable=${{ needs.prepare-release.outputs.prerelease != 'true' }}
             type=raw,value=v${{ steps.semver.outputs.major }},enable=${{ needs.prepare-release.outputs.prerelease != 'true' && steps.semver.outputs.major != '' }}
             type=raw,value=v${{ steps.semver.outputs.major }}.${{ steps.semver.outputs.minor }},enable=${{ needs.prepare-release.outputs.prerelease != 'true' && steps.semver.outputs.major != '' && steps.semver.outputs.minor != '' }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
 
       - name: Build and (optionally) push Docker image
         uses: docker/build-push-action@v6
@@ -373,7 +374,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ needs.prepare-release.outputs.create_release == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
           build-args: |
             VERSION=${{ needs.prepare-release.outputs.version }}
             COMMIT=${{ needs.prepare-release.outputs.commit }}
