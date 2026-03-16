@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"syscall"
 
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/api"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/genre"
@@ -173,8 +172,12 @@ func initConfig() {
 		if err != nil {
 			logging.Warnf("Invalid umask value '%s', using default: %v", cfg.System.Umask, err)
 		} else {
-			oldUmask := syscall.Umask(int(umaskValue))
-			logging.Debugf("Applied umask: %s (previous: %04o)", cfg.System.Umask, oldUmask)
+			oldUmask, applied := applyUmask(int(umaskValue))
+			if applied {
+				logging.Debugf("Applied umask: %s (previous: %04o)", cfg.System.Umask, oldUmask)
+			} else {
+				logging.Debugf("Umask configured (%s) but unsupported on this platform", cfg.System.Umask)
+			}
 		}
 	}
 }
