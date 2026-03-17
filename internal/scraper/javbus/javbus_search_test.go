@@ -135,7 +135,7 @@ func TestScraperGetURLReturnsChallengeError(t *testing.T) {
 func TestScraperSearchReturnsNotFoundAndDisabledErrors(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprint(w, `<html><body>No results</body></html>`)
+			_, _ = fmt.Fprint(w, `<html><body>No results</body></html>`)
 		}))
 		defer server.Close()
 
