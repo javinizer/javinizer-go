@@ -28,7 +28,7 @@
 		ChevronUp,
 		Play,
 		RotateCcw,
-		AlertCircle,
+		CircleAlert,
 		FolderOpen,
 		Image as ImageIcon,
 		Loader2,
@@ -1087,7 +1087,7 @@
 		{:else if error}
 			<Card class="p-6">
 				<div class="text-center text-destructive">
-					<AlertCircle class="h-12 w-12 mx-auto mb-4" />
+					<CircleAlert class="h-12 w-12 mx-auto mb-4" />
 					<p class="font-semibold">Error</p>
 					<p class="text-sm">{error}</p>
 					<Button onclick={() => goto('/browse')} class="mt-4">
@@ -1181,7 +1181,7 @@
 							{#each Array.from(fileStatuses.entries()) as [filePath, status] (filePath)}
 								<div animate:flip={{ duration: 220, easing: quintOut }} class="flex items-start gap-2 text-sm p-2 rounded {status.status === 'failed' ? 'bg-red-50' : 'bg-green-50'}">
 									{#if status.status === 'failed'}
-										<AlertCircle class="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+										<CircleAlert class="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
 									{:else}
 										<Check class="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
 									{/if}
@@ -1232,7 +1232,7 @@
 				{:else if failures.length > 0}
 					<Card class="p-6 border-orange-500">
 						<div class="flex items-start gap-3">
-							<AlertCircle class="h-6 w-6 text-orange-600 shrink-0" />
+							<CircleAlert class="h-6 w-6 text-orange-600 shrink-0" />
 							<div class="flex-1">
 								<h3 class="font-semibold mb-2">Organization Completed with Errors</h3>
 								<p class="text-sm text-muted-foreground mb-4">
@@ -1437,7 +1437,7 @@
 								<p class="text-sm text-muted-foreground">{currentMovie.id}</p>
 								{#if hasChanges(currentResult.file_path)}
 									<span class="text-xs text-orange-600 flex items-center gap-1 justify-center mt-1">
-										<AlertCircle class="h-3 w-3" />
+										<CircleAlert class="h-3 w-3" />
 										Modified
 									</span>
 								{/if}

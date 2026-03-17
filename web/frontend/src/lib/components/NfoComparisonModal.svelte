@@ -2,7 +2,7 @@
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
 	import { fade, scale } from 'svelte/transition';
-	import { X, AlertCircle, Check, ChevronRight, Info } from 'lucide-svelte';
+	import { X, CircleAlert, Check, ChevronRight, Info } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import type {
 		NFOComparisonResponse,
@@ -201,7 +201,7 @@
 										<!-- Reason (if provided) -->
 										{#if diff.reason}
 											<div class="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-400">
-												<AlertCircle class="h-3 w-3 mt-0.5 flex-shrink-0" />
+												<CircleAlert class="h-3 w-3 mt-0.5 flex-shrink-0" />
 												<span>{diff.reason}</span>
 											</div>
 										{/if}
@@ -280,7 +280,7 @@
 						</div>
 					{:else}
 						<div class="text-center py-12">
-							<AlertCircle class="h-12 w-12 mx-auto text-gray-400 mb-4" />
+							<CircleAlert class="h-12 w-12 mx-auto text-gray-400 mb-4" />
 							<p class="text-lg font-medium text-gray-900 dark:text-white mb-2">
 								No Statistics Available
 							</p>

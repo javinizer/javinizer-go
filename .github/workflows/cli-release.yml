@@ -214,14 +214,14 @@ jobs:
   build-web-assets:
     name: Build web assets
     needs: prepare-release
-    if: needs.prepare-release.outputs.is_nightly != 'true'
+    if: github.event_name != 'schedule' || needs.prepare-release.outputs.nightly_should_run == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
@@ -247,7 +247,7 @@ jobs:
   build-linux:
     name: Build ${{ matrix.id }}
     needs: [prepare-release, build-web-assets]
-    if: needs.prepare-release.outputs.is_nightly != 'true'
+    if: github.event_name != 'schedule' || needs.prepare-release.outputs.nightly_should_run == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -277,10 +277,29 @@ jobs:
           go-version-file: ${{ env.GO_VERSION_FILE }}
 
       - name: Download web assets
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: web-dist
-          path: .
+          path: .artifacts/web-dist
+
+      - name: Restore web assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf web/dist
+          mkdir -p web/dist
+          cp -R .artifacts/web-dist/. web/dist/
+
+      - name: Verify embedded web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f web/dist/index.html
+          test -d web/dist/_app
+          if grep -q "Javinizer Web UI Placeholder" web/dist/index.html; then
+            echo "Placeholder web bundle detected in release build input"
+            exit 1
+          fi
 
       - name: Install build dependencies
         if: runner.os == 'Linux' && matrix.build_deps != ''
@@ -318,7 +337,7 @@ jobs:
   build-darwin:
     name: Build darwin binaries
     needs: [prepare-release, build-web-assets]
-    if: needs.prepare-release.outputs.is_nightly != 'true'
+    if: github.event_name != 'schedule' || needs.prepare-release.outputs.nightly_should_run == 'true'
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -330,10 +349,29 @@ jobs:
           go-version-file: ${{ env.GO_VERSION_FILE }}
 
       - name: Download web assets
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: web-dist
-          path: .
+          path: .artifacts/web-dist
+
+      - name: Restore web assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf web/dist
+          mkdir -p web/dist
+          cp -R .artifacts/web-dist/. web/dist/
+
+      - name: Verify embedded web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f web/dist/index.html
+          test -d web/dist/_app
+          if grep -q "Javinizer Web UI Placeholder" web/dist/index.html; then
+            echo "Placeholder web bundle detected in release build input"
+            exit 1
+          fi
 
       - name: Build AMD64 and ARM64 binaries
         shell: bash
@@ -378,7 +416,7 @@ jobs:
   build-windows-amd64:
     name: Build windows-amd64
     needs: [prepare-release, build-web-assets]
-    if: needs.prepare-release.outputs.is_nightly != 'true'
+    if: github.event_name != 'schedule' || needs.prepare-release.outputs.nightly_should_run == 'true'
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -390,10 +428,32 @@ jobs:
           go-version-file: ${{ env.GO_VERSION_FILE }}
 
       - name: Download web assets
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: web-dist
-          path: .
+          path: .artifacts/web-dist
+
+      - name: Restore web assets
+        shell: pwsh
+        run: |
+          if (Test-Path web/dist) {
+            Remove-Item web/dist -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force -Path web/dist | Out-Null
+          Copy-Item .artifacts/web-dist/* web/dist -Recurse -Force
+
+      - name: Verify embedded web bundle
+        shell: pwsh
+        run: |
+          if (-not (Test-Path web/dist/index.html)) {
+            throw "web/dist/index.html is missing"
+          }
+          if (-not (Test-Path web/dist/_app)) {
+            throw "web/dist/_app is missing"
+          }
+          if (Select-String -Path web/dist/index.html -Pattern 'Javinizer Web UI Placeholder' -Quiet) {
+            throw "Placeholder web bundle detected in release build input"
+          }
 
       - name: Build binary
         shell: pwsh
@@ -425,10 +485,10 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Normalize image name
         id: image
@@ -478,7 +538,7 @@ jobs:
             org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
 
       - name: Build and (optionally) push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -502,25 +562,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download linux-amd64 artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: linux-amd64
           path: ./artifacts/linux-amd64
 
       - name: Download linux-arm64 artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: linux-arm64
           path: ./artifacts/linux-arm64
 
       - name: Download darwin artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: darwin
           path: ./artifacts/darwin
 
       - name: Download windows-amd64 artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: windows-amd64
           path: ./artifacts/windows-amd64

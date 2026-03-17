@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
-	import { CheckCircle, X, AlertCircle, Info, XCircle } from 'lucide-svelte';
+	import { CheckCircle, X, CircleAlert, Info, XCircle } from 'lucide-svelte';
 
 	interface Props {
 		id: string;
@@ -21,7 +21,7 @@
 		success: CheckCircle,
 		error: XCircle,
 		info: Info,
-		warning: AlertCircle
+		warning: CircleAlert
 	};
 
 	const styles = {
