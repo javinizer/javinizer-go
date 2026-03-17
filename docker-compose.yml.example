@@ -1,12 +1,19 @@
 services:
   javinizer:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        - USER_ID=${USER_ID:-1000}
-        - GROUP_ID=${GROUP_ID:-1000}
-    image: javinizer:latest
+    # Option 1: Pull pre-built image (recommended for end users)
+    # Use 'latest' for most recent release, or pin to specific version (e.g., 'v0.1.1-alpha')
+    # Available tags: https://github.com/javinizer/javinizer-go/pkgs/container/javinizer-go
+    image: ghcr.io/javinizer/javinizer-go:latest
+
+    # Option 2: Build locally (for developers)
+    # Uncomment the 'build' section below and comment out 'image' above to build from source
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     - USER_ID=${USER_ID:-1000}
+    #     - GROUP_ID=${GROUP_ID:-1000}
+
     container_name: javinizer
     restart: unless-stopped
     user: "${USER_ID:-1000}:${GROUP_ID:-1000}"
