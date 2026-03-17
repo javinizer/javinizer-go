@@ -142,10 +142,10 @@ bench:
 # Generate strict coverage report using go-acc (used by CI/release)
 # Uses go run to execute go-acc from project dependencies (no global install needed)
 # Version is pinned to match go.mod for reproducible builds
-# Excludes: mocks (generated), tui (interactive UI), docs (generated API docs), testutil (test helpers)
+# Excludes: mocks (generated), tui (interactive UI), docs (generated API docs), testutil (test helpers), coveragecheck (coverage utility), coverage (coverage utility), web (frontend)
 coverage:
 	@rm -f coverage.out
-	@go run github.com/ory/go-acc@v0.2.8 --covermode count --ignore mocks,tui,docs,testutil -o coverage.out ./... -- -count=1
+	@go run github.com/ory/go-acc@v0.2.8 --covermode count --ignore mocks,tui,docs,testutil,coveragecheck,coverage,web -o coverage.out ./... -- -count=1
 
 # Generate faster local coverage report (package-level, short mode)
 # This is optimized for iteration speed and is not used for CI threshold enforcement.

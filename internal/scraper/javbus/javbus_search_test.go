@@ -26,9 +26,9 @@ func TestScraperGetURLAndSearch(t *testing.T) {
 		searchRequests = append(searchRequests, r.URL.Path)
 		switch r.URL.Path {
 		case "/search/ABC-123&type=0&parent=uc":
-			fmt.Fprint(w, `<html><body><a class="movie-box" href="/ABC-123" title="ABC-123 Example Title"><date>ABC-123</date></a></body></html>`)
+			_, _ = fmt.Fprint(w, `<html><body><a class="movie-box" href="/ABC-123" title="ABC-123 Example Title"><date>ABC-123</date></a></body></html>`)
 		case "/ja/ABC-123":
-			fmt.Fprint(w, `<html>
+			_, _ = fmt.Fprint(w, `<html>
 <head>
   <title>ABC-123 Example Title - JavBus</title>
   <meta name="description" content="Example description">
@@ -118,7 +118,7 @@ func TestScraperGetURLAcceptsDirectHTTPURL(t *testing.T) {
 
 func TestScraperGetURLReturnsChallengeError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><head><title>Age Verification JavBus - JavBus</title></head></html>`)
+		_, _ = fmt.Fprint(w, `<html><head><title>Age Verification JavBus - JavBus</title></head></html>`)
 	}))
 	defer server.Close()
 

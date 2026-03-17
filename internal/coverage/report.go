@@ -56,7 +56,7 @@ func AnalyzeProfile(path string) (Summary, error) {
 	if err != nil {
 		return Summary{}, fmt.Errorf("open profile: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	return Analyze(file)
 }
