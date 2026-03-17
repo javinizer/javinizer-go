@@ -62,7 +62,7 @@ Open [http://localhost:8080](http://localhost:8080) to access the web UI.
 
 **Notes:**
 - Replace `/path/to/your/media` with the path to your JAV library
-- Use a pinned tag (e.g., `v0.1.1-alpha`) for reproducible deployments
+- Use a pinned tag (e.g., `v0.1.2-alpha`) for reproducible deployments
 - `latest` tracks the most recent release
 
 ### Docker Compose
@@ -105,7 +105,7 @@ Download pre-compiled binaries from [GitHub Releases](https://github.com/javiniz
 **Installation:**
 ```bash
 # Example for Linux amd64
-wget https://github.com/javinizer/javinizer-go/releases/download/v0.1.1-alpha/javinizer-linux-amd64.tar.gz
+wget https://github.com/javinizer/javinizer-go/releases/download/v0.1.2-alpha/javinizer-linux-amd64.tar.gz
 tar -xzf javinizer-linux-amd64.tar.gz
 sudo mv javinizer /usr/local/bin/
 javinizer version
