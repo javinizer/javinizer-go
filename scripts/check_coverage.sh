@@ -29,49 +29,17 @@ if [ ! -f "${COVERAGE_PROFILE}" ]; then
   exit 2
 fi
 
-# Extract total coverage percentage
-# go tool cover -func outputs lines like:
-# total:                    (statements)    72.3%
-TOTAL_COVERAGE=$(go tool cover -func="${COVERAGE_PROFILE}" | awk '/^total:/ {print $3}' | sed 's/%//')
-
-if [ -z "${TOTAL_COVERAGE}" ]; then
-  echo -e "${RED}Error: Could not parse coverage from ${COVERAGE_PROFILE}${NC}"
-  exit 2
-fi
-
-echo "=========================================="
-echo "Test Coverage Report"
-echo "=========================================="
-echo "Coverage Profile: ${COVERAGE_PROFILE}"
-echo "Current Coverage: ${TOTAL_COVERAGE}%"
-echo "Required Minimum: ${MIN_COVERAGE}%"
-echo "=========================================="
-
-# Compare coverage against threshold using awk for float comparison
-RESULT=$(awk -v current="${TOTAL_COVERAGE}" -v required="${MIN_COVERAGE}" \
-  'BEGIN {
-    if (current + 0 < required + 0) {
-      print "FAIL"
-      exit 1
-    } else {
-      print "PASS"
-      exit 0
-    }
-  }')
-
-EXIT_CODE=$?
-
-if [ ${EXIT_CODE} -eq 0 ]; then
+if go run ./cmd/coveragecheck --metric line --min "${MIN_COVERAGE}" --profile "${COVERAGE_PROFILE}"; then
   echo -e "${GREEN}✓ Coverage check PASSED${NC}"
-  echo -e "${GREEN}  ${TOTAL_COVERAGE}% >= ${MIN_COVERAGE}%${NC}"
   exit 0
 else
-  echo -e "${RED}✗ Coverage check FAILED${NC}"
-  echo -e "${RED}  ${TOTAL_COVERAGE}% < ${MIN_COVERAGE}%${NC}"
-  echo ""
-  echo -e "${YELLOW}Action required:${NC}"
-  echo "  - Add tests to increase coverage"
-  echo "  - Run 'make coverage-html' to see uncovered code"
-  echo "  - Target critical packages: scraper, api, cli"
-  exit 1
+  EXIT_CODE=$?
+  if [ ${EXIT_CODE} -eq 1 ]; then
+    echo ""
+    echo -e "${YELLOW}Action required:${NC}"
+    echo "  - Add tests to increase coverage"
+    echo "  - Run 'make coverage-html' to see uncovered code"
+    echo "  - Target critical packages: scraper, api, cli"
+  fi
+  exit ${EXIT_CODE}
 fi
