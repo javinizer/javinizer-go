@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	webui "github.com/javinizer/javinizer-go/web"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -261,6 +263,32 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 
 	router := gin.Default()
 
+	var (
+		webDistFS      fs.FS
+		webUIAvailable bool
+		webStaticFS    http.FileSystem
+		webIndexHTML   []byte
+	)
+
+	distFS, distErr := webui.DistFS()
+	if distErr != nil {
+		logging.Warnf("Web UI assets unavailable: %v", distErr)
+	} else {
+		webDistFS = distFS
+		webStaticFS = http.FS(webDistFS)
+		if _, err := fs.Stat(webDistFS, "index.html"); err == nil {
+			indexBytes, readErr := fs.ReadFile(webDistFS, "index.html")
+			if readErr != nil {
+				logging.Warnf("Failed to read embedded Web UI index.html: %v", readErr)
+			} else {
+				webIndexHTML = indexBytes
+				webUIAvailable = true
+			}
+		} else {
+			logging.Warnf("Web UI index.html not found in embedded assets: %v", err)
+		}
+	}
+
 	// Enable CORS for web UI with dynamic origin validation
 	// Read allowedOrigins from deps.GetConfig() each time to respect config reloads
 	router.Use(func(c *gin.Context) {
@@ -386,12 +414,27 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 		v1.DELETE("/history", deleteHistoryBulk(deps.HistoryRepo))
 	}
 
-	// Serve frontend static files (for Docker deployment)
-	// Frontend should be built and placed in web/dist by the Dockerfile
-	// Define AFTER API routes so API takes precedence
-	router.Static("/_app", "/app/web/dist/_app") // SvelteKit assets
-	router.StaticFile("/favicon.ico", "/app/web/dist/favicon.ico")
-	router.StaticFile("/robots.txt", "/app/web/dist/robots.txt")
+	// Serve frontend static files from embedded web bundle.
+	// Define AFTER API routes so API takes precedence.
+	if webUIAvailable {
+		if appFS, err := fs.Sub(webDistFS, "_app"); err == nil {
+			router.StaticFS("/_app", http.FS(appFS))
+		} else {
+			logging.Warnf("Web UI _app assets unavailable: %v", err)
+		}
+
+		if _, err := fs.Stat(webDistFS, "favicon.ico"); err == nil {
+			router.GET("/favicon.ico", func(c *gin.Context) {
+				c.FileFromFS("favicon.ico", webStaticFS)
+			})
+		}
+
+		if _, err := fs.Stat(webDistFS, "robots.txt"); err == nil {
+			router.GET("/robots.txt", func(c *gin.Context) {
+				c.FileFromFS("robots.txt", webStaticFS)
+			})
+		}
+	}
 
 	// Fallback: serve index.html for browser SPA routing only
 	// API requests to non-existent endpoints should return proper 404 JSON
@@ -404,7 +447,7 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 
 		// Handle requests that accept HTML (browser traffic)
 		method := c.Request.Method
-		if acceptsHTML(c) {
+		if webUIAvailable && acceptsHTML(c) {
 			// HEAD requests should not return a body per HTTP semantics
 			if method == http.MethodHead {
 				c.Status(http.StatusNoContent)
@@ -412,7 +455,7 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 			}
 			// Serve SPA for GET requests
 			if method == http.MethodGet {
-				c.File("/app/web/dist/index.html")
+				c.Data(http.StatusOK, "text/html; charset=utf-8", webIndexHTML)
 				return
 			}
 		}

@@ -14,7 +14,7 @@ help:
 	@echo "Javinizer Makefile - Available Targets"
 	@echo ""
 	@echo "Build & Run:"
-	@echo "  make build              - Build CLI binary with version info"
+	@echo "  make build              - Build single binary (API + embedded Web UI)"
 	@echo "  make run                - Run CLI directly (no build)"
 	@echo "  make run-api            - Run API server directly"
 	@echo "  make run-api-dev        - Run API server with hot reload (air)"
@@ -48,7 +48,7 @@ help:
 	@echo "Web Frontend:"
 	@echo "  make web-install        - Install npm dependencies"
 	@echo "  make web-dev            - Start dev server with hot reload"
-	@echo "  make web-build          - Build for production"
+	@echo "  make web-build          - Build frontend and sync to web/dist"
 	@echo "  make web-preview        - Preview production build"
 	@echo "  make web-clean          - Clean node_modules and build artifacts"
 	@echo ""
@@ -92,8 +92,8 @@ LDFLAGS_RELEASE := -ldflags "\
 	-X github.com/javinizer/javinizer-go/internal/version.Commit=$(COMMIT) \
 	-X github.com/javinizer/javinizer-go/internal/version.BuildDate=$(BUILD_DATE)"
 
-# Build the application (single binary with version info)
-build:
+# Build the application (single binary with embedded web UI and version info)
+build: web-build
 	@echo "Building javinizer $(VERSION) (commit: $(COMMIT))..."
 	go build $(LDFLAGS) -o bin/javinizer ./cmd/javinizer
 
@@ -238,6 +238,9 @@ web-dev:
 
 web-build:
 	cd web/frontend && npm run build
+	rm -rf web/dist
+	mkdir -p web/dist
+	cp -R web/frontend/build/. web/dist/
 
 web-preview:
 	cd web/frontend && npm run preview

@@ -653,12 +653,13 @@ javinizer --config ~/configs/complete.yaml sort ~/Special
 
 ## API Server
 
-### `api`
+### `api` (alias: `web`)
 
 Start a REST API server for programmatic access to Javinizer functionality.
 
 ```bash
 javinizer api [flags]
+javinizer web [flags]
 ```
 
 **Flags:**
@@ -672,6 +673,9 @@ javinizer api [flags]
 ```bash
 # Start with defaults (localhost:8080)
 javinizer api
+
+# Equivalent alias
+javinizer web
 
 # Custom host and port
 javinizer api --host 0.0.0.0 --port 9000

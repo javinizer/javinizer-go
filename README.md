@@ -111,26 +111,23 @@ sudo mv javinizer /usr/local/bin/
 javinizer version
 ```
 
-**Note:** Prebuilt binaries include CLI, TUI, and API server, but not the web UI. For the web UI, use Docker or build the frontend separately.
+**Note:** Prebuilt binaries include CLI, TUI, API server, and embedded web UI.
 
 ### Build from Source
 
-Requires Go 1.25+ and CGO (for SQLite support):
+Requires Go 1.25+ and CGO (for SQLite support). For embedded web UI builds, Node.js 20+ is also required.
 
 ```bash
 go install github.com/javinizer/javinizer-go/cmd/javinizer@latest
 
-# Or clone and build manually
+# Or clone and build manually (single binary with embedded web UI)
 git clone https://github.com/javinizer/javinizer-go.git
 cd javinizer-go
-make build          # Build CLI binary only
+make build
 ./bin/javinizer version
-
-# Optional: Build web UI (requires Node.js 20+)
-make web-build      # Build frontend to web/dist
 ```
 
-The `make build` command only builds the Go binary. To include the web UI, run `make web-build` separately.
+The `make build` target now builds the frontend bundle and embeds it into the Go binary.
 
 ## Usage
 
@@ -215,10 +212,13 @@ javinizer info --config    # Show current configuration
 
 ### API Server
 
-Start the REST API server:
+Start the REST API + web server:
 
 ```bash
 javinizer api
+
+# Alias
+javinizer web
 
 # Custom port
 PORT=9000 javinizer api
@@ -227,7 +227,7 @@ PORT=9000 javinizer api
 javinizer api --host 0.0.0.0 --port 8081
 ```
 
-**Note:** The CLI binary only provides the REST API. The web UI is only available when running via Docker (where the frontend is pre-built into the image). To use the web UI with a local build, see [Web Development](#web-development) below.
+**Note:** `javinizer web` is an alias of `javinizer api` and starts the same server.
 
 ## Web UI
 
@@ -235,7 +235,7 @@ The web application provides a modern interface for managing your JAV library.
 
 **Availability:**
 - ✅ **Docker**: Web UI is included and available at `localhost:8080`
-- ❌ **CLI/Binary**: API only, web UI requires separate build (see below)
+- ✅ **CLI/Binary**: Web UI is embedded in the binary and served at `localhost:8080`
 
 **How to access:**
 ```bash
@@ -262,24 +262,24 @@ See [API Reference](./docs/07-api-reference.md) for endpoint documentation.
 
 To build and use the web UI with a local installation:
 
-**Option 1: Production build (serves from Go binary)**
+**Option 1: Production build (single binary with embedded UI)**
 ```bash
-# Build frontend
-make web-build
+# Build binary (includes web bundle)
+make build
 
-# Start API server (serves built frontend from web/dist)
-javinizer api
+# Start API/web server
+javinizer web
 # Open http://localhost:8080
 ```
 
 **Option 2: Development mode (hot reload)**
 ```bash
 # Terminal 1: Start API server
-javinizer api
+javinizer web
 
 # Terminal 2: Start frontend dev server with hot reload
 make web-dev
-# Open http://localhost:5173 (proxies API calls to :8080)
+# Open http://localhost:5174 (proxies API calls to :8080)
 ```
 
 The development server provides:

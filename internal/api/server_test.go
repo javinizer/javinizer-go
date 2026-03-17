@@ -470,6 +470,94 @@ func TestNewServer_InvalidRoutes(t *testing.T) {
 	}
 }
 
+func TestNewServer_SPARouteFallbackForHTML(t *testing.T) {
+	cfg := &config.Config{
+		Logging: config.LoggingConfig{
+			Level: "info",
+		},
+		Matching: config.MatchingConfig{
+			RegexEnabled: false,
+		},
+	}
+
+	registry := models.NewScraperRegistry()
+	mat, err := matcher.NewMatcher(&cfg.Matching)
+	require.NoError(t, err)
+
+	deps := &ServerDependencies{
+		ConfigFile:  "/tmp/config.yaml",
+		Registry:    registry,
+		Aggregator:  aggregator.New(cfg),
+		MovieRepo:   newMockMovieRepo(),
+		ActressRepo: newMockActressRepo(),
+		Matcher:     mat,
+		JobQueue:    worker.NewJobQueue(),
+	}
+	deps.SetConfig(cfg)
+
+	router := NewServer(deps)
+	defer cleanupServerHub(t, deps)
+
+	req := httptest.NewRequest("GET", "/some/spa/route", nil)
+	req.Header.Set("Accept", "text/html")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+	if w.Code == 301 || w.Code == 302 || w.Code == 307 || w.Code == 308 {
+		location := w.Header().Get("Location")
+		if location == "" || location == "." || location == "./" {
+			location = "/"
+		}
+		if location[0] != '/' {
+			location = "/" + location
+		}
+		redirectReq := httptest.NewRequest("GET", location, nil)
+		redirectReq.Header.Set("Accept", "text/html")
+		w = httptest.NewRecorder()
+		router.ServeHTTP(w, redirectReq)
+	}
+
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, strings.ToLower(w.Body.String()), "<!doctype html>")
+}
+
+func TestNewServer_RobotsTxtServed(t *testing.T) {
+	cfg := &config.Config{
+		Logging: config.LoggingConfig{
+			Level: "info",
+		},
+		Matching: config.MatchingConfig{
+			RegexEnabled: false,
+		},
+	}
+
+	registry := models.NewScraperRegistry()
+	mat, err := matcher.NewMatcher(&cfg.Matching)
+	require.NoError(t, err)
+
+	deps := &ServerDependencies{
+		ConfigFile:  "/tmp/config.yaml",
+		Registry:    registry,
+		Aggregator:  aggregator.New(cfg),
+		MovieRepo:   newMockMovieRepo(),
+		ActressRepo: newMockActressRepo(),
+		Matcher:     mat,
+		JobQueue:    worker.NewJobQueue(),
+	}
+	deps.SetConfig(cfg)
+
+	router := NewServer(deps)
+	defer cleanupServerHub(t, deps)
+
+	req := httptest.NewRequest("GET", "/robots.txt", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+	assert.Contains(t, w.Body.String(), "User-agent:")
+}
+
 func TestServerDependencies_Shutdown(t *testing.T) {
 	cfg := &config.Config{
 		Logging: config.LoggingConfig{
