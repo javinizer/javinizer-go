@@ -111,6 +111,8 @@ sudo mv javinizer /usr/local/bin/
 javinizer version
 ```
 
+**Note:** Prebuilt binaries include CLI, TUI, and API server, but not the web UI. For the web UI, use Docker or build the frontend separately.
+
 ### Build from Source
 
 Requires Go 1.25+ and CGO (for SQLite support):
@@ -121,9 +123,14 @@ go install github.com/javinizer/javinizer-go/cmd/javinizer@latest
 # Or clone and build manually
 git clone https://github.com/javinizer/javinizer-go.git
 cd javinizer-go
-make build
+make build          # Build CLI binary only
 ./bin/javinizer version
+
+# Optional: Build web UI (requires Node.js 20+)
+make web-build      # Build frontend to web/dist
 ```
+
+The `make build` command only builds the Go binary. To include the web UI, run `make web-build` separately.
 
 ## Usage
 
@@ -208,7 +215,7 @@ javinizer info --config    # Show current configuration
 
 ### API Server
 
-Start the REST API server with web UI:
+Start the REST API server:
 
 ```bash
 javinizer api
@@ -220,11 +227,22 @@ PORT=9000 javinizer api
 javinizer api --host 0.0.0.0 --port 8081
 ```
 
-Access the web UI at [http://localhost:8080](http://localhost:8080).
+**Note:** The CLI binary only provides the REST API. The web UI is only available when running via Docker (where the frontend is pre-built into the image). To use the web UI with a local build, see [Web Development](#web-development) below.
 
 ## Web UI
 
-The web application provides a modern interface for managing your JAV library. Available at `localhost:8080` when running via Docker or `javinizer api`.
+The web application provides a modern interface for managing your JAV library.
+
+**Availability:**
+- ✅ **Docker**: Web UI is included and available at `localhost:8080`
+- ❌ **CLI/Binary**: API only, web UI requires separate build (see below)
+
+**How to access:**
+```bash
+# Using Docker (recommended)
+docker run -p 8080:8080 -v ./data:/javinizer ghcr.io/javinizer/javinizer-go:latest
+# Open http://localhost:8080
+```
 
 **Pages:**
 - **Dashboard** - Quick stats and recent activity
@@ -239,6 +257,37 @@ The web application provides a modern interface for managing your JAV library. A
 - **Swagger UI**: [http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html) - OpenAPI spec viewer
 
 See [API Reference](./docs/07-api-reference.md) for endpoint documentation.
+
+### Web Development
+
+To build and use the web UI with a local installation:
+
+**Option 1: Production build (serves from Go binary)**
+```bash
+# Build frontend
+make web-build
+
+# Start API server (serves built frontend from web/dist)
+javinizer api
+# Open http://localhost:8080
+```
+
+**Option 2: Development mode (hot reload)**
+```bash
+# Terminal 1: Start API server
+javinizer api
+
+# Terminal 2: Start frontend dev server with hot reload
+make web-dev
+# Open http://localhost:5173 (proxies API calls to :8080)
+```
+
+The development server provides:
+- Hot module replacement (instant updates on file changes)
+- Better error messages
+- Faster iteration
+
+See `web/frontend/README.md` for more details.
 
 ## Environment Variables
 
