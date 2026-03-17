@@ -33,7 +33,7 @@ Job 1/5: Unit Tests & Coverage
 → Generating coverage report...
 ✓ Coverage report generated
 
-→ Checking coverage threshold (75%)...
+→ Checking Codecov-compatible coverage threshold (75%)...
 ✓ Coverage check PASSED
   78.4% >= 75%
 
@@ -69,7 +69,7 @@ make simulate-ci
 **What it checks:**
 - Dependencies download
 - Unit tests pass
-- Coverage generation and threshold (75%)
+- Coverage generation and Codecov-compatible line threshold (75%)
 - Race detector on concurrent packages
 - go vet static analysis
 - golangci-lint (if installed)

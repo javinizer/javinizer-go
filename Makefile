@@ -31,8 +31,8 @@ help:
 	@echo "  make coverage           - Generate strict coverage report for CI/release (coverage.out)"
 	@echo "  make coverage-fast      - Generate faster local coverage report (coverage.out)"
 	@echo "  make coverage-html      - Open coverage report in browser"
-	@echo "  make coverage-func      - Display function-by-function coverage"
-	@echo "  make coverage-check     - Enforce 75%% minimum coverage threshold"
+	@echo "  make coverage-func      - Display Go statement coverage by function"
+	@echo "  make coverage-check     - Enforce 75%% Codecov-compatible line coverage"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  make fmt                - Format code with go fmt"
@@ -162,7 +162,7 @@ coverage-html: coverage
 coverage-func: coverage
 	go tool cover -func=coverage.out
 
-# Check if coverage meets minimum threshold (75% as per CLAUDE.md)
+# Check if coverage meets minimum threshold using Codecov-compatible line coverage.
 coverage-check: coverage
 	@./scripts/check_coverage.sh 75 coverage.out
 

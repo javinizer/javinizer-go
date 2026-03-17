@@ -29,7 +29,7 @@ make coverage-fast
 # View coverage in browser
 make coverage-html
 
-# Check if coverage meets threshold (75%)
+# Check if Codecov-compatible line coverage meets threshold (75%)
 make coverage-check
 ```
 
@@ -57,8 +57,8 @@ The `make coverage` command runs strict coverage via `go-acc` (used by CI/releas
 | `make coverage` | Generate strict coverage.out file (go-acc) | CI/release-quality coverage |
 | `make coverage-fast` | Generate faster local coverage.out file | Daily local iteration |
 | `make coverage-html` | Open HTML coverage report in browser | Visual coverage analysis |
-| `make coverage-func` | Display function-by-function coverage breakdown | Identify specific gaps |
-| `make coverage-check` | Verify coverage meets 75% threshold | Pre-push validation |
+| `make coverage-func` | Display Go statement coverage breakdown by function | Identify specific gaps |
+| `make coverage-check` | Verify Codecov-compatible line coverage meets 75% threshold | Pre-push validation |
 | `make ci` | Run full CI suite (vet + lint + coverage + race) | Before opening PR |
 
 ### Running Specific Package Tests
@@ -82,7 +82,7 @@ go tool cover -html=coverage.out
 
 ### Overall Project Coverage
 
-- **Current Baseline:** 75% (enforced in CI)
+- **Current Baseline:** 75% Codecov-compatible line coverage (enforced in CI)
 - **Short-term Goal:** 80%
 - **Long-term Target:** 80%+
 
