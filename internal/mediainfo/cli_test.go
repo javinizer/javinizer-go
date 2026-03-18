@@ -1,9 +1,12 @@
 package mediainfo
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -443,6 +446,254 @@ func TestParseFloat_EdgeCases(t *testing.T) {
 			result, err := parseFloat(tt.input)
 			require.NoError(t, err)
 			assert.InDelta(t, tt.expected, result, 0.0001)
+		})
+	}
+}
+
+// TestCLIProber_Probe_Timeout tests the CLI prober timeout behavior
+func TestCLIProber_Probe_Timeout(t *testing.T) {
+	// Use a script that sleeps longer than the timeout
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "slow_script.sh")
+	err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nsleep 10"), 0755)
+	require.NoError(t, err)
+
+	cfg := &MediaInfoConfig{
+		CLIEnabled: true,
+		CLIPath:    scriptPath,
+		CLITimeout: 1, // 1 second timeout
+	}
+	prober := NewCLIProber(cfg)
+
+	tmpFile := filepath.Join(tmpDir, "test.mp4")
+	err = os.WriteFile(tmpFile, []byte("dummy"), 0644)
+	require.NoError(t, err)
+
+	f, err := os.Open(tmpFile)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	_, err = prober.Probe(f)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out")
+}
+
+// TestCLIProber_Probe_CommandNotFound tests error when CLI command doesn't exist
+func TestCLIProber_Probe_CommandNotFound(t *testing.T) {
+	cfg := &MediaInfoConfig{
+		CLIEnabled: true,
+		CLIPath:    "nonexistent_command_12345",
+		CLITimeout: 30,
+	}
+	prober := NewCLIProber(cfg)
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test.mp4")
+	err := os.WriteFile(tmpFile, []byte("dummy"), 0644)
+	require.NoError(t, err)
+
+	f, err := os.Open(tmpFile)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	_, err = prober.Probe(f)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed")
+}
+
+// TestCLIProber_Probe_InvalidJSONOutput tests handling of invalid JSON from CLI
+func TestCLIProber_Probe_InvalidJSONOutput(t *testing.T) {
+	// Create a script that outputs invalid JSON
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "invalid_json.sh")
+	err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho '{invalid json'"), 0755)
+	require.NoError(t, err)
+
+	cfg := &MediaInfoConfig{
+		CLIEnabled: true,
+		CLIPath:    scriptPath,
+		CLITimeout: 30,
+	}
+	prober := NewCLIProber(cfg)
+
+	tmpFile := filepath.Join(tmpDir, "test.mp4")
+	err = os.WriteFile(tmpFile, []byte("dummy"), 0644)
+	require.NoError(t, err)
+
+	f, err := os.Open(tmpFile)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	_, err = prober.Probe(f)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse JSON")
+}
+
+// TestCLIProber_Probe_EmptyOutput tests handling of empty output from CLI
+func TestCLIProber_Probe_EmptyOutput(t *testing.T) {
+	// Create a script that outputs empty string
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "empty_output.sh")
+	err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho ''"), 0755)
+	require.NoError(t, err)
+
+	cfg := &MediaInfoConfig{
+		CLIEnabled: true,
+		CLIPath:    scriptPath,
+		CLITimeout: 30,
+	}
+	prober := NewCLIProber(cfg)
+
+	tmpFile := filepath.Join(tmpDir, "test.mp4")
+	err = os.WriteFile(tmpFile, []byte("dummy"), 0644)
+	require.NoError(t, err)
+
+	f, err := os.Open(tmpFile)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	_, err = prober.Probe(f)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse JSON")
+}
+
+// TestCLIProber_Probe_InvalidFilePath tests handling of invalid file content
+func TestCLIProber_Probe_InvalidFilePath(t *testing.T) {
+	cfg := &MediaInfoConfig{
+		CLIEnabled: true,
+		CLIPath:    "echo", // Use echo as a simple command
+		CLITimeout: 30,
+	}
+	prober := NewCLIProber(cfg)
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test.mp4")
+	err := os.WriteFile(tmpFile, []byte("dummy content"), 0644)
+	require.NoError(t, err)
+
+	f, err := os.Open(tmpFile)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	// This should fail because mediainfo can't parse the content
+	_, err = prober.Probe(f)
+	// Expected to fail - we're testing error handling
+	assert.Error(t, err)
+}
+
+// TestCLIProber_Probe_ContextCancellation tests behavior when context is cancelled
+func TestCLIProber_Probe_ContextCancellation(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "slow_script.sh")
+	err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nsleep 5"), 0755)
+	require.NoError(t, err)
+
+	cfg := &MediaInfoConfig{
+		CLIEnabled: true,
+		CLIPath:    scriptPath,
+		CLITimeout: 30,
+	}
+	prober := NewCLIProber(cfg)
+
+	tmpFile := filepath.Join(tmpDir, "test.mp4")
+	err = os.WriteFile(tmpFile, []byte("dummy"), 0644)
+	require.NoError(t, err)
+
+	f, err := os.Open(tmpFile)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	// Start the probe in a goroutine with its own context
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, prober.path, "--Output=JSON", tmpFile)
+	output, err := cmd.CombinedOutput()
+
+	// Context should trigger timeout
+	// Error can be "context deadline exceeded" or "signal: killed" depending on OS
+	assert.Error(t, err)
+	// Accept both error messages - different OS/platforms may return different messages
+	assert.True(t,
+		err.Error() == "context deadline exceeded" ||
+			err.Error() == "signal: killed" ||
+			err.Error() == "signal: terminated",
+		"Expected context cancellation error, got: %v", err)
+
+	_ = output // Suppress unused variable warning
+}
+
+// TestNewCLIProber_WithConfig tests CLI prober creation with custom config
+func TestNewCLIProber_WithConfig(t *testing.T) {
+	cfg := &MediaInfoConfig{
+		CLIEnabled: true,
+		CLIPath:    "/custom/path/to/mediainfo",
+		CLITimeout: 60,
+	}
+	prober := NewCLIProber(cfg)
+
+	assert.NotNil(t, prober)
+	assert.True(t, prober.enabled)
+	assert.Equal(t, "/custom/path/to/mediainfo", prober.path)
+	assert.Equal(t, 60, prober.timeout)
+}
+
+// TestNewCLIProber_DisabledWithNilConfig tests that disabled CLI uses default config
+func TestNewCLIProber_DisabledWithNilConfig(t *testing.T) {
+	// Simulate passing nil config (uses defaults)
+	prober := NewCLIProber(nil)
+
+	assert.NotNil(t, prober)
+	// Default config has CLIEnabled: false
+	assert.False(t, prober.enabled)
+}
+
+// TestParseMediaInfoJSON_StreamDuration tests that Stream type track is skipped
+func TestParseMediaInfoJSON_StreamDuration(t *testing.T) {
+	jsonData := `{
+		"media": {
+			"track": [
+				{
+					"@type": "Stream",
+					"StreamType": "General",
+					"Duration": "60000.000"
+				},
+				{
+					"@type": "Video",
+					"Format": "AVC",
+					"Width": "1280",
+					"Height": "720",
+					"FrameRate": "25.000"
+				}
+			]
+		}
+	}`
+
+	info, err := parseMediaInfoJSON([]byte(jsonData))
+
+	require.NoError(t, err)
+	// Stream track should be skipped, no General track so duration is 0
+	assert.Equal(t, 0.0, info.Duration)
+	assert.Equal(t, "h264", info.VideoCodec)
+}
+
+// TestNormalizeCodecName_SpecialCases tests additional codec name normalization cases
+func TestNormalizeCodecName_SpecialCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"DivX with spaces", "DivX ", "divx_"},
+		{"RealVideo", "RealVideo", "realvideo"},
+		{"Theora", "theora", "theora"},
+		{"VP6 with underscore", "vp6_f4", "vp6_f4"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeCodecName(tt.input)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

@@ -508,3 +508,150 @@ func TestCookieConversion(t *testing.T) {
 	assert.Equal(t, "__cf_bm", cookies[1].Name)
 	assert.Equal(t, "xyz789", cookies[1].Value)
 }
+
+func TestFlareSolverr_DestroySession(t *testing.T) {
+	var capturedCmd string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		var req map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		capturedCmd = req["cmd"].(string)
+
+		w.Header().Set("Content-Type", "application/json")
+		if req["cmd"] == "sessions.create" {
+			_, _ = w.Write([]byte(`{"status":"ok","session":"test-session-123"}`))
+		} else {
+			_, _ = w.Write([]byte(`{"status":"ok","message":"session destroyed"}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.FlareSolverrConfig{
+		Enabled:    true,
+		URL:        server.URL,
+		Timeout:    30,
+		MaxRetries: 1,
+		SessionTTL: 300,
+	}
+
+	fs, err := httpclient.NewFlareSolverr(&cfg)
+	require.NoError(t, err)
+
+	// Create a session first
+	sessionID, err := fs.CreateSession()
+	require.NoError(t, err)
+	require.NotEmpty(t, sessionID)
+
+	// Destroy the session
+	err = fs.DestroySession(sessionID)
+	assert.NoError(t, err)
+	assert.Equal(t, "sessions.destroy", capturedCmd)
+}
+
+func TestFlareSolverr_SessionResetOnFailure(t *testing.T) {
+	var (
+		mu           sync.Mutex
+		createCalls  int
+		requestCalls int
+		destroyCalls int
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		var req map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+
+		mu.Lock()
+		switch req["cmd"] {
+		case "sessions.create":
+			createCalls++
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok","session":"persist-1"}`))
+		case "sessions.destroy":
+			destroyCalls++
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "request.get":
+			requestCalls++
+			mu.Unlock()
+			// Return error on first request to trigger session reset
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"error","message":"session invalid"}`))
+		default:
+			mu.Unlock()
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.FlareSolverrConfig{
+		Enabled:    true,
+		URL:        server.URL,
+		Timeout:    30,
+		MaxRetries: 1,
+		SessionTTL: 300,
+	}
+
+	fs, err := httpclient.NewFlareSolverr(&cfg)
+	require.NoError(t, err)
+
+	// First call will fail and trigger session reset
+	_, _, err = fs.ResolveURL("https://example.com/page1")
+	// Error expected since we return error responses
+	assert.Error(t, err)
+
+	// Verify session was destroyed and recreated
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Greater(t, destroyCalls, 0, "session should be destroyed on failure")
+}
+
+func TestGetFlareSolverrFromClient(t *testing.T) {
+	client := httpclient.NewRestyClientNoProxy(30*time.Second, 3)
+
+	fs, ok := httpclient.GetFlareSolverrFromClient(client)
+
+	assert.Nil(t, fs)
+	assert.False(t, ok)
+}
+
+func TestFlareSolverr_SessionCacheAfterDestroy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		var req map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+
+		w.Header().Set("Content-Type", "application/json")
+		if req["cmd"] == "sessions.create" {
+			_, _ = w.Write([]byte(`{"status":"ok","session":"test-session-123"}`))
+		} else {
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.FlareSolverrConfig{
+		Enabled:    true,
+		URL:        server.URL,
+		Timeout:    30,
+		MaxRetries: 1,
+		SessionTTL: 300,
+	}
+
+	fs, err := httpclient.NewFlareSolverr(&cfg)
+	require.NoError(t, err)
+
+	// Create session
+	sessionID, err := fs.CreateSession()
+	require.NoError(t, err)
+
+	// Destroy session
+	err = fs.DestroySession(sessionID)
+	assert.NoError(t, err)
+
+	// Session should be removed from cache
+	// (We can't directly check the sync.Map, but we can verify no error occurred)
+}

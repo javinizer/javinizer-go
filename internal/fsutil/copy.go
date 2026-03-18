@@ -69,29 +69,33 @@ func CopyFileAtomic(src, dst string) error {
 	// Rename temp file to final destination (atomic on same filesystem)
 	if err := os.Rename(tmpDst, dst); err != nil {
 		// Fallback for cross-filesystem rename (e.g., external drives, network mounts)
-		if copyErr := func() error {
-			in, err := os.Open(tmpDst)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = in.Close() }()
-
-			out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm())
-			if err != nil {
-				return err
-			}
-			defer func() { _ = out.Close() }()
-
-			if _, err := io.Copy(out, in); err != nil {
-				return err
-			}
-			return nil
-		}(); copyErr != nil {
+		if copyErr := copyWithFallback(tmpDst, dst, srcInfo.Mode().Perm()); copyErr != nil {
 			_ = os.Remove(tmpDst)
 			return fmt.Errorf("failed to finalize copy (rename: %v, fallback: %v)", err, copyErr)
 		}
 		_ = os.Remove(tmpDst)
 	}
 
+	return nil
+}
+
+// copyWithFallback performs a copy operation using open/copy/close pattern.
+// This is used as a fallback when os.Rename fails (e.g., cross-filesystem rename).
+func copyWithFallback(src, dst string, perms os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perms)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = out.Close() }()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
 	return nil
 }

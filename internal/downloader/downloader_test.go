@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -16,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -2187,5 +2189,207 @@ func BenchmarkDownload(b *testing.B) {
 		if err != nil {
 			b.Fatalf("DownloadCover failed: %v", err)
 		}
+	}
+}
+
+// TestCollectDownloadProxyResolvers tests proxy resolver collection
+func TestCollectDownloadProxyResolvers(t *testing.T) {
+	tests := []struct {
+		name         string
+		cfg          *config.Config
+		registry     *models.ScraperRegistry
+		wantProxyLen int
+	}{
+		{
+			name:         "nil config",
+			cfg:          nil,
+			registry:     models.NewScraperRegistry(),
+			wantProxyLen: 0,
+		},
+		{
+			name: "nil registry",
+			cfg: &config.Config{
+				Scrapers: config.ScrapersConfig{
+					Proxy: config.ProxyConfig{
+						Enabled: true,
+						URL:     "http://proxy.example.com:8080",
+					},
+				},
+			},
+			registry:     nil,
+			wantProxyLen: 0,
+		},
+		{
+			name: "no proxies configured",
+			cfg: &config.Config{
+				Scrapers: config.ScrapersConfig{
+					Proxy: config.ProxyConfig{
+						Enabled: false,
+					},
+				},
+			},
+			registry:     models.NewScraperRegistry(),
+			wantProxyLen: 0,
+		},
+		{
+			name: "scraper proxy enabled - no registered scrapers returns nil",
+			cfg: &config.Config{
+				Scrapers: config.ScrapersConfig{
+					Proxy: config.ProxyConfig{
+						Enabled: true,
+						URL:     "http://proxy.example.com:8080",
+					},
+				},
+			},
+			registry:     models.NewScraperRegistry(),
+			wantProxyLen: 0,
+		},
+		{
+			name: "download proxy only - no registered scrapers returns nil",
+			cfg: &config.Config{
+				Scrapers: config.ScrapersConfig{
+					Proxy: config.ProxyConfig{
+						Enabled: false,
+					},
+				},
+				Output: config.OutputConfig{
+					DownloadProxy: config.ProxyConfig{
+						Enabled: true,
+						URL:     "http://download-proxy:8080",
+					},
+				},
+			},
+			registry:     models.NewScraperRegistry(),
+			wantProxyLen: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proxyResolvers := collectDownloadProxyResolvers(tt.cfg, tt.registry)
+
+			if len(proxyResolvers) != tt.wantProxyLen {
+				t.Errorf("Expected %d proxy resolvers, got %d", tt.wantProxyLen, len(proxyResolvers))
+			}
+		})
+	}
+}
+
+// TestHasLegacyDownloadOverrideFields tests legacy config field detection
+func TestHasLegacyDownloadOverrideFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      *config.ProxyConfig
+		expected bool
+	}{
+		{
+			name: "legacy fields present",
+			cfg: &config.ProxyConfig{
+				UseMainProxy: true,
+			},
+			expected: true,
+		},
+		{
+			name: "URL present",
+			cfg: &config.ProxyConfig{
+				URL: "http://proxy.example.com:8080",
+			},
+			expected: true,
+		},
+		{
+			name: "profile present",
+			cfg: &config.ProxyConfig{
+				Profile: "test-profile",
+			},
+			expected: true,
+		},
+		{
+			name:     "all fields empty",
+			cfg:      &config.ProxyConfig{},
+			expected: false,
+		},
+		{
+			name:     "nil config",
+			cfg:      nil,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := hasLegacyDownloadOverrideFields(tt.cfg)
+			if result != tt.expected {
+				t.Errorf("Expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestDownloader_Do_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		statusCode  int
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "404 not found",
+			statusCode:  404,
+			wantErr:     true,
+			errContains: "404",
+		},
+		{
+			name:        "500 server error",
+			statusCode:  500,
+			wantErr:     true,
+			errContains: "500",
+		},
+		{
+			name:        "403 forbidden",
+			statusCode:  403,
+			wantErr:     true,
+			errContains: "403",
+		},
+		{
+			name:        "401 unauthorized",
+			statusCode:  401,
+			wantErr:     true,
+			errContains: "401",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create test server with specified status code
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.statusCode)
+				// Don't write body for error cases
+			}))
+			defer server.Close()
+
+			// Create unique temp file for this test
+			tmpDir := t.TempDir()
+			destPath := filepath.Join(tmpDir, "test_download")
+
+			// Create downloader with test client
+			cfg := &config.Config{
+				Output: config.OutputConfig{
+					DownloadCover: true,
+				},
+			}
+			downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), &cfg.Output, "test-agent")
+
+			// Perform download - should fail for error status codes
+			err := downloader.DownloadWithRetry(context.Background(), server.URL, destPath, 0)
+
+			assert.Error(t, err, "Expected error for status code %d", tt.statusCode)
+			if tt.errContains != "" {
+				assert.Contains(t, err.Error(), tt.errContains)
+			}
+		})
 	}
 }

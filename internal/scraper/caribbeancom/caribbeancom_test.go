@@ -7,6 +7,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestResolveSearchQuery(t *testing.T) {
@@ -36,7 +37,7 @@ func TestResolveSearchQuery(t *testing.T) {
 	}
 }
 
-func TestNormalizeMovieID(t *testing.T) {
+func TestNormalizeMovieIDTable(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -49,9 +50,7 @@ func TestNormalizeMovieID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeMovieID(tt.input); got != tt.want {
-				t.Fatalf("normalizeMovieID(%q) = %q, want %q", tt.input, got, tt.want)
-			}
+			assert.Equal(t, tt.want, normalizeMovieID(tt.input))
 		})
 	}
 }
@@ -233,5 +232,214 @@ func TestApplyLanguage(t *testing.T) {
 	jaURL := sJa.applyLanguage("https://en.caribbeancom.com/eng/moviepages/120614-753/index.html")
 	if jaURL != "https://www.caribbeancom.com/moviepages/120614-753/index.html" {
 		t.Fatalf("unexpected ja URL: %s", jaURL)
+	}
+}
+
+func TestExtractMovieID(t *testing.T) {
+	tests := []struct {
+		name       string
+		html       string
+		sourceURL  string
+		fallbackID string
+		want       string
+	}{
+		{
+			name:       "from JSON",
+			html:       `{"movie_id":"120614-753"}`,
+			sourceURL:  "",
+			fallbackID: "120614-753",
+			want:       "120614-753",
+		},
+		{
+			name:       "from URL",
+			html:       "",
+			sourceURL:  "https://www.caribbeancom.com/moviepages/120614-753/index.html",
+			fallbackID: "120614-753",
+			want:       "120614-753",
+		},
+		{
+			name:       "from token regex",
+			html:       "",
+			sourceURL:  "",
+			fallbackID: "120614_753",
+			want:       "120614-753",
+		},
+		{
+			name:       "fallback to normalized",
+			html:       "",
+			sourceURL:  "",
+			fallbackID: "120614_753",
+			want:       "120614-753",
+		},
+		{
+			name:       "empty inputs",
+			html:       "",
+			sourceURL:  "",
+			fallbackID: "",
+			want:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, extractMovieID(tt.html, tt.sourceURL, tt.fallbackID))
+		})
+	}
+}
+
+func TestExtractSpecValue(t *testing.T) {
+	html := `
+<ul>
+  <li class="movie-spec">
+    <span class="spec-title">再生時間</span>
+    <span class="spec-content">01:23:45</span>
+  </li>
+  <li class="movie-spec">
+    <span class="spec-title">配信日</span>
+    <span class="spec-content">2024/01/15</span>
+  </li>
+</ul>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	assert.NoError(t, err)
+
+	assert.Equal(t, "01:23:45", extractSpecValue(doc, []string{"再生時間", "Duration", "Runtime", "Length"}))
+	assert.Equal(t, "2024/01/15", extractSpecValue(doc, []string{"配信日", "公開日", "Release Date", "Date"}))
+	assert.Equal(t, "", extractSpecValue(doc, []string{"不存在的标签"}))
+}
+
+func TestParseRuntime(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  int
+	}{
+		{name: "ISO format H M S", input: "T01H23M45S", want: 84},
+		{name: "ISO format M S", input: "T00H45M30S", want: 46},
+		{name: "ISO format only H", input: "T02H", want: 120},
+		{name: "clock format", input: "01:23:45", want: 84},
+		{name: "clock format no seconds", input: "01:23", want: 83},
+		{name: "minute format", input: "123 min", want: 123},
+		{name: "minute format with space", input: "123 分", want: 123},
+		{name: "empty string", input: "", want: 0},
+		{name: "invalid string", input: "not a time", want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, parseRuntime(tt.input))
+		})
+	}
+}
+
+func TestParseReleaseDate(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "YMD format", input: "2024/01/15", want: "2024-01-15"},
+		{name: "invalid YMD month", input: "2024/13/15", want: ""},
+		{name: "invalid day", input: "2024/01/32", want: ""},
+		{name: "empty", input: "", want: ""},
+		{name: "invalid", input: "not a date", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseReleaseDate(tt.input)
+			if tt.want == "" {
+				assert.Nil(t, result)
+			} else {
+				assert.NotNil(t, result)
+				assert.Equal(t, tt.want, result.Format("2006-01-02"))
+			}
+		})
+	}
+}
+
+func TestParseReleaseDateFromID(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "valid ID 6-digit", input: "120614-753", want: "2014-12-06"},
+		{name: "valid ID 6-digit uppercase", input: "120614-753", want: "2014-12-06"},
+		{name: "invalid short", input: "12345-753", want: ""},
+		{name: "invalid format", input: "123-456", want: ""},
+		{name: "empty", input: "", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseReleaseDateFromID(tt.input)
+			if tt.want == "" {
+				assert.Nil(t, result)
+			} else {
+				assert.NotNil(t, result)
+				assert.Equal(t, tt.want, result.Format("2006-01-02"))
+			}
+		})
+	}
+}
+
+func TestNormalizeLanguage(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: " japanese ", input: " japanese ", want: "ja"},
+		{name: "japanese", input: "japanese", want: "ja"},
+		{name: " japanese with spaces ", input: " japanese ", want: "ja"},
+		{name: "en", input: "en", want: "en"},
+		{name: "invalid", input: "invalid", want: "ja"},
+		{name: "empty", input: "", want: "ja"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, normalizeLanguage(tt.input))
+		})
+	}
+}
+
+func TestIsHTTPURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "http", input: "http://example.com", want: true},
+		{name: "https", input: "https://example.com", want: true},
+		{name: "no scheme", input: "example.com", want: false},
+		{name: "empty", input: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isHTTPURL(tt.input))
+		})
+	}
+}
+
+func TestNormalizeMovieID(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "already canonical", input: "120614-753", want: "120614-753"},
+		{name: "underscore to dash", input: "120614_753", want: "120614-753"},
+		{name: "padded two digit", input: "020326_01-10MU", want: "020326-001"},
+		{name: "uppercase", input: "120614-753", want: "120614-753"},
+		{name: "empty", input: "", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, normalizeMovieID(tt.input))
+		})
 	}
 }
