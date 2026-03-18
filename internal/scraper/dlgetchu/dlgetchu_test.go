@@ -2,6 +2,7 @@ package dlgetchu
 
 import (
 	"fmt"
+	"github.com/go-resty/resty/v2"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/stretchr/testify/assert"
 )
 
 func testConfig(baseURL string) *config.Config {
@@ -133,4 +135,76 @@ func TestHelpers(t *testing.T) {
 	if !isHTTPURL("https://dl.getchu.com/i/item12345") {
 		t.Fatal("expected HTTP URL")
 	}
+}
+
+func TestExtractGenres(t *testing.T) {
+	html := `<a href="genre_id=1">Action</a>`
+	genres := extractGenres(html)
+	assert.Equal(t, 1, len(genres))
+}
+
+func TestExtractScreenshots(t *testing.T) {
+	html := `<a href="/data/item_img/demo/s1.jpg" class="highslide"></a>`
+	screenshots := extractScreenshots(html, "https://dl.getchu.com")
+	assert.Equal(t, 1, len(screenshots))
+}
+
+func TestFetchPage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("<html>test</html>"))
+	}))
+	defer server.Close()
+	cfg := testConfig(server.URL)
+	cfg.Scrapers.DLGetchu.RequestDelay = 0
+	s := New(cfg)
+	result, status, err := s.fetchPage(server.URL)
+	assert.NoError(t, err)
+	assert.Equal(t, 200, status)
+	assert.Contains(t, result, "test")
+}
+
+func TestDecodeBody(t *testing.T) {
+	resp := &resty.Response{RawResponse: &http.Response{Body: http.NoBody}}
+	result, err := decodeBody(resp)
+	assert.NoError(t, err)
+	assert.Empty(t, result)
+}
+
+func TestWaitForRateLimit(t *testing.T) {
+	cfg := testConfig("https://dl.getchu.com")
+	cfg.Scrapers.DLGetchu.RequestDelay = 50
+	s := New(cfg)
+	s.lastRequestTime.Store(time.Now().Add(-10 * time.Millisecond))
+	start := time.Now()
+	s.waitForRateLimit()
+	elapsed := time.Since(start)
+	// Should wait for remaining time (at least 40ms)
+	assert.GreaterOrEqual(t, elapsed, 40*time.Millisecond)
+}
+
+func TestUpdateLastRequestTime(t *testing.T) {
+	cfg := testConfig("https://dl.getchu.com")
+	s := New(cfg)
+	s.updateLastRequestTime()
+	loadedTime, ok := s.lastRequestTime.Load().(time.Time)
+	assert.True(t, ok)
+	assert.False(t, loadedTime.IsZero())
+}
+
+func TestResolveURL(t *testing.T) {
+	assert.Equal(t, "https://example.com/x/y.jpg", resolveURL("https://example.com/i/item1", "/x/y.jpg"))
+}
+
+func TestCleanString(t *testing.T) {
+	assert.Equal(t, "hello world", cleanString("hello   world"))
+}
+
+func TestStripTags(t *testing.T) {
+	assert.Equal(t, "Hello world", stripTags("Hello <b>world</b>"))
+}
+
+func TestIsHTTPURL(t *testing.T) {
+	assert.True(t, isHTTPURL("http://example.com"))
+	assert.True(t, isHTTPURL("https://example.com"))
+	assert.False(t, isHTTPURL("example.com"))
 }
