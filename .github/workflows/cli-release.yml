@@ -6,7 +6,7 @@ on:
       - 'v*'
   schedule:
     # Midnight UTC daily
-    - cron: '0 4 * * *'
+    - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
       release_type:
@@ -99,7 +99,7 @@ jobs:
             else
               prerelease="false"
             fi
-          elif [[ "${event_name}" == "schedule" ]]; then
+          elif [[ "${event_name}" == "schedule" || "${event_name}" == "workflow_dispatch" ]]; then
             # Extract base version (e.g., v0.1.2 from v0.1.2-rc.1 or v0.1.2)
             nightly_base="${tracked_version%%-*}"
             if [[ -z "${nightly_base}" ]]; then
