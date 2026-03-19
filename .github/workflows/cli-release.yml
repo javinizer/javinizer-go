@@ -100,11 +100,15 @@ jobs:
               prerelease="false"
             fi
           elif [[ "${event_name}" == "schedule" ]]; then
+            # Extract base version (e.g., v0.1.2 from v0.1.2-rc.1 or v0.1.2)
             nightly_base="${tracked_version%%-*}"
             if [[ -z "${nightly_base}" ]]; then
               nightly_base="${tracked_version}"
             fi
-            version="${nightly_base}-nightly.$(date -u '+%Y%m%d')"
+            
+            # Updated format: cleanly separated with dashes (e.g. v0.1.2-nightly-20260319)
+            version="${nightly_base}-nightly-$(date -u '+%Y%m%d')"
+            
             create_release="false"
             draft="false"
             prerelease="true"
@@ -530,11 +534,10 @@ jobs:
             type=raw,value=${{ needs.prepare-release.outputs.version }}
             type=raw,value=latest,enable=${{ needs.prepare-release.outputs.publish_latest == 'true' }}
             type=raw,value=nightly,enable=${{ needs.prepare-release.outputs.is_nightly == 'true' }}
-            type=raw,value=nightly-${{ needs.prepare-release.outputs.nightly_date }},enable=${{ needs.prepare-release.outputs.is_nightly == 'true' && needs.prepare-release.outputs.nightly_date != '' }}
-            type=sha,format=short,prefix=sha-,enable=${{ needs.prepare-release.outputs.is_nightly == 'true' }}
             type=raw,value=v${{ steps.semver.outputs.major }},enable=${{ needs.prepare-release.outputs.prerelease != 'true' && steps.semver.outputs.major != '' }}
             type=raw,value=v${{ steps.semver.outputs.major }}.${{ steps.semver.outputs.minor }},enable=${{ needs.prepare-release.outputs.prerelease != 'true' && steps.semver.outputs.major != '' && steps.semver.outputs.minor != '' }}
           labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
 
       - name: Build and (optionally) push Docker image
@@ -547,7 +550,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
             ${{ steps.meta.outputs.labels }}
-            org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
           build-args: |
             VERSION=${{ needs.prepare-release.outputs.version }}
             COMMIT=${{ needs.prepare-release.outputs.commit }}
