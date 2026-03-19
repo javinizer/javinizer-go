@@ -703,8 +703,13 @@ func TestPreviewOrganize(t *testing.T) {
 					FolderFormat: "<ID>",
 					FileFormat:   "<ID>",
 					// Use multipart conditional templates for testing
-					PosterFormat: "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
-					FanartFormat: "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
+					PosterFormat:     "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
+					FanartFormat:     "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
+					ScreenshotFolder: "extrafanart",
+					// Enable media downloads for preview testing
+					DownloadCover:       true,
+					DownloadPoster:      false,
+					DownloadExtrafanart: true,
 				},
 				API: config.APIConfig{
 					Security: config.SecurityConfig{

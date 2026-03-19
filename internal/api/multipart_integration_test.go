@@ -22,10 +22,15 @@ func TestMultipartPreviewEndToEnd(t *testing.T) {
 	// Create config with multipart templates
 	cfg := &config.Config{
 		Output: config.OutputConfig{
-			FolderFormat: "<ID>",
-			FileFormat:   "<ID>",
-			PosterFormat: "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
-			FanartFormat: "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
+			FolderFormat:     "<ID>",
+			FileFormat:       "<ID>",
+			PosterFormat:     "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
+			FanartFormat:     "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
+			ScreenshotFolder: "extrafanart",
+			// Enable media downloads for preview testing
+			DownloadCover:       true,
+			DownloadPoster:      false,
+			DownloadExtrafanart: true,
 		},
 		API: config.APIConfig{
 			Security: config.SecurityConfig{
@@ -122,10 +127,15 @@ func TestMultipartPreviewSingleFile(t *testing.T) {
 
 	cfg := &config.Config{
 		Output: config.OutputConfig{
-			FolderFormat: "<ID>",
-			FileFormat:   "<ID>",
-			PosterFormat: "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
-			FanartFormat: "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
+			FolderFormat:     "<ID>",
+			FileFormat:       "<ID>",
+			PosterFormat:     "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
+			FanartFormat:     "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
+			ScreenshotFolder: "extrafanart",
+			// Enable media downloads for preview testing
+			DownloadCover:       true,
+			DownloadPoster:      false,
+			DownloadExtrafanart: true,
 		},
 		API: config.APIConfig{
 			Security: config.SecurityConfig{

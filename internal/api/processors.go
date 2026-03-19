@@ -872,29 +872,62 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 	generatePerFileNFO := cfg.Metadata.NFO.PerFile && isMultiPart
 
 	// Generate NFO paths using template engine
+	// Only generate if NFO is enabled in config
 	var nfoPath string
 	var nfoPaths []string
 
-	if generatePerFileNFO {
-		// Generate one NFO per video file (matching video file naming)
-		nfoPaths = make([]string, 0, len(fileResults))
-		for _, result := range fileResults {
-			if result != nil && result.FilePath != "" {
-				// Generate NFO filename using template with multi-part context
-				nfoCtx := ctx.Clone()
-				nfoCtx.PartNumber = result.PartNumber
-				nfoCtx.PartSuffix = result.PartSuffix
-				nfoCtx.IsMultiPart = result.IsMultiPart
+	if cfg.Metadata.NFO.Enabled {
+		if generatePerFileNFO {
+			// Generate one NFO per video file (matching video file naming)
+			nfoPaths = make([]string, 0, len(fileResults))
+			for _, result := range fileResults {
+				if result != nil && result.FilePath != "" {
+					// Generate NFO filename using template with multi-part context
+					nfoCtx := ctx.Clone()
+					nfoCtx.PartNumber = result.PartNumber
+					nfoCtx.PartSuffix = result.PartSuffix
+					nfoCtx.IsMultiPart = result.IsMultiPart
 
-				nfoFileName, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, nfoCtx)
-				if err != nil || nfoFileName == "" {
-					// Fallback to fileName-based naming
-					nfoFileName = fileName
-					if result.IsMultiPart && result.PartSuffix != "" {
-						nfoFileName = fileName + result.PartSuffix
+					nfoFileName, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, nfoCtx)
+					if err != nil || nfoFileName == "" {
+						// Fallback to fileName-based naming
+						nfoFileName = fileName
+						if result.IsMultiPart && result.PartSuffix != "" {
+							nfoFileName = fileName + result.PartSuffix
+						}
 					}
-				}
 
+					// Case-insensitive .nfo trimming to prevent double extensions
+					basename := nfoFileName
+					lower := strings.ToLower(basename)
+					if strings.HasSuffix(lower, ".nfo") {
+						basename = basename[:len(basename)-4]
+					}
+					sanitized := template.SanitizeFilename(basename)
+
+					// Three-tier fallback for empty results
+					if sanitized == "" {
+						sanitized = template.SanitizeFilename(fileName)
+						if sanitized == "" {
+							sanitized = "metadata"
+						}
+					}
+
+					nfoFilePath := filepath.Join(folderPath, sanitized+".nfo")
+					nfoPaths = append(nfoPaths, nfoFilePath)
+				}
+			}
+			// Set primary NFO path for backward compatibility (use first)
+			if len(nfoPaths) > 0 {
+				nfoPath = nfoPaths[0]
+			}
+		} else {
+			// Single NFO file (default behavior) - use template engine
+			nfoFileName, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, ctx)
+			if err != nil || nfoFileName == "" {
+				// Fallback to fileName-based naming
+				nfoFileName = fileName + ".nfo"
+			} else {
 				// Case-insensitive .nfo trimming to prevent double extensions
 				basename := nfoFileName
 				lower := strings.ToLower(basename)
@@ -911,88 +944,73 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 					}
 				}
 
-				nfoFilePath := filepath.Join(folderPath, sanitized+".nfo")
-				nfoPaths = append(nfoPaths, nfoFilePath)
+				nfoFileName = sanitized + ".nfo"
 			}
+			nfoPath = filepath.Join(folderPath, nfoFileName)
 		}
-		// Set primary NFO path for backward compatibility (use first)
-		if len(nfoPaths) > 0 {
-			nfoPath = nfoPaths[0]
-		}
-	} else {
-		// Single NFO file (default behavior) - use template engine
-		nfoFileName, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, ctx)
-		if err != nil || nfoFileName == "" {
-			// Fallback to fileName-based naming
-			nfoFileName = fileName + ".nfo"
-		} else {
-			// Case-insensitive .nfo trimming to prevent double extensions
-			basename := nfoFileName
-			lower := strings.ToLower(basename)
-			if strings.HasSuffix(lower, ".nfo") {
-				basename = basename[:len(basename)-4]
-			}
-			sanitized := template.SanitizeFilename(basename)
-
-			// Three-tier fallback for empty results
-			if sanitized == "" {
-				sanitized = template.SanitizeFilename(fileName)
-				if sanitized == "" {
-					sanitized = "metadata"
-				}
-			}
-
-			nfoFileName = sanitized + ".nfo"
-		}
-		nfoPath = filepath.Join(folderPath, nfoFileName)
 	}
+	// If NFO is disabled, nfoPath and nfoPaths remain empty
 
 	// Generate poster path using template engine
-	// Use first file's multipart context so templates with <IF:MULTIPART> work correctly
-	posterCtx := ctx.Clone()
-	if len(fileResults) > 0 && fileResults[0] != nil {
-		posterCtx.PartNumber = fileResults[0].PartNumber
-		posterCtx.PartSuffix = fileResults[0].PartSuffix
-		posterCtx.IsMultiPart = fileResults[0].IsMultiPart
+	// Only generate if cover or poster download is enabled
+	var posterPath string
+	if cfg.Output.DownloadCover || cfg.Output.DownloadPoster {
+		// Use first file's multipart context so templates with <IF:MULTIPART> work correctly
+		posterCtx := ctx.Clone()
+		if len(fileResults) > 0 && fileResults[0] != nil {
+			posterCtx.PartNumber = fileResults[0].PartNumber
+			posterCtx.PartSuffix = fileResults[0].PartSuffix
+			posterCtx.IsMultiPart = fileResults[0].IsMultiPart
+		}
+		posterFileName, err := templateEngine.Execute(cfg.Output.PosterFormat, posterCtx)
+		if err != nil || posterFileName == "" {
+			// Fallback to hardcoded format
+			posterFileName = fmt.Sprintf("%s-poster.jpg", movie.ID)
+		}
+		posterFileName = template.SanitizeFilename(posterFileName)
+		if posterFileName == "" {
+			// Double fallback if sanitization removes everything
+			posterFileName = fmt.Sprintf("%s-poster.jpg", template.SanitizeFilename(movie.ID))
+		}
+		posterPath = filepath.Join(folderPath, posterFileName)
 	}
-	posterFileName, err := templateEngine.Execute(cfg.Output.PosterFormat, posterCtx)
-	if err != nil || posterFileName == "" {
-		// Fallback to hardcoded format
-		posterFileName = fmt.Sprintf("%s-poster.jpg", movie.ID)
-	}
-	posterFileName = template.SanitizeFilename(posterFileName)
-	if posterFileName == "" {
-		// Double fallback if sanitization removes everything
-		posterFileName = fmt.Sprintf("%s-poster.jpg", template.SanitizeFilename(movie.ID))
-	}
-	posterPath := filepath.Join(folderPath, posterFileName)
+	// If cover/poster download is disabled, posterPath remains empty
 
 	// Generate fanart path using template engine
-	// Use first file's multipart context so templates with <IF:MULTIPART> work correctly
-	fanartCtx := ctx.Clone()
-	if len(fileResults) > 0 && fileResults[0] != nil {
-		fanartCtx.PartNumber = fileResults[0].PartNumber
-		fanartCtx.PartSuffix = fileResults[0].PartSuffix
-		fanartCtx.IsMultiPart = fileResults[0].IsMultiPart
+	// Only generate if extrafanart download is enabled
+	var fanartPath string
+	if cfg.Output.DownloadExtrafanart {
+		// Use first file's multipart context so templates with <IF:MULTIPART> work correctly
+		fanartCtx := ctx.Clone()
+		if len(fileResults) > 0 && fileResults[0] != nil {
+			fanartCtx.PartNumber = fileResults[0].PartNumber
+			fanartCtx.PartSuffix = fileResults[0].PartSuffix
+			fanartCtx.IsMultiPart = fileResults[0].IsMultiPart
+		}
+		fanartFileName, err := templateEngine.Execute(cfg.Output.FanartFormat, fanartCtx)
+		if err != nil || fanartFileName == "" {
+			// Fallback to hardcoded format
+			fanartFileName = fmt.Sprintf("%s-fanart.jpg", movie.ID)
+		}
+		fanartFileName = template.SanitizeFilename(fanartFileName)
+		if fanartFileName == "" {
+			// Double fallback if sanitization removes everything
+			fanartFileName = fmt.Sprintf("%s-fanart.jpg", template.SanitizeFilename(movie.ID))
+		}
+		fanartPath = filepath.Join(folderPath, fanartFileName)
 	}
-	fanartFileName, err := templateEngine.Execute(cfg.Output.FanartFormat, fanartCtx)
-	if err != nil || fanartFileName == "" {
-		// Fallback to hardcoded format
-		fanartFileName = fmt.Sprintf("%s-fanart.jpg", movie.ID)
-	}
-	fanartFileName = template.SanitizeFilename(fanartFileName)
-	if fanartFileName == "" {
-		// Double fallback if sanitization removes everything
-		fanartFileName = fmt.Sprintf("%s-fanart.jpg", template.SanitizeFilename(movie.ID))
-	}
-	fanartPath := filepath.Join(folderPath, fanartFileName)
+	// If extrafanart download is disabled, fanartPath remains empty
 
-	// Use configured screenshot folder name
-	extrafanartPath := filepath.Join(folderPath, cfg.Output.ScreenshotFolder)
+	// Use configured screenshot folder name (only if extrafanart is enabled)
+	var extrafanartPath string
+	if cfg.Output.DownloadExtrafanart {
+		extrafanartPath = filepath.Join(folderPath, cfg.Output.ScreenshotFolder)
+	}
 
 	// Generate screenshot names using template engine (same as downloader)
+	// Only generate if extrafanart download is enabled
 	screenshots := []string{}
-	if len(movie.Screenshots) > 0 {
+	if cfg.Output.DownloadExtrafanart && len(movie.Screenshots) > 0 {
 		for i := range movie.Screenshots {
 			ctx.Index = i + 1 // Set index for template
 			screenshotName, err := templateEngine.Execute(cfg.Output.ScreenshotFormat, ctx)

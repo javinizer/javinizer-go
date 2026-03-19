@@ -20,6 +20,7 @@ func TestGeneratePreview_MultipartFallbackPaths(t *testing.T) {
 	cfg.Output.ScreenshotFormat = "<SERIES>"
 	cfg.Output.ScreenshotPadding = 2
 	cfg.Output.MaxPathLength = 1
+	cfg.Output.DownloadExtrafanart = true // Enable for screenshot/fanart preview
 	cfg.Metadata.NFO.PerFile = true
 	cfg.Metadata.NFO.FilenameTemplate = "<SERIES>"
 
@@ -79,6 +80,7 @@ func TestGeneratePreview_NoFileResultsFallback(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Output.FolderFormat = "<ID>"
 	cfg.Output.FileFormat = "<ID>"
+	cfg.Output.DownloadExtrafanart = true // Enable for screenshot preview
 	cfg.Metadata.NFO.PerFile = false
 	cfg.Metadata.NFO.FilenameTemplate = "<ID>.nfo"
 
