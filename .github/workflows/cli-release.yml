@@ -6,7 +6,7 @@ on:
       - 'v*'
   schedule:
     # Midnight UTC daily
-    - cron: '0 0 * * *'
+    - cron: '45 3 * * *'
   workflow_dispatch:
     inputs:
       release_type:
