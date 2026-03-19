@@ -18,7 +18,7 @@ echo -e "${BLUE}Running pre-commit checks...${NC}"
 echo ""
 
 # Check 1: Go formatting
-echo -e "${BLUE}[1/4] Checking code formatting...${NC}"
+echo -e "${BLUE}[1/6] Checking code formatting...${NC}"
 UNFORMATTED=$(gofmt -l . 2>&1)
 if [ -n "$UNFORMATTED" ]; then
     echo -e "${RED}✗ Code is not formatted. Please run 'make fmt'${NC}"
@@ -29,8 +29,22 @@ fi
 echo -e "${GREEN}✓ Code formatting OK${NC}"
 echo ""
 
-# Check 2: Go vet
-echo -e "${BLUE}[2/4] Running go vet...${NC}"
+# Check 2: golangci-lint
+echo -e "${BLUE}[2/6] Running golangci-lint...${NC}"
+if command -v golangci-lint &> /dev/null; then
+    if ! golangci-lint run ./... 2>&1; then
+        echo -e "${RED}✗ golangci-lint found issues${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ golangci-lint passed${NC}"
+else
+    echo -e "${YELLOW}⚠ golangci-lint not installed (skipping)${NC}"
+    echo -e "${YELLOW}  Install: brew install golangci-lint${NC}"
+fi
+echo ""
+
+# Check 3: Go vet
+echo -e "${BLUE}[3/6] Running go vet...${NC}"
 if ! go vet ./... 2>&1; then
     echo -e "${RED}✗ go vet found issues${NC}"
     exit 1
@@ -38,8 +52,8 @@ fi
 echo -e "${GREEN}✓ go vet passed${NC}"
 echo ""
 
-# Check 3: Fast unit tests (skip flaky network tests)
-echo -e "${BLUE}[3/4] Running fast unit tests...${NC}"
+# Check 4: Fast unit tests (skip flaky network tests)
+echo -e "${BLUE}[4/6] Running fast unit tests...${NC}"
 # Increase timeout to 60s and skip tests known to be flaky due to network issues
 if ! go test -short -timeout=60s -skip="TestDownloadTask_Execute_Cancellation" ./... 2>&1; then
     echo -e "${RED}✗ Tests failed${NC}"
@@ -48,8 +62,8 @@ fi
 echo -e "${GREEN}✓ Tests passed${NC}"
 echo ""
 
-# Check 4: Build verification
-echo -e "${BLUE}[4/5] Verifying build...${NC}"
+# Check 5: Build verification
+echo -e "${BLUE}[5/6] Verifying build...${NC}"
 if ! go build -o /tmp/javinizer-test ./cmd/javinizer 2>&1; then
     echo -e "${RED}✗ Build failed${NC}"
     exit 1
@@ -58,8 +72,8 @@ rm -f /tmp/javinizer-test
 echo -e "${GREEN}✓ Build successful${NC}"
 echo ""
 
-# Check 5: Swagger documentation
-echo -e "${BLUE}[5/5] Checking Swagger documentation...${NC}"
+# Check 6: Swagger documentation
+echo -e "${BLUE}[6/6] Checking Swagger documentation...${NC}"
 if ! command -v swag &> /dev/null; then
     echo -e "${YELLOW}⚠️  swag not installed, installing...${NC}"
     go install github.com/swaggo/swag/cmd/swag@latest
