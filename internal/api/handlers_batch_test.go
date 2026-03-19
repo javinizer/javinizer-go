@@ -708,7 +708,7 @@ func TestPreviewOrganize(t *testing.T) {
 					ScreenshotFolder: "extrafanart",
 					// Enable media downloads for preview testing
 					DownloadCover:       true,
-					DownloadPoster:      false,
+					DownloadPoster:      true,
 					DownloadExtrafanart: true,
 				},
 				API: config.APIConfig{

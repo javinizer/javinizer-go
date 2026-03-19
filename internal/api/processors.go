@@ -952,9 +952,10 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 	// If NFO is disabled, nfoPath and nfoPaths remain empty
 
 	// Generate poster path using template engine
-	// Only generate if cover or poster download is enabled
+	// Only generate if poster download is enabled
+	logging.Debugf("DEBUG generatePreview: DownloadCover=%v, DownloadPoster=%v, DownloadExtrafanart=%v", cfg.Output.DownloadCover, cfg.Output.DownloadPoster, cfg.Output.DownloadExtrafanart)
 	var posterPath string
-	if cfg.Output.DownloadCover || cfg.Output.DownloadPoster {
+	if cfg.Output.DownloadPoster {
 		// Use first file's multipart context so templates with <IF:MULTIPART> work correctly
 		posterCtx := ctx.Clone()
 		if len(fileResults) > 0 && fileResults[0] != nil {
@@ -978,6 +979,7 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 
 	// Generate fanart path using template engine
 	// Only generate if extrafanart download is enabled
+	logging.Debugf("DEBUG generatePreview: DownloadExtrafanart=%v (fanart check)", cfg.Output.DownloadExtrafanart)
 	var fanartPath string
 	if cfg.Output.DownloadExtrafanart {
 		// Use first file's multipart context so templates with <IF:MULTIPART> work correctly
