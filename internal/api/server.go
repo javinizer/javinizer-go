@@ -237,15 +237,8 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 				return isSameOrigin(origin, r)
 			}
 
-			// Check for wildcard
-			for _, allowed := range allowedOrigins {
-				if allowed == "*" {
-					logging.Debugf("WebSocket: Allowing connection from any origin (wildcard enabled)")
-					return true
-				}
-			}
-
 			// Check for exact origin match
+			// Note: Wildcard "*" is NOT supported for security reasons - it would disable CSRF protection
 			if isOriginAllowed(origin, allowedOrigins) {
 				return true
 			}
