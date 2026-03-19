@@ -30,12 +30,12 @@ func TestCORS_OriginValidation(t *testing.T) {
 		shouldAllowConnection bool
 	}{
 		{
-			name:                  "wildcard allows any origin",
+			name:                  "wildcard is rejected for security (CORS)",
 			allowedOrigins:        []string{"*"},
 			requestOrigin:         "http://evil.com",
-			expectedAllowOrigin:   "*",
-			expectedAllowCreds:    "", // No credentials with wildcard
-			shouldAllowConnection: true,
+			expectedAllowOrigin:   "", // Wildcard is NOT allowed - security measure
+			expectedAllowCreds:    "",
+			shouldAllowConnection: false,
 		},
 		{
 			name:                  "empty config allows same-origin with Origin header",
@@ -149,12 +149,12 @@ func TestCORS_PreflightRequest(t *testing.T) {
 		shouldHaveHeaders bool
 	}{
 		{
-			name:              "valid preflight with wildcard",
+			name:              "preflight with wildcard is rejected (security)",
 			allowedOrigins:    []string{"*"},
 			requestOrigin:     "http://localhost:3000",
 			requestMethod:     "POST",
 			expectedStatus:    204,
-			shouldHaveHeaders: true,
+			shouldHaveHeaders: false, // Wildcard is rejected - no CORS headers
 		},
 		{
 			name:              "valid preflight with specific origin",
@@ -266,10 +266,10 @@ func TestIsSameOrigin(t *testing.T) {
 			expectedMatch: false,
 		},
 		{
-			name:          "https vs http",
+			name:          "https vs http (different schemes = different origins)",
 			origin:        "https://localhost:8080",
 			requestHost:   "localhost:8080",
-			expectedMatch: true, // Host matches regardless of protocol
+			expectedMatch: false, // HTTP and HTTPS are different origins (security requirement)
 		},
 	}
 
@@ -294,10 +294,10 @@ func TestIsOriginAllowed(t *testing.T) {
 		expectedAllow  bool
 	}{
 		{
-			name:           "wildcard allows all",
+			name:           "wildcard is explicitly rejected for security",
 			origin:         "http://anything.com",
 			allowedOrigins: []string{"*"},
-			expectedAllow:  true,
+			expectedAllow:  false, // Wildcard is NOT allowed - prevents CSRF/XSWS attacks
 		},
 		{
 			name:           "exact match",
@@ -324,10 +324,10 @@ func TestIsOriginAllowed(t *testing.T) {
 			expectedAllow:  false,
 		},
 		{
-			name:           "wildcard with other origins",
+			name:           "wildcard is ignored even with other origins",
 			origin:         "http://anything.com",
 			allowedOrigins: []string{"http://localhost:3000", "*"},
-			expectedAllow:  true,
+			expectedAllow:  false, // Wildcard is explicitly skipped - only exact matches allowed
 		},
 	}
 
@@ -707,10 +707,10 @@ func TestSecurity_WebSocketOriginValidation(t *testing.T) {
 		shouldAllowUpgrade bool
 	}{
 		{
-			name:               "wildcard allows any origin",
+			name:               "wildcard is rejected for security (WebSocket)",
 			allowedOrigins:     []string{"*"},
 			requestOrigin:      "http://evil.com",
-			shouldAllowUpgrade: true,
+			shouldAllowUpgrade: false, // Wildcard is NOT allowed - prevents XSWS attacks
 		},
 		{
 			name:               "empty config allows same-origin",

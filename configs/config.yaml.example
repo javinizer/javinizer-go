@@ -6,19 +6,22 @@ server:
 api:
     security:
         # CORS allowed origins for API and WebSocket connections
-        # - Use ["*"] to allow all origins (development only - NOT secure for production)
-        # - Use specific origins like ["http://localhost:3000", "http://127.0.0.1:3000"] for stricter control
-        # - Empty array [] means same-origin only (secure but may block browser-based frontends)
-        allowed_origins: []  # Change to ["*"] for local development
+        # - Specific origins only (wildcard "*" is NOT supported for security reasons)
+        # - Empty array [] means same-origin only
+        # - Add frontend origins if using a separate web server (e.g., "http://localhost:5173" for Vite dev server)
+        allowed_origins:
+            - http://localhost:8080
+            - http://localhost:5173
+            - http://127.0.0.1:8080
+            - http://127.0.0.1:5173
 
         # Allowed directories for API file operations (organize, preview, etc.)
         # SECURITY: Empty list = deny all (secure by default)
-        # Docker deployments auto-detect /media automatically.
-        # Manual deployments should uncomment and add specific paths below:
-        #   allowed_directories:
-        #     - /path/to/media
-        #     - ~/Videos
-        allowed_directories: []  # Deny all by default - configure paths for your deployment
+        # Docker deployments: add /media for containerized setups
+        # Manual deployments: add your media library path(s) below
+        allowed_directories:
+            - /media
+            - ./media
 
         # Explicitly deny specific directories (optional)
         denied_directories: []

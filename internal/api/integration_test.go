@@ -128,7 +128,7 @@ func setupTestServer(t *testing.T) (*gin.Engine, *ServerDependencies) {
 		},
 		API: config.APIConfig{
 			Security: config.SecurityConfig{
-				AllowedOrigins: []string{"*"}, // Allow all origins in tests
+				AllowedOrigins: []string{"http://localhost:8080"}, // Specific origin for tests
 			},
 		},
 	}
@@ -351,6 +351,7 @@ func TestIntegrationMovieCRUDOperations(t *testing.T) {
 	// Test 1: GET /api/v1/movies (list movies)
 	t.Run("List Movies", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/v1/movies", nil)
+		req.Header.Set("Origin", "http://localhost:8080") // Required for CORS
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -360,7 +361,7 @@ func TestIntegrationMovieCRUDOperations(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "Integration Test Movie")
 
 		// Verify CORS headers
-		assert.NotEmpty(t, w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "http://localhost:8080", w.Header().Get("Access-Control-Allow-Origin"))
 	})
 
 	// Test 2: GET /api/v1/movies/:id (get single movie)

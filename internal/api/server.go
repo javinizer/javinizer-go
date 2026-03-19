@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -113,6 +114,7 @@ func resolveSwaggerPath() string {
 }
 
 // isSameOrigin checks if the origin matches the request host (same-origin)
+// Compares scheme, hostname, and port (with default port normalization)
 func isSameOrigin(origin string, r *http.Request) bool {
 	if origin == "" {
 		// No Origin header (e.g., some non-browser clients) - treat as same-origin
@@ -124,15 +126,57 @@ func isSameOrigin(origin string, r *http.Request) bool {
 		return false
 	}
 
-	return u.Host == r.Host
+	// Get request scheme
+	reqScheme := "http"
+	if r.TLS != nil {
+		reqScheme = "https"
+	}
+
+	// Normalize origin port (explicit default ports)
+	originPort := u.Port()
+	if originPort == "" {
+		if u.Scheme == "http" {
+			originPort = "80"
+		} else if u.Scheme == "https" {
+			originPort = "443"
+		}
+	}
+
+	// Parse request host using net.SplitHostPort for proper IPv6 support
+	// Handle both "host:port" and "[ipv6]:port" formats
+	reqHost := r.Host
+	reqPort := ""
+	if host, port, err := net.SplitHostPort(r.Host); err == nil {
+		reqHost = host
+		reqPort = port
+	}
+	if reqPort == "" {
+		if reqScheme == "http" {
+			reqPort = "80"
+		} else {
+			reqPort = "443"
+		}
+	}
+
+	// Compare scheme, hostname, and port components directly
+	return strings.EqualFold(u.Scheme, reqScheme) &&
+		strings.EqualFold(u.Hostname(), reqHost) &&
+		originPort == reqPort
 }
 
 // isOriginAllowed checks if an origin is allowed based on configuration
 // Note: This does NOT handle same-origin checking - use isSameOrigin for that
+// Note: Wildcard "*" is explicitly NOT supported - it must be an exact origin match
 func isOriginAllowed(origin string, allowedOrigins []string) bool {
 	// Check each allowed origin
 	for _, allowed := range allowedOrigins {
-		if allowed == "*" || allowed == origin {
+		// Explicitly reject wildcard - this is a security measure to prevent
+		// cross-site WebSocket hijacking and CSRF attacks
+		if allowed == "*" {
+			logging.Warn("Ignoring wildcard '*' in AllowedOrigins - only exact origin matches are supported for security")
+			continue
+		}
+		if allowed == origin {
 			return true
 		}
 	}
@@ -296,39 +340,31 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 			if isSameOrigin(origin, c.Request) {
 				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				c.Writer.Header().Add("Vary", "Origin")
 			}
 		} else {
-			// Check for wildcard in allowed origins
-			hasWildcard := false
-			for _, allowed := range allowedOrigins {
-				if allowed == "*" {
-					hasWildcard = true
-					break
-				}
-			}
-
-			if hasWildcard {
-				// Wildcard: allow all origins (no credentials for wildcard)
-				c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-			} else if isOriginAllowed(origin, allowedOrigins) {
+			// Check for exact origin match only
+			// Note: Wildcard "*" is NOT supported for security reasons
+			if isOriginAllowed(origin, allowedOrigins) {
 				// Specific origin allowed
 				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				c.Writer.Header().Add("Vary", "Origin")
 			}
 		}
 
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 
-		// Allow requested headers dynamically (echo back Access-Control-Request-Headers)
-		// This allows SPAs and API clients to use custom headers without CORS preflight failures
-		requestedHeaders := c.Request.Header.Get("Access-Control-Request-Headers")
-		if requestedHeaders != "" {
-			// Use requested headers from preflight
-			c.Writer.Header().Set("Access-Control-Allow-Headers", requestedHeaders)
-		} else {
-			// Default to common headers
-			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		// Allow specific headers - whitelist approach for security
+		// Only allow headers that are known to be safe and necessary
+		allowedHeaders := []string{
+			"Content-Type",
+			"Authorization",
+			"Accept",
+			"Origin",
+			"X-Requested-With",
 		}
+		c.Writer.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)

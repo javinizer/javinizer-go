@@ -87,8 +87,9 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 
 	// Create a map to track which movie IDs have had posters generated
 	// This prevents redundant poster downloads/crops for multi-part files
-	// Note: processedMovieIDs is passed by reference to all tasks and should be
-	// accessed with proper synchronization if tasks run concurrently
+	//
+	// NOTE: The worker package (internal/worker/single_scrape.go) uses a package-level
+	// mutex (processedMovieIDsMutex) to protect concurrent access to this map.
 	processedMovieIDs := make(map[string]bool)
 
 	// Submit tasks to pool

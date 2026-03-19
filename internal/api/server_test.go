@@ -93,7 +93,7 @@ func TestNewServer_CORSHeaders(t *testing.T) {
 	cfg := &config.Config{
 		API: config.APIConfig{
 			Security: config.SecurityConfig{
-				AllowedOrigins: []string{"*"}, // Allow all origins for test
+				AllowedOrigins: []string{"http://localhost:3000"}, // Specific origin for test
 			},
 		},
 		Logging: config.LoggingConfig{
@@ -125,15 +125,17 @@ func TestNewServer_CORSHeaders(t *testing.T) {
 
 	// Test OPTIONS request (CORS preflight)
 	req := httptest.NewRequest("OPTIONS", "/api/v1/movies", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
 
-	// Should return 204 and proper CORS headers
+	// Should return 204 and proper CORS headers for allowed origin
 	assert.Equal(t, 204, w.Code)
-	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "http://localhost:3000", w.Header().Get("Access-Control-Allow-Origin"))
 	assert.Contains(t, w.Header().Get("Access-Control-Allow-Methods"), "GET")
 	assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), "Content-Type")
+	assert.Equal(t, "true", w.Header().Get("Access-Control-Allow-Credentials"))
 }
 
 func TestNewServer_StaticFiles(t *testing.T) {
@@ -366,7 +368,7 @@ func TestNewServer_SecurityHeaders(t *testing.T) {
 	cfg := &config.Config{
 		API: config.APIConfig{
 			Security: config.SecurityConfig{
-				AllowedOrigins: []string{"*"}, // Allow all origins for test
+				AllowedOrigins: []string{"http://localhost:3000"}, // Specific origin for test
 			},
 		},
 		Logging: config.LoggingConfig{
@@ -396,15 +398,15 @@ func TestNewServer_SecurityHeaders(t *testing.T) {
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
 
-	t.Run("CORS allows all origins", func(t *testing.T) {
+	t.Run("CORS rejects wildcard and blocked origins", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/health", nil)
 		req.Header.Set("Origin", "http://evil.com")
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
 
-		// CORS is wide open (for development)
-		assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		// Wildcard "*" is NOT allowed - blocked origins should have no CORS headers
+		assert.Equal(t, "", w.Header().Get("Access-Control-Allow-Origin"))
 	})
 
 	t.Run("Large request body handling", func(t *testing.T) {
