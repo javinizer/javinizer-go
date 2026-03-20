@@ -18,22 +18,10 @@ import (
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
-	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
-	"github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
-	"github.com/javinizer/javinizer-go/internal/scraper/caribbeancom"
-	"github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
-	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
-	"github.com/javinizer/javinizer-go/internal/scraper/jav321"
-	"github.com/javinizer/javinizer-go/internal/scraper/javbus"
-	"github.com/javinizer/javinizer-go/internal/scraper/javdb"
-	"github.com/javinizer/javinizer-go/internal/scraper/javlibrary"
-	"github.com/javinizer/javinizer-go/internal/scraper/libredmm"
-	"github.com/javinizer/javinizer-go/internal/scraper/mgstage"
-	"github.com/javinizer/javinizer-go/internal/scraper/r18dev"
-	"github.com/javinizer/javinizer-go/internal/scraper/tokyohot"
+	"github.com/javinizer/javinizer-go/internal/scraper"
 	"github.com/javinizer/javinizer-go/internal/tui"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/spf13/afero"
@@ -227,27 +215,11 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Initialize repositories
 	movieRepo := database.NewMovieRepository(db)
-	contentIDRepo := database.NewContentIDMappingRepository(db)
 
-	// Initialize scraper registry
-	registry := models.NewScraperRegistry()
-	registry.Register(r18dev.New(cfg))
-	registry.Register(dmm.New(cfg, contentIDRepo))
-	registry.Register(libredmm.New(cfg))
-	registry.Register(mgstage.New(cfg))
-	registry.Register(javdb.New(cfg))
-	registry.Register(javbus.New(cfg))
-	registry.Register(jav321.New(cfg))
-	registry.Register(tokyohot.New(cfg))
-	registry.Register(aventertainment.New(cfg))
-	registry.Register(dlgetchu.New(cfg))
-	registry.Register(caribbeancom.New(cfg))
-	javLibraryProxy := config.ResolveScraperProxy(cfg.Scrapers.Proxy, cfg.Scrapers.JavLibrary.Proxy)
-	javlib, err := javlibrary.New(&cfg.Scrapers.JavLibrary, javLibraryProxy, cfg.Scrapers.UserAgent)
+	// Initialize scraper registry using centralized function
+	registry, err := scraper.NewDefaultScraperRegistry(cfg, db)
 	if err != nil {
-		logging.Warnf("Failed to initialize JavLibrary scraper: %v", err)
-	} else {
-		registry.Register(javlib)
+		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
 
 	// Initialize aggregator

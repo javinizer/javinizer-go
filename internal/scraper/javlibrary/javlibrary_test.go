@@ -178,14 +178,17 @@ func TestScraper_GetURL_Languages(t *testing.T) {
 	}
 }
 
-func TestScraper_InvalidLanguage(t *testing.T) {
+func TestScraper_LanguageNormalization(t *testing.T) {
 	tests := []struct {
 		name     string
 		language string
+		wantLang string
 	}{
-		{"Korean", "ko"},
-		{"French", "fr"},
-		{"invalid code", "xx"},
+		{"Korean (invalid, normalize to en)", "ko", "en"},
+		{"French (invalid, normalize to en)", "fr", "en"},
+		{"invalid code (normalize to en)", "xx", "en"},
+		{"Chinese Simplified (valid)", "cn", "cn"},
+		{"Chinese Traditional (valid)", "tw", "tw"},
 	}
 
 	for _, tt := range tests {
@@ -196,9 +199,9 @@ func TestScraper_InvalidLanguage(t *testing.T) {
 				BaseURL:  "http://www.javlibrary.com",
 			}
 
-			_, err := javlibrary.New(&cfg, &config.ProxyConfig{})
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "unsupported")
+			scraper, err := javlibrary.New(&cfg, &config.ProxyConfig{})
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantLang, scraper.GetLanguage())
 		})
 	}
 }

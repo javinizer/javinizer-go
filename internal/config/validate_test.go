@@ -253,6 +253,57 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			expectError: false,
 		},
+		{
+			name: "javlibrary language valid - default",
+			modifyConfig: func(c *Config) {
+				c.Scrapers.JavLibrary.Language = ""
+			},
+			expectError: false,
+		},
+		{
+			name: "javlibrary language valid - en",
+			modifyConfig: func(c *Config) {
+				c.Scrapers.JavLibrary.Language = "en"
+			},
+			expectError: false,
+		},
+		{
+			name: "javlibrary language valid - ja",
+			modifyConfig: func(c *Config) {
+				c.Scrapers.JavLibrary.Language = "ja"
+			},
+			expectError: false,
+		},
+		{
+			name: "javlibrary language valid - cn",
+			modifyConfig: func(c *Config) {
+				c.Scrapers.JavLibrary.Language = "cn"
+			},
+			expectError: false,
+		},
+		{
+			name: "javlibrary language valid - tw",
+			modifyConfig: func(c *Config) {
+				c.Scrapers.JavLibrary.Language = "tw"
+			},
+			expectError: false,
+		},
+		{
+			name: "javlibrary language invalid - Korean",
+			modifyConfig: func(c *Config) {
+				c.Scrapers.JavLibrary.Language = "ko"
+			},
+			expectError:   true,
+			errorContains: "scrapers.javlibrary.language must be one of",
+		},
+		{
+			name: "javlibrary language invalid - French",
+			modifyConfig: func(c *Config) {
+				c.Scrapers.JavLibrary.Language = "fr"
+			},
+			expectError:   true,
+			errorContains: "scrapers.javlibrary.language must be one of",
+		},
 	}
 
 	for _, tt := range tests {

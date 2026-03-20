@@ -50,12 +50,15 @@ func New(cfg *config.JavLibraryConfig, proxyConfig *config.ProxyConfig, globalUs
 		baseURL = "http://www.javlibrary.com"
 	}
 
+	// Normalize language to a supported value
 	language := cfg.Language
 	if language == "" {
 		language = "en"
 	}
+	// Validate and normalize language - if invalid, fall back to "en" rather than failing
 	if !isValidLanguage(language) {
-		return nil, fmt.Errorf("unsupported JavLibrary language %q (supported: %v)", language, SupportedLanguages)
+		logging.Warnf("JavLibrary: unsupported language %q, falling back to 'en' (supported: %v)", language, SupportedLanguages)
+		language = "en"
 	}
 
 	effectiveGlobalUA := ""
@@ -95,6 +98,11 @@ func New(cfg *config.JavLibraryConfig, proxyConfig *config.ProxyConfig, globalUs
 // Name returns the scraper name
 func (s *Scraper) Name() string {
 	return "javlibrary"
+}
+
+// GetLanguage returns the configured language
+func (s *Scraper) GetLanguage() string {
+	return s.language
 }
 
 // IsEnabled returns whether the scraper is enabled

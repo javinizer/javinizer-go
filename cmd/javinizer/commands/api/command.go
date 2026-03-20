@@ -12,19 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
-	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
-	"github.com/javinizer/javinizer-go/internal/scraper/caribbeancom"
-	"github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
-	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
-	"github.com/javinizer/javinizer-go/internal/scraper/jav321"
-	"github.com/javinizer/javinizer-go/internal/scraper/javbus"
-	"github.com/javinizer/javinizer-go/internal/scraper/javdb"
-	"github.com/javinizer/javinizer-go/internal/scraper/javlibrary"
-	"github.com/javinizer/javinizer-go/internal/scraper/libredmm"
-	"github.com/javinizer/javinizer-go/internal/scraper/mgstage"
-	"github.com/javinizer/javinizer-go/internal/scraper/r18dev"
-	"github.com/javinizer/javinizer-go/internal/scraper/tokyohot"
+	"github.com/javinizer/javinizer-go/internal/scraper"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/spf13/cobra"
 
@@ -124,27 +112,12 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 	// Initialize repositories
 	movieRepo := database.NewMovieRepository(db)
 	actressRepo := database.NewActressRepository(db)
-	contentIDRepo := database.NewContentIDMappingRepository(db)
 
-	// Initialize scrapers
-	registry := models.NewScraperRegistry()
-	registry.Register(r18dev.New(cfg))
-	registry.Register(dmm.New(cfg, contentIDRepo))
-	registry.Register(libredmm.New(cfg))
-	registry.Register(mgstage.New(cfg))
-	registry.Register(javdb.New(cfg))
-	registry.Register(javbus.New(cfg))
-	registry.Register(jav321.New(cfg))
-	registry.Register(tokyohot.New(cfg))
-	registry.Register(aventertainment.New(cfg))
-	registry.Register(dlgetchu.New(cfg))
-	registry.Register(caribbeancom.New(cfg))
-	javLibraryProxy := config.ResolveScraperProxy(cfg.Scrapers.Proxy, cfg.Scrapers.JavLibrary.Proxy)
-	javlib, err := javlibrary.New(&cfg.Scrapers.JavLibrary, javLibraryProxy, cfg.Scrapers.UserAgent)
+	// Initialize scrapers using centralized registry
+	registry, err := scraper.NewDefaultScraperRegistry(cfg, db)
 	if err != nil {
-		logging.Warnf("Failed to initialize JavLibrary scraper: %v", err)
-	} else {
-		registry.Register(javlib)
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
 
 	logging.Infof("Registered %d scrapers", len(registry.GetAll()))

@@ -849,6 +849,20 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("scrapers.r18dev.language must be either 'en' or 'ja'")
 	}
 
+	// Validate JavLibrary language (must be one of: en, ja, cn, tw)
+	switch strings.ToLower(strings.TrimSpace(c.Scrapers.JavLibrary.Language)) {
+	case "", "en":
+		c.Scrapers.JavLibrary.Language = "en"
+	case "ja":
+		c.Scrapers.JavLibrary.Language = "ja"
+	case "cn":
+		c.Scrapers.JavLibrary.Language = "cn"
+	case "tw":
+		c.Scrapers.JavLibrary.Language = "tw"
+	default:
+		return fmt.Errorf("scrapers.javlibrary.language must be one of: 'en', 'ja', 'cn', 'tw'")
+	}
+
 	if err := validateProxyProfileConfig(c); err != nil {
 		return err
 	}

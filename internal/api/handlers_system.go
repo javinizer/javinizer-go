@@ -15,24 +15,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
-	"github.com/javinizer/javinizer-go/internal/scraper/caribbeancom"
-	"github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
-	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
-	"github.com/javinizer/javinizer-go/internal/scraper/fc2"
-	"github.com/javinizer/javinizer-go/internal/scraper/jav321"
-	"github.com/javinizer/javinizer-go/internal/scraper/javbus"
-	"github.com/javinizer/javinizer-go/internal/scraper/javdb"
-	"github.com/javinizer/javinizer-go/internal/scraper/javlibrary"
-	"github.com/javinizer/javinizer-go/internal/scraper/libredmm"
-	"github.com/javinizer/javinizer-go/internal/scraper/mgstage"
-	"github.com/javinizer/javinizer-go/internal/scraper/r18dev"
-	"github.com/javinizer/javinizer-go/internal/scraper/tokyohot"
+	"github.com/javinizer/javinizer-go/internal/scraper"
 	"github.com/javinizer/javinizer-go/internal/version"
 )
 
@@ -763,32 +750,9 @@ func reloadComponents(deps *ServerDependencies, newCfg *config.Config) error {
 
 	// 1. Build new scrapers (outside lock - can take time)
 	logging.Debug("Reinitializing scraper registry...")
-	newRegistry := models.NewScraperRegistry()
-
-	// Get content ID repository for DMM scraper
-	contentIDRepo := database.NewContentIDMappingRepository(deps.DB)
-
-	// Register scrapers with new config
-	newRegistry.Register(r18dev.New(newCfg))
-	newRegistry.Register(dmm.New(newCfg, contentIDRepo))
-	newRegistry.Register(libredmm.New(newCfg))
-	newRegistry.Register(mgstage.New(newCfg))
-	newRegistry.Register(javdb.New(newCfg))
-	newRegistry.Register(javbus.New(newCfg))
-	newRegistry.Register(jav321.New(newCfg))
-	newRegistry.Register(tokyohot.New(newCfg))
-	newRegistry.Register(aventertainment.New(newCfg))
-	newRegistry.Register(dlgetchu.New(newCfg))
-	newRegistry.Register(caribbeancom.New(newCfg))
-	newRegistry.Register(fc2.New(newCfg))
-
-	// Register JavLibrary scraper (may return error if language is invalid)
-	javLibraryProxy := config.ResolveScraperProxy(newCfg.Scrapers.Proxy, newCfg.Scrapers.JavLibrary.Proxy)
-	javlib, err := javlibrary.New(&newCfg.Scrapers.JavLibrary, javLibraryProxy, newCfg.Scrapers.UserAgent)
+	newRegistry, err := scraper.NewDefaultScraperRegistry(newCfg, deps.DB)
 	if err != nil {
-		logging.Warnf("Failed to initialize JavLibrary scraper: %v", err)
-	} else {
-		newRegistry.Register(javlib)
+		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
 
 	// 2. Build new aggregator (outside lock)
