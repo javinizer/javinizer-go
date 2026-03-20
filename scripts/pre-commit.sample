@@ -14,8 +14,46 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Golangci-lint configuration
+GOLANGCI_LINT="${HOME}/go/bin/golangci-lint"
+REQUIRED_VERSION_MAJOR=2
+REQUIRED_VERSION_MINOR=4
+
 echo -e "${BLUE}Running pre-commit checks...${NC}"
 echo ""
+
+# Function to check golangci-lint version
+check_golangci_lint_version() {
+    if [[ ! -x "$GOLANGCI_LINT" ]]; then
+        return 1
+    fi
+
+    local version
+    version=$("$GOLANGCI_LINT" version 2>&1)
+
+    # Extract version number (e.g., "golangci-lint has version 2.4.0 built with...")
+    # Use sed instead of grep -P for macOS compatibility
+    local version_str
+    version_str=$(echo "$version" | sed -E 's/.*version ([0-9]+\.[0-9]+).*/\1/')
+
+    if [[ -z "$version_str" ]]; then
+        return 1
+    fi
+
+    local major minor
+    IFS='.' read -r major minor <<< "$version_str"
+
+    if [[ -z "$major" || -z "$minor" ]]; then
+        return 1
+    fi
+
+    if (( major > REQUIRED_VERSION_MAJOR )) || \
+       (( major == REQUIRED_VERSION_MAJOR && minor >= REQUIRED_VERSION_MINOR )); then
+        return 0
+    fi
+
+    return 1
+}
 
 # Check 1: Go formatting
 echo -e "${BLUE}[1/6] Checking code formatting...${NC}"
@@ -31,15 +69,20 @@ echo ""
 
 # Check 2: golangci-lint
 echo -e "${BLUE}[2/6] Running golangci-lint...${NC}"
-if command -v golangci-lint &> /dev/null; then
-    if ! golangci-lint run ./... 2>&1; then
+if [[ -x "$GOLANGCI_LINT" ]] && check_golangci_lint_version; then
+    echo -e "${BLUE}  Using golangci-lint from $GOLANGCI_LINT${NC}"
+    if ! "$GOLANGCI_LINT" run ./... 2>&1; then
         echo -e "${RED}✗ golangci-lint found issues${NC}"
         exit 1
     fi
     echo -e "${GREEN}✓ golangci-lint passed${NC}"
 else
-    echo -e "${YELLOW}⚠ golangci-lint not installed (skipping)${NC}"
-    echo -e "${YELLOW}  Install: brew install golangci-lint${NC}"
+    echo -e "${YELLOW}⚠ golangci-lint not installed or version too old (skipping)${NC}"
+    echo -e "${YELLOW}  Required: >=${REQUIRED_VERSION_MAJOR}.${REQUIRED_VERSION_MINOR}.0${NC}"
+    if [[ -x "$GOLANGCI_LINT" ]]; then
+        echo -e "${YELLOW}  Current: $("$GOLANGCI_LINT" version 2>&1 | head -1)${NC}"
+    fi
+    echo -e "${YELLOW}  Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${REQUIRED_VERSION_MAJOR}.x${NC}"
 fi
 echo ""
 
