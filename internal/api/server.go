@@ -135,9 +135,10 @@ func isSameOrigin(origin string, r *http.Request) bool {
 	// Normalize origin port (explicit default ports)
 	originPort := u.Port()
 	if originPort == "" {
-		if u.Scheme == "http" {
+		switch u.Scheme {
+		case "http":
 			originPort = "80"
-		} else if u.Scheme == "https" {
+		case "https":
 			originPort = "443"
 		}
 	}

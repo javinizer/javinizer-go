@@ -10,6 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -449,58 +453,139 @@ func (s *Service) translateWithGooglePaid(ctx context.Context, sourceLang, targe
 	return result, nil
 }
 
+// googleFreeResult holds the result of a single translation
+type googleFreeResult struct {
+	index int
+	text  string
+	err   error
+}
+
 func (s *Service) translateWithGoogleFree(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(s.cfg.Google.BaseURL), "/")
 	if baseURL == "" {
 		baseURL = "https://translate.googleapis.com"
 	}
 
-	result := make([]string, 0, len(texts))
 	sl := sourceLang
 	if sl == "" {
 		sl = "auto"
 	}
 
-	for _, text := range texts {
-		u, err := url.Parse(baseURL + "/translate_a/single")
-		if err != nil {
-			return nil, err
-		}
-		query := u.Query()
-		query.Set("client", "gtx")
-		query.Set("sl", sl)
-		query.Set("tl", targetLang)
-		query.Set("dt", "t")
-		query.Set("q", text)
-		u.RawQuery = query.Encode()
+	// Use errgroup to manage concurrent goroutines with a semaphore for bounded parallelism
+	// max 5 concurrent requests to avoid overwhelming the API
+	maxWorkers := 5
+	if len(texts) < maxWorkers {
+		maxWorkers = len(texts)
+	}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-		if err != nil {
-			return nil, err
-		}
+	eg, egCtx := errgroup.WithContext(ctx)
+	sem := semaphore.NewWeighted(int64(maxWorkers))
 
-		resp, err := s.httpClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
+	// Result slice to collect translation results by index
+	results := make([]googleFreeResult, len(texts))
 
-		respBody, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			return nil, readErr
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, fmt.Errorf("google free translation failed with status %d: %s", resp.StatusCode, string(respBody))
+	// Track if any goroutine has seen an error
+	var firstErr error
+	var errOnce sync.Once
+
+	// Launch goroutines for each text to translate
+	for i, text := range texts {
+		// Check context before starting each goroutine
+		select {
+		case <-ctx.Done():
+			// Context was canceled externally, stop launching new goroutines
+			// Wait for remaining goroutines to complete
+			_ = eg.Wait()
+			return nil, ctx.Err()
+		default:
 		}
 
-		translated, err := parseGoogleFreeResponse(respBody)
-		if err != nil {
-			return nil, err
+		// Acquire semaphore slot before launching goroutine
+		if err := sem.Acquire(egCtx, 1); err != nil {
+			// Context was canceled, stop launching new goroutines
+			_ = eg.Wait()
+			break
 		}
-		result = append(result, translated)
+
+		i := i // capture loop variable for closure
+		text := text
+
+		eg.Go(func() error {
+			defer sem.Release(1)
+			result := s.performGoogleFreeTranslation(egCtx, baseURL, sl, targetLang, text)
+			results[i] = googleFreeResult{
+				index: i,
+				text:  result.text,
+				err:   result.err,
+			}
+			// Track first error without canceling other goroutines
+			if result.err != nil {
+				errOnce.Do(func() {
+					firstErr = result.err
+				})
+			}
+			// Don't return error to avoid canceling other goroutines
+			// This ensures all requests complete and we get all results
+			return nil
+		})
+	}
+
+	// Wait for all goroutines to complete
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
+	// If any request failed, return the first error
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	// Extract results in original order
+	result := make([]string, len(texts))
+	for i, r := range results {
+		result[i] = r.text
 	}
 
 	return result, nil
+}
+
+func (s *Service) performGoogleFreeTranslation(ctx context.Context, baseURL, sourceLang, targetLang, text string) googleFreeResult {
+	u, err := url.Parse(baseURL + "/translate_a/single")
+	if err != nil {
+		return googleFreeResult{err: err}
+	}
+	query := u.Query()
+	query.Set("client", "gtx")
+	query.Set("sl", sourceLang)
+	query.Set("tl", targetLang)
+	query.Set("dt", "t")
+	query.Set("q", text)
+	u.RawQuery = query.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return googleFreeResult{err: err}
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return googleFreeResult{err: err}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return googleFreeResult{err: readErr}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return googleFreeResult{err: fmt.Errorf("google free translation failed with status %d: %s", resp.StatusCode, string(respBody))}
+	}
+
+	translated, err := parseGoogleFreeResponse(respBody)
+	if err != nil {
+		return googleFreeResult{err: err}
+	}
+	return googleFreeResult{text: translated}
 }
 
 func parseGoogleFreeResponse(payload []byte) (string, error) {
