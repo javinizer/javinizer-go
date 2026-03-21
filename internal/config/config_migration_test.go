@@ -141,3 +141,42 @@ system:
 	assert.Contains(t, savedText, "update_enabled: false")
 	assert.Contains(t, savedText, "update_check_interval_hours: 12")
 }
+
+func TestLoadOrCreateRejectsNewerConfigVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	newer := `config_version: 999
+server:
+  port: 8080
+`
+
+	err := os.WriteFile(cfgPath, []byte(newer), 0644)
+	require.NoError(t, err)
+
+	_, err = LoadOrCreate(cfgPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "newer than supported version")
+}
+
+func TestLegacyScraperPriorityBaseline(t *testing.T) {
+	assert.Equal(
+		t,
+		[]string{
+			"r18dev",
+			"dmm",
+			"libredmm",
+			"mgstage",
+			"javlibrary",
+			"javdb",
+			"javbus",
+			"jav321",
+			"tokyohot",
+			"aventertainment",
+			"dlgetchu",
+			"caribbeancom",
+			"fc2",
+		},
+		legacyScraperPriorityBaseline(),
+	)
+}

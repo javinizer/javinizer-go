@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -21,8 +22,9 @@ const (
 	// FilePermConfig is the permission mode for configuration files
 	FilePermConfig = 0644
 
-	// CurrentConfigVersion is the latest configuration schema version.
-	// Increment this when adding migrations for new config fields/structures.
+	// CurrentConfigVersion tracks compatibility breakpoints for on-disk config.
+	// Do not bump for additive/default-only fields; those are handled by loading
+	// into DefaultConfig() and idempotent normalization rules.
 	CurrentConfigVersion = 3
 
 	// DefaultUserAgent is the true/identifying UA for Javinizer.
@@ -740,100 +742,129 @@ func DefaultConfig() *Config {
 	}
 }
 
-// migrateToV1 applies schema updates introduced in config version 1.
-func migrateToV1(cfg *Config) error {
-	// Keep user ordering, append newly introduced scrapers to ensure they are
-	// discoverable in UI priority controls.
-	knownScrapers := []string{
-		"r18dev",
-		"dmm",
-		"libredmm",
-		"mgstage",
-		"javlibrary",
-		"javdb",
-		"javbus",
-		"jav321",
-		"tokyohot",
-		"aventertainment",
-		"dlgetchu",
-		"caribbeancom",
-	}
-	existing := cfg.Scrapers.Priority
+type compatibilityRule struct {
+	legacyMaxVersion int
+	apply            func(cfg *Config, defaults *Config) (bool, error)
+}
+
+// appendMissingStrings keeps user ordering and appends default values that are
+// missing from the existing list.
+func appendMissingStrings(existing, defaults []string) ([]string, bool) {
 	if len(existing) == 0 {
-		cfg.Scrapers.Priority = append([]string{}, knownScrapers...)
-		return nil
+		return append([]string{}, defaults...), len(defaults) > 0
 	}
 
 	seen := make(map[string]bool, len(existing))
-	for _, scraper := range existing {
-		seen[scraper] = true
+	for _, value := range existing {
+		seen[value] = true
 	}
-	for _, scraper := range knownScrapers {
-		if !seen[scraper] {
-			cfg.Scrapers.Priority = append(cfg.Scrapers.Priority, scraper)
+
+	merged := append([]string{}, existing...)
+	changed := false
+	for _, value := range defaults {
+		if seen[value] {
+			continue
 		}
+		merged = append(merged, value)
+		changed = true
 	}
-	return nil
+	return merged, changed
 }
 
-// migrateToV2 appends FC2 to scraper priority ordering for discoverability.
-func migrateToV2(cfg *Config) error {
+func legacyScraperPriorityBaseline() []string {
+	t := reflect.TypeOf(ScrapersConfig{})
+	baseline := make([]string, 0, t.NumField())
+	proxyType := reflect.TypeOf(ProxyConfig{})
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if field.Type.Kind() != reflect.Struct {
+			continue
+		}
+		if field.Type == proxyType {
+			continue
+		}
+		enabledField, ok := field.Type.FieldByName("Enabled")
+		if !ok || enabledField.Type.Kind() != reflect.Bool {
+			continue
+		}
+
+		yamlTag := field.Tag.Get("yaml")
+		if yamlTag == "" || yamlTag == "-" {
+			continue
+		}
+		name := strings.Split(yamlTag, ",")[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		baseline = append(baseline, name)
+	}
+
+	return baseline
+}
+
+// configCompatibilityRules are applied idempotently for legacy configs.
+// These should be exceptional; additive fields should rely on DefaultConfig().
+var configCompatibilityRules = []compatibilityRule{
+	{
+		legacyMaxVersion: 2,
+		apply: func(cfg *Config, _ *Config) (bool, error) {
+			baseline := legacyScraperPriorityBaseline()
+			merged, changed := appendMissingStrings(cfg.Scrapers.Priority, baseline)
+			if changed {
+				cfg.Scrapers.Priority = merged
+			}
+			return changed, nil
+		},
+	},
+	{
+		legacyMaxVersion: 2,
+		apply: func(cfg *Config, defaults *Config) (bool, error) {
+			// Preserve explicit false for update_enabled; only backfill interval.
+			if cfg.System.UpdateCheckIntervalHours == 0 {
+				cfg.System.UpdateCheckIntervalHours = defaults.System.UpdateCheckIntervalHours
+				return true, nil
+			}
+			return false, nil
+		},
+	},
+}
+
+// applyCompatibilityRules upgrades legacy config behavior to current semantics.
+// Returns true when any compatibility change is applied.
+func applyCompatibilityRules(cfg *Config) (bool, error) {
 	if cfg == nil {
-		return nil
+		return false, nil
+	}
+	if cfg.ConfigVersion > CurrentConfigVersion {
+		return false, fmt.Errorf(
+			"config version %d is newer than supported version %d; please update Javinizer",
+			cfg.ConfigVersion,
+			CurrentConfigVersion,
+		)
 	}
 
-	existing := cfg.Scrapers.Priority
-	if len(existing) == 0 {
-		return nil
-	}
+	defaults := DefaultConfig()
+	originalVersion := cfg.ConfigVersion
+	changed := false
 
-	for _, scraper := range existing {
-		if scraper == "fc2" {
-			return nil
+	for _, rule := range configCompatibilityRules {
+		if originalVersion > rule.legacyMaxVersion {
+			continue
 		}
-	}
-	cfg.Scrapers.Priority = append(cfg.Scrapers.Priority, "fc2")
-	return nil
-}
-
-// migrateToV3 adds default update configuration.
-func migrateToV3(cfg *Config) error {
-	// UpdateEnabled defaults to true via DefaultConfig(). Do not force true here,
-	// so explicitly configured false values remain preserved during migration.
-	if cfg.System.UpdateCheckIntervalHours == 0 {
-		cfg.System.UpdateCheckIntervalHours = 24
-	}
-	return nil
-}
-
-// applyMigrations upgrades config to CurrentConfigVersion.
-// Returns true when any migration is applied.
-func applyMigrations(cfg *Config) (bool, error) {
-	migrated := false
-
-	for cfg.ConfigVersion < CurrentConfigVersion {
-		next := cfg.ConfigVersion + 1
-		switch next {
-		case 1:
-			if err := migrateToV1(cfg); err != nil {
-				return false, fmt.Errorf("failed to migrate config to version %d: %w", next, err)
-			}
-		case 2:
-			if err := migrateToV2(cfg); err != nil {
-				return false, fmt.Errorf("failed to migrate config to version %d: %w", next, err)
-			}
-		case 3:
-			if err := migrateToV3(cfg); err != nil {
-				return false, fmt.Errorf("failed to migrate config to version %d: %w", next, err)
-			}
-		default:
-			return false, fmt.Errorf("no migration available for config version %d", next)
+		ruleChanged, err := rule.apply(cfg, defaults)
+		if err != nil {
+			return false, err
 		}
-		cfg.ConfigVersion = next
-		migrated = true
+		changed = changed || ruleChanged
 	}
 
-	return migrated, nil
+	if cfg.ConfigVersion != CurrentConfigVersion {
+		cfg.ConfigVersion = CurrentConfigVersion
+		changed = true
+	}
+
+	return changed, nil
 }
 
 // Validate checks configuration values for validity
@@ -1530,6 +1561,10 @@ func Save(cfg *Config, path string) error {
 		}
 	}
 
+	if readErr == nil && bytes.Equal(existingData, data) {
+		return nil
+	}
+
 	if err := os.WriteFile(path, data, FilePermConfig); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
@@ -1551,7 +1586,7 @@ func LoadOrCreate(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to stat config file: %w", statErr)
 	}
 
-	migrated, err := applyMigrations(cfg)
+	migrated, err := applyCompatibilityRules(cfg)
 	if err != nil {
 		return nil, err
 	}
