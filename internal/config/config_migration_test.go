@@ -34,7 +34,7 @@ scrapers:
 
 	saved, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
-	assert.Contains(t, string(saved), "config_version: 2")
+	assert.Contains(t, string(saved), "config_version: 3")
 	assert.Contains(t, string(saved), "libredmm")
 	assert.Contains(t, string(saved), "javlibrary")
 	assert.Contains(t, string(saved), "javdb")
@@ -51,7 +51,7 @@ func TestLoadOrCreateSkipsMigrationForCurrentVersion(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
-	current := `config_version: 2
+	current := `config_version: 3
 server:
   port: 9090
 scrapers:
@@ -71,7 +71,7 @@ scrapers:
 
 	saved, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
-	assert.True(t, strings.Contains(string(saved), "config_version: 2"))
+	assert.True(t, strings.Contains(string(saved), "config_version: 3"))
 	assert.True(t, strings.Contains(string(saved), "- dmm"))
 }
 
@@ -102,7 +102,7 @@ scrapers:
 
 	assert.Contains(t, savedText, "# user-managed config")
 	assert.Contains(t, savedText, "custom_source:")
-	assert.Contains(t, savedText, "config_version: 2")
+	assert.Contains(t, savedText, "config_version: 3")
 	assert.Contains(t, savedText, "libredmm")
 	assert.Contains(t, savedText, "javlibrary")
 	assert.Contains(t, savedText, "javdb")
@@ -113,4 +113,31 @@ scrapers:
 	assert.Contains(t, savedText, "dlgetchu")
 	assert.Contains(t, savedText, "caribbeancom")
 	assert.Contains(t, savedText, "fc2")
+}
+
+func TestLoadOrCreateMigrationPreservesExplicitUpdateDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	v2 := `config_version: 2
+system:
+  update_enabled: false
+  update_check_interval_hours: 12
+`
+
+	err := os.WriteFile(cfgPath, []byte(v2), 0644)
+	require.NoError(t, err)
+
+	cfg, err := LoadOrCreate(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, CurrentConfigVersion, cfg.ConfigVersion)
+	assert.False(t, cfg.System.UpdateEnabled)
+	assert.Equal(t, 12, cfg.System.UpdateCheckIntervalHours)
+
+	saved, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	savedText := string(saved)
+	assert.Contains(t, savedText, "config_version: 3")
+	assert.Contains(t, savedText, "update_enabled: false")
+	assert.Contains(t, savedText, "update_check_interval_hours: 12")
 }

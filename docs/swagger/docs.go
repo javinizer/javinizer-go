@@ -1444,6 +1444,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/version": {
+            "get": {
+                "description": "Get the current version and check if an update is available. Returns cached status unless explicitly refreshed.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get version status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.VersionStatusResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/version/check": {
+            "post": {
+                "description": "Force a check for the latest version and update the cache.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Force version check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.VersionStatusResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/health": {
             "get": {
                 "description": "Check API health status and list all enabled scrapers. Returns version information and build metadata.",
@@ -2599,6 +2639,47 @@ const docTemplate = `{
             "properties": {
                 "movie": {
                     "$ref": "#/definitions/models.Movie"
+                }
+            }
+        },
+        "api.VersionStatusResponse": {
+            "type": "object",
+            "properties": {
+                "build_date": {
+                    "description": "Build timestamp",
+                    "type": "string"
+                },
+                "checked_at": {
+                    "description": "When the check was performed",
+                    "type": "string"
+                },
+                "commit": {
+                    "description": "Current commit hash",
+                    "type": "string"
+                },
+                "current": {
+                    "description": "Current installed version",
+                    "type": "string"
+                },
+                "error": {
+                    "description": "Error message if any",
+                    "type": "string"
+                },
+                "latest": {
+                    "description": "Latest available version",
+                    "type": "string"
+                },
+                "prerelease": {
+                    "description": "Whether latest is a prerelease",
+                    "type": "boolean"
+                },
+                "source": {
+                    "description": "\"cached\" or \"fresh\"",
+                    "type": "string"
+                },
+                "update_available": {
+                    "description": "Whether an update is available",
+                    "type": "boolean"
                 }
             }
         },
@@ -3910,6 +3991,14 @@ const docTemplate = `{
                 "umask": {
                     "description": "Umask for file creation (e.g., \"002\" for rwxrwxr-x)\nCan be overridden with UMASK environment variable",
                     "type": "string"
+                },
+                "update_check_interval_hours": {
+                    "description": "UpdateCheckIntervalHours is the interval between update checks in hours",
+                    "type": "integer"
+                },
+                "update_enabled": {
+                    "description": "UpdateEnabled enables checking for new releases",
+                    "type": "boolean"
                 }
             }
         },

@@ -414,6 +414,10 @@ func NewServer(deps *ServerDependencies) *gin.Engine {
 		v1.POST("/proxy/test", testProxy(deps))
 		v1.POST("/translation/models", getTranslationModels(deps))
 
+		// Version endpoints
+		v1.GET("/version", versionStatus(deps))
+		v1.POST("/version/check", versionCheck(deps))
+
 		// File endpoints
 		v1.GET("/cwd", getCurrentWorkingDirectory(deps))
 		v1.POST("/scan", scanDirectory(deps))

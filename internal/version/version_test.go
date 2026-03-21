@@ -4,6 +4,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestInfo(t *testing.T) {
@@ -305,4 +307,31 @@ func TestApplyTrackedVersion(t *testing.T) {
 			t.Fatalf("Version = %q, want %q", Version, "v9.9.9")
 		}
 	})
+}
+
+func TestIsPrerelease(t *testing.T) {
+	tests := []struct {
+		version  string
+		expected bool
+	}{
+		{"v1.6.0", false},
+		{"1.6.0", false},
+		{"v1.6.0-rc1", true},
+		{"1.6.0-rc1", true},
+		{"v1.6.0-beta.2", true},
+		{"1.6.0-beta.2", true},
+		{"v1.6.0-alpha", true},
+		{"1.6.0-alpha", true},
+		{"v1.6.0-rc1-123-gabc123", true},
+		{"v2.0.0", false},
+		{"1.0.0", false},
+		{"v0.1.0-dev", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			result := IsPrerelease(tt.version)
+			assert.Equal(t, tt.expected, result, "IsPrerelease(%q)", tt.version)
+		})
+	}
 }

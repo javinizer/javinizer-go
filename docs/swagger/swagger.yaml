@@ -778,6 +778,36 @@ definitions:
     required:
     - movie
     type: object
+  api.VersionStatusResponse:
+    properties:
+      build_date:
+        description: Build timestamp
+        type: string
+      checked_at:
+        description: When the check was performed
+        type: string
+      commit:
+        description: Current commit hash
+        type: string
+      current:
+        description: Current installed version
+        type: string
+      error:
+        description: Error message if any
+        type: string
+      latest:
+        description: Latest available version
+        type: string
+      prerelease:
+        description: Whether latest is a prerelease
+        type: boolean
+      source:
+        description: '"cached" or "fresh"'
+        type: string
+      update_available:
+        description: Whether an update is available
+        type: boolean
+    type: object
   config.APIConfig:
     properties:
       security:
@@ -1655,6 +1685,13 @@ definitions:
           Umask for file creation (e.g., "002" for rwxrwxr-x)
           Can be overridden with UMASK environment variable
         type: string
+      update_check_interval_hours:
+        description: UpdateCheckIntervalHours is the interval between update checks
+          in hours
+        type: integer
+      update_enabled:
+        description: UpdateEnabled enables checking for new releases
+        type: boolean
     type: object
   config.TagDatabaseConfig:
     properties:
@@ -2861,6 +2898,33 @@ paths:
           schema:
             $ref: '#/definitions/api.ErrorResponse'
       summary: Get translation models
+      tags:
+      - system
+  /api/v1/version:
+    get:
+      description: Get the current version and check if an update is available. Returns
+        cached status unless explicitly refreshed.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.VersionStatusResponse'
+      summary: Get version status
+      tags:
+      - system
+  /api/v1/version/check:
+    post:
+      description: Force a check for the latest version and update the cache.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.VersionStatusResponse'
+      summary: Force version check
       tags:
       - system
   /health:

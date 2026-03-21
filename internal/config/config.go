@@ -23,7 +23,7 @@ const (
 
 	// CurrentConfigVersion is the latest configuration schema version.
 	// Increment this when adding migrations for new config fields/structures.
-	CurrentConfigVersion = 2
+	CurrentConfigVersion = 3
 
 	// DefaultUserAgent is the true/identifying UA for Javinizer.
 	DefaultUserAgent = "Javinizer (+https://github.com/javinizer/Javinizer)"
@@ -78,6 +78,10 @@ type SystemConfig struct {
 	// Umask for file creation (e.g., "002" for rwxrwxr-x)
 	// Can be overridden with UMASK environment variable
 	Umask string `yaml:"umask" json:"umask"`
+	// UpdateEnabled enables checking for new releases
+	UpdateEnabled bool `yaml:"update_enabled" json:"update_enabled"`
+	// UpdateCheckIntervalHours is the interval between update checks in hours
+	UpdateCheckIntervalHours int `yaml:"update_check_interval_hours" json:"update_check_interval_hours"`
 }
 
 // ScrapersConfig holds scraper-specific settings
@@ -728,6 +732,11 @@ func DefaultConfig() *Config {
 			CLIPath:    "mediainfo",
 			CLITimeout: 30,
 		},
+		System: SystemConfig{
+			Umask:                    "",
+			UpdateEnabled:            true,
+			UpdateCheckIntervalHours: 24,
+		},
 	}
 }
 
@@ -787,6 +796,16 @@ func migrateToV2(cfg *Config) error {
 	return nil
 }
 
+// migrateToV3 adds default update configuration.
+func migrateToV3(cfg *Config) error {
+	// UpdateEnabled defaults to true via DefaultConfig(). Do not force true here,
+	// so explicitly configured false values remain preserved during migration.
+	if cfg.System.UpdateCheckIntervalHours == 0 {
+		cfg.System.UpdateCheckIntervalHours = 24
+	}
+	return nil
+}
+
 // applyMigrations upgrades config to CurrentConfigVersion.
 // Returns true when any migration is applied.
 func applyMigrations(cfg *Config) (bool, error) {
@@ -801,6 +820,10 @@ func applyMigrations(cfg *Config) (bool, error) {
 			}
 		case 2:
 			if err := migrateToV2(cfg); err != nil {
+				return false, fmt.Errorf("failed to migrate config to version %d: %w", next, err)
+			}
+		case 3:
+			if err := migrateToV3(cfg); err != nil {
 				return false, fmt.Errorf("failed to migrate config to version %d: %w", next, err)
 			}
 		default:
@@ -962,6 +985,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Performance.UpdateInterval < 10 || c.Performance.UpdateInterval > 5000 {
 		return fmt.Errorf("performance.update_interval must be between 10 and 5000")
+	}
+
+	// Validate update settings
+	// Allow 0 to mean "use default" (handled by DefaultConfig and migrations)
+	if c.System.UpdateCheckIntervalHours != 0 && (c.System.UpdateCheckIntervalHours < 1 || c.System.UpdateCheckIntervalHours > 168) {
+		return fmt.Errorf("system.update_check_interval_hours must be between 1 and 168 (1 week), or 0 for default")
 	}
 
 	return nil

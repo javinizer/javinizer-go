@@ -97,3 +97,12 @@ func Short() string {
 	}
 	return Version
 }
+
+// IsPrerelease returns true if the version is a prerelease.
+// A prerelease version contains a hyphen followed by identifiers (e.g., 1.6.0-rc1).
+func IsPrerelease(version string) bool {
+	// Remove leading 'v' if present
+	v := strings.TrimPrefix(version, "v")
+	// Prereleases contain a hyphen followed by identifiers (e.g., 1.6.0-rc1)
+	return strings.Contains(v, "-")
+}
