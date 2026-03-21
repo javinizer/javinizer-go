@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
-	import { CheckCircle, X, CircleAlert, Info, XCircle } from 'lucide-svelte';
+	import { CircleCheckBig, X, CircleAlert, Info, CircleX } from 'lucide-svelte';
 
 	interface Props {
 		id: string;
@@ -18,8 +18,8 @@
 	let interval: ReturnType<typeof setInterval> | null = null;
 
 	const icons = {
-		success: CheckCircle,
-		error: XCircle,
+		success: CircleCheckBig,
+		error: CircleX,
 		info: Info,
 		warning: CircleAlert
 	};
@@ -71,7 +71,7 @@
 	]}"
 	role="alert"
 >
-	<Icon class="h-5 w-5 flex-shrink-0 mt-0.5 {iconStyles[type]}" />
+	<Icon class="h-5 w-5 shrink-0 mt-0.5 {iconStyles[type]}" />
 	<div class="flex-1 min-w-0">
 		<p class="text-sm font-medium">{message}</p>
 		{#if duration > 0}
@@ -85,7 +85,7 @@
 	</div>
 	<button
 		onclick={handleDismiss}
-		class="flex-shrink-0 p-1 hover:bg-white/20 rounded transition-colors"
+		class="shrink-0 p-1 hover:bg-white/20 rounded transition-colors"
 		aria-label="Dismiss"
 	>
 		<X class="h-4 w-4" />

@@ -5,8 +5,8 @@
 	import { fade, fly } from 'svelte/transition';
 	import {
 		Calendar,
-		CheckCircle,
-		XCircle,
+		CircleCheckBig,
+		CircleX,
 		Clock,
 		Trash2,
 		ChevronLeft,
@@ -332,9 +332,9 @@
 							<div class="flex-1">
 								<div class="flex items-center gap-3 mb-2">
 									{#if item.status === 'success'}
-										<CheckCircle class="h-5 w-5 text-green-500" />
+										<CircleCheckBig class="h-5 w-5 text-green-500" />
 									{:else if item.status === 'failed'}
-										<XCircle class="h-5 w-5 text-red-500" />
+										<CircleX class="h-5 w-5 text-red-500" />
 									{:else}
 										<Clock class="h-5 w-5 text-yellow-500" />
 									{/if}

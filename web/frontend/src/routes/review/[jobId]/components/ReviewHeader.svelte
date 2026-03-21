@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/Button.svelte';
-	import { Loader2, Play, RefreshCw, X } from 'lucide-svelte';
+	import { LoaderCircle, Play, RefreshCw, X } from 'lucide-svelte';
 
 	interface Props {
 		isUpdateMode: boolean;
@@ -45,7 +45,7 @@
 			<Button onclick={onUpdateAll} disabled={organizing}>
 				{#snippet children()}
 					{#if organizing}
-						<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+						<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
 					{:else}
 						<RefreshCw class="h-4 w-4 mr-2" />
 					{/if}
@@ -56,7 +56,7 @@
 			<Button onclick={onOrganizeAll} disabled={organizing || !destinationPath.trim()}>
 				{#snippet children()}
 					{#if organizing}
-						<Loader2 class="h-4 w-4 mr-2" />
+						<LoaderCircle class="h-4 w-4 mr-2" />
 					{:else}
 						<Play class="h-4 w-4 mr-2" />
 					{/if}

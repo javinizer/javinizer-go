@@ -265,7 +265,7 @@
 					{/if}
 				</p>
 			</div>
-			<Info class="h-5 w-5 text-muted-foreground flex-shrink-0 mt-1" />
+			<Info class="h-5 w-5 text-muted-foreground shrink-0 mt-1" />
 		</div>
 
 		<!-- Global Priority -->

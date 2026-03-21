@@ -6,7 +6,7 @@
 	import type { Movie, Actress } from '$lib/api/types';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
-	import { Plus, Edit, Trash2, X, Save, Search } from 'lucide-svelte';
+	import { Plus, SquarePen, Trash2, X, Save, Search } from 'lucide-svelte';
 
 	interface Props {
 		movie: Movie;
@@ -262,7 +262,7 @@
 						<div class="flex gap-1">
 							<Button variant="outline" size="sm" onclick={() => openEditActress(index)} class="flex-1">
 								{#snippet children()}
-									<Edit class="h-3 w-3" />
+									<SquarePen class="h-3 w-3" />
 								{/snippet}
 							</Button>
 							<Button

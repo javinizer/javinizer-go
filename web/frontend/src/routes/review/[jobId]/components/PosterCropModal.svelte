@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { quintOut } from 'svelte/easing';
 	import { fade, scale } from 'svelte/transition';
-	import { Loader2, X } from 'lucide-svelte';
+	import { LoaderCircle, X } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
@@ -108,7 +108,7 @@
 						<Button onclick={onApply} disabled={!cropBox || !!posterCropLoadError || posterCropSaving}>
 							{#snippet children()}
 								{#if posterCropSaving}
-									<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+									<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
 									Applying...
 								{:else}
 									Apply Crop

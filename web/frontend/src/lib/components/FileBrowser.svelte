@@ -8,7 +8,7 @@
 		Folder,
 		File,
 		ChevronRight,
-		Home,
+		House,
 		RefreshCw,
 		CheckSquare,
 		Square,
@@ -16,7 +16,7 @@
 		Check,
 		Search,
 		X,
-		Loader2,
+		LoaderCircle,
 		Scan,
 		ArrowUp,
 		ArrowDown,
@@ -359,7 +359,7 @@
 	<div class="flex items-center gap-2 mb-4 pb-4 border-b">
 		<Button variant="ghost" size="icon" onclick={() => browse('/')} title="Go to root">
 			{#snippet children()}
-				<Home class="h-4 w-4" />
+				<House class="h-4 w-4" />
 			{/snippet}
 		</Button>
 
@@ -394,7 +394,7 @@
 				/>
 				{#if autocompleteLoading}
 					<div class="absolute inset-y-0 right-3 flex items-center text-muted-foreground">
-						<Loader2 class="h-3.5 w-3.5 animate-spin" />
+						<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
 					</div>
 				{/if}
 
@@ -532,7 +532,7 @@
 					>
 						{#snippet children()}
 							{#if scanLoading}
-								<Loader2 class="h-3.5 w-3.5 mr-1.5 animate-spin" />
+								<LoaderCircle class="h-3.5 w-3.5 mr-1.5 animate-spin" />
 							{:else}
 								<Scan class="h-3.5 w-3.5 mr-1.5" />
 							{/if}
@@ -635,7 +635,7 @@
 					<div
 						class="w-full flex items-center gap-3 p-3 rounded-lg border-2 border-transparent opacity-50"
 					>
-						<File class="h-5 w-5 text-muted-foreground flex-shrink-0" />
+						<File class="h-5 w-5 text-muted-foreground shrink-0" />
 						<div class="flex-1 text-left">
 							<div class="font-medium text-muted-foreground">
 								{item.name}
@@ -659,9 +659,9 @@
 					>
 						<!-- Checkbox for files -->
 						{#if selectedFilesSet.has(item.path)}
-							<CheckSquare class="h-5 w-5 text-primary flex-shrink-0" />
+							<CheckSquare class="h-5 w-5 text-primary shrink-0" />
 						{:else}
-							<Square class="h-5 w-5 text-muted-foreground flex-shrink-0" />
+							<Square class="h-5 w-5 text-muted-foreground shrink-0" />
 						{/if}
 						<!-- File icon -->
 						<File

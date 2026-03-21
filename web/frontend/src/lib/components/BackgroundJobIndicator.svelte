@@ -4,7 +4,7 @@
 	import { fly, slide } from 'svelte/transition';
 	import { apiClient } from '$lib/api/client';
 	import type { BatchJobResponse } from '$lib/api/types';
-	import { Loader2, X, ChevronUp, ChevronDown } from 'lucide-svelte';
+	import { LoaderCircle, X, ChevronUp, ChevronDown } from 'lucide-svelte';
 
 	interface Props {
 		jobId: string;
@@ -65,13 +65,13 @@
 			class="flex items-center gap-3 px-4 py-3 w-full text-left hover:bg-white/5 rounded-t-lg transition-colors"
 		>
 			{#if job.status === 'running'}
-				<Loader2 class="h-5 w-5 animate-spin flex-shrink-0" />
+				<LoaderCircle class="h-5 w-5 animate-spin shrink-0" />
 			{:else if job.status === 'completed'}
-				<div class="h-5 w-5 flex-shrink-0 text-green-300">✓</div>
+				<div class="h-5 w-5 shrink-0 text-green-300">✓</div>
 			{:else if job.status === 'failed'}
-				<div class="h-5 w-5 flex-shrink-0 text-red-300">✗</div>
+				<div class="h-5 w-5 shrink-0 text-red-300">✗</div>
 			{:else}
-				<Loader2 class="h-5 w-5 animate-spin flex-shrink-0" />
+				<LoaderCircle class="h-5 w-5 animate-spin shrink-0" />
 			{/if}
 
 			<div class="flex flex-col items-start min-w-0 flex-1">
@@ -90,7 +90,7 @@
 					e.stopPropagation();
 					expanded = !expanded;
 				}}
-				class="p-1 hover:bg-white/10 rounded transition-colors flex-shrink-0"
+				class="p-1 hover:bg-white/10 rounded transition-colors shrink-0"
 				aria-label={expanded ? 'Collapse' : 'Expand'}
 			>
 				{#if expanded}
@@ -105,7 +105,7 @@
 					e.stopPropagation();
 					onDismiss();
 				}}
-				class="p-1 hover:bg-white/10 rounded transition-colors flex-shrink-0"
+				class="p-1 hover:bg-white/10 rounded transition-colors shrink-0"
 				aria-label="Dismiss"
 			>
 				<X class="h-4 w-4" />

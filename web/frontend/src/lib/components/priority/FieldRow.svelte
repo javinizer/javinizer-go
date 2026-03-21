@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Edit, RotateCcw } from 'lucide-svelte';
+	import { SquarePen, RotateCcw } from 'lucide-svelte';
 	import Button from '../ui/Button.svelte';
 
 	interface Props {
@@ -39,7 +39,7 @@
 >
 	<!-- Status Indicator -->
 	<div
-		class="w-2 h-2 rounded-full flex-shrink-0 {isOverridden
+		class="w-2 h-2 rounded-full shrink-0 {isOverridden
 			? 'bg-orange-500'
 			: 'bg-green-500'}"
 		aria-label={isOverridden ? 'Custom priority' : 'Inherited from global'}
@@ -76,7 +76,7 @@
 		{/if}
 		<Button variant="ghost" size="icon" onclick={onEdit} class="h-8 w-8">
 			{#snippet children()}
-				<Edit class="h-4 w-4" />
+				<SquarePen class="h-4 w-4" />
 			{/snippet}
 		</Button>
 	</div>

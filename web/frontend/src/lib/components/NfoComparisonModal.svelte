@@ -201,7 +201,7 @@
 										<!-- Reason (if provided) -->
 										{#if diff.reason}
 											<div class="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-400">
-												<CircleAlert class="h-3 w-3 mt-0.5 flex-shrink-0" />
+												<CircleAlert class="h-3 w-3 mt-0.5 shrink-0" />
 												<span>{diff.reason}</span>
 											</div>
 										{/if}

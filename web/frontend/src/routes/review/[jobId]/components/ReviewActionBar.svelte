@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
-	import { Loader2, Play, X } from 'lucide-svelte';
+	import { LoaderCircle, Play, X } from 'lucide-svelte';
 
 	interface Props {
 		isUpdateMode: boolean;
@@ -34,7 +34,7 @@
 			<Button onclick={onOrganizeAll} disabled={organizing || !destinationPath.trim()}>
 				{#snippet children()}
 					{#if organizing}
-						<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+						<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
 					{:else}
 						<Play class="h-4 w-4 mr-2" />
 					{/if}

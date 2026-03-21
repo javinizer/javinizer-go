@@ -8,7 +8,7 @@
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
 	import type { BatchJobResponse, ProgressMessage, FileResult } from '$lib/api/types';
-	import { X, CheckCircle, XCircle, Loader2, ChevronDown, ChevronRight } from 'lucide-svelte';
+	import { X, CircleCheckBig, CircleX, LoaderCircle, ChevronDown, ChevronRight } from 'lucide-svelte';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
 
@@ -169,7 +169,7 @@
 				<h2 class="text-2xl font-semibold">Batch Scraping Progress</h2>
 				{#if job && job.status === 'running'}
 					<div class="flex items-center gap-2 px-3 py-1 bg-blue-50 rounded-full text-sm">
-						<Loader2 class="h-4 w-4 animate-spin text-blue-600" />
+						<LoaderCircle class="h-4 w-4 animate-spin text-blue-600" />
 						<span class="font-medium text-blue-700">
 							{activeWorkerCount} / {maxWorkers} workers active
 						</span>
@@ -185,7 +185,7 @@
 		<div class="flex-1 overflow-y-auto p-6 space-y-6">
 			{#if loading}
 				<div class="text-center py-8">
-					<Loader2 class="h-8 w-8 animate-spin mx-auto mb-2" />
+					<LoaderCircle class="h-8 w-8 animate-spin mx-auto mb-2" />
 					<p class="text-muted-foreground">Loading job status...</p>
 				</div>
 			{:else if error}
@@ -222,24 +222,24 @@
 						<span
 							class="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded text-sm"
 						>
-							<CheckCircle class="h-4 w-4" />
+							<CircleCheckBig class="h-4 w-4" />
 							Completed
 						</span>
 					{:else if job.status === 'failed'}
 						<span
 							class="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded text-sm"
 						>
-							<XCircle class="h-4 w-4" />
+							<CircleX class="h-4 w-4" />
 							Failed
 						</span>
 					{:else if job.status === 'cancelled'}
 						<span class="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm">
-							<XCircle class="h-4 w-4" />
+							<CircleX class="h-4 w-4" />
 							Cancelled
 						</span>
 					{:else}
 						<span class="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm">
-							<Loader2 class="h-4 w-4 animate-spin" />
+							<LoaderCircle class="h-4 w-4 animate-spin" />
 							{job.status}
 						</span>
 					{/if}
@@ -249,14 +249,14 @@
 				{#if activeFiles.length > 0}
 					<div class="space-y-3">
 						<h3 class="font-semibold text-blue-600 flex items-center gap-2 text-lg">
-							<Loader2 class="h-5 w-5 animate-spin" />
+							<LoaderCircle class="h-5 w-5 animate-spin" />
 							Processing ({activeFiles.length})
 						</h3>
 						<div class="space-y-2">
 							{#each activeFiles as result, index (result.file_path)}
 								<div animate:flip={{ duration: 220, easing: cubicOut }} class="active-file border-2 rounded-lg p-3 bg-blue-50/50" style="animation-delay: {index * 0.2}s">
 									<div class="flex items-start gap-3">
-										<Loader2 class="h-5 w-5 text-blue-600 animate-spin mt-0.5 shrink-0" />
+										<LoaderCircle class="h-5 w-5 text-blue-600 animate-spin mt-0.5 shrink-0" />
 										<div class="flex-1 min-w-0">
 											<div class="font-medium text-blue-900 truncate">
 												{result.movie_id || 'Processing...'}
@@ -312,7 +312,7 @@
 							class="w-full flex items-center justify-between p-3 rounded-lg bg-green-50 hover:bg-green-100 transition-colors"
 						>
 							<div class="flex items-center gap-2">
-								<CheckCircle class="h-5 w-5 text-green-600" />
+								<CircleCheckBig class="h-5 w-5 text-green-600" />
 								<h3 class="font-semibold text-green-700">
 									Completed ({completedFiles.length})
 								</h3>
@@ -327,7 +327,7 @@
 							<div class="space-y-1 pl-4 max-h-60 overflow-y-auto" transition:slide|local={{ duration: 180, easing: cubicOut }}>
 								{#each completedFiles as result (result.file_path)}
 									<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-start gap-2 p-2 rounded bg-green-50/50 text-sm">
-										<CheckCircle class="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+										<CircleCheckBig class="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
 										<div class="flex-1 min-w-0">
 											<div class="font-medium text-green-900 truncate">
 												{result.movie_id || 'Unknown'}
@@ -351,7 +351,7 @@
 							class="w-full flex items-center justify-between p-3 rounded-lg bg-red-50 hover:bg-red-100 transition-colors"
 						>
 							<div class="flex items-center gap-2">
-								<XCircle class="h-5 w-5 text-red-600" />
+								<CircleX class="h-5 w-5 text-red-600" />
 								<h3 class="font-semibold text-red-700">
 									Failed ({failedFiles.length})
 								</h3>
@@ -366,7 +366,7 @@
 							<div class="space-y-1 pl-4 max-h-60 overflow-y-auto" transition:slide|local={{ duration: 180, easing: cubicOut }}>
 								{#each failedFiles as result (result.file_path)}
 									<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-start gap-2 p-2 rounded bg-red-50/50 text-sm">
-										<XCircle class="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+										<CircleX class="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
 										<div class="flex-1 min-w-0">
 											<div class="font-medium text-red-900 truncate">
 												{result.movie_id || 'Unknown'}
@@ -413,7 +413,7 @@
 			{:else if job && job.status === 'completed'}
 				{#if !cancelRedirect && countdown > 0}
 					<div class="flex items-center gap-2">
-						<CheckCircle class="h-5 w-5 text-green-500" />
+						<CircleCheckBig class="h-5 w-5 text-green-500" />
 						<p class="text-sm font-medium text-green-700">
 							Scraping completed! {job.completed} file{job.completed !== 1 ? 's' : ''} processed successfully.
 						</p>
@@ -425,7 +425,7 @@
 					</div>
 				{:else}
 					<div class="flex items-center gap-2">
-						<CheckCircle class="h-5 w-5 text-green-500" />
+						<CircleCheckBig class="h-5 w-5 text-green-500" />
 						<p class="text-sm font-medium text-green-700">
 							Scraping completed! {job.completed} file{job.completed !== 1 ? 's' : ''} processed successfully.
 						</p>

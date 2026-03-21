@@ -17,7 +17,7 @@
 <Card class="overflow-hidden {selected ? 'ring-2 ring-primary' : ''}">
 	<div class="flex gap-4 p-4">
 		<!-- Cover Image -->
-		<div class="flex-shrink-0">
+		<div class="shrink-0">
 			{#if movie.cover_url}
 				<img
 					src={movie.cover_url}

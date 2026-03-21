@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { quintOut } from 'svelte/easing';
 	import { fade, scale } from 'svelte/transition';
-	import { Loader2, RotateCcw, X } from 'lucide-svelte';
+	import { LoaderCircle, RotateCcw, X } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import type { Scraper } from '$lib/api/types';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -69,7 +69,7 @@
 				<div class="flex-1 overflow-auto p-6">
 					{#if rescraping}
 						<div class="flex flex-col items-center justify-center py-8 space-y-4">
-							<Loader2 class="h-12 w-12 animate-spin text-primary" />
+							<LoaderCircle class="h-12 w-12 animate-spin text-primary" />
 							<div class="text-center space-y-2">
 								<p class="text-sm font-medium">{manualSearchMode ? 'Scraping metadata...' : 'Rescraping metadata...'}</p>
 								<p class="text-xs text-muted-foreground">
@@ -244,7 +244,7 @@
 					<Button onclick={onExecute} disabled={rescraping}>
 						{#snippet children()}
 							{#if rescraping}
-								<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+								<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
 								{manualSearchMode ? 'Scraping...' : 'Rescraping...'}
 							{:else}
 								<RotateCcw class="h-4 w-4 mr-2" />

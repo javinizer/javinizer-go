@@ -835,7 +835,7 @@
 			<div
 				class="bg-destructive/10 border-2 border-destructive text-destructive px-4 py-3 rounded-lg flex items-start gap-2"
 			>
-				<CircleAlert class="h-5 w-5 mt-0.5 flex-shrink-0" />
+				<CircleAlert class="h-5 w-5 mt-0.5 shrink-0" />
 				<p>{error}</p>
 			</div>
 		{/if}

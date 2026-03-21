@@ -3,7 +3,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import MovieEditor from '$lib/components/MovieEditor.svelte';
-	import { Loader2, RotateCcw } from 'lucide-svelte';
+	import { LoaderCircle, RotateCcw } from 'lucide-svelte';
 
 	interface Props {
 		currentMovie: Movie;
@@ -43,7 +43,7 @@
 					<Button variant="outline" size="sm" onclick={onOpenRescrape} disabled={isRescraping}>
 						{#snippet children()}
 							{#if isRescraping}
-								<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+								<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
 								Rescraping...
 							{:else}
 								<RotateCcw class="h-4 w-4 mr-2" />

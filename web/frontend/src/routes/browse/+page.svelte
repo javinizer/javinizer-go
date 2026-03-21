@@ -12,7 +12,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
-	import { Play, FolderOutput, FolderOpen, RotateCcw, Loader2, RefreshCw, Settings, ChevronUp, ChevronDown, X } from 'lucide-svelte';
+	import { Play, FolderOutput, FolderOpen, RotateCcw, LoaderCircle, RefreshCw, Settings, ChevronUp, ChevronDown, X } from 'lucide-svelte';
 	import type { Scraper, FileInfo } from '$lib/api/types';
 
 	type OperationMode = 'scrape' | 'update';
@@ -643,7 +643,7 @@
 				<Button onclick={startBatchScrape} disabled={selectedFiles.length === 0 || scraping}>
 					{#snippet children()}
 						{#if scraping}
-							<Loader2 class="h-4 w-4 mr-2 animate-spin" />
+							<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
 						{:else if operationMode === 'update'}
 							<RefreshCw class="h-4 w-4 mr-2" />
 						{:else}

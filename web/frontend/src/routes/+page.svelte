@@ -18,7 +18,7 @@
 		Settings,
 		TriangleAlert,
 		Users,
-		XCircle
+		CircleX
 	} from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -271,7 +271,7 @@
 		<!-- Top Row -->
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 			<div class="lg:col-span-2" in:fly|local={{ y: -12, duration: 240, easing: cubicOut }}>
-				<Card class="relative overflow-hidden p-6 border-primary/30 bg-gradient-to-br from-primary/10 via-card to-card">
+				<Card class="relative overflow-hidden p-6 border-primary/30 bg-linear-to-br from-primary/10 via-card to-card">
 					<div class="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-2xl"></div>
 					<div class="relative space-y-4">
 						<div>
@@ -452,7 +452,7 @@
 											{#if check.ok}
 												<CheckCircle2 class="h-4 w-4 text-green-600" />
 											{:else}
-												<XCircle class="h-4 w-4 text-red-600" />
+												<CircleX class="h-4 w-4 text-red-600" />
 											{/if}
 											<p class="font-medium text-sm">{check.label}</p>
 										</div>
