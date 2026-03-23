@@ -407,7 +407,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 
 		// Generate expected filename using template
 		templateEngine := template.NewEngine()
-		nfoFilename, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
+		nfoFilename, err := templateEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
 		if err != nil {
 			// Fall back to default naming on template error (with sanitization)
 			logging.Warnf("Failed to execute NFO filename template: %v, using default", err)

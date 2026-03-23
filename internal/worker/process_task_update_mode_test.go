@@ -122,7 +122,7 @@ func TestProcessFileTask_MergeWithExistingNFO(t *testing.T) {
 			ID:    "ABC-123",
 			Title: "Scraped Title",
 		}
-		merged := task.mergeWithExistingNFO(movie)
+		merged := task.mergeWithExistingNFO(context.Background(), movie)
 		assert.Equal(t, movie, merged)
 	})
 
@@ -135,7 +135,7 @@ func TestProcessFileTask_MergeWithExistingNFO(t *testing.T) {
 		nfoPath := filepath.Join(tmpDir, "ABC-123.nfo")
 		writeTestNFO(t, nfoPath, "ABC-123", "NFO Preferred Title")
 
-		merged := task.mergeWithExistingNFO(movie)
+		merged := task.mergeWithExistingNFO(context.Background(), movie)
 		require.NotNil(t, merged)
 		assert.Equal(t, "NFO Preferred Title", merged.Title)
 		assert.Equal(t, "[ABC-123] NFO Preferred Title", merged.DisplayName)
@@ -150,7 +150,7 @@ func TestProcessFileTask_MergeWithExistingNFO(t *testing.T) {
 		nfoPath := filepath.Join(tmpDir, "ABC-123.nfo")
 		writeTestNFO(t, nfoPath, "ABC-123", "[ABC-123] Existing Templated Title")
 
-		merged := task.mergeWithExistingNFO(movie)
+		merged := task.mergeWithExistingNFO(context.Background(), movie)
 		require.NotNil(t, merged)
 		assert.Equal(t, "[ABC-123] Existing Templated Title", merged.Title)
 		assert.Equal(t, merged.Title, merged.DisplayName)
@@ -180,7 +180,7 @@ func TestProcessFileTask_MergeWithExistingNFO(t *testing.T) {
 			ID:    "ABC-123",
 			Title: "Scraped Title",
 		}
-		merged := task.mergeWithExistingNFO(movie)
+		merged := task.mergeWithExistingNFO(context.Background(), movie)
 		require.NotNil(t, merged)
 		assert.Equal(t, "Legacy Multipart Title", merged.Title)
 	})
@@ -197,7 +197,7 @@ func TestProcessFileTask_MergeWithExistingNFO(t *testing.T) {
 			ID:    "ABC-123",
 			Title: "Scraped Title",
 		}
-		merged := task.mergeWithExistingNFO(movie)
+		merged := task.mergeWithExistingNFO(context.Background(), movie)
 		require.NotNil(t, merged)
 		assert.Equal(t, "Fallback Template Title", merged.Title)
 	})
@@ -211,7 +211,7 @@ func TestProcessFileTask_MergeWithExistingNFO(t *testing.T) {
 			ID:    "ABC-123",
 			Title: "Scraped Title",
 		}
-		merged := task.mergeWithExistingNFO(movie)
+		merged := task.mergeWithExistingNFO(context.Background(), movie)
 		assert.Equal(t, movie, merged)
 	})
 }

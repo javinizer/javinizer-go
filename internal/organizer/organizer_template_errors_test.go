@@ -61,9 +61,9 @@ func TestOrganizerTemplate_ErrorHandling(t *testing.T) {
 			movieSetup: func() *testutil.MovieBuilder {
 				return testutil.NewMovieBuilder().WithID("IPX-123")
 			},
-			expectError:    false, // Template engine handles unclosed conditionals gracefully
-			errorSubstring: "",
-			description:    "Unclosed conditional should be handled gracefully",
+			expectError:    true,
+			errorSubstring: "unclosed <IF> block",
+			description:    "Unclosed conditional should fail validation",
 		},
 	}
 
@@ -192,8 +192,8 @@ func TestOrganizerTemplate_ConditionalErrors(t *testing.T) {
 			movieSetup: func() *testutil.MovieBuilder {
 				return testutil.NewMovieBuilder().WithID("IPX-123")
 			},
-			shouldWork:  true, // Template engine treats this as literal text
-			description: "Malformed ELSE should be treated as literal text",
+			shouldWork:  false,
+			description: "Malformed ELSE placement should fail validation",
 		},
 	}
 

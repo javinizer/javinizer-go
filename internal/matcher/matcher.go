@@ -106,16 +106,23 @@ func (m *Matcher) matchWithRegex(file scanner.FileInfo, filename string, pattern
 	if len(matches) == 0 {
 		return nil
 	}
+	if len(matches) <= 1 {
+		// No capture group means no usable ID for matcher output.
+		return nil
+	}
+	id := strings.TrimSpace(matches[1])
+	if id == "" {
+		// Empty capture should be treated as no match to allow fallback behavior.
+		return nil
+	}
 
 	result := &MatchResult{
 		File:      file,
 		MatchedBy: matchType,
 	}
 
-	// First capture group is the ID
-	if len(matches) > 1 {
-		result.ID = strings.ToUpper(matches[1])
-	}
+	// First capture group is the ID.
+	result.ID = strings.ToUpper(id)
 
 	// Detect part suffix from the rest of the filename
 	num, suffix, patternType := DetectPartSuffix(filename, result.ID)
@@ -135,7 +142,10 @@ func (m *Matcher) MatchString(s string) string {
 	if m.config.RegexEnabled && m.regexPattern != nil {
 		matches := m.regexPattern.FindStringSubmatch(s)
 		if len(matches) > 1 {
-			return strings.ToUpper(matches[1])
+			id := strings.TrimSpace(matches[1])
+			if id != "" {
+				return strings.ToUpper(id)
+			}
 		}
 	}
 

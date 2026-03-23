@@ -1063,10 +1063,13 @@ func TestMatcher_CustomRegexPriority(t *testing.T) {
 			expectedID:     "AB-123",
 			expectedSource: "builtin",
 		},
-		// Note: The current implementation returns an empty ID when regex has no capture group.
-		// This is a bug that should be fixed to fall back to builtin pattern.
-		// For now, we skip this test case to avoid codifying buggy behavior.
-		// TODO: Fix matcher to fall back to builtin when custom regex has no capture group
+		{
+			name:           "Custom match without capture group falls back to builtin",
+			regexPattern:   `(?i)[A-Z]{3}-\d{3}`,
+			filename:       "IPX-535.mp4",
+			expectedID:     "IPX-535",
+			expectedSource: "builtin",
+		},
 		{
 			name:         "Invalid regex pattern",
 			regexPattern: `[invalid(`,

@@ -1105,10 +1105,6 @@ func TestScanner_RelativePath(t *testing.T) {
 	}
 }
 
-// TODO: Fix symlink detection - fs.WalkDir's DirEntry.Info() follows symlinks
-// Scanner uses d.Info() which calls Stat() instead of Lstat(), preventing symlink detection
-// This bug was hidden when tests used afero.NewMemMapFs() (which doesn't support symlinks properly)
-// Now revealed with afero.NewOsFs(). Need to refactor scanner to use fs.Lstat() for symlink detection.
 func TestScanner_Symlinks(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -1169,7 +1165,6 @@ func TestScanner_Symlinks(t *testing.T) {
 	})
 
 	t.Run("ScanSingle on symlink file", func(t *testing.T) {
-		t.Skip("TODO: Fix symlink detection bug - see TestScanner_Symlinks comment")
 		result, err := scanner.ScanSingle(symlinkFile)
 		if err != nil {
 			t.Fatalf("ScanSingle failed: %v", err)
@@ -1183,10 +1178,13 @@ func TestScanner_Symlinks(t *testing.T) {
 		if result.SkippedCount != 1 {
 			t.Errorf("Expected 1 skipped file (symlink), got %d", result.SkippedCount)
 		}
+
+		if len(result.Skipped) != 1 || result.Skipped[0] != symlinkFile {
+			t.Errorf("Expected skipped list to contain symlink path %q, got %#v", symlinkFile, result.Skipped)
+		}
 	})
 
 	t.Run("Filter skips symlinks", func(t *testing.T) {
-		t.Skip("TODO: Fix symlink detection bug - see TestScanner_Symlinks comment")
 		files := []string{realFile, symlinkFile}
 		result := scanner.Filter(files)
 

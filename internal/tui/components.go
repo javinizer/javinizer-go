@@ -11,8 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
-// Component stubs - these provide basic functionality
-// Can be enhanced later with full Bubbles components
+// Component implementations used by the TUI model/view orchestration.
 
 // Header component
 type Header struct {
@@ -33,7 +32,7 @@ func (h *Header) UpdateStats(stats worker.ProgressStats) {
 }
 
 func (h *Header) View() string {
-	// Simple header - will be enhanced
+	// Header content is rendered in view.go; this component keeps a minimal fallback.
 	return HeaderStyle.Render("Javinizer TUI")
 }
 

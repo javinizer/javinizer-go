@@ -770,7 +770,7 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 
 	// In update mode, merge scraped data with existing NFO before generating outputs.
 	if t.updateMode {
-		movie = t.mergeWithExistingNFO(movie)
+		movie = t.mergeWithExistingNFO(ctx, movie)
 	}
 
 	// Determine target directory.
@@ -867,7 +867,7 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 
 // mergeWithExistingNFO merges scraped metadata with an existing NFO when update mode is enabled.
 // If no NFO exists or parsing/merge fails, it returns the original movie unchanged.
-func (t *ProcessFileTask) mergeWithExistingNFO(movie *models.Movie) *models.Movie {
+func (t *ProcessFileTask) mergeWithExistingNFO(ctx context.Context, movie *models.Movie) *models.Movie {
 	if movie == nil || t.cfg == nil {
 		return movie
 	}
@@ -882,7 +882,7 @@ func (t *ProcessFileTask) mergeWithExistingNFO(movie *models.Movie) *models.Movi
 	}
 
 	templateEngine := template.NewEngine()
-	nfoFilename, err := templateEngine.Execute(t.cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
+	nfoFilename, err := templateEngine.ExecuteWithContext(ctx, t.cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
 	if err != nil {
 		logging.Warnf("[%s] Failed to execute NFO filename template: %v, using default", movie.ID, err)
 		sanitized := template.SanitizeFilename(movie.ID)
@@ -954,8 +954,8 @@ func (t *ProcessFileTask) mergeWithExistingNFO(movie *models.Movie) *models.Movi
 	if titleAlreadyTemplated {
 		merged.DisplayName = merged.Title
 	} else if t.cfg.Metadata.NFO.DisplayName != "" {
-		ctx := template.NewContextFromMovie(merged)
-		if displayName, err := templateEngine.Execute(t.cfg.Metadata.NFO.DisplayName, ctx); err == nil {
+		tmplCtx := template.NewContextFromMovie(merged)
+		if displayName, err := templateEngine.ExecuteWithContext(ctx, t.cfg.Metadata.NFO.DisplayName, tmplCtx); err == nil {
 			merged.DisplayName = displayName
 		}
 	}

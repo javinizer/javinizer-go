@@ -186,11 +186,30 @@ func (g *Generator) MovieToNFO(movie *models.Movie, videoFilePath string) *Movie
 	// Add actresses
 	if len(movie.Actresses) > 0 {
 		nfo.Actors = make([]Actor, 0, len(movie.Actresses))
-		for i, actress := range movie.Actresses {
+		seenDMMID := make(map[int]struct{})
+		seenNames := make(map[string]struct{})
+		for _, actress := range movie.Actresses {
 			actorName := g.formatActressName(actress)
+
+			// Deduplicate actresses:
+			// 1) Prefer positive DMMID as stable identity.
+			// 2) Fall back to normalized formatted name when DMMID is unavailable.
+			if actress.DMMID > 0 {
+				if _, exists := seenDMMID[actress.DMMID]; exists {
+					continue
+				}
+				seenDMMID[actress.DMMID] = struct{}{}
+			} else {
+				nameKey := normalizeActressNameForDedup(actorName)
+				if _, exists := seenNames[nameKey]; exists {
+					continue
+				}
+				seenNames[nameKey] = struct{}{}
+			}
+
 			actor := Actor{
 				Name:  actorName,
-				Order: i,
+				Order: len(nfo.Actors),
 			}
 
 			// Add generic role if configured
@@ -329,6 +348,14 @@ func (g *Generator) MovieToNFO(movie *models.Movie, videoFilePath string) *Movie
 	}
 
 	return nfo
+}
+
+func normalizeActressNameForDedup(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+	return strings.ToLower(strings.Join(strings.Fields(trimmed), " "))
 }
 
 // formatActressName formats an actress name according to config

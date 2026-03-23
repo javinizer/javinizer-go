@@ -37,6 +37,23 @@ func NewScanner(fs afero.Fs, cfg *config.MatchingConfig) *Scanner {
 	}
 }
 
+// lstatInfo returns file info without following symlinks when the filesystem supports it.
+func (s *Scanner) lstatInfo(path string) (os.FileInfo, error) {
+	if lstater, ok := s.fs.(afero.Lstater); ok {
+		info, _, err := lstater.LstatIfPossible(path)
+		return info, err
+	}
+	return s.fs.Stat(path)
+}
+
+// trackSkipped records a skipped path while capping stored paths to MaxSkippedFiles.
+func trackSkipped(result *ScanResult, path string) {
+	result.SkippedCount++
+	if len(result.Skipped) < MaxSkippedFiles {
+		result.Skipped = append(result.Skipped, path)
+	}
+}
+
 // FileInfo represents a discovered video file
 type FileInfo struct {
 	Path      string    // Full absolute path
@@ -91,6 +108,16 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 		return nil, err
 	}
 
+	// Skip symlink roots entirely to avoid following links outside the scan boundary.
+	rootInfo, err := s.lstatInfo(absPath)
+	if err != nil {
+		return nil, err
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 {
+		trackSkipped(result, absPath)
+		return result, nil
+	}
+
 	// Normalize filter for case-insensitive matching
 	filterLower := strings.ToLower(filter)
 
@@ -111,6 +138,17 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 		if err != nil {
 			result.Errors = append(result.Errors, err)
 			return nil // Continue scanning
+		}
+
+		// Use lstat to detect symlinks without following them.
+		info, statErr := s.lstatInfo(path)
+		if statErr != nil {
+			result.Errors = append(result.Errors, statErr)
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			trackSkipped(result, path)
+			return nil
 		}
 
 		// For directories: skip if filter is set and directory name doesn't match
@@ -140,21 +178,6 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 
 		// Check if file matches criteria
 		if s.shouldIncludeFile(path, d) {
-			info, err := d.Info()
-			if err != nil {
-				result.Errors = append(result.Errors, err)
-				return nil
-			}
-
-			// Skip symlinks to prevent metadata leakage from protected files
-			if info.Mode()&os.ModeSymlink != 0 {
-				result.SkippedCount++
-				if len(result.Skipped) < MaxSkippedFiles {
-					result.Skipped = append(result.Skipped, path)
-				}
-				return nil
-			}
-
 			fileInfo := FileInfo{
 				Path:      path,
 				Name:      d.Name(),
@@ -172,11 +195,7 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 				return filepath.SkipAll // Stop walking
 			}
 		} else {
-			// Track skipped files count, but only store first MaxSkippedFiles paths to prevent memory issues
-			result.SkippedCount++
-			if len(result.Skipped) < MaxSkippedFiles {
-				result.Skipped = append(result.Skipped, path)
-			}
+			trackSkipped(result, path)
 		}
 
 		return nil
@@ -203,6 +222,16 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 		return nil, err
 	}
 
+	// Detect and skip symlinks without following their targets.
+	lstatInfo, err := s.lstatInfo(absPath)
+	if err != nil {
+		return nil, err
+	}
+	if lstatInfo.Mode()&os.ModeSymlink != 0 {
+		trackSkipped(result, absPath)
+		return result, nil
+	}
+
 	// Check if it's a file or directory
 	info, err := s.fs.Stat(absPath)
 	if err != nil {
@@ -217,64 +246,53 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 		}
 
 		for _, entry := range entries {
-			if entry.IsDir() {
+			fullPath := filepath.Join(absPath, entry.Name())
+
+			entryInfo, err := s.lstatInfo(fullPath)
+			if err != nil {
+				result.Errors = append(result.Errors, err)
 				continue
 			}
 
-			fullPath := filepath.Join(absPath, entry.Name())
-			if s.shouldIncludeFile(fullPath, nil) {
-				// Skip symlinks to prevent metadata leakage from protected files
-				if entry.Mode()&os.ModeSymlink != 0 {
-					result.SkippedCount++
-					if len(result.Skipped) < MaxSkippedFiles {
-						result.Skipped = append(result.Skipped, fullPath)
-					}
-					continue
-				}
+			if entryInfo.IsDir() {
+				continue
+			}
 
+			if entryInfo.Mode()&os.ModeSymlink != 0 {
+				trackSkipped(result, fullPath)
+				continue
+			}
+
+			if s.shouldIncludeFile(fullPath, nil) {
 				fileInfo := FileInfo{
 					Path:      fullPath,
-					Name:      entry.Name(),
+					Name:      entryInfo.Name(),
 					Extension: filepath.Ext(fullPath),
-					Size:      entry.Size(),
-					ModTime:   entry.ModTime(),
+					Size:      entryInfo.Size(),
+					ModTime:   entryInfo.ModTime(),
 					Dir:       absPath,
 				}
 
 				result.Files = append(result.Files, fileInfo)
 			} else {
-				result.SkippedCount++
-				if len(result.Skipped) < MaxSkippedFiles {
-					result.Skipped = append(result.Skipped, fullPath)
-				}
+				trackSkipped(result, fullPath)
 			}
 		}
 	} else {
 		// Single file
 		if s.shouldIncludeFile(absPath, nil) {
-			// Skip symlinks to prevent metadata leakage from protected files
-			if info.Mode()&os.ModeSymlink != 0 {
-				result.SkippedCount++
-				if len(result.Skipped) < MaxSkippedFiles {
-					result.Skipped = append(result.Skipped, absPath)
-				}
-			} else {
-				fileInfo := FileInfo{
-					Path:      absPath,
-					Name:      info.Name(),
-					Extension: filepath.Ext(absPath),
-					Size:      info.Size(),
-					ModTime:   info.ModTime(),
-					Dir:       filepath.Dir(absPath),
-				}
+			fileInfo := FileInfo{
+				Path:      absPath,
+				Name:      info.Name(),
+				Extension: filepath.Ext(absPath),
+				Size:      info.Size(),
+				ModTime:   info.ModTime(),
+				Dir:       filepath.Dir(absPath),
+			}
 
-				result.Files = append(result.Files, fileInfo)
-			}
+			result.Files = append(result.Files, fileInfo)
 		} else {
-			result.SkippedCount++
-			if len(result.Skipped) < MaxSkippedFiles {
-				result.Skipped = append(result.Skipped, absPath)
-			}
+			trackSkipped(result, absPath)
 		}
 	}
 
@@ -334,22 +352,18 @@ func (s *Scanner) Filter(files []string) []FileInfo {
 	result := make([]FileInfo, 0)
 
 	for _, path := range files {
-		if !s.shouldIncludeFile(path, nil) {
-			continue
-		}
-
-		// Get file info
-		info, err := s.fs.Stat(path)
+		info, err := s.lstatInfo(path)
 		if err != nil {
 			continue
 		}
-
 		if info.IsDir() {
 			continue
 		}
-
-		// Skip symlinks to prevent metadata leakage from protected files
 		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+
+		if !s.shouldIncludeFile(path, nil) {
 			continue
 		}
 

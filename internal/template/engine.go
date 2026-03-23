@@ -1,6 +1,7 @@
 package template
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -9,8 +10,22 @@ import (
 
 // Package-level compiled regexes for performance
 var (
-	cjkRegex = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]`)
+	cjkRegex              = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]`)
+	conditionalTokenRegex = regexp.MustCompile(`(?i)<IF:[A-Z_]+>|</IF>`)
 )
+
+const (
+	DefaultMaxTemplateBytes    = 64 * 1024
+	DefaultMaxOutputBytes      = 10 * 1024 * 1024
+	DefaultMaxConditionalDepth = 32
+)
+
+// EngineOptions defines validation and execution limits for template rendering.
+type EngineOptions struct {
+	MaxTemplateBytes    int
+	MaxOutputBytes      int
+	MaxConditionalDepth int
+}
 
 // Engine is a template processor for format strings
 type Engine struct {
@@ -18,10 +33,26 @@ type Engine struct {
 	tagPattern *regexp.Regexp
 	// Conditional pattern matches: <IF:TAG>content</IF>
 	conditionalPattern *regexp.Regexp
+	options            EngineOptions
 }
 
 // NewEngine creates a new template engine
 func NewEngine() *Engine {
+	return NewEngineWithOptions(EngineOptions{})
+}
+
+// NewEngineWithOptions creates a new template engine with custom limits.
+func NewEngineWithOptions(opts EngineOptions) *Engine {
+	if opts.MaxTemplateBytes <= 0 {
+		opts.MaxTemplateBytes = DefaultMaxTemplateBytes
+	}
+	if opts.MaxOutputBytes <= 0 {
+		opts.MaxOutputBytes = DefaultMaxOutputBytes
+	}
+	if opts.MaxConditionalDepth <= 0 {
+		opts.MaxConditionalDepth = DefaultMaxConditionalDepth
+	}
+
 	return &Engine{
 		// Matches: <ID>, <TITLE:50>, <RELEASEDATE:YYYY-MM-DD>, etc.
 		// Case-insensitive to allow <id>, <Id>, <ID>, etc.
@@ -29,24 +60,52 @@ func NewEngine() *Engine {
 		// Matches: <IF:TAG>content</IF> or <IF:TAG>true<ELSE>false</IF>
 		// Case-insensitive to allow <if:tag>, <IF:TAG>, etc.
 		conditionalPattern: regexp.MustCompile(`(?i)<IF:([A-Z_]+)>(.*?)(?:<ELSE>(.*?))?</IF>`),
+		options:            opts,
 	}
 }
 
 // Execute processes a template string with the given context
 func (e *Engine) Execute(template string, ctx *Context) (string, error) {
+	return e.ExecuteWithContext(context.Background(), template, ctx)
+}
+
+// ExecuteWithContext processes a template string with cancellation support and output limits.
+func (e *Engine) ExecuteWithContext(execCtx context.Context, template string, ctx *Context) (string, error) {
+	if execCtx == nil {
+		return "", fmt.Errorf("execution context cannot be nil")
+	}
 	if ctx == nil {
 		return "", fmt.Errorf("context cannot be nil")
+	}
+	if err := e.checkExecutionContext(execCtx); err != nil {
+		return "", err
+	}
+	if err := e.Validate(template); err != nil {
+		return "", err
 	}
 
 	result := template
 
 	// Step 1: Process conditional blocks first
-	result = e.processConditionals(result, ctx)
+	var err error
+	result, err = e.processConditionalsWithContext(execCtx, result, ctx)
+	if err != nil {
+		return "", err
+	}
+	if err := e.ensureOutputWithinLimit(result); err != nil {
+		return "", err
+	}
 
 	// Step 2: Process regular tags
 	matches := e.tagPattern.FindAllStringSubmatch(result, -1)
 
-	for _, match := range matches {
+	for i, match := range matches {
+		if i%25 == 0 {
+			if err := e.checkExecutionContext(execCtx); err != nil {
+				return "", err
+			}
+		}
+
 		fullTag := match[0]                  // e.g., "<TITLE:50>" or "<title:50>"
 		tagName := strings.ToUpper(match[1]) // Normalize to uppercase: "TITLE"
 		modifier := ""
@@ -63,23 +122,34 @@ func (e *Engine) Execute(template string, ctx *Context) (string, error) {
 
 		// Replace the tag with its value
 		result = strings.Replace(result, fullTag, value, 1)
+		if err := e.ensureOutputWithinLimit(result); err != nil {
+			return "", err
+		}
 	}
 
 	// Note: sanitization is done by caller if needed
 	// We don't sanitize here because templates might be used for folder paths
 	// which need to preserve slashes
 
+	if err := e.checkExecutionContext(execCtx); err != nil {
+		return "", err
+	}
 	return result, nil
 }
 
 // processConditionals processes conditional blocks in the template
-func (e *Engine) processConditionals(template string, ctx *Context) string {
+func (e *Engine) processConditionalsWithContext(execCtx context.Context, template string, ctx *Context) (string, error) {
 	result := template
 
 	// Find all conditional blocks
 	matches := e.conditionalPattern.FindAllStringSubmatch(result, -1)
 
-	for _, match := range matches {
+	for i, match := range matches {
+		if i%25 == 0 {
+			if err := e.checkExecutionContext(execCtx); err != nil {
+				return "", err
+			}
+		}
 		fullBlock := match[0]                // e.g., "<IF:SERIES>Series: <SERIES></IF>" or "<if:series>..."
 		tagName := strings.ToUpper(match[1]) // Normalize to uppercase: "SERIES"
 		trueContent := match[2]              // e.g., "Series: <SERIES>"
@@ -102,9 +172,56 @@ func (e *Engine) processConditionals(template string, ctx *Context) string {
 
 		// Replace the entire conditional block
 		result = strings.Replace(result, fullBlock, replacement, 1)
+		if err := e.ensureOutputWithinLimit(result); err != nil {
+			return "", err
+		}
 	}
 
-	return result
+	return result, nil
+}
+
+// Validate checks template shape and size before execution.
+func (e *Engine) Validate(template string) error {
+	if len(template) > e.options.MaxTemplateBytes {
+		return fmt.Errorf("template size %d exceeds maximum %d bytes", len(template), e.options.MaxTemplateBytes)
+	}
+
+	depth := 0
+	tokens := conditionalTokenRegex.FindAllString(template, -1)
+	for _, token := range tokens {
+		if strings.HasPrefix(strings.ToUpper(token), "<IF:") {
+			depth++
+			if depth > e.options.MaxConditionalDepth {
+				return fmt.Errorf("conditional depth %d exceeds maximum %d", depth, e.options.MaxConditionalDepth)
+			}
+			continue
+		}
+
+		depth--
+		if depth < 0 {
+			return fmt.Errorf("invalid template conditionals: unexpected closing </IF>")
+		}
+	}
+
+	if depth != 0 {
+		return fmt.Errorf("invalid template conditionals: unclosed <IF> block")
+	}
+
+	return nil
+}
+
+func (e *Engine) ensureOutputWithinLimit(output string) error {
+	if len(output) > e.options.MaxOutputBytes {
+		return fmt.Errorf("rendered template size %d exceeds maximum %d bytes", len(output), e.options.MaxOutputBytes)
+	}
+	return nil
+}
+
+func (e *Engine) checkExecutionContext(execCtx context.Context) error {
+	if err := execCtx.Err(); err != nil {
+		return fmt.Errorf("template execution canceled: %w", err)
+	}
+	return nil
 }
 
 // resolveTag resolves a tag to its value

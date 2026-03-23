@@ -278,7 +278,7 @@ func RunBatchScrapeOnce(
 
 				// Generate expected NFO filename using template
 				templateEngine := template.NewEngine()
-				nfoFilename, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
+				nfoFilename, err := templateEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
 				if err != nil {
 					logging.Warnf("[Batch %s] File %d: Failed to execute NFO filename template: %v, using default", job.ID, fileIndex, err)
 					sanitized := template.SanitizeFilename(cached.ID)
@@ -364,8 +364,8 @@ func RunBatchScrapeOnce(
 							} else if cfg != nil && cfg.Metadata.NFO.DisplayName != "" {
 								// Title not templated, regenerate DisplayName from Title
 								tmplEngine := template.NewEngine()
-								ctx := template.NewContextFromMovie(movieToReturn)
-								if displayName, err := tmplEngine.Execute(cfg.Metadata.NFO.DisplayName, ctx); err == nil {
+								displayCtx := template.NewContextFromMovie(movieToReturn)
+								if displayName, err := tmplEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayName, displayCtx); err == nil {
 									movieToReturn.DisplayName = displayName
 									logging.Debugf("[Batch %s] File %d: Regenerated DisplayName from Title: %s", job.ID, fileIndex, displayName)
 								}
@@ -658,7 +658,7 @@ func RunBatchScrapeOnce(
 
 		// Generate expected NFO filename using template
 		templateEngine := template.NewEngine()
-		nfoFilename, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
+		nfoFilename, err := templateEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
 		if err != nil {
 			// Fall back to default naming
 			logging.Warnf("[Batch %s] File %d: Failed to execute NFO filename template: %v, using default", job.ID, fileIndex, err)
@@ -744,8 +744,8 @@ func RunBatchScrapeOnce(
 					} else if cfg != nil && cfg.Metadata.NFO.DisplayName != "" {
 						// Title not templated, regenerate DisplayName from Title
 						tmplEngine := template.NewEngine()
-						ctx := template.NewContextFromMovie(movie)
-						if displayName, err := tmplEngine.Execute(cfg.Metadata.NFO.DisplayName, ctx); err == nil {
+						displayCtx := template.NewContextFromMovie(movie)
+						if displayName, err := tmplEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayName, displayCtx); err == nil {
 							movie.DisplayName = displayName
 							logging.Debugf("[Batch %s] File %d: Regenerated DisplayName from Title: %s", job.ID, fileIndex, displayName)
 						}

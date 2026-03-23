@@ -1,6 +1,7 @@
 package template
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -11,8 +12,7 @@ import (
 // Story 4.4: Template Error Handling and Validation Tests
 //
 // This test file documents the CURRENT SECURITY STATE of the template engine
-// based on the security audit (Task 1). Most epic tech spec security features
-// are NOT IMPLEMENTED - this file tests existing behavior and documents gaps.
+// after the guardrail rollout in engine.go.
 //
 // IMPLEMENTATION REALITY (from engine.go audit):
 //
@@ -21,30 +21,13 @@ import (
 // - Function whitelist: Hardcoded in resolveTag() switch statement
 // - Filesystem sanitization: SanitizeFilename() exists (tested in functions_test.go)
 //
-// ❌ NOT IMPLEMENTED (documented gaps):
-// - Timeout protection: Execute() accepts context but NEVER checks ctx.Done()
-// - Output size limiting: No size-limiting writer wrapping
-// - Input validation: No Validate() method, no pre-execution checks
-//
 // TEST STRATEGY (following Story 4.3 pattern):
-// 1. Test existing behavior (context acceptance, error messages)
-// 2. Document implementation gaps (advisory notes for future)
-// 3. Maintain 93.5% coverage (no meaningless tests for non-existent features)
-// 4. Provide implementation guidance if features need to be added
+// 1. Test compatibility behavior (context acceptance, error messages)
+// 2. Test guardrails (validation, cancellation, output size limits)
+// 3. Maintain high coverage with meaningful assertions
 
 // TestEngine_SecurityContextAcceptance documents that Execute() accepts context
-// parameter but does not actually check ctx.Done() during execution.
-//
-// AC1 (Timeout Protection): ❌ NOT IMPLEMENTED
-// - Execute() signature includes *Context parameter (template data)
-// - No context.Context parameter exists for cancellation
-// - Template engine uses custom Context struct, not Go's context.Context
-//
-// Advisory Note: To implement timeout protection:
-// 1. Change Execute signature to: Execute(ctx context.Context, template string, data *Context)
-// 2. Check ctx.Done() periodically in processConditionals() and resolveTag() loops
-// 3. Add goroutine-based timeout wrapper if text/template is used
-// 4. Use goleak.VerifyNone(t) to detect goroutine leaks
+// parameter and validates nil contexts for compatibility.
 func TestEngine_SecurityContextAcceptance(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -89,17 +72,7 @@ func TestEngine_SecurityContextAcceptance(t *testing.T) {
 	}
 }
 
-// TestEngine_OutputSizeLimits documents that no output size limiting exists.
-//
-// AC2 (Output Size Limits): ❌ NOT IMPLEMENTED
-// - Execute() returns string directly, no io.Writer wrapping
-// - No size checks or limiting writer implementation
-// - Large templates will succeed without truncation
-//
-// Advisory Note: To implement size limiting:
-// 1. Create LimitedWriter that wraps io.Writer and tracks bytes written
-// 2. Return error when output exceeds 10MB threshold
-// 3. Consider using io.LimitedReader pattern for implementation
+// TestEngine_OutputSizeLimits verifies normal templates still render under default limits.
 func TestEngine_OutputSizeLimits(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -117,7 +90,7 @@ func TestEngine_OutputSizeLimits(t *testing.T) {
 			name:           "moderately large template succeeds",
 			template:       strings.Repeat("<TITLE>", 100), // ~700 chars
 			expectedMaxLen: 10000,
-			description:    "No size limiting - this would fail if 10MB limit was implemented",
+			description:    "Default limit is large enough for normal templates",
 		},
 	}
 
@@ -130,26 +103,13 @@ func TestEngine_OutputSizeLimits(t *testing.T) {
 
 			result, err := engine.Execute(tt.template, ctx)
 
-			// Current behavior: all templates succeed regardless of size
-			assert.NoError(t, err, "GAP: No output size limiting - large templates succeed")
+			assert.NoError(t, err, tt.description)
 			assert.LessOrEqual(t, len(result), tt.expectedMaxLen)
 		})
 	}
 }
 
-// TestEngine_InputValidation documents that no pre-execution validation exists.
-//
-// AC3 (Input Validation): ❌ NOT IMPLEMENTED
-// - No Validate() method on Engine
-// - No checks for deeply nested conditionals
-// - No template length limits
-// - Templates processed as-is without safety checks
-//
-// Advisory Note: To implement input validation:
-// 1. Add Validate(template string) error method to Engine
-// 2. Parse template and count conditional nesting depth
-// 3. Reject if nesting > 10 levels or template length > 1KB
-// 4. Return descriptive validation errors before execution
+// TestEngine_InputValidation verifies valid templates pass pre-execution validation.
 func TestEngine_InputValidation(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -164,12 +124,12 @@ func TestEngine_InputValidation(t *testing.T) {
 		{
 			name:        "deeply nested conditionals process",
 			template:    strings.Repeat("<IF:TITLE>", 5) + "deep" + strings.Repeat("</IF>", 5),
-			description: "GAP: No nesting limit - deeply nested conditionals succeed",
+			description: "Nested conditionals within limits are allowed",
 		},
 		{
 			name:        "very long template processes",
 			template:    strings.Repeat("<TITLE>", 200), // ~1.4KB
-			description: "GAP: No length limit - long templates succeed",
+			description: "Templates below length limits are allowed",
 		},
 	}
 
@@ -182,13 +142,77 @@ func TestEngine_InputValidation(t *testing.T) {
 				ReleaseDate: &releaseDate,
 			}
 
-			// Current behavior: no validation, all templates processed
 			result, err := engine.Execute(tt.template, ctx)
 
 			assert.NoError(t, err, tt.description)
 			assert.NotEmpty(t, result)
 		})
 	}
+}
+
+func TestEngine_ValidateLimitsAndStructure(t *testing.T) {
+	t.Run("template length limit exceeded", func(t *testing.T) {
+		engine := NewEngineWithOptions(EngineOptions{
+			MaxTemplateBytes: 10,
+		})
+		err := engine.Validate(strings.Repeat("A", 11))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "template size")
+	})
+
+	t.Run("conditional depth limit exceeded", func(t *testing.T) {
+		engine := NewEngineWithOptions(EngineOptions{
+			MaxConditionalDepth: 2,
+		})
+		template := strings.Repeat("<IF:TITLE>", 3) + "x" + strings.Repeat("</IF>", 3)
+		err := engine.Validate(template)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "conditional depth")
+	})
+
+	t.Run("unexpected closing conditional", func(t *testing.T) {
+		engine := NewEngine()
+		err := engine.Validate("</IF><TITLE>")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected closing")
+	})
+
+	t.Run("unclosed conditional", func(t *testing.T) {
+		engine := NewEngine()
+		err := engine.Validate("<IF:TITLE><TITLE>")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unclosed")
+	})
+}
+
+func TestEngine_ExecuteWithContextCancellation(t *testing.T) {
+	engine := NewEngine()
+	execCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := engine.ExecuteWithContext(execCtx, "<TITLE>", &Context{Title: "Test"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "template execution canceled")
+}
+
+func TestEngine_ExecuteOutputSizeLimitExceeded(t *testing.T) {
+	engine := NewEngineWithOptions(EngineOptions{
+		MaxOutputBytes: 8,
+	})
+
+	_, err := engine.Execute("<TITLE>", &Context{Title: "This output is too long"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "rendered template size")
+}
+
+func TestEngine_ExecuteBackwardCompatibility(t *testing.T) {
+	engine := NewEngine()
+	result, err := engine.Execute("<ID> - <TITLE>", &Context{
+		ID:    "IPX-535",
+		Title: "Sample Title",
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, "IPX-535 - Sample Title", result)
 }
 
 // TestEngine_MaliciousTemplateProtection tests path traversal sanitization.
@@ -317,20 +341,17 @@ func TestEngine_ErrorMessageQuality(t *testing.T) {
 //
 // AUDIT FINDINGS SUMMARY:
 //
-// Context Timeout Support (AC1): ❌ NOT IMPLEMENTED
-// - Execute() accepts *Context (template data), not context.Context (cancellation)
-// - No ctx.Done() checks during processing
-// - Would require signature change to add timeout support
+// Context Timeout Support (AC1): ✅ IMPLEMENTED
+// - ExecuteWithContext accepts context.Context for cancellation
+// - Cancellation is checked at start and within render loops
 //
-// Output Size Limiting (AC2): ❌ NOT IMPLEMENTED
-// - Execute() returns string directly
-// - No io.Writer wrapping or size tracking
-// - Would require LimitedWriter implementation
+// Output Size Limiting (AC2): ✅ IMPLEMENTED
+// - Output size is checked during conditional/tag replacement
+// - Rendering fails when output exceeds configured maximum
 //
-// Input Validation (AC3): ❌ NOT IMPLEMENTED
-// - No Validate() method exists
-// - No pre-execution safety checks
-// - Templates processed without nesting/length limits
+// Input Validation (AC3): ✅ IMPLEMENTED
+// - Validate(template string) performs pre-execution checks
+// - Template size, conditional depth, and conditional structure are validated
 //
 // Path Traversal Prevention (AC4): ✅ IMPLEMENTED
 // - SanitizeFilename() exists with comprehensive tests
@@ -342,23 +363,7 @@ func TestEngine_ErrorMessageQuality(t *testing.T) {
 // - Unknown tags handled gracefully (empty string)
 // - Appropriate for simple tag-based system
 //
-// RECOMMENDATIONS FOR FUTURE IMPLEMENTATION:
-//
-// 1. Timeout Protection (if needed):
-//   - Change signature: Execute(ctx context.Context, template string, data *Context)
-//   - Check ctx.Done() in loops (processConditionals, resolveTag)
-//   - Use goleak for leak detection
-//
-// 2. Size Limiting (if needed):
-//   - Implement LimitedWriter wrapping strings.Builder
-//   - Check size before each write operation
-//   - Return error when exceeding 10MB limit
-//
-// 3. Input Validation (if needed):
-//   - Add Validate(template string) error method
-//   - Count conditional nesting depth
-//   - Check template length against threshold
-//   - Validate before Execute() call
+// The remaining work in this area is tuning limits as product requirements evolve.
 func TestEngine_SecurityAuditFindings(t *testing.T) {
 	t.Run("audit findings are codified", func(t *testing.T) {
 		// This test always passes - it exists to document the audit
@@ -374,13 +379,13 @@ func TestEngine_SecurityAuditFindings(t *testing.T) {
 		assert.NotNil(t, engine, "Engine is stateless - no cache map or sync.RWMutex")
 
 		t.Log("✅ Security audit complete")
-		t.Log("❌ Timeout protection: NOT IMPLEMENTED (context.Context not used)")
-		t.Log("❌ Output size limiting: NOT IMPLEMENTED (no size-limiting writer)")
-		t.Log("❌ Input validation: NOT IMPLEMENTED (no Validate() method)")
+		t.Log("✅ Timeout protection: IMPLEMENTED (ExecuteWithContext + cancellation checks)")
+		t.Log("✅ Output size limiting: IMPLEMENTED (enforced output byte limit)")
+		t.Log("✅ Input validation: IMPLEMENTED (Validate method and structural checks)")
 		t.Log("✅ Path traversal prevention: IMPLEMENTED (SanitizeFilename)")
 		t.Log("✅ Error message quality: PARTIALLY IMPLEMENTED (basic errors)")
 		t.Log("")
-		t.Log("Story 4.4 Result: Verification-only (like Story 4.3)")
+		t.Log("Story 4.4 Result: Guardrails implemented and verified")
 		t.Log("Coverage maintained at 93.5% (exceeds 70% target by 23.5%)")
 	})
 }

@@ -8,8 +8,10 @@ import (
 // Authentication and Authorization Tests
 // =============================================================================
 //
-// **CURRENT STATUS (2025-11-18):**
-// Authentication and authorization are NOT currently implemented in the API.
+// **CURRENT STATUS (2026-03-23):**
+// Authentication and authorization are intentionally deferred for now.
+// See docs/14-api-auth-design.md for threat model, options, migration path,
+// and implementation acceptance criteria.
 //
 // **Investigation Findings:**
 // - NO JWT libraries in go.mod (checked for github.com/golang-jwt/jwt, github.com/dgrijalva/jwt-go)
@@ -27,9 +29,9 @@ import (
 // TestAuthenticationNotImplemented documents that authentication is not currently
 // implemented in the API and provides a structure for future authentication tests.
 //
-// This test is intentionally skipped as it serves as documentation and a placeholder
-// for future implementation. When authentication is added, this test should be
-// replaced with comprehensive authentication test suites.
+// This test is intentionally skipped while auth work is deferred.
+// When implementation starts, replace this placeholder with comprehensive tests
+// based on docs/14-api-auth-design.md.
 //
 // **Future Implementation Checklist:**
 //
@@ -170,13 +172,11 @@ import (
 // - internal/api/handlers_test_helpers.go - Reuse createTestDeps() helper
 //
 // **Acceptance Criteria Coverage:**
-// This placeholder test satisfies AC-3.3.1: "If no auth exists, document in test
-// file and create placeholder structure." Comprehensive tests will be needed when
-// authentication is implemented to satisfy AC-3.3.2 through AC-3.3.5.
+// This placeholder test keeps the deferred status explicit in CI until
+// implementation begins.
 func TestAuthenticationNotImplemented(t *testing.T) {
-	t.Skip("Authentication is not currently implemented in the API. " +
-		"See documentation above for comprehensive test checklist when auth is added. " +
-		"Related epic: Epic 3 - Security-Critical Package Testing")
+	t.Skip("Authentication is intentionally deferred. " +
+		"See docs/14-api-auth-design.md for implementation design and test requirements.")
 }
 
 // TestAuthenticationTestsPassRaceDetector verifies that placeholder auth tests

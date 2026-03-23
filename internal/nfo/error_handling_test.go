@@ -435,12 +435,11 @@ func TestGenerator_DuplicateActresses(t *testing.T) {
 
 		nfo := gen.MovieToNFO(movie, "")
 
-		// TODO(Epic 5): Update assertion when deduplication logic is implemented
-		// Story 4.6 documents current behavior; deduplication is out of scope for Epic 4
-		// Current implementation does NOT deduplicate
-		// This test documents the current behavior
-		// If deduplication is implemented, this assertion should change
-		assert.Len(t, nfo.Actors, 3, "current implementation does not deduplicate")
+		assert.Len(t, nfo.Actors, 2, "duplicate actress names should be deduplicated")
+		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
+		assert.Equal(t, 0, nfo.Actors[0].Order)
+		assert.Equal(t, "Ai Uehara", nfo.Actors[1].Name)
+		assert.Equal(t, 1, nfo.Actors[1].Order)
 
 		// Count "Yui Hatano" occurrences
 		count := 0
@@ -450,8 +449,7 @@ func TestGenerator_DuplicateActresses(t *testing.T) {
 			}
 		}
 
-		// Document current behavior: duplicates are NOT removed
-		assert.Equal(t, 2, count, "current implementation includes duplicates")
+		assert.Equal(t, 1, count, "duplicate actress names should be removed")
 	})
 
 	t.Run("duplicate actress DMMIDs", func(t *testing.T) {
@@ -469,7 +467,29 @@ func TestGenerator_DuplicateActresses(t *testing.T) {
 
 		nfo := gen.MovieToNFO(movie, "")
 
-		// Current implementation does NOT deduplicate by DMMID
-		assert.Len(t, nfo.Actors, 2, "current implementation does not deduplicate by DMMID")
+		assert.Len(t, nfo.Actors, 1, "duplicate DMMID entries should be deduplicated")
+		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
+		assert.Equal(t, 0, nfo.Actors[0].Order)
+	})
+
+	t.Run("deduplicate actress names with case and whitespace normalization", func(t *testing.T) {
+		movie := &models.Movie{
+			ID:    "DUP-003",
+			Title: "Test",
+			Actresses: []models.Actress{
+				{FirstName: "Yui", LastName: "Hatano"},
+				{FirstName: " yui ", LastName: "HATANO"},
+				{FirstName: "Ai", LastName: "Uehara"},
+			},
+		}
+
+		fs := afero.NewMemMapFs()
+		gen := NewGenerator(fs, DefaultConfig())
+
+		nfo := gen.MovieToNFO(movie, "")
+
+		assert.Len(t, nfo.Actors, 2, "name normalization should deduplicate mixed case/whitespace variants")
+		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
+		assert.Equal(t, "Ai Uehara", nfo.Actors[1].Name)
 	})
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -399,7 +400,7 @@ func TestNFOWithMultipleActresses(t *testing.T) {
 	actresses := make([]models.Actress, 10)
 	for i := 0; i < 10; i++ {
 		actresses[i] = models.Actress{
-			FirstName:    "FirstName",
+			FirstName:    "FirstName" + strconv.Itoa(i),
 			LastName:     "LastName",
 			JapaneseName: "日本名",
 			ThumbURL:     "https://example.com/actress.jpg",
@@ -417,7 +418,7 @@ func TestNFOWithMultipleActresses(t *testing.T) {
 
 	require.Len(t, nfo.Actors, 10)
 	for i, actor := range nfo.Actors {
-		assert.Equal(t, "FirstName LastName", actor.Name)
+		assert.Equal(t, "FirstName"+strconv.Itoa(i)+" LastName", actor.Name)
 		assert.Equal(t, i, actor.Order)
 		assert.Equal(t, "https://example.com/actress.jpg", actor.Thumb)
 	}
