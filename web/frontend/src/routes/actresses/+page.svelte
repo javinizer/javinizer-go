@@ -436,10 +436,38 @@
 		</div>
 
 		<div class="grid grid-cols-1 xl:grid-cols-5 gap-6" in:fade|local={{ duration: 240 }}>
-			<div class="xl:col-span-2">
+			<div class="xl:col-span-2 xl:self-start xl:sticky xl:top-20">
 				<div in:fade|local={{ duration: 220 }}>
-					<Card class="p-5 space-y-4 sticky top-20">
-						<h2 class="text-lg font-semibold">{editingId ? 'Edit Actress' : 'Create Actress'}</h2>
+					<Card
+						class={`p-5 space-y-4 transition-colors ${
+							editingId
+								? 'border-primary/40 bg-primary/5'
+								: 'border-dashed border-input/70 bg-card'
+						}`}
+					>
+						<div class="flex items-center justify-between gap-2">
+							<h2 class="text-lg font-semibold flex items-center gap-2">
+								{#if editingId}
+									<Pencil class="h-5 w-5 text-primary" />
+									Edit Actress
+								{:else}
+									<Plus class="h-5 w-5 text-muted-foreground" />
+									Create Actress
+								{/if}
+							</h2>
+							<span
+								class={`text-xs font-medium rounded-full px-2.5 py-1 ${
+									editingId ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
+								}`}
+							>
+								{editingId ? 'Edit Mode' : 'Create Mode'}
+							</span>
+						</div>
+						<p class={`text-sm ${editingId ? 'text-primary/90' : 'text-muted-foreground'}`}>
+							{editingId
+								? 'You are editing an existing actress record.'
+								: 'Fill in details to add a new actress record.'}
+						</p>
 
 					{#if formError}
 						<div class="rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
