@@ -49,6 +49,7 @@ Thumbs.db
 /logs/
 config.local.yaml
 configs/config.yaml
+configs/auth.credentials.json
 
 # Docker configuration
 .env
