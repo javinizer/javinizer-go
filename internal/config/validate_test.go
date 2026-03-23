@@ -318,13 +318,6 @@ func TestConfig_Validate(t *testing.T) {
 				assert.Contains(t, err.Error(), tt.errorContains)
 			} else {
 				assert.NoError(t, err)
-				// Verify default referer was set if it was empty
-				if tt.name == "empty referer gets default" {
-					assert.Equal(t, "https://www.dmm.co.jp/", cfg.Scrapers.Referer)
-				}
-				if tt.name == "database type normalized to sqlite" {
-					assert.Equal(t, "sqlite", cfg.Database.Type)
-				}
 			}
 		})
 	}

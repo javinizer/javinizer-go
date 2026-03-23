@@ -696,10 +696,9 @@ func updateConfig(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Validate configuration on save so invalid settings are rejected in UI
-		// before writing to disk or attempting component reload.
-		if err := newConfig.Validate(); err != nil {
-			c.JSON(400, ErrorResponse{Error: "Invalid configuration: " + err.Error()})
+		// Run full config preparation pipeline before save/reload.
+		if _, err := config.Prepare(&newConfig); err != nil {
+			c.JSON(400, ErrorResponse{Error: err.Error()})
 			return
 		}
 		if err := validateTranslationSaveConfig(&newConfig); err != nil {

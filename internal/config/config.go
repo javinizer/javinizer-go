@@ -1,15 +1,9 @@
 package config
 
 import (
-	"bytes"
 	"fmt"
 	"net/url"
-	"os"
-	"path/filepath"
-	"reflect"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // File and directory permission constants
@@ -742,131 +736,6 @@ func DefaultConfig() *Config {
 	}
 }
 
-type compatibilityRule struct {
-	legacyMaxVersion int
-	apply            func(cfg *Config, defaults *Config) (bool, error)
-}
-
-// appendMissingStrings keeps user ordering and appends default values that are
-// missing from the existing list.
-func appendMissingStrings(existing, defaults []string) ([]string, bool) {
-	if len(existing) == 0 {
-		return append([]string{}, defaults...), len(defaults) > 0
-	}
-
-	seen := make(map[string]bool, len(existing))
-	for _, value := range existing {
-		seen[value] = true
-	}
-
-	merged := append([]string{}, existing...)
-	changed := false
-	for _, value := range defaults {
-		if seen[value] {
-			continue
-		}
-		merged = append(merged, value)
-		changed = true
-	}
-	return merged, changed
-}
-
-func legacyScraperPriorityBaseline() []string {
-	t := reflect.TypeOf(ScrapersConfig{})
-	baseline := make([]string, 0, t.NumField())
-	proxyType := reflect.TypeOf(ProxyConfig{})
-
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if field.Type.Kind() != reflect.Struct {
-			continue
-		}
-		if field.Type == proxyType {
-			continue
-		}
-		enabledField, ok := field.Type.FieldByName("Enabled")
-		if !ok || enabledField.Type.Kind() != reflect.Bool {
-			continue
-		}
-
-		yamlTag := field.Tag.Get("yaml")
-		if yamlTag == "" || yamlTag == "-" {
-			continue
-		}
-		name := strings.Split(yamlTag, ",")[0]
-		if name == "" || name == "-" {
-			continue
-		}
-		baseline = append(baseline, name)
-	}
-
-	return baseline
-}
-
-// configCompatibilityRules are applied idempotently for legacy configs.
-// These should be exceptional; additive fields should rely on DefaultConfig().
-var configCompatibilityRules = []compatibilityRule{
-	{
-		legacyMaxVersion: 2,
-		apply: func(cfg *Config, _ *Config) (bool, error) {
-			baseline := legacyScraperPriorityBaseline()
-			merged, changed := appendMissingStrings(cfg.Scrapers.Priority, baseline)
-			if changed {
-				cfg.Scrapers.Priority = merged
-			}
-			return changed, nil
-		},
-	},
-	{
-		legacyMaxVersion: 2,
-		apply: func(cfg *Config, defaults *Config) (bool, error) {
-			// Preserve explicit false for update_enabled; only backfill interval.
-			if cfg.System.UpdateCheckIntervalHours == 0 {
-				cfg.System.UpdateCheckIntervalHours = defaults.System.UpdateCheckIntervalHours
-				return true, nil
-			}
-			return false, nil
-		},
-	},
-}
-
-// applyCompatibilityRules upgrades legacy config behavior to current semantics.
-// Returns true when any compatibility change is applied.
-func applyCompatibilityRules(cfg *Config) (bool, error) {
-	if cfg == nil {
-		return false, nil
-	}
-	if cfg.ConfigVersion > CurrentConfigVersion {
-		return false, fmt.Errorf(
-			"config version %d is newer than supported version %d; please update Javinizer",
-			cfg.ConfigVersion,
-			CurrentConfigVersion,
-		)
-	}
-
-	defaults := DefaultConfig()
-	originalVersion := cfg.ConfigVersion
-	changed := false
-
-	for _, rule := range configCompatibilityRules {
-		if originalVersion > rule.legacyMaxVersion {
-			continue
-		}
-		ruleChanged, err := rule.apply(cfg, defaults)
-		if err != nil {
-			return false, err
-		}
-		changed = changed || ruleChanged
-	}
-
-	if cfg.ConfigVersion != CurrentConfigVersion {
-		cfg.ConfigVersion = CurrentConfigVersion
-		changed = true
-	}
-
-	return changed, nil
-}
-
 // Validate checks configuration values for validity
 func (c *Config) Validate() error {
 	// Validate database settings
@@ -878,7 +747,6 @@ func (c *Config) Validate() error {
 	if dbType != "sqlite" {
 		return fmt.Errorf("database.type must be 'sqlite' (currently only sqlite is supported)")
 	}
-	c.Database.Type = dbType
 
 	if strings.TrimSpace(c.Database.DSN) == "" {
 		return fmt.Errorf("database.dsn is required")
@@ -896,9 +764,7 @@ func (c *Config) Validate() error {
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Scrapers.R18Dev.Language)) {
 	case "", "en":
-		c.Scrapers.R18Dev.Language = "en"
 	case "ja":
-		c.Scrapers.R18Dev.Language = "ja"
 	default:
 		return fmt.Errorf("scrapers.r18dev.language must be either 'en' or 'ja'")
 	}
@@ -906,13 +772,9 @@ func (c *Config) Validate() error {
 	// Validate JavLibrary language (must be one of: en, ja, cn, tw)
 	switch strings.ToLower(strings.TrimSpace(c.Scrapers.JavLibrary.Language)) {
 	case "", "en":
-		c.Scrapers.JavLibrary.Language = "en"
 	case "ja":
-		c.Scrapers.JavLibrary.Language = "ja"
 	case "cn":
-		c.Scrapers.JavLibrary.Language = "cn"
 	case "tw":
-		c.Scrapers.JavLibrary.Language = "tw"
 	default:
 		return fmt.Errorf("scrapers.javlibrary.language must be one of: 'en', 'ja', 'cn', 'tw'")
 	}
@@ -991,14 +853,13 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Set default referer if not specified (for backward compatibility with old configs)
-	// DMM CDN requires a referer header to avoid 403 errors
-	if c.Scrapers.Referer == "" {
-		c.Scrapers.Referer = "https://www.dmm.co.jp/"
-	}
-
 	// Validate referer URL format
-	u, err := url.Parse(c.Scrapers.Referer)
+	referer := strings.TrimSpace(c.Scrapers.Referer)
+	if referer == "" {
+		// Backward compatibility with old configs that omitted referer.
+		referer = "https://www.dmm.co.jp/"
+	}
+	u, err := url.Parse(referer)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("scrapers.referer must be a valid http(s) URL with a host")
 	}
@@ -1028,73 +889,76 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validateTranslationConfig() error {
-	t := &c.Metadata.Translation
+	t := c.Metadata.Translation
 
-	// Apply defaults for omitted fields in partial configs.
-	if strings.TrimSpace(t.Provider) == "" {
-		t.Provider = "openai"
+	provider := strings.ToLower(strings.TrimSpace(t.Provider))
+	if provider == "" {
+		provider = "openai"
 	}
-	if strings.TrimSpace(t.SourceLanguage) == "" {
-		t.SourceLanguage = "auto"
+
+	targetLanguage := strings.TrimSpace(t.TargetLanguage)
+	if targetLanguage == "" {
+		targetLanguage = "ja"
 	}
-	if strings.TrimSpace(t.TargetLanguage) == "" {
-		t.TargetLanguage = "ja"
+
+	timeoutSeconds := t.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 60
 	}
-	if t.TimeoutSeconds <= 0 {
-		t.TimeoutSeconds = 60
+
+	openAIBaseURL := strings.TrimSpace(t.OpenAI.BaseURL)
+	if openAIBaseURL == "" {
+		openAIBaseURL = "https://api.openai.com/v1"
 	}
-	if strings.TrimSpace(t.OpenAI.BaseURL) == "" {
-		t.OpenAI.BaseURL = "https://api.openai.com/v1"
+
+	openAIModel := strings.TrimSpace(t.OpenAI.Model)
+	if openAIModel == "" {
+		openAIModel = "gpt-4o-mini"
 	}
-	if strings.TrimSpace(t.OpenAI.Model) == "" {
-		t.OpenAI.Model = "gpt-4o-mini"
+
+	deepLMode := strings.ToLower(strings.TrimSpace(t.DeepL.Mode))
+	if deepLMode == "" {
+		deepLMode = "free"
 	}
-	if strings.TrimSpace(t.DeepL.Mode) == "" {
-		t.DeepL.Mode = "free"
-	}
-	if strings.TrimSpace(t.Google.Mode) == "" {
-		t.Google.Mode = "free"
+
+	googleMode := strings.ToLower(strings.TrimSpace(t.Google.Mode))
+	if googleMode == "" {
+		googleMode = "free"
 	}
 
 	if !t.Enabled {
 		return nil
 	}
 
-	if t.TimeoutSeconds < 5 || t.TimeoutSeconds > 300 {
+	if timeoutSeconds < 5 || timeoutSeconds > 300 {
 		return fmt.Errorf("metadata.translation.timeout_seconds must be between 5 and 300")
 	}
 
-	if strings.TrimSpace(t.TargetLanguage) == "" {
+	if targetLanguage == "" {
 		return fmt.Errorf("metadata.translation.target_language is required when translation is enabled")
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(t.Provider))
-	t.Provider = provider
 	switch provider {
 	case "openai":
-		if strings.TrimSpace(t.OpenAI.Model) == "" {
+		if openAIModel == "" {
 			return fmt.Errorf("metadata.translation.openai.model is required when provider=openai")
 		}
-		if err := validateHTTPBaseURL("metadata.translation.openai.base_url", t.OpenAI.BaseURL); err != nil {
+		if err := validateHTTPBaseURL("metadata.translation.openai.base_url", openAIBaseURL); err != nil {
 			return err
 		}
 	case "deepl":
-		mode := strings.ToLower(strings.TrimSpace(t.DeepL.Mode))
-		if mode != "free" && mode != "pro" {
+		if deepLMode != "free" && deepLMode != "pro" {
 			return fmt.Errorf("metadata.translation.deepl.mode must be either 'free' or 'pro'")
 		}
-		t.DeepL.Mode = mode
 		if strings.TrimSpace(t.DeepL.BaseURL) != "" {
 			if err := validateHTTPBaseURL("metadata.translation.deepl.base_url", t.DeepL.BaseURL); err != nil {
 				return err
 			}
 		}
 	case "google":
-		mode := strings.ToLower(strings.TrimSpace(t.Google.Mode))
-		if mode != "free" && mode != "paid" {
+		if googleMode != "free" && googleMode != "paid" {
 			return fmt.Errorf("metadata.translation.google.mode must be either 'free' or 'paid'")
 		}
-		t.Google.Mode = mode
 		if strings.TrimSpace(t.Google.BaseURL) != "" {
 			if err := validateHTTPBaseURL("metadata.translation.google.base_url", t.Google.BaseURL); err != nil {
 				return err
@@ -1370,241 +1234,4 @@ func validateFlareSolverrConfig(path string, cfg FlareSolverrConfig) error {
 		return fmt.Errorf("%s.session_ttl must be between 60 and 3600", path)
 	}
 	return nil
-}
-
-// Load reads configuration from a YAML file
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// If file doesn't exist, return default config
-			return DefaultConfig(), nil
-		}
-		return nil, fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	cfg := DefaultConfig()
-	// Treat existing files without config_version as legacy schema (v0) so
-	// LoadOrCreate can apply migrations and persist newly introduced fields.
-	cfg.ConfigVersion = 0
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
-	}
-
-	return cfg, nil
-}
-
-func cloneYAMLNode(node *yaml.Node) *yaml.Node {
-	if node == nil {
-		return nil
-	}
-
-	cloned := *node
-	cloned.Content = make([]*yaml.Node, len(node.Content))
-	for i, child := range node.Content {
-		cloned.Content[i] = cloneYAMLNode(child)
-	}
-	return &cloned
-}
-
-func applyNodeMetadataPreservingComments(dst, src *yaml.Node) {
-	if src.HeadComment == "" {
-		src.HeadComment = dst.HeadComment
-	}
-	if src.LineComment == "" {
-		src.LineComment = dst.LineComment
-	}
-	if src.FootComment == "" {
-		src.FootComment = dst.FootComment
-	}
-	if src.Style == 0 {
-		src.Style = dst.Style
-	}
-}
-
-func findMappingValueIndex(node *yaml.Node, key string) int {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return -1
-	}
-	for i := 0; i < len(node.Content)-1; i += 2 {
-		if node.Content[i].Value == key {
-			return i + 1
-		}
-	}
-	return -1
-}
-
-func mergeYAMLNode(dst, src *yaml.Node) {
-	if dst == nil || src == nil {
-		return
-	}
-
-	if dst.Kind == yaml.MappingNode && src.Kind == yaml.MappingNode {
-		for i := 0; i < len(src.Content)-1; i += 2 {
-			srcKey := src.Content[i]
-			srcValue := src.Content[i+1]
-
-			dstValueIdx := findMappingValueIndex(dst, srcKey.Value)
-			if dstValueIdx == -1 {
-				dst.Content = append(dst.Content, cloneYAMLNode(srcKey), cloneYAMLNode(srcValue))
-				continue
-			}
-
-			mergeYAMLNode(dst.Content[dstValueIdx], srcValue)
-		}
-		return
-	}
-
-	if dst.Kind == yaml.DocumentNode && src.Kind == yaml.DocumentNode {
-		if len(dst.Content) == 0 {
-			dst.Content = append(dst.Content, cloneYAMLNode(src.Content[0]))
-			return
-		}
-		if len(src.Content) == 0 {
-			return
-		}
-		mergeYAMLNode(dst.Content[0], src.Content[0])
-		return
-	}
-
-	replacement := cloneYAMLNode(src)
-	applyNodeMetadataPreservingComments(dst, replacement)
-	*dst = *replacement
-}
-
-func configToYAMLDocument(cfg *Config) (*yaml.Node, error) {
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("failed to parse marshaled config: %w", err)
-	}
-
-	if doc.Kind != yaml.DocumentNode {
-		return nil, fmt.Errorf("invalid marshaled YAML document")
-	}
-
-	return &doc, nil
-}
-
-func parseYAMLDocument(data []byte) (*yaml.Node, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("failed to parse YAML document: %w", err)
-	}
-	if doc.Kind != yaml.DocumentNode {
-		return nil, fmt.Errorf("invalid YAML document")
-	}
-	return &doc, nil
-}
-
-func encodeYAMLDocument(doc *yaml.Node) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(4)
-	if err := enc.Encode(doc); err != nil {
-		_ = enc.Close()
-		return nil, fmt.Errorf("failed to encode YAML document: %w", err)
-	}
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("failed to finalize YAML encoding: %w", err)
-	}
-	return buf.Bytes(), nil
-}
-
-// Save writes the configuration to a YAML file
-func Save(cfg *Config, path string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, DirPermConfig); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
-	}
-
-	targetDoc, err := configToYAMLDocument(cfg)
-	if err != nil {
-		return err
-	}
-
-	var data []byte
-	existingData, readErr := os.ReadFile(path)
-	if readErr == nil {
-		existingDoc, parseErr := parseYAMLDocument(existingData)
-		if parseErr == nil {
-			mergedDoc := cloneYAMLNode(existingDoc)
-			mergeYAMLNode(mergedDoc, targetDoc)
-
-			data, err = encodeYAMLDocument(mergedDoc)
-			if err != nil {
-				return err
-			}
-		} else {
-			// Fallback: write canonical YAML from struct if existing YAML is malformed.
-			data, err = encodeYAMLDocument(targetDoc)
-			if err != nil {
-				return err
-			}
-		}
-	} else if os.IsNotExist(readErr) {
-		data, err = encodeYAMLDocument(targetDoc)
-		if err != nil {
-			return err
-		}
-	} else {
-		// If existing file can't be read (e.g., permissions), fall back to
-		// canonical YAML output and let the write path return the final error.
-		data, err = encodeYAMLDocument(targetDoc)
-		if err != nil {
-			return err
-		}
-	}
-
-	if readErr == nil && bytes.Equal(existingData, data) {
-		return nil
-	}
-
-	if err := os.WriteFile(path, data, FilePermConfig); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	return nil
-}
-
-// LoadOrCreate loads config from file or creates it with defaults
-func LoadOrCreate(path string) (*Config, error) {
-	cfg, err := Load(path)
-	if err != nil {
-		return nil, err
-	}
-
-	// Capture whether file existed prior to potential migration/save.
-	_, statErr := os.Stat(path)
-	fileMissing := os.IsNotExist(statErr)
-	if statErr != nil && !fileMissing {
-		return nil, fmt.Errorf("failed to stat config file: %w", statErr)
-	}
-
-	migrated, err := applyCompatibilityRules(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	// Validate configuration
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
-	}
-
-	// Save when created or migrated to keep on-disk config in sync.
-	if fileMissing || migrated {
-		if err := Save(cfg, path); err != nil {
-			if fileMissing {
-				return nil, fmt.Errorf("failed to save default config: %w", err)
-			}
-			return nil, fmt.Errorf("failed to save migrated config: %w", err)
-		}
-	}
-
-	return cfg, nil
 }

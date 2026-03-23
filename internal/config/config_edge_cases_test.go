@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,7 +45,12 @@ func TestSaveFileWriteError(t *testing.T) {
 
 	// Should fail due to write permissions
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to write config file")
+	assert.True(
+		t,
+		strings.Contains(err.Error(), "failed to write config file") ||
+			strings.Contains(err.Error(), "failed to acquire config lock"),
+		"expected write or lock failure, got: %v", err,
+	)
 }
 
 // TestLoadOrCreateSaveError tests error handling when Save() fails in LoadOrCreate

@@ -655,6 +655,17 @@ func TestUpdateConfig(t *testing.T) {
 			expectedStatus: 400,
 			expectedError:  "Invalid configuration format",
 		},
+		{
+			name:          "reject newer config version",
+			initialConfig: config.DefaultConfig(),
+			requestBody: func() *config.Config {
+				cfg := config.DefaultConfig()
+				cfg.ConfigVersion = config.CurrentConfigVersion + 1
+				return cfg
+			}(),
+			expectedStatus: 400,
+			expectedError:  "newer than supported version",
+		},
 	}
 
 	for _, tt := range tests {

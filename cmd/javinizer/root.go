@@ -103,6 +103,10 @@ func initConfig() {
 
 	// Override config values with environment variables (Docker-friendly)
 	config.ApplyEnvironmentOverrides(cfg)
+	if _, err := config.Prepare(cfg); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Failed to apply environment overrides: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Initialize logger
 	logCfg := &logging.Config{

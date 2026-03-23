@@ -599,11 +599,7 @@ func TestR18DevLanguageValidation(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			if tt.language == "ja" {
-				assert.Equal(t, "ja", cfg.Scrapers.R18Dev.Language)
-			} else {
-				assert.Equal(t, "en", cfg.Scrapers.R18Dev.Language)
-			}
+			assert.Equal(t, tt.language, cfg.Scrapers.R18Dev.Language)
 		})
 	}
 }

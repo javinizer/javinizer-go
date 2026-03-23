@@ -142,8 +142,14 @@ func Run(cmd *cobra.Command, args []string, configFile string, deps *commandutil
 		return nil, nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Apply environment overrides before CLI flags so flags keep highest precedence.
+	config.ApplyEnvironmentOverrides(cfg)
+
 	// Apply CLI flag overrides to config
 	ApplyFlagOverrides(cmd, cfg)
+	if _, err := config.Prepare(cfg); err != nil {
+		return nil, nil, fmt.Errorf("invalid configuration after CLI overrides: %w", err)
+	}
 
 	// Initialize or use injected dependencies
 	var ownDeps bool

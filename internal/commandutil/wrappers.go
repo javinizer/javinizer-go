@@ -40,6 +40,9 @@ func RunWithDeps(
 		// Apply command-specific overrides if provided
 		if applyOverrides != nil {
 			applyOverrides(cmd, cfg)
+			if _, err := config.Prepare(cfg); err != nil {
+				return fmt.Errorf("invalid configuration after overrides: %w", err)
+			}
 		}
 
 		deps, err := newDeps(cfg)

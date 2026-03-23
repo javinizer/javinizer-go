@@ -153,10 +153,16 @@ server:
 
 	err := os.WriteFile(cfgPath, []byte(newer), 0644)
 	require.NoError(t, err)
+	before, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
 
 	_, err = LoadOrCreate(cfgPath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "newer than supported version")
+
+	after, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after))
 }
 
 func TestLegacyScraperPriorityBaseline(t *testing.T) {

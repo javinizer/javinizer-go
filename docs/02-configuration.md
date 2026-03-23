@@ -28,7 +28,7 @@ Generate a fresh config file:
 javinizer init
 ```
 
-The config file now includes a `config_version` field. On startup, Javinizer applies incremental schema migrations for older config files and writes the upgraded config back to disk.
+The config file includes a `config_version` field. On startup, Javinizer applies compatibility rules for older config files and writes the upgraded config back to disk.
 
 ## Server Settings
 
@@ -49,7 +49,7 @@ Javinizer supports multiple metadata scrapers that can be enabled/disabled and p
 ### General Scraper Settings
 
 ```yaml
-config_version: 2
+config_version: 3
 
 scrapers:
   user_agent: "Javinizer (+https://github.com/javinizer/Javinizer)"

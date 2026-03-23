@@ -488,3 +488,25 @@ func TestRun_FlagOverrides(t *testing.T) {
 	assert.NotNil(t, results)
 	// Flag override was applied (verified indirectly through successful execution)
 }
+
+func TestRun_EnvironmentOverridesValidated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+
+	tmpFile := t.TempDir() + "/config.yaml"
+	cfg := config.DefaultConfig()
+	cfg.Metadata.Translation.Enabled = true
+	require.NoError(t, config.Save(cfg, tmpFile))
+
+	cmd := scrape.NewCommand()
+	t.Setenv("TRANSLATION_PROVIDER", "definitely-not-valid")
+
+	movie, results, err := scrape.Run(cmd, []string{"TEST-ENV"}, tmpFile, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid configuration after CLI overrides")
+	assert.Contains(t, err.Error(), "metadata.translation.provider")
+	assert.Nil(t, movie)
+	assert.Nil(t, results)
+}

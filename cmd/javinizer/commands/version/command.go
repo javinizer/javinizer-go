@@ -108,5 +108,8 @@ func loadConfigForCheck(configFile string) (*config.Config, error) {
 	}
 
 	config.ApplyEnvironmentOverrides(cfg)
+	if _, err := config.Prepare(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
