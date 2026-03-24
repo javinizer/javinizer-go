@@ -213,7 +213,7 @@ lint:
 # Generate Swagger API documentation
 swagger:
 	@echo "Generating Swagger documentation..."
-	@export PATH=$$(go env GOPATH)/bin && swag init -g cmd/javinizer/commands/api/command.go -o docs/swagger
+	@export PATH=$$PATH:$$(go env GOPATH)/bin && swag init -g cmd/javinizer/commands/api/command.go -o docs/swagger
 	@echo "✅ Swagger documentation generated"
 	@echo "   - docs/swagger/swagger.json ($(shell wc -l < docs/swagger/swagger.json) lines)"
 	@echo "   - docs/swagger/swagger.yaml ($(shell wc -l < docs/swagger/swagger.yaml) lines)"
@@ -222,8 +222,8 @@ swagger:
 # Check if swagger documentation is up to date
 check-swagger:
 	@echo "Checking Swagger documentation..."
-	@export PATH=$$(go env GOPATH)/bin && swag init -g cmd/javinizer/commands/api/command.go -o docs/swagger --instanceName javinizer-api
-	@if [ -n "$(git status docs/swagger/ --porcelain)" ]; then \
+	@export PATH=$$PATH:$$(go env GOPATH)/bin && swag init -g cmd/javinizer/commands/api/command.go -o docs/swagger
+	@if ! git diff --quiet -- docs/swagger/; then \
 		echo "❌ Swagger documentation is out of date"; \
 		echo "Run 'make swagger' and commit the changes"; \
 		exit 1; \

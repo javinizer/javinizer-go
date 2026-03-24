@@ -1,17 +1,6 @@
 basePath: /
 definitions:
-  api.ActressMergeConflict:
-    properties:
-      default_resolution:
-        example: target
-        type: string
-      field:
-        example: japanese_name
-        type: string
-      source_value: {}
-      target_value: {}
-    type: object
-  api.ActressMergePreviewRequest:
+  actress.ActressMergePreviewRequest:
     properties:
       source_id:
         example: 34
@@ -23,11 +12,11 @@ definitions:
     - source_id
     - target_id
     type: object
-  api.ActressMergePreviewResponse:
+  actress.ActressMergePreviewResponse:
     properties:
       conflicts:
         items:
-          $ref: '#/definitions/api.ActressMergeConflict'
+          $ref: '#/definitions/contracts.ActressMergeConflict'
         type: array
       default_resolutions:
         additionalProperties:
@@ -40,7 +29,7 @@ definitions:
       target:
         $ref: '#/definitions/models.Actress'
     type: object
-  api.ActressMergeRequest:
+  actress.ActressMergeRequest:
     properties:
       resolutions:
         additionalProperties:
@@ -59,7 +48,7 @@ definitions:
     - source_id
     - target_id
     type: object
-  api.ActressMergeResponse:
+  actress.ActressMergeResponse:
     properties:
       aliases_added:
         example: 5
@@ -76,47 +65,17 @@ definitions:
         example: 27
         type: integer
     type: object
-  api.AvailableScrapersResponse:
+  actress.ErrorResponse:
     properties:
-      scrapers:
+      error:
+        example: Movie not found
+        type: string
+      errors:
         items:
-          $ref: '#/definitions/api.ScraperInfo'
+          type: string
         type: array
     type: object
-  api.BatchFileResult:
-    properties:
-      actress_sources:
-        additionalProperties:
-          type: string
-        description: Actress-level source by scraper/NFO
-        type: object
-      data:
-        description: Movie data
-      ended_at:
-        type: string
-      error:
-        type: string
-      field_sources:
-        additionalProperties:
-          type: string
-        description: Field-level source by scraper/NFO
-        type: object
-      file_path:
-        type: string
-      is_multi_part:
-        type: boolean
-      movie_id:
-        type: string
-      part_number:
-        type: integer
-      part_suffix:
-        type: string
-      started_at:
-        type: string
-      status:
-        type: string
-    type: object
-  api.BatchJobResponse:
+  batch.BatchJobResponse:
     properties:
       completed:
         type: integer
@@ -135,7 +94,7 @@ definitions:
         type: number
       results:
         additionalProperties:
-          $ref: '#/definitions/api.BatchFileResult'
+          $ref: '#/definitions/contracts.BatchFileResult'
         type: object
       started_at:
         type: string
@@ -144,7 +103,7 @@ definitions:
       total_files:
         type: integer
     type: object
-  api.BatchRescrapeRequest:
+  batch.BatchRescrapeRequest:
     properties:
       array_strategy:
         description: 'For Update mode: merge, replace'
@@ -174,7 +133,7 @@ definitions:
           type: string
         type: array
     type: object
-  api.BatchRescrapeResponse:
+  batch.BatchRescrapeResponse:
     properties:
       actress_sources:
         additionalProperties:
@@ -187,7 +146,7 @@ definitions:
       movie:
         $ref: '#/definitions/models.Movie'
     type: object
-  api.BatchScrapeRequest:
+  batch.BatchScrapeRequest:
     properties:
       array_strategy:
         description: 'For Update mode: merge, replace'
@@ -231,52 +190,13 @@ definitions:
     required:
     - files
     type: object
-  api.BatchScrapeResponse:
+  batch.BatchScrapeResponse:
     properties:
       job_id:
         example: 550e8400-e29b-41d4-a716-446655440000
         type: string
     type: object
-  api.BrowseRequest:
-    properties:
-      path:
-        example: /path/to/directory
-        type: string
-    type: object
-  api.BrowseResponse:
-    properties:
-      current_path:
-        example: /path/to/directory
-        type: string
-      items:
-        items:
-          $ref: '#/definitions/api.FileInfo'
-        type: array
-      parent_path:
-        example: /path/to
-        type: string
-    type: object
-  api.DataSource:
-    properties:
-      confidence:
-        description: Confidence score (0.0-1.0)
-        example: 0.9
-        type: number
-      last_updated:
-        description: ISO 8601 timestamp
-        example: "2024-01-15T10:30:00Z"
-        type: string
-      source:
-        description: '"scraper" or "nfo"'
-        example: nfo
-        type: string
-    type: object
-  api.DeleteHistoryBulkResponse:
-    properties:
-      deleted:
-        type: integer
-    type: object
-  api.ErrorResponse:
+  batch.ErrorResponse:
     properties:
       error:
         example: Movie not found
@@ -286,244 +206,21 @@ definitions:
           type: string
         type: array
     type: object
-  api.FieldDifference:
-    properties:
-      field:
-        example: title
-        type: string
-      merged_value: {}
-      nfo_value: {}
-      reason:
-        example: NFO preferred by merge strategy
-        type: string
-      scraped_value: {}
-    type: object
-  api.FileInfo:
-    properties:
-      is_dir:
-        example: false
-        type: boolean
-      is_multi_part:
-        example: true
-        type: boolean
-      matched:
-        example: true
-        type: boolean
-      mod_time:
-        example: "2024-01-15T10:30:00Z"
-        type: string
-      movie_id:
-        example: IPX-535
-        type: string
-      name:
-        example: video.mp4
-        type: string
-      part_number:
-        example: 1
-        type: integer
-      part_suffix:
-        example: -pt1
-        type: string
-      path:
-        example: /path/to/video.mp4
-        type: string
-      size:
-        example: 1024000000
-        type: integer
-    type: object
-  api.HealthResponse:
-    properties:
-      build_date:
-        example: "2026-02-23T00:00:00Z"
-        type: string
-      commit:
-        example: abc123def456
-        type: string
-      scrapers:
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-      status:
-        example: ok
-        type: string
-      version:
-        example: v1.2.3
-        type: string
-    type: object
-  api.HistoryListResponse:
-    properties:
-      limit:
-        type: integer
-      offset:
-        type: integer
-      records:
-        items:
-          $ref: '#/definitions/api.HistoryRecord'
-        type: array
-      total:
-        type: integer
-    type: object
-  api.HistoryRecord:
-    properties:
-      created_at:
-        type: string
-      dry_run:
-        type: boolean
-      error_message:
-        type: string
-      id:
-        type: integer
-      metadata:
-        type: string
-      movie_id:
-        type: string
-      new_path:
-        type: string
-      operation:
-        type: string
-      original_path:
-        type: string
-      status:
-        type: string
-    type: object
-  api.HistoryStats:
-    properties:
-      by_operation:
-        additionalProperties:
-          format: int64
-          type: integer
-        type: object
-      failed:
-        type: integer
-      reverted:
-        type: integer
-      success:
-        type: integer
-      total:
-        type: integer
-    type: object
-  api.MergeStatistics:
-    properties:
-      conflicts_resolved:
-        example: 5
-        type: integer
-      empty_fields:
-        example: 2
-        type: integer
-      from_nfo:
-        example: 3
-        type: integer
-      from_scraper:
-        example: 10
-        type: integer
-      merged_arrays:
-        example: 2
-        type: integer
-      total_fields:
-        example: 15
-        type: integer
-    type: object
-  api.MovieResponse:
+  batch.MovieResponse:
     properties:
       merge_stats:
         allOf:
-        - $ref: '#/definitions/api.MergeStatistics'
+        - $ref: '#/definitions/contracts.MergeStatistics'
         description: Merge statistics when NFO merging occurred
       movie:
         $ref: '#/definitions/models.Movie'
       provenance:
         additionalProperties:
-          $ref: '#/definitions/api.DataSource'
+          $ref: '#/definitions/contracts.DataSource'
         description: Field-level data source tracking
         type: object
     type: object
-  api.MoviesResponse:
-    properties:
-      count:
-        example: 20
-        type: integer
-      movies:
-        items:
-          $ref: '#/definitions/models.Movie'
-        type: array
-    type: object
-  api.NFOComparisonRequest:
-    properties:
-      array_strategy:
-        description: 'Array field merge strategy: merge or replace'
-        example: merge
-        type: string
-      merge_strategy:
-        description: 'Deprecated: prefer-scraper, prefer-nfo, merge-arrays (use preset
-          or scalar/array strategies instead)'
-        example: prefer-scraper
-        type: string
-      nfo_path:
-        description: 'Optional: explicit NFO path'
-        example: /path/to/movie.nfo
-        type: string
-      preset:
-        description: 'Merge strategy preset: conservative, gap-fill, or aggressive
-          (overrides scalar/array strategies)'
-        example: conservative
-        type: string
-      scalar_strategy:
-        description: 'Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing,
-          or fill-missing-only'
-        example: prefer-nfo
-        type: string
-      selected_scrapers:
-        description: 'Optional: custom scrapers for comparison'
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-    type: object
-  api.NFOComparisonResponse:
-    properties:
-      differences:
-        description: List of fields that differ
-        items:
-          $ref: '#/definitions/api.FieldDifference'
-        type: array
-      merge_stats:
-        allOf:
-        - $ref: '#/definitions/api.MergeStatistics'
-        description: Merge statistics
-      merged_data:
-        allOf:
-        - $ref: '#/definitions/models.Movie'
-        description: Result of merging
-      movie_id:
-        example: IPX-535
-        type: string
-      nfo_data:
-        allOf:
-        - $ref: '#/definitions/models.Movie'
-        description: Data from NFO file
-      nfo_exists:
-        example: true
-        type: boolean
-      nfo_path:
-        description: Returns filename only for security
-        example: movie.nfo
-        type: string
-      provenance:
-        additionalProperties:
-          $ref: '#/definitions/api.DataSource'
-        description: Field-level provenance
-        type: object
-      scraped_data:
-        allOf:
-        - $ref: '#/definitions/models.Movie'
-        description: Fresh scraped data
-    type: object
-  api.OrganizePreviewRequest:
+  batch.OrganizePreviewRequest:
     properties:
       copy_only:
         example: false
@@ -540,7 +237,7 @@ definitions:
     required:
     - destination
     type: object
-  api.OrganizePreviewResponse:
+  batch.OrganizePreviewResponse:
     properties:
       extrafanart_path:
         example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/extrafanart
@@ -583,7 +280,7 @@ definitions:
           type: string
         type: array
     type: object
-  api.OrganizeRequest:
+  batch.OrganizeRequest:
     properties:
       copy_only:
         example: false
@@ -600,43 +297,7 @@ definitions:
     required:
     - destination
     type: object
-  api.PathAutocompleteRequest:
-    properties:
-      limit:
-        example: 10
-        type: integer
-      path:
-        example: /path/to/vid
-        type: string
-    required:
-    - path
-    type: object
-  api.PathAutocompleteResponse:
-    properties:
-      base_path:
-        example: /path/to
-        type: string
-      input_path:
-        example: /path/to/vid
-        type: string
-      suggestions:
-        items:
-          $ref: '#/definitions/api.PathAutocompleteSuggestion'
-        type: array
-    type: object
-  api.PathAutocompleteSuggestion:
-    properties:
-      is_dir:
-        example: true
-        type: boolean
-      name:
-        example: videos
-        type: string
-      path:
-        example: /path/to/videos
-        type: string
-    type: object
-  api.PosterCropRequest:
+  batch.PosterCropRequest:
     properties:
       height:
         minimum: 1
@@ -651,238 +312,17 @@ definitions:
         minimum: 0
         type: integer
     type: object
-  api.PosterCropResponse:
+  batch.PosterCropResponse:
     properties:
       cropped_poster_url:
         type: string
     type: object
-  api.ProxyTestRequest:
-    properties:
-      mode:
-        description: direct or flaresolverr
-        enum:
-        - direct
-        - flaresolverr
-        type: string
-      proxy:
-        $ref: '#/definitions/config.ProxyConfig'
-      target_url:
-        description: Optional override target URL
-        type: string
-    required:
-    - mode
-    type: object
-  api.ProxyTestResponse:
-    properties:
-      duration_ms:
-        type: integer
-      flaresolverr_url:
-        description: FlareSolverr endpoint used
-        type: string
-      message:
-        type: string
-      mode:
-        type: string
-      proxy_url:
-        description: Redacted proxy URL
-        type: string
-      status_code:
-        type: integer
-      success:
-        type: boolean
-      target_url:
-        type: string
-    type: object
-  api.RescrapeRequest:
-    properties:
-      force:
-        example: false
-        type: boolean
-      selected_scrapers:
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-    required:
-    - selected_scrapers
-    type: object
-  api.ScanRequest:
-    properties:
-      filter:
-        description: Filter folder/file names (case-insensitive substring match)
-        example: STSK
-        type: string
-      path:
-        example: /path/to/videos
-        type: string
-      recursive:
-        example: true
-        type: boolean
-    required:
-    - path
-    type: object
-  api.ScanResponse:
-    properties:
-      count:
-        example: 10
-        type: integer
-      files:
-        items:
-          $ref: '#/definitions/api.FileInfo'
-        type: array
-      skipped:
-        items:
-          type: string
-        type: array
-    type: object
-  api.ScrapeRequest:
-    properties:
-      force:
-        example: false
-        type: boolean
-      id:
-        example: IPX-535
-        type: string
-      selected_scrapers:
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-    required:
-    - id
-    type: object
-  api.ScrapeResponse:
-    properties:
-      cached:
-        example: false
-        type: boolean
-      errors:
-        items:
-          type: string
-        type: array
-      movie:
-        $ref: '#/definitions/models.Movie'
-      sources_used:
-        example: 2
-        type: integer
-    type: object
-  api.ScraperChoice:
-    properties:
-      label:
-        example: English
-        type: string
-      value:
-        example: en
-        type: string
-    type: object
-  api.ScraperInfo:
-    properties:
-      display_name:
-        example: R18.dev
-        type: string
-      enabled:
-        example: true
-        type: boolean
-      name:
-        example: r18dev
-        type: string
-      options:
-        items:
-          $ref: '#/definitions/api.ScraperOption'
-        type: array
-    type: object
-  api.ScraperOption:
-    properties:
-      choices:
-        description: 'For select type: available choices'
-        items:
-          $ref: '#/definitions/api.ScraperChoice'
-        type: array
-      description:
-        example: Enable detailed actress data scraping from DMM (may be slower)
-        type: string
-      key:
-        example: scrape_actress
-        type: string
-      label:
-        example: Scrape Actress Information
-        type: string
-      max:
-        example: 120
-        type: integer
-      min:
-        example: 5
-        type: integer
-      type:
-        description: boolean, string, number, select
-        example: boolean
-        type: string
-      unit:
-        example: seconds
-        type: string
-    type: object
-  api.TranslationModelsRequest:
-    properties:
-      api_key:
-        description: Provider API key
-        type: string
-      base_url:
-        description: API base URL (e.g., https://api.openai.com/v1)
-        type: string
-      provider:
-        description: openai (OpenAI-compatible only for now)
-        type: string
-    required:
-    - base_url
-    - provider
-    type: object
-  api.TranslationModelsResponse:
-    properties:
-      models:
-        items:
-          type: string
-        type: array
-    type: object
-  api.UpdateMovieRequest:
+  batch.UpdateMovieRequest:
     properties:
       movie:
         $ref: '#/definitions/models.Movie'
     required:
     - movie
-    type: object
-  api.VersionStatusResponse:
-    properties:
-      build_date:
-        description: Build timestamp
-        type: string
-      checked_at:
-        description: When the check was performed
-        type: string
-      commit:
-        description: Current commit hash
-        type: string
-      current:
-        description: Current installed version
-        type: string
-      error:
-        description: Error message if any
-        type: string
-      latest:
-        description: Latest available version
-        type: string
-      prerelease:
-        description: Whether latest is a prerelease
-        type: boolean
-      source:
-        description: '"cached" or "fresh"'
-        type: string
-      update_available:
-        description: Whether an update is available
-        type: boolean
     type: object
   config.APIConfig:
     properties:
@@ -1865,6 +1305,347 @@ definitions:
       title:
         type: boolean
     type: object
+  contracts.ActressMergeConflict:
+    properties:
+      default_resolution:
+        example: target
+        type: string
+      field:
+        example: japanese_name
+        type: string
+      source_value: {}
+      target_value: {}
+    type: object
+  contracts.BatchFileResult:
+    properties:
+      actress_sources:
+        additionalProperties:
+          type: string
+        description: Actress-level source by scraper/NFO
+        type: object
+      data:
+        description: Movie data
+      ended_at:
+        type: string
+      error:
+        type: string
+      field_sources:
+        additionalProperties:
+          type: string
+        description: Field-level source by scraper/NFO
+        type: object
+      file_path:
+        type: string
+      is_multi_part:
+        type: boolean
+      movie_id:
+        type: string
+      part_number:
+        type: integer
+      part_suffix:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+    type: object
+  contracts.DataSource:
+    properties:
+      confidence:
+        description: Confidence score (0.0-1.0)
+        example: 0.9
+        type: number
+      last_updated:
+        description: ISO 8601 timestamp
+        example: "2024-01-15T10:30:00Z"
+        type: string
+      source:
+        description: '"scraper" or "nfo"'
+        example: nfo
+        type: string
+    type: object
+  contracts.FieldDifference:
+    properties:
+      field:
+        example: title
+        type: string
+      merged_value: {}
+      nfo_value: {}
+      reason:
+        example: NFO preferred by merge strategy
+        type: string
+      scraped_value: {}
+    type: object
+  contracts.FileInfo:
+    properties:
+      is_dir:
+        example: false
+        type: boolean
+      is_multi_part:
+        example: true
+        type: boolean
+      matched:
+        example: true
+        type: boolean
+      mod_time:
+        example: "2024-01-15T10:30:00Z"
+        type: string
+      movie_id:
+        example: IPX-535
+        type: string
+      name:
+        example: video.mp4
+        type: string
+      part_number:
+        example: 1
+        type: integer
+      part_suffix:
+        example: -pt1
+        type: string
+      path:
+        example: /path/to/video.mp4
+        type: string
+      size:
+        example: 1024000000
+        type: integer
+    type: object
+  contracts.MergeStatistics:
+    properties:
+      conflicts_resolved:
+        example: 5
+        type: integer
+      empty_fields:
+        example: 2
+        type: integer
+      from_nfo:
+        example: 3
+        type: integer
+      from_scraper:
+        example: 10
+        type: integer
+      merged_arrays:
+        example: 2
+        type: integer
+      total_fields:
+        example: 15
+        type: integer
+    type: object
+  contracts.PathAutocompleteSuggestion:
+    properties:
+      is_dir:
+        example: true
+        type: boolean
+      name:
+        example: videos
+        type: string
+      path:
+        example: /path/to/videos
+        type: string
+    type: object
+  contracts.ScraperChoice:
+    properties:
+      label:
+        example: English
+        type: string
+      value:
+        example: en
+        type: string
+    type: object
+  contracts.ScraperInfo:
+    properties:
+      display_name:
+        example: R18.dev
+        type: string
+      enabled:
+        example: true
+        type: boolean
+      name:
+        example: r18dev
+        type: string
+      options:
+        items:
+          $ref: '#/definitions/contracts.ScraperOption'
+        type: array
+    type: object
+  contracts.ScraperOption:
+    properties:
+      choices:
+        description: 'For select type: available choices'
+        items:
+          $ref: '#/definitions/contracts.ScraperChoice'
+        type: array
+      description:
+        example: Enable detailed actress data scraping from DMM (may be slower)
+        type: string
+      key:
+        example: scrape_actress
+        type: string
+      label:
+        example: Scrape Actress Information
+        type: string
+      max:
+        example: 120
+        type: integer
+      min:
+        example: 5
+        type: integer
+      type:
+        description: boolean, string, number, select
+        example: boolean
+        type: string
+      unit:
+        example: seconds
+        type: string
+    type: object
+  file.BrowseRequest:
+    properties:
+      path:
+        example: /path/to/directory
+        type: string
+    type: object
+  file.BrowseResponse:
+    properties:
+      current_path:
+        example: /path/to/directory
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/contracts.FileInfo'
+        type: array
+      parent_path:
+        example: /path/to
+        type: string
+    type: object
+  file.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  file.PathAutocompleteRequest:
+    properties:
+      limit:
+        example: 10
+        type: integer
+      path:
+        example: /path/to/vid
+        type: string
+    required:
+    - path
+    type: object
+  file.PathAutocompleteResponse:
+    properties:
+      base_path:
+        example: /path/to
+        type: string
+      input_path:
+        example: /path/to/vid
+        type: string
+      suggestions:
+        items:
+          $ref: '#/definitions/contracts.PathAutocompleteSuggestion'
+        type: array
+    type: object
+  file.ScanRequest:
+    properties:
+      filter:
+        description: Filter folder/file names (case-insensitive substring match)
+        example: STSK
+        type: string
+      path:
+        example: /path/to/videos
+        type: string
+      recursive:
+        example: true
+        type: boolean
+    required:
+    - path
+    type: object
+  file.ScanResponse:
+    properties:
+      count:
+        example: 10
+        type: integer
+      files:
+        items:
+          $ref: '#/definitions/contracts.FileInfo'
+        type: array
+      skipped:
+        items:
+          type: string
+        type: array
+    type: object
+  history.DeleteHistoryBulkResponse:
+    properties:
+      deleted:
+        type: integer
+    type: object
+  history.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  history.HistoryListResponse:
+    properties:
+      limit:
+        type: integer
+      offset:
+        type: integer
+      records:
+        items:
+          $ref: '#/definitions/history.HistoryRecord'
+        type: array
+      total:
+        type: integer
+    type: object
+  history.HistoryRecord:
+    properties:
+      created_at:
+        type: string
+      dry_run:
+        type: boolean
+      error_message:
+        type: string
+      id:
+        type: integer
+      metadata:
+        type: string
+      movie_id:
+        type: string
+      new_path:
+        type: string
+      operation:
+        type: string
+      original_path:
+        type: string
+      status:
+        type: string
+    type: object
+  history.HistoryStats:
+    properties:
+      by_operation:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      failed:
+        type: integer
+      reverted:
+        type: integer
+      success:
+        type: integer
+      total:
+        type: integer
+    type: object
   models.Actress:
     properties:
       aliases:
@@ -2009,6 +1790,299 @@ definitions:
       updated_at:
         type: string
     type: object
+  movie.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  movie.MovieResponse:
+    properties:
+      merge_stats:
+        allOf:
+        - $ref: '#/definitions/contracts.MergeStatistics'
+        description: Merge statistics when NFO merging occurred
+      movie:
+        $ref: '#/definitions/models.Movie'
+      provenance:
+        additionalProperties:
+          $ref: '#/definitions/contracts.DataSource'
+        description: Field-level data source tracking
+        type: object
+    type: object
+  movie.MoviesResponse:
+    properties:
+      count:
+        example: 20
+        type: integer
+      movies:
+        items:
+          $ref: '#/definitions/models.Movie'
+        type: array
+    type: object
+  movie.NFOComparisonRequest:
+    properties:
+      array_strategy:
+        description: 'Array field merge strategy: merge or replace'
+        example: merge
+        type: string
+      merge_strategy:
+        description: 'Deprecated: prefer-scraper, prefer-nfo, merge-arrays (use preset
+          or scalar/array strategies instead)'
+        example: prefer-scraper
+        type: string
+      nfo_path:
+        description: 'Optional: explicit NFO path'
+        example: /path/to/movie.nfo
+        type: string
+      preset:
+        description: 'Merge strategy preset: conservative, gap-fill, or aggressive
+          (overrides scalar/array strategies)'
+        example: conservative
+        type: string
+      scalar_strategy:
+        description: 'Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing,
+          or fill-missing-only'
+        example: prefer-nfo
+        type: string
+      selected_scrapers:
+        description: 'Optional: custom scrapers for comparison'
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+    type: object
+  movie.NFOComparisonResponse:
+    properties:
+      differences:
+        description: List of fields that differ
+        items:
+          $ref: '#/definitions/contracts.FieldDifference'
+        type: array
+      merge_stats:
+        allOf:
+        - $ref: '#/definitions/contracts.MergeStatistics'
+        description: Merge statistics
+      merged_data:
+        allOf:
+        - $ref: '#/definitions/models.Movie'
+        description: Result of merging
+      movie_id:
+        example: IPX-535
+        type: string
+      nfo_data:
+        allOf:
+        - $ref: '#/definitions/models.Movie'
+        description: Data from NFO file
+      nfo_exists:
+        example: true
+        type: boolean
+      nfo_path:
+        description: Returns filename only for security
+        example: movie.nfo
+        type: string
+      provenance:
+        additionalProperties:
+          $ref: '#/definitions/contracts.DataSource'
+        description: Field-level provenance
+        type: object
+      scraped_data:
+        allOf:
+        - $ref: '#/definitions/models.Movie'
+        description: Fresh scraped data
+    type: object
+  movie.RescrapeRequest:
+    properties:
+      force:
+        example: false
+        type: boolean
+      selected_scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+    required:
+    - selected_scrapers
+    type: object
+  movie.ScrapeRequest:
+    properties:
+      force:
+        example: false
+        type: boolean
+      id:
+        example: IPX-535
+        type: string
+      selected_scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+    required:
+    - id
+    type: object
+  movie.ScrapeResponse:
+    properties:
+      cached:
+        example: false
+        type: boolean
+      errors:
+        items:
+          type: string
+        type: array
+      movie:
+        $ref: '#/definitions/models.Movie'
+      sources_used:
+        example: 2
+        type: integer
+    type: object
+  system.AvailableScrapersResponse:
+    properties:
+      scrapers:
+        items:
+          $ref: '#/definitions/contracts.ScraperInfo'
+        type: array
+    type: object
+  system.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  system.HealthResponse:
+    properties:
+      build_date:
+        example: "2026-02-23T00:00:00Z"
+        type: string
+      commit:
+        example: abc123def456
+        type: string
+      scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+      status:
+        example: ok
+        type: string
+      version:
+        example: v1.2.3
+        type: string
+    type: object
+  system.ProxyTestRequest:
+    properties:
+      mode:
+        description: direct or flaresolverr
+        enum:
+        - direct
+        - flaresolverr
+        type: string
+      proxy:
+        $ref: '#/definitions/config.ProxyConfig'
+      target_url:
+        description: Optional override target URL
+        type: string
+    required:
+    - mode
+    type: object
+  system.ProxyTestResponse:
+    properties:
+      duration_ms:
+        type: integer
+      flaresolverr_url:
+        description: FlareSolverr endpoint used
+        type: string
+      message:
+        type: string
+      mode:
+        type: string
+      proxy_url:
+        description: Redacted proxy URL
+        type: string
+      status_code:
+        type: integer
+      success:
+        type: boolean
+      target_url:
+        type: string
+    type: object
+  system.TranslationModelsRequest:
+    properties:
+      api_key:
+        description: Provider API key
+        type: string
+      base_url:
+        description: API base URL (e.g., https://api.openai.com/v1)
+        type: string
+      provider:
+        description: openai (OpenAI-compatible only for now)
+        type: string
+    required:
+    - base_url
+    - provider
+    type: object
+  system.TranslationModelsResponse:
+    properties:
+      models:
+        items:
+          type: string
+        type: array
+    type: object
+  temp.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  version.VersionStatusResponse:
+    properties:
+      build_date:
+        description: Build timestamp
+        type: string
+      checked_at:
+        description: When the check was performed
+        type: string
+      commit:
+        description: Current commit hash
+        type: string
+      current:
+        description: Current installed version
+        type: string
+      error:
+        description: Error message if any
+        type: string
+      latest:
+        description: Latest available version
+        type: string
+      prerelease:
+        description: Whether latest is a prerelease
+        type: boolean
+      source:
+        description: '"cached" or "fresh"'
+        type: string
+      update_available:
+        description: Whether an update is available
+        type: boolean
+    type: object
 host: localhost:8080
 info:
   contact:
@@ -2034,30 +2108,30 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.ActressMergeRequest'
+          $ref: '#/definitions/actress.ActressMergeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.ActressMergeResponse'
+            $ref: '#/definitions/actress.ActressMergeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/actress.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/actress.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/actress.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/actress.ErrorResponse'
       summary: Merge duplicated actresses
       tags:
       - actress
@@ -2073,30 +2147,30 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.ActressMergePreviewRequest'
+          $ref: '#/definitions/actress.ActressMergePreviewRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.ActressMergePreviewResponse'
+            $ref: '#/definitions/actress.ActressMergePreviewResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/actress.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/actress.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/actress.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/actress.ErrorResponse'
       summary: Preview actress merge
       tags:
       - actress
@@ -2121,11 +2195,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/actress.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/actress.ErrorResponse'
       summary: Search actresses
       tags:
       - actress
@@ -2144,11 +2218,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.BatchJobResponse'
+            $ref: '#/definitions/batch.BatchJobResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
       summary: Get batch job status
       tags:
       - web
@@ -2173,7 +2247,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
       summary: Cancel batch job
       tags:
       - web
@@ -2198,22 +2272,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.UpdateMovieRequest'
+          $ref: '#/definitions/batch.UpdateMovieRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.MovieResponse'
+            $ref: '#/definitions/batch.MovieResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
       summary: Update movie in batch job
       tags:
       - web
@@ -2243,7 +2317,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
       summary: Exclude movie from batch organization
       tags:
       - web
@@ -2269,22 +2343,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.PosterCropRequest'
+          $ref: '#/definitions/batch.PosterCropRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.PosterCropResponse'
+            $ref: '#/definitions/batch.PosterCropResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
       summary: Update manual poster crop in batch job
       tags:
       - web
@@ -2309,22 +2383,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.OrganizePreviewRequest'
+          $ref: '#/definitions/batch.OrganizePreviewRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.OrganizePreviewResponse'
+            $ref: '#/definitions/batch.OrganizePreviewResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
       summary: Preview organize output
       tags:
       - web
@@ -2350,26 +2424,26 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.BatchRescrapeRequest'
+          $ref: '#/definitions/batch.BatchRescrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.BatchRescrapeResponse'
+            $ref: '#/definitions/batch.BatchRescrapeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
       summary: Rescrape a single movie within a batch job
       tags:
       - batch
@@ -2390,7 +2464,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.OrganizeRequest'
+          $ref: '#/definitions/batch.OrganizeRequest'
       produces:
       - application/json
       responses:
@@ -2403,11 +2477,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
       summary: Organize batch job files
       tags:
       - web
@@ -2433,11 +2507,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
       summary: Update batch job files
       tags:
       - web
@@ -2453,18 +2527,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.BatchScrapeRequest'
+          $ref: '#/definitions/batch.BatchScrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.BatchScrapeResponse'
+            $ref: '#/definitions/batch.BatchScrapeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/batch.ErrorResponse'
       summary: Batch scrape movies
       tags:
       - web
@@ -2479,18 +2553,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.BrowseRequest'
+          $ref: '#/definitions/file.BrowseRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.BrowseResponse'
+            $ref: '#/definitions/file.BrowseResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/file.ErrorResponse'
       summary: Browse directory
       tags:
       - web
@@ -2505,18 +2579,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.PathAutocompleteRequest'
+          $ref: '#/definitions/file.PathAutocompleteRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.PathAutocompleteResponse'
+            $ref: '#/definitions/file.PathAutocompleteResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/file.ErrorResponse'
       summary: Autocomplete directory path
       tags:
       - web
@@ -2536,7 +2610,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/system.ErrorResponse'
       summary: Get configuration
       tags:
       - system
@@ -2563,11 +2637,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/system.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/system.ErrorResponse'
       summary: Update configuration
       tags:
       - system
@@ -2588,7 +2662,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/file.ErrorResponse'
       summary: Get current working directory
       tags:
       - web
@@ -2610,15 +2684,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.DeleteHistoryBulkResponse'
+            $ref: '#/definitions/history.DeleteHistoryBulkResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/history.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/history.ErrorResponse'
       summary: Delete history records in bulk
       tags:
       - history
@@ -2651,15 +2725,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.HistoryListResponse'
+            $ref: '#/definitions/history.HistoryListResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/history.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/history.ErrorResponse'
       summary: List history records
       tags:
       - history
@@ -2684,15 +2758,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/history.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/history.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/history.ErrorResponse'
       summary: Delete a history record
       tags:
       - history
@@ -2705,11 +2779,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.HistoryStats'
+            $ref: '#/definitions/history.HistoryStats'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/history.ErrorResponse'
       summary: Get history statistics
       tags:
       - history
@@ -2733,11 +2807,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.MoviesResponse'
+            $ref: '#/definitions/movie.MoviesResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
       summary: List cached movies
       tags:
       - movies
@@ -2761,11 +2835,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.MovieResponse'
+            $ref: '#/definitions/movie.MovieResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
       summary: Get movie by ID
       tags:
       - movies
@@ -2785,26 +2859,26 @@ paths:
         in: body
         name: request
         schema:
-          $ref: '#/definitions/api.NFOComparisonRequest'
+          $ref: '#/definitions/movie.NFOComparisonRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.NFOComparisonResponse'
+            $ref: '#/definitions/movie.NFOComparisonResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
       summary: Compare NFO with scraped data
       tags:
       - movies
@@ -2824,26 +2898,26 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.RescrapeRequest'
+          $ref: '#/definitions/movie.RescrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.MovieResponse'
+            $ref: '#/definitions/movie.MovieResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
       summary: Rescrape movie with specific scrapers
       tags:
       - movies
@@ -2865,7 +2939,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/temp.ErrorResponse'
       summary: Serve cropped poster image
   /api/v1/proxy/test:
     post:
@@ -2879,18 +2953,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.ProxyTestRequest'
+          $ref: '#/definitions/system.ProxyTestRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.ProxyTestResponse'
+            $ref: '#/definitions/system.ProxyTestResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/system.ErrorResponse'
       summary: Test proxy connectivity
       tags:
       - system
@@ -2905,22 +2979,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.ScanRequest'
+          $ref: '#/definitions/file.ScanRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.ScanResponse'
+            $ref: '#/definitions/file.ScanResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/file.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/file.ErrorResponse'
       summary: Scan directory for video files
       tags:
       - web
@@ -2935,26 +3009,26 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.ScrapeRequest'
+          $ref: '#/definitions/movie.ScrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.ScrapeResponse'
+            $ref: '#/definitions/movie.ScrapeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/movie.ErrorResponse'
       summary: Scrape movie metadata
       tags:
       - movies
@@ -2968,11 +3042,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.AvailableScrapersResponse'
+            $ref: '#/definitions/system.AvailableScrapersResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/system.ErrorResponse'
       summary: Get available scrapers
       tags:
       - system
@@ -2994,11 +3068,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/temp.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/temp.ErrorResponse'
       summary: Proxy remote images
   /api/v1/temp/posters/{jobId}/{filename}:
     get:
@@ -3023,7 +3097,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/temp.ErrorResponse'
       summary: Serve temporary poster image
   /api/v1/translation/models:
     post:
@@ -3036,22 +3110,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/api.TranslationModelsRequest'
+          $ref: '#/definitions/system.TranslationModelsRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.TranslationModelsResponse'
+            $ref: '#/definitions/system.TranslationModelsResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/system.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/system.ErrorResponse'
       summary: Get translation models
       tags:
       - system
@@ -3065,7 +3139,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.VersionStatusResponse'
+            $ref: '#/definitions/version.VersionStatusResponse'
       summary: Get version status
       tags:
       - system
@@ -3078,7 +3152,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.VersionStatusResponse'
+            $ref: '#/definitions/version.VersionStatusResponse'
       summary: Force version check
       tags:
       - system
@@ -3092,7 +3166,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.HealthResponse'
+            $ref: '#/definitions/system.HealthResponse'
       summary: Health check
       tags:
       - system
@@ -3108,11 +3182,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            additionalProperties:
+              type: string
+            type: object
       summary: WebSocket progress updates
 schemes:
 - http

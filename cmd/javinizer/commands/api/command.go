@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
-	"github.com/javinizer/javinizer-go/internal/api"
+	apiauth "github.com/javinizer/javinizer-go/internal/api/auth"
+	apicore "github.com/javinizer/javinizer-go/internal/api/core"
+	apiserver "github.com/javinizer/javinizer-go/internal/api/server"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -63,7 +65,7 @@ func NewCommand() *cobra.Command {
 // Run executes the API command initialization without starting the server.
 // Exported for testing purposes (Epic 7 Story 7.1).
 // Returns initialized ServerDependencies for the API server.
-func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (*api.ServerDependencies, error) {
+func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (*apicore.ServerDependencies, error) {
 	// Load configuration
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
@@ -81,7 +83,7 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 	logging.Infof("Loaded configuration from %s", configFile)
 
 	// Initialize single-user authentication manager (credentials file next to config).
-	authManager, err := api.NewAuthManager(configFile, api.DefaultSessionTTL)
+	authManager, err := apiauth.NewAuthManager(configFile, apiauth.DefaultSessionTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize authentication: %w", err)
 	}
@@ -146,7 +148,7 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 	historyRepo := database.NewHistoryRepository(db)
 
 	// Create server dependencies
-	apiDeps := &api.ServerDependencies{
+	apiDeps := &apicore.ServerDependencies{
 		ConfigFile:  configFile,
 		Registry:    registry,
 		DB:          db,
@@ -173,10 +175,10 @@ func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) e
 	defer func() { _ = apiDeps.DB.Close() }()
 
 	// Create and configure the server
-	router := api.NewServer(apiDeps)
+	router := apiserver.NewServer(apiDeps)
 
 	// Log server info
-	api.LogServerInfo(apiDeps.GetConfig())
+	apiserver.LogServerInfo(apiDeps.GetConfig())
 
 	// Start server (blocking operation)
 	currentCfg := apiDeps.GetConfig()

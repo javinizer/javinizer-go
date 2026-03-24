@@ -43,7 +43,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ActressMergeRequest"
+                            "$ref": "#/definitions/actress.ActressMergeRequest"
                         }
                     }
                 ],
@@ -51,31 +51,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.ActressMergeResponse"
+                            "$ref": "#/definitions/actress.ActressMergeResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/actress.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/actress.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/actress.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/actress.ErrorResponse"
                         }
                     }
                 }
@@ -101,7 +101,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ActressMergePreviewRequest"
+                            "$ref": "#/definitions/actress.ActressMergePreviewRequest"
                         }
                     }
                 ],
@@ -109,31 +109,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.ActressMergePreviewResponse"
+                            "$ref": "#/definitions/actress.ActressMergePreviewResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/actress.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/actress.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/actress.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/actress.ErrorResponse"
                         }
                     }
                 }
@@ -171,13 +171,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/actress.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/actress.ErrorResponse"
                         }
                     }
                 }
@@ -203,7 +203,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.BatchScrapeRequest"
+                            "$ref": "#/definitions/batch.BatchScrapeRequest"
                         }
                     }
                 ],
@@ -211,13 +211,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.BatchScrapeResponse"
+                            "$ref": "#/definitions/batch.BatchScrapeResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     }
                 }
@@ -246,13 +246,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.BatchJobResponse"
+                            "$ref": "#/definitions/batch.BatchJobResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     }
                 }
@@ -290,7 +290,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     }
                 }
@@ -330,7 +330,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.UpdateMovieRequest"
+                            "$ref": "#/definitions/batch.UpdateMovieRequest"
                         }
                     }
                 ],
@@ -338,19 +338,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.MovieResponse"
+                            "$ref": "#/definitions/batch.MovieResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     }
                 }
@@ -395,7 +395,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     }
                 }
@@ -435,7 +435,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.PosterCropRequest"
+                            "$ref": "#/definitions/batch.PosterCropRequest"
                         }
                     }
                 ],
@@ -443,19 +443,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.PosterCropResponse"
+                            "$ref": "#/definitions/batch.PosterCropResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     }
                 }
@@ -495,7 +495,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.OrganizePreviewRequest"
+                            "$ref": "#/definitions/batch.OrganizePreviewRequest"
                         }
                     }
                 ],
@@ -503,19 +503,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.OrganizePreviewResponse"
+                            "$ref": "#/definitions/batch.OrganizePreviewResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     }
                 }
@@ -555,7 +555,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.BatchRescrapeRequest"
+                            "$ref": "#/definitions/batch.BatchRescrapeRequest"
                         }
                     }
                 ],
@@ -563,25 +563,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.BatchRescrapeResponse"
+                            "$ref": "#/definitions/batch.BatchRescrapeResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     }
                 }
@@ -614,7 +614,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.OrganizeRequest"
+                            "$ref": "#/definitions/batch.OrganizeRequest"
                         }
                     }
                 ],
@@ -631,13 +631,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     }
                 }
@@ -675,13 +675,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/batch.ErrorResponse"
                         }
                     }
                 }
@@ -707,7 +707,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.BrowseRequest"
+                            "$ref": "#/definitions/file.BrowseRequest"
                         }
                     }
                 ],
@@ -715,13 +715,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.BrowseResponse"
+                            "$ref": "#/definitions/file.BrowseResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/file.ErrorResponse"
                         }
                     }
                 }
@@ -747,7 +747,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.PathAutocompleteRequest"
+                            "$ref": "#/definitions/file.PathAutocompleteRequest"
                         }
                     }
                 ],
@@ -755,13 +755,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.PathAutocompleteResponse"
+                            "$ref": "#/definitions/file.PathAutocompleteResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/file.ErrorResponse"
                         }
                     }
                 }
@@ -788,7 +788,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/system.ErrorResponse"
                         }
                     }
                 }
@@ -827,13 +827,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/system.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/system.ErrorResponse"
                         }
                     }
                 }
@@ -862,7 +862,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/file.ErrorResponse"
                         }
                     }
                 }
@@ -914,19 +914,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.HistoryListResponse"
+                            "$ref": "#/definitions/history.HistoryListResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/history.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/history.ErrorResponse"
                         }
                     }
                 }
@@ -958,19 +958,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.DeleteHistoryBulkResponse"
+                            "$ref": "#/definitions/history.DeleteHistoryBulkResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/history.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/history.ErrorResponse"
                         }
                     }
                 }
@@ -990,13 +990,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.HistoryStats"
+                            "$ref": "#/definitions/history.HistoryStats"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/history.ErrorResponse"
                         }
                     }
                 }
@@ -1034,19 +1034,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/history.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/history.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/history.ErrorResponse"
                         }
                     }
                 }
@@ -1080,13 +1080,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.MoviesResponse"
+                            "$ref": "#/definitions/movie.MoviesResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     }
                 }
@@ -1121,13 +1121,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.MovieResponse"
+                            "$ref": "#/definitions/movie.MovieResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     }
                 }
@@ -1159,7 +1159,7 @@ const docTemplate = `{
                         "name": "request",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/api.NFOComparisonRequest"
+                            "$ref": "#/definitions/movie.NFOComparisonRequest"
                         }
                     }
                 ],
@@ -1167,25 +1167,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.NFOComparisonResponse"
+                            "$ref": "#/definitions/movie.NFOComparisonResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     }
                 }
@@ -1218,7 +1218,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.RescrapeRequest"
+                            "$ref": "#/definitions/movie.RescrapeRequest"
                         }
                     }
                 ],
@@ -1226,25 +1226,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.MovieResponse"
+                            "$ref": "#/definitions/movie.MovieResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     }
                 }
@@ -1273,7 +1273,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/temp.ErrorResponse"
                         }
                     }
                 }
@@ -1299,7 +1299,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ProxyTestRequest"
+                            "$ref": "#/definitions/system.ProxyTestRequest"
                         }
                     }
                 ],
@@ -1307,13 +1307,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.ProxyTestResponse"
+                            "$ref": "#/definitions/system.ProxyTestResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/system.ErrorResponse"
                         }
                     }
                 }
@@ -1339,7 +1339,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ScanRequest"
+                            "$ref": "#/definitions/file.ScanRequest"
                         }
                     }
                 ],
@@ -1347,19 +1347,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.ScanResponse"
+                            "$ref": "#/definitions/file.ScanResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/file.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/file.ErrorResponse"
                         }
                     }
                 }
@@ -1385,7 +1385,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.ScrapeRequest"
+                            "$ref": "#/definitions/movie.ScrapeRequest"
                         }
                     }
                 ],
@@ -1393,25 +1393,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.ScrapeResponse"
+                            "$ref": "#/definitions/movie.ScrapeResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/movie.ErrorResponse"
                         }
                     }
                 }
@@ -1431,13 +1431,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.AvailableScrapersResponse"
+                            "$ref": "#/definitions/system.AvailableScrapersResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/system.ErrorResponse"
                         }
                     }
                 }
@@ -1466,13 +1466,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/temp.ErrorResponse"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/temp.ErrorResponse"
                         }
                     }
                 }
@@ -1508,7 +1508,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/temp.ErrorResponse"
                         }
                     }
                 }
@@ -1534,7 +1534,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/api.TranslationModelsRequest"
+                            "$ref": "#/definitions/system.TranslationModelsRequest"
                         }
                     }
                 ],
@@ -1542,19 +1542,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.TranslationModelsResponse"
+                            "$ref": "#/definitions/system.TranslationModelsResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/system.ErrorResponse"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/system.ErrorResponse"
                         }
                     }
                 }
@@ -1574,7 +1574,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.VersionStatusResponse"
+                            "$ref": "#/definitions/version.VersionStatusResponse"
                         }
                     }
                 }
@@ -1594,7 +1594,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.VersionStatusResponse"
+                            "$ref": "#/definitions/version.VersionStatusResponse"
                         }
                     }
                 }
@@ -1614,7 +1614,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.HealthResponse"
+                            "$ref": "#/definitions/system.HealthResponse"
                         }
                     }
                 }
@@ -1631,13 +1631,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -1645,22 +1651,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "api.ActressMergeConflict": {
-            "type": "object",
-            "properties": {
-                "default_resolution": {
-                    "type": "string",
-                    "example": "target"
-                },
-                "field": {
-                    "type": "string",
-                    "example": "japanese_name"
-                },
-                "source_value": {},
-                "target_value": {}
-            }
-        },
-        "api.ActressMergePreviewRequest": {
+        "actress.ActressMergePreviewRequest": {
             "type": "object",
             "required": [
                 "source_id",
@@ -1677,13 +1668,13 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ActressMergePreviewResponse": {
+        "actress.ActressMergePreviewResponse": {
             "type": "object",
             "properties": {
                 "conflicts": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.ActressMergeConflict"
+                        "$ref": "#/definitions/contracts.ActressMergeConflict"
                     }
                 },
                 "default_resolutions": {
@@ -1703,7 +1694,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ActressMergeRequest": {
+        "actress.ActressMergeRequest": {
             "type": "object",
             "required": [
                 "source_id",
@@ -1730,7 +1721,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ActressMergeResponse": {
+        "actress.ActressMergeResponse": {
             "type": "object",
             "properties": {
                 "aliases_added": {
@@ -1754,67 +1745,22 @@ const docTemplate = `{
                 }
             }
         },
-        "api.AvailableScrapersResponse": {
+        "actress.ErrorResponse": {
             "type": "object",
             "properties": {
-                "scrapers": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.ScraperInfo"
+                        "type": "string"
                     }
                 }
             }
         },
-        "api.BatchFileResult": {
-            "type": "object",
-            "properties": {
-                "actress_sources": {
-                    "description": "Actress-level source by scraper/NFO",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "data": {
-                    "description": "Movie data"
-                },
-                "ended_at": {
-                    "type": "string"
-                },
-                "error": {
-                    "type": "string"
-                },
-                "field_sources": {
-                    "description": "Field-level source by scraper/NFO",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "file_path": {
-                    "type": "string"
-                },
-                "is_multi_part": {
-                    "type": "boolean"
-                },
-                "movie_id": {
-                    "type": "string"
-                },
-                "part_number": {
-                    "type": "integer"
-                },
-                "part_suffix": {
-                    "type": "string"
-                },
-                "started_at": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.BatchJobResponse": {
+        "batch.BatchJobResponse": {
             "type": "object",
             "properties": {
                 "completed": {
@@ -1842,7 +1788,7 @@ const docTemplate = `{
                 "results": {
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/api.BatchFileResult"
+                        "$ref": "#/definitions/contracts.BatchFileResult"
                     }
                 },
                 "started_at": {
@@ -1856,7 +1802,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.BatchRescrapeRequest": {
+        "batch.BatchRescrapeRequest": {
             "type": "object",
             "properties": {
                 "array_strategy": {
@@ -1894,7 +1840,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.BatchRescrapeResponse": {
+        "batch.BatchRescrapeResponse": {
             "type": "object",
             "properties": {
                 "actress_sources": {
@@ -1914,7 +1860,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.BatchScrapeRequest": {
+        "batch.BatchScrapeRequest": {
             "type": "object",
             "required": [
                 "files"
@@ -1970,7 +1916,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.BatchScrapeResponse": {
+        "batch.BatchScrapeResponse": {
             "type": "object",
             "properties": {
                 "job_id": {
@@ -1979,63 +1925,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.BrowseRequest": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "example": "/path/to/directory"
-                }
-            }
-        },
-        "api.BrowseResponse": {
-            "type": "object",
-            "properties": {
-                "current_path": {
-                    "type": "string",
-                    "example": "/path/to/directory"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.FileInfo"
-                    }
-                },
-                "parent_path": {
-                    "type": "string",
-                    "example": "/path/to"
-                }
-            }
-        },
-        "api.DataSource": {
-            "type": "object",
-            "properties": {
-                "confidence": {
-                    "description": "Confidence score (0.0-1.0)",
-                    "type": "number",
-                    "example": 0.9
-                },
-                "last_updated": {
-                    "description": "ISO 8601 timestamp",
-                    "type": "string",
-                    "example": "2024-01-15T10:30:00Z"
-                },
-                "source": {
-                    "description": "\"scraper\" or \"nfo\"",
-                    "type": "string",
-                    "example": "nfo"
-                }
-            }
-        },
-        "api.DeleteHistoryBulkResponse": {
-            "type": "object",
-            "properties": {
-                "deleted": {
-                    "type": "integer"
-                }
-            }
-        },
-        "api.ErrorResponse": {
+        "batch.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
@@ -2050,214 +1940,14 @@ const docTemplate = `{
                 }
             }
         },
-        "api.FieldDifference": {
-            "type": "object",
-            "properties": {
-                "field": {
-                    "type": "string",
-                    "example": "title"
-                },
-                "merged_value": {},
-                "nfo_value": {},
-                "reason": {
-                    "type": "string",
-                    "example": "NFO preferred by merge strategy"
-                },
-                "scraped_value": {}
-            }
-        },
-        "api.FileInfo": {
-            "type": "object",
-            "properties": {
-                "is_dir": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "is_multi_part": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "matched": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "mod_time": {
-                    "type": "string",
-                    "example": "2024-01-15T10:30:00Z"
-                },
-                "movie_id": {
-                    "type": "string",
-                    "example": "IPX-535"
-                },
-                "name": {
-                    "type": "string",
-                    "example": "video.mp4"
-                },
-                "part_number": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "part_suffix": {
-                    "type": "string",
-                    "example": "-pt1"
-                },
-                "path": {
-                    "type": "string",
-                    "example": "/path/to/video.mp4"
-                },
-                "size": {
-                    "type": "integer",
-                    "example": 1024000000
-                }
-            }
-        },
-        "api.HealthResponse": {
-            "type": "object",
-            "properties": {
-                "build_date": {
-                    "type": "string",
-                    "example": "2026-02-23T00:00:00Z"
-                },
-                "commit": {
-                    "type": "string",
-                    "example": "abc123def456"
-                },
-                "scrapers": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "r18dev",
-                        "dmm"
-                    ]
-                },
-                "status": {
-                    "type": "string",
-                    "example": "ok"
-                },
-                "version": {
-                    "type": "string",
-                    "example": "v1.2.3"
-                }
-            }
-        },
-        "api.HistoryListResponse": {
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "records": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.HistoryRecord"
-                    }
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "api.HistoryRecord": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "dry_run": {
-                    "type": "boolean"
-                },
-                "error_message": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "metadata": {
-                    "type": "string"
-                },
-                "movie_id": {
-                    "type": "string"
-                },
-                "new_path": {
-                    "type": "string"
-                },
-                "operation": {
-                    "type": "string"
-                },
-                "original_path": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.HistoryStats": {
-            "type": "object",
-            "properties": {
-                "by_operation": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
-                    }
-                },
-                "failed": {
-                    "type": "integer"
-                },
-                "reverted": {
-                    "type": "integer"
-                },
-                "success": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "api.MergeStatistics": {
-            "type": "object",
-            "properties": {
-                "conflicts_resolved": {
-                    "type": "integer",
-                    "example": 5
-                },
-                "empty_fields": {
-                    "type": "integer",
-                    "example": 2
-                },
-                "from_nfo": {
-                    "type": "integer",
-                    "example": 3
-                },
-                "from_scraper": {
-                    "type": "integer",
-                    "example": 10
-                },
-                "merged_arrays": {
-                    "type": "integer",
-                    "example": 2
-                },
-                "total_fields": {
-                    "type": "integer",
-                    "example": 15
-                }
-            }
-        },
-        "api.MovieResponse": {
+        "batch.MovieResponse": {
             "type": "object",
             "properties": {
                 "merge_stats": {
                     "description": "Merge statistics when NFO merging occurred",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/api.MergeStatistics"
+                            "$ref": "#/definitions/contracts.MergeStatistics"
                         }
                     ]
                 },
@@ -2268,132 +1958,12 @@ const docTemplate = `{
                     "description": "Field-level data source tracking",
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/api.DataSource"
+                        "$ref": "#/definitions/contracts.DataSource"
                     }
                 }
             }
         },
-        "api.MoviesResponse": {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer",
-                    "example": 20
-                },
-                "movies": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.Movie"
-                    }
-                }
-            }
-        },
-        "api.NFOComparisonRequest": {
-            "type": "object",
-            "properties": {
-                "array_strategy": {
-                    "description": "Array field merge strategy: merge or replace",
-                    "type": "string",
-                    "example": "merge"
-                },
-                "merge_strategy": {
-                    "description": "Deprecated: prefer-scraper, prefer-nfo, merge-arrays (use preset or scalar/array strategies instead)",
-                    "type": "string",
-                    "example": "prefer-scraper"
-                },
-                "nfo_path": {
-                    "description": "Optional: explicit NFO path",
-                    "type": "string",
-                    "example": "/path/to/movie.nfo"
-                },
-                "preset": {
-                    "description": "Merge strategy preset: conservative, gap-fill, or aggressive (overrides scalar/array strategies)",
-                    "type": "string",
-                    "example": "conservative"
-                },
-                "scalar_strategy": {
-                    "description": "Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing, or fill-missing-only",
-                    "type": "string",
-                    "example": "prefer-nfo"
-                },
-                "selected_scrapers": {
-                    "description": "Optional: custom scrapers for comparison",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "r18dev",
-                        "dmm"
-                    ]
-                }
-            }
-        },
-        "api.NFOComparisonResponse": {
-            "type": "object",
-            "properties": {
-                "differences": {
-                    "description": "List of fields that differ",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.FieldDifference"
-                    }
-                },
-                "merge_stats": {
-                    "description": "Merge statistics",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/api.MergeStatistics"
-                        }
-                    ]
-                },
-                "merged_data": {
-                    "description": "Result of merging",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/models.Movie"
-                        }
-                    ]
-                },
-                "movie_id": {
-                    "type": "string",
-                    "example": "IPX-535"
-                },
-                "nfo_data": {
-                    "description": "Data from NFO file",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/models.Movie"
-                        }
-                    ]
-                },
-                "nfo_exists": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "nfo_path": {
-                    "description": "Returns filename only for security",
-                    "type": "string",
-                    "example": "movie.nfo"
-                },
-                "provenance": {
-                    "description": "Field-level provenance",
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/api.DataSource"
-                    }
-                },
-                "scraped_data": {
-                    "description": "Fresh scraped data",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/models.Movie"
-                        }
-                    ]
-                }
-            }
-        },
-        "api.OrganizePreviewRequest": {
+        "batch.OrganizePreviewRequest": {
             "type": "object",
             "required": [
                 "destination"
@@ -2417,7 +1987,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.OrganizePreviewResponse": {
+        "batch.OrganizePreviewResponse": {
             "type": "object",
             "properties": {
                 "extrafanart_path": {
@@ -2476,7 +2046,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.OrganizeRequest": {
+        "batch.OrganizeRequest": {
             "type": "object",
             "required": [
                 "destination"
@@ -2500,59 +2070,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.PathAutocompleteRequest": {
-            "type": "object",
-            "required": [
-                "path"
-            ],
-            "properties": {
-                "limit": {
-                    "type": "integer",
-                    "example": 10
-                },
-                "path": {
-                    "type": "string",
-                    "example": "/path/to/vid"
-                }
-            }
-        },
-        "api.PathAutocompleteResponse": {
-            "type": "object",
-            "properties": {
-                "base_path": {
-                    "type": "string",
-                    "example": "/path/to"
-                },
-                "input_path": {
-                    "type": "string",
-                    "example": "/path/to/vid"
-                },
-                "suggestions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.PathAutocompleteSuggestion"
-                    }
-                }
-            }
-        },
-        "api.PathAutocompleteSuggestion": {
-            "type": "object",
-            "properties": {
-                "is_dir": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "name": {
-                    "type": "string",
-                    "example": "videos"
-                },
-                "path": {
-                    "type": "string",
-                    "example": "/path/to/videos"
-                }
-            }
-        },
-        "api.PosterCropRequest": {
+        "batch.PosterCropRequest": {
             "type": "object",
             "properties": {
                 "height": {
@@ -2573,7 +2091,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.PosterCropResponse": {
+        "batch.PosterCropResponse": {
             "type": "object",
             "properties": {
                 "cropped_poster_url": {
@@ -2581,282 +2099,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ProxyTestRequest": {
-            "type": "object",
-            "required": [
-                "mode"
-            ],
-            "properties": {
-                "mode": {
-                    "description": "direct or flaresolverr",
-                    "type": "string",
-                    "enum": [
-                        "direct",
-                        "flaresolverr"
-                    ]
-                },
-                "proxy": {
-                    "$ref": "#/definitions/config.ProxyConfig"
-                },
-                "target_url": {
-                    "description": "Optional override target URL",
-                    "type": "string"
-                }
-            }
-        },
-        "api.ProxyTestResponse": {
-            "type": "object",
-            "properties": {
-                "duration_ms": {
-                    "type": "integer"
-                },
-                "flaresolverr_url": {
-                    "description": "FlareSolverr endpoint used",
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "mode": {
-                    "type": "string"
-                },
-                "proxy_url": {
-                    "description": "Redacted proxy URL",
-                    "type": "string"
-                },
-                "status_code": {
-                    "type": "integer"
-                },
-                "success": {
-                    "type": "boolean"
-                },
-                "target_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.RescrapeRequest": {
-            "type": "object",
-            "required": [
-                "selected_scrapers"
-            ],
-            "properties": {
-                "force": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "selected_scrapers": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "r18dev",
-                        "dmm"
-                    ]
-                }
-            }
-        },
-        "api.ScanRequest": {
-            "type": "object",
-            "required": [
-                "path"
-            ],
-            "properties": {
-                "filter": {
-                    "description": "Filter folder/file names (case-insensitive substring match)",
-                    "type": "string",
-                    "example": "STSK"
-                },
-                "path": {
-                    "type": "string",
-                    "example": "/path/to/videos"
-                },
-                "recursive": {
-                    "type": "boolean",
-                    "example": true
-                }
-            }
-        },
-        "api.ScanResponse": {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer",
-                    "example": 10
-                },
-                "files": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.FileInfo"
-                    }
-                },
-                "skipped": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "api.ScrapeRequest": {
-            "type": "object",
-            "required": [
-                "id"
-            ],
-            "properties": {
-                "force": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "id": {
-                    "type": "string",
-                    "example": "IPX-535"
-                },
-                "selected_scrapers": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "r18dev",
-                        "dmm"
-                    ]
-                }
-            }
-        },
-        "api.ScrapeResponse": {
-            "type": "object",
-            "properties": {
-                "cached": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "errors": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "movie": {
-                    "$ref": "#/definitions/models.Movie"
-                },
-                "sources_used": {
-                    "type": "integer",
-                    "example": 2
-                }
-            }
-        },
-        "api.ScraperChoice": {
-            "type": "object",
-            "properties": {
-                "label": {
-                    "type": "string",
-                    "example": "English"
-                },
-                "value": {
-                    "type": "string",
-                    "example": "en"
-                }
-            }
-        },
-        "api.ScraperInfo": {
-            "type": "object",
-            "properties": {
-                "display_name": {
-                    "type": "string",
-                    "example": "R18.dev"
-                },
-                "enabled": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "name": {
-                    "type": "string",
-                    "example": "r18dev"
-                },
-                "options": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.ScraperOption"
-                    }
-                }
-            }
-        },
-        "api.ScraperOption": {
-            "type": "object",
-            "properties": {
-                "choices": {
-                    "description": "For select type: available choices",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.ScraperChoice"
-                    }
-                },
-                "description": {
-                    "type": "string",
-                    "example": "Enable detailed actress data scraping from DMM (may be slower)"
-                },
-                "key": {
-                    "type": "string",
-                    "example": "scrape_actress"
-                },
-                "label": {
-                    "type": "string",
-                    "example": "Scrape Actress Information"
-                },
-                "max": {
-                    "type": "integer",
-                    "example": 120
-                },
-                "min": {
-                    "type": "integer",
-                    "example": 5
-                },
-                "type": {
-                    "description": "boolean, string, number, select",
-                    "type": "string",
-                    "example": "boolean"
-                },
-                "unit": {
-                    "type": "string",
-                    "example": "seconds"
-                }
-            }
-        },
-        "api.TranslationModelsRequest": {
-            "type": "object",
-            "required": [
-                "base_url",
-                "provider"
-            ],
-            "properties": {
-                "api_key": {
-                    "description": "Provider API key",
-                    "type": "string"
-                },
-                "base_url": {
-                    "description": "API base URL (e.g., https://api.openai.com/v1)",
-                    "type": "string"
-                },
-                "provider": {
-                    "description": "openai (OpenAI-compatible only for now)",
-                    "type": "string"
-                }
-            }
-        },
-        "api.TranslationModelsResponse": {
-            "type": "object",
-            "properties": {
-                "models": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "api.UpdateMovieRequest": {
+        "batch.UpdateMovieRequest": {
             "type": "object",
             "required": [
                 "movie"
@@ -2864,47 +2107,6 @@ const docTemplate = `{
             "properties": {
                 "movie": {
                     "$ref": "#/definitions/models.Movie"
-                }
-            }
-        },
-        "api.VersionStatusResponse": {
-            "type": "object",
-            "properties": {
-                "build_date": {
-                    "description": "Build timestamp",
-                    "type": "string"
-                },
-                "checked_at": {
-                    "description": "When the check was performed",
-                    "type": "string"
-                },
-                "commit": {
-                    "description": "Current commit hash",
-                    "type": "string"
-                },
-                "current": {
-                    "description": "Current installed version",
-                    "type": "string"
-                },
-                "error": {
-                    "description": "Error message if any",
-                    "type": "string"
-                },
-                "latest": {
-                    "description": "Latest available version",
-                    "type": "string"
-                },
-                "prerelease": {
-                    "description": "Whether latest is a prerelease",
-                    "type": "boolean"
-                },
-                "source": {
-                    "description": "\"cached\" or \"fresh\"",
-                    "type": "string"
-                },
-                "update_available": {
-                    "description": "Whether an update is available",
-                    "type": "boolean"
                 }
             }
         },
@@ -4377,6 +3579,496 @@ const docTemplate = `{
                 }
             }
         },
+        "contracts.ActressMergeConflict": {
+            "type": "object",
+            "properties": {
+                "default_resolution": {
+                    "type": "string",
+                    "example": "target"
+                },
+                "field": {
+                    "type": "string",
+                    "example": "japanese_name"
+                },
+                "source_value": {},
+                "target_value": {}
+            }
+        },
+        "contracts.BatchFileResult": {
+            "type": "object",
+            "properties": {
+                "actress_sources": {
+                    "description": "Actress-level source by scraper/NFO",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "data": {
+                    "description": "Movie data"
+                },
+                "ended_at": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "field_sources": {
+                    "description": "Field-level source by scraper/NFO",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "file_path": {
+                    "type": "string"
+                },
+                "is_multi_part": {
+                    "type": "boolean"
+                },
+                "movie_id": {
+                    "type": "string"
+                },
+                "part_number": {
+                    "type": "integer"
+                },
+                "part_suffix": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "contracts.DataSource": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "description": "Confidence score (0.0-1.0)",
+                    "type": "number",
+                    "example": 0.9
+                },
+                "last_updated": {
+                    "description": "ISO 8601 timestamp",
+                    "type": "string",
+                    "example": "2024-01-15T10:30:00Z"
+                },
+                "source": {
+                    "description": "\"scraper\" or \"nfo\"",
+                    "type": "string",
+                    "example": "nfo"
+                }
+            }
+        },
+        "contracts.FieldDifference": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string",
+                    "example": "title"
+                },
+                "merged_value": {},
+                "nfo_value": {},
+                "reason": {
+                    "type": "string",
+                    "example": "NFO preferred by merge strategy"
+                },
+                "scraped_value": {}
+            }
+        },
+        "contracts.FileInfo": {
+            "type": "object",
+            "properties": {
+                "is_dir": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "is_multi_part": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "matched": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "mod_time": {
+                    "type": "string",
+                    "example": "2024-01-15T10:30:00Z"
+                },
+                "movie_id": {
+                    "type": "string",
+                    "example": "IPX-535"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "video.mp4"
+                },
+                "part_number": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "part_suffix": {
+                    "type": "string",
+                    "example": "-pt1"
+                },
+                "path": {
+                    "type": "string",
+                    "example": "/path/to/video.mp4"
+                },
+                "size": {
+                    "type": "integer",
+                    "example": 1024000000
+                }
+            }
+        },
+        "contracts.MergeStatistics": {
+            "type": "object",
+            "properties": {
+                "conflicts_resolved": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "empty_fields": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "from_nfo": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "from_scraper": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "merged_arrays": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "total_fields": {
+                    "type": "integer",
+                    "example": 15
+                }
+            }
+        },
+        "contracts.PathAutocompleteSuggestion": {
+            "type": "object",
+            "properties": {
+                "is_dir": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "name": {
+                    "type": "string",
+                    "example": "videos"
+                },
+                "path": {
+                    "type": "string",
+                    "example": "/path/to/videos"
+                }
+            }
+        },
+        "contracts.ScraperChoice": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string",
+                    "example": "English"
+                },
+                "value": {
+                    "type": "string",
+                    "example": "en"
+                }
+            }
+        },
+        "contracts.ScraperInfo": {
+            "type": "object",
+            "properties": {
+                "display_name": {
+                    "type": "string",
+                    "example": "R18.dev"
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "name": {
+                    "type": "string",
+                    "example": "r18dev"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.ScraperOption"
+                    }
+                }
+            }
+        },
+        "contracts.ScraperOption": {
+            "type": "object",
+            "properties": {
+                "choices": {
+                    "description": "For select type: available choices",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.ScraperChoice"
+                    }
+                },
+                "description": {
+                    "type": "string",
+                    "example": "Enable detailed actress data scraping from DMM (may be slower)"
+                },
+                "key": {
+                    "type": "string",
+                    "example": "scrape_actress"
+                },
+                "label": {
+                    "type": "string",
+                    "example": "Scrape Actress Information"
+                },
+                "max": {
+                    "type": "integer",
+                    "example": 120
+                },
+                "min": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "type": {
+                    "description": "boolean, string, number, select",
+                    "type": "string",
+                    "example": "boolean"
+                },
+                "unit": {
+                    "type": "string",
+                    "example": "seconds"
+                }
+            }
+        },
+        "file.BrowseRequest": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "example": "/path/to/directory"
+                }
+            }
+        },
+        "file.BrowseResponse": {
+            "type": "object",
+            "properties": {
+                "current_path": {
+                    "type": "string",
+                    "example": "/path/to/directory"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.FileInfo"
+                    }
+                },
+                "parent_path": {
+                    "type": "string",
+                    "example": "/path/to"
+                }
+            }
+        },
+        "file.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "file.PathAutocompleteRequest": {
+            "type": "object",
+            "required": [
+                "path"
+            ],
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "path": {
+                    "type": "string",
+                    "example": "/path/to/vid"
+                }
+            }
+        },
+        "file.PathAutocompleteResponse": {
+            "type": "object",
+            "properties": {
+                "base_path": {
+                    "type": "string",
+                    "example": "/path/to"
+                },
+                "input_path": {
+                    "type": "string",
+                    "example": "/path/to/vid"
+                },
+                "suggestions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.PathAutocompleteSuggestion"
+                    }
+                }
+            }
+        },
+        "file.ScanRequest": {
+            "type": "object",
+            "required": [
+                "path"
+            ],
+            "properties": {
+                "filter": {
+                    "description": "Filter folder/file names (case-insensitive substring match)",
+                    "type": "string",
+                    "example": "STSK"
+                },
+                "path": {
+                    "type": "string",
+                    "example": "/path/to/videos"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "file.ScanResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.FileInfo"
+                    }
+                },
+                "skipped": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "history.DeleteHistoryBulkResponse": {
+            "type": "object",
+            "properties": {
+                "deleted": {
+                    "type": "integer"
+                }
+            }
+        },
+        "history.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "history.HistoryListResponse": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "records": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/history.HistoryRecord"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "history.HistoryRecord": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "dry_run": {
+                    "type": "boolean"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "metadata": {
+                    "type": "string"
+                },
+                "movie_id": {
+                    "type": "string"
+                },
+                "new_path": {
+                    "type": "string"
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "original_path": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "history.HistoryStats": {
+            "type": "object",
+            "properties": {
+                "by_operation": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "reverted": {
+                    "type": "integer"
+                },
+                "success": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.Actress": {
             "type": "object",
             "properties": {
@@ -4582,6 +4274,433 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "movie.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "movie.MovieResponse": {
+            "type": "object",
+            "properties": {
+                "merge_stats": {
+                    "description": "Merge statistics when NFO merging occurred",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/contracts.MergeStatistics"
+                        }
+                    ]
+                },
+                "movie": {
+                    "$ref": "#/definitions/models.Movie"
+                },
+                "provenance": {
+                    "description": "Field-level data source tracking",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/contracts.DataSource"
+                    }
+                }
+            }
+        },
+        "movie.MoviesResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "movies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Movie"
+                    }
+                }
+            }
+        },
+        "movie.NFOComparisonRequest": {
+            "type": "object",
+            "properties": {
+                "array_strategy": {
+                    "description": "Array field merge strategy: merge or replace",
+                    "type": "string",
+                    "example": "merge"
+                },
+                "merge_strategy": {
+                    "description": "Deprecated: prefer-scraper, prefer-nfo, merge-arrays (use preset or scalar/array strategies instead)",
+                    "type": "string",
+                    "example": "prefer-scraper"
+                },
+                "nfo_path": {
+                    "description": "Optional: explicit NFO path",
+                    "type": "string",
+                    "example": "/path/to/movie.nfo"
+                },
+                "preset": {
+                    "description": "Merge strategy preset: conservative, gap-fill, or aggressive (overrides scalar/array strategies)",
+                    "type": "string",
+                    "example": "conservative"
+                },
+                "scalar_strategy": {
+                    "description": "Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing, or fill-missing-only",
+                    "type": "string",
+                    "example": "prefer-nfo"
+                },
+                "selected_scrapers": {
+                    "description": "Optional: custom scrapers for comparison",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "r18dev",
+                        "dmm"
+                    ]
+                }
+            }
+        },
+        "movie.NFOComparisonResponse": {
+            "type": "object",
+            "properties": {
+                "differences": {
+                    "description": "List of fields that differ",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.FieldDifference"
+                    }
+                },
+                "merge_stats": {
+                    "description": "Merge statistics",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/contracts.MergeStatistics"
+                        }
+                    ]
+                },
+                "merged_data": {
+                    "description": "Result of merging",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.Movie"
+                        }
+                    ]
+                },
+                "movie_id": {
+                    "type": "string",
+                    "example": "IPX-535"
+                },
+                "nfo_data": {
+                    "description": "Data from NFO file",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.Movie"
+                        }
+                    ]
+                },
+                "nfo_exists": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "nfo_path": {
+                    "description": "Returns filename only for security",
+                    "type": "string",
+                    "example": "movie.nfo"
+                },
+                "provenance": {
+                    "description": "Field-level provenance",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/contracts.DataSource"
+                    }
+                },
+                "scraped_data": {
+                    "description": "Fresh scraped data",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.Movie"
+                        }
+                    ]
+                }
+            }
+        },
+        "movie.RescrapeRequest": {
+            "type": "object",
+            "required": [
+                "selected_scrapers"
+            ],
+            "properties": {
+                "force": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "selected_scrapers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "r18dev",
+                        "dmm"
+                    ]
+                }
+            }
+        },
+        "movie.ScrapeRequest": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "force": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "id": {
+                    "type": "string",
+                    "example": "IPX-535"
+                },
+                "selected_scrapers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "r18dev",
+                        "dmm"
+                    ]
+                }
+            }
+        },
+        "movie.ScrapeResponse": {
+            "type": "object",
+            "properties": {
+                "cached": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "movie": {
+                    "$ref": "#/definitions/models.Movie"
+                },
+                "sources_used": {
+                    "type": "integer",
+                    "example": 2
+                }
+            }
+        },
+        "system.AvailableScrapersResponse": {
+            "type": "object",
+            "properties": {
+                "scrapers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.ScraperInfo"
+                    }
+                }
+            }
+        },
+        "system.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "system.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "build_date": {
+                    "type": "string",
+                    "example": "2026-02-23T00:00:00Z"
+                },
+                "commit": {
+                    "type": "string",
+                    "example": "abc123def456"
+                },
+                "scrapers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "r18dev",
+                        "dmm"
+                    ]
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "v1.2.3"
+                }
+            }
+        },
+        "system.ProxyTestRequest": {
+            "type": "object",
+            "required": [
+                "mode"
+            ],
+            "properties": {
+                "mode": {
+                    "description": "direct or flaresolverr",
+                    "type": "string",
+                    "enum": [
+                        "direct",
+                        "flaresolverr"
+                    ]
+                },
+                "proxy": {
+                    "$ref": "#/definitions/config.ProxyConfig"
+                },
+                "target_url": {
+                    "description": "Optional override target URL",
+                    "type": "string"
+                }
+            }
+        },
+        "system.ProxyTestResponse": {
+            "type": "object",
+            "properties": {
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "flaresolverr_url": {
+                    "description": "FlareSolverr endpoint used",
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "proxy_url": {
+                    "description": "Redacted proxy URL",
+                    "type": "string"
+                },
+                "status_code": {
+                    "type": "integer"
+                },
+                "success": {
+                    "type": "boolean"
+                },
+                "target_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "system.TranslationModelsRequest": {
+            "type": "object",
+            "required": [
+                "base_url",
+                "provider"
+            ],
+            "properties": {
+                "api_key": {
+                    "description": "Provider API key",
+                    "type": "string"
+                },
+                "base_url": {
+                    "description": "API base URL (e.g., https://api.openai.com/v1)",
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "openai (OpenAI-compatible only for now)",
+                    "type": "string"
+                }
+            }
+        },
+        "system.TranslationModelsResponse": {
+            "type": "object",
+            "properties": {
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "temp.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "version.VersionStatusResponse": {
+            "type": "object",
+            "properties": {
+                "build_date": {
+                    "description": "Build timestamp",
+                    "type": "string"
+                },
+                "checked_at": {
+                    "description": "When the check was performed",
+                    "type": "string"
+                },
+                "commit": {
+                    "description": "Current commit hash",
+                    "type": "string"
+                },
+                "current": {
+                    "description": "Current installed version",
+                    "type": "string"
+                },
+                "error": {
+                    "description": "Error message if any",
+                    "type": "string"
+                },
+                "latest": {
+                    "description": "Latest available version",
+                    "type": "string"
+                },
+                "prerelease": {
+                    "description": "Whether latest is a prerelease",
+                    "type": "boolean"
+                },
+                "source": {
+                    "description": "\"cached\" or \"fresh\"",
+                    "type": "string"
+                },
+                "update_available": {
+                    "description": "Whether an update is available",
+                    "type": "boolean"
                 }
             }
         }

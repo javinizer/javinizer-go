@@ -9,7 +9,8 @@ import (
 
 	api "github.com/javinizer/javinizer-go/cmd/javinizer/commands/api"
 	"github.com/javinizer/javinizer-go/internal/aggregator"
-	internalapi "github.com/javinizer/javinizer-go/internal/api"
+	apicore "github.com/javinizer/javinizer-go/internal/api/core"
+	apiserver "github.com/javinizer/javinizer-go/internal/api/server"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -88,7 +89,7 @@ matching:
 }
 
 // createTestAPIServer creates a test API server with minimal dependencies
-func createTestAPIServer(t *testing.T) *internalapi.ServerDependencies {
+func createTestAPIServer(t *testing.T) *apicore.ServerDependencies {
 	t.Helper()
 
 	// Create test config
@@ -132,7 +133,7 @@ func createTestAPIServer(t *testing.T) *internalapi.ServerDependencies {
 	jobQueue := worker.NewJobQueue()
 
 	// Create server dependencies
-	deps := &internalapi.ServerDependencies{
+	deps := &apicore.ServerDependencies{
 		ConfigFile:  configPath,
 		Registry:    registry,
 		DB:          db,
@@ -152,7 +153,7 @@ func TestAPIServer_HealthCheck(t *testing.T) {
 	deps := createTestAPIServer(t)
 	defer func() { _ = deps.DB.Close() }()
 
-	router := internalapi.NewServer(deps)
+	router := apiserver.NewServer(deps)
 
 	req, _ := http.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -177,7 +178,7 @@ func TestAPIServer_ListMovies(t *testing.T) {
 	err := deps.MovieRepo.Upsert(movie)
 	require.NoError(t, err)
 
-	router := internalapi.NewServer(deps)
+	router := apiserver.NewServer(deps)
 
 	req, _ := http.NewRequest("GET", "/api/v1/movies", nil)
 	w := httptest.NewRecorder()
@@ -204,7 +205,7 @@ func TestAPIServer_GetMovie(t *testing.T) {
 	err := deps.MovieRepo.Upsert(movie)
 	require.NoError(t, err)
 
-	router := internalapi.NewServer(deps)
+	router := apiserver.NewServer(deps)
 
 	req, _ := http.NewRequest("GET", "/api/v1/movies/IPX-123", nil)
 	w := httptest.NewRecorder()
@@ -226,7 +227,7 @@ func TestAPIServer_GetMovie_NotFound(t *testing.T) {
 	deps := createTestAPIServer(t)
 	defer func() { _ = deps.DB.Close() }()
 
-	router := internalapi.NewServer(deps)
+	router := apiserver.NewServer(deps)
 
 	req, _ := http.NewRequest("GET", "/api/v1/movies/NONEXISTENT-999", nil)
 	w := httptest.NewRecorder()

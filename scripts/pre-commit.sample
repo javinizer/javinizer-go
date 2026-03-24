@@ -126,7 +126,7 @@ if ! make swagger &> /dev/null; then
     echo -e "${RED}✗ Swagger generation failed${NC}"
     exit 1
 fi
-if [ -n "$(git status docs/swagger/ --porcelain)" ]; then
+if ! git diff --quiet -- docs/swagger/; then
     echo -e "${RED}✗ Swagger documentation is out of date${NC}"
     echo -e "${YELLOW}Run 'make swagger' and commit the changes${NC}"
     echo ""

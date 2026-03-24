@@ -22,7 +22,7 @@ while IFS= read -r -d '' file; do
     echo "ERROR: ${file} has ${line_count} lines (max: ${max_lines})"
     violations=1
   fi
-done < <(find "${target_dir}" -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -print0 | sort -z)
+done < <(find "${target_dir}" -type f -name '*.go' ! -name '*_test.go' -print0 | sort -z)
 
 if (( violations > 0 )); then
   echo
