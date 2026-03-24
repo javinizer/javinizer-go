@@ -85,6 +85,7 @@ func scrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 				logging.Warnf("%s: %v", scraper.Name(), err)
 				continue
 			}
+			result.NormalizeMediaURLs()
 			results = append(results, result)
 		}
 

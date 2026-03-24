@@ -247,6 +247,7 @@ func Run(cmd *cobra.Command, args []string, configFile string, deps *commandutil
 				continue
 			}
 		}
+		result.NormalizeMediaURLs()
 		logging.Info("✅")
 		results = append(results, result)
 	}

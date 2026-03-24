@@ -938,3 +938,66 @@ func TestFieldSpecificValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestScraperResultNormalizeMediaURLs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{
+			name:   "pics dmm ps to pl",
+			input:  "https://pics.dmm.co.jp/mono/movie/adult/aldn560/aldn560ps.jpg",
+			expect: "https://pics.dmm.co.jp/mono/movie/adult/aldn560/aldn560pl.jpg",
+		},
+		{
+			name:   "awsimgsrc co jp ps to pl",
+			input:  "https://awsimgsrc.dmm.co.jp/pics_dig/video/ipx00535/ipx00535ps.jpg",
+			expect: "https://awsimgsrc.dmm.co.jp/pics_dig/video/ipx00535/ipx00535pl.jpg",
+		},
+		{
+			name:   "awsimgsrc com ps to pl",
+			input:  "https://awsimgsrc.dmm.com/dig/video/ipx00535/ipx00535ps.jpg",
+			expect: "https://awsimgsrc.dmm.com/dig/video/ipx00535/ipx00535pl.jpg",
+		},
+		{
+			name:   "keeps query string",
+			input:  "https://pics.dmm.co.jp/mono/movie/adult/aldn560/aldn560ps.jpg?foo=bar",
+			expect: "https://pics.dmm.co.jp/mono/movie/adult/aldn560/aldn560pl.jpg?foo=bar",
+		},
+		{
+			name:   "non dmm url unchanged",
+			input:  "https://images.example.com/aldn560ps.jpg",
+			expect: "https://images.example.com/aldn560ps.jpg",
+		},
+		{
+			name:   "already pl unchanged",
+			input:  "https://pics.dmm.co.jp/mono/movie/adult/aldn560/aldn560pl.jpg",
+			expect: "https://pics.dmm.co.jp/mono/movie/adult/aldn560/aldn560pl.jpg",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := &ScraperResult{
+				PosterURL: tt.input,
+				CoverURL:  tt.input,
+			}
+			result.NormalizeMediaURLs()
+			assert.Equal(t, tt.expect, result.PosterURL)
+			assert.Equal(t, tt.expect, result.CoverURL)
+		})
+	}
+}
+
+func TestScraperResultNormalizeMediaURLs_NilReceiver(t *testing.T) {
+	t.Parallel()
+
+	var result *ScraperResult
+	assert.NotPanics(t, func() {
+		result.NormalizeMediaURLs()
+	})
+}

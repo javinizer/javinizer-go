@@ -1,6 +1,8 @@
 package models
 
 import (
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -37,6 +39,57 @@ type ScraperResult struct {
 	ShouldCropPoster bool          `json:"should_crop_poster"` // Whether poster needs cropping from cover
 	ScreenshotURL    []string      `json:"screenshot_urls"`
 	TrailerURL       string        `json:"trailer_url"`
+}
+
+// NormalizeMediaURLs applies post-scrape media URL normalization hooks.
+//
+// This currently upgrades DMM poster URLs ending in "ps.jpg" to "pl.jpg"
+// to use higher-resolution assets when available.
+func (r *ScraperResult) NormalizeMediaURLs() {
+	if r == nil {
+		return
+	}
+
+	r.PosterURL = normalizeDMMPosterURL(r.PosterURL)
+	r.CoverURL = normalizeDMMPosterURL(r.CoverURL)
+}
+
+// normalizeDMMPosterURL rewrites known DMM poster URLs from ps.jpg to pl.jpg.
+func normalizeDMMPosterURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	if host != "pics.dmm.co.jp" &&
+		host != "awsimgsrc.dmm.co.jp" &&
+		host != "awsimgsrc.dmm.com" {
+		return raw
+	}
+
+	base := strings.ToLower(path.Base(parsed.Path))
+	if !strings.HasSuffix(base, "ps.jpg") {
+		return raw
+	}
+
+	parsed.Path = replacePathSuffixIgnoreCase(parsed.Path, "ps.jpg", "pl.jpg")
+	parsed.RawPath = ""
+
+	return parsed.String()
+}
+
+func replacePathSuffixIgnoreCase(v, suffix, replacement string) string {
+	lower := strings.ToLower(v)
+	if !strings.HasSuffix(lower, suffix) {
+		return v
+	}
+	return v[:len(v)-len(suffix)] + replacement
 }
 
 // ActressInfo represents actress information from a scraper

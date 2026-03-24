@@ -381,15 +381,17 @@ func (e *Engine) TruncateTitle(title string, maxLen int) string {
 		return title
 	}
 
+	marker := "~"
+
 	// Check if title contains CJK characters
 	isCJK := e.containsCJK(title)
 
 	if isCJK {
-		// CJK: Hard truncate at character boundary and add ellipsis
+		// CJK: Hard truncate at character boundary and add truncation marker
 		if maxLen > 3 {
 			runes := []rune(title)
 			if len(runes) > maxLen-3 {
-				return string(runes[:maxLen-3]) + "..."
+				return string(runes[:maxLen-3]) + marker
 			}
 		}
 		return title
@@ -403,10 +405,10 @@ func (e *Engine) TruncateTitle(title string, maxLen int) string {
 			truncStr := string(truncated)
 			lastSpace := strings.LastIndex(truncStr, " ")
 			if lastSpace > 0 {
-				return truncStr[:lastSpace] + "..."
+				return truncStr[:lastSpace] + marker
 			}
 			// No space found, truncate at character boundary
-			return truncStr + "..."
+			return truncStr + marker
 		}
 		return title
 	}
@@ -429,12 +431,13 @@ func (e *Engine) TruncateTitleBytes(title string, maxBytes int) string {
 		return title
 	}
 
-	ellipsis := "..."
-	ellipsisLen := len(ellipsis)
+	marker := "~"
+	markerReserve := 3
 
-	// If maxBytes is too small for ellipsis + content, just hard truncate
-	if maxBytes <= ellipsisLen {
-		// Return as many bytes as we can fit (no ellipsis)
+	// Preserve legacy budget behavior by reserving 3 bytes for truncation marker.
+	// This keeps truncation cut points stable while changing only visible suffix.
+	if maxBytes <= markerReserve {
+		// Return as many bytes as we can fit (no marker)
 		runes := []rune(title)
 		currentBytes := 0
 		for i, r := range runes {
@@ -450,8 +453,8 @@ func (e *Engine) TruncateTitleBytes(title string, maxBytes int) string {
 		return title // Shouldn't reach here
 	}
 
-	// Reserve space for ellipsis
-	budget := maxBytes - ellipsisLen
+	// Reserve space for marker
+	budget := maxBytes - markerReserve
 	runes := []rune(title)
 	currentBytes := 0
 	endIdx := 0
@@ -468,7 +471,7 @@ func (e *Engine) TruncateTitleBytes(title string, maxBytes int) string {
 
 	if endIdx == 0 {
 		// Can't fit even one rune in budget
-		return ellipsis
+		return marker
 	}
 
 	// Build the truncated string
@@ -484,10 +487,10 @@ func (e *Engine) TruncateTitleBytes(title string, maxBytes int) string {
 		}
 	}
 
-	// Always trim trailing spaces before adding ellipsis
+	// Always trim trailing spaces before adding marker
 	truncated = strings.TrimRight(truncated, " ")
 
-	return truncated + ellipsis
+	return truncated + marker
 }
 
 // ValidatePathLength checks if a path exceeds the maximum length

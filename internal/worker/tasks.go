@@ -149,6 +149,7 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 			})
 			continue
 		}
+		result.NormalizeMediaURLs()
 		logging.Debugf("[%s] Scraper %s returned: Title=%s, Language=%s, Actresses=%d, Genres=%d",
 			t.javID, scraper.Name(), result.Title, result.Language, len(result.Actresses), len(result.Genres))
 		results = append(results, result)

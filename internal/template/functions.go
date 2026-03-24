@@ -65,5 +65,7 @@ func SanitizeFolderPath(s string) string {
 		}
 	}
 
-	return result.String()
+	// Windows/SMB can mangle names that end with a period.
+	// Match original Javinizer behavior by trimming only trailing dots/spaces.
+	return strings.TrimRight(result.String(), " .")
 }

@@ -51,6 +51,9 @@ func scraperSearchWithContext(ctx context.Context, scraper models.Scraper, id st
 		// Context cancelled - scraper goroutine will continue but result will be ignored
 		return nil, ctx.Err()
 	case res := <-resultCh:
+		if res.scraperResult != nil {
+			res.scraperResult.NormalizeMediaURLs()
+		}
 		return res.scraperResult, res.err
 	}
 }

@@ -606,6 +606,15 @@ If you see weird characters in filenames:
 2. Check the [Special Characters](#special-characters) section
 3. Titles with many special chars will be cleaned
 
+### SMB/NAS Mangled Names (`ABC123~1`)
+
+If folder names appear as short aliases like `ABC123~1` over SMB/NAS:
+1. Upgrade to a build that trims trailing dots/spaces from generated folder names
+2. Truncated titles now use a trailing `~` marker instead of `...` for SMB compatibility
+3. Keep `output.max_title_length` reasonable for your share (for example, `100`)
+4. Avoid extremely long nested paths (`subfolder_format` + long title-heavy folder templates)
+5. If your NAS still mangles names, use a shorter folder format (for example, `<ID> - <TITLE>`)
+
 ---
 
 **Next**: [Genre Management](./05-genre-management.md)

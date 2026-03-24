@@ -19,39 +19,34 @@ import (
 // Covers AC-3.5.1: Very long title handling
 func TestOrganizerTemplate_LongTitles(t *testing.T) {
 	tests := []struct {
-		name               string
-		titleLength        int
-		maxTitleLength     int
-		shouldTruncate     bool
-		shouldHaveEllipsis bool
+		name           string
+		titleLength    int
+		maxTitleLength int
+		shouldTruncate bool
 	}{
 		{
-			name:               "normal length title",
-			titleLength:        50,
-			maxTitleLength:     100,
-			shouldTruncate:     false,
-			shouldHaveEllipsis: false,
+			name:           "normal length title",
+			titleLength:    50,
+			maxTitleLength: 100,
+			shouldTruncate: false,
 		},
 		{
-			name:               "title with room for prefix",
-			titleLength:        80,
-			maxTitleLength:     100,
-			shouldTruncate:     false,
-			shouldHaveEllipsis: false,
+			name:           "title with room for prefix",
+			titleLength:    80,
+			maxTitleLength: 100,
+			shouldTruncate: false,
 		},
 		{
-			name:               "exceeds max length",
-			titleLength:        150,
-			maxTitleLength:     100,
-			shouldTruncate:     true,
-			shouldHaveEllipsis: true,
+			name:           "exceeds max length",
+			titleLength:    150,
+			maxTitleLength: 100,
+			shouldTruncate: true,
 		},
 		{
-			name:               "very long title 300 chars",
-			titleLength:        300,
-			maxTitleLength:     80,
-			shouldTruncate:     true,
-			shouldHaveEllipsis: true,
+			name:           "very long title 300 chars",
+			titleLength:    300,
+			maxTitleLength: 80,
+			shouldTruncate: true,
 		},
 	}
 
@@ -102,11 +97,8 @@ func TestOrganizerTemplate_LongTitles(t *testing.T) {
 				// Folder name should be shorter than the original title
 				assert.Less(t, len(folderName), len("IPX-123 - "+longTitle),
 					"Folder name should be truncated")
-
-				if tt.shouldHaveEllipsis {
-					assert.Contains(t, folderName, "...",
-						"Truncated title should include ellipsis")
-				}
+				assert.False(t, strings.HasSuffix(folderName, "."),
+					"Folder name should not end with a trailing period")
 			} else {
 				// Should not be truncated
 				expectedFolder := "IPX-123 - " + longTitle

@@ -373,7 +373,7 @@ output:
     file_format: <ID><PARTSUFFIX>
     subfolder_format: []
     delimiter: ', '
-    max_title_length: 60
+    max_title_length: 100
     max_path_length: 240
     move_subtitles: false
     subtitle_extensions:

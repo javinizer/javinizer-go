@@ -505,6 +505,7 @@ dest/
 - All template tags are supported (see [Template System](./04-template-system.md))
 - Folder names are automatically sanitized for filesystem compatibility
 - Can be overridden per-command with CLI flags
+- SMB/NAS note: on some servers/clients, folder names that end with `.` can be shown as mangled short names (for example, `ABC123~1`). Javinizer trims trailing dots/spaces in generated folder names to avoid this.
 
 See [Template System](./04-template-system.md) for available tags and modifiers.
 
