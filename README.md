@@ -6,6 +6,7 @@ Javinizer Go is a metadata scraper and file organizer for Japanese Adult Videos 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Test & Coverage](https://github.com/javinizer/javinizer-go/actions/workflows/test.yml/badge.svg)](https://github.com/javinizer/javinizer-go/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/javinizer/javinizer-go/branch/main/graph/badge.svg)](https://codecov.io/gh/javinizer/javinizer-go)
+[![Discord](https://img.shields.io/discord/608449512352120834?color=brightgreen&style=plastic&label=discord)](https://discord.gg/Pds7xCpzpc)
 
 ## Features
 
