@@ -68,7 +68,7 @@ func copyTempCroppedPoster(job *worker.BatchJob, movie *models.Movie, destDir st
 
 	// Copy temp poster to destination
 	if err := fsutil.CopyFileAtomic(tempPosterPath, destPosterPath); err != nil {
-		logging.Warnf("%s mode: Failed to copy temp poster: %v", mode, err)
+		logging.Warnf("[post-move] mode=%s movie=%s stage=temp_poster_copy src=%s dst=%s err=%v", mode, movie.ID, tempPosterPath, destPosterPath, err)
 		return false
 	}
 
@@ -86,9 +86,20 @@ func downloadMediaFilesWithHistory(dl *downloader.Downloader, movie *models.Movi
 		return
 	}
 
+	failed := 0
+	downloaded := 0
+	skipped := 0
 	for _, result := range results {
 		if result.Downloaded {
+			downloaded++
 			logging.Infof("Downloaded %s: %s (%d bytes)", result.Type, result.LocalPath, result.Size)
+		}
+		if result.Error != nil {
+			failed++
+			logging.Warnf("[post-move] mode=Organize movie=%s stage=download media_type=%s url=%s dst=%s err=%v", movie.ID, result.Type, result.URL, result.LocalPath, result.Error)
+		}
+		if !result.Downloaded && result.Error == nil {
+			skipped++
 		}
 		// Log download to history (both successful and failed, skip if no URL)
 		if result.URL != "" {
@@ -96,5 +107,9 @@ func downloadMediaFilesWithHistory(dl *downloader.Downloader, movie *models.Movi
 				logging.Warnf("Failed to log download history for %s: %v", movie.ID, logErr)
 			}
 		}
+	}
+
+	if failed > 0 {
+		logging.Warnf("[post-move] mode=Organize movie=%s stage=download_summary total=%d downloaded=%d skipped=%d failed=%d dest_dir=%s", movie.ID, len(results), downloaded, skipped, failed, destDir)
 	}
 }

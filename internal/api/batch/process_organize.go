@@ -126,6 +126,16 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 			}
 		}
 
+		postMoveIssueCount := 0
+
+		// Surface subtitle move failures clearly in logs for support/debug workflows.
+		for _, subtitle := range result.Subtitles {
+			if subtitle.Error != nil {
+				postMoveIssueCount++
+				logging.Warnf("[post-move] mode=Organize movie=%s file=%s stage=subtitle_move src=%s dst=%s err=%v", movie.ID, filePath, subtitle.OriginalPath, subtitle.NewPath, subtitle.Error)
+			}
+		}
+
 		// Copy temp cropped poster and download all media files
 		if result.Moved {
 			// Create multipart info from match for template conditionals
@@ -161,7 +171,8 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 			}
 			nfoErr := nfoGen.Generate(movie, result.FolderPath, partSuffix, videoFilePath)
 			if nfoErr != nil {
-				logging.Errorf("Failed to generate NFO for %s: %v", movie.ID, nfoErr)
+				postMoveIssueCount++
+				logging.Warnf("[post-move] mode=Organize movie=%s file=%s stage=nfo_generate folder=%s video=%s part_suffix=%q err=%v", movie.ID, filePath, result.FolderPath, videoFilePath, partSuffix, nfoErr)
 			}
 
 			// Log NFO generation to history
@@ -171,6 +182,10 @@ func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination 
 			}
 		} else if result.Moved && !cfg.Metadata.NFO.Enabled {
 			logging.Debugf("NFO generation disabled in config, skipping for %s", movie.ID)
+		}
+
+		if postMoveIssueCount > 0 {
+			logging.Warnf("[post-move] mode=Organize movie=%s file=%s stage=summary issues=%d moved_path=%s folder=%s", movie.ID, filePath, postMoveIssueCount, result.NewPath, result.FolderPath)
 		}
 
 		organized++

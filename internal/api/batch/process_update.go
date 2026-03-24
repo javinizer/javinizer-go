@@ -288,6 +288,14 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 				if result.Downloaded {
 					logging.Infof("Downloaded %s: %s (%d bytes)", result.Type, result.LocalPath, result.Size)
 				}
+				if result.Error != nil {
+					hasErrors = true
+					logging.Warnf("[post-move] mode=Update movie=%s file=%s stage=download media_type=%s url=%s dst=%s err=%v", movie.ID, filePath, result.Type, result.URL, result.LocalPath, result.Error)
+					if errorMsg != "" {
+						errorMsg += "; "
+					}
+					errorMsg += fmt.Sprintf("%s download failed: %v", result.Type, result.Error)
+				}
 				// Log download to history (both successful and failed)
 				if result.URL != "" {
 					if logErr := historyLogger.LogDownload(movie.ID, result.URL, result.LocalPath, string(result.Type), result.Error); logErr != nil {

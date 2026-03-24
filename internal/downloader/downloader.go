@@ -615,12 +615,12 @@ func (d *Downloader) DownloadAll(movie *models.Movie, destDir string, multipart 
 	// Note: Each download method has a file-exists check, so if templates produce
 	// the same filename for different parts, the file won't be re-downloaded.
 	// If templates use <IF:MULTIPART> or <PART>, each part gets its own file.
-	if coverResult, err := d.DownloadCover(movie, destDir, multipart); err == nil && coverResult != nil {
+	if coverResult, _ := d.DownloadCover(movie, destDir, multipart); coverResult != nil {
 		results = append(results, *coverResult)
 	}
 
 	// Download poster
-	if posterResult, err := d.DownloadPoster(movie, destDir, multipart); err == nil && posterResult != nil {
+	if posterResult, _ := d.DownloadPoster(movie, destDir, multipart); posterResult != nil {
 		results = append(results, *posterResult)
 	}
 
@@ -630,7 +630,7 @@ func (d *Downloader) DownloadAll(movie *models.Movie, destDir string, multipart 
 	}
 
 	// Download trailer
-	if trailerResult, err := d.DownloadTrailer(movie, destDir, multipart); err == nil && trailerResult != nil {
+	if trailerResult, _ := d.DownloadTrailer(movie, destDir, multipart); trailerResult != nil {
 		results = append(results, *trailerResult)
 	}
 

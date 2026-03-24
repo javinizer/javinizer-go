@@ -544,6 +544,42 @@ func TestDownloader_DownloadAll(t *testing.T) {
 	}
 }
 
+func TestDownloader_DownloadAll_IncludesFailedResults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	movie := createTestMovie()
+	movie.CoverURL = server.URL + "/cover.jpg"
+
+	cfg := &config.OutputConfig{
+		DownloadCover:       true,
+		DownloadPoster:      false,
+		DownloadExtrafanart: false,
+		DownloadTrailer:     false,
+		DownloadActress:     false,
+	}
+
+	dl := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent")
+	results, err := dl.DownloadAll(movie, tmpDir, nil)
+	require.NoError(t, err)
+
+	foundCover := false
+	for _, result := range results {
+		if result.Type != MediaTypeCover {
+			continue
+		}
+		foundCover = true
+		require.Error(t, result.Error)
+		assert.Contains(t, result.Error.Error(), "bad status code")
+		assert.False(t, result.Downloaded)
+	}
+
+	assert.True(t, foundCover, "expected cover result to be present even when download fails")
+}
+
 func TestGetImageExtension(t *testing.T) {
 	testCases := []struct {
 		url      string
