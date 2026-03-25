@@ -41,26 +41,27 @@ type Scraper struct {
 
 // New creates a new R18.dev scraper
 func New(cfg *config.Config) *Scraper {
-	proxyConfig := config.ResolveScraperProxy(cfg.Scrapers.Proxy, cfg.Scrapers.R18Dev.Proxy)
+	// Create scraper config for HTTP client ownership (HTTP-01)
+	scraperCfg := &config.ScraperConfig{
+		Enabled:          cfg.Scrapers.R18Dev.Enabled,
+		Timeout:          30, // default
+		RateLimit:        cfg.Scrapers.R18Dev.RequestDelay,
+		RetryCount:       cfg.Scrapers.R18Dev.MaxRetries,
+		UseFakeUserAgent: cfg.Scrapers.R18Dev.UseFakeUserAgent,
+		UserAgent:        cfg.Scrapers.R18Dev.FakeUserAgent,
+		Proxy:            cfg.Scrapers.R18Dev.Proxy,
+		DownloadProxy:    cfg.Scrapers.R18Dev.DownloadProxy,
+		FlareSolverr:     cfg.Scrapers.Proxy.FlareSolverr, // inherit global if not overridden
+	}
 
-	// Create resty client with proxy support
-	client, err := httpclient.NewRestyClient(
-		proxyConfig,
-		30*time.Second,
-		3,
-	)
+	// Create HTTP client via per-scraper NewHTTPClient (HTTP-01)
+	client, err := NewHTTPClient(scraperCfg, &cfg.Scrapers.Proxy)
 	if err != nil {
-		logging.Errorf("R18Dev: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
+		logging.Errorf("R18Dev: Failed to create HTTP client: %v, using explicit no-proxy fallback", err)
 		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
 	}
 
-	userAgent := config.ResolveScraperUserAgent(
-		cfg.Scrapers.UserAgent,
-		cfg.Scrapers.R18Dev.UseFakeUserAgent,
-		cfg.Scrapers.R18Dev.FakeUserAgent,
-	)
 	language := normalizeLanguage(cfg.Scrapers.R18Dev.Language)
-	client.SetHeader("User-Agent", userAgent)
 
 	// Add browser-like headers to help bypass protection
 	client.SetHeader("Accept", "application/json, text/html, */*")
@@ -71,8 +72,8 @@ func New(cfg *config.Config) *Scraper {
 	}
 	client.SetHeader("Accept-Encoding", "gzip, deflate, br")
 	client.SetHeader("Connection", "keep-alive")
-	client.SetHeader("Referer", "https://r18.dev/")
 
+	proxyConfig := config.ResolveScraperProxy(cfg.Scrapers.Proxy, cfg.Scrapers.R18Dev.Proxy)
 	if proxyConfig.Enabled {
 		logging.Infof("R18Dev: Using proxy %s", httpclient.SanitizeProxyURL(proxyConfig.URL))
 	}
@@ -122,12 +123,16 @@ func (s *Scraper) IsEnabled() bool {
 func (s *Scraper) Config() *config.ScraperConfig {
 	return &config.ScraperConfig{
 		Enabled:          s.cfg.Enabled,
-		Language:         s.cfg.Language,
-		RateLimit:        s.cfg.RequestDelay,
+		Language:         s.language,
+		Timeout:          30,
+		RateLimit:        int(s.requestDelay.Milliseconds()),
+		RetryCount:       s.maxRetries,
 		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
 		UserAgent:        s.cfg.FakeUserAgent,
 		Proxy:            s.cfg.Proxy,
 		DownloadProxy:    s.cfg.DownloadProxy,
+		FlareSolverr:     s.cfg.Proxy.FlareSolverr, // FlareSolverr from R18Dev's proxy config
+		Extra:            make(map[string]any),
 	}
 }
 
