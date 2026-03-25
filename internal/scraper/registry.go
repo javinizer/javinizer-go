@@ -22,12 +22,6 @@ import (
 //   - error: Any error encountered during scraper initialization
 //
 // The registry uses GetScraperConstructors() to discover all registered scrapers via init().
-// JavLibrary is handled specially (removed from constructors, initialized separately) due to
-// its unique proxy and initialization requirements.
-//
-// Note: Language validation for JavLibrary is performed in Config.Validate() to ensure
-// consistent behavior across all initialization paths. Invalid languages are rejected
-// at config load time rather than causing partial failures during startup.
 func NewDefaultScraperRegistry(cfg *config.Config, db *database.DB) (*models.ScraperRegistry, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
@@ -38,19 +32,7 @@ func NewDefaultScraperRegistry(cfg *config.Config, db *database.DB) (*models.Scr
 	// Get all registered scraper constructors from init() registrations
 	constructors := GetScraperConstructors()
 
-	// Handle JavLibrary scraper specially (language validation is done in config)
-	// This scraper requires special proxy resolution and is removed from the generic constructor map
-	if javlibConstructor, ok := constructors["javlibrary"]; ok {
-		delete(constructors, "javlibrary")
-		javlib, err := javlibConstructor(cfg, db)
-		if err != nil {
-			logging.Warnf("Failed to initialize JavLibrary scraper: %v", err)
-		} else {
-			registry.Register(javlib)
-		}
-	}
-
-	// Initialize all other scrapers via their registered constructors
+	// Initialize all scrapers via their registered constructors
 	for name, constructor := range constructors {
 		scraper, err := constructor(cfg, db)
 		if err != nil {

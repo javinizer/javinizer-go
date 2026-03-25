@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"net/url"
 	"path"
 	"sort"
@@ -134,6 +135,36 @@ type Scraper interface {
 	// Returns nil if no cleanup is needed
 	Close() error
 }
+
+// Compile-time verification that nil Closer satisfies Scraper interface
+var _ Scraper = (*Closer)(nil)
+
+// Closer provides a no-op implementation for scrapers without cleanup.
+// Scrapers that don't hold external resources can embed Closer to satisfy
+// the Scraper interface without implementing Close().
+type Closer struct{}
+
+// Name returns "cloner" as the identifier for the Closer no-op scraper
+func (c *Closer) Name() string { return "cloner" }
+
+// Search returns an error indicating this is a no-op implementation
+func (c *Closer) Search(_ string) (*ScraperResult, error) {
+	return nil, fmt.Errorf("cloner: no-op scraper cannot search")
+}
+
+// GetURL returns an error indicating this is a no-op implementation
+func (c *Closer) GetURL(_ string) (string, error) {
+	return "", fmt.Errorf("cloner: no-op scraper cannot get url")
+}
+
+// IsEnabled returns false as this is a no-op implementation
+func (c *Closer) IsEnabled() bool { return false }
+
+// Config returns nil as this is a no-op implementation
+func (c *Closer) Config() *config.ScraperConfig { return nil }
+
+// Close is a no-op implementation for scrapers that don't require resource cleanup
+func (c *Closer) Close() error { return nil }
 
 // ScraperQueryResolver is an optional hook for scrapers to declare and normalize
 // identifier formats they can handle (e.g., non-standard filename IDs).
