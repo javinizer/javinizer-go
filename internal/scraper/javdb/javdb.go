@@ -123,6 +123,9 @@ func (s *Scraper) Config() *config.ScraperConfig {
 		UserAgent:        s.cfg.FakeUserAgent,
 		Proxy:            s.cfg.Proxy,
 		DownloadProxy:    s.cfg.DownloadProxy,
+		// HTTP-03: FlareSolverr from ScraperConfig directly
+		FlareSolverr: s.cfg.Proxy.FlareSolverr,
+		Extra:        make(map[string]any),
 	}
 }
 
