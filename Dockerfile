@@ -90,6 +90,7 @@ RUN apk add --no-cache \
     ca-certificates \
     tzdata \
     sqlite \
+    su-exec \
     wget \
     chromium \
     nss \
@@ -97,19 +98,11 @@ RUN apk add --no-cache \
     harfbuzz \
     ttf-freefont
 
-# Create non-root user with configurable UID/GID (defaults to 1000).
-# On macOS, common host GIDs (e.g., 20) may already exist in Alpine, so we
-# reuse existing UID/GID entries when present instead of failing the build.
+# Preserve image defaults for runtime UID/GID selection. The entrypoint still
+# prefers PUID/PGID, then falls back to USER_ID/GROUP_ID, and only uses these
+# values when no runtime override is provided.
 ARG USER_ID=1000
 ARG GROUP_ID=1000
-
-RUN if ! awk -F: -v gid="${GROUP_ID}" '$3 == gid { found=1; exit } END { exit !found }' /etc/group; then \
-      addgroup -g "${GROUP_ID}" javinizer; \
-    fi && \
-    GROUP_NAME="$(awk -F: -v gid="${GROUP_ID}" '$3 == gid { print $1; exit }' /etc/group)" && \
-    if ! awk -F: -v uid="${USER_ID}" '$3 == uid { found=1; exit } END { exit !found }' /etc/passwd; then \
-      adduser -u "${USER_ID}" -G "${GROUP_NAME}" -s /bin/sh -D javinizer; \
-    fi
 
 # Copy binary to /usr/local/bin for system-wide access
 COPY --from=go-builder /build/javinizer /usr/local/bin/javinizer
@@ -132,21 +125,22 @@ RUN sed -i 's/^\([[:space:]]*\)host: localhost/\1host: 0.0.0.0/' /app/config/con
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Create directory structure for volumes
+# Create image-managed state directories. Sticky world-writable permissions are
+# only a fallback for containers started with an explicit Docker `user:` that
+# bypasses the root bootstrap; mounted volumes still rely on host ownership.
 RUN mkdir -p /javinizer/logs /javinizer/cache /media && \
-    chown -R ${USER_ID}:${GROUP_ID} /javinizer /media /app
+    chmod 1777 /javinizer /javinizer/logs /javinizer/cache /media
 
 # Environment variables
 ENV JAVINIZER_HOME=/javinizer \
     JAVINIZER_CONFIG=/javinizer/config.yaml \
     JAVINIZER_DB=/javinizer/javinizer.db \
     JAVINIZER_LOG_DIR=/javinizer/logs \
+    JAVINIZER_IMAGE_DEFAULT_UID=${USER_ID} \
+    JAVINIZER_IMAGE_DEFAULT_GID=${GROUP_ID} \
     CHROME_BIN=/usr/bin/chromium-browser \
     CHROME_PATH=/usr/bin/chromium-browser \
     PATH="/usr/local/bin:${PATH}"
-
-# Switch to non-root user (numeric UID/GID to support reused existing accounts)
-USER ${USER_ID}:${GROUP_ID}
 
 # Expose API/web port
 EXPOSE 8080
