@@ -37,10 +37,10 @@ func NewHTTPClient(cfg *config.ScraperConfig, globalProxy *config.ProxyConfig, u
 	// The bool parameter (useFlareSolverr) comes from scraperCfg.UseFlareSolverr
 	if useFlareSolverr {
 		proxyWithFlareSolverr := &config.ProxyConfig{
-			Enabled:      proxyCfg.Enabled,
-			URL:          proxyCfg.URL,
-			Username:     proxyCfg.Username,
-			Password:     proxyCfg.Password,
+			Enabled:  proxyCfg.Enabled,
+			URL:      proxyCfg.URL,
+			Username: proxyCfg.Username,
+			Password: proxyCfg.Password,
 			FlareSolverr: config.FlareSolverrConfig{
 				Enabled: true,
 			},

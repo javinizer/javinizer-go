@@ -26,7 +26,7 @@ func createTestConfig(javCfg config.JavLibraryConfig, proxyCfg config.ProxyConfi
 	return &config.Config{
 		Scrapers: config.ScrapersConfig{
 			JavLibrary: javCfg,
-			Proxy:     proxyCfg,
+			Proxy:      proxyCfg,
 		},
 	}
 }
