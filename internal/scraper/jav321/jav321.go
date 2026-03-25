@@ -47,25 +47,27 @@ type Scraper struct {
 // New creates a new Jav321 scraper.
 func New(cfg *config.Config) *Scraper {
 	scraperCfg := cfg.Scrapers.Jav321
+
+	// Build ScraperConfig for HTTP client (HTTP-01 pattern)
+	configForHTTP := &config.ScraperConfig{
+		Enabled:          scraperCfg.Enabled,
+		Timeout:          30,
+		RateLimit:        scraperCfg.RequestDelay,
+		RetryCount:       3,
+		UseFakeUserAgent: scraperCfg.UseFakeUserAgent,
+		UserAgent:        scraperCfg.FakeUserAgent,
+		Proxy:            scraperCfg.Proxy,
+		DownloadProxy:    scraperCfg.DownloadProxy,
+	}
+
 	proxyCfg := config.ResolveScraperProxy(cfg.Scrapers.Proxy, scraperCfg.Proxy)
 
-	client, err := httpclient.NewRestyClient(proxyCfg, 30*time.Second, 3)
+	client, err := NewHTTPClient(configForHTTP, &cfg.Scrapers.Proxy)
 	usingProxy := err == nil && proxyCfg.Enabled && strings.TrimSpace(proxyCfg.URL) != ""
 	if err != nil {
 		logging.Errorf("Jav321: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
 		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
 	}
-
-	userAgent := config.ResolveScraperUserAgent(
-		cfg.Scrapers.UserAgent,
-		scraperCfg.UseFakeUserAgent,
-		scraperCfg.FakeUserAgent,
-	)
-	client.SetHeader("User-Agent", userAgent)
-	client.SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	client.SetHeader("Accept-Language", "ja,en-US;q=0.8,en;q=0.6")
-	client.SetHeader("Connection", "keep-alive")
-	client.SetHeader("Upgrade-Insecure-Requests", "1")
 
 	base := strings.TrimSpace(scraperCfg.BaseURL)
 	if base == "" {
@@ -102,15 +104,39 @@ func (s *Scraper) Config() *config.ScraperConfig {
 	return &config.ScraperConfig{
 		Enabled:          s.cfg.Enabled,
 		RateLimit:        s.cfg.RequestDelay,
+		Timeout:          30,
+		RetryCount:       3,
 		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
 		UserAgent:        s.cfg.FakeUserAgent,
 		Proxy:            s.cfg.Proxy,
 		DownloadProxy:    s.cfg.DownloadProxy,
+		Extra:            make(map[string]any),
 	}
 }
 
 // Close cleans up resources held by the scraper
 func (s *Scraper) Close() error {
+	return nil
+}
+
+// ValidateConfig validates the scraper configuration.
+// Returns error if config is invalid, nil if valid.
+func (s *Scraper) ValidateConfig(cfg *config.ScraperConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("jav321: config is nil")
+	}
+	if !cfg.Enabled {
+		return nil // Disabled is valid
+	}
+	if cfg.RateLimit < 0 {
+		return fmt.Errorf("jav321: rate_limit must be non-negative, got %d", cfg.RateLimit)
+	}
+	if cfg.RetryCount < 0 {
+		return fmt.Errorf("jav321: retry_count must be non-negative, got %d", cfg.RetryCount)
+	}
+	if cfg.Timeout < 0 {
+		return fmt.Errorf("jav321: timeout must be non-negative, got %d", cfg.Timeout)
+	}
 	return nil
 }
 
