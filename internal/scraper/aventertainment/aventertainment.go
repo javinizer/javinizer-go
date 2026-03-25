@@ -37,6 +37,7 @@ var (
 // Scraper implements the AVEntertainment scraper.
 type Scraper struct {
 	client          *resty.Client
+	cfg             *config.AVEntertainmentConfig
 	enabled         bool
 	baseURL         string
 	language        string
@@ -78,6 +79,7 @@ func New(cfg *config.Config) *Scraper {
 
 	s := &Scraper{
 		client:        client,
+		cfg:           &cfg.Scrapers.AVEntertainment,
 		enabled:       scraperCfg.Enabled,
 		baseURL:       base,
 		language:      normalizeLanguage(scraperCfg.Language),
@@ -100,6 +102,24 @@ func (s *Scraper) Name() string { return "aventertainment" }
 
 // IsEnabled returns whether scraper is enabled.
 func (s *Scraper) IsEnabled() bool { return s.enabled }
+
+// Config returns the scraper's configuration
+func (s *Scraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{
+		Enabled:          s.cfg.Enabled,
+		Language:         s.cfg.Language,
+		RequestDelay:     s.cfg.RequestDelay,
+		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
+		FakeUserAgent:    s.cfg.FakeUserAgent,
+		Proxy:            s.cfg.Proxy,
+		DownloadProxy:    s.cfg.DownloadProxy,
+	}
+}
+
+// Close cleans up resources held by the scraper
+func (s *Scraper) Close() error {
+	return nil
+}
 
 // ResolveDownloadProxyForHost declares AVEntertainment-owned media hosts for downloader proxy routing.
 func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {

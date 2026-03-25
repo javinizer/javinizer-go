@@ -37,6 +37,7 @@ var (
 // Scraper implements the Caribbeancom scraper.
 type Scraper struct {
 	client          *resty.Client
+	cfg             *config.CaribbeancomConfig
 	enabled         bool
 	baseURL         string
 	language        string
@@ -79,6 +80,7 @@ func New(cfg *config.Config) *Scraper {
 
 	s := &Scraper{
 		client:        client,
+		cfg:           &cfg.Scrapers.Caribbeancom,
 		enabled:       scraperCfg.Enabled,
 		baseURL:       base,
 		language:      lang,
@@ -100,6 +102,24 @@ func (s *Scraper) Name() string { return "caribbeancom" }
 
 // IsEnabled returns whether scraper is enabled.
 func (s *Scraper) IsEnabled() bool { return s.enabled }
+
+// Config returns the scraper's configuration
+func (s *Scraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{
+		Enabled:          s.cfg.Enabled,
+		Language:         s.cfg.Language,
+		RequestDelay:     s.cfg.RequestDelay,
+		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
+		FakeUserAgent:    s.cfg.FakeUserAgent,
+		Proxy:            s.cfg.Proxy,
+		DownloadProxy:    s.cfg.DownloadProxy,
+	}
+}
+
+// Close cleans up resources held by the scraper
+func (s *Scraper) Close() error {
+	return nil
+}
 
 // ResolveDownloadProxyForHost declares Caribbeancom-owned media hosts for downloader proxy routing.
 func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {

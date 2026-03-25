@@ -103,6 +103,18 @@ type ScrapersConfig struct {
 	FC2                   FC2Config             `yaml:"fc2" json:"fc2"`
 }
 
+// ScraperConfig holds common scraper configuration fields used by the Scraper interface.
+// Individual scraper configs embed this and add scraper-specific fields.
+type ScraperConfig struct {
+	Enabled          bool         `yaml:"enabled" json:"enabled"`
+	Language         string       `yaml:"language" json:"language"`                                 // Language code varies by scraper
+	RequestDelay     int          `yaml:"request_delay" json:"request_delay"`                     // Delay between requests in milliseconds
+	UseFakeUserAgent bool         `yaml:"use_fake_user_agent" json:"use_fake_user_agent"`         // Use browser-like User-Agent header
+	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                 // Optional custom fake User-Agent
+	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
+	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+}
+
 // R18DevConfig holds R18.dev scraper configuration
 type R18DevConfig struct {
 	Enabled           bool         `yaml:"enabled" json:"enabled"`

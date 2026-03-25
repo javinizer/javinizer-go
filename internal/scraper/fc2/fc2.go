@@ -35,6 +35,7 @@ var (
 // Scraper implements the FC2 scraper.
 type Scraper struct {
 	client          *resty.Client
+	cfg             *config.FC2Config
 	enabled         bool
 	baseURL         string
 	requestDelay    time.Duration
@@ -75,6 +76,7 @@ func New(cfg *config.Config) *Scraper {
 
 	s := &Scraper{
 		client:        client,
+		cfg:           &cfg.Scrapers.FC2,
 		enabled:       scraperCfg.Enabled,
 		baseURL:       base,
 		requestDelay:  time.Duration(scraperCfg.RequestDelay) * time.Millisecond,
@@ -95,6 +97,23 @@ func (s *Scraper) Name() string { return "fc2" }
 
 // IsEnabled returns whether scraper is enabled.
 func (s *Scraper) IsEnabled() bool { return s.enabled }
+
+// Config returns the scraper's configuration
+func (s *Scraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{
+		Enabled:          s.cfg.Enabled,
+		RequestDelay:     s.cfg.RequestDelay,
+		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
+		FakeUserAgent:    s.cfg.FakeUserAgent,
+		Proxy:            s.cfg.Proxy,
+		DownloadProxy:    s.cfg.DownloadProxy,
+	}
+}
+
+// Close cleans up resources held by the scraper
+func (s *Scraper) Close() error {
+	return nil
+}
 
 // ResolveDownloadProxyForHost declares FC2-owned media hosts for downloader proxy routing.
 func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
