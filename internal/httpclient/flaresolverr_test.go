@@ -655,3 +655,69 @@ func TestFlareSolverr_SessionCacheAfterDestroy(t *testing.T) {
 	// Session should be removed from cache
 	// (We can't directly check the sync.Map, but we can verify no error occurred)
 }
+
+func TestResolveURL_CachesCookiesInSession(t *testing.T) {
+	var (
+		mu         sync.Mutex
+		requestNum int
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+
+		var req map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+
+		w.Header().Set("Content-Type", "application/json")
+
+		switch req["cmd"] {
+		case "sessions.create":
+			_, _ = w.Write([]byte(`{"status":"ok","session":"persist-1"}`))
+		case "request.get":
+			mu.Lock()
+			currentReq := requestNum
+			requestNum++
+			mu.Unlock()
+
+			if currentReq == 0 {
+				// First request: return cookies
+				_, _ = w.Write([]byte(`{"status":"ok","solution":{"response":"<html>page1</html>","cookies":[{"name":"cf_clearance","value":"token123"},{"name":"__cf_bm","value":"abc"}],"userAgent":"ua"}}`))
+			} else {
+				// Second request: return empty cookies (simulating server not returning cookies)
+				_, _ = w.Write([]byte(`{"status":"ok","solution":{"response":"<html>page2</html>","cookies":[],"userAgent":"ua"}}`))
+			}
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.FlareSolverrConfig{
+		Enabled:    true,
+		URL:        server.URL,
+		Timeout:    30,
+		MaxRetries: 1,
+		SessionTTL: 300,
+	}
+
+	fs, err := httpclient.NewFlareSolverr(&cfg)
+	require.NoError(t, err)
+
+	// First request: should return cookies from response
+	_, cookies1, err := fs.ResolveURL("https://example.com/page1")
+	require.NoError(t, err)
+	require.Len(t, cookies1, 2, "first request should return cookies from response")
+	assert.Equal(t, "cf_clearance", cookies1[0].Name)
+	assert.Equal(t, "token123", cookies1[0].Value)
+	assert.Equal(t, "__cf_bm", cookies1[1].Name)
+	assert.Equal(t, "abc", cookies1[1].Value)
+
+	// Second request: should return cached cookies even though server returned empty
+	_, cookies2, err := fs.ResolveURL("https://example.com/page2")
+	require.NoError(t, err)
+	require.Len(t, cookies2, 2, "second request should return cached cookies when server returns empty")
+	assert.Equal(t, "cf_clearance", cookies2[0].Name)
+	assert.Equal(t, "token123", cookies2[0].Value)
+	assert.Equal(t, "__cf_bm", cookies2[1].Name)
+	assert.Equal(t, "abc", cookies2[1].Value)
+}
