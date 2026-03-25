@@ -78,22 +78,24 @@ func New(cfg *config.Config) *Scraper {
 	scraperCfg := cfg.Scrapers.LibreDMM
 	proxyCfg := config.ResolveScraperProxy(cfg.Scrapers.Proxy, scraperCfg.Proxy)
 
-	client, err := httpclient.NewRestyClient(proxyCfg, 30*time.Second, 3)
+	// Build ScraperConfig for HTTP client (HTTP-01 pattern)
+	configForHTTP := &config.ScraperConfig{
+		Enabled:          scraperCfg.Enabled,
+		Timeout:          30,
+		RateLimit:        scraperCfg.RequestDelay,
+		RetryCount:       3,
+		UseFakeUserAgent: scraperCfg.UseFakeUserAgent,
+		UserAgent:        scraperCfg.FakeUserAgent,
+		Proxy:            scraperCfg.Proxy,
+		DownloadProxy:    scraperCfg.DownloadProxy,
+	}
+
+	client, err := NewHTTPClient(configForHTTP, &cfg.Scrapers.Proxy)
 	usingProxy := err == nil && proxyCfg.Enabled && strings.TrimSpace(proxyCfg.URL) != ""
 	if err != nil {
 		logging.Errorf("LibreDMM: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
 		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
 	}
-
-	userAgent := config.ResolveScraperUserAgent(
-		cfg.Scrapers.UserAgent,
-		scraperCfg.UseFakeUserAgent,
-		scraperCfg.FakeUserAgent,
-	)
-	client.SetHeader("User-Agent", userAgent)
-	client.SetHeader("Accept", "application/json, text/plain;q=0.9, */*;q=0.8")
-	client.SetHeader("Accept-Language", "ja,en-US;q=0.8,en;q=0.6")
-	client.SetHeader("Connection", "keep-alive")
 
 	base := strings.TrimSpace(scraperCfg.BaseURL)
 	if base == "" {
@@ -132,15 +134,39 @@ func (s *Scraper) Config() *config.ScraperConfig {
 	return &config.ScraperConfig{
 		Enabled:          s.cfg.Enabled,
 		RateLimit:        s.cfg.RequestDelay,
+		Timeout:          30,
+		RetryCount:       3,
 		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
 		UserAgent:        s.cfg.FakeUserAgent,
 		Proxy:            s.cfg.Proxy,
 		DownloadProxy:    s.cfg.DownloadProxy,
+		Extra:            make(map[string]any),
 	}
 }
 
 // Close cleans up resources held by the scraper
 func (s *Scraper) Close() error {
+	return nil
+}
+
+// ValidateConfig validates the scraper configuration.
+// Returns error if config is invalid, nil if valid.
+func (s *Scraper) ValidateConfig(cfg *config.ScraperConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("libredmm: config is nil")
+	}
+	if !cfg.Enabled {
+		return nil // Disabled is valid
+	}
+	if cfg.RateLimit < 0 {
+		return fmt.Errorf("libredmm: rate_limit must be non-negative, got %d", cfg.RateLimit)
+	}
+	if cfg.RetryCount < 0 {
+		return fmt.Errorf("libredmm: retry_count must be non-negative, got %d", cfg.RetryCount)
+	}
+	if cfg.Timeout < 0 {
+		return fmt.Errorf("libredmm: timeout must be non-negative, got %d", cfg.Timeout)
+	}
 	return nil
 }
 
