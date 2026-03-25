@@ -131,6 +131,18 @@ func (m *mockScraper) IsEnabled() bool {
 	return true
 }
 
+// Config returns a minimal ScraperConfig for the mock scraper.
+func (m *mockScraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{
+		Enabled: true,
+	}
+}
+
+// Close is a no-op for mock scrapers.
+func (m *mockScraper) Close() error {
+	return nil
+}
+
 // setupMockScraperRegistry creates a registry with deterministic mock scrapers.
 // The results map keys are scraper names, values are the results they should return.
 //
@@ -824,6 +836,16 @@ func (m *MockScraper) AddURL(id string, url string) {
 // SetEnabled sets whether this scraper is enabled
 func (m *MockScraper) SetEnabled(enabled bool) {
 	m.enabled = enabled
+}
+
+// Close is a no-op for mock scrapers
+func (m *MockScraper) Close() error {
+	return nil
+}
+
+// Config returns a minimal ScraperConfig for the mock scraper
+func (m *MockScraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: m.enabled}
 }
 
 // createMockScraperRegistry creates a scraper registry with mock scrapers for testing

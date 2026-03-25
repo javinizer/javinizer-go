@@ -2334,6 +2334,10 @@ const docTemplate = `{
                     "description": "Optional custom fake User-Agent (defaults to built-in browser UA)",
                     "type": "string"
                 },
+                "max_retries": {
+                    "description": "Maximum number of retry attempts for rate-limited requests",
+                    "type": "integer"
+                },
                 "proxy": {
                     "description": "Optional scraper-specific proxy override",
                     "allOf": [
@@ -2341,6 +2345,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/config.ProxyConfig"
                         }
                     ]
+                },
+                "request_delay": {
+                    "description": "Delay between requests in milliseconds (0 = no delay)",
+                    "type": "integer"
                 },
                 "scrape_actress": {
                     "type": "boolean"
@@ -3293,6 +3301,67 @@ const docTemplate = `{
                 }
             }
         },
+        "config.ScraperConfig": {
+            "type": "object",
+            "properties": {
+                "download_proxy": {
+                    "description": "Optional scraper-specific download proxy override",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.ProxyConfig"
+                        }
+                    ]
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "extra": {
+                    "description": "CONF-06: scraper-specific fields",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "flaresolverr": {
+                    "description": "HTTP-03: FlareSolverr on ScraperConfig",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.FlareSolverrConfig"
+                        }
+                    ]
+                },
+                "language": {
+                    "description": "Language code varies by scraper",
+                    "type": "string"
+                },
+                "proxy": {
+                    "description": "Optional scraper-specific proxy override",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.ProxyConfig"
+                        }
+                    ]
+                },
+                "rate_limit": {
+                    "description": "Request delay in milliseconds (mirrors RequestDelay)",
+                    "type": "integer"
+                },
+                "retry_count": {
+                    "description": "Max retries (mirrors MaxRetries)",
+                    "type": "integer"
+                },
+                "timeout": {
+                    "description": "HTTP client timeout in seconds",
+                    "type": "integer"
+                },
+                "use_fake_user_agent": {
+                    "description": "Use browser-like User-Agent header",
+                    "type": "boolean"
+                },
+                "user_agent": {
+                    "description": "Optional custom User-Agent (replaces FakeUserAgent)",
+                    "type": "string"
+                }
+            }
+        },
         "config.ScrapersConfig": {
             "type": "object",
             "properties": {
@@ -3328,6 +3397,13 @@ const docTemplate = `{
                 },
                 "mgstage": {
                     "$ref": "#/definitions/config.MGStageConfig"
+                },
+                "overrides": {
+                    "description": "Overrides: normalized map for generic iteration (populated at Load() time)\nCONF-02: This map is write-only populated from flat structs.\nNOT yaml-serializable (omitempty). The flat structs remain source of truth for YAML.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/config.ScraperConfig"
+                    }
                 },
                 "priority": {
                     "description": "Global scraper priority order",

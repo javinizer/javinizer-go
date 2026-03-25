@@ -67,6 +67,10 @@ func (m *mockScraperWithResults) Search(id string) (*models.ScraperResult, error
 
 func (m *mockScraperWithResults) GetURL(id string) (string, error) { return "", nil }
 func (m *mockScraperWithResults) IsEnabled() bool                  { return m.enabled }
+func (m *mockScraperWithResults) Close() error                     { return nil }
+func (m *mockScraperWithResults) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: m.enabled}
+}
 
 type mockScraper struct {
 	name    string
@@ -79,3 +83,7 @@ func (m *mockScraper) Search(id string) (*models.ScraperResult, error) {
 }
 func (m *mockScraper) GetURL(id string) (string, error) { return "", nil }
 func (m *mockScraper) IsEnabled() bool                  { return m.enabled }
+func (m *mockScraper) Close() error                     { return nil }
+func (m *mockScraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: m.enabled}
+}

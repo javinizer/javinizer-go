@@ -48,6 +48,14 @@ func (m *MockScraper) IsEnabled() bool {
 	return true
 }
 
+func (m *MockScraper) Close() error {
+	return nil
+}
+
+func (m *MockScraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: true}
+}
+
 // createTestMovie creates a test movie for database operations
 func createTestMovie(id, title string) *models.Movie {
 	return &models.Movie{

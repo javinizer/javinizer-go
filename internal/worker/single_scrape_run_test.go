@@ -65,6 +65,12 @@ func (s *runBatchTestScraper) ResolveSearchQuery(input string) (string, bool) {
 	return query, ok
 }
 
+func (s *runBatchTestScraper) Close() error { return nil }
+
+func (s *runBatchTestScraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: s.enabled}
+}
+
 func newRunBatchTestEnv(t *testing.T, scraperName string) (*config.Config, *database.DB, *database.MovieRepository, *aggregator.Aggregator, *matcher.Matcher) {
 	t.Helper()
 

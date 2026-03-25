@@ -33,3 +33,7 @@ func (m *mockScraperWithResults) Search(id string) (*models.ScraperResult, error
 
 func (m *mockScraperWithResults) GetURL(id string) (string, error) { return "", nil }
 func (m *mockScraperWithResults) IsEnabled() bool                  { return m.enabled }
+func (m *mockScraperWithResults) Close() error                     { return nil }
+func (m *mockScraperWithResults) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: m.enabled}
+}

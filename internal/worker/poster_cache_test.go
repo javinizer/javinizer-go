@@ -295,3 +295,11 @@ func (m *mockScraperForPosterTest) GetURL(id string) (string, error) {
 func (m *mockScraperForPosterTest) IsEnabled() bool {
 	return true
 }
+
+func (m *mockScraperForPosterTest) Close() error {
+	return nil
+}
+
+func (m *mockScraperForPosterTest) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: true}
+}

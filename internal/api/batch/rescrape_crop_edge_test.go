@@ -45,6 +45,12 @@ func (s *noPosterStubScraper) GetURL(id string) (string, error) {
 
 func (s *noPosterStubScraper) IsEnabled() bool { return true }
 
+func (s *noPosterStubScraper) Close() error { return nil }
+
+func (s *noPosterStubScraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: true}
+}
+
 func writeJPEG(t *testing.T, path string, width, height int) {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, width, height))

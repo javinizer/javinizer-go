@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -25,6 +26,12 @@ func (s *resolverTestScraper) ResolveSearchQuery(input string) (string, bool) {
 	key := strings.ToLower(strings.TrimSpace(input))
 	query, ok := s.mappings[key]
 	return query, ok
+}
+
+func (s *resolverTestScraper) Close() error { return nil }
+
+func (s *resolverTestScraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: s.enabled}
 }
 
 func TestResolveScraperQueryForInputs(t *testing.T) {

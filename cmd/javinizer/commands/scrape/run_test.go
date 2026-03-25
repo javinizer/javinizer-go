@@ -62,6 +62,14 @@ func (m *MockScraper) IsEnabled() bool {
 	return true
 }
 
+func (m *MockScraper) Close() error {
+	return nil
+}
+
+func (m *MockScraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: true}
+}
+
 // setupTestDB creates a temporary database and config for testing
 func setupTestDB(t *testing.T) (string, *database.DB) {
 	t.Helper()

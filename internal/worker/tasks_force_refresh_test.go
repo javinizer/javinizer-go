@@ -26,6 +26,8 @@ func (m *MockScraper) Name() string                                    { return 
 func (m *MockScraper) IsEnabled() bool                                 { return true }
 func (m *MockScraper) GetURL(id string) (string, error)                { return "", nil }
 func (m *MockScraper) Search(id string) (*models.ScraperResult, error) { return m.results, m.err }
+func (m *MockScraper) Close() error                                    { return nil }
+func (m *MockScraper) Config() *config.ScraperConfig                   { return &config.ScraperConfig{Enabled: true} }
 
 // TestScrapeTask_ForceRefresh tests that forceRefresh deletes from cache before scraping
 func TestScrapeTask_ForceRefresh(t *testing.T) {

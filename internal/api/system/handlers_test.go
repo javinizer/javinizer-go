@@ -43,6 +43,12 @@ func (m *mockScraper) IsEnabled() bool {
 	return m.enabled
 }
 
+func (m *mockScraper) Close() error { return nil }
+
+func (m *mockScraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{Enabled: m.enabled}
+}
+
 func TestHealthCheck(t *testing.T) {
 	tests := []struct {
 		name             string
