@@ -128,7 +128,7 @@ func (s *Scraper) Config() *config.ScraperConfig {
 	return &config.ScraperConfig{
 		Enabled:          s.cfg.Enabled,
 		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
-		FakeUserAgent:    s.cfg.FakeUserAgent,
+		UserAgent:        s.cfg.FakeUserAgent,
 		Proxy:            s.cfg.Proxy,
 		DownloadProxy:    s.cfg.DownloadProxy,
 	}

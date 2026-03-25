@@ -49,6 +49,10 @@ func decodeConfig(data []byte) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// CONF-02: Populate Overrides and flatConfigs maps from flat per-scraper structs.
+	// This enables generic iteration in Validate() without scraper-name branching.
+	cfg.Scrapers.normalizeScraperConfigs()
+
 	return cfg, nil
 }
 
