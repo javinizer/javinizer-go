@@ -64,38 +64,15 @@ type Scraper struct {
 
 // New creates a new DMM scraper
 func New(cfg *config.Config, contentIDRepo *database.ContentIDMappingRepository) *Scraper {
-	proxyConfig := config.ResolveScraperProxy(cfg.Scrapers.Proxy, cfg.Scrapers.DMM.Proxy)
-
-	// Create resty client with proxy support
-	client, err := httpclient.NewRestyClient(
-		proxyConfig,
-		30*time.Second,
-		3,
-	)
+	// Create HTTP client via per-scraper NewHTTPClient (HTTP-01)
+	client, proxyConfig, err := NewHTTPClientWithDefaults(cfg)
 	if err != nil {
-		logging.Errorf("DMM: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
-		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
+		// NewHTTPClientWithDefaults already logged and fell back; client is non-nil
+		logging.Debugf("DMM: Using fallback HTTP client: %v", err)
 	}
 
-	userAgent := config.ResolveScraperUserAgent(
-		cfg.Scrapers.UserAgent,
-		cfg.Scrapers.DMM.UseFakeUserAgent,
-		cfg.Scrapers.DMM.FakeUserAgent,
-	)
-	client.SetHeader("User-Agent", userAgent)
-
-	// Add browser-like headers to help with scraping
-	client.SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	client.SetHeader("Accept-Language", "en-US,en;q=0.9,ja;q=0.8")
-	client.SetHeader("Accept-Encoding", "gzip, deflate, br")
-	client.SetHeader("Connection", "keep-alive")
-	client.SetHeader("Upgrade-Insecure-Requests", "1")
-
-	// Set age verification cookies once on the client
-	// These will be sent with all requests automatically
-	client.SetHeader("Cookie", "age_check_done=1; cklg=ja")
-
-	if proxyConfig.Enabled {
+	// Log proxy usage if enabled
+	if proxyConfig != nil && proxyConfig.Enabled {
 		logging.Infof("DMM: Using proxy %s", httpclient.SanitizeProxyURL(proxyConfig.URL))
 	}
 
