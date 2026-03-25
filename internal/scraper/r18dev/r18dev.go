@@ -26,6 +26,7 @@ const (
 // Scraper implements the R18.dev scraper
 type Scraper struct {
 	client            *resty.Client
+	cfg               *config.R18DevConfig
 	enabled           bool
 	language          string
 	requestDelay      time.Duration
@@ -85,6 +86,7 @@ func New(cfg *config.Config) *Scraper {
 
 	scraper := &Scraper{
 		client:            client,
+		cfg:               &cfg.Scrapers.R18Dev,
 		enabled:           cfg.Scrapers.R18Dev.Enabled,
 		language:          language,
 		requestDelay:      requestDelay,
@@ -112,6 +114,24 @@ func (s *Scraper) Name() string {
 // IsEnabled returns whether the scraper is enabled
 func (s *Scraper) IsEnabled() bool {
 	return s.enabled
+}
+
+// Config returns the scraper's configuration
+func (s *Scraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{
+		Enabled:          s.cfg.Enabled,
+		Language:         s.cfg.Language,
+		RequestDelay:     s.cfg.RequestDelay,
+		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
+		FakeUserAgent:    s.cfg.FakeUserAgent,
+		Proxy:            s.cfg.Proxy,
+		DownloadProxy:    s.cfg.DownloadProxy,
+	}
+}
+
+// Close cleans up resources held by the scraper
+func (s *Scraper) Close() error {
+	return nil
 }
 
 // ResolveDownloadProxyForHost declares R18.dev-owned media hosts for downloader proxy routing.

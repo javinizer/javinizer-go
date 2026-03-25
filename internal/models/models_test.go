@@ -2,6 +2,8 @@ package models
 
 import (
 	"testing"
+
+	"github.com/javinizer/javinizer-go/internal/config"
 )
 
 // TestActressFullName tests the Actress.FullName() method
@@ -161,6 +163,16 @@ func (m *MockScraper) GetURL(id string) (string, error) {
 
 func (m *MockScraper) IsEnabled() bool {
 	return m.enabled
+}
+
+func (m *MockScraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{
+		Enabled: m.enabled,
+	}
+}
+
+func (m *MockScraper) Close() error {
+	return nil
 }
 
 type MockResolverScraper struct {

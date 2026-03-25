@@ -25,6 +25,7 @@ const (
 // Scraper implements the MGStage scraper
 type Scraper struct {
 	client          *resty.Client
+	cfg             *config.MGStageConfig
 	enabled         bool
 	usingProxy      bool
 	requestDelay    time.Duration
@@ -82,6 +83,7 @@ func New(cfg *config.Config) *Scraper {
 
 	scraper := &Scraper{
 		client:        client,
+		cfg:           &cfg.Scrapers.MGStage,
 		enabled:       cfg.Scrapers.MGStage.Enabled,
 		usingProxy:    usingProxy,
 		requestDelay:  requestDelay,
@@ -107,6 +109,23 @@ func (s *Scraper) Name() string {
 // IsEnabled returns whether the scraper is enabled
 func (s *Scraper) IsEnabled() bool {
 	return s.enabled
+}
+
+// Config returns the scraper's configuration
+func (s *Scraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{
+		Enabled:          s.cfg.Enabled,
+		RequestDelay:     s.cfg.RequestDelay,
+		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
+		FakeUserAgent:    s.cfg.FakeUserAgent,
+		Proxy:            s.cfg.Proxy,
+		DownloadProxy:    s.cfg.DownloadProxy,
+	}
+}
+
+// Close cleans up resources held by the scraper
+func (s *Scraper) Close() error {
+	return nil
 }
 
 // ResolveDownloadProxyForHost declares MGStage-owned media hosts for downloader proxy routing.

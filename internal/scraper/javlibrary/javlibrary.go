@@ -110,6 +110,24 @@ func (s *Scraper) IsEnabled() bool {
 	return s.enabled
 }
 
+// Config returns the scraper's configuration
+func (s *Scraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{
+		Enabled:          s.cfg.Enabled,
+		Language:         s.cfg.Language,
+		RequestDelay:     s.cfg.RequestDelay,
+		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
+		FakeUserAgent:    s.cfg.FakeUserAgent,
+		Proxy:            s.cfg.Proxy,
+		DownloadProxy:    s.cfg.DownloadProxy,
+	}
+}
+
+// Close cleans up resources held by the scraper
+func (s *Scraper) Close() error {
+	return nil
+}
+
 // ResolveDownloadProxyForHost declares JavLibrary-owned media hosts for downloader proxy routing.
 func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))

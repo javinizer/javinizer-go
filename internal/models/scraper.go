@@ -3,6 +3,7 @@ package models
 import (
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -125,6 +126,13 @@ type Scraper interface {
 
 	// IsEnabled returns whether this scraper is enabled in configuration
 	IsEnabled() bool
+
+	// Config returns the scraper's configuration
+	Config() *config.ScraperConfig
+
+	// Close cleans up resources held by the scraper (e.g., HTTP clients, browsers)
+	// Returns nil if no cleanup is needed
+	Close() error
 }
 
 // ScraperQueryResolver is an optional hook for scrapers to declare and normalize
@@ -163,27 +171,45 @@ func (r *ScraperRegistry) Register(scraper Scraper) {
 	r.scrapers[scraper.Name()] = scraper
 }
 
+// Reset clears all registered scrapers from the registry.
+// Primarily used for test isolation.
+func (r *ScraperRegistry) Reset() {
+	r.scrapers = make(map[string]Scraper)
+}
+
 // Get retrieves a scraper by name
 func (r *ScraperRegistry) Get(name string) (Scraper, bool) {
 	scraper, exists := r.scrapers[name]
 	return scraper, exists
 }
 
-// GetAll returns all registered scrapers
+// GetAll returns all registered scrapers in sorted key order for deterministic iteration
 func (r *ScraperRegistry) GetAll() []Scraper {
+	keys := make([]string, 0, len(r.scrapers))
+	for k := range r.scrapers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	scrapers := make([]Scraper, 0, len(r.scrapers))
-	for _, scraper := range r.scrapers {
-		scrapers = append(scrapers, scraper)
+	for _, k := range keys {
+		scrapers = append(scrapers, r.scrapers[k])
 	}
 	return scrapers
 }
 
-// GetEnabled returns all enabled scrapers
+// GetEnabled returns all enabled scrapers in sorted key order for deterministic iteration
 func (r *ScraperRegistry) GetEnabled() []Scraper {
+	keys := make([]string, 0, len(r.scrapers))
+	for k := range r.scrapers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	scrapers := make([]Scraper, 0)
-	for _, scraper := range r.scrapers {
-		if scraper.IsEnabled() {
-			scrapers = append(scrapers, scraper)
+	for _, k := range keys {
+		if r.scrapers[k].IsEnabled() {
+			scrapers = append(scrapers, r.scrapers[k])
 		}
 	}
 	return scrapers

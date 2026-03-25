@@ -50,6 +50,7 @@ var (
 // Scraper implements the DMM/Fanza scraper
 type Scraper struct {
 	client         *resty.Client
+	cfg            *config.DMMConfig
 	enabled        bool
 	scrapeActress  bool
 	enableBrowser  bool
@@ -99,6 +100,7 @@ func New(cfg *config.Config, contentIDRepo *database.ContentIDMappingRepository)
 
 	return &Scraper{
 		client:         client,
+		cfg:            &cfg.Scrapers.DMM,
 		enabled:        cfg.Scrapers.DMM.Enabled,
 		scrapeActress:  cfg.Scrapers.DMM.ScrapeActress,
 		enableBrowser:  cfg.Scrapers.DMM.EnableBrowser,
@@ -118,6 +120,22 @@ func (s *Scraper) Name() string {
 // IsEnabled returns whether the scraper is enabled
 func (s *Scraper) IsEnabled() bool {
 	return s.enabled
+}
+
+// Config returns the scraper's configuration
+func (s *Scraper) Config() *config.ScraperConfig {
+	return &config.ScraperConfig{
+		Enabled:          s.cfg.Enabled,
+		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
+		FakeUserAgent:    s.cfg.FakeUserAgent,
+		Proxy:            s.cfg.Proxy,
+		DownloadProxy:    s.cfg.DownloadProxy,
+	}
+}
+
+// Close cleans up resources held by the scraper
+func (s *Scraper) Close() error {
+	return nil
 }
 
 // ResolveDownloadProxyForHost declares DMM-owned media hosts for downloader proxy routing.
