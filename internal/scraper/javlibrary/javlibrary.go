@@ -9,9 +9,11 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
-	httpclient "github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	scraper "github.com/javinizer/javinizer-go/internal/scraper"
 )
 
 // SupportedLanguages lists the language codes supported by JavLibrary.
@@ -31,68 +33,74 @@ type Scraper struct {
 }
 
 // New creates a new JavLibrary scraper.
-// globalUserAgent is optional for backward compatibility with existing callers.
-func New(cfg *config.JavLibraryConfig, proxyConfig *config.ProxyConfig, globalUserAgent ...string) (*Scraper, error) {
-	client, fs, err := httpclient.NewRestyClientWithFlareSolverr(
-		proxyConfig,
-		30*time.Second,
-		3,
-	)
-	usingProxy := err == nil && proxyConfig != nil && proxyConfig.Enabled && strings.TrimSpace(proxyConfig.URL) != ""
+func New(cfg *config.Config) *Scraper {
+	scraperCfg := cfg.Scrapers.JavLibrary
+	proxyConfig := cfg.Scrapers.Proxy
+
+	// Handle nil Proxy in scraperCfg
+	var flaresolverrConfig config.FlareSolverrConfig
+	if scraperCfg.Proxy != nil {
+		flaresolverrConfig = scraperCfg.Proxy.FlareSolverr
+	}
+
+	// Build ScraperConfig for NewHTTPClient (HTTP-01 pattern)
+	configForHTTP := &config.ScraperConfig{
+		Enabled:          scraperCfg.Enabled,
+		Language:         scraperCfg.Language,
+		RateLimit:        scraperCfg.RequestDelay,
+		Timeout:          30, // default, will be overridden if ScraperConfig has it
+		RetryCount:       3,  // default
+		UseFakeUserAgent: scraperCfg.UseFakeUserAgent,
+		UserAgent:        scraperCfg.FakeUserAgent,
+		Proxy:            scraperCfg.Proxy,
+		DownloadProxy:    scraperCfg.DownloadProxy,
+		FlareSolverr:     flaresolverrConfig,
+	}
+
+	client, flaresolverr, err := NewHTTPClient(configForHTTP, &proxyConfig, scraperCfg.UseFlareSolverr)
+	usingProxy := err == nil && proxyConfig.Enabled && strings.TrimSpace(proxyConfig.URL) != ""
 	if err != nil {
 		logging.Errorf("JavLibrary: Failed to create HTTP client with proxy/flaresolverr: %v, using explicit no-proxy fallback", err)
 		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
-		fs = nil
+		flaresolverr = nil
 	}
 
-	baseURL := cfg.BaseURL
+	baseURL := scraperCfg.BaseURL
 	if baseURL == "" {
 		baseURL = "http://www.javlibrary.com"
 	}
 
 	// Normalize language to a supported value
-	language := cfg.Language
+	language := scraperCfg.Language
 	if language == "" {
 		language = "en"
 	}
-	// Validate and normalize language - if invalid, fall back to "en" rather than failing
 	if !isValidLanguage(language) {
 		logging.Warnf("JavLibrary: unsupported language %q, falling back to 'en' (supported: %v)", language, SupportedLanguages)
 		language = "en"
 	}
 
-	effectiveGlobalUA := ""
-	if len(globalUserAgent) > 0 {
-		effectiveGlobalUA = globalUserAgent[0]
-	}
-	// Legacy per-scraper user_agent field takes precedence when configured.
-	userAgent := strings.TrimSpace(cfg.UserAgent)
-	if userAgent == "" {
-		userAgent = config.ResolveScraperUserAgent(
-			effectiveGlobalUA,
-			cfg.UseFakeUserAgent,
-			cfg.FakeUserAgent,
-		)
-	}
+	userAgent := config.ResolveScraperUserAgent(
+		cfg.Scrapers.UserAgent,
+		scraperCfg.UseFakeUserAgent,
+		scraperCfg.FakeUserAgent,
+	)
 	client.SetHeader("User-Agent", userAgent)
 
 	if usingProxy {
 		logging.Infof("JavLibrary: Using proxy %s", httpclient.SanitizeProxyURL(proxyConfig.URL))
 	}
-	if cfg.UseFlareSolverr && fs == nil {
-		logging.Warn("JavLibrary: use_flaresolverr=true but no FlareSolverr client is configured")
-	}
 
 	return &Scraper{
 		client:        client,
-		flaresolverr:  fs,
-		cfg:           cfg,
-		enabled:       cfg.Enabled,
+		flaresolverr:  flaresolverr,
+		cfg:           &scraperCfg,
+		enabled:       scraperCfg.Enabled,
 		baseURL:       baseURL,
 		language:      language,
-		proxyOverride: proxyConfig,
-		downloadProxy: cfg.DownloadProxy,
-	}, nil
+		proxyOverride: scraperCfg.Proxy,
+		downloadProxy: scraperCfg.DownloadProxy,
+	}
 }
 
 // Name returns the scraper name
@@ -116,15 +124,25 @@ func (s *Scraper) Config() *config.ScraperConfig {
 		Enabled:          s.cfg.Enabled,
 		Language:         s.cfg.Language,
 		RateLimit:        s.cfg.RequestDelay,
+		Timeout:          30, // default, hardcoded in HTTP client creation
+		RetryCount:       3,  // default, hardcoded in HTTP client creation
 		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
 		UserAgent:        s.cfg.FakeUserAgent,
 		Proxy:            s.cfg.Proxy,
 		DownloadProxy:    s.cfg.DownloadProxy,
+		FlareSolverr: config.FlareSolverrConfig{
+			Enabled: s.cfg.UseFlareSolverr,
+		},
 	}
 }
 
-// Close cleans up resources held by the scraper
+// Close cleans up resources held by the scraper (HTTP client, FlareSolverr).
 func (s *Scraper) Close() error {
+	if s.flaresolverr != nil {
+		if closeErr := s.flaresolverr.Close(); closeErr != nil {
+			logging.Debugf("JavLibrary: Error closing FlareSolverr: %v", closeErr)
+		}
+	}
 	return nil
 }
 
@@ -456,4 +474,34 @@ func isValidLanguage(lang string) bool {
 		}
 	}
 	return false
+}
+
+// ValidateConfig validates the scraper configuration.
+// Returns error if config is invalid, nil if valid.
+func (s *Scraper) ValidateConfig(cfg *config.ScraperConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("javlibrary: config is nil")
+	}
+	if !cfg.Enabled {
+		return nil // Disabled is valid
+	}
+	// Validate rate limit
+	if cfg.RateLimit < 0 {
+		return fmt.Errorf("javlibrary: rate_limit must be non-negative, got %d", cfg.RateLimit)
+	}
+	// Validate retry count
+	if cfg.RetryCount < 0 {
+		return fmt.Errorf("javlibrary: retry_count must be non-negative, got %d", cfg.RetryCount)
+	}
+	// Validate timeout
+	if cfg.Timeout < 0 {
+		return fmt.Errorf("javlibrary: timeout must be non-negative, got %d", cfg.Timeout)
+	}
+	return nil
+}
+
+func init() {
+	scraper.RegisterScraper("javlibrary", func(cfg *config.Config, db *database.DB) (models.Scraper, error) {
+		return New(cfg), nil
+	})
 }

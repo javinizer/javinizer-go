@@ -22,12 +22,20 @@ func requireJavLibraryIntegration(t *testing.T) {
 	}
 }
 
+func createTestConfig(javCfg config.JavLibraryConfig, proxyCfg config.ProxyConfig) *config.Config {
+	return &config.Config{
+		Scrapers: config.ScrapersConfig{
+			JavLibrary: javCfg,
+			Proxy:     proxyCfg,
+		},
+	}
+}
+
 func TestNewScraper(t *testing.T) {
 	tests := []struct {
-		name        string
-		javConfig   config.JavLibraryConfig
-		proxyConfig *config.ProxyConfig
-		wantError   bool
+		name      string
+		javConfig config.JavLibraryConfig
+		proxyCfg  config.ProxyConfig
 	}{
 		{
 			name: "basic scraper",
@@ -38,8 +46,7 @@ func TestNewScraper(t *testing.T) {
 				BaseURL:         "http://www.javlibrary.com",
 				UseFlareSolverr: false,
 			},
-			proxyConfig: &config.ProxyConfig{},
-			wantError:   false,
+			proxyCfg: config.ProxyConfig{},
 		},
 		{
 			name: "scraper with FlareSolverr enabled",
@@ -50,7 +57,7 @@ func TestNewScraper(t *testing.T) {
 				BaseURL:         "http://www.javlibrary.com",
 				UseFlareSolverr: true,
 			},
-			proxyConfig: &config.ProxyConfig{
+			proxyCfg: config.ProxyConfig{
 				FlareSolverr: config.FlareSolverrConfig{
 					Enabled:    true,
 					URL:        "http://localhost:8191/v1",
@@ -59,7 +66,6 @@ func TestNewScraper(t *testing.T) {
 					SessionTTL: 300,
 				},
 			},
-			wantError: false,
 		},
 		{
 			name: "scraper disabled",
@@ -70,8 +76,7 @@ func TestNewScraper(t *testing.T) {
 				BaseURL:         "http://www.javlibrary.com",
 				UseFlareSolverr: false,
 			},
-			proxyConfig: &config.ProxyConfig{},
-			wantError:   false,
+			proxyCfg: config.ProxyConfig{},
 		},
 		{
 			name: "default language when empty",
@@ -81,39 +86,35 @@ func TestNewScraper(t *testing.T) {
 				BaseURL:         "http://www.javlibrary.com",
 				UseFlareSolverr: false,
 			},
-			proxyConfig: &config.ProxyConfig{},
-			wantError:   false,
+			proxyCfg: config.ProxyConfig{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scraper, err := javlibrary.New(&tt.javConfig, tt.proxyConfig)
+			cfg := createTestConfig(tt.javConfig, tt.proxyCfg)
+			scraper := javlibrary.New(cfg)
 
-			if tt.wantError {
-				assert.Error(t, err)
-				assert.Nil(t, scraper)
-			} else {
-				require.NoError(t, err)
-				assert.NotNil(t, scraper)
-				assert.Equal(t, "javlibrary", scraper.Name())
-				assert.Equal(t, tt.javConfig.Enabled, scraper.IsEnabled())
-			}
+			assert.NotNil(t, scraper)
+			assert.Equal(t, "javlibrary", scraper.Name())
+			assert.Equal(t, tt.javConfig.Enabled, scraper.IsEnabled())
 		})
 	}
 }
 
 func TestScraper_GetURL(t *testing.T) {
-	cfg := config.JavLibraryConfig{
-		Enabled:         false,
-		Language:        "en",
-		RequestDelay:    1000,
-		BaseURL:         "http://www.javlibrary.com",
-		UseFlareSolverr: false,
-	}
+	cfg := createTestConfig(
+		config.JavLibraryConfig{
+			Enabled:         false,
+			Language:        "en",
+			RequestDelay:    1000,
+			BaseURL:         "http://www.javlibrary.com",
+			UseFlareSolverr: false,
+		},
+		config.ProxyConfig{},
+	)
 
-	scraper, err := javlibrary.New(&cfg, &config.ProxyConfig{})
-	require.NoError(t, err)
+	scraper := javlibrary.New(cfg)
 
 	tests := []struct {
 		name string
@@ -161,14 +162,16 @@ func TestScraper_GetURL_Languages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := config.JavLibraryConfig{
-				Enabled:  false,
-				Language: tt.language,
-				BaseURL:  "http://www.javlibrary.com",
-			}
+			cfg := createTestConfig(
+				config.JavLibraryConfig{
+					Enabled:  false,
+					Language: tt.language,
+					BaseURL:  "http://www.javlibrary.com",
+				},
+				config.ProxyConfig{},
+			)
 
-			scraper, err := javlibrary.New(&cfg, &config.ProxyConfig{})
-			require.NoError(t, err)
+			scraper := javlibrary.New(cfg)
 
 			url, err := scraper.GetURL("IPX-123")
 			require.NoError(t, err)
@@ -193,14 +196,16 @@ func TestScraper_LanguageNormalization(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := config.JavLibraryConfig{
-				Enabled:  false,
-				Language: tt.language,
-				BaseURL:  "http://www.javlibrary.com",
-			}
+			cfg := createTestConfig(
+				config.JavLibraryConfig{
+					Enabled:  false,
+					Language: tt.language,
+					BaseURL:  "http://www.javlibrary.com",
+				},
+				config.ProxyConfig{},
+			)
 
-			scraper, err := javlibrary.New(&cfg, &config.ProxyConfig{})
-			assert.NoError(t, err)
+			scraper := javlibrary.New(cfg)
 			assert.Equal(t, tt.wantLang, scraper.GetLanguage())
 		})
 	}
@@ -217,16 +222,18 @@ func TestScraper_IsEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := config.JavLibraryConfig{
-				Enabled:         tt.enabled,
-				Language:        "en",
-				RequestDelay:    1000,
-				BaseURL:         "http://www.javlibrary.com",
-				UseFlareSolverr: false,
-			}
+			cfg := createTestConfig(
+				config.JavLibraryConfig{
+					Enabled:         tt.enabled,
+					Language:        "en",
+					RequestDelay:    1000,
+					BaseURL:         "http://www.javlibrary.com",
+					UseFlareSolverr: false,
+				},
+				config.ProxyConfig{},
+			)
 
-			scraper, err := javlibrary.New(&cfg, &config.ProxyConfig{})
-			require.NoError(t, err)
+			scraper := javlibrary.New(cfg)
 			assert.Equal(t, tt.enabled, scraper.IsEnabled())
 		})
 	}
@@ -234,16 +241,18 @@ func TestScraper_IsEnabled(t *testing.T) {
 
 // TestScraper_SearchDisabled verifies that Search returns an error when disabled
 func TestScraper_SearchDisabled(t *testing.T) {
-	cfg := config.JavLibraryConfig{
-		Enabled:  false,
-		Language: "en",
-		BaseURL:  "http://www.javlibrary.com",
-	}
+	cfg := createTestConfig(
+		config.JavLibraryConfig{
+			Enabled:  false,
+			Language: "en",
+			BaseURL:  "http://www.javlibrary.com",
+		},
+		config.ProxyConfig{},
+	)
 
-	scraper, err := javlibrary.New(&cfg, &config.ProxyConfig{})
-	require.NoError(t, err)
+	scraper := javlibrary.New(cfg)
 
-	_, err = scraper.Search("IPX-123")
+	_, err := scraper.Search("IPX-123")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "disabled")
 }
@@ -253,26 +262,26 @@ func TestScraper_SearchDisabled(t *testing.T) {
 func TestIntegration_Search(t *testing.T) {
 	requireJavLibraryIntegration(t)
 
-	cfg := config.JavLibraryConfig{
-		Enabled:         true,
-		Language:        "en",
-		RequestDelay:    1000,
-		BaseURL:         "http://www.javlibrary.com",
-		UseFlareSolverr: true,
-	}
-
-	proxyCfg := &config.ProxyConfig{
-		FlareSolverr: config.FlareSolverrConfig{
-			Enabled:    true,
-			URL:        "http://localhost:8191/v1",
-			Timeout:    90,
-			MaxRetries: 2,
-			SessionTTL: 300,
+	cfg := createTestConfig(
+		config.JavLibraryConfig{
+			Enabled:         true,
+			Language:        "en",
+			RequestDelay:    1000,
+			BaseURL:         "http://www.javlibrary.com",
+			UseFlareSolverr: true,
 		},
-	}
+		config.ProxyConfig{
+			FlareSolverr: config.FlareSolverrConfig{
+				Enabled:    true,
+				URL:        "http://localhost:8191/v1",
+				Timeout:    90,
+				MaxRetries: 2,
+				SessionTTL: 300,
+			},
+		},
+	)
 
-	scraper, err := javlibrary.New(&cfg, proxyCfg)
-	require.NoError(t, err)
+	scraper := javlibrary.New(cfg)
 
 	result, err := scraper.Search("IPX-123")
 	if err != nil {

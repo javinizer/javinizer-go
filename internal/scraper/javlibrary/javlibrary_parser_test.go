@@ -10,15 +10,25 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 )
 
-func TestParseDetailPage(t *testing.T) {
-	s, err := New(&config.JavLibraryConfig{
-		Enabled:  true,
-		Language: "en",
-		BaseURL:  "https://www.javlibrary.com",
-	}, &config.ProxyConfig{})
-	if err != nil {
-		t.Fatalf("New returned error: %v", err)
+func createTestConfig(javlibraryCfg config.JavLibraryConfig, proxyCfg config.ProxyConfig) *config.Config {
+	return &config.Config{
+		Scrapers: config.ScrapersConfig{
+			JavLibrary: javlibraryCfg,
+			Proxy:      proxyCfg,
+		},
 	}
+}
+
+func TestParseDetailPage(t *testing.T) {
+	cfg := createTestConfig(
+		config.JavLibraryConfig{
+			Enabled:  true,
+			Language: "en",
+			BaseURL:  "https://www.javlibrary.com",
+		},
+		config.ProxyConfig{},
+	)
+	s := New(cfg)
 
 	html := `<html><head><title>IPX-123 Sample Title - JAVLibrary</title></head><body>
 <div id="video_info"></div>
@@ -103,14 +113,15 @@ func TestSearch_SearchResultFlow(t *testing.T) {
 	}))
 	defer server.Close()
 
-	s, err := New(&config.JavLibraryConfig{
-		Enabled:  true,
-		Language: "en",
-		BaseURL:  server.URL,
-	}, &config.ProxyConfig{})
-	if err != nil {
-		t.Fatalf("New returned error: %v", err)
-	}
+	cfg := createTestConfig(
+		config.JavLibraryConfig{
+			Enabled:  true,
+			Language: "en",
+			BaseURL:  server.URL,
+		},
+		config.ProxyConfig{},
+	)
+	s := New(cfg)
 
 	result, err := s.Search("IPX-123")
 	if err != nil {
@@ -129,14 +140,15 @@ func TestSearch_SearchResultFlow(t *testing.T) {
 }
 
 func TestHelpers(t *testing.T) {
-	s, err := New(&config.JavLibraryConfig{
-		Enabled:  true,
-		Language: "en",
-		BaseURL:  "https://www.javlibrary.com",
-	}, &config.ProxyConfig{})
-	if err != nil {
-		t.Fatalf("New returned error: %v", err)
-	}
+	cfg := createTestConfig(
+		config.JavLibraryConfig{
+			Enabled:  true,
+			Language: "en",
+			BaseURL:  "https://www.javlibrary.com",
+		},
+		config.ProxyConfig{},
+	)
+	s := New(cfg)
 
 	if got := s.extractMovieURLFromHTML(`<a href="/en/?v=javli43uqe">match</a>`); got != "/en/?v=javli43uqe" {
 		t.Fatalf("extractMovieURLFromHTML absolute = %q", got)
