@@ -361,6 +361,8 @@ type DMMConfig struct {
 	ScrapeActress    bool         `yaml:"scrape_actress" json:"scrape_actress"`
 	EnableBrowser    bool         `yaml:"enable_browser" json:"enable_browser"`                     // Enable browser mode for video.dmm.co.jp (JavaScript rendering)
 	BrowserTimeout   int          `yaml:"browser_timeout" json:"browser_timeout"`                   // Timeout in seconds for browser operations (default: 30)
+	RequestDelay     int          `yaml:"request_delay" json:"request_delay"`                       // Delay between requests in milliseconds (0 = no delay)
+	MaxRetries       int          `yaml:"max_retries" json:"max_retries"`                           // Maximum number of retry attempts for rate-limited requests
 	UseFakeUserAgent bool         `yaml:"use_fake_user_agent" json:"use_fake_user_agent"`           // Use browser-like User-Agent header for this scraper
 	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                   // Optional custom fake User-Agent (defaults to built-in browser UA)
 	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
