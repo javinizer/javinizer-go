@@ -39,11 +39,25 @@ func NewHTTPClient(cfg *config.ScraperConfig, globalProxy *config.ProxyConfig, u
 	var err error
 
 	if cfg.FlareSolverr.Enabled {
+		// When using FlareSolverr, we need to ensure:
+		// 1. proxyWithFlareSolverr.Enabled is true so buildFlareSolverrRequestProxy works
+		// 2. The FlareSolverr server has access to the global proxy to reach target sites
+		// Use global proxy URL if scraper-specific proxy URL is empty but global proxy has one
+		flareProxyURL := proxyCfg.URL
+		flareUsername := proxyCfg.Username
+		flarePassword := proxyCfg.Password
+		if flareProxyURL == "" && globalProxy.URL != "" {
+			// Scraper has no proxy override; use global proxy for FlareSolverr
+			flareProxyURL = globalProxy.URL
+			flareUsername = globalProxy.Username
+			flarePassword = globalProxy.Password
+		}
+
 		proxyWithFlareSolverr := &config.ProxyConfig{
 			Enabled:      true, // Must be true so buildFlareSolverrRequestProxy sets fs.requestProxy
-			URL:          proxyCfg.URL,
-			Username:     proxyCfg.Username,
-			Password:     proxyCfg.Password,
+			URL:          flareProxyURL,
+			Username:     flareUsername,
+			Password:     flarePassword,
 			FlareSolverr: cfg.FlareSolverr,
 		}
 		client, fs, err = httpclient.NewRestyClientWithFlareSolverr(
