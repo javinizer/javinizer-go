@@ -104,15 +104,44 @@ func (s *Scraper) IsEnabled() bool {
 func (s *Scraper) Config() *config.ScraperConfig {
 	return &config.ScraperConfig{
 		Enabled:          s.cfg.Enabled,
+		Timeout:          30, // default (seconds)
+		RateLimit:        0,  // no per-request delay for DMM
+		RetryCount:       3,  // default
 		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
 		UserAgent:        s.cfg.FakeUserAgent,
 		Proxy:            s.cfg.Proxy,
 		DownloadProxy:    s.cfg.DownloadProxy,
+		FlareSolverr:     config.FlareSolverrConfig{}, // DMM doesn't use FlareSolverr
+		Extra:            make(map[string]any),
 	}
 }
 
 // Close cleans up resources held by the scraper
 func (s *Scraper) Close() error {
+	return nil
+}
+
+// ValidateConfig validates the scraper configuration.
+// Returns error if config is invalid, nil if valid.
+func (s *Scraper) ValidateConfig(cfg *config.ScraperConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("dmm: config is nil")
+	}
+	if !cfg.Enabled {
+		return nil // Disabled is valid
+	}
+	// Validate rate limit
+	if cfg.RateLimit < 0 {
+		return fmt.Errorf("dmm: rate_limit must be non-negative, got %d", cfg.RateLimit)
+	}
+	// Validate retry count
+	if cfg.RetryCount < 0 {
+		return fmt.Errorf("dmm: retry_count must be non-negative, got %d", cfg.RetryCount)
+	}
+	// Validate timeout
+	if cfg.Timeout < 0 {
+		return fmt.Errorf("dmm: timeout must be non-negative, got %d", cfg.Timeout)
+	}
 	return nil
 }
 
