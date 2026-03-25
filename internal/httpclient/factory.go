@@ -398,6 +398,13 @@ func (fs *FlareSolverr) ResolveURLWithSession(targetURL, sessionID string) (stri
 	return html, cookies, nil
 }
 
+// Close cleans up resources held by the FlareSolverr.
+// Currently a no-op since FlareSolverr uses stateless HTTP requests,
+// but provides a cleanup hook for future resource management.
+func (fs *FlareSolverr) Close() error {
+	return nil
+}
+
 // NewRestyClientWithFlareSolverr creates a resty.Client with optional FlareSolverr support
 func NewRestyClientWithFlareSolverr(proxyConfig *config.ProxyConfig, timeout time.Duration, retries int) (*resty.Client, *FlareSolverr, error) {
 	client, err := NewRestyClient(proxyConfig, timeout, retries)

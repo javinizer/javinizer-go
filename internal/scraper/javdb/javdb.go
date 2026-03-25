@@ -137,8 +137,37 @@ func (s *Scraper) Config() *config.ScraperConfig {
 	}
 }
 
-// Close cleans up resources held by the scraper
+// Close cleans up resources held by the scraper (HTTP client, FlareSolverr).
 func (s *Scraper) Close() error {
+	if s.flaresolverr != nil {
+		if closeErr := s.flaresolverr.Close(); closeErr != nil {
+			logging.Debugf("JavDB: Error closing FlareSolverr: %v", closeErr)
+		}
+	}
+	return nil
+}
+
+// ValidateConfig validates the scraper configuration.
+// Returns error if config is invalid, nil if valid.
+func (s *Scraper) ValidateConfig(cfg *config.ScraperConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("javdb: config is nil")
+	}
+	if !cfg.Enabled {
+		return nil // Disabled is valid
+	}
+	// Validate rate limit
+	if cfg.RateLimit < 0 {
+		return fmt.Errorf("javdb: rate_limit must be non-negative, got %d", cfg.RateLimit)
+	}
+	// Validate retry count
+	if cfg.RetryCount < 0 {
+		return fmt.Errorf("javdb: retry_count must be non-negative, got %d", cfg.RetryCount)
+	}
+	// Validate timeout
+	if cfg.Timeout < 0 {
+		return fmt.Errorf("javdb: timeout must be non-negative, got %d", cfg.Timeout)
+	}
 	return nil
 }
 
