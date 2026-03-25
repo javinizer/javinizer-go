@@ -42,6 +42,11 @@ func New(cfg *config.Config) *Scraper {
 	if scraperCfg.Proxy != nil {
 		flaresolverrConfig = scraperCfg.Proxy.FlareSolverr
 	}
+	// If scraper-level use_flaresolverr is set, ensure FlareSolverr is enabled
+	// (can be used with global proxy + global flaresolverr without scraper-specific proxy)
+	if scraperCfg.UseFlareSolverr {
+		flaresolverrConfig.Enabled = true
+	}
 
 	// Build ScraperConfig for NewHTTPClient (HTTP-01 pattern)
 	configForHTTP := &config.ScraperConfig{
