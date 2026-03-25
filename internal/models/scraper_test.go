@@ -613,7 +613,7 @@ func (m *mockScraperForTest) Search(id string) (*ScraperResult, error) { return 
 func (m *mockScraperForTest) GetURL(id string) (string, error)         { return "", nil }
 func (m *mockScraperForTest) IsEnabled() bool                          { return true }
 func (m *mockScraperForTest) Config() *config.ScraperConfig            { return &config.ScraperConfig{} }
-func (m *mockScraperForTest) Close() error                            { return nil }
+func (m *mockScraperForTest) Close() error                             { return nil }
 
 // TestActressInfoValidation tests ActressInfo struct validation (AC-2.5.5)
 func TestActressInfoValidation(t *testing.T) {

@@ -80,6 +80,13 @@ type SystemConfig struct {
 	UpdateCheckIntervalHours int `yaml:"update_check_interval_hours" json:"update_check_interval_hours"`
 }
 
+// ConfigValidator is implemented by flat per-scraper config structs.
+// Each scraper config validates its scraper-specific fields via ValidateConfig().
+// CONF-03, CONF-04: Enables interface-based dispatch without hardcoded scraper-name branches.
+type ConfigValidator interface {
+	ValidateConfig(*ScraperConfig) error
+}
+
 // ScrapersConfig holds scraper-specific settings
 type ScrapersConfig struct {
 	UserAgent             string                `yaml:"user_agent" json:"user_agent"`
@@ -101,18 +108,221 @@ type ScrapersConfig struct {
 	DLGetchu              DLGetchuConfig        `yaml:"dlgetchu" json:"dlgetchu"`
 	Caribbeancom          CaribbeancomConfig    `yaml:"caribbeancom" json:"caribbeancom"`
 	FC2                   FC2Config             `yaml:"fc2" json:"fc2"`
+
+	// Overrides: normalized map for generic iteration (populated at Load() time)
+	// CONF-02: This map is write-only populated from flat structs.
+	// NOT yaml-serializable (omitempty). The flat structs remain source of truth for YAML.
+	Overrides map[string]*ScraperConfig `yaml:"-" json:"overrides,omitempty"`
+
+	// flatConfigs: maps scraper name to flat config for ConfigValidator interface dispatch.
+	// NOT yaml-serializable. Populated at Load() time by normalizeScraperConfigs().
+	flatConfigs map[string]ConfigValidator `yaml:"-" json:"-"`
 }
 
 // ScraperConfig holds common scraper configuration fields used by the Scraper interface.
 // Individual scraper configs embed this and add scraper-specific fields.
+// CONF-01: All fields are present: Enabled, Timeout, RateLimit, RetryCount,
+// FlareSolverr, UseFakeUserAgent, UserAgent, Extra.
 type ScraperConfig struct {
-	Enabled          bool         `yaml:"enabled" json:"enabled"`
-	Language         string       `yaml:"language" json:"language"`                                 // Language code varies by scraper
-	RequestDelay     int          `yaml:"request_delay" json:"request_delay"`                     // Delay between requests in milliseconds
-	UseFakeUserAgent bool         `yaml:"use_fake_user_agent" json:"use_fake_user_agent"`         // Use browser-like User-Agent header
-	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                 // Optional custom fake User-Agent
-	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
-	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+	Enabled          bool               `yaml:"enabled" json:"enabled"`
+	Language         string             `yaml:"language" json:"language"`                                 // Language code varies by scraper
+	Timeout          int                `yaml:"timeout" json:"timeout"`                                   // HTTP client timeout in seconds
+	RateLimit        int                `yaml:"rate_limit" json:"rate_limit"`                             // Request delay in milliseconds (mirrors RequestDelay)
+	RetryCount       int                `yaml:"retry_count" json:"retry_count"`                           // Max retries (mirrors MaxRetries)
+	UseFakeUserAgent bool               `yaml:"use_fake_user_agent" json:"use_fake_user_agent"`           // Use browser-like User-Agent header
+	UserAgent        string             `yaml:"user_agent" json:"user_agent"`                             // Optional custom User-Agent (replaces FakeUserAgent)
+	Proxy            *ProxyConfig       `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
+	DownloadProxy    *ProxyConfig       `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+	FlareSolverr     FlareSolverrConfig `yaml:"flaresolverr" json:"flaresolverr"`                         // HTTP-03: FlareSolverr on ScraperConfig
+	Extra            map[string]any     `yaml:"extra,omitempty" json:"extra,omitempty"`                   // CONF-06: scraper-specific fields
+}
+
+// GetBoolExtra returns a boolean from Extra map with type safety.
+func (sc *ScraperConfig) GetBoolExtra(key string, defaultVal bool) bool {
+	if sc.Extra == nil {
+		return defaultVal
+	}
+	v, ok := sc.Extra[key]
+	if !ok {
+		return defaultVal
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return defaultVal
+	}
+	return b
+}
+
+// GetIntExtra returns an integer from Extra map with type safety.
+func (sc *ScraperConfig) GetIntExtra(key string, defaultVal int) int {
+	if sc.Extra == nil {
+		return defaultVal
+	}
+	v, ok := sc.Extra[key]
+	if !ok {
+		return defaultVal
+	}
+	i, ok := v.(int)
+	if !ok {
+		return defaultVal
+	}
+	return i
+}
+
+// GetStringExtra returns a string from Extra map with type safety.
+func (sc *ScraperConfig) GetStringExtra(key string, defaultVal string) string {
+	if sc.Extra == nil {
+		return defaultVal
+	}
+	v, ok := sc.Extra[key]
+	if !ok {
+		return defaultVal
+	}
+	s, ok := v.(string)
+	if !ok {
+		return defaultVal
+	}
+	return s
+}
+
+// normalizeScraperConfigs populates Overrides and flatConfigs from flat per-scraper structs.
+// Called at Load() time to enable generic iteration without scraper-name branching.
+// CONF-02, CONF-04.
+func (c *ScrapersConfig) normalizeScraperConfigs() {
+	c.Overrides = make(map[string]*ScraperConfig)
+	c.flatConfigs = make(map[string]ConfigValidator)
+
+	flats := map[string]interface{}{
+		"r18dev":          &c.R18Dev,
+		"dmm":             &c.DMM,
+		"libredmm":        &c.LibreDMM,
+		"mgstage":         &c.MGStage,
+		"javlibrary":      &c.JavLibrary,
+		"javdb":           &c.JavDB,
+		"javbus":          &c.JavBus,
+		"jav321":          &c.Jav321,
+		"tokyohot":        &c.TokyoHot,
+		"aventertainment": &c.AVEntertainment,
+		"dlgetchu":        &c.DLGetchu,
+		"caribbeancom":    &c.Caribbeancom,
+		"fc2":             &c.FC2,
+	}
+
+	for name, flat := range flats {
+		c.Overrides[name] = flatToScraperConfig(name, flat)
+		if validator, ok := flat.(ConfigValidator); ok {
+			c.flatConfigs[name] = validator
+		}
+	}
+}
+
+// flatToScraperConfig converts a flat per-scraper config to unified ScraperConfig.
+// Extracts common fields and populates Extra with scraper-specific fields.
+func flatToScraperConfig(name string, flat interface{}) *ScraperConfig {
+	sc := &ScraperConfig{Extra: make(map[string]any)}
+
+	switch cfg := flat.(type) {
+	case *R18DevConfig:
+		sc.Enabled = cfg.Enabled
+		sc.Language = cfg.Language
+		sc.RateLimit = cfg.RequestDelay
+		sc.RetryCount = cfg.MaxRetries
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+		sc.DownloadProxy = cfg.DownloadProxy
+		if cfg.RespectRetryAfter {
+			sc.Extra["respect_retry_after"] = true
+		}
+	case *DMMConfig:
+		sc.Enabled = cfg.Enabled
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+		sc.DownloadProxy = cfg.DownloadProxy
+		if cfg.EnableBrowser {
+			sc.Extra["enable_browser"] = cfg.EnableBrowser
+		}
+		if cfg.BrowserTimeout != 0 {
+			sc.Extra["browser_timeout"] = cfg.BrowserTimeout
+		}
+		if cfg.ScrapeActress {
+			sc.Extra["scrape_actress"] = cfg.ScrapeActress
+		}
+	case *JavDBConfig:
+		sc.Enabled = cfg.Enabled
+		sc.RateLimit = cfg.RequestDelay
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+		sc.DownloadProxy = cfg.DownloadProxy
+	case *JavLibraryConfig:
+		sc.Enabled = cfg.Enabled
+		sc.Language = cfg.Language
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+		sc.DownloadProxy = cfg.DownloadProxy
+	case *MGStageConfig:
+		sc.Enabled = cfg.Enabled
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+	case *LibreDMMConfig:
+		sc.Enabled = cfg.Enabled
+		sc.RateLimit = cfg.RequestDelay
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+	case *JavBusConfig:
+		sc.Enabled = cfg.Enabled
+		sc.Language = cfg.Language
+		sc.RateLimit = cfg.RequestDelay
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+	case *Jav321Config:
+		sc.Enabled = cfg.Enabled
+		sc.RateLimit = cfg.RequestDelay
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+	case *TokyoHotConfig:
+		sc.Enabled = cfg.Enabled
+		sc.Language = cfg.Language
+		sc.RateLimit = cfg.RequestDelay
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+	case *AVEntertainmentConfig:
+		sc.Enabled = cfg.Enabled
+		sc.Language = cfg.Language
+		sc.RateLimit = cfg.RequestDelay
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+	case *DLGetchuConfig:
+		sc.Enabled = cfg.Enabled
+		sc.RateLimit = cfg.RequestDelay
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+	case *CaribbeancomConfig:
+		sc.Enabled = cfg.Enabled
+		sc.Language = cfg.Language
+		sc.RateLimit = cfg.RequestDelay
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+	case *FC2Config:
+		sc.Enabled = cfg.Enabled
+		sc.RateLimit = cfg.RequestDelay
+		sc.UseFakeUserAgent = cfg.UseFakeUserAgent
+		sc.UserAgent = cfg.FakeUserAgent
+		sc.Proxy = cfg.Proxy
+	}
+
+	return sc
 }
 
 // R18DevConfig holds R18.dev scraper configuration
@@ -128,6 +338,23 @@ type R18DevConfig struct {
 	DownloadProxy     *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
+// ValidateConfig implements ConfigValidator for R18DevConfig.
+func (c *R18DevConfig) ValidateConfig(sc *ScraperConfig) error {
+	switch strings.ToLower(strings.TrimSpace(c.Language)) {
+	case "", "en":
+	case "ja":
+	default:
+		return fmt.Errorf("scrapers.r18dev.language must be either 'en' or 'ja'")
+	}
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.r18dev.request_delay must be non-negative")
+	}
+	if c.MaxRetries < 0 {
+		return fmt.Errorf("scrapers.r18dev.max_retries must be non-negative")
+	}
+	return nil
+}
+
 // DMMConfig holds DMM/Fanza scraper configuration
 type DMMConfig struct {
 	Enabled          bool         `yaml:"enabled" json:"enabled"`
@@ -138,6 +365,14 @@ type DMMConfig struct {
 	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                   // Optional custom fake User-Agent (defaults to built-in browser UA)
 	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+}
+
+// ValidateConfig implements ConfigValidator for DMMConfig.
+func (c *DMMConfig) ValidateConfig(sc *ScraperConfig) error {
+	if c.BrowserTimeout < 1 || c.BrowserTimeout > 300 {
+		return fmt.Errorf("scrapers.dmm.browser_timeout must be between 1 and 300")
+	}
+	return nil
 }
 
 // LibreDMMConfig holds LibreDMM scraper configuration
@@ -151,6 +386,14 @@ type LibreDMMConfig struct {
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
+// ValidateConfig implements ConfigValidator for LibreDMMConfig.
+func (c *LibreDMMConfig) ValidateConfig(sc *ScraperConfig) error {
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.libredmm.request_delay must be non-negative")
+	}
+	return nil
+}
+
 // MGStageConfig holds MGStage scraper configuration
 type MGStageConfig struct {
 	Enabled          bool         `yaml:"enabled" json:"enabled"`
@@ -159,6 +402,14 @@ type MGStageConfig struct {
 	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                   // Optional custom fake User-Agent (defaults to built-in browser UA)
 	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+}
+
+// ValidateConfig implements ConfigValidator for MGStageConfig.
+func (c *MGStageConfig) ValidateConfig(sc *ScraperConfig) error {
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.mgstage.request_delay must be non-negative")
+	}
+	return nil
 }
 
 // JavLibraryConfig holds JavLibrary scraper configuration
@@ -177,6 +428,22 @@ type JavLibraryConfig struct {
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
+// ValidateConfig implements ConfigValidator for JavLibraryConfig.
+func (c *JavLibraryConfig) ValidateConfig(sc *ScraperConfig) error {
+	switch strings.ToLower(strings.TrimSpace(c.Language)) {
+	case "", "en":
+	case "ja":
+	case "cn":
+	case "tw":
+	default:
+		return fmt.Errorf("scrapers.javlibrary.language must be one of: 'en', 'ja', 'cn', 'tw'")
+	}
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.javlibrary.request_delay must be non-negative")
+	}
+	return nil
+}
+
 // JavDBConfig holds JavDB scraper configuration
 type JavDBConfig struct {
 	Enabled          bool         `yaml:"enabled" json:"enabled"`
@@ -187,6 +454,14 @@ type JavDBConfig struct {
 	UseFlareSolverr  bool         `yaml:"use_flaresolverr" json:"use_flaresolverr"`                 // Enable FlareSolverr for Cloudflare bypass
 	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+}
+
+// ValidateConfig implements ConfigValidator for JavDBConfig.
+func (c *JavDBConfig) ValidateConfig(sc *ScraperConfig) error {
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.javdb.request_delay must be non-negative")
+	}
+	return nil
 }
 
 // JavBusConfig holds JavBus scraper configuration
@@ -201,6 +476,14 @@ type JavBusConfig struct {
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
+// ValidateConfig implements ConfigValidator for JavBusConfig.
+func (c *JavBusConfig) ValidateConfig(sc *ScraperConfig) error {
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.javbus.request_delay must be non-negative")
+	}
+	return nil
+}
+
 // Jav321Config holds Jav321 scraper configuration
 type Jav321Config struct {
 	Enabled          bool         `yaml:"enabled" json:"enabled"`
@@ -210,6 +493,14 @@ type Jav321Config struct {
 	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                   // Optional custom fake User-Agent (defaults to built-in browser UA)
 	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+}
+
+// ValidateConfig implements ConfigValidator for Jav321Config.
+func (c *Jav321Config) ValidateConfig(sc *ScraperConfig) error {
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.jav321.request_delay must be non-negative")
+	}
+	return nil
 }
 
 // TokyoHotConfig holds TokyoHot scraper configuration
@@ -222,6 +513,14 @@ type TokyoHotConfig struct {
 	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                   // Optional custom fake User-Agent (defaults to built-in browser UA)
 	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+}
+
+// ValidateConfig implements ConfigValidator for TokyoHotConfig.
+func (c *TokyoHotConfig) ValidateConfig(sc *ScraperConfig) error {
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.tokyohot.request_delay must be non-negative")
+	}
+	return nil
 }
 
 // AVEntertainmentConfig holds AVEntertainment scraper configuration
@@ -237,6 +536,14 @@ type AVEntertainmentConfig struct {
 	DownloadProxy      *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
+// ValidateConfig implements ConfigValidator for AVEntertainmentConfig.
+func (c *AVEntertainmentConfig) ValidateConfig(sc *ScraperConfig) error {
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.aventertainment.request_delay must be non-negative")
+	}
+	return nil
+}
+
 // DLGetchuConfig holds DLgetchu scraper configuration
 type DLGetchuConfig struct {
 	Enabled          bool         `yaml:"enabled" json:"enabled"`
@@ -246,6 +553,14 @@ type DLGetchuConfig struct {
 	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                   // Optional custom fake User-Agent (defaults to built-in browser UA)
 	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+}
+
+// ValidateConfig implements ConfigValidator for DLGetchuConfig.
+func (c *DLGetchuConfig) ValidateConfig(sc *ScraperConfig) error {
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.dlgetchu.request_delay must be non-negative")
+	}
+	return nil
 }
 
 // CaribbeancomConfig holds Caribbeancom scraper configuration
@@ -260,6 +575,14 @@ type CaribbeancomConfig struct {
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 }
 
+// ValidateConfig implements ConfigValidator for CaribbeancomConfig.
+func (c *CaribbeancomConfig) ValidateConfig(sc *ScraperConfig) error {
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.caribbeancom.request_delay must be non-negative")
+	}
+	return nil
+}
+
 // FC2Config holds FC2 scraper configuration
 type FC2Config struct {
 	Enabled          bool         `yaml:"enabled" json:"enabled"`
@@ -269,6 +592,14 @@ type FC2Config struct {
 	FakeUserAgent    string       `yaml:"fake_user_agent" json:"fake_user_agent"`                   // Optional custom fake User-Agent (defaults to built-in browser UA)
 	Proxy            *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
 	DownloadProxy    *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
+}
+
+// ValidateConfig implements ConfigValidator for FC2Config.
+func (c *FC2Config) ValidateConfig(sc *ScraperConfig) error {
+	if c.RequestDelay < 0 {
+		return fmt.Errorf("scrapers.fc2.request_delay must be non-negative")
+	}
+	return nil
 }
 
 // FlareSolverrConfig holds FlareSolverr configuration for bypassing Cloudflare
@@ -750,6 +1081,11 @@ func DefaultConfig() *Config {
 
 // Validate checks configuration values for validity
 func (c *Config) Validate() error {
+	// Ensure Overrides map is populated (for configs created via DefaultConfig vs Load)
+	if c.Scrapers.Overrides == nil {
+		c.Scrapers.normalizeScraperConfigs()
+	}
+
 	// Validate database settings
 	dbType := strings.ToLower(strings.TrimSpace(c.Database.Type))
 	if dbType == "" {
@@ -771,98 +1107,31 @@ func (c *Config) Validate() error {
 	if c.Scrapers.RequestTimeoutSeconds < 1 || c.Scrapers.RequestTimeoutSeconds > 600 {
 		return fmt.Errorf("scrapers.request_timeout_seconds must be between 1 and 600")
 	}
-	if c.Scrapers.DMM.BrowserTimeout < 1 || c.Scrapers.DMM.BrowserTimeout > 300 {
-		return fmt.Errorf("scrapers.dmm.browser_timeout must be between 1 and 300")
-	}
-	switch strings.ToLower(strings.TrimSpace(c.Scrapers.R18Dev.Language)) {
-	case "", "en":
-	case "ja":
-	default:
-		return fmt.Errorf("scrapers.r18dev.language must be either 'en' or 'ja'")
+
+	// CONF-04: Generic scraper config validation — uses flatConfigs map for interface dispatch.
+	// NO hardcoded scraper-name branches.
+	for name, sc := range c.Scrapers.Overrides {
+		// Interface dispatch via flatConfigs map (no switch on scraper name)
+		if validator, ok := c.Scrapers.flatConfigs[name]; ok {
+			if err := validator.ValidateConfig(sc); err != nil {
+				return err
+			}
+		}
+
+		// Generic FlareSolverr validation using sc.FlareSolverr (HTTP-03)
+		if err := validateFlareSolverrConfig("scrapers."+name+".flaresolverr", sc.FlareSolverr); err != nil {
+			return err
+		}
 	}
 
-	// Validate JavLibrary language (must be one of: en, ja, cn, tw)
-	switch strings.ToLower(strings.TrimSpace(c.Scrapers.JavLibrary.Language)) {
-	case "", "en":
-	case "ja":
-	case "cn":
-	case "tw":
-	default:
-		return fmt.Errorf("scrapers.javlibrary.language must be one of: 'en', 'ja', 'cn', 'tw'")
-	}
-
+	// Validate proxy profiles (global + per-scraper)
 	if err := validateProxyProfileConfig(c); err != nil {
 		return err
 	}
 
-	// Validate FlareSolverr config (global + scraper-specific overrides)
+	// Validate FlareSolverr config (global)
 	if err := validateFlareSolverrConfig("scrapers.proxy.flaresolverr", c.Scrapers.Proxy.FlareSolverr); err != nil {
 		return err
-	}
-	if c.Scrapers.R18Dev.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.r18dev.proxy.flaresolverr", c.Scrapers.R18Dev.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.DMM.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.dmm.proxy.flaresolverr", c.Scrapers.DMM.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.LibreDMM.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.libredmm.proxy.flaresolverr", c.Scrapers.LibreDMM.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.MGStage.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.mgstage.proxy.flaresolverr", c.Scrapers.MGStage.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.JavLibrary.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.javlibrary.proxy.flaresolverr", c.Scrapers.JavLibrary.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.JavDB.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.javdb.proxy.flaresolverr", c.Scrapers.JavDB.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.JavBus.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.javbus.proxy.flaresolverr", c.Scrapers.JavBus.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.Jav321.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.jav321.proxy.flaresolverr", c.Scrapers.Jav321.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.TokyoHot.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.tokyohot.proxy.flaresolverr", c.Scrapers.TokyoHot.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.AVEntertainment.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.aventertainment.proxy.flaresolverr", c.Scrapers.AVEntertainment.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.DLGetchu.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.dlgetchu.proxy.flaresolverr", c.Scrapers.DLGetchu.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.Caribbeancom.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.caribbeancom.proxy.flaresolverr", c.Scrapers.Caribbeancom.Proxy.FlareSolverr); err != nil {
-			return err
-		}
-	}
-	if c.Scrapers.FC2.Proxy != nil {
-		if err := validateFlareSolverrConfig("scrapers.fc2.proxy.flaresolverr", c.Scrapers.FC2.Proxy.FlareSolverr); err != nil {
-			return err
-		}
 	}
 
 	// Validate referer URL format
@@ -999,6 +1268,13 @@ func validateProxyProfileConfig(c *Config) error {
 		return nil
 	}
 
+	// Ensure Overrides is populated before validation.
+	// This must be called here (not just in Validate()) so that direct calls
+	// to validateProxyProfileConfig pick up any flat config modifications.
+	if c.Scrapers.Overrides == nil {
+		c.Scrapers.normalizeScraperConfigs()
+	}
+
 	profiles := c.Scrapers.Proxy.Profiles
 
 	if err := validateNoLegacyProxyDirectFields("scrapers.proxy", &c.Scrapers.Proxy); err != nil {
@@ -1014,88 +1290,43 @@ func validateProxyProfileConfig(c *Config) error {
 		}
 	}
 
-	if err := validateProxyProfileRef("scrapers.r18dev.proxy", c.Scrapers.R18Dev.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.dmm.proxy", c.Scrapers.DMM.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.libredmm.proxy", c.Scrapers.LibreDMM.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.mgstage.proxy", c.Scrapers.MGStage.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.javlibrary.proxy", c.Scrapers.JavLibrary.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.javdb.proxy", c.Scrapers.JavDB.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.javbus.proxy", c.Scrapers.JavBus.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.jav321.proxy", c.Scrapers.Jav321.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.tokyohot.proxy", c.Scrapers.TokyoHot.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.aventertainment.proxy", c.Scrapers.AVEntertainment.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.dlgetchu.proxy", c.Scrapers.DLGetchu.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.caribbeancom.proxy", c.Scrapers.Caribbeancom.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.fc2.proxy", c.Scrapers.FC2.Proxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("output.download_proxy", &c.Output.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.r18dev.download_proxy", c.Scrapers.R18Dev.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.dmm.download_proxy", c.Scrapers.DMM.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.libredmm.download_proxy", c.Scrapers.LibreDMM.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.mgstage.download_proxy", c.Scrapers.MGStage.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.javlibrary.download_proxy", c.Scrapers.JavLibrary.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.javdb.download_proxy", c.Scrapers.JavDB.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.javbus.download_proxy", c.Scrapers.JavBus.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.jav321.download_proxy", c.Scrapers.Jav321.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.tokyohot.download_proxy", c.Scrapers.TokyoHot.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.aventertainment.download_proxy", c.Scrapers.AVEntertainment.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.dlgetchu.download_proxy", c.Scrapers.DLGetchu.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.caribbeancom.download_proxy", c.Scrapers.Caribbeancom.DownloadProxy, profiles); err != nil {
-		return err
-	}
-	if err := validateProxyProfileRef("scrapers.fc2.download_proxy", c.Scrapers.FC2.DownloadProxy, profiles); err != nil {
+	// CONF-04: Generic scraper proxy profile validation — iterates Overrides map.
+	// NO hardcoded scraper-name branches.
+	if err := c.validateScraperProxyProfiles(); err != nil {
 		return err
 	}
 
+	// Validate output.download_proxy (not a scraper, special case)
+	if err := validateProxyProfileRef("output.download_proxy", &c.Output.DownloadProxy, profiles); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateScraperProxyProfiles validates proxy profiles for all scrapers generically.
+// Uses c.Scrapers.Overrides map — NO hardcoded scraper-name branches.
+// CONF-04: Adding a new scraper only requires adding it to flats map in normalizeScraperConfigs().
+func (c *Config) validateScraperProxyProfiles() error {
+	// Always re-normalize to pick up any modifications made to flat configs
+	// after the previous normalizeScraperConfigs() call (e.g., in tests).
+	c.Scrapers.normalizeScraperConfigs()
+
+	for name, sc := range c.Scrapers.Overrides {
+		path := "scrapers." + name
+
+		if sc.Proxy != nil {
+			if err := validateProxyProfileRef(path+".proxy", sc.Proxy, c.Scrapers.Proxy.Profiles); err != nil {
+				return err
+			}
+		}
+
+		if sc.DownloadProxy != nil {
+			if err := validateProxyProfileRef(path+".download_proxy", sc.DownloadProxy, c.Scrapers.Proxy.Profiles); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

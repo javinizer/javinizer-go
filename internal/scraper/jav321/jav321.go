@@ -101,9 +101,9 @@ func (s *Scraper) IsEnabled() bool { return s.enabled }
 func (s *Scraper) Config() *config.ScraperConfig {
 	return &config.ScraperConfig{
 		Enabled:          s.cfg.Enabled,
-		RequestDelay:     s.cfg.RequestDelay,
+		RateLimit:        s.cfg.RequestDelay,
 		UseFakeUserAgent: s.cfg.UseFakeUserAgent,
-		FakeUserAgent:    s.cfg.FakeUserAgent,
+		UserAgent:        s.cfg.FakeUserAgent,
 		Proxy:            s.cfg.Proxy,
 		DownloadProxy:    s.cfg.DownloadProxy,
 	}
