@@ -8,28 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
-	"github.com/javinizer/javinizer-go/internal/scraper/caribbeancom"
-	"github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
-	"github.com/javinizer/javinizer-go/internal/scraper/dmm"
-	"github.com/javinizer/javinizer-go/internal/scraper/fc2"
-	"github.com/javinizer/javinizer-go/internal/scraper/jav321"
-	"github.com/javinizer/javinizer-go/internal/scraper/javbus"
-	"github.com/javinizer/javinizer-go/internal/scraper/javdb"
-	"github.com/javinizer/javinizer-go/internal/scraper/javlibrary"
-	"github.com/javinizer/javinizer-go/internal/scraper/libredmm"
-	"github.com/javinizer/javinizer-go/internal/scraper/mgstage"
-	"github.com/javinizer/javinizer-go/internal/scraper/r18dev"
-	"github.com/javinizer/javinizer-go/internal/scraper/tokyohot"
 )
-
-// ScraperInfo holds registration information for a scraper.
-type ScraperInfo struct {
-	Name        string
-	Registrar   func(*config.Config, database.ContentIDMappingRepositoryInterface) (models.Scraper, error)
-	IsEnabled   bool
-	ErrorAction string // "warn" or "fail"
-}
 
 // NewDefaultScraperRegistry creates a new scraper registry with all default scrapers.
 // This is the single source of truth for scraper registration across all modes (API, TUI, CLI).
@@ -42,10 +21,9 @@ type ScraperInfo struct {
 //   - *models.ScraperRegistry: The configured registry
 //   - error: Any error encountered during scraper initialization
 //
-// The registry includes all scrapers from config:
-//   - r18dev, dmm, libredmm, mgstage, javdb, javbus, jav321, tokyohot
-//   - aventertainment, dlgetchu, caribbeancom, fc2
-//   - javlibrary (always registered; language validation is done in Config.Validate())
+// The registry uses GetScraperConstructors() to discover all registered scrapers via init().
+// JavLibrary is handled specially (removed from constructors, initialized separately) due to
+// its unique proxy and initialization requirements.
 //
 // Note: Language validation for JavLibrary is performed in Config.Validate() to ensure
 // consistent behavior across all initialization paths. Invalid languages are rejected
@@ -57,67 +35,29 @@ func NewDefaultScraperRegistry(cfg *config.Config, db *database.DB) (*models.Scr
 
 	registry := models.NewScraperRegistry()
 
-	// Create ContentIDMappingRepository for DMM scraper
-	contentIDRepo := database.NewContentIDMappingRepository(db)
+	// Get all registered scraper constructors from init() registrations
+	constructors := GetScraperConstructors()
 
-	// Register all scrapers in a table-driven manner for maintainability
-	scraperConfigs := []struct {
-		name      string
-		shouldAdd bool
-		addFunc   func()
-	}{
-		{"r18dev", true, func() {
-			registry.Register(r18dev.New(cfg))
-		}},
-		{"dmm", true, func() {
-			registry.Register(dmm.New(cfg, contentIDRepo))
-		}},
-		{"libredmm", true, func() {
-			registry.Register(libredmm.New(cfg))
-		}},
-		{"mgstage", true, func() {
-			registry.Register(mgstage.New(cfg))
-		}},
-		{"javdb", true, func() {
-			registry.Register(javdb.New(cfg))
-		}},
-		{"javbus", true, func() {
-			registry.Register(javbus.New(cfg))
-		}},
-		{"jav321", true, func() {
-			registry.Register(jav321.New(cfg))
-		}},
-		{"tokyohot", true, func() {
-			registry.Register(tokyohot.New(cfg))
-		}},
-		{"aventertainment", true, func() {
-			registry.Register(aventertainment.New(cfg))
-		}},
-		{"dlgetchu", true, func() {
-			registry.Register(dlgetchu.New(cfg))
-		}},
-		{"caribbeancom", true, func() {
-			registry.Register(caribbeancom.New(cfg))
-		}},
-		{"fc2", true, func() {
-			registry.Register(fc2.New(cfg))
-		}},
-	}
-
-	// Register all scrapers with enabled status
-	for _, sc := range scraperConfigs {
-		if sc.shouldAdd {
-			sc.addFunc()
+	// Handle JavLibrary scraper specially (language validation is done in config)
+	// This scraper requires special proxy resolution and is removed from the generic constructor map
+	if javlibConstructor, ok := constructors["javlibrary"]; ok {
+		delete(constructors, "javlibrary")
+		javlib, err := javlibConstructor(cfg, db)
+		if err != nil {
+			logging.Warnf("Failed to initialize JavLibrary scraper: %v", err)
+		} else {
+			registry.Register(javlib)
 		}
 	}
 
-	// Handle JavLibrary scraper (language validation is done in config, but other errors possible)
-	javLibraryProxy := config.ResolveScraperProxy(cfg.Scrapers.Proxy, cfg.Scrapers.JavLibrary.Proxy)
-	javlib, err := javlibrary.New(&cfg.Scrapers.JavLibrary, javLibraryProxy, cfg.Scrapers.UserAgent)
-	if err != nil {
-		logging.Warnf("Failed to initialize JavLibrary scraper: %v", err)
-	} else {
-		registry.Register(javlib)
+	// Initialize all other scrapers via their registered constructors
+	for name, constructor := range constructors {
+		scraper, err := constructor(cfg, db)
+		if err != nil {
+			logging.Warnf("Failed to initialize %s scraper: %v", name, err)
+			continue
+		}
+		registry.Register(scraper)
 	}
 
 	logging.Infof("Registered %d scrapers", len(registry.GetAll()))
