@@ -20,6 +20,7 @@ javinizer-go
 /web/frontend/build/
 /web/dist/*
 !/web/dist/robots.txt
+!/web/dist/index.html
 
 # Go workspace file
 go.work
