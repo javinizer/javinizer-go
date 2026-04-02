@@ -20,7 +20,7 @@ import (
 )
 
 // processOrganizeJob processes file organization for a completed scrape job
-func processOrganizeJob(job *worker.BatchJob, mat *matcher.Matcher, destination string, copyOnly bool, linkModeRaw string, db *database.DB, cfg *config.Config, registry *models.ScraperRegistry) {
+func processOrganizeJob(job *worker.BatchJob, destination string, copyOnly bool, linkModeRaw string, db *database.DB, cfg *config.Config, registry *models.ScraperRegistry) {
 	// Initialize organizer, downloader, NFO generator, and history logger
 	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)
 	historyLogger := history.NewLogger(db)

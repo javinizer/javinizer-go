@@ -143,7 +143,7 @@ func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 		},
 	})
 
-	processOrganizeJob(job, deps.Matcher, destDir, true, "", deps.DB, cfg, deps.Registry)
+	processOrganizeJob(job, destDir, true, "", deps.DB, cfg, deps.Registry)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusCompleted {
