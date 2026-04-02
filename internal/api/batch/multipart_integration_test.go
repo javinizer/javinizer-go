@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/stretchr/testify/assert"
@@ -117,6 +118,147 @@ func TestMultipartPreviewEndToEnd(t *testing.T) {
 	// These are the key assertions - poster and fanart should have -pt1 suffix
 	assert.Contains(t, response.PosterPath, "-pt1-poster", "poster should have pt1 suffix")
 	assert.Contains(t, response.FanartPath, "-pt1-fanart", "fanart should have pt1 suffix")
+}
+
+func TestMultipartPreviewLetterPatternDiscoveryFlow(t *testing.T) {
+	// Test the FULL flow: discovery -> FileMatchInfo -> preview
+	// This verifies that letter-pattern multipart metadata is correctly preserved
+
+	initTestWebSocket(t)
+
+	cfg := &config.Config{
+		Output: config.OutputConfig{
+			FolderFormat:     "<ID>",
+			FileFormat:       "<ID><IF:MULTIPART>-pt<PART></IF>",
+			PosterFormat:     "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
+			ScreenshotFolder: "extrafanart",
+			DownloadCover:    true,
+			DownloadPoster:   true,
+		},
+		Matching: config.MatchingConfig{
+			Extensions:   []string{".mp4"},
+			RegexPattern: `(?i)([a-z]{2,10}-?\d{2,5}[a-z]?)`,
+			RegexEnabled: true,
+		},
+		API: config.APIConfig{
+			Security: config.SecurityConfig{
+				AllowedDirectories: []string{"/media", "/output"},
+			},
+		},
+	}
+
+	deps := createTestDeps(t, cfg, "")
+
+	// Test files with letter-pattern suffixes
+	files := []string{
+		"/media/cemd-349-a.mp4",
+		"/media/cemd-349-b.mp4",
+	}
+
+	// Run discovery to get metadata
+	mat, _ := matcher.NewMatcher(&cfg.Matching)
+	allFiles, fileMatchInfo := discoverSiblingPartsWithMetadata(files, mat, cfg)
+
+	t.Logf("Discovered %d files", len(allFiles))
+	for path, info := range fileMatchInfo {
+		t.Logf("  %s: MovieID=%s, IsMultiPart=%v, PartNumber=%d, PartSuffix=%s",
+			path, info.MovieID, info.IsMultiPart, info.PartNumber, info.PartSuffix)
+	}
+
+	// Verify discovery correctly identified multipart
+	require.Len(t, allFiles, 2, "should have 2 files")
+	require.Len(t, fileMatchInfo, 2, "should have metadata for 2 files")
+
+	// Verify letter-pattern files are marked as multipart
+	for _, path := range files {
+		info, ok := fileMatchInfo[path]
+		require.True(t, ok, "should have metadata for %s", path)
+		assert.True(t, info.IsMultiPart, "%s should be marked as multipart", path)
+		assert.NotZero(t, info.PartNumber, "%s should have part number", path)
+	}
+
+	// Create job and populate FileMatchInfo (simulating what lifecycle.go does)
+	job := deps.JobQueue.CreateJob(allFiles)
+	for path, info := range fileMatchInfo {
+		job.FileMatchInfo[path] = info
+	}
+
+	// Create a mock FileResult WITHOUT multipart info (simulating what RunBatchScrapeOnce returns)
+	// This tests that the task correctly applies metadata from FileMatchInfo
+	movie := &models.Movie{
+		ID:    "CEMD-349",
+		Title: "Test Movie",
+	}
+
+	resultA := &worker.FileResult{
+		FilePath:  "/media/cemd-349-a.mp4",
+		MovieID:   "CEMD-349",
+		Status:    worker.JobStatusCompleted,
+		Data:      movie,
+		StartedAt: time.Now(),
+		// Note: IsMultiPart, PartNumber, PartSuffix are NOT set here
+		// They should be applied from FileMatchInfo
+	}
+	job.UpdateFileResult("/media/cemd-349-a.mp4", resultA)
+
+	resultB := &worker.FileResult{
+		FilePath:  "/media/cemd-349-b.mp4",
+		MovieID:   "CEMD-349",
+		Status:    worker.JobStatusCompleted,
+		Data:      movie,
+		StartedAt: time.Now(),
+		// Note: IsMultiPart, PartNumber, PartSuffix are NOT set here
+	}
+	job.UpdateFileResult("/media/cemd-349-b.mp4", resultB)
+
+	// Now simulate what the batch task does - apply metadata from FileMatchInfo to FileResult
+	// This tests that the wiring between discovery -> FileMatchInfo -> FileResult works
+	for _, filePath := range files {
+		fileResult, exists := job.Results[filePath]
+		require.True(t, exists, "should have result for %s", filePath)
+
+		// Apply metadata (simulating batch_scrape_task.go logic)
+		if info, ok := job.FileMatchInfo[filePath]; ok {
+			fileResult.IsMultiPart = info.IsMultiPart
+			fileResult.PartNumber = info.PartNumber
+			fileResult.PartSuffix = info.PartSuffix
+		}
+	}
+
+	// Verify metadata was applied
+	for path, res := range job.Results {
+		t.Logf("After metadata apply - %s: IsMultiPart=%v, PartNumber=%d",
+			path, res.IsMultiPart, res.PartNumber)
+		assert.True(t, res.IsMultiPart, "%s should have IsMultiPart=true", path)
+	}
+
+	// Test preview endpoint
+	router := gin.New()
+	router.POST("/batch/:id/movies/:movieId/preview", previewOrganize(deps))
+
+	reqBody := OrganizePreviewRequest{Destination: "/output"}
+	body, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest("POST", "/batch/"+job.ID+"/movies/CEMD-349/preview", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	t.Logf("Response status: %d", w.Code)
+	t.Logf("Response body: %s", w.Body.String())
+
+	assert.Equal(t, 200, w.Code)
+
+	var response OrganizePreviewResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	// Verify preview shows correct multipart output
+	assert.Contains(t, response.PosterPath, "CEMD-349-pt1-poster", "poster should have pt1 suffix")
+	assert.Len(t, response.VideoFiles, 2, "should have 2 video files")
+	assert.Contains(t, response.VideoFiles[0], "CEMD-349-pt1.mp4", "first video should be pt1")
+	assert.Contains(t, response.VideoFiles[1], "CEMD-349-pt2.mp4", "second video should be pt2")
 }
 
 func TestMultipartPreviewLetterPatternFiles(t *testing.T) {
