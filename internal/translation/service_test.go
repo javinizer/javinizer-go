@@ -2104,3 +2104,463 @@ func TestParseStringArrayPayload_EdgeCases(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// translateWithOpenAICompatible tests
+// =============================================================================
+
+func TestTranslateWithOpenAICompatible(t *testing.T) {
+	tests := []struct {
+		name        string
+		handler     func(http.ResponseWriter, *http.Request)
+		cfg         config.TranslationConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "success with api key",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/chat/completions", r.URL.Path)
+				assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+				response := map[string]interface{}{
+					"choices": []map[string]interface{}{
+						{
+							"message": map[string]string{
+								"content": `["translated text"]`,
+							},
+						},
+					},
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "openai-compatible",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				OpenAICompatible: config.OpenAICompatibleTranslationConfig{
+					APIKey: "test-key",
+					Model:  "llama3",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "success without api key",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "", r.Header.Get("Authorization"))
+				response := map[string]interface{}{
+					"choices": []map[string]interface{}{
+						{
+							"message": map[string]string{
+								"content": `["translated"]`,
+							},
+						},
+					},
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "openai-compatible",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				OpenAICompatible: config.OpenAICompatibleTranslationConfig{
+					Model: "llama3",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing model returns error",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				// Should not be called
+				t.Error("handler should not be called")
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "openai-compatible",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				OpenAICompatible: config.OpenAICompatibleTranslationConfig{
+					APIKey: "test-key",
+				},
+			},
+			wantErr:     true,
+			errContains: "openai-compatible model is required",
+		},
+		{
+			name: "upstream error status",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte("Invalid key"))
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "openai-compatible",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				OpenAICompatible: config.OpenAICompatibleTranslationConfig{
+					APIKey: "test-key",
+					Model:  "llama3",
+				},
+			},
+			wantErr:     true,
+			errContains: "openai-compatible translation failed",
+		},
+		{
+			name: "malformed json response",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("not valid json"))
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "openai-compatible",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				OpenAICompatible: config.OpenAICompatibleTranslationConfig{
+					APIKey: "test-key",
+					Model:  "llama3",
+				},
+			},
+			wantErr:     true,
+			errContains: "failed to decode openai-compatible response",
+		},
+		{
+			name: "empty choices in response",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				response := map[string]interface{}{
+					"choices": []map[string]interface{}{},
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "openai-compatible",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				OpenAICompatible: config.OpenAICompatibleTranslationConfig{
+					APIKey: "test-key",
+					Model:  "llama3",
+				},
+			},
+			wantErr:     true,
+			errContains: "openai-compatible response contained no choices",
+		},
+		{
+			name: "uses default base url when empty",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				response := map[string]interface{}{
+					"choices": []map[string]interface{}{
+						{
+							"message": map[string]string{
+								"content": `["translated"]`,
+							},
+						},
+					},
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "openai-compatible",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				OpenAICompatible: config.OpenAICompatibleTranslationConfig{
+					Model: "llama3",
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.wantErr && tt.errContains == "openai-compatible model is required" {
+				s := New(tt.cfg)
+				_, err := s.translateTexts(context.Background(), "ja", "en", []string{"test"})
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+				return
+			}
+
+			server := httptest.NewServer(http.HandlerFunc(tt.handler))
+			defer server.Close()
+
+			tt.cfg.OpenAICompatible.BaseURL = server.URL
+			s := New(tt.cfg)
+
+			result, err := s.translateTexts(context.Background(), "ja", "en", []string{"test"})
+
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Len(t, result, 1)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// translateWithAnthropic tests
+// =============================================================================
+
+func TestTranslateWithAnthropic(t *testing.T) {
+	tests := []struct {
+		name        string
+		handler     func(http.ResponseWriter, *http.Request)
+		cfg         config.TranslationConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "success with valid response",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/v1/messages", r.URL.Path)
+				assert.Equal(t, "test-key", r.Header.Get("x-api-key"))
+				assert.Equal(t, "2023-06-01", r.Header.Get("anthropic-version"))
+				response := map[string]interface{}{
+					"content": []map[string]string{
+						{"type": "text", "text": `["translated text"]`},
+					},
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "anthropic",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				Anthropic: config.AnthropicTranslationConfig{
+					APIKey: "test-key",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing api key returns error",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				t.Error("handler should not be called")
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "anthropic",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				Anthropic: config.AnthropicTranslationConfig{
+					APIKey: "",
+				},
+			},
+			wantErr:     true,
+			errContains: "anthropic api_key is required",
+		},
+		{
+			name: "upstream error status",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte("Invalid API key"))
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "anthropic",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				Anthropic: config.AnthropicTranslationConfig{
+					APIKey: "test-key",
+				},
+			},
+			wantErr:     true,
+			errContains: "anthropic translation failed",
+		},
+		{
+			name: "malformed json response",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("not valid json"))
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "anthropic",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				Anthropic: config.AnthropicTranslationConfig{
+					APIKey: "test-key",
+				},
+			},
+			wantErr:     true,
+			errContains: "failed to decode anthropic response",
+		},
+		{
+			name: "empty content blocks",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				response := map[string]interface{}{
+					"content": []map[string]string{},
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "anthropic",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				Anthropic: config.AnthropicTranslationConfig{
+					APIKey: "test-key",
+				},
+			},
+			wantErr:     true,
+			errContains: "anthropic response contained no content blocks",
+		},
+		{
+			name: "uses default model when not specified",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]interface{}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				assert.Equal(t, "claude-sonnet-4-20250514", body["model"])
+				response := map[string]interface{}{
+					"content": []map[string]string{
+						{"type": "text", "text": `["translated"]`},
+					},
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "anthropic",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				Anthropic: config.AnthropicTranslationConfig{
+					APIKey: "test-key",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "uses custom model when specified",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]interface{}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				assert.Equal(t, "claude-3-5-sonnet-20241022", body["model"])
+				response := map[string]interface{}{
+					"content": []map[string]string{
+						{"type": "text", "text": `["translated"]`},
+					},
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			},
+			cfg: config.TranslationConfig{
+				Provider:       "anthropic",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				Anthropic: config.AnthropicTranslationConfig{
+					APIKey: "test-key",
+					Model:  "claude-3-5-sonnet-20241022",
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.wantErr && tt.errContains == "anthropic api_key is required" {
+				s := New(tt.cfg)
+				_, err := s.translateTexts(context.Background(), "ja", "en", []string{"test"})
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+				return
+			}
+
+			server := httptest.NewServer(http.HandlerFunc(tt.handler))
+			defer server.Close()
+
+			tt.cfg.Anthropic.BaseURL = server.URL
+			s := New(tt.cfg)
+
+			result, err := s.translateTexts(context.Background(), "ja", "en", []string{"test"})
+
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Len(t, result, 1)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Dispatch tests for new providers
+// =============================================================================
+
+func TestTranslateTexts_Dispatch_NewProviders(t *testing.T) {
+	tests := []struct {
+		name        string
+		provider    string
+		cfg         config.TranslationConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:     "openai-compatible provider dispatch",
+			provider: "openai-compatible",
+			cfg: config.TranslationConfig{
+				Provider:       "openai-compatible",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				OpenAICompatible: config.OpenAICompatibleTranslationConfig{
+					Model: "llama3",
+				},
+			},
+			wantErr: true, // Error due to connection failure (no server)
+		},
+		{
+			name:     "anthropic provider dispatch",
+			provider: "anthropic",
+			cfg: config.TranslationConfig{
+				Provider:       "anthropic",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				Anthropic: config.AnthropicTranslationConfig{
+					APIKey: "test-key",
+				},
+			},
+			wantErr: true, // Error due to connection failure (no server)
+		},
+		{
+			name:     "uppercase openai-compatible provider",
+			provider: "OPENAI-COMPATIBLE",
+			cfg: config.TranslationConfig{
+				Provider:       "OPENAI-COMPATIBLE",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				OpenAICompatible: config.OpenAICompatibleTranslationConfig{
+					Model: "llama3",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name:     "uppercase anthropic provider",
+			provider: "ANTHROPIC",
+			cfg: config.TranslationConfig{
+				Provider:       "ANTHROPIC",
+				TargetLanguage: "en",
+				SourceLanguage: "ja",
+				Anthropic: config.AnthropicTranslationConfig{
+					APIKey: "test-key",
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := New(tt.cfg)
+
+			_, err := s.translateTexts(context.Background(), "ja", "en", []string{"test"})
+
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}

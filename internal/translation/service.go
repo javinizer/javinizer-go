@@ -20,9 +20,11 @@ import (
 )
 
 const (
-	providerOpenAI = "openai"
-	providerDeepL  = "deepl"
-	providerGoogle = "google"
+	providerOpenAI           = "openai"
+	providerOpenAICompatible = "openai-compatible"
+	providerDeepL            = "deepl"
+	providerGoogle           = "google"
+	providerAnthropic        = "anthropic"
 )
 
 // Service translates aggregated movie metadata using a configured provider.
@@ -202,6 +204,10 @@ func (s *Service) translateTexts(ctx context.Context, sourceLang, targetLang str
 		return s.translateWithDeepL(ctx, sourceLang, targetLang, texts)
 	case providerGoogle:
 		return s.translateWithGoogle(ctx, sourceLang, targetLang, texts)
+	case providerOpenAICompatible:
+		return s.translateWithOpenAICompatible(ctx, sourceLang, targetLang, texts)
+	case providerAnthropic:
+		return s.translateWithAnthropic(ctx, sourceLang, targetLang, texts)
 	default:
 		return nil, fmt.Errorf("unsupported translation provider: %s", provider)
 	}
@@ -295,6 +301,161 @@ func (s *Service) translateWithOpenAI(ctx context.Context, sourceLang, targetLan
 	}
 
 	content := strings.TrimSpace(decoded.Choices[0].Message.Content)
+	return parseStringArrayPayload(content)
+}
+
+func (s *Service) translateWithOpenAICompatible(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(s.cfg.OpenAICompatible.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = "http://localhost:11434/v1"
+	}
+
+	apiKey := strings.TrimSpace(s.cfg.OpenAICompatible.APIKey)
+	model := strings.TrimSpace(s.cfg.OpenAICompatible.Model)
+	if model == "" {
+		return nil, fmt.Errorf("openai-compatible model is required")
+	}
+
+	systemPrompt := "You are a translation engine. Translate each input item to the requested target language. Preserve order and return ONLY a valid JSON array of translated strings."
+	if sourceLang != "auto" {
+		systemPrompt += " Source language: " + sourceLang + "."
+	}
+	systemPrompt += " Target language: " + targetLang + "."
+
+	payloadBytes, err := json.Marshal(texts)
+	if err != nil {
+		return nil, err
+	}
+
+	requestBody := openAIChatRequest{
+		Model:       model,
+		Temperature: 0,
+		Messages: []openAIChatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: "Translate this JSON array of strings: " + string(payloadBytes)},
+		},
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("openai-compatible translation failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var decoded openAIChatResponse
+	if err := json.Unmarshal(respBody, &decoded); err != nil {
+		return nil, fmt.Errorf("failed to decode openai-compatible response: %w", err)
+	}
+	if len(decoded.Choices) == 0 {
+		return nil, fmt.Errorf("openai-compatible response contained no choices")
+	}
+
+	content := strings.TrimSpace(decoded.Choices[0].Message.Content)
+	return parseStringArrayPayload(content)
+}
+
+func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(s.cfg.Anthropic.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com"
+	}
+
+	apiKey := strings.TrimSpace(s.cfg.Anthropic.APIKey)
+	if apiKey == "" {
+		return nil, fmt.Errorf("anthropic api_key is required")
+	}
+
+	model := strings.TrimSpace(s.cfg.Anthropic.Model)
+	if model == "" {
+		model = "claude-sonnet-4-20250514"
+	}
+
+	systemPrompt := "You are a translation engine. Translate each input item to the requested target language. Preserve order and return ONLY a valid JSON array of translated strings."
+	if sourceLang != "auto" {
+		systemPrompt += " Source language: " + sourceLang + "."
+	}
+	systemPrompt += " Target language: " + targetLang + "."
+
+	payloadBytes, err := json.Marshal(texts)
+	if err != nil {
+		return nil, err
+	}
+
+	type anthropicMessage struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+
+	requestBody := map[string]interface{}{
+		"model":      model,
+		"max_tokens": 4096,
+		"system":     systemPrompt,
+		"messages":   []anthropicMessage{{Role: "user", Content: "Translate this JSON array of strings: " + string(payloadBytes)}},
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/messages", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("content-type", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("anthropic translation failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var decoded struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(respBody, &decoded); err != nil {
+		return nil, fmt.Errorf("failed to decode anthropic response: %w", err)
+	}
+	if len(decoded.Content) == 0 {
+		return nil, fmt.Errorf("anthropic response contained no content blocks")
+	}
+
+	content := strings.TrimSpace(decoded.Content[0].Text)
 	return parseStringArrayPayload(content)
 }
 
