@@ -229,7 +229,9 @@ type openAIChatMessage struct {
 
 type openAIChatResponse struct {
 	Choices []struct {
-		Message openAIChatMessage `json:"message"`
+		Message struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
 	} `json:"choices"`
 }
 
@@ -302,8 +304,19 @@ func (s *Service) translateWithOpenAI(ctx context.Context, sourceLang, targetLan
 		return nil, fmt.Errorf("openai response contained no choices")
 	}
 
-	content := strings.TrimSpace(decoded.Choices[0].Message.Content)
+	content := extractContentString(decoded.Choices[0].Message.Content)
 	return parseStringArrayPayload(content)
+}
+
+func extractContentString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	return string(raw)
 }
 
 func (s *Service) translateWithOpenAICompatible(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
@@ -380,7 +393,7 @@ func (s *Service) translateWithOpenAICompatible(ctx context.Context, sourceLang,
 		return nil, fmt.Errorf("openai-compatible response contained no choices")
 	}
 
-	content := strings.TrimSpace(decoded.Choices[0].Message.Content)
+	content := extractContentString(decoded.Choices[0].Message.Content)
 	return parseStringArrayPayload(content)
 }
 
