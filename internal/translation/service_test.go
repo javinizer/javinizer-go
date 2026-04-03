@@ -434,9 +434,13 @@ func TestTranslateWithDeepL(t *testing.T) {
 			},
 			wantErr: false,
 			validateRequest: func(t *testing.T, r *http.Request) {
-				assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
-				assert.Equal(t, "EN", r.FormValue("target_lang"))
-				assert.Equal(t, "JA", r.FormValue("source_lang"))
+				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+				assert.Equal(t, "DeepL-Auth-Key test-key", r.Header.Get("Authorization"))
+
+				var body map[string]interface{}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				assert.Equal(t, "EN", body["target_lang"])
+				assert.Equal(t, "JA", body["source_lang"])
 			},
 		},
 		{
@@ -452,8 +456,12 @@ func TestTranslateWithDeepL(t *testing.T) {
 			},
 			wantErr: false,
 			validateRequest: func(t *testing.T, r *http.Request) {
-				assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
-				assert.Equal(t, "EN", r.FormValue("target_lang"))
+				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+				assert.Equal(t, "DeepL-Auth-Key test-key", r.Header.Get("Authorization"))
+
+				var body map[string]interface{}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				assert.Equal(t, "EN", body["target_lang"])
 			},
 		},
 		{
@@ -488,9 +496,11 @@ func TestTranslateWithDeepL(t *testing.T) {
 			wantErr:     false,
 			expectCount: 3,
 			validateRequest: func(t *testing.T, r *http.Request) {
-				// Parse form to populate r.Form
-				require.NoError(t, r.ParseForm())
-				assert.ElementsMatch(t, []string{"test1", "test2", "test3"}, r.Form["text"])
+				var body map[string]interface{}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				texts, ok := body["text"].([]interface{})
+				require.True(t, ok)
+				assert.Len(t, texts, 3)
 			},
 		},
 	}
@@ -572,7 +582,11 @@ func TestTranslateWithDeepL_SourceLanguage(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v2/translate", func(w http.ResponseWriter, r *http.Request) {
-		capturedSourceLang = r.FormValue("source_lang")
+		var body map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		if sl, ok := body["source_lang"].(string); ok {
+			capturedSourceLang = sl
+		}
 		response := map[string]interface{}{
 			"translations": []map[string]string{
 				{"text": "translated"},

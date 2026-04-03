@@ -402,6 +402,21 @@ export interface TranslationModelsResponse {
 	models: string[];
 }
 
+export interface DeepLUsageRequest {
+	mode: string;
+	base_url: string;
+	api_key: string;
+}
+
+export interface DeepLUsageResponse {
+	character_count: number;
+	character_limit: number;
+	start_time?: string;
+	end_time?: string;
+	api_key_character_count?: number;
+	api_key_character_limit?: number;
+}
+
 export interface TestResult {
 	success: boolean;
 	timestamp: number;

@@ -28,6 +28,8 @@ import type {
 	ProxyTestResponse,
 	TranslationModelsRequest,
 	TranslationModelsResponse,
+	DeepLUsageRequest,
+	DeepLUsageResponse,
 	HistoryListResponse,
 	HistoryListParams,
 	HistoryStats,
@@ -297,6 +299,13 @@ class APIClient {
 	// Discover models from OpenAI-compatible provider
 	async getTranslationModels(request: TranslationModelsRequest): Promise<TranslationModelsResponse> {
 		return this.request<TranslationModelsResponse>('/api/v1/translation/models', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		});
+	}
+
+	async getDeepLUsage(request: DeepLUsageRequest): Promise<DeepLUsageResponse> {
+		return this.request<DeepLUsageResponse>('/api/v1/translation/deepl/usage', {
 			method: 'POST',
 			body: JSON.stringify(request)
 		});

@@ -645,6 +645,149 @@ func TestGetTranslationModels(t *testing.T) {
 	})
 }
 
+func TestGetDeepLUsage(t *testing.T) {
+	t.Run("success free mode", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/v2/usage", r.URL.Path)
+			assert.Equal(t, "DeepL-Auth-Key test-free-key", r.Header.Get("Authorization"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"character_count":180118,"character_limit":1250000}`))
+		}))
+		defer upstream.Close()
+
+		deps := &ServerDependencies{}
+		deps.SetConfig(config.DefaultConfig())
+
+		router := gin.New()
+		router.POST("/translation/deepl/usage", getDeepLUsage(deps))
+
+		reqBody := DeepLUsageRequest{
+			Mode:    "free",
+			BaseURL: upstream.URL,
+			APIKey:  "test-free-key",
+		}
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/translation/deepl/usage", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp DeepLUsageResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, int64(180118), resp.CharacterCount)
+		assert.Equal(t, int64(1250000), resp.CharacterLimit)
+	})
+
+	t.Run("success pro mode with billing period", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "DeepL-Auth-Key test-pro-key", r.Header.Get("Authorization"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"character_count": 5947223,
+				"character_limit": 1000000000000,
+				"start_time": "2025-05-13T09:18:42Z",
+				"end_time": "2025-06-13T09:18:42Z",
+				"api_key_character_count": 636,
+				"api_key_character_limit": 1000000000000
+			}`))
+		}))
+		defer upstream.Close()
+
+		deps := &ServerDependencies{}
+		deps.SetConfig(config.DefaultConfig())
+
+		router := gin.New()
+		router.POST("/translation/deepl/usage", getDeepLUsage(deps))
+
+		reqBody := DeepLUsageRequest{
+			Mode:    "pro",
+			BaseURL: upstream.URL,
+			APIKey:  "test-pro-key",
+		}
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/translation/deepl/usage", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp DeepLUsageResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, int64(5947223), resp.CharacterCount)
+		assert.Equal(t, "2025-05-13T09:18:42Z", resp.StartTime)
+		assert.Equal(t, "2025-06-13T09:18:42Z", resp.EndTime)
+		assert.Equal(t, int64(636), resp.APIKeyCount)
+	})
+
+	t.Run("missing api key", func(t *testing.T) {
+		deps := &ServerDependencies{}
+		deps.SetConfig(config.DefaultConfig())
+
+		router := gin.New()
+		router.POST("/translation/deepl/usage", getDeepLUsage(deps))
+
+		body := []byte(`{"mode":"free","api_key":""}`)
+		req := httptest.NewRequest(http.MethodPost, "/translation/deepl/usage", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("invalid mode", func(t *testing.T) {
+		deps := &ServerDependencies{}
+		deps.SetConfig(config.DefaultConfig())
+
+		router := gin.New()
+		router.POST("/translation/deepl/usage", getDeepLUsage(deps))
+
+		body := []byte(`{"mode":"invalid","api_key":"key"}`)
+		req := httptest.NewRequest(http.MethodPost, "/translation/deepl/usage", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("upstream error", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"Invalid auth key"}`))
+		}))
+		defer upstream.Close()
+
+		deps := &ServerDependencies{}
+		deps.SetConfig(config.DefaultConfig())
+
+		router := gin.New()
+		router.POST("/translation/deepl/usage", getDeepLUsage(deps))
+
+		reqBody := DeepLUsageRequest{
+			Mode:    "free",
+			BaseURL: upstream.URL,
+			APIKey:  "bad-key",
+		}
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/translation/deepl/usage", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadGateway, w.Code)
+	})
+}
+
 func TestUpdateConfig(t *testing.T) {
 	tests := []struct {
 		name           string

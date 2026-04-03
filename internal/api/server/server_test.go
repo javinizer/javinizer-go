@@ -174,6 +174,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"POST /api/v1/scan",
 		"POST /api/v1/scrape",
 		"POST /api/v1/translation/models",
+		"POST /api/v1/translation/deepl/usage",
 		"POST /api/v1/version/check",
 		"PUT /api/v1/actresses/:id",
 		"PUT /api/v1/config",

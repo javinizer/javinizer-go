@@ -161,6 +161,16 @@ func DefaultConfig() *Config {
 					BaseURL: "",
 					APIKey:  "",
 				},
+				OpenAICompatible: OpenAICompatibleTranslationConfig{
+					BaseURL: "http://localhost:11434/v1",
+					APIKey:  "",
+					Model:   "",
+				},
+				Anthropic: AnthropicTranslationConfig{
+					BaseURL: "https://api.anthropic.com",
+					APIKey:  "",
+					Model:   "claude-sonnet-4-20250514",
+				},
 			},
 			IgnoreGenres: []string{},
 			NFO: NFOConfig{

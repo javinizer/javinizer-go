@@ -341,6 +341,18 @@ definitions:
         description: Enable actress image lookup from database
         type: boolean
     type: object
+  config.AnthropicTranslationConfig:
+    properties:
+      api_key:
+        description: Required
+        type: string
+      base_url:
+        description: e.g., https://api.anthropic.com
+        type: string
+      model:
+        description: e.g., claude-sonnet-4-20250514
+        type: string
+    type: object
   config.BrowserConfig:
     properties:
       binary_path:
@@ -564,6 +576,18 @@ definitions:
       tagline:
         type: string
       unknown_actress_text:
+        type: string
+    type: object
+  config.OpenAICompatibleTranslationConfig:
+    properties:
+      api_key:
+        description: Optional for local endpoints
+        type: string
+      base_url:
+        description: e.g., http://localhost:11434/v1
+        type: string
+      model:
+        description: e.g., llama3.1
         type: string
     type: object
   config.OpenAITranslationConfig:
@@ -795,6 +819,10 @@ definitions:
     type: object
   config.TranslationConfig:
     properties:
+      anthropic:
+        allOf:
+        - $ref: '#/definitions/config.AnthropicTranslationConfig'
+        description: Anthropic (Claude) provider settings
       apply_to_primary:
         description: Replace primary movie metadata with translated text
         type: boolean
@@ -817,6 +845,10 @@ definitions:
         allOf:
         - $ref: '#/definitions/config.OpenAITranslationConfig'
         description: OpenAI/OpenAI-compatible provider settings
+      openai_compatible:
+        allOf:
+        - $ref: '#/definitions/config.OpenAICompatibleTranslationConfig'
+        description: OpenAI-compatible (Ollama, vLLM, etc.) provider settings
       overwrite_existing_target:
         description: Overwrite target-language translation if already present
         type: boolean
@@ -1502,6 +1534,30 @@ definitions:
         items:
           $ref: '#/definitions/contracts.ScraperInfo'
         type: array
+    type: object
+  system.DeepLUsageRequest:
+    properties:
+      api_key:
+        type: string
+      base_url:
+        type: string
+      mode:
+        type: string
+    type: object
+  system.DeepLUsageResponse:
+    properties:
+      api_key_character_count:
+        type: integer
+      api_key_character_limit:
+        type: integer
+      character_count:
+        type: integer
+      character_limit:
+        type: integer
+      end_time:
+        type: string
+      start_time:
+        type: string
     type: object
   system.ErrorResponse:
     properties:
@@ -2691,6 +2747,36 @@ paths:
           schema:
             $ref: '#/definitions/temp.ErrorResponse'
       summary: Serve temporary poster image
+  /api/v1/translation/deepl/usage:
+    post:
+      consumes:
+      - application/json
+      description: Fetch current character usage and limits from DeepL API
+      parameters:
+      - description: DeepL usage lookup request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/system.DeepLUsageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/system.DeepLUsageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/system.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/system.ErrorResponse'
+      summary: Get DeepL usage information
+      tags:
+      - system
   /api/v1/translation/models:
     post:
       consumes:

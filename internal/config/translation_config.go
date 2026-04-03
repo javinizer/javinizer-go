@@ -23,17 +23,19 @@ type MetadataConfig struct {
 
 // TranslationConfig holds metadata translation settings.
 type TranslationConfig struct {
-	Enabled                 bool                    `yaml:"enabled" json:"enabled"`                                     // Enable metadata translation after aggregation
-	Provider                string                  `yaml:"provider" json:"provider"`                                   // openai, deepl, google
-	SourceLanguage          string                  `yaml:"source_language" json:"source_language"`                     // Source language code (e.g., en, ja, auto)
-	TargetLanguage          string                  `yaml:"target_language" json:"target_language"`                     // Target language code (e.g., en, ja, zh)
-	TimeoutSeconds          int                     `yaml:"timeout_seconds" json:"timeout_seconds"`                     // Request timeout in seconds
-	ApplyToPrimary          bool                    `yaml:"apply_to_primary" json:"apply_to_primary"`                   // Replace primary movie metadata with translated text
-	OverwriteExistingTarget bool                    `yaml:"overwrite_existing_target" json:"overwrite_existing_target"` // Overwrite target-language translation if already present
-	Fields                  TranslationFieldsConfig `yaml:"fields" json:"fields"`                                       // Per-field translation controls
-	OpenAI                  OpenAITranslationConfig `yaml:"openai" json:"openai"`                                       // OpenAI/OpenAI-compatible provider settings
-	DeepL                   DeepLTranslationConfig  `yaml:"deepl" json:"deepl"`                                         // DeepL provider settings
-	Google                  GoogleTranslationConfig `yaml:"google" json:"google"`                                       // Google provider settings
+	Enabled                 bool                              `yaml:"enabled" json:"enabled"`                                     // Enable metadata translation after aggregation
+	Provider                string                            `yaml:"provider" json:"provider"`                                   // openai, deepl, google
+	SourceLanguage          string                            `yaml:"source_language" json:"source_language"`                     // Source language code (e.g., en, ja, auto)
+	TargetLanguage          string                            `yaml:"target_language" json:"target_language"`                     // Target language code (e.g., en, ja, zh)
+	TimeoutSeconds          int                               `yaml:"timeout_seconds" json:"timeout_seconds"`                     // Request timeout in seconds
+	ApplyToPrimary          bool                              `yaml:"apply_to_primary" json:"apply_to_primary"`                   // Replace primary movie metadata with translated text
+	OverwriteExistingTarget bool                              `yaml:"overwrite_existing_target" json:"overwrite_existing_target"` // Overwrite target-language translation if already present
+	Fields                  TranslationFieldsConfig           `yaml:"fields" json:"fields"`                                       // Per-field translation controls
+	OpenAI                  OpenAITranslationConfig           `yaml:"openai" json:"openai"`                                       // OpenAI/OpenAI-compatible provider settings
+	DeepL                   DeepLTranslationConfig            `yaml:"deepl" json:"deepl"`                                         // DeepL provider settings
+	Google                  GoogleTranslationConfig           `yaml:"google" json:"google"`                                       // Google provider settings
+	OpenAICompatible        OpenAICompatibleTranslationConfig `yaml:"openai_compatible" json:"openai_compatible"`                 // OpenAI-compatible (Ollama, vLLM, etc.) provider settings
+	Anthropic               AnthropicTranslationConfig        `yaml:"anthropic" json:"anthropic"`                                 // Anthropic (Claude) provider settings
 }
 
 // TranslationFieldsConfig controls which metadata fields are translated.
@@ -68,6 +70,21 @@ type GoogleTranslationConfig struct {
 	Mode    string `yaml:"mode" json:"mode"`         // free or paid
 	BaseURL string `yaml:"base_url" json:"base_url"` // Optional override
 	APIKey  string `yaml:"api_key" json:"api_key"`   // Required for paid mode
+}
+
+// OpenAICompatibleTranslationConfig holds settings for self-hosted or third-party
+// OpenAI-compatible translation endpoints (Ollama, vLLM, LM Studio, OpenRouter, etc.).
+type OpenAICompatibleTranslationConfig struct {
+	BaseURL string `yaml:"base_url" json:"base_url"` // e.g., http://localhost:11434/v1
+	APIKey  string `yaml:"api_key" json:"api_key"`   // Optional for local endpoints
+	Model   string `yaml:"model" json:"model"`       // e.g., llama3.1
+}
+
+// AnthropicTranslationConfig holds Anthropic (Claude) translation settings.
+type AnthropicTranslationConfig struct {
+	BaseURL string `yaml:"base_url" json:"base_url"` // e.g., https://api.anthropic.com
+	APIKey  string `yaml:"api_key" json:"api_key"`   // Required
+	Model   string `yaml:"model" json:"model"`       // e.g., claude-sonnet-4-20250514
 }
 
 // PriorityConfig defines scraper priority for metadata aggregation.

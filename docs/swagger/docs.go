@@ -1514,6 +1514,52 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/translation/deepl/usage": {
+            "post": {
+                "description": "Fetch current character usage and limits from DeepL API",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get DeepL usage information",
+                "parameters": [
+                    {
+                        "description": "DeepL usage lookup request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/system.DeepLUsageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/system.DeepLUsageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/system.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/system.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/translation/models": {
             "post": {
                 "description": "Fetch available models from an OpenAI-compatible base URL",
@@ -2135,6 +2181,23 @@ const docTemplate = `{
                 }
             }
         },
+        "config.AnthropicTranslationConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "Required",
+                    "type": "string"
+                },
+                "base_url": {
+                    "description": "e.g., https://api.anthropic.com",
+                    "type": "string"
+                },
+                "model": {
+                    "description": "e.g., claude-sonnet-4-20250514",
+                    "type": "string"
+                }
+            }
+        },
         "config.BrowserConfig": {
             "type": "object",
             "properties": {
@@ -2465,6 +2528,23 @@ const docTemplate = `{
                 }
             }
         },
+        "config.OpenAICompatibleTranslationConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "Optional for local endpoints",
+                    "type": "string"
+                },
+                "base_url": {
+                    "description": "e.g., http://localhost:11434/v1",
+                    "type": "string"
+                },
+                "model": {
+                    "description": "e.g., llama3.1",
+                    "type": "string"
+                }
+            }
+        },
         "config.OpenAITranslationConfig": {
             "type": "object",
             "properties": {
@@ -2787,6 +2867,14 @@ const docTemplate = `{
         "config.TranslationConfig": {
             "type": "object",
             "properties": {
+                "anthropic": {
+                    "description": "Anthropic (Claude) provider settings",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.AnthropicTranslationConfig"
+                        }
+                    ]
+                },
                 "apply_to_primary": {
                     "description": "Replace primary movie metadata with translated text",
                     "type": "boolean"
@@ -2824,6 +2912,14 @@ const docTemplate = `{
                     "allOf": [
                         {
                             "$ref": "#/definitions/config.OpenAITranslationConfig"
+                        }
+                    ]
+                },
+                "openai_compatible": {
+                    "description": "OpenAI-compatible (Ollama, vLLM, etc.) provider settings",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.OpenAICompatibleTranslationConfig"
                         }
                     ]
                 },
@@ -3818,6 +3914,43 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/contracts.ScraperInfo"
                     }
+                }
+            }
+        },
+        "system.DeepLUsageRequest": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "base_url": {
+                    "type": "string"
+                },
+                "mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "system.DeepLUsageResponse": {
+            "type": "object",
+            "properties": {
+                "api_key_character_count": {
+                    "type": "integer"
+                },
+                "api_key_character_limit": {
+                    "type": "integer"
+                },
+                "character_count": {
+                    "type": "integer"
+                },
+                "character_limit": {
+                    "type": "integer"
+                },
+                "end_time": {
+                    "type": "string"
+                },
+                "start_time": {
+                    "type": "string"
                 }
             }
         },

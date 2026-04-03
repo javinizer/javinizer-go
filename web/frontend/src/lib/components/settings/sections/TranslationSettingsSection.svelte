@@ -7,6 +7,8 @@
 	import FormPasswordInput from '$lib/components/settings/FormPasswordInput.svelte';
 	import FormTextInput from '$lib/components/settings/FormTextInput.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
+	import { apiClient } from '$lib/api/client';
+	import type { DeepLUsageResponse } from '$lib/api/types';
 
 	interface Props {
 		config: any;
@@ -24,6 +26,49 @@
 		translationModelOptions
 	}: Props = $props();
 	const translationEnabled = $derived(config?.metadata?.translation?.enabled ?? false);
+
+	let deeplUsage: DeepLUsageResponse | null = $state<DeepLUsageResponse | null>(null);
+	let fetchingDeepLUsage = $state(false);
+	let deeplUsageError = $state<string | null>(null);
+
+	const usagePercentage = $derived(
+		deeplUsage && deeplUsage.character_limit > 0
+			? (deeplUsage.character_count / deeplUsage.character_limit) * 100
+			: 0
+	);
+
+	function formatNumber(n: number): string {
+		if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B';
+		if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+		if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+		return n.toString();
+	}
+
+	async function fetchDeepLUsage() {
+		const apiKey = config.metadata.translation?.deepl?.api_key ?? '';
+		if (!apiKey.trim()) {
+			deeplUsageError = 'API key is required';
+			return;
+		}
+
+		fetchingDeepLUsage = true;
+		deeplUsageError = null;
+		deeplUsage = null;
+
+		try {
+			const mode = config.metadata.translation?.deepl?.mode ?? 'free';
+			const baseURL = config.metadata.translation?.deepl?.base_url ?? '';
+			deeplUsage = await apiClient.getDeepLUsage({
+				mode,
+				base_url: baseURL,
+				api_key: apiKey
+			});
+		} catch (err: any) {
+			deeplUsageError = err?.message || 'Failed to fetch usage data';
+		} finally {
+			fetchingDeepLUsage = false;
+		}
+	}
 </script>
 
 <SettingsSection title="Translation Settings" description="Translate aggregated metadata to a target language using configurable providers" defaultExpanded={false}>
@@ -271,6 +316,99 @@
 						config.metadata.translation.openai.api_key = val;
 					}}
 				/>
+			</fieldset>
+		</SettingsSubsection>
+	{:else if config.metadata.translation?.provider === 'deepl'}
+		<SettingsSubsection title="DeepL Provider">
+			<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
+				<div class="py-4 border-b border-border">
+					<label class="block text-sm font-medium mb-2" for="deepl-mode">Mode</label>
+					<select id="deepl-mode" bind:value={config.metadata.translation.deepl.mode} class={inputClass}>
+						<option value="free">Free API</option>
+						<option value="pro">Pro API</option>
+					</select>
+					<p class="text-xs text-muted-foreground mt-1">
+						Use <code>free</code> for DeepL API Free plan, or <code>pro</code> for paid DeepL API.
+					</p>
+				</div>
+
+				<FormTextInput
+					label="Base URL (optional)"
+					description="Optional DeepL endpoint override (leave blank to use mode defaults)"
+					value={config.metadata.translation?.deepl?.base_url ?? ''}
+					placeholder="https://api-free.deepl.com"
+					onchange={(val) => {
+						if (!config.metadata.translation) config.metadata.translation = {};
+						if (!config.metadata.translation.deepl) config.metadata.translation.deepl = {};
+						config.metadata.translation.deepl.base_url = val.trim();
+					}}
+				/>
+
+				<FormPasswordInput
+					label="API Key"
+					description="DeepL API key (required for both free and pro API modes)"
+					value={config.metadata.translation?.deepl?.api_key ?? ''}
+					onchange={(val) => {
+						if (!config.metadata.translation) config.metadata.translation = {};
+						if (!config.metadata.translation.deepl) config.metadata.translation.deepl = {};
+						config.metadata.translation.deepl.api_key = val;
+					}}
+				/>
+
+				<div class="py-4 border-b border-border">
+					<div class="flex items-center justify-between mb-3">
+						<div>
+							<h4 class="text-sm font-medium">Usage</h4>
+							<p class="text-xs text-muted-foreground">Current billing period character usage</p>
+						</div>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={fetchDeepLUsage}
+							disabled={
+								fetchingDeepLUsage ||
+								!(config.metadata.translation?.deepl?.api_key ?? '').trim()
+							}
+						>
+							{#snippet children()}
+								<RefreshCw class={`h-4 w-4 mr-2 ${fetchingDeepLUsage ? 'animate-spin' : ''}`} />
+								{fetchingDeepLUsage ? 'Fetching...' : 'Refresh'}
+							{/snippet}
+						</Button>
+					</div>
+
+					{#if deeplUsageError}
+						<p class="text-xs text-destructive mb-2">{deeplUsageError}</p>
+					{/if}
+
+					{#if deeplUsage}
+						<div class="space-y-2">
+							<div class="flex items-center justify-between text-sm">
+								<span class="font-medium">Characters used</span>
+								<span class="text-muted-foreground">
+									{formatNumber(deeplUsage.character_count)} / {formatNumber(deeplUsage.character_limit)}
+								</span>
+							</div>
+							<div class="h-3 bg-secondary rounded-full overflow-hidden">
+								<div
+									class="h-full rounded-full transition-all duration-300 {usagePercentage > 90 ? 'bg-destructive' : usagePercentage > 70 ? 'bg-yellow-500' : 'bg-primary'}"
+									style="width: {Math.min(100, usagePercentage)}%"
+								></div>
+							</div>
+							<div class="flex items-center justify-between text-xs text-muted-foreground">
+								<span>{usagePercentage.toFixed(1)}% used</span>
+								<span>{formatNumber(deeplUsage.character_limit - deeplUsage.character_count)} remaining</span>
+							</div>
+							{#if deeplUsage.start_time && deeplUsage.end_time}
+								<p class="text-xs text-muted-foreground">
+									Billing period: {new Date(deeplUsage.start_time).toLocaleDateString()} – {new Date(deeplUsage.end_time).toLocaleDateString()}
+								</p>
+							{/if}
+						</div>
+					{:else if !fetchingDeepLUsage && !deeplUsageError}
+						<p class="text-xs text-muted-foreground">Click Refresh to load usage data</p>
+					{/if}
+				</div>
 			</fieldset>
 		</SettingsSubsection>
 	{:else if config.metadata.translation?.provider === 'deepl'}

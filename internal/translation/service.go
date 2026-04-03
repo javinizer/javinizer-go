@@ -324,21 +324,31 @@ func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang
 		return nil, fmt.Errorf("deepl api_key is required")
 	}
 
-	form := url.Values{}
-	form.Set("auth_key", apiKey)
-	form.Set("target_lang", strings.ToUpper(targetLang))
-	if sourceLang != "" && sourceLang != "auto" {
-		form.Set("source_lang", strings.ToUpper(sourceLang))
-	}
-	for _, text := range texts {
-		form.Add("text", text)
+	type deepLRequest struct {
+		Text       []string `json:"text"`
+		TargetLang string   `json:"target_lang"`
+		SourceLang string   `json:"source_lang,omitempty"`
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v2/translate", strings.NewReader(form.Encode()))
+	reqBody := deepLRequest{
+		Text:       texts,
+		TargetLang: strings.ToUpper(targetLang),
+	}
+	if sourceLang != "" && sourceLang != "auto" {
+		reqBody.SourceLang = strings.ToUpper(sourceLang)
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v2/translate", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "DeepL-Auth-Key "+apiKey)
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
