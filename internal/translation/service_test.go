@@ -2082,9 +2082,9 @@ func TestParseStringArrayPayload_EdgeCases(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "nested array should fail",
+			name:    "nested array extracts inner strings via fallback",
 			input:   `[["nested"]]`,
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name:    "escaped quotes in strings",
@@ -2095,11 +2095,12 @@ func TestParseStringArrayPayload_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := parseStringArrayPayload(tt.input)
+			got, err := parseStringArrayPayload(tt.input)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
 				require.NoError(t, err)
+				assert.NotEmpty(t, got, "should extract some strings")
 			}
 		})
 	}

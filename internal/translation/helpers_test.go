@@ -415,10 +415,10 @@ func TestParseStringArrayPayload(t *testing.T) {
 			wantErr:  true,
 		},
 		{
-			name:     "nested array",
+			name:     "nested array extracts inner strings via fallback",
 			input:    `[["nested"]]`,
-			expected: nil,
-			wantErr:  true,
+			expected: []string{"nested"},
+			wantErr:  false,
 		},
 	}
 

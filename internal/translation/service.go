@@ -199,22 +199,72 @@ func replaceActressName(actress *models.Actress, translated string) {
 	actress.LastName = ""
 }
 
+const maxTranslationRetries = 3
+
+type translationResult struct {
+	texts  []string
+	rawLLM string
+}
+
 func (s *Service) translateTexts(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
 	provider := normalizeProvider(s.cfg.Provider)
-	switch provider {
-	case providerOpenAI:
-		return s.translateWithOpenAI(ctx, sourceLang, targetLang, texts)
-	case providerDeepL:
-		return s.translateWithDeepL(ctx, sourceLang, targetLang, texts)
-	case providerGoogle:
-		return s.translateWithGoogle(ctx, sourceLang, targetLang, texts)
-	case providerOpenAICompatible:
-		return s.translateWithOpenAICompatible(ctx, sourceLang, targetLang, texts)
-	case providerAnthropic:
-		return s.translateWithAnthropic(ctx, sourceLang, targetLang, texts)
-	default:
-		return nil, fmt.Errorf("unsupported translation provider: %s", provider)
+
+	var lastResult *translationResult
+	var lastErr error
+
+	for attempt := 1; attempt <= maxTranslationRetries; attempt++ {
+		var result *translationResult
+		var err error
+
+		switch provider {
+		case providerOpenAI:
+			result, err = s.translateWithOpenAI(ctx, sourceLang, targetLang, texts)
+		case providerDeepL:
+			result, err = s.translateWithDeepL(ctx, sourceLang, targetLang, texts)
+		case providerGoogle:
+			result, err = s.translateWithGoogle(ctx, sourceLang, targetLang, texts)
+		case providerOpenAICompatible:
+			result, err = s.translateWithOpenAICompatible(ctx, sourceLang, targetLang, texts)
+		case providerAnthropic:
+			result, err = s.translateWithAnthropic(ctx, sourceLang, targetLang, texts)
+		default:
+			return nil, fmt.Errorf("unsupported translation provider: %s", provider)
+		}
+
+		if err == nil && result != nil && len(result.texts) > 0 {
+			return result.texts, nil
+		}
+
+		lastResult = result
+		lastErr = err
+
+		if attempt < maxTranslationRetries {
+			if isRetryableError(err, result) {
+				logging.Debugf("Translation: attempt %d/%d failed (%v), retrying...", attempt, maxTranslationRetries, err)
+				time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+			} else {
+				logging.Debugf("Translation: attempt %d/%d failed with non-retryable error (%v), giving up", attempt, maxTranslationRetries, err)
+				break
+			}
+		}
 	}
+
+	if lastResult != nil && lastResult.rawLLM != "" {
+		logging.Debugf("Translation: all %d attempts failed. Last LLM output (length=%d):\n%s", maxTranslationRetries, len(lastResult.rawLLM), lastResult.rawLLM)
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("translation failed after %d attempts", maxTranslationRetries)
+}
+
+func isRetryableError(err error, result *translationResult) bool {
+	if err == nil {
+		return result != nil && len(result.texts) == 0 && result.rawLLM != ""
+	}
+	return strings.Contains(err.Error(), "failed to parse") ||
+		strings.Contains(err.Error(), "no valid JSON arrays found")
 }
 
 type openAIChatRequest struct {
@@ -237,7 +287,7 @@ type openAIChatResponse struct {
 	} `json:"choices"`
 }
 
-func (s *Service) translateWithOpenAI(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
+func (s *Service) translateWithOpenAI(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(s.cfg.OpenAI.BaseURL), "/")
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
@@ -298,6 +348,8 @@ func (s *Service) translateWithOpenAI(ctx context.Context, sourceLang, targetLan
 		return nil, fmt.Errorf("openai translation failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	logging.Debugf("Translation (openai): response: %s", string(respBody))
+
 	var decoded openAIChatResponse
 	if err := json.Unmarshal(respBody, &decoded); err != nil {
 		return nil, fmt.Errorf("failed to decode openai response: %w", err)
@@ -307,7 +359,11 @@ func (s *Service) translateWithOpenAI(ctx context.Context, sourceLang, targetLan
 	}
 
 	content := extractContentString(decoded.Choices[0].Message.Content)
-	return parseStringArrayPayload(content)
+	parsed, err := parseStringArrayPayload(content)
+	if err != nil {
+		return &translationResult{rawLLM: content}, err
+	}
+	return &translationResult{texts: parsed, rawLLM: content}, nil
 }
 
 func extractContentString(raw json.RawMessage) string {
@@ -321,7 +377,7 @@ func extractContentString(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func (s *Service) translateWithOpenAICompatible(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
+func (s *Service) translateWithOpenAICompatible(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(s.cfg.OpenAICompatible.BaseURL), "/")
 	if baseURL == "" {
 		baseURL = "http://localhost:11434/v1"
@@ -396,10 +452,14 @@ func (s *Service) translateWithOpenAICompatible(ctx context.Context, sourceLang,
 	}
 
 	content := extractContentString(decoded.Choices[0].Message.Content)
-	return parseStringArrayPayload(content)
+	parsed, err := parseStringArrayPayload(content)
+	if err != nil {
+		return &translationResult{rawLLM: content}, err
+	}
+	return &translationResult{texts: parsed, rawLLM: content}, nil
 }
 
-func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
+func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(s.cfg.Anthropic.BaseURL), "/")
 	if baseURL == "" {
 		baseURL = "https://api.anthropic.com"
@@ -464,6 +524,8 @@ func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, target
 		return nil, fmt.Errorf("anthropic translation failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	logging.Debugf("Translation (anthropic): response: %s", string(respBody))
+
 	var decoded struct {
 		Content []struct {
 			Type string `json:"type"`
@@ -478,7 +540,11 @@ func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, target
 	}
 
 	content := strings.TrimSpace(decoded.Content[0].Text)
-	return parseStringArrayPayload(content)
+	parsed, err := parseStringArrayPayload(content)
+	if err != nil {
+		return &translationResult{rawLLM: content}, err
+	}
+	return &translationResult{texts: parsed, rawLLM: content}, nil
 }
 
 type deepLTranslateResponse struct {
@@ -487,7 +553,7 @@ type deepLTranslateResponse struct {
 	} `json:"translations"`
 }
 
-func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
+func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
 	mode := strings.ToLower(strings.TrimSpace(s.cfg.DeepL.Mode))
 	if mode == "" {
 		mode = "free"
@@ -557,7 +623,7 @@ func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang
 		result = append(result, item.Text)
 	}
 
-	return result, nil
+	return &translationResult{texts: result}, nil
 }
 
 type googlePaidTranslateRequest struct {
@@ -575,7 +641,7 @@ type googlePaidTranslateResponse struct {
 	} `json:"data"`
 }
 
-func (s *Service) translateWithGoogle(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
+func (s *Service) translateWithGoogle(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
 	mode := strings.ToLower(strings.TrimSpace(s.cfg.Google.Mode))
 	if mode == "" {
 		mode = "free"
@@ -587,7 +653,7 @@ func (s *Service) translateWithGoogle(ctx context.Context, sourceLang, targetLan
 	return s.translateWithGoogleFree(ctx, sourceLang, targetLang, texts)
 }
 
-func (s *Service) translateWithGooglePaid(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
+func (s *Service) translateWithGooglePaid(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
 	apiKey := strings.TrimSpace(s.cfg.Google.APIKey)
 	if apiKey == "" {
 		return nil, fmt.Errorf("google api_key is required for paid mode")
@@ -643,7 +709,7 @@ func (s *Service) translateWithGooglePaid(ctx context.Context, sourceLang, targe
 		result = append(result, html.UnescapeString(item.TranslatedText))
 	}
 
-	return result, nil
+	return &translationResult{texts: result}, nil
 }
 
 // googleFreeResult holds the result of a single translation
@@ -653,7 +719,7 @@ type googleFreeResult struct {
 	err   error
 }
 
-func (s *Service) translateWithGoogleFree(ctx context.Context, sourceLang, targetLang string, texts []string) ([]string, error) {
+func (s *Service) translateWithGoogleFree(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(s.cfg.Google.BaseURL), "/")
 	if baseURL == "" {
 		baseURL = "https://translate.googleapis.com"
@@ -739,7 +805,7 @@ func (s *Service) translateWithGoogleFree(ctx context.Context, sourceLang, targe
 		result[i] = r.text
 	}
 
-	return result, nil
+	return &translationResult{texts: result}, nil
 }
 
 func (s *Service) performGoogleFreeTranslation(ctx context.Context, baseURL, sourceLang, targetLang, text string) googleFreeResult {
@@ -903,12 +969,10 @@ func parseStringArrayPayload(payload string) ([]string, error) {
 	logging.Debugf("Translation: parseStringArrayPayload found %d arrays, total %d items", arrayNum, len(out))
 
 	if len(out) == 0 {
-		if arrayNum == 0 {
-			out = extractQuotedStrings(cleaned)
-			if len(out) > 0 {
-				logging.Debugf("Translation: parseStringArrayPayload extracted %d strings via fallback", len(out))
-				return out, nil
-			}
+		out = extractQuotedStrings(cleaned)
+		if len(out) > 0 {
+			logging.Debugf("Translation: parseStringArrayPayload extracted %d strings via fallback", len(out))
+			return out, nil
 		}
 		return nil, fmt.Errorf("failed to parse translated output payload: no valid JSON arrays found")
 	}
