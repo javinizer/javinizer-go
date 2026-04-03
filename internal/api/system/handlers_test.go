@@ -612,6 +612,110 @@ func TestGetTranslationModels(t *testing.T) {
 		assert.Equal(t, []string{"gpt-4.1", "gpt-4o-mini"}, resp.Models)
 	})
 
+	t.Run("success openai-compatible provider", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/models", r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"llama-3"},{"id":"mistral"}]}`))
+		}))
+		defer upstream.Close()
+
+		deps := &ServerDependencies{}
+		deps.SetConfig(config.DefaultConfig())
+
+		router := gin.New()
+		router.POST("/translation/models", getTranslationModels(deps))
+
+		reqBody := TranslationModelsRequest{
+			Provider: "openai-compatible",
+			BaseURL:  upstream.URL,
+			APIKey:   "optional-key",
+		}
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/translation/models", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp TranslationModelsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, []string{"llama-3", "mistral"}, resp.Models)
+	})
+
+	t.Run("openai-compatible without api key", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/models", r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"ollama-model"}]}`))
+		}))
+		defer upstream.Close()
+
+		deps := &ServerDependencies{}
+		deps.SetConfig(config.DefaultConfig())
+
+		router := gin.New()
+		router.POST("/translation/models", getTranslationModels(deps))
+
+		reqBody := TranslationModelsRequest{
+			Provider: "openai-compatible",
+			BaseURL:  upstream.URL,
+			APIKey:   "",
+		}
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/translation/models", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp TranslationModelsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, []string{"ollama-model"}, resp.Models)
+	})
+
+	t.Run("success anthropic models", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/v1/models", r.URL.Path)
+			assert.Equal(t, "test-anthropic-key", r.Header.Get("x-api-key"))
+			assert.Equal(t, "2023-06-01", r.Header.Get("anthropic-version"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"claude-3-5-sonnet"},{"id":"claude-3-opus"},{"id":"claude-3-5-sonnet"}]}`))
+		}))
+		defer upstream.Close()
+
+		deps := &ServerDependencies{}
+		deps.SetConfig(config.DefaultConfig())
+
+		router := gin.New()
+		router.POST("/translation/models", getTranslationModels(deps))
+
+		reqBody := TranslationModelsRequest{
+			Provider: "anthropic",
+			BaseURL:  upstream.URL,
+			APIKey:   "test-anthropic-key",
+		}
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/translation/models", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp TranslationModelsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, []string{"claude-3-5-sonnet", "claude-3-opus"}, resp.Models)
+	})
+
 	t.Run("invalid provider", func(t *testing.T) {
 		deps := &ServerDependencies{}
 		deps.SetConfig(config.DefaultConfig())
@@ -628,7 +732,7 @@ func TestGetTranslationModels(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
-	t.Run("missing api key", func(t *testing.T) {
+	t.Run("missing api key for openai", func(t *testing.T) {
 		deps := &ServerDependencies{}
 		deps.SetConfig(config.DefaultConfig())
 
