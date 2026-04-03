@@ -354,6 +354,7 @@ func migrateSchemaCompatibilityUp(ctx context.Context, db *sql.DB) error {
 			{Name: "label", Definition: "TEXT"},
 			{Name: "series", Definition: "TEXT"},
 			{Name: "source_name", Definition: "TEXT"},
+			{Name: "settings_hash", Definition: "VARCHAR(16)"},
 			{Name: "created_at", Definition: "DATETIME"},
 			{Name: "updated_at", Definition: "DATETIME"},
 		},

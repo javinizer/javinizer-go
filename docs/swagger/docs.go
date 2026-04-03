@@ -3666,6 +3666,10 @@ const docTemplate = `{
                 "series": {
                     "type": "string"
                 },
+                "settings_hash": {
+                    "description": "Hash of translation settings used",
+                    "type": "string"
+                },
                 "source_name": {
                     "description": "Which scraper provided this translation",
                     "type": "string"
