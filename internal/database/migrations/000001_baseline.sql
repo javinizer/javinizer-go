@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS movie_translations (
     label TEXT,
     series TEXT,
     source_name TEXT,
+    settings_hash VARCHAR(16),
     created_at DATETIME,
     updated_at DATETIME,
     CONSTRAINT fk_movies_translations FOREIGN KEY (movie_id) REFERENCES movies(content_id)
@@ -123,6 +124,20 @@ CREATE TABLE IF NOT EXISTS movie_genres (
     CONSTRAINT fk_movie_genres_movie FOREIGN KEY (movie_content_id) REFERENCES movies(content_id),
     CONSTRAINT fk_movie_genres_genre FOREIGN KEY (genre_id) REFERENCES genres(id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_movies_content_id ON movies(content_id);
+CREATE INDEX IF NOT EXISTS idx_movies_id ON movies(id);
+CREATE INDEX IF NOT EXISTS idx_actresses_japanese_name ON actresses(japanese_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_genres_name ON genres(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_genre_replacements_original ON genre_replacements(original);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_actress_aliases_alias_name ON actress_aliases(alias_name);
+CREATE INDEX IF NOT EXISTS idx_actress_aliases_canonical_name ON actress_aliases(canonical_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_movie_tag ON movie_tags(movie_id, tag);
+CREATE INDEX IF NOT EXISTS idx_history_movie_id ON history(movie_id);
+CREATE INDEX IF NOT EXISTS idx_history_created_at ON history(created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_content_id_mappings_search_id ON content_id_mappings(search_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_movie_language ON movie_translations(movie_id, language);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_actresses_dmm_id_positive ON actresses(dmm_id) WHERE dmm_id > 0;
 
 -- +goose StatementEnd
 
