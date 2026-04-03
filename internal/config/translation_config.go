@@ -1,5 +1,12 @@
 package config
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"strings"
+)
+
 // FlareSolverrConfig holds FlareSolverr configuration for bypassing Cloudflare
 type FlareSolverrConfig struct {
 	Enabled    bool   `yaml:"enabled" json:"enabled"`         // Enable FlareSolverr for bypassing Cloudflare
@@ -135,4 +142,62 @@ type NFOConfig struct {
 	Tag                  []string `yaml:"tag" json:"tag"`
 	Tagline              string   `yaml:"tagline" json:"tagline"`
 	Credits              []string `yaml:"credits" json:"credits"`
+}
+
+// SettingsHash computes a deterministic hash of output-affecting translation settings.
+// The hash is used for cache invalidation - when settings change, the hash changes,
+// triggering re-translation of cached movies.
+// Returns a 16-character hex string (truncated SHA256).
+func (tc *TranslationConfig) SettingsHash() string {
+	// Extract only output-affecting settings (exclude api_key, base_url, timeout)
+	hashInput := settingsHashInput{
+		Provider:                tc.Provider,
+		SourceLanguage:          strings.ToLower(strings.TrimSpace(tc.SourceLanguage)),
+		TargetLanguage:          strings.ToLower(strings.TrimSpace(tc.TargetLanguage)),
+		ApplyToPrimary:          tc.ApplyToPrimary,
+		OverwriteExistingTarget: tc.OverwriteExistingTarget,
+		Fields:                  tc.Fields,
+	}
+
+	// Add provider-specific model settings (these affect output)
+	switch tc.Provider {
+	case "openai":
+		hashInput.OpenAIModel = tc.OpenAI.Model
+	case "openai_compatible", "openai-compatible":
+		hashInput.OpenAICompatibleModel = tc.OpenAICompatible.Model
+	case "anthropic":
+		hashInput.AnthropicModel = tc.Anthropic.Model
+	case "deepl":
+		hashInput.DeepLMode = tc.DeepL.Mode
+	case "google":
+		hashInput.GoogleMode = tc.Google.Mode
+	}
+
+	// Serialize to JSON with sorted keys for determinism
+	jsonBytes, err := json.Marshal(hashInput)
+	if err != nil {
+		return "" // Should never happen with simple struct
+	}
+
+	// Compute SHA256 hash
+	hash := sha256.Sum256(jsonBytes)
+
+	// Return truncated hex string (16 chars = 64 bits, sufficient for our use case)
+	return hex.EncodeToString(hash[:8])
+}
+
+// settingsHashInput is a simplified struct for hash computation.
+// Only includes settings that affect translation output.
+type settingsHashInput struct {
+	Provider                string                  `json:"provider"`
+	SourceLanguage          string                  `json:"source_language"`
+	TargetLanguage          string                  `json:"target_language"`
+	ApplyToPrimary          bool                    `json:"apply_to_primary"`
+	OverwriteExistingTarget bool                    `json:"overwrite_existing_target"`
+	Fields                  TranslationFieldsConfig `json:"fields"`
+	OpenAIModel             string                  `json:"openai_model,omitempty"`
+	OpenAICompatibleModel   string                  `json:"openai_compatible_model,omitempty"`
+	AnthropicModel          string                  `json:"anthropic_model,omitempty"`
+	DeepLMode               string                  `json:"deepl_mode,omitempty"`
+	GoogleMode              string                  `json:"google_mode,omitempty"`
 }
