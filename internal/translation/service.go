@@ -808,8 +808,11 @@ func parseStringArrayPayload(payload string) ([]string, error) {
 	cleaned = strings.TrimSuffix(cleaned, "```")
 	cleaned = strings.TrimSpace(cleaned)
 
+	logging.Debugf("Translation: parseStringArrayPayload input length=%d, first 200 chars: %s", len(cleaned), cleaned[:min(200, len(cleaned))])
+
 	var out []string
 	pos := 0
+	arrayNum := 0
 	for pos < len(cleaned) {
 		start := strings.Index(cleaned[pos:], "[")
 		if start < 0 {
@@ -850,15 +853,23 @@ func parseStringArrayPayload(payload string) ([]string, error) {
 		}
 
 		if end < 0 {
+			logging.Debugf("Translation: parseStringArrayPayload array %d unclosed, stopping at pos=%d", arrayNum+1, pos)
 			break
 		}
 
+		arrayNum++
+		jsonStr := cleaned[start : end+1]
 		var arr []string
-		if err := json.Unmarshal([]byte(cleaned[start:end+1]), &arr); err == nil {
+		if err := json.Unmarshal([]byte(jsonStr), &arr); err != nil {
+			logging.Debugf("Translation: parseStringArrayPayload array %d unmarshal failed: %v", arrayNum, err)
+		} else {
+			logging.Debugf("Translation: parseStringArrayPayload array %d has %d items", arrayNum, len(arr))
 			out = append(out, arr...)
 		}
 		pos = end + 1
 	}
+
+	logging.Debugf("Translation: parseStringArrayPayload found %d arrays, total %d items", arrayNum, len(out))
 
 	if len(out) == 0 {
 		return nil, fmt.Errorf("failed to parse translated output payload: no valid JSON arrays found")
