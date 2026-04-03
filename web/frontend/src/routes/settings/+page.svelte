@@ -491,6 +491,16 @@
 		if (!translation.google.mode) translation.google.mode = 'free';
 		if (!translation.google.base_url) translation.google.base_url = '';
 		if (!translation.google.api_key) translation.google.api_key = '';
+
+		if (!translation['openai-compatible'] || typeof translation['openai-compatible'] !== 'object') translation['openai-compatible'] = {};
+		if (!translation['openai-compatible'].base_url) translation['openai-compatible'].base_url = 'http://localhost:11434/v1';
+		if (!translation['openai-compatible'].model) translation['openai-compatible'].model = '';
+		if (!translation['openai-compatible'].api_key) translation['openai-compatible'].api_key = '';
+
+		if (!translation.anthropic || typeof translation.anthropic !== 'object') translation.anthropic = {};
+		if (!translation.anthropic.base_url) translation.anthropic.base_url = 'https://api.anthropic.com';
+		if (!translation.anthropic.model) translation.anthropic.model = '';
+		if (!translation.anthropic.api_key) translation.anthropic.api_key = '';
 	}
 
 	function getProxyProfileNames(): string[] {

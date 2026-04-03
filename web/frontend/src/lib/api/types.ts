@@ -393,13 +393,25 @@ export interface ProxyTestResponse {
 }
 
 export interface TranslationModelsRequest {
-	provider: 'openai';
+	provider: 'openai' | 'openai-compatible' | 'anthropic';
 	base_url: string;
 	api_key: string;
 }
 
 export interface TranslationModelsResponse {
 	models: string[];
+}
+
+export interface OpenAICompatibleTranslationConfig {
+	base_url: string;
+	api_key: string;
+	model: string;
+}
+
+export interface AnthropicTranslationConfig {
+	base_url: string;
+	api_key: string;
+	model: string;
 }
 
 export interface DeepLUsageRequest {
