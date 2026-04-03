@@ -1011,13 +1011,17 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult, movie *m
 
 func (a *Aggregator) applyConfiguredTranslation(movie *models.Movie) {
 	if a == nil || movie == nil || a.config == nil {
+		logging.Debugf("Translation: skipped (nil aggregator, movie, or config)")
 		return
 	}
 
 	translationCfg := a.config.Metadata.Translation
 	if !translationCfg.Enabled {
+		logging.Debugf("Translation: skipped (disabled)")
 		return
 	}
+
+	logging.Debugf("Translation: starting (provider=%s, source=%s, target=%s)", translationCfg.Provider, translationCfg.SourceLanguage, translationCfg.TargetLanguage)
 
 	timeout := translationCfg.TimeoutSeconds
 	if timeout <= 0 {
@@ -1038,14 +1042,19 @@ func (a *Aggregator) applyConfiguredTranslation(movie *models.Movie) {
 		return
 	}
 	if translatedRecord == nil {
+		logging.Debugf("Translation: returned nil record (no fields to translate or source==target)")
 		return
 	}
+
+	logging.Debugf("Translation: appending %s translation (title=%q, fields populated)", translatedRecord.Language, translatedRecord.Title)
 
 	movie.Translations = mergeOrAppendTranslation(
 		movie.Translations,
 		*translatedRecord,
 		translationCfg.OverwriteExistingTarget,
 	)
+
+	logging.Debugf("Translation: movie now has %d translation(s)", len(movie.Translations))
 }
 
 // applyGenreReplacement applies genre replacement if one exists
