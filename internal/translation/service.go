@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -271,6 +272,9 @@ func (s *Service) translateWithOpenAI(ctx context.Context, sourceLang, targetLan
 		return nil, err
 	}
 
+	logging.Debugf("Translation (openai): POST %s model=%s texts=%d", baseURL+"/chat/completions", model, len(texts))
+	logging.Debugf("Translation (openai): system prompt: %s", systemPrompt)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -340,6 +344,9 @@ func (s *Service) translateWithOpenAICompatible(ctx context.Context, sourceLang,
 	if err != nil {
 		return nil, err
 	}
+
+	logging.Debugf("Translation (openai-compatible): POST %s model=%s texts=%d", baseURL+"/chat/completions", model, len(texts))
+	logging.Debugf("Translation (openai-compatible): system prompt: %s", systemPrompt)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
@@ -419,6 +426,9 @@ func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, target
 	if err != nil {
 		return nil, err
 	}
+
+	logging.Debugf("Translation (anthropic): POST %s model=%s texts=%d", baseURL+"/v1/messages", model, len(texts))
+	logging.Debugf("Translation (anthropic): system prompt: %s", systemPrompt)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
