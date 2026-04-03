@@ -835,6 +835,14 @@ func parseStringArrayPayload(payload string) ([]string, error) {
 		}
 		start += pos
 
+		if start+1 < len(cleaned) {
+			nextChar := cleaned[start+1]
+			if nextChar != '"' && nextChar != ' ' && nextChar != '\n' && nextChar != '\t' && nextChar != '[' {
+				pos = start + 1
+				continue
+			}
+		}
+
 		depth := 0
 		end := -1
 		inString := false
@@ -872,22 +880,72 @@ func parseStringArrayPayload(payload string) ([]string, error) {
 			break
 		}
 
-		arrayNum++
 		jsonStr := cleaned[start : end+1]
+		if len(jsonStr) > 2 && jsonStr[1] == '[' {
+			logging.Debugf("Translation: parseStringArrayPayload array %d is nested, skipping", arrayNum+1)
+			pos = end + 1
+			arrayNum++
+			continue
+		}
+
+		arrayNum++
 		var arr []string
 		if err := json.Unmarshal([]byte(jsonStr), &arr); err != nil {
 			logging.Debugf("Translation: parseStringArrayPayload array %d unmarshal failed: %v", arrayNum, err)
-		} else {
-			logging.Debugf("Translation: parseStringArrayPayload array %d has %d items", arrayNum, len(arr))
-			out = append(out, arr...)
+			pos = end + 1
+			continue
 		}
+		logging.Debugf("Translation: parseStringArrayPayload array %d has %d items", arrayNum, len(arr))
+		out = append(out, arr...)
 		pos = end + 1
 	}
 
 	logging.Debugf("Translation: parseStringArrayPayload found %d arrays, total %d items", arrayNum, len(out))
 
 	if len(out) == 0 {
+		if arrayNum == 0 {
+			out = extractQuotedStrings(cleaned)
+			if len(out) > 0 {
+				logging.Debugf("Translation: parseStringArrayPayload extracted %d strings via fallback", len(out))
+				return out, nil
+			}
+		}
 		return nil, fmt.Errorf("failed to parse translated output payload: no valid JSON arrays found")
 	}
 	return out, nil
+}
+
+func extractQuotedStrings(s string) []string {
+	var results []string
+	inString := false
+	escaped := false
+	var current strings.Builder
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if escaped {
+			escaped = false
+			if inString {
+				current.WriteByte(ch)
+			}
+			continue
+		}
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			if inString {
+				results = append(results, current.String())
+				current.Reset()
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			current.WriteByte(ch)
+		}
+	}
+
+	return results
 }
