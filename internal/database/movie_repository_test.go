@@ -737,3 +737,88 @@ func TestMovieRepository_EnsureActressesExist(t *testing.T) {
 		assert.Equal(t, "Actress", foundActress.LastName)
 	})
 }
+
+func TestMovieRepository_Upsert_WithSettingsHash(t *testing.T) {
+	cfg := &config.Config{
+		Database: config.DatabaseConfig{Type: "sqlite", DSN: ":memory:"},
+		Logging:  config.LoggingConfig{Level: "error"},
+	}
+
+	db, err := New(cfg)
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, db.AutoMigrate())
+	repo := NewMovieRepository(db)
+
+	t.Run("Upsert stores settings_hash", func(t *testing.T) {
+		movie := createTestMovie("IPX-HASH-001")
+		movie.Translations = []models.MovieTranslation{
+			{
+				Language:     "en",
+				Title:        "English Title",
+				SettingsHash: "abc123def456",
+				SourceName:   "translation-service",
+			},
+		}
+
+		err := repo.Upsert(movie)
+		require.NoError(t, err)
+
+		found, err := repo.FindByID("IPX-HASH-001")
+		require.NoError(t, err)
+		assert.Len(t, found.Translations, 1)
+		assert.Equal(t, "abc123def456", found.Translations[0].SettingsHash, "settings_hash should be stored")
+	})
+
+	t.Run("Upsert preserves empty hash (legacy)", func(t *testing.T) {
+		movie := createTestMovie("IPX-HASH-002")
+		movie.Translations = []models.MovieTranslation{
+			{
+				Language:     "ja",
+				Title:        "Japanese Title",
+				SettingsHash: "",
+				SourceName:   "dmm",
+			},
+		}
+
+		err := repo.Upsert(movie)
+		require.NoError(t, err)
+
+		found, err := repo.FindByID("IPX-HASH-002")
+		require.NoError(t, err)
+		assert.Len(t, found.Translations, 1)
+		assert.Equal(t, "", found.Translations[0].SettingsHash, "empty hash should be preserved for legacy")
+	})
+
+	t.Run("Upsert updates hash on re-translation", func(t *testing.T) {
+		movie := createTestMovie("IPX-HASH-003")
+		movie.Translations = []models.MovieTranslation{
+			{
+				Language:     "en",
+				Title:        "Old English Title",
+				SettingsHash: "oldhash123",
+				SourceName:   "translation-service",
+			},
+		}
+		err := repo.Upsert(movie)
+		require.NoError(t, err)
+
+		movie.Translations = []models.MovieTranslation{
+			{
+				Language:     "en",
+				Title:        "New English Title",
+				SettingsHash: "newhash456",
+				SourceName:   "translation-service",
+			},
+		}
+
+		err = repo.Upsert(movie)
+		require.NoError(t, err)
+
+		found, err := repo.FindByID("IPX-HASH-003")
+		require.NoError(t, err)
+		assert.Len(t, found.Translations, 1, "should replace translation for same language")
+		assert.Equal(t, "newhash456", found.Translations[0].SettingsHash, "new hash should be stored")
+		assert.Equal(t, "New English Title", found.Translations[0].Title, "title should be updated")
+	})
+}
