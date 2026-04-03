@@ -1021,7 +1021,8 @@ func (a *Aggregator) ApplyConfiguredTranslation(movie *models.Movie) {
 		return
 	}
 
-	logging.Debugf("Translation: starting (provider=%s, source=%s, target=%s)", translationCfg.Provider, translationCfg.SourceLanguage, translationCfg.TargetLanguage)
+	settingsHash := translationCfg.SettingsHash()
+	logging.Debugf("Translation: starting (provider=%s, source=%s, target=%s, hash=%s)", translationCfg.Provider, translationCfg.SourceLanguage, translationCfg.TargetLanguage, settingsHash)
 
 	timeout := translationCfg.TimeoutSeconds
 	if timeout <= 0 {
@@ -1032,7 +1033,7 @@ func (a *Aggregator) ApplyConfiguredTranslation(movie *models.Movie) {
 	defer cancel()
 
 	service := translation.New(translationCfg)
-	translatedRecord, err := service.TranslateMovie(ctx, movie, "")
+	translatedRecord, err := service.TranslateMovie(ctx, movie, settingsHash)
 	if err != nil {
 		id := movie.ID
 		if id == "" {
@@ -1046,7 +1047,7 @@ func (a *Aggregator) ApplyConfiguredTranslation(movie *models.Movie) {
 		return
 	}
 
-	logging.Debugf("Translation: appending %s translation (title=%q, fields populated)", translatedRecord.Language, translatedRecord.Title)
+	logging.Debugf("Translation: appending %s translation (title=%q, hash=%s)", translatedRecord.Language, translatedRecord.Title, translatedRecord.SettingsHash)
 
 	movie.Translations = mergeOrAppendTranslation(
 		movie.Translations,
