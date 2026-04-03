@@ -519,7 +519,7 @@ func (a *Aggregator) Aggregate(results []*models.ScraperResult) (*models.Movie, 
 	// Build translations from scrapers that contributed to merged fields
 	movie.Translations = a.buildTranslations(results, movie)
 
-	a.applyConfiguredTranslation(movie)
+	a.ApplyConfiguredTranslation(movie)
 
 	// Generate display name from template if configured
 	if a.config.Metadata.NFO.DisplayName != "" {
@@ -667,7 +667,7 @@ func (a *Aggregator) AggregateWithPriority(results []*models.ScraperResult, cust
 	// Build translations from scrapers that contributed to merged fields
 	movie.Translations = a.buildTranslations(results, movie)
 
-	a.applyConfiguredTranslation(movie)
+	a.ApplyConfiguredTranslation(movie)
 
 	// Generate display name from template if configured
 	if a.config.Metadata.NFO.DisplayName != "" {
@@ -1009,7 +1009,7 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult, movie *m
 	return translations
 }
 
-func (a *Aggregator) applyConfiguredTranslation(movie *models.Movie) {
+func (a *Aggregator) ApplyConfiguredTranslation(movie *models.Movie) {
 	if a == nil || movie == nil || a.config == nil {
 		logging.Debugf("Translation: skipped (nil aggregator, movie, or config)")
 		return
@@ -1032,7 +1032,7 @@ func (a *Aggregator) applyConfiguredTranslation(movie *models.Movie) {
 	defer cancel()
 
 	service := translation.New(translationCfg)
-	translatedRecord, err := service.TranslateMovie(ctx, movie)
+	translatedRecord, err := service.TranslateMovie(ctx, movie, "")
 	if err != nil {
 		id := movie.ID
 		if id == "" {

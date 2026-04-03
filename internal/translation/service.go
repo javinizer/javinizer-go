@@ -47,8 +47,9 @@ func New(cfg config.TranslationConfig) *Service {
 
 // TranslateMovie translates configured textual fields and optionally applies them
 // to primary movie fields. It returns a target-language translation record when
-// translation work was performed.
-func (s *Service) TranslateMovie(ctx context.Context, movie *models.Movie) (*models.MovieTranslation, error) {
+// translation work was performed. The settingsHash parameter identifies which
+// translation settings were used to generate this translation.
+func (s *Service) TranslateMovie(ctx context.Context, movie *models.Movie, settingsHash string) (*models.MovieTranslation, error) {
 	if s == nil || movie == nil || !s.cfg.Enabled {
 		return nil, nil
 	}
@@ -73,8 +74,9 @@ func (s *Service) TranslateMovie(ctx context.Context, movie *models.Movie) (*mod
 
 	requests := make([]pendingText, 0)
 	translatedRecord := &models.MovieTranslation{
-		Language:   targetLang,
-		SourceName: "translation:" + normalizeProvider(s.cfg.Provider),
+		Language:     targetLang,
+		SourceName:   "translation:" + normalizeProvider(s.cfg.Provider),
+		SettingsHash: settingsHash,
 	}
 
 	queueField := func(raw string, assignRecord func(string), assignMovie func(string)) {

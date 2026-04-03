@@ -114,7 +114,7 @@ func TestTranslateMovie_EarlyReturns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := tt.service.TranslateMovie(context.Background(), tt.movie)
+			result, err := tt.service.TranslateMovie(context.Background(), tt.movie, "")
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, result)
@@ -163,7 +163,7 @@ func TestTranslateMovie_ApplyToPrimary(t *testing.T) {
 
 		s := New(cfg)
 		movie := &models.Movie{Title: "テスト"}
-		result, err := s.TranslateMovie(context.Background(), movie)
+		result, err := s.TranslateMovie(context.Background(), movie, "")
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -205,7 +205,7 @@ func TestTranslateMovie_ApplyToPrimary(t *testing.T) {
 		s := New(cfg)
 		movie := &models.Movie{Title: "テスト"}
 		originalTitle := movie.Title
-		result, err := s.TranslateMovie(context.Background(), movie)
+		result, err := s.TranslateMovie(context.Background(), movie, "")
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -1494,7 +1494,7 @@ func TestTranslateMovie_FullFlow(t *testing.T) {
 
 			originalTitle := movieCopy.Title
 
-			result, err := s.TranslateMovie(context.Background(), movieCopy)
+			result, err := s.TranslateMovie(context.Background(), movieCopy, "")
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -1632,7 +1632,7 @@ func TestTranslateMovie_TranslationCountMismatch(t *testing.T) {
 				movie.Director = "Test Director"
 			}
 
-			_, err := s.TranslateMovie(context.Background(), movie)
+			_, err := s.TranslateMovie(context.Background(), movie, "")
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -1863,7 +1863,7 @@ func TestTranslateMovie_ContextCancellation(t *testing.T) {
 		}()
 
 		movie := &models.Movie{Title: "テスト"}
-		_, err := s.TranslateMovie(ctx, movie)
+		_, err := s.TranslateMovie(ctx, movie, "")
 
 		close(done) // Unblock the server handler
 		require.Error(t, err)
@@ -1907,7 +1907,7 @@ func TestTranslateMovie_ContextCancellation(t *testing.T) {
 		defer cancel()
 
 		movie := &models.Movie{Title: "テスト"}
-		_, err := s.TranslateMovie(ctx, movie)
+		_, err := s.TranslateMovie(ctx, movie, "")
 
 		close(done) // Unblock the server handler
 		require.Error(t, err)
@@ -2563,4 +2563,52 @@ func TestTranslateTexts_Dispatch_NewProviders(t *testing.T) {
 			}
 		})
 	}
+}
+
+// =============================================================================
+// SettingsHash storage tests
+// =============================================================================
+
+func TestService_TranslateMovie_StoresHash(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]string{
+						"content": `["Translated Title"]`,
+					},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	cfg := &config.TranslationConfig{
+		Enabled:        true,
+		Provider:       "openai",
+		SourceLanguage: "ja",
+		TargetLanguage: "en",
+		Fields: config.TranslationFieldsConfig{
+			Title: true,
+		},
+		OpenAI: config.OpenAITranslationConfig{
+			BaseURL: server.URL,
+			Model:   "gpt-4",
+			APIKey:  "test-key",
+		},
+	}
+
+	movie := &models.Movie{
+		ContentID:   "test001",
+		Title:       "テストタイトル",
+		Description: "テスト説明",
+	}
+
+	service := New(*cfg)
+	translation, err := service.TranslateMovie(context.Background(), movie, "abc123def456")
+
+	require.NoError(t, err)
+	require.NotNil(t, translation)
+	assert.Equal(t, "abc123def456", translation.SettingsHash, "hash should be stored in translation")
 }
