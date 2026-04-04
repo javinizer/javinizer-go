@@ -187,13 +187,13 @@
 							class="group"
 						>
 							<Card class="overflow-hidden hover:border-border/80 transition-colors">
-								<div class="flex">
+								<div class="flex items-center">
 									{#if poster}
-										<div class="w-20 h-20 flex-shrink-0 bg-muted">
+										<div class="w-20 h-20 flex-shrink-0 bg-muted flex items-center justify-center">
 											<img
 												src={poster}
 												alt=""
-												class="w-full h-full object-cover"
+												class="w-full h-full object-cover object-center"
 												onerror={(e) => {
 													(e.target as HTMLImageElement).style.display = 'none';
 												}}
