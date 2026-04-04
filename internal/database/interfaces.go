@@ -94,3 +94,13 @@ type ContentIDMappingRepositoryInterface interface {
 	Delete(searchID string) error
 	GetAll() ([]models.ContentIDMapping, error)
 }
+
+// JobRepositoryInterface defines the contract for job database operations
+type JobRepositoryInterface interface {
+	Create(job *models.Job) error
+	Update(job *models.Job) error
+	FindByID(id string) (*models.Job, error)
+	List() ([]models.Job, error)
+	Delete(id string) error
+	DeleteOrganizedOlderThan(date time.Time) error
+}
