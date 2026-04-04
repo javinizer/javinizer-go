@@ -132,7 +132,7 @@
 
 <div class="min-h-screen bg-background">
 	<div class="container mx-auto px-4 py-8 max-w-5xl">
-		<div class="flex items-center justify-between mb-8">
+		<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
 			<div>
 				<h1 class="text-2xl font-bold tracking-tight">Jobs</h1>
 				<p class="text-muted-foreground text-sm mt-1">Manage your batch scrape jobs</p>
@@ -186,10 +186,10 @@
 							in:fly={{ y: 10, duration: 200, delay: Math.min(index * 30, 150) }}
 							class="group"
 						>
-							<Card class="overflow-hidden hover:border-border/80 transition-colors">
-								<div class="flex items-center">
+							<Card class="overflow-hidden hover:border-border/80 transition-colors shadow-sm">
+								<div class="flex items-center p-3 gap-4">
 									{#if poster}
-										<div class="w-20 h-20 flex-shrink-0 bg-muted flex items-center justify-center">
+										<div class="w-20 h-20 flex-shrink-0 bg-muted rounded-md overflow-hidden flex items-center justify-center">
 											<img
 												src={poster}
 												alt=""
@@ -200,68 +200,33 @@
 											/>
 										</div>
 									{:else}
-										<div class="w-20 h-20 flex-shrink-0 bg-muted flex items-center justify-center">
+										<div class="w-20 h-20 flex-shrink-0 bg-muted rounded-md flex items-center justify-center">
 											<FolderOpen class="h-8 w-8 text-muted-foreground/30" />
 										</div>
 									{/if}
 
-									<div class="flex-1 min-w-0 p-3">
-										<div class="flex items-start justify-between gap-3">
-											<div class="flex-1 min-w-0">
-												<div class="flex items-center gap-2 mb-1">
-													<span class="font-mono text-xs text-muted-foreground">
-														{job.id.slice(0, 8)}
-													</span>
-													<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium {config.bg} {config.color}">
-														<svelte:component this={config.icon} class="h-3 w-3" />
-														{config.label}
-													</span>
-												</div>
-												<p class="text-sm truncate mb-1.5" title={job.files?.[0]}>
-													{getFileNames(job)}
-												</p>
-												<div class="flex items-center gap-4 text-xs text-muted-foreground">
-													<span>{job.total_files} file{job.total_files !== 1 ? 's' : ''}</span>
-													{#if job.completed > 0}
-														<span class="text-green-600">{job.completed} done</span>
-													{/if}
-													{#if job.failed > 0}
-														<span class="text-red-500">{job.failed} failed</span>
-													{/if}
-													<span>{formatDate(job.started_at)}</span>
-												</div>
-											</div>
-
-											<div class="flex items-center gap-1.5 flex-shrink-0">
-												{#if job.status.toLowerCase() === 'running'}
-													<Button variant="outline" size="sm" onclick={() => cancelJob(job.id)}>
-														Cancel
-													</Button>
-													<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
-														<Eye class="h-4 w-4 mr-1" />
-														View
-													</Button>
-												{:else if job.status.toLowerCase() === 'completed'}
-													<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
-														Review & Organize
-													</Button>
-													<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
-														<Trash2 class="h-4 w-4 text-muted-foreground" />
-													</Button>
-												{:else if job.status.toLowerCase() === 'failed'}
-													<Button variant="outline" size="sm" onclick={() => goto(`/review/${job.id}`)}>
-														<Eye class="h-4 w-4 mr-1" />
-														Review
-													</Button>
-													<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
-														<Trash2 class="h-4 w-4 text-muted-foreground" />
-													</Button>
-												{:else}
-													<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
-														<Trash2 class="h-4 w-4 text-muted-foreground" />
-													</Button>
-												{/if}
-											</div>
+									<div class="flex-1 min-w-0">
+										<div class="flex items-center gap-2 mb-1">
+											<span class="font-mono text-xs text-muted-foreground">
+												{job.id.slice(0, 8)}
+											</span>
+											<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium {config.bg} {config.color}">
+												<svelte:component this={config.icon} class="h-3 w-3" />
+												{config.label}
+											</span>
+										</div>
+										<p class="text-sm truncate mb-1.5" title={job.files?.[0]}>
+											{getFileNames(job)}
+										</p>
+										<div class="flex items-center gap-4 text-xs text-muted-foreground">
+											<span>{job.total_files} file{job.total_files !== 1 ? 's' : ''}</span>
+											{#if job.completed > 0}
+												<span class="text-green-600">{job.completed} done</span>
+											{/if}
+											{#if job.failed > 0}
+												<span class="text-red-500">{job.failed} failed</span>
+											{/if}
+											<span>{formatDate(job.started_at)}</span>
 										</div>
 
 										{#if job.status.toLowerCase() === 'running'}
@@ -273,6 +238,37 @@
 													></div>
 												</div>
 											</div>
+										{/if}
+									</div>
+
+									<div class="flex items-center gap-1.5 flex-shrink-0">
+										{#if job.status.toLowerCase() === 'running'}
+											<Button variant="outline" size="sm" onclick={() => cancelJob(job.id)}>
+												Cancel
+											</Button>
+											<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+												<Eye class="h-4 w-4 mr-1" />
+												View
+											</Button>
+										{:else if job.status.toLowerCase() === 'completed'}
+											<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+												Review & Organize
+											</Button>
+											<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
+												<Trash2 class="h-4 w-4 text-muted-foreground" />
+											</Button>
+										{:else if job.status.toLowerCase() === 'failed'}
+											<Button variant="outline" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+												<Eye class="h-4 w-4 mr-1" />
+												Review
+											</Button>
+											<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
+												<Trash2 class="h-4 w-4 text-muted-foreground" />
+											</Button>
+										{:else}
+											<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
+												<Trash2 class="h-4 w-4 text-muted-foreground" />
+											</Button>
 										{/if}
 									</div>
 								</div>
