@@ -211,7 +211,7 @@
 												{job.id.slice(0, 8)}
 											</span>
 											<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium {config.bg} {config.color}">
-												<svelte:component this={config.icon} class="h-3 w-3" />
+												<config.icon class="h-3 w-3" />
 												{config.label}
 											</span>
 										</div>
