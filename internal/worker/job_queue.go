@@ -93,6 +93,7 @@ type BatchJob struct {
 	Results       map[string]*FileResult   `json:"results"`
 	FileMatchInfo map[string]FileMatchInfo `json:"file_match_info,omitempty"`
 	Progress      float64                  `json:"progress"`
+	Destination   string                   `json:"destination"`
 	StartedAt     time.Time                `json:"started_at"`
 	CompletedAt   *time.Time               `json:"completed_at,omitempty"`
 	OrganizedAt   *time.Time               `json:"organized_at,omitempty"`
@@ -184,6 +185,7 @@ func (jq *JobQueue) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 		Completed:     dbJob.Completed,
 		Failed:        dbJob.Failed,
 		Progress:      dbJob.Progress,
+		Destination:   dbJob.Destination,
 		StartedAt:     dbJob.StartedAt,
 		CompletedAt:   dbJob.CompletedAt,
 		OrganizedAt:   dbJob.OrganizedAt,
@@ -292,6 +294,7 @@ func (jq *JobQueue) persistToDatabase(job *BatchJob) {
 		Completed:     job.Completed,
 		Failed:        job.Failed,
 		Progress:      job.Progress,
+		Destination:   job.Destination,
 		Files:         string(filesJSON),
 		Results:       string(resultsJSON),
 		Excluded:      string(excludedJSON),

@@ -1815,8 +1815,10 @@ const docTemplate = `{
                 "completed_at": {
                     "type": "string"
                 },
+                "destination": {
+                    "type": "string"
+                },
                 "excluded": {
-                    "description": "Files excluded from organization",
                     "type": "object",
                     "additionalProperties": {
                         "type": "boolean"

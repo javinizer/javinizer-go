@@ -81,10 +81,11 @@ definitions:
         type: integer
       completed_at:
         type: string
+      destination:
+        type: string
       excluded:
         additionalProperties:
           type: boolean
-        description: Files excluded from organization
         type: object
       failed:
         type: integer

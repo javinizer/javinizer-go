@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     completed INTEGER NOT NULL DEFAULT 0,
     failed INTEGER NOT NULL DEFAULT 0,
     progress REAL NOT NULL DEFAULT 0,
+    destination TEXT NOT NULL DEFAULT '',
     files TEXT NOT NULL,
     results TEXT NOT NULL DEFAULT '{}',
     excluded TEXT NOT NULL DEFAULT '{}',

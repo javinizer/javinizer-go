@@ -20,6 +20,7 @@ type Job struct {
 	Completed     int        `json:"completed"`
 	Failed        int        `json:"failed"`
 	Progress      float64    `json:"progress"`
+	Destination   string     `json:"destination"`
 	Files         string     `json:"files" gorm:"type:text"`
 	Results       string     `json:"results" gorm:"type:text"`
 	Excluded      string     `json:"excluded" gorm:"type:text"`

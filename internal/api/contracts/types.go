@@ -248,8 +248,9 @@ type BatchJobResponse struct {
 	TotalFiles  int                         `json:"total_files"`
 	Completed   int                         `json:"completed"`
 	Failed      int                         `json:"failed"`
-	Excluded    map[string]bool             `json:"excluded"` // Files excluded from organization
+	Excluded    map[string]bool             `json:"excluded"`
 	Progress    float64                     `json:"progress"`
+	Destination string                      `json:"destination"`
 	Results     map[string]*BatchFileResult `json:"results"`
 	StartedAt   string                      `json:"started_at"`
 	CompletedAt *string                     `json:"completed_at,omitempty"`

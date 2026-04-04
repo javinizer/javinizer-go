@@ -62,6 +62,11 @@ func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
 		// Create job with all files (original + discovered siblings)
 		job := deps.JobQueue.CreateJob(allFiles)
 
+		// Set destination for the job
+		if req.Destination != "" {
+			job.Destination = req.Destination
+		}
+
 		// Populate file match metadata (multipart info from discovery)
 		for path, info := range fileMatchInfo {
 			job.FileMatchInfo[path] = info
@@ -140,6 +145,7 @@ func getBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 			Failed:      job.Failed,
 			Excluded:    job.Excluded,
 			Progress:    job.Progress,
+			Destination: job.Destination,
 			Results:     results,
 			StartedAt:   job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
 			CompletedAt: completedAt,
@@ -249,6 +255,7 @@ func listBatchJobs(deps *ServerDependencies) gin.HandlerFunc {
 				Failed:      job.Failed,
 				Excluded:    excluded,
 				Progress:    job.Progress,
+				Destination: job.Destination,
 				Results:     results,
 				StartedAt:   job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
 				CompletedAt: completedAt,

@@ -201,6 +201,9 @@
 	async function fetchJob() {
 		try {
 			job = await apiClient.getBatchJob(jobId);
+			if (job && job.destination && !destinationPath) {
+				destinationPath = job.destination;
+			}
 			loading = false;
 		} catch (e) {
 			console.error('Failed to fetch batch job:', e);
