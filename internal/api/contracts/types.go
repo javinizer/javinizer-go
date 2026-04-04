@@ -255,6 +255,10 @@ type BatchJobResponse struct {
 	CompletedAt *string                     `json:"completed_at,omitempty"`
 }
 
+type BatchJobListResponse struct {
+	Jobs []BatchJobResponse `json:"jobs"`
+}
+
 // BrowseRequest represents a browse request
 type BrowseRequest struct {
 	Path string `json:"path" example:"/path/to/directory"`
