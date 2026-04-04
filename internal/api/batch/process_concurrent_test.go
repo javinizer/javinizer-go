@@ -454,7 +454,7 @@ func TestProgressAdapterWebSocketOrdering(t *testing.T) {
 
 	// Create test job
 	files := []string{"/test/file1.mp4", "/test/file2.mp4", "/test/file3.mp4"}
-	jobQueue := worker.NewJobQueue(nil)
+	jobQueue := worker.NewJobQueue(nil, "")
 	job := jobQueue.CreateJob(files)
 
 	// Create progress adapter with mock hub
@@ -810,7 +810,7 @@ func TestBatchJobResultConsistency(t *testing.T) {
 		files[i] = fmt.Sprintf("/test/file-%d.mp4", i)
 	}
 
-	jobQueue := worker.NewJobQueue(nil)
+	jobQueue := worker.NewJobQueue(nil, "")
 	job := jobQueue.CreateJob(files)
 
 	// Concurrently update file results
@@ -898,7 +898,7 @@ func TestProgressAdapterRegistrationConcurrency(t *testing.T) {
 		files[i] = fmt.Sprintf("/test/file-%d.mp4", i)
 	}
 
-	jobQueue := worker.NewJobQueue(nil)
+	jobQueue := worker.NewJobQueue(nil, "")
 	job := jobQueue.CreateJob(files)
 
 	adapter := realtime.NewProgressAdapter(job.ID, job, mockHub)

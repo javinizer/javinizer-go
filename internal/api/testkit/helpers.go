@@ -161,7 +161,7 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.S
 	}
 
 	// Initialize job queue
-	jobQueue := worker.NewJobQueue(nil)
+	jobQueue := worker.NewJobQueue(nil, "")
 
 	deps := &core.ServerDependencies{
 		ConfigFile:  configFile,

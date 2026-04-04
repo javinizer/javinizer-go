@@ -113,14 +113,16 @@ type FileMatchInfo struct {
 type JobQueue struct {
 	jobs    map[string]*BatchJob
 	jobRepo database.JobRepositoryInterface
+	tempDir string
 	mu      sync.RWMutex
 }
 
 // NewJobQueue creates a new job queue
-func NewJobQueue(jobRepo database.JobRepositoryInterface) *JobQueue {
+func NewJobQueue(jobRepo database.JobRepositoryInterface, tempDir string) *JobQueue {
 	jq := &JobQueue{
 		jobs:    make(map[string]*BatchJob),
 		jobRepo: jobRepo,
+		tempDir: tempDir,
 	}
 
 	jq.loadFromDatabase()
@@ -202,6 +204,27 @@ func (jq *JobQueue) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 	if dbJob.Results != "" {
 		if err := json.Unmarshal([]byte(dbJob.Results), &batchJob.Results); err != nil {
 			logging.Warnf("Failed to parse results for job %s: %v", dbJob.ID, err)
+		}
+	}
+
+	if jq.tempDir != "" {
+		posterDir := filepath.Join(jq.tempDir, "posters", dbJob.ID)
+		for _, result := range batchJob.Results {
+			if result.Data == nil {
+				continue
+			}
+			movie, ok := result.Data.(*models.Movie)
+			if !ok || movie == nil {
+				continue
+			}
+			if movie.CroppedPosterURL == "" {
+				continue
+			}
+			tempPosterPath := filepath.Join(posterDir, movie.ID+".jpg")
+			if _, err := os.Stat(tempPosterPath); os.IsNotExist(err) {
+				movie.CroppedPosterURL = ""
+				logging.Debugf("[Job %s] Cleared missing temp poster URL for %s", dbJob.ID, movie.ID)
+			}
 		}
 	}
 

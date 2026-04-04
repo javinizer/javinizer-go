@@ -44,7 +44,7 @@ func TestNewServer(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -113,7 +113,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	deps.SetConfig(cfg)
 
@@ -254,7 +254,7 @@ func TestNewServer_CORSHeaders(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -298,7 +298,7 @@ func TestNewServer_StaticFiles(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -338,7 +338,7 @@ func TestServeScalarDocs(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -416,7 +416,7 @@ func TestNewServer_GinMode(t *testing.T) {
 				MovieRepo:   newMockMovieRepo(),
 				ActressRepo: newMockActressRepo(),
 				Matcher:     mat,
-				JobQueue:    worker.NewJobQueue(nil),
+				JobQueue:    worker.NewJobQueue(nil, ""),
 			}
 			// Initialize atomic config pointer
 			deps.SetConfig(cfg)
@@ -471,7 +471,7 @@ func TestNewServer_AllEndpointsAccessible(t *testing.T) {
 		MovieRepo:   database.NewMovieRepository(db),
 		ActressRepo: database.NewActressRepository(db),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -529,7 +529,7 @@ func TestNewServer_SecurityHeaders(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -583,7 +583,7 @@ func TestNewServer_InvalidRoutes(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -632,7 +632,7 @@ func TestNewServer_SPARouteFallbackForHTML(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	deps.SetConfig(cfg)
 
@@ -683,7 +683,7 @@ func TestNewServer_RobotsTxtServed(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	deps.SetConfig(cfg)
 
@@ -720,7 +720,7 @@ func TestServerDependencies_Shutdown(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil),
+		JobQueue:    worker.NewJobQueue(nil, ""),
 	}
 	deps.SetConfig(cfg)
 

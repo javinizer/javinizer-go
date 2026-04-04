@@ -94,16 +94,6 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
-	// Cleanup temp posters from previous sessions
-	// Temp posters are ephemeral and tied to batch job lifecycle
-	// Since batch jobs don't persist across restarts, cleanup all temp posters on startup
-	tempPosterDir := filepath.Join(cfg.System.TempDir, "posters")
-	if err := os.RemoveAll(tempPosterDir); err != nil {
-		logging.Warnf("Failed to clean temp poster directory on startup: %v", err)
-	} else {
-		logging.Info("Cleaned temp poster directory from previous sessions")
-	}
-
 	// Initialize database
 	db, err := database.New(cfg)
 	if err != nil {
@@ -143,7 +133,7 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 
 	// Initialize job repository and queue
 	jobRepo := database.NewJobRepository(db)
-	jobQueue := worker.NewJobQueue(jobRepo)
+	jobQueue := worker.NewJobQueue(jobRepo, cfg.System.TempDir)
 
 	// Initialize history repository
 	historyRepo := database.NewHistoryRepository(db)

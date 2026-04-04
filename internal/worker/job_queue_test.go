@@ -11,7 +11,7 @@ import (
 
 func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 	t.Run("Create and get job", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi"}
 
 		job := jq.CreateJob(files)
@@ -37,7 +37,7 @@ func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 	})
 
 	t.Run("Get non-existent job", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 
 		retrieved, ok := jq.GetJob("non-existent-id")
 		assert.False(t, ok, "Job should not exist")
@@ -45,7 +45,7 @@ func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 	})
 
 	t.Run("Delete job", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4"}
 
 		job := jq.CreateJob(files)
@@ -64,7 +64,7 @@ func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 	})
 
 	t.Run("List jobs", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 
 		// Initially empty
 		jobs := jq.ListJobs()
@@ -97,7 +97,7 @@ func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 	})
 
 	t.Run("Empty files list", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{})
 
 		assert.Equal(t, 0, job.TotalFiles)
@@ -107,7 +107,7 @@ func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 
 func TestBatchJob_UpdateFileResult(t *testing.T) {
 	t.Run("Update single file result", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi"}
 		job := jq.CreateJob(files)
 
@@ -133,7 +133,7 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 	})
 
 	t.Run("Update multiple file results with mixed status", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi", "file4.mp4"}
 		job := jq.CreateJob(files)
 
@@ -182,7 +182,7 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 	})
 
 	t.Run("Update same file result multiple times", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4"}
 		job := jq.CreateJob(files)
 
@@ -214,7 +214,7 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 	})
 
 	t.Run("Progress calculation with pending files", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi"}
 		job := jq.CreateJob(files)
 
@@ -236,7 +236,7 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 
 func TestBatchJob_StatusTransitions(t *testing.T) {
 	t.Run("MarkStarted", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		assert.Equal(t, JobStatusPending, job.Status)
@@ -252,7 +252,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	})
 
 	t.Run("MarkCompleted", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 		job.MarkStarted()
 
@@ -268,7 +268,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	})
 
 	t.Run("MarkFailed", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 		job.MarkStarted()
 
@@ -283,7 +283,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	})
 
 	t.Run("MarkCancelled", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 		job.MarkStarted()
 
@@ -298,7 +298,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	})
 
 	t.Run("Full workflow: pending -> running -> completed", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 
@@ -333,7 +333,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 
 func TestBatchJob_GetStatus(t *testing.T) {
 	t.Run("Returns copy with all fields", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 		job.MarkStarted()
@@ -360,7 +360,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 	})
 
 	t.Run("Deep copy of FileResults - map and FileResults are independent", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 
@@ -403,7 +403,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 	})
 
 	t.Run("Copies CompletedAt correctly when nil", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		status := job.GetStatus()
@@ -413,7 +413,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 	})
 
 	t.Run("Copies CompletedAt correctly when set", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 		job.MarkCompleted()
 
@@ -428,7 +428,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 	})
 
 	t.Run("Empty results map is copied correctly", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		status := job.GetStatus()
@@ -441,7 +441,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 // TestConcurrent_GetStatusAndUpdateFileResult validates thread-safe snapshot access
 // This test catches race conditions where handlers read job state while workers update it
 func TestConcurrent_GetStatusAndUpdateFileResult(t *testing.T) {
-	jq := NewJobQueue(nil)
+	jq := NewJobQueue(nil, "")
 	job := jq.CreateJob([]string{"file1.mp4", "file2.mkv", "file3.avi"})
 
 	now := time.Now()
@@ -498,7 +498,7 @@ func TestConcurrent_GetStatusAndUpdateFileResult(t *testing.T) {
 func TestConcurrent_DirectMapAccessIsUnsafe(t *testing.T) {
 	t.Skip("This test demonstrates unsafe pattern - skip to avoid race detector failures")
 
-	jq := NewJobQueue(nil)
+	jq := NewJobQueue(nil, "")
 	job := jq.CreateJob([]string{"file1.mp4"})
 
 	now := time.Now()
@@ -536,7 +536,7 @@ func TestConcurrent_DirectMapAccessIsUnsafe(t *testing.T) {
 // TestBatchJob_PointerFieldIndependence validates that pointer fields are deep copied
 // This ensures modifying pointer fields in the snapshot doesn't affect the live job
 func TestBatchJob_PointerFieldIndependence(t *testing.T) {
-	jq := NewJobQueue(nil)
+	jq := NewJobQueue(nil, "")
 	job := jq.CreateJob([]string{"file1.mp4"})
 
 	// Create FileResult with pointer fields
@@ -585,7 +585,7 @@ func TestBatchJob_PointerFieldIndependence(t *testing.T) {
 // TestJobQueue_GetJobPointer tests the GetJobPointer method
 func TestJobQueue_GetJobPointer(t *testing.T) {
 	t.Run("get existing job pointer", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 
@@ -604,7 +604,7 @@ func TestJobQueue_GetJobPointer(t *testing.T) {
 	})
 
 	t.Run("get non-existent job pointer", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 
 		jobPtr, ok := jq.GetJobPointer("non-existent-id")
 		assert.False(t, ok, "Should not find non-existent job")
@@ -615,7 +615,7 @@ func TestJobQueue_GetJobPointer(t *testing.T) {
 // TestBatchJob_AtomicUpdateFileResult tests atomic file result updates
 func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 	t.Run("atomic update with update function", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		now := time.Now()
@@ -642,7 +642,7 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 	})
 
 	t.Run("atomic update with error", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		now := time.Now()
@@ -666,7 +666,7 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 	})
 
 	t.Run("atomic update on non-existent file", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		// Try to update without initial result
@@ -684,7 +684,7 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 // TestBatchJob_SetCancelFunc tests setting cancellation function
 func TestBatchJob_SetCancelFunc(t *testing.T) {
 	t.Run("set and trigger cancel func", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		cancelled := false
@@ -704,7 +704,7 @@ func TestBatchJob_SetCancelFunc(t *testing.T) {
 	})
 
 	t.Run("cancel without cancel func", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		// Don't set cancel func, just call Cancel
@@ -718,7 +718,7 @@ func TestBatchJob_SetCancelFunc(t *testing.T) {
 // TestBatchJob_GetProgress tests progress retrieval
 func TestBatchJob_GetProgress(t *testing.T) {
 	t.Run("get progress at different stages", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi", "file4.mp4"}
 		job := jq.CreateJob(files)
 
@@ -764,7 +764,7 @@ func TestBatchJob_GetProgress(t *testing.T) {
 // TestBatchJob_ExcludeFile tests file exclusion
 func TestBatchJob_ExcludeFile(t *testing.T) {
 	t.Run("exclude single file", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi"}
 		job := jq.CreateJob(files)
 
@@ -778,7 +778,7 @@ func TestBatchJob_ExcludeFile(t *testing.T) {
 	})
 
 	t.Run("exclude multiple files", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi"}
 		job := jq.CreateJob(files)
 
@@ -793,7 +793,7 @@ func TestBatchJob_ExcludeFile(t *testing.T) {
 	})
 
 	t.Run("exclude same file multiple times", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4"}
 		job := jq.CreateJob(files)
 
@@ -810,7 +810,7 @@ func TestBatchJob_ExcludeFile(t *testing.T) {
 // TestBatchJob_IsExcluded tests exclusion checking
 func TestBatchJob_IsExcluded(t *testing.T) {
 	t.Run("check non-excluded file", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 
@@ -820,7 +820,7 @@ func TestBatchJob_IsExcluded(t *testing.T) {
 	})
 
 	t.Run("check excluded file", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 
@@ -831,7 +831,7 @@ func TestBatchJob_IsExcluded(t *testing.T) {
 	})
 
 	t.Run("check non-existent file", func(t *testing.T) {
-		jq := NewJobQueue(nil)
+		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4"}
 		job := jq.CreateJob(files)
 

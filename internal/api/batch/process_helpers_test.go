@@ -33,7 +33,7 @@ func TestCopyTempCroppedPoster(t *testing.T) {
 		cfg := config.DefaultConfig()
 		cfg.Output.DownloadPoster = false
 
-		job := worker.NewJobQueue(nil).CreateJob(nil)
+		job := worker.NewJobQueue(nil, "").CreateJob(nil)
 		t.Cleanup(func() {
 			_ = os.RemoveAll(filepath.Join("data", "temp", "posters", job.ID))
 		})
@@ -59,7 +59,7 @@ func TestCopyTempCroppedPoster(t *testing.T) {
 		cfg.Output.DownloadPoster = true
 		cfg.Output.PosterFormat = "<INVALID-TEMPLATE"
 
-		job := worker.NewJobQueue(nil).CreateJob(nil)
+		job := worker.NewJobQueue(nil, "").CreateJob(nil)
 		t.Cleanup(func() {
 			_ = os.RemoveAll(filepath.Join("data", "temp", "posters", job.ID))
 		})

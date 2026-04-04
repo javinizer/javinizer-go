@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { quintOut } from 'svelte/easing';
 	import { fade, fly } from 'svelte/transition';
 	import {
 		Activity,
@@ -10,12 +9,15 @@
 		Clock,
 		RefreshCw,
 		CheckCircle2,
-		AlertTriangle
+		AlertTriangle,
+		FolderOpen,
+		Trash2,
+		Eye
 	} from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { apiClient } from '$lib/api/client';
-	import type { BatchJobResponse } from '$lib/api/types';
+	import type { BatchJobResponse, FileResult } from '$lib/api/types';
 
 	let jobs = $state<BatchJobResponse[]>([]);
 	let loading = $state(true);
@@ -23,10 +25,6 @@
 	let isRefreshing = $state(false);
 	let error = $state<string | null>(null);
 	let listRenderVersion = $state(0);
-
-	function itemDelay(index: number): number {
-		return Math.min(index * 28, 220);
-	}
 
 	async function loadJobs() {
 		if (!hasLoadedOnce) {
@@ -72,56 +70,59 @@
 
 	function formatDate(dateStr: string): string {
 		const date = new Date(dateStr);
-		return new Intl.DateTimeFormat('en-US', {
-			dateStyle: 'medium',
-			timeStyle: 'short'
-		}).format(date);
+		const now = new Date();
+		const diffMs = now.getTime() - date.getTime();
+		const diffMins = Math.floor(diffMs / 60000);
+		const diffHours = Math.floor(diffMs / 3600000);
+		const diffDays = Math.floor(diffMs / 86400000);
+
+		if (diffMins < 1) return 'Just now';
+		if (diffMins < 60) return `${diffMins}m ago`;
+		if (diffHours < 24) return `${diffHours}h ago`;
+		if (diffDays < 7) return `${diffDays}d ago`;
+		return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' }).format(date);
 	}
 
-	function getStatusColor(status: string): string {
-		switch (status.toLowerCase()) {
+	function getStatusConfig(status: string): { icon: typeof Clock; color: string; bg: string; label: string } {
+		const s = status.toLowerCase();
+		switch (s) {
 			case 'running':
-				return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300';
+				return { icon: Clock, color: 'text-blue-500', bg: 'bg-blue-500/10', label: 'Running' };
 			case 'completed':
-				return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300';
+				return { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10', label: 'Ready' };
 			case 'failed':
-				return 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300';
+				return { icon: AlertTriangle, color: 'text-red-500', bg: 'bg-red-500/10', label: 'Failed' };
 			case 'organized':
-				return 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300';
+				return { icon: CheckCircle2, color: 'text-purple-500', bg: 'bg-purple-500/10', label: 'Organized' };
 			case 'cancelled':
-				return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+				return { icon: CircleX, color: 'text-gray-400', bg: 'bg-gray-500/10', label: 'Cancelled' };
 			default:
-				return 'bg-muted text-muted-foreground';
+				return { icon: Clock, color: 'text-gray-400', bg: 'bg-gray-500/10', label: status };
 		}
 	}
 
-	type ButtonVariant = 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
-
-	function getActionButtons(job: BatchJobResponse): { label: string; action: () => void; variant?: ButtonVariant }[] {
-		const status = job.status.toLowerCase();
-		switch (status) {
-			case 'running':
-				return [
-					{ label: 'Cancel', action: () => cancelJob(job.id), variant: 'outline' },
-					{ label: 'View', action: () => goto(`/review/${job.id}`) }
-				];
-			case 'completed':
-				return [
-					{ label: 'Review', action: () => goto(`/review/${job.id}`) },
-					{ label: 'Dismiss', action: () => dismissJob(job.id), variant: 'outline' }
-				];
-			case 'failed':
-				return [
-					{ label: 'Review', action: () => goto(`/review/${job.id}`) },
-					{ label: 'Dismiss', action: () => dismissJob(job.id), variant: 'outline' }
-				];
-			case 'organized':
-				return [{ label: 'Dismiss', action: () => dismissJob(job.id), variant: 'outline' }];
-			case 'cancelled':
-				return [{ label: 'Dismiss', action: () => dismissJob(job.id), variant: 'outline' }];
-			default:
-				return [];
+	function getFirstPoster(job: BatchJobResponse): string | null {
+		const results = Object.values(job.results || {});
+		for (const r of results) {
+			if (r.data?.cropped_poster_url) {
+				return r.data.cropped_poster_url;
+			}
+			if (r.data?.poster_url) {
+				return apiClient.getPreviewImageURL(r.data.poster_url);
+			}
 		}
+		return null;
+	}
+
+	function getFileNames(job: BatchJobResponse): string {
+		const files = job.files || Object.keys(job.results || {});
+		if (files.length === 0) return 'No files';
+		if (files.length === 1) {
+			const name = files[0].split('/').pop() || files[0];
+			return name.length > 40 ? name.slice(0, 37) + '...' : name;
+		}
+		const first = files[0].split('/').pop() || files[0];
+		return `${first} +${files.length - 1} more`;
 	}
 
 	onMount(() => {
@@ -129,24 +130,30 @@
 	});
 </script>
 
-<div class="container mx-auto px-4 py-8">
-	<div class="max-w-6xl mx-auto space-y-6">
-		<div class="flex items-center justify-between">
+<div class="min-h-screen bg-background">
+	<div class="container mx-auto px-4 py-8 max-w-5xl">
+		<div class="flex items-center justify-between mb-8">
 			<div>
-				<h1 class="text-3xl font-bold">Batch Jobs</h1>
-				<p class="text-muted-foreground mt-1">View and manage active and recent batch jobs</p>
+				<h1 class="text-2xl font-bold tracking-tight">Jobs</h1>
+				<p class="text-muted-foreground text-sm mt-1">Manage your batch scrape jobs</p>
 			</div>
-			<Button variant="outline" onclick={loadJobs}>
-				<RefreshCw class="h-4 w-4 mr-2 {isRefreshing ? 'animate-spin' : ''}" />
-				Refresh
-			</Button>
+			<div class="flex items-center gap-2">
+				<Button variant="outline" size="sm" onclick={loadJobs} disabled={isRefreshing}>
+					<RefreshCw class="h-4 w-4 mr-1.5 {isRefreshing ? 'animate-spin' : ''}" />
+					Refresh
+				</Button>
+				<Button size="sm" onclick={() => goto('/browse')}>
+					<FolderOpen class="h-4 w-4 mr-1.5" />
+					New Scrape
+				</Button>
+			</div>
 		</div>
 
 		{#if error}
-			<div in:fade|local={{ duration: 150 }}>
-				<Card class="p-4 bg-destructive/10 border-destructive text-destructive">
-					<div class="flex items-center gap-2">
-						<AlertTriangle class="h-5 w-5" />
+			<div in:fade={{ duration: 150 }} class="mb-4">
+				<Card class="p-3 bg-destructive/5 border-destructive/20">
+					<div class="flex items-center gap-2 text-destructive text-sm">
+						<AlertTriangle class="h-4 w-4" />
 						<span>{error}</span>
 					</div>
 				</Card>
@@ -154,91 +161,119 @@
 		{/if}
 
 		{#if loading && !hasLoadedOnce}
-			<Card class="p-8 text-center">
-				<Clock class="h-8 w-8 animate-spin mx-auto mb-2" />
-				<p class="text-muted-foreground">Loading jobs...</p>
-			</Card>
+			<div class="flex items-center justify-center py-20">
+				<div class="text-center">
+					<Clock class="h-8 w-8 animate-spin mx-auto mb-3 text-muted-foreground" />
+					<p class="text-muted-foreground text-sm">Loading jobs...</p>
+				</div>
+			</div>
 		{:else if jobs.length === 0}
-			<Card class="p-8 text-center">
-				<Activity class="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-				<p class="text-muted-foreground">No batch jobs found</p>
-				<Button onclick={() => goto('/browse')} class="mt-4">
-					<ArrowRight class="h-4 w-4 mr-2" />
-					Start New Scrape
+			<Card class="p-12 text-center">
+				<Activity class="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+				<p class="text-muted-foreground mb-4">No batch jobs yet</p>
+				<Button onclick={() => goto('/browse')}>
+					<ArrowRight class="h-4 w-4 mr-1.5" />
+					Start Your First Scrape
 				</Button>
 			</Card>
 		{:else}
 			{#key listRenderVersion}
-				<div class="space-y-4" in:fade|local={{ duration: 170 }}>
+				<div class="space-y-3" in:fade={{ duration: 150 }}>
 					{#each jobs as job, index (`${job.id}-${listRenderVersion}`)}
-						<div in:fly|local={{ y: 8, duration: 210, delay: itemDelay(index), easing: quintOut }}>
-							<Card class="p-4 hover:shadow-md transition-shadow">
-								<div class="flex items-start justify-between gap-4">
-									<div class="flex-1 min-w-0">
-										<div class="flex items-center gap-3 mb-3">
-											{#if job.status.toLowerCase() === 'running'}
-												<Clock class="h-5 w-5" />
-											{:else if job.status.toLowerCase() === 'completed' || job.status.toLowerCase() === 'organized'}
-												<CheckCircle2 class="h-5 w-5 text-green-600" />
-											{:else if job.status.toLowerCase() === 'failed'}
-												<AlertTriangle class="h-5 w-5 text-red-600" />
-											{:else if job.status.toLowerCase() === 'cancelled'}
-												<CircleX class="h-5 w-5 text-gray-500" />
-											{:else}
-												<Clock class="h-5 w-5" />
-											{/if}
-											<h3 class="font-semibold truncate">
-												Job {job.id.slice(0, 8)}
-											</h3>
-											<span class="px-2 py-0.5 text-xs rounded {getStatusColor(job.status)}">
-												{job.status}
-											</span>
+						{@const config = getStatusConfig(job.status)}
+						{@const poster = getFirstPoster(job)}
+						<div
+							in:fly={{ y: 10, duration: 200, delay: Math.min(index * 30, 150) }}
+							class="group"
+						>
+							<Card class="overflow-hidden hover:border-border/80 transition-colors">
+								<div class="flex">
+									{#if poster}
+										<div class="w-20 h-20 flex-shrink-0 bg-muted">
+											<img
+												src={poster}
+												alt=""
+												class="w-full h-full object-cover"
+												onerror={(e) => {
+													(e.target as HTMLImageElement).style.display = 'none';
+												}}
+											/>
+										</div>
+									{:else}
+										<div class="w-20 h-20 flex-shrink-0 bg-muted flex items-center justify-center">
+											<FolderOpen class="h-8 w-8 text-muted-foreground/30" />
+										</div>
+									{/if}
+
+									<div class="flex-1 min-w-0 p-3">
+										<div class="flex items-start justify-between gap-3">
+											<div class="flex-1 min-w-0">
+												<div class="flex items-center gap-2 mb-1">
+													<span class="font-mono text-xs text-muted-foreground">
+														{job.id.slice(0, 8)}
+													</span>
+													<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium {config.bg} {config.color}">
+														<svelte:component this={config.icon} class="h-3 w-3" />
+														{config.label}
+													</span>
+												</div>
+												<p class="text-sm truncate mb-1.5" title={job.files?.[0]}>
+													{getFileNames(job)}
+												</p>
+												<div class="flex items-center gap-4 text-xs text-muted-foreground">
+													<span>{job.total_files} file{job.total_files !== 1 ? 's' : ''}</span>
+													{#if job.completed > 0}
+														<span class="text-green-600">{job.completed} done</span>
+													{/if}
+													{#if job.failed > 0}
+														<span class="text-red-500">{job.failed} failed</span>
+													{/if}
+													<span>{formatDate(job.started_at)}</span>
+												</div>
+											</div>
+
+											<div class="flex items-center gap-1.5 flex-shrink-0">
+												{#if job.status.toLowerCase() === 'running'}
+													<Button variant="outline" size="sm" onclick={() => cancelJob(job.id)}>
+														Cancel
+													</Button>
+													<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+														<Eye class="h-4 w-4 mr-1" />
+														View
+													</Button>
+												{:else if job.status.toLowerCase() === 'completed'}
+													<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+														Review & Organize
+													</Button>
+													<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
+														<Trash2 class="h-4 w-4 text-muted-foreground" />
+													</Button>
+												{:else if job.status.toLowerCase() === 'failed'}
+													<Button variant="outline" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+														<Eye class="h-4 w-4 mr-1" />
+														Review
+													</Button>
+													<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
+														<Trash2 class="h-4 w-4 text-muted-foreground" />
+													</Button>
+												{:else}
+													<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
+														<Trash2 class="h-4 w-4 text-muted-foreground" />
+													</Button>
+												{/if}
+											</div>
 										</div>
 
-										<div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-											<div>
-												<span class="text-muted-foreground">Files:</span>
-												<span class="font-medium ml-1">{job.total_files}</span>
-											</div>
-											<div>
-												<span class="text-muted-foreground">Completed:</span>
-												<span class="font-medium ml-1 text-green-600">{job.completed}</span>
-											</div>
-											<div>
-												<span class="text-muted-foreground">Failed:</span>
-												<span class="font-medium ml-1 text-red-600">{job.failed}</span>
-											</div>
-											<div>
-												<span class="text-muted-foreground">Started:</span>
-												<span class="font-medium ml-1">{formatDate(job.started_at)}</span>
-											</div>
-										</div>
-
-										{#if job.status.toLowerCase() === 'running' || job.status.toLowerCase() === 'pending'}
-											<div class="space-y-1">
-												<div class="h-2 rounded-full bg-muted overflow-hidden">
+										{#if job.status.toLowerCase() === 'running'}
+											<div class="mt-2">
+												<div class="h-1.5 rounded-full bg-muted overflow-hidden">
 													<div
 														class="h-full bg-primary transition-all duration-300"
 														style="width: {Math.max(0, Math.min(100, job.progress))}%"
 													></div>
 												</div>
-												<div class="text-xs text-muted-foreground">
-													{job.progress.toFixed(0)}% complete
-												</div>
 											</div>
 										{/if}
-									</div>
-
-									<div class="flex flex-wrap gap-2">
-										{#each getActionButtons(job) as btn}
-											<Button
-												variant={btn.variant || 'default'}
-												size="sm"
-												onclick={btn.action}
-											>
-												{btn.label}
-											</Button>
-										{/each}
 									</div>
 								</div>
 							</Card>

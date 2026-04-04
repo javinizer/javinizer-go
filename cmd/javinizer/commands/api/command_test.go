@@ -173,7 +173,7 @@ func createTestAPIServer(t *testing.T) *apicore.ServerDependencies {
 	require.NoError(t, err)
 
 	// Initialize job queue
-	jobQueue := worker.NewJobQueue(nil)
+	jobQueue := worker.NewJobQueue(nil, "")
 
 	// Create server dependencies
 	deps := &apicore.ServerDependencies{
