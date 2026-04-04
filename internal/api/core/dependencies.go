@@ -37,6 +37,7 @@ type ServerDependencies struct {
 	MovieRepo   *database.MovieRepository
 	ActressRepo *database.ActressRepository
 	HistoryRepo *database.HistoryRepository
+	JobRepo     *database.JobRepository
 	Matcher     *matcher.Matcher
 	JobQueue    *worker.JobQueue
 	Auth        AuthProvider
