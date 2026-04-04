@@ -127,6 +127,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 
 	expected := []string{
 		"DELETE /api/v1/actresses/:id",
+		"DELETE /api/v1/batch/:id",
 		"DELETE /api/v1/history",
 		"DELETE /api/v1/history/:id",
 		"GET /api/v1/actresses",

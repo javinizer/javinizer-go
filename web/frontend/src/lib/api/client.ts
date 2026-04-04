@@ -175,6 +175,16 @@ class APIClient {
 		});
 	}
 
+	async deleteBatchJob(jobId: string): Promise<void> {
+		await this.request(`/api/v1/batch/${jobId}`, {
+			method: 'DELETE'
+		});
+	}
+
+	async listBatchJobs(): Promise<{ jobs: BatchJobResponse[] }> {
+		return this.request<{ jobs: BatchJobResponse[] }>('/api/v1/batch');
+	}
+
 	// Update movie in batch job
 	async updateBatchMovie(jobId: string, movieId: string, movie: Movie): Promise<{ movie: Movie }> {
 		return this.request<{ movie: Movie }>(`/api/v1/batch/${jobId}/movies/${movieId}`, {

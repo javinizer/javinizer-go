@@ -327,9 +327,9 @@
 								<span>{latestActivity.progress.toFixed(0)}%</span>
 							</div>
 							<div class="flex gap-2 pt-1">
-								<Button size="sm" variant="outline" onclick={() => goto('/browse')}>
-									Open Jobs
-								</Button>
+<Button size="sm" variant="outline" onclick={() => goto('/jobs')}>
+								Open Jobs
+							</Button>
 								<Button size="sm" variant="outline" onclick={() => goto('/history')}>
 									View History
 								</Button>

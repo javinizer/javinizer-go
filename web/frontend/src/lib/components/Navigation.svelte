@@ -2,7 +2,7 @@
 	import { page } from '$app/stores';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
-	import { House, FolderOpen, Settings, History, Film, Users, LogOut } from 'lucide-svelte';
+	import { House, FolderOpen, Settings, History, Film, Users, LogOut, Activity } from 'lucide-svelte';
 
 	interface Props {
 		authenticated?: boolean;
@@ -14,6 +14,7 @@
 
 	const navItems = [
 		{ href: '/', label: 'Home', icon: House },
+		{ href: '/jobs', label: 'Jobs', icon: Activity },
 		{ href: '/browse', label: 'Browse & Scrape', icon: FolderOpen },
 		{ href: '/actresses', label: 'Actresses', icon: Users },
 		{ href: '/settings', label: 'Settings', icon: Settings },

@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -85,10 +86,13 @@ func createTestMovie(id, title string) *models.Movie {
 func setupTagTestDB(t *testing.T) (string, *database.DB) {
 	t.Helper()
 
-	// Create temp config file
-	configContent := `
+	tmpDir := t.TempDir()
+	tmpFile := tmpDir + "/config.yaml"
+
+	configContent := `config_version: 3
 database:
   dsn: ":memory:"
+  type: sqlite
 scrapers:
   priority: ["r18dev", "dmm"]
   timeout_seconds: 30
@@ -103,19 +107,26 @@ metadata:
 matching:
   extensions: [".mp4"]
   regex_enabled: false
+server:
+  host: localhost
+  port: 8080
+system:
+  temp_dir: ` + tmpDir + `
 `
-	tmpFile := t.TempDir() + "/config.yaml"
 	require.NoError(t, os.WriteFile(tmpFile, []byte(configContent), 0644))
 
-	// Load config
 	cfg, err := config.Load(tmpFile)
 	require.NoError(t, err)
 
-	// Create database
 	db, err := database.New(cfg)
 	require.NoError(t, err)
-	err = db.AutoMigrate()
+
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
 
 	return tmpFile, db
 }

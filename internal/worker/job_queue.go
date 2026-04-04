@@ -33,15 +33,52 @@ type FileResult struct {
 	MovieID        string            `json:"movie_id"`
 	Status         JobStatus         `json:"status"`
 	Error          string            `json:"error,omitempty"`
-	PosterError    *string           `json:"poster_error,omitempty"`    // Optional error from poster generation
-	FieldSources   map[string]string `json:"field_sources,omitempty"`   // Field -> scraper/NFO source
-	ActressSources map[string]string `json:"actress_sources,omitempty"` // Actress-key -> scraper/NFO source
+	PosterError    *string           `json:"poster_error,omitempty"`
+	FieldSources   map[string]string `json:"field_sources,omitempty"`
+	ActressSources map[string]string `json:"actress_sources,omitempty"`
+	DataType       string            `json:"data_type,omitempty"`
 	Data           interface{}       `json:"data,omitempty"`
 	StartedAt      time.Time         `json:"started_at"`
 	EndedAt        *time.Time        `json:"ended_at,omitempty"`
 	IsMultiPart    bool              `json:"is_multi_part,omitempty"`
 	PartNumber     int               `json:"part_number,omitempty"`
 	PartSuffix     string            `json:"part_suffix,omitempty"`
+}
+
+const (
+	DataTypeMovie = "movie"
+)
+
+type fileResultAlias FileResult
+
+func (fr *FileResult) MarshalJSON() ([]byte, error) {
+	if fr.Data != nil {
+		if _, ok := fr.Data.(*models.Movie); ok {
+			fr.DataType = DataTypeMovie
+		}
+	}
+	return json.Marshal(fileResultAlias(*fr))
+}
+
+func (fr *FileResult) UnmarshalJSON(data []byte) error {
+	var alias fileResultAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*fr = FileResult(alias)
+
+	if fr.DataType == DataTypeMovie && fr.Data != nil {
+		var movie models.Movie
+		rawData, err := json.Marshal(fr.Data)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(rawData, &movie); err != nil {
+			return err
+		}
+		fr.Data = &movie
+	}
+	return nil
 }
 
 // BatchJob represents a batch processing job
@@ -51,15 +88,16 @@ type BatchJob struct {
 	TotalFiles    int                      `json:"total_files"`
 	Completed     int                      `json:"completed"`
 	Failed        int                      `json:"failed"`
-	Excluded      map[string]bool          `json:"excluded"` // Files excluded from organization (keyed by file path)
+	Excluded      map[string]bool          `json:"excluded"`
 	Files         []string                 `json:"files"`
-	Results       map[string]*FileResult   `json:"results"`                   // keyed by file path
-	FileMatchInfo map[string]FileMatchInfo `json:"file_match_info,omitempty"` // Multipart metadata from discovery phase
+	Results       map[string]*FileResult   `json:"results"`
+	FileMatchInfo map[string]FileMatchInfo `json:"file_match_info,omitempty"`
 	Progress      float64                  `json:"progress"`
 	StartedAt     time.Time                `json:"started_at"`
 	CompletedAt   *time.Time               `json:"completed_at,omitempty"`
+	OrganizedAt   *time.Time               `json:"organized_at,omitempty"`
 	CancelFunc    context.CancelFunc       `json:"-"`
-	Done          chan struct{}            `json:"-"` // closed when job fully finishes
+	Done          chan struct{}            `json:"-"`
 	mu            sync.RWMutex             `json:"-"`
 }
 
@@ -146,6 +184,7 @@ func (jq *JobQueue) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 		Progress:      dbJob.Progress,
 		StartedAt:     dbJob.StartedAt,
 		CompletedAt:   dbJob.CompletedAt,
+		OrganizedAt:   dbJob.OrganizedAt,
 		Results:       make(map[string]*FileResult),
 		Excluded:      make(map[string]bool),
 		FileMatchInfo: make(map[string]FileMatchInfo),
@@ -236,6 +275,7 @@ func (jq *JobQueue) persistToDatabase(job *BatchJob) {
 		FileMatchInfo: string(fileMatchInfoJSON),
 		StartedAt:     job.StartedAt,
 		CompletedAt:   job.CompletedAt,
+		OrganizedAt:   job.OrganizedAt,
 	}
 
 	// Try to update first, if not found then create
@@ -536,7 +576,7 @@ func (job *BatchJob) MarkOrganized() {
 	defer job.mu.Unlock()
 	job.Status = JobStatusOrganized
 	now := time.Now()
-	job.CompletedAt = &now
+	job.OrganizedAt = &now
 	select {
 	case <-job.Done:
 	default:

@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/nfo"
+	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
 // batchScrape godoc
@@ -172,6 +173,34 @@ func cancelBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 		go cleanupJobTempPosters(jobID, deps.GetConfig().System.TempDir)
 
 		c.JSON(200, gin.H{"message": "Job cancelled successfully"})
+	}
+}
+
+func deleteBatchJob(deps *ServerDependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		jobID := c.Param("id")
+
+		job, ok := deps.JobQueue.GetJobPointer(jobID)
+		if !ok {
+			c.JSON(404, ErrorResponse{Error: "Job not found"})
+			return
+		}
+
+		if job.Status == worker.JobStatusRunning {
+			c.JSON(400, ErrorResponse{Error: "Cannot delete running job. Cancel it first."})
+			return
+		}
+
+		if err := deps.JobRepo.Delete(jobID); err != nil {
+			c.JSON(500, ErrorResponse{Error: "Failed to delete job"})
+			return
+		}
+
+		deps.JobQueue.DeleteJob(jobID, deps.GetConfig().System.TempDir)
+
+		go cleanupJobTempPosters(jobID, deps.GetConfig().System.TempDir)
+
+		c.JSON(200, gin.H{"message": "Job deleted successfully"})
 	}
 }
 

@@ -158,9 +158,10 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 		ActressRepo: actressRepo,
 		HistoryRepo: historyRepo,
 		Matcher:     mat,
+		JobRepo:     jobRepo,
 		JobQueue:    jobQueue,
 		Auth:        authManager,
-		TokenStore:  apicore.NewTokenStore(), // Initialize token store for proxy verification
+		TokenStore:  apicore.NewTokenStore(),
 	}
 	// Initialize atomic config pointer
 	apiDeps.SetConfig(cfg)
