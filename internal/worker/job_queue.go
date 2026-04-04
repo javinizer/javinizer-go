@@ -84,8 +84,35 @@ func NewJobQueue(jobRepo database.JobRepositoryInterface) *JobQueue {
 		jobs:    make(map[string]*BatchJob),
 		jobRepo: jobRepo,
 	}
+
 	jq.loadFromDatabase()
+	jq.StartCleanup()
+
 	return jq
+}
+
+// StartCleanup starts a background goroutine that cleans up old organized jobs every hour
+func (jq *JobQueue) StartCleanup() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			jq.cleanupOldOrganizedJobs()
+		}
+	}()
+}
+
+// cleanupOldOrganizedJobs deletes organized jobs older than 24 hours
+func (jq *JobQueue) cleanupOldOrganizedJobs() {
+	if jq.jobRepo == nil {
+		return
+	}
+
+	threshold := time.Now().Add(-24 * time.Hour)
+	if err := jq.jobRepo.DeleteOrganizedOlderThan(threshold); err != nil {
+		logging.Warnf("JobQueue: failed to cleanup old organized jobs: %v", err)
+	}
 }
 
 // loadFromDatabase loads existing jobs from the database on startup
