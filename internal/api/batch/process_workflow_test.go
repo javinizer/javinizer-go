@@ -143,11 +143,11 @@ func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 		},
 	})
 
-	processOrganizeJob(job, destDir, true, "", deps.DB, cfg, deps.Registry)
+	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry)
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusCompleted {
-		t.Fatalf("job status = %q, want completed", status.Status)
+	if status.Status != worker.JobStatusOrganized {
+		t.Fatalf("job status = %q, want organized", status.Status)
 	}
 
 	targetFolder := filepath.Join(destDir, "IPX-777")

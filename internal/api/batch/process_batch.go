@@ -24,13 +24,16 @@ import (
 // If updateMode is true, will also download media files and generate NFOs in place without moving files.
 // scalarStrategy determines how to merge scalar fields (prefer-scraper, prefer-nfo)
 // arrayStrategy determines how to merge array fields (merge, replace)
-func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg *aggregator.Aggregator, movieRepo *database.MovieRepository, mat *matcher.Matcher, strict, force, updateMode bool, destination string, cfg *config.Config, selectedScrapers []string, scalarStrategy string, arrayStrategy string, db *database.DB) {
+func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *models.ScraperRegistry, agg *aggregator.Aggregator, movieRepo *database.MovieRepository, mat *matcher.Matcher, strict, force, updateMode bool, destination string, cfg *config.Config, selectedScrapers []string, scalarStrategy string, arrayStrategy string, db *database.DB) {
 	// Setup context for cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	job.SetCancelFunc(cancel)
 	defer cancel()
 
 	job.MarkStarted()
+	if jobQueue != nil {
+		jobQueue.PersistJob(job)
+	}
 
 	// Log which scrapers will be used
 	if len(selectedScrapers) > 0 {
@@ -85,6 +88,9 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 		select {
 		case <-ctx.Done():
 			job.MarkCancelled()
+			if jobQueue != nil {
+				jobQueue.PersistJob(job)
+			}
 			return
 		default:
 		}
@@ -141,6 +147,9 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 			now := time.Now()
 			result.EndedAt = &now
 			job.UpdateFileResult(filePath, result)
+			if jobQueue != nil {
+				jobQueue.PersistJob(job)
+			}
 		}
 	}
 
@@ -151,6 +160,9 @@ func processBatchJob(job *worker.BatchJob, registry *models.ScraperRegistry, agg
 
 	// Mark job as completed (don't auto-process update mode - wait for user to review and click "Update")
 	job.MarkCompleted()
+	if jobQueue != nil {
+		jobQueue.PersistJob(job)
+	}
 
 	// Log history for all scrape operations
 	historyLogger := history.NewLogger(db)

@@ -223,6 +223,7 @@ func TestProcessBatchJobConcurrent(t *testing.T) {
 	go func() {
 		processBatchJob(
 			job,
+			deps.JobQueue,
 			deps.Registry,
 			deps.Aggregator,
 			deps.MovieRepo,
@@ -305,6 +306,7 @@ func TestProcessBatchJobCancellation(t *testing.T) {
 	go func() {
 		processBatchJob(
 			job,
+			deps.JobQueue,
 			deps.Registry,
 			deps.Aggregator,
 			deps.MovieRepo,
@@ -384,6 +386,7 @@ func TestProcessBatchJobRaceConditions(t *testing.T) {
 	go func() {
 		processBatchJob(
 			job,
+			deps.JobQueue,
 			deps.Registry,
 			deps.Aggregator,
 			deps.MovieRepo,
@@ -582,6 +585,7 @@ func TestBatchScrapeTaskDatabaseSafety(t *testing.T) {
 	go func() {
 		processBatchJob(
 			job,
+			deps.JobQueue,
 			deps.Registry,
 			deps.Aggregator,
 			deps.MovieRepo,
@@ -677,6 +681,7 @@ func TestWorkerPoolErrorHandling(t *testing.T) {
 	go func() {
 		processBatchJob(
 			job,
+			deps.JobQueue,
 			deps.Registry,
 			deps.Aggregator,
 			deps.MovieRepo,

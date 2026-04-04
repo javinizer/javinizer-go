@@ -20,7 +20,7 @@ import (
 )
 
 // processOrganizeJob processes file organization for a completed scrape job
-func processOrganizeJob(job *worker.BatchJob, destination string, copyOnly bool, linkModeRaw string, db *database.DB, cfg *config.Config, registry *models.ScraperRegistry) {
+func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destination string, copyOnly bool, linkModeRaw string, db *database.DB, cfg *config.Config, registry *models.ScraperRegistry) {
 	// Initialize organizer, downloader, NFO generator, and history logger
 	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)
 	historyLogger := history.NewLogger(db)
@@ -33,6 +33,9 @@ func processOrganizeJob(job *worker.BatchJob, destination string, copyOnly bool,
 			Message:  fmt.Sprintf("Invalid link mode: %v", err),
 		})
 		job.MarkFailed()
+		if jobQueue != nil {
+			jobQueue.PersistJob(job)
+		}
 		return
 	}
 
@@ -46,6 +49,9 @@ func processOrganizeJob(job *worker.BatchJob, destination string, copyOnly bool,
 			Message:  fmt.Sprintf("Failed to create HTTP client: %v", err),
 		})
 		job.MarkFailed()
+		if jobQueue != nil {
+			jobQueue.PersistJob(job)
+		}
 		return
 	}
 	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, "Javinizer/1.0", cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
@@ -207,7 +213,10 @@ func processOrganizeJob(job *worker.BatchJob, destination string, copyOnly bool,
 		Progress: 100,
 		Message:  fmt.Sprintf("Organized %d files, %d failed", organized, failed),
 	})
-	job.MarkCompleted()
+	job.MarkOrganized()
+	if jobQueue != nil {
+		jobQueue.PersistJob(job)
+	}
 
 	// Cleanup temp posters only if ALL files succeeded
 	// If any failed, keep temp posters so user can retry without re-scraping

@@ -57,11 +57,11 @@ func TestProcessOrganizeJob_HandlesExcludedInvalidAndUnmatchedFiles(t *testing.T
 	})
 	job.ExcludeFile(excludedPath)
 
-	processOrganizeJob(job, destDir, true, "", deps.DB, cfg, deps.Registry)
+	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry)
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusCompleted {
-		t.Fatalf("job status = %q, want completed", status.Status)
+	if status.Status != worker.JobStatusOrganized {
+		t.Fatalf("job status = %q, want organized", status.Status)
 	}
 	if status.Completed != 3 {
 		t.Fatalf("completed count = %d, want 3", status.Completed)
@@ -188,11 +188,11 @@ func TestProcessOrganizeJob_SkipsNFOWhenDisabled(t *testing.T) {
 
 	// copyOnly=true copies files to destDir without moving original
 	// NFO generation should be skipped since cfg.Metadata.NFO.Enabled = false
-	processOrganizeJob(job, destDir, true, "", deps.DB, cfg, deps.Registry)
+	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry)
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusCompleted {
-		t.Fatalf("job status = %q, want completed", status.Status)
+	if status.Status != worker.JobStatusOrganized {
+		t.Fatalf("job status = %q, want organized", status.Status)
 	}
 
 	// Verify no NFO files were generated since NFO is disabled
