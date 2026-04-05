@@ -1,11 +1,14 @@
 package core
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/api/apperrors"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,10 +39,10 @@ func TestValidateScanPath(t *testing.T) {
 			expectedError: false,
 		},
 		{
-			name:      "valid path - no allowlist restriction",
+			name:      "valid path - with allowlist",
 			inputPath: tempDir,
 			securityCfg: &config.SecurityConfig{
-				AllowedDirectories: []string{},
+				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
 				MaxFilesPerScan:    10000,
 				ScanTimeoutSeconds: 30,
@@ -86,7 +89,7 @@ func TestValidateScanPath(t *testing.T) {
 			name:      "nonexistent path",
 			inputPath: "/nonexistent/path/12345",
 			securityCfg: &config.SecurityConfig{
-				AllowedDirectories: []string{},
+				AllowedDirectories: []string{"/"},
 				DeniedDirectories:  []string{},
 				MaxFilesPerScan:    10000,
 				ScanTimeoutSeconds: 30,
@@ -116,25 +119,18 @@ func TestValidateScanPath(t *testing.T) {
 }
 
 func TestValidateScanPath_SystemDirectories(t *testing.T) {
-	// Test that system directories are blocked regardless of allowlist
 	systemDirs := []string{
-		"/etc",
-		"/var/log",
-		"/usr/bin",
+		"/proc",
+		"/sys",
+		"/dev",
 	}
 
-	// Add Windows-specific test paths if on Windows
 	if runtime.GOOS == "windows" {
-		systemDirs = append(systemDirs, "C:\\Windows")
-	}
-
-	// Add macOS-specific test paths if on macOS
-	if runtime.GOOS == "darwin" {
-		systemDirs = append(systemDirs, "/System")
+		t.Skip("Unix-specific test")
 	}
 
 	securityCfg := &config.SecurityConfig{
-		AllowedDirectories: []string{},
+		AllowedDirectories: []string{"/"},
 		DeniedDirectories:  []string{},
 		MaxFilesPerScan:    10000,
 		ScanTimeoutSeconds: 30,
@@ -142,26 +138,24 @@ func TestValidateScanPath_SystemDirectories(t *testing.T) {
 
 	for _, dir := range systemDirs {
 		t.Run("blocks "+dir, func(t *testing.T) {
-			// Skip if directory doesn't exist (won't be blocked if it doesn't exist)
 			if _, err := os.Stat(dir); os.IsNotExist(err) {
 				t.Skip("System directory doesn't exist on this platform")
 			}
 
 			_, err := validateScanPath(dir, securityCfg)
-			assert.Error(t, err)
+			require.Error(t, err)
 			assert.Contains(t, err.Error(), "system directory")
 		})
 	}
 }
 
 func TestValidateScanPath_FileVsDirectory(t *testing.T) {
-	// Create temp file
 	tempDir := t.TempDir()
 	tempFile := filepath.Join(tempDir, "testfile.txt")
 	require.NoError(t, os.WriteFile(tempFile, []byte("test"), 0644))
 
 	securityCfg := &config.SecurityConfig{
-		AllowedDirectories: []string{},
+		AllowedDirectories: []string{tempDir},
 		DeniedDirectories:  []string{},
 		MaxFilesPerScan:    10000,
 		ScanTimeoutSeconds: 30,
@@ -176,7 +170,6 @@ func TestValidateScanPath_FileVsDirectory(t *testing.T) {
 	t.Run("accepts directory path", func(t *testing.T) {
 		validPath, err := validateScanPath(tempDir, securityCfg)
 		assert.NoError(t, err)
-		// Compare canonical paths since validateScanPath returns canonical path
 		expectedPath, _ := filepath.EvalSymlinks(tempDir)
 		assert.Equal(t, expectedPath, validPath)
 	})
@@ -185,18 +178,13 @@ func TestValidateScanPath_FileVsDirectory(t *testing.T) {
 func TestGetDeniedDirectories(t *testing.T) {
 	denied := getDeniedDirectories()
 
-	// Should always include these cross-platform directories
-	assert.Contains(t, denied, "/etc")
-	assert.Contains(t, denied, "/var/log")
+	assert.Contains(t, denied, "/proc")
+	assert.Contains(t, denied, "/sys")
+	assert.Contains(t, denied, "/dev")
 
-	// Platform-specific checks
-	if runtime.GOOS == "windows" {
-		assert.Contains(t, denied, "C:\\Windows")
-	}
-
-	if runtime.GOOS == "darwin" {
-		assert.Contains(t, denied, "/System")
-	}
+	assert.NotContains(t, denied, "/etc")
+	assert.NotContains(t, denied, "/var/log")
+	assert.NotContains(t, denied, "/usr/bin")
 }
 
 func BenchmarkValidateScanPath(b *testing.B) {
@@ -229,18 +217,18 @@ func TestValidateScanPath_EdgeCases(t *testing.T) {
 			name:      "empty path defaults to current directory",
 			inputPath: "",
 			securityCfg: &config.SecurityConfig{
-				AllowedDirectories: []string{},
+				AllowedDirectories: []string{"/"},
 				DeniedDirectories:  []string{},
 				MaxFilesPerScan:    10000,
 				ScanTimeoutSeconds: 30,
 			},
-			expectedError: false, // Empty path becomes "." which resolves to current directory
+			expectedError: false,
 		},
 		{
 			name:      "path with trailing slash",
 			inputPath: tempDir + "/",
 			securityCfg: &config.SecurityConfig{
-				AllowedDirectories: []string{},
+				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
 				MaxFilesPerScan:    10000,
 				ScanTimeoutSeconds: 30,
@@ -251,18 +239,18 @@ func TestValidateScanPath_EdgeCases(t *testing.T) {
 			name:      "path with ./ prefix",
 			inputPath: "./",
 			securityCfg: &config.SecurityConfig{
-				AllowedDirectories: []string{},
+				AllowedDirectories: []string{"/"},
 				DeniedDirectories:  []string{},
 				MaxFilesPerScan:    10000,
 				ScanTimeoutSeconds: 30,
 			},
-			expectedError: false, // ./ resolves to current directory
+			expectedError: false,
 		},
 		{
 			name:      "relative path cleaned to absolute",
 			inputPath: tempDir,
 			securityCfg: &config.SecurityConfig{
-				AllowedDirectories: []string{},
+				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
 				MaxFilesPerScan:    10000,
 				ScanTimeoutSeconds: 30,
@@ -980,7 +968,6 @@ func TestIsDirAllowed_Denylist(t *testing.T) {
 }
 
 func TestIsDirAllowed_BuiltInDenied(t *testing.T) {
-	// Test that built-in system directories are always denied
 	tests := []struct {
 		name     string
 		dir      string
@@ -988,56 +975,36 @@ func TestIsDirAllowed_BuiltInDenied(t *testing.T) {
 		skipOS   string
 	}{
 		{
-			name:     "deny /etc",
-			dir:      "/etc",
+			name:     "deny /proc",
+			dir:      "/proc",
+			expected: false,
+			skipOS:   "darwin",
+		},
+		{
+			name:     "deny /sys",
+			dir:      "/sys",
+			expected: false,
+			skipOS:   "darwin",
+		},
+		{
+			name:     "deny /dev",
+			dir:      "/dev",
 			expected: false,
 			skipOS:   "windows",
-		},
-		{
-			name:     "deny /var/log",
-			dir:      "/var/log",
-			expected: false,
-			skipOS:   "windows",
-		},
-		{
-			name:     "deny /usr/bin",
-			dir:      "/usr/bin",
-			expected: false,
-			skipOS:   "windows",
-		},
-		{
-			name:     "deny C:\\Windows",
-			dir:      `C:\Windows`,
-			expected: false,
-			skipOS:   "!windows",
-		},
-		{
-			name:     "deny C:\\Program Files",
-			dir:      `C:\Program Files`,
-			expected: false,
-			skipOS:   "!windows",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skipOS == "!windows" && runtime.GOOS != "windows" {
-				t.Skip("Test requires Windows")
-			}
-			if tt.skipOS == "windows" && runtime.GOOS == "windows" {
-				t.Skip("Test not applicable on Windows")
+			if tt.skipOS == runtime.GOOS {
+				t.Skipf("Skipping on %s", runtime.GOOS)
 			}
 
-			// Skip if directory doesn't exist (can't test denied check)
 			if _, err := os.Stat(tt.dir); os.IsNotExist(err) {
 				t.Skip("System directory doesn't exist on this platform")
 			}
 
-			// Even with allowlist that includes everything, built-in denied dirs should be blocked
 			allow := []string{"/"}
-			if runtime.GOOS == "windows" {
-				allow = []string{`C:\`}
-			}
 			deny := []string{}
 
 			result := isDirAllowed(tt.dir, allow, deny)
@@ -1106,4 +1073,280 @@ func TestCanonicalizePath_NonExistentChildUnderExistingParent(t *testing.T) {
 	assert.True(t, filepath.IsAbs(got))
 	assert.Equal(t, filepath.Base(missing), filepath.Base(got))
 	assert.Equal(t, "nested", filepath.Base(filepath.Dir(got)))
+}
+
+func TestValidateScanPath_TypedErrors(t *testing.T) {
+	tempDir := t.TempDir()
+	allowedDir := filepath.Join(tempDir, "allowed")
+	require.NoError(t, os.Mkdir(allowedDir, 0755))
+
+	tests := []struct {
+		name        string
+		inputPath   string
+		securityCfg *config.SecurityConfig
+		expectedErr error
+		skipIf      string
+	}{
+		{
+			name:      "path outside allowed directory returns ErrPathOutsideAllowed",
+			inputPath: tempDir,
+			securityCfg: &config.SecurityConfig{
+				AllowedDirectories: []string{allowedDir},
+				DeniedDirectories:  []string{},
+			},
+			expectedErr: apperrors.ErrPathOutsideAllowed,
+		},
+		{
+			name:      "nonexistent path returns ErrPathNotExist",
+			inputPath: "/nonexistent/path/12345",
+			securityCfg: &config.SecurityConfig{
+				AllowedDirectories: []string{"/tmp"},
+			},
+			expectedErr: apperrors.ErrPathNotExist,
+		},
+		{
+			name:      "empty allowlist returns ErrAllowedDirsEmpty",
+			inputPath: tempDir,
+			securityCfg: &config.SecurityConfig{
+				AllowedDirectories: []string{},
+			},
+			expectedErr: apperrors.ErrAllowedDirsEmpty,
+		},
+		{
+			name:      "pseudo-filesystem (/proc) returns ErrPathInDenylist even with allowlist",
+			inputPath: "/proc",
+			securityCfg: &config.SecurityConfig{
+				AllowedDirectories: []string{"/"},
+			},
+			expectedErr: apperrors.ErrPathInDenylist,
+			skipIf:      "darwin windows",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if strings.Contains(tt.skipIf, runtime.GOOS) {
+				t.Skipf("Skipping on %s", runtime.GOOS)
+			}
+
+			_, err := validateScanPath(tt.inputPath, tt.securityCfg)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, tt.expectedErr),
+				"Expected error to be %v, got %v", tt.expectedErr, err)
+		})
+	}
+}
+
+func TestValidateScanPath_EmptyAllowlistDeniesByDefault(t *testing.T) {
+	tempDir := t.TempDir()
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{},
+		DeniedDirectories:  []string{},
+	}
+
+	_, err := validateScanPath(tempDir, securityCfg)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrAllowedDirsEmpty),
+		"Empty allowlist should return ErrAllowedDirsEmpty, got %v", err)
+}
+
+func TestValidateScanPath_BlankEntriesIgnored(t *testing.T) {
+	tempDir := t.TempDir()
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{"", "  ", tempDir},
+		DeniedDirectories:  []string{},
+	}
+
+	_, err := validateScanPath(tempDir, securityCfg)
+	require.NoError(t, err, "Blank entries should be ignored, valid entry should allow access")
+}
+
+func TestValidateScanPath_OnlyBlankEntriesDeniesByDefault(t *testing.T) {
+	tempDir := t.TempDir()
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{"", "  ", "\t"},
+		DeniedDirectories:  []string{},
+	}
+
+	_, err := validateScanPath(tempDir, securityCfg)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrAllowedDirsEmpty),
+		"Only blank entries should be treated as empty allowlist, got %v", err)
+}
+
+func TestValidateScanPath_FileNotDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	tempFile := filepath.Join(tempDir, "testfile.txt")
+	require.NoError(t, os.WriteFile(tempFile, []byte("test"), 0644))
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{tempDir},
+		DeniedDirectories:  []string{},
+	}
+
+	t.Run("rejects file path", func(t *testing.T) {
+		_, err := validateScanPath(tempFile, securityCfg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, apperrors.ErrPathNotDir),
+			"File path should return ErrPathNotDir, got %v", err)
+	})
+
+	t.Run("accepts directory path", func(t *testing.T) {
+		validPath, err := validateScanPath(tempDir, securityCfg)
+		require.NoError(t, err)
+		expectedPath, _ := filepath.EvalSymlinks(tempDir)
+		assert.Equal(t, expectedPath, validPath)
+	})
+}
+
+func TestGetDeniedDirectories_MinimalDenylist(t *testing.T) {
+	denied := getDeniedDirectories()
+
+	assert.Contains(t, denied, "/proc")
+	assert.Contains(t, denied, "/sys")
+	assert.Contains(t, denied, "/dev")
+
+	assert.NotContains(t, denied, "/etc")
+	assert.NotContains(t, denied, "/var/log")
+	assert.NotContains(t, denied, "/usr/bin")
+	assert.NotContains(t, denied, "/root")
+}
+
+func TestValidateScanPath_MinimalDenylistOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	tests := []struct {
+		name        string
+		path        string
+		shouldExist bool
+	}{
+		{name: "/proc is blocked", path: "/proc", shouldExist: true},
+		{name: "/sys is blocked", path: "/sys", shouldExist: true},
+		{name: "/dev is blocked", path: "/dev", shouldExist: true},
+	}
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{"/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := os.Stat(tt.path); os.IsNotExist(err) {
+				t.Skip("Directory doesn't exist on this system")
+			}
+
+			_, err := validateScanPath(tt.path, securityCfg)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, apperrors.ErrPathInDenylist),
+				"Expected ErrPathInDenylist for %s, got %v", tt.path, err)
+		})
+	}
+}
+
+// Windows-specific security tests
+
+func TestValidateScanPath_ReservedDeviceName(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific test")
+	}
+
+	tempDir := t.TempDir()
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{tempDir},
+	}
+
+	tests := []struct {
+		name        string
+		inputPath   string
+		expectedErr error
+	}{
+		{"CON is rejected", `CON`, apperrors.ErrReservedDeviceName},
+		{"NUL is rejected", `NUL`, apperrors.ErrReservedDeviceName},
+		{"COM1 is rejected", `COM1`, apperrors.ErrReservedDeviceName},
+		{"LPT1 is rejected", `LPT1`, apperrors.ErrReservedDeviceName},
+		{"lowercase con is rejected", `con`, apperrors.ErrReservedDeviceName},
+		{"CON with extension is rejected", `CON.txt`, apperrors.ErrReservedDeviceName},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateScanPath(tt.inputPath, securityCfg)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, tt.expectedErr),
+				"Expected %v, got %v", tt.expectedErr, err)
+		})
+	}
+}
+
+func TestValidateScanPath_UNCPath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific test")
+	}
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{`C:\Videos`},
+		AllowUNC:           false,
+	}
+
+	t.Run("UNC path blocked by default", func(t *testing.T) {
+		_, err := validateScanPath(`\\server\share`, securityCfg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, apperrors.ErrUNCPathBlocked))
+	})
+
+	t.Run("UNC path blocked when server not in whitelist", func(t *testing.T) {
+		cfg := &config.SecurityConfig{
+			AllowedDirectories: []string{`C:\Videos`},
+			AllowUNC:           true,
+			AllowedUNCServers:  []string{"trusted-server"},
+		}
+		_, err := validateScanPath(`\\evil-server\share`, cfg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, apperrors.ErrUNCPathBlocked))
+	})
+}
+
+func TestStripTrailingChars_NoOp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Non-Windows test")
+	}
+
+	input := "/some/path"
+	result := stripTrailingChars(input)
+	assert.Equal(t, input, result, "Should be no-op on non-Windows")
+}
+
+func TestIsReservedDeviceName_NoOp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Non-Windows test")
+	}
+
+	assert.False(t, isReservedDeviceName("CON"), "Should return false on non-Windows")
+	assert.False(t, isReservedDeviceName("NUL"), "Should return false on non-Windows")
+}
+
+func TestNormalizeUNCPath_NoOp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Non-Windows test")
+	}
+
+	result, err := normalizeUNCPath(`\\server\share`, false, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, `\\server\share`, result, "Should be no-op on non-Windows")
+}
+
+func TestNormalizePathForPlatform_NoOp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Non-Windows test")
+	}
+
+	input := "/some/path"
+	result := normalizePathForPlatform(input)
+	assert.Equal(t, input, result, "Should be no-op on non-Windows")
 }

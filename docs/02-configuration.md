@@ -40,6 +40,46 @@ server:
   port: 8080       # Listen port
 ```
 
+### API Security Settings
+
+Configure path access control for the API:
+
+```yaml
+api:
+  security:
+    allowed_directories:
+      - /media
+      - ~/Videos
+    denied_directories:
+      - /etc
+      - /root
+    max_files_per_scan: 10000
+    scan_timeout_seconds: 30
+    allowed_origins:
+      - "http://localhost:5173"
+    # Windows-specific UNC path settings
+    allow_unc: false
+    allowed_unc_servers: []
+```
+
+**allowed_directories**: Paths the API can access. Empty = deny all (secure by default).
+
+**denied_directories**: Additional paths to block (built-in denylist includes `/proc`, `/sys`, `/dev`).
+
+**max_files_per_scan**: Maximum files returned by scan endpoint.
+
+**scan_timeout_seconds**: Timeout for scan operations.
+
+**allowed_origins**: CORS allowed origins. `["*"]` allows all (development only).
+
+**allow_unc**: (Windows only) Allow UNC paths. **Default: false** for security.
+
+**allowed_unc_servers**: (Windows only) Whitelisted UNC servers when `allow_unc` is true.
+
+#### UNC Path Security Warning
+
+UNC paths like `\\server\share` can leak NTLM credentials to remote servers. Windows automatically sends authentication when accessing UNC paths. Only enable if you trust all servers in `allowed_unc_servers`.
+
 ## Scraper Configuration
 
 ### Overview
@@ -765,6 +805,90 @@ This displays your current configuration and verifies it's valid.
 3. **Genre filtering**: Use `ignore_genres` to filter unwanted categories
 4. **Priority tuning**: Experiment with different scraper priorities for best results
 5. **Template testing**: Test folder/file formats before processing large batches
+
+## Docker Deployment
+
+### Path Configuration for Containers
+
+When running Javinizer in a Docker container, the paths in your configuration must match what the **container** sees, not the host.
+
+#### Linux Containers
+
+```yaml
+api:
+  security:
+    allowed_directories:
+      - /data/videos    # Container path, not host path
+```
+
+Run with:
+```bash
+docker run -v /host/videos:/data/videos javinizer/javinizer
+```
+
+#### Windows Containers
+
+```yaml
+api:
+  security:
+    allowed_directories:
+      - C:\data\videos  # Container path
+```
+
+Run with:
+```powershell
+docker run -v C:\host\videos:C:\data\videos javinizer/javinizer
+```
+
+### WSL2 Considerations
+
+When running on WSL2:
+
+1. **Windows drives** are mounted at `/mnt/c/`, `/mnt/d/`, etc.
+2. **UNC paths** to WSL distros: `\\wsl$\Ubuntu\path`
+3. **Performance**: Accessing Windows files from WSL2 is slower than native Linux files
+
+**Recommended**: Use WSL2 filesystem paths (`/home/user/videos`) for best performance.
+
+### UNC Paths and Security
+
+UNC paths (`\\server\share`) are blocked by default because they can leak NTLM credentials to remote servers. If you need UNC access:
+
+```yaml
+api:
+  security:
+    allow_unc: true
+    allowed_unc_servers:
+      - fileserver.local
+      - nas.example.com
+```
+
+**Only allow UNC servers you trust.** The server receives your Windows authentication credentials when accessed.
+
+### Common Docker Issues
+
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| "path outside allowed directories" | Host path in config, container sees different path | Use container paths in config |
+| Slow file scanning on Windows | Using `/mnt/c/` paths in WSL2 | Move files to WSL2 filesystem |
+| UNC path blocked | UNC paths disabled by default | Enable `api.security.allow_unc` |
+| Paths with spaces fail | Improper quoting | Use quotes in volume mounts |
+
+### Docker Compose Example
+
+```yaml
+version: '3'
+services:
+  javinizer:
+    image: javinizer/javinizer:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/config
+      - /media/videos:/data/videos:ro
+    environment:
+      - JAVINIZER_CONFIG=/config/config.yaml
+```
 
 ---
 

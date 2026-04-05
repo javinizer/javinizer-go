@@ -763,6 +763,10 @@ definitions:
     type: object
   config.SecurityConfig:
     properties:
+      allow_unc:
+        description: Allow UNC paths (Windows only). UNC paths can leak NTLM credentials
+          to remote servers.
+        type: boolean
       allowed_directories:
         description: Allowed directories for scanning/browsing (empty = no allowlist
           restriction)
@@ -772,6 +776,12 @@ definitions:
       allowed_origins:
         description: Allowed origins for CORS and WebSocket connections (empty = same-origin
           only, "*" = allow all)
+        items:
+          type: string
+        type: array
+      allowed_unc_servers:
+        description: Allowed UNC servers (Windows only). Only used if AllowUNC is
+          true.
         items:
           type: string
         type: array

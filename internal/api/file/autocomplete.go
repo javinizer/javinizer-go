@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/apperrors"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 )
@@ -35,11 +36,7 @@ func autocompletePath(deps *ServerDependencies) gin.HandlerFunc {
 		cfg := deps.GetConfig()
 		basePath, fragment, err := resolveAutocompleteBasePath(req.Path, &cfg.API.Security)
 		if err != nil {
-			statusCode := 400
-			if core.Contains(err.Error(), "access denied") {
-				statusCode = 403
-			}
-			c.JSON(statusCode, ErrorResponse{Error: err.Error()})
+			apperrors.WriteAPIError(c, err)
 			return
 		}
 
@@ -99,7 +96,7 @@ func resolveAutocompleteBasePath(userPath string, cfg *config.SecurityConfig) (s
 
 	absPath, err := filepath.Abs(trimmedPath)
 	if err != nil {
-		return "", "", fmt.Errorf("invalid path")
+		return "", "", apperrors.ErrPathInvalid
 	}
 
 	basePath := absPath

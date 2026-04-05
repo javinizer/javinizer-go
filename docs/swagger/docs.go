@@ -2798,6 +2798,10 @@ const docTemplate = `{
         "config.SecurityConfig": {
             "type": "object",
             "properties": {
+                "allow_unc": {
+                    "description": "Allow UNC paths (Windows only). UNC paths can leak NTLM credentials to remote servers.",
+                    "type": "boolean"
+                },
                 "allowed_directories": {
                     "description": "Allowed directories for scanning/browsing (empty = no allowlist restriction)",
                     "type": "array",
@@ -2807,6 +2811,13 @@ const docTemplate = `{
                 },
                 "allowed_origins": {
                     "description": "Allowed origins for CORS and WebSocket connections (empty = same-origin only, \"*\" = allow all)",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "allowed_unc_servers": {
+                    "description": "Allowed UNC servers (Windows only). Only used if AllowUNC is true.",
                     "type": "array",
                     "items": {
                         "type": "string"

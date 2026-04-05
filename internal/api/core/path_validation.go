@@ -1,12 +1,12 @@
 package core
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/api/apperrors"
 	"github.com/javinizer/javinizer-go/internal/config"
 )
 
@@ -14,104 +14,147 @@ import (
 // It performs multiple security checks:
 // 1. Expands home directory (~)
 // 2. Cleans the path (removes ../, ./, etc.)
-// 3. Converts to absolute path
-// 4. Canonicalizes path (resolves symlinks) - CRITICAL for security
-// 5. Checks against allowlist (if provided in config)
-// 6. Blocks sensitive system directories (built-in + config denylist)
-// 7. Verifies path exists and is a directory
+// 3. Windows: Strips trailing dots/spaces (Win32 API silently strips these)
+// 4. Windows: Checks for reserved device names (CON, NUL, etc.) BEFORE filesystem access
+// 5. Converts to absolute path
+// 6. Canonicalizes path (resolves symlinks) - CRITICAL for security
+// 7. Windows: Validates UNC paths (blocks by default to prevent NTLM leaks)
+// 8. Windows: Normalizes path for platform (resolves 8.3 short names, trailing chars)
+// 9. Checks against allowlist (if provided in config)
+// 10. Blocks sensitive system directories (built-in + config denylist)
+// 11. Verifies path exists and is a directory
 //
 // Returns: cleaned absolute path, error
 func validateScanPath(userPath string, cfg *config.SecurityConfig) (string, error) {
-	// 1. Expand home directory
+	if len(cfg.AllowedDirectories) == 0 {
+		return "", apperrors.ErrAllowedDirsEmpty
+	}
+
+	hasValidEntry := false
+	for _, dir := range cfg.AllowedDirectories {
+		if strings.TrimSpace(dir) != "" {
+			hasValidEntry = true
+			break
+		}
+	}
+	if !hasValidEntry {
+		return "", apperrors.ErrAllowedDirsEmpty
+	}
+
 	expandedPath := expandHomeDir(userPath)
 
-	// 2. Clean the path (removes ../, ./, etc.)
 	cleanPath := filepath.Clean(expandedPath)
 
-	// 3. Convert to absolute path
+	// Windows: Strip trailing dots and spaces before further processing.
+	// Win32 API silently strips these, so we must too for accurate comparison.
+	cleanPath = stripTrailingChars(cleanPath)
+
+	// Windows: Check for reserved device names BEFORE any filesystem access.
+	// Accessing paths like COM1, NUL, etc. can hang operations.
+	for _, component := range strings.Split(cleanPath, string(filepath.Separator)) {
+		if isReservedDeviceName(component) {
+			return "", apperrors.NewPathError(apperrors.ErrReservedDeviceName, cleanPath)
+		}
+	}
+
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
-		return "", fmt.Errorf("invalid path")
+		return "", apperrors.ErrPathInvalid
 	}
 
-	// 4. Verify path exists before canonicalization
-	info, err := os.Lstat(absPath) // Use Lstat to detect symlinks
+	// Windows: Normalize extended-path prefixes before security checks.
+	// This converts \??\UNC\, \\?\UNC\, \\.\UNC\ variants to standard \\ format
+	// for consistent UNC detection.
+	absPath = normalizeWindowsPath(absPath)
+
+	// Windows: Block UNC paths BEFORE any filesystem access.
+	// os.Lstat on UNC paths triggers SMB connection and NTLM authentication.
+	if isUNCPath(absPath) {
+		if !cfg.AllowUNC {
+			return "", apperrors.NewPathError(apperrors.ErrUNCPathBlocked, absPath)
+		}
+		// Early whitelist check to prevent connection to malicious servers
+		normalizedUNC, err := normalizeUNCPath(absPath, cfg.AllowUNC, cfg.AllowedUNCServers)
+		if err != nil {
+			return "", err
+		}
+		absPath = normalizedUNC
+	}
+
+	info, err := os.Lstat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("path does not exist")
+			return "", apperrors.NewPathError(apperrors.ErrPathNotExist, absPath)
 		}
-		return "", fmt.Errorf("cannot access path")
+		return "", apperrors.ErrPathInvalid
 	}
 
-	// 5. Canonicalize path (resolve symlinks) - CRITICAL to prevent symlink traversal attacks
 	canonicalPath, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
-		return "", fmt.Errorf("cannot resolve path")
+		return "", apperrors.NewPathError(apperrors.ErrPathUnresolvable, absPath)
 	}
 
-	// Ensure canonical path is absolute
 	if !filepath.IsAbs(canonicalPath) {
 		canonicalPath, err = filepath.Abs(canonicalPath)
 		if err != nil {
-			return "", fmt.Errorf("invalid path")
+			return "", apperrors.ErrPathInvalid
 		}
 	}
 
-	// 6. Check if path is within allowed base directories (if allowlist is provided in config)
-	if len(cfg.AllowedDirectories) > 0 {
-		allowed := false
-		for _, baseDir := range cfg.AllowedDirectories {
-			// Expand and canonicalize allowed directory
-			expandedBase := expandHomeDir(baseDir)
-			absBase, err := filepath.Abs(expandedBase)
-			if err != nil {
-				continue
-			}
-			// Canonicalize the allowed directory as well
-			canonicalBase, err := filepath.EvalSymlinks(absBase)
-			if err != nil {
-				continue
-			}
+	// Windows: Normalize path for platform comparison.
+	// This resolves 8.3 short names and ensures consistent path format.
+	canonicalPath = normalizePathForPlatform(canonicalPath)
 
-			// Check if canonicalPath is within canonicalBase
-			rel, err := filepath.Rel(canonicalBase, canonicalPath)
-			if err == nil && !strings.HasPrefix(rel, "..") && rel != ".." {
-				allowed = true
-				break
-			}
+	allowed := false
+	for _, baseDir := range cfg.AllowedDirectories {
+		if strings.TrimSpace(baseDir) == "" {
+			continue
 		}
-		if !allowed {
-			return "", fmt.Errorf("access denied: path outside allowed directories")
+		expandedBase := expandHomeDir(baseDir)
+		absBase, err := filepath.Abs(expandedBase)
+		if err != nil {
+			continue
+		}
+
+		// Windows: Normalize allowlist entry for platform comparison.
+		absBase = normalizePathForPlatform(absBase)
+
+		canonicalBase, err := filepath.EvalSymlinks(absBase)
+		if err != nil {
+			continue
+		}
+
+		rel, err := filepath.Rel(canonicalBase, canonicalPath)
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != ".." {
+			allowed = true
+			break
 		}
 	}
+	if !allowed {
+		return "", apperrors.NewPathError(apperrors.ErrPathOutsideAllowed, canonicalPath)
+	}
 
-	// 7. Deny sensitive system directories (built-in + config denylist)
 	deniedPrefixes := getDeniedDirectories()
-	// Merge with config denied directories (canonicalized)
 	for _, denied := range cfg.DeniedDirectories {
 		expandedDenied := expandHomeDir(denied)
 		absDenied, err := filepath.Abs(expandedDenied)
 		if err == nil {
-			// Canonicalize denied paths too
 			if canonicalDenied, err := filepath.EvalSymlinks(absDenied); err == nil {
 				deniedPrefixes = append(deniedPrefixes, canonicalDenied)
 			} else {
-				// If symlink resolution fails, use the absolute path
 				deniedPrefixes = append(deniedPrefixes, absDenied)
 			}
 		}
 	}
 
-	// Check denied paths with case-insensitive comparison on Windows
 	for _, denied := range deniedPrefixes {
 		if pathHasPrefix(canonicalPath, denied) {
-			return "", fmt.Errorf("access denied: cannot scan system directory")
+			return "", apperrors.NewPathError(apperrors.ErrPathInDenylist, canonicalPath)
 		}
 	}
 
-	// 8. Verify it's a directory (we already checked with Lstat earlier)
 	if !info.IsDir() {
-		return "", fmt.Errorf("path is not a directory")
+		return "", apperrors.NewPathError(apperrors.ErrPathNotDir, canonicalPath)
 	}
 
 	return canonicalPath, nil
@@ -119,45 +162,11 @@ func validateScanPath(userPath string, cfg *config.SecurityConfig) (string, erro
 
 // getDeniedDirectories returns a list of system directories that should never be scanned
 func getDeniedDirectories() []string {
-	denied := []string{
-		"/etc",
-		"/var/log",
-		"/var/spool",
-		"/var/mail",
-		"/usr/bin",
-		"/usr/sbin",
-		"/bin",
-		"/sbin",
-		"/boot",
-		"/dev",
+	return []string{
 		"/proc",
 		"/sys",
-		"/root",
-		"/private/etc",
-		"/private/var/log",
-		"/private/var/spool",
-		"/private/var/mail",
+		"/dev",
 	}
-
-	// Add Windows-specific directories
-	if runtime.GOOS == "windows" {
-		denied = append(denied,
-			"C:\\Windows",
-			"C:\\Program Files",
-			"C:\\Program Files (x86)",
-			"C:\\ProgramData",
-		)
-	}
-
-	// Add macOS-specific directories
-	if runtime.GOOS == "darwin" {
-		denied = append(denied,
-			"/System",
-			"/Library/Application Support",
-		)
-	}
-
-	return denied
 }
 
 // expandHomeDir expands ~ to the user's home directory

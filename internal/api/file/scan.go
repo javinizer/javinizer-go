@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/apperrors"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/scanner"
@@ -34,15 +35,9 @@ func scanDirectory(deps *ServerDependencies) gin.HandlerFunc {
 		// Read current config (respects config reloads)
 		cfg := deps.GetConfig()
 
-		// Validate and sanitize the path for security
 		validPath, err := core.ValidateScanPath(req.Path, &cfg.API.Security)
 		if err != nil {
-			// Return 403 for access denied, 400 for other validation errors
-			statusCode := 400
-			if core.Contains(err.Error(), "access denied") {
-				statusCode = 403
-			}
-			c.JSON(statusCode, ErrorResponse{Error: err.Error()})
+			apperrors.WriteAPIError(c, err)
 			return
 		}
 

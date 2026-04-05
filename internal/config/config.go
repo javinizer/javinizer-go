@@ -75,6 +75,10 @@ type SecurityConfig struct {
 	ScanTimeoutSeconds int `yaml:"scan_timeout_seconds" json:"scan_timeout_seconds"`
 	// Allowed origins for CORS and WebSocket connections (empty = same-origin only, "*" = allow all)
 	AllowedOrigins []string `yaml:"allowed_origins" json:"allowed_origins"`
+	// Allow UNC paths (Windows only). UNC paths can leak NTLM credentials to remote servers.
+	AllowUNC bool `yaml:"allow_unc" json:"allow_unc"`
+	// Allowed UNC servers (Windows only). Only used if AllowUNC is true.
+	AllowedUNCServers []string `yaml:"allowed_unc_servers" json:"allowed_unc_servers"`
 }
 
 // SystemConfig holds system-level settings

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -134,6 +135,11 @@ func TestScanDirectory(t *testing.T) {
 			scanPath := tt.setupFiles(t, tempDir)
 
 			cfg := &config.Config{
+				API: config.APIConfig{
+					Security: config.SecurityConfig{
+						AllowedDirectories: []string{tempDir},
+					},
+				},
 				Matching: config.MatchingConfig{
 					RegexEnabled: false,
 					Extensions:   []string{".mp4", ".mkv", ".avi"},
@@ -181,10 +187,14 @@ func TestScanDirectory(t *testing.T) {
 }
 
 func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
-	// Test that path traversal attempts and system directory access are properly blocked
 	tempDir := t.TempDir()
 
 	cfg := &config.Config{
+		API: config.APIConfig{
+			Security: config.SecurityConfig{
+				AllowedDirectories: []string{"/"},
+			},
+		},
 		Matching: config.MatchingConfig{
 			RegexEnabled: false,
 		},
@@ -205,10 +215,11 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 	tests := []struct {
 		name             string
 		path             string
-		expectedStatus   int      // Single expected status (use 0 if acceptedStatuses is set)
-		acceptedStatuses []int    // Multiple acceptable statuses (for platform-dependent behavior)
-		errorContains    string   // Single error substring (use "" if acceptedErrors is set)
-		acceptedErrors   []string // Multiple acceptable error substrings
+		expectedStatus   int
+		acceptedStatuses []int
+		errorContains    string
+		acceptedErrors   []string
+		skipOS           string
 	}{
 		{
 			name:           "valid temp directory",
@@ -216,20 +227,10 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 			expectedStatus: 200,
 		},
 		{
-			name:           "system directory /etc - should block",
-			path:           "/etc",
-			expectedStatus: 403,
-			errorContains:  "system directory",
-		},
-		{
-			name: "path traversal with ../ - should block",
-			path: filepath.Join(tempDir, "../../../etc"),
-			// Accept either 400 (path doesn't exist) or 403 (system directory blocked)
-			// Behavior depends on temp directory depth:
-			// - macOS: /var/folders/.../T/test/../../../etc → /var/folders/.../etc (doesn't exist) → 400
-			// - Linux: /tmp/test/../../../etc → /etc (exists, blocked) → 403
+			name:             "path traversal with ../ - should block",
+			path:             filepath.Join(tempDir, "../../../etc"),
 			acceptedStatuses: []int{400, 403},
-			acceptedErrors:   []string{"does not exist", "system directory", "access denied"},
+			acceptedErrors:   []string{"does not exist", "access denied"},
 		},
 		{
 			name:           "nonexistent path",
@@ -237,10 +238,20 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 			expectedStatus: 400,
 			errorContains:  "does not exist",
 		},
+		{
+			name:           "/dev is blocked by denylist",
+			path:           "/dev",
+			expectedStatus: 403,
+			errorContains:  "system directory",
+			skipOS:         "windows",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.skipOS == runtime.GOOS {
+				t.Skipf("Skipping on %s", runtime.GOOS)
+			}
 			reqBody := ScanRequest{Path: tt.path}
 			body, err := json.Marshal(reqBody)
 			require.NoError(t, err)
@@ -420,10 +431,7 @@ func TestBrowseDirectory(t *testing.T) {
 				return ""
 			},
 			requestBody:    BrowseRequest{Path: ""},
-			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp *BrowseResponse) {
-				assert.NotEmpty(t, resp.CurrentPath)
-			},
+			expectedStatus: 403,
 		},
 		{
 			name: "invalid JSON",
@@ -441,8 +449,8 @@ func TestBrowseDirectory(t *testing.T) {
 			browsePath := tt.setupFiles(t, tempDir)
 
 			cfg := config.DefaultConfig()
+			cfg.API.Security.AllowedDirectories = []string{tempDir}
 
-			// Create minimal ServerDependencies for test
 			deps := &ServerDependencies{}
 			deps.SetConfig(cfg)
 
@@ -554,7 +562,7 @@ func TestBrowseDirectory_ParentPathCalculation(t *testing.T) {
 	require.NoError(t, os.Mkdir(subDir, 0755))
 
 	cfg := config.DefaultConfig()
-	// Create minimal ServerDependencies for test
+	cfg.API.Security.AllowedDirectories = []string{tempDir}
 	deps := &ServerDependencies{}
 	deps.SetConfig(cfg)
 
@@ -699,6 +707,11 @@ func TestScanDirectory_LargeDirectory(t *testing.T) {
 	}
 
 	cfg := &config.Config{
+		API: config.APIConfig{
+			Security: config.SecurityConfig{
+				AllowedDirectories: []string{tempDir},
+			},
+		},
 		Matching: config.MatchingConfig{
 			RegexEnabled: false,
 			Extensions:   []string{".mp4"},
