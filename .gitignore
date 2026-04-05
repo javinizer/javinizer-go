@@ -44,6 +44,7 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+*.migration.lock
 /data/
 /downloads/
 /logs/
