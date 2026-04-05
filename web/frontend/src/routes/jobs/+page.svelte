@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { fade, fly } from 'svelte/transition';
+	import { fade, fly, slide } from 'svelte/transition';
+	import { page } from '$app/stores';
 	import {
 		Activity,
 		ArrowRight,
@@ -12,7 +13,9 @@
 		AlertTriangle,
 		FolderOpen,
 		Trash2,
-		Eye
+		Eye,
+		ChevronDown,
+		ChevronRight
 	} from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -25,6 +28,8 @@
 	let isRefreshing = $state(false);
 	let error = $state<string | null>(null);
 	let listRenderVersion = $state(0);
+	let activeFilter = $state<string>('all');
+	let collapsedGroups = $state<Set<string>>(new Set(['running', 'completed', 'organized', 'cancelled']));
 
 	async function loadJobs() {
 		if (!hasLoadedOnce) {
@@ -48,6 +53,60 @@
 			loading = false;
 			isRefreshing = false;
 		}
+	}
+
+	function setFilter(filter: string) {
+		activeFilter = filter;
+		const url = new URL(window.location.href);
+		if (filter === 'all') {
+			url.searchParams.delete('status');
+		} else {
+			url.searchParams.set('status', filter);
+		}
+		window.history.replaceState({}, '', url.toString());
+	}
+
+	function getJobsByStatus(status: string): BatchJobResponse[] {
+		return jobs.filter(job => job.status.toLowerCase() === status.toLowerCase());
+	}
+
+	function getStatusCount(status: string): number {
+		return getJobsByStatus(status).length;
+	}
+
+	let filteredJobs = $derived(() => {
+		if (activeFilter === 'all') {
+			return jobs;
+		}
+		return getJobsByStatus(activeFilter);
+	});
+
+	let groupedJobs = $derived(() => {
+		const groups: { status: string; jobs: BatchJobResponse[]; label: string }[] = [];
+		const statusOrder = ['running', 'failed', 'completed', 'organized', 'cancelled'];
+		
+		for (const status of statusOrder) {
+			const statusJobs = getJobsByStatus(status);
+			if (statusJobs.length > 0) {
+				const config = getStatusConfig(status);
+				groups.push({
+					status,
+					jobs: statusJobs,
+					label: config.label
+				});
+			}
+		}
+		return groups;
+	});
+
+	function toggleGroup(status: string) {
+		const newCollapsed = new Set(collapsedGroups);
+		if (newCollapsed.has(status)) {
+			newCollapsed.delete(status);
+		} else {
+			newCollapsed.add(status);
+		}
+		collapsedGroups = newCollapsed;
 	}
 
 	async function cancelJob(jobId: string) {
@@ -126,6 +185,12 @@
 	}
 
 	onMount(() => {
+		const statusParam = $page.url.searchParams.get('status');
+		if (statusParam && ['running', 'completed', 'failed', 'cancelled', 'organized'].includes(statusParam)) {
+			activeFilter = statusParam;
+		} else {
+			activeFilter = 'all';
+		}
 		loadJobs();
 	});
 </script>
@@ -160,6 +225,26 @@
 			</div>
 		{/if}
 
+		{#if !loading || hasLoadedOnce}
+			<div class="flex flex-wrap gap-1.5 mb-6" in:fade={{ duration: 150 }}>
+				{#each ['all', 'running', 'failed', 'completed', 'cancelled', 'organized'] as filter}
+					{@const count = filter === 'all' ? jobs.length : getStatusCount(filter)}
+					<Button
+						variant={activeFilter === filter ? 'outline' : 'ghost'}
+						size="sm"
+						onclick={() => setFilter(filter)}
+						class="relative"
+					>
+						{filter === 'all' ? 'All' : getStatusConfig(filter).label}
+						<span class="ml-1.5 text-xs text-muted-foreground">({count})</span>
+						{#if activeFilter === filter}
+							<span class="absolute -bottom-0.5 left-0 right-0 h-0.5 bg-primary rounded-full"></span>
+						{/if}
+					</Button>
+				{/each}
+			</div>
+		{/if}
+
 		{#if loading && !hasLoadedOnce}
 			<div class="flex items-center justify-center py-20">
 				<div class="text-center">
@@ -176,10 +261,10 @@
 					Start Your First Scrape
 				</Button>
 			</Card>
-		{:else}
+		{:else if activeFilter !== 'all'}
 			{#key listRenderVersion}
 				<div class="space-y-3" in:fade={{ duration: 150 }}>
-					{#each jobs as job, index (`${job.id}-${listRenderVersion}`)}
+					{#each filteredJobs() as job, index (`${job.id}-${listRenderVersion}`)}
 						{@const config = getStatusConfig(job.status)}
 						{@const poster = getFirstPoster(job)}
 						<div
@@ -273,6 +358,130 @@
 									</div>
 								</div>
 							</Card>
+						</div>
+					{/each}
+				</div>
+			{/key}
+		{:else}
+			{#key listRenderVersion}
+				<div class="space-y-6" in:fade={{ duration: 150 }}>
+					{#each groupedJobs() as group (`${group.status}-${listRenderVersion}`)}
+						{@const config = getStatusConfig(group.status)}
+						{@const isCollapsed = collapsedGroups.has(group.status)}
+						<div>
+							<button
+								onclick={() => toggleGroup(group.status)}
+								class="w-full flex items-center gap-2 px-3 py-2 rounded-lg {config.bg} hover:opacity-80 transition-opacity mb-2"
+							>
+								{#if isCollapsed}
+									<ChevronRight class="h-4 w-4 text-muted-foreground" />
+								{:else}
+									<ChevronDown class="h-4 w-4 text-muted-foreground" />
+								{/if}
+								<config.icon class="h-4 w-4 {config.color}" />
+								<span class="font-medium">{config.label}</span>
+								<span class="text-sm text-muted-foreground">({group.jobs.length})</span>
+							</button>
+							
+							{#if !isCollapsed}
+								<div class="space-y-3 pl-2" in:slide={{ duration: 200 }}>
+									{#each group.jobs as job, index (`${job.id}-${listRenderVersion}`)}
+										{@const poster = getFirstPoster(job)}
+										<div
+											in:fly={{ y: 10, duration: 200, delay: Math.min(index * 30, 150) }}
+											class="group"
+										>
+											<Card class="overflow-hidden hover:border-border/80 transition-colors shadow-sm">
+												<div class="flex items-center p-3 gap-4">
+													{#if poster}
+														<div class="w-20 h-20 flex-shrink-0 bg-muted rounded-md overflow-hidden flex items-center justify-center">
+															<img
+																src={poster}
+																alt=""
+																class="w-full h-full object-cover object-center"
+																onerror={(e) => {
+																	(e.target as HTMLImageElement).style.display = 'none';
+																}}
+															/>
+														</div>
+													{:else}
+														<div class="w-20 h-20 flex-shrink-0 bg-muted rounded-md flex items-center justify-center">
+															<FolderOpen class="h-8 w-8 text-muted-foreground/30" />
+														</div>
+													{/if}
+
+													<div class="flex-1 min-w-0">
+														<div class="flex items-center gap-2 mb-1">
+															<span class="font-mono text-xs text-muted-foreground">
+																{job.id.slice(0, 8)}
+															</span>
+															<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium {config.bg} {config.color}">
+																<config.icon class="h-3 w-3" />
+																{config.label}
+															</span>
+														</div>
+														<p class="text-sm truncate mb-1.5" title={job.files?.[0]}>
+															{getFileNames(job)}
+														</p>
+														<div class="flex items-center gap-4 text-xs text-muted-foreground">
+															<span>{job.total_files} file{job.total_files !== 1 ? 's' : ''}</span>
+															{#if job.completed > 0}
+																<span class="text-green-600">{job.completed} done</span>
+															{/if}
+															{#if job.failed > 0}
+																<span class="text-red-500">{job.failed} failed</span>
+															{/if}
+															<span>{formatDate(job.started_at)}</span>
+														</div>
+
+														{#if job.status.toLowerCase() === 'running'}
+															<div class="mt-2">
+																<div class="h-1.5 rounded-full bg-muted overflow-hidden">
+																	<div
+																		class="h-full bg-primary transition-all duration-300"
+																		style="width: {Math.max(0, Math.min(100, job.progress))}%"
+																	></div>
+																</div>
+															</div>
+														{/if}
+													</div>
+
+													<div class="flex items-center gap-1.5 flex-shrink-0">
+														{#if job.status.toLowerCase() === 'running'}
+															<Button variant="outline" size="sm" onclick={() => cancelJob(job.id)}>
+																Cancel
+															</Button>
+															<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+																<Eye class="h-4 w-4 mr-1" />
+																View
+															</Button>
+														{:else if job.status.toLowerCase() === 'completed'}
+															<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+																Review & Organize
+															</Button>
+															<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
+																<Trash2 class="h-4 w-4 text-muted-foreground" />
+															</Button>
+														{:else if job.status.toLowerCase() === 'failed'}
+															<Button variant="outline" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+																<Eye class="h-4 w-4 mr-1" />
+																Review
+															</Button>
+															<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
+																<Trash2 class="h-4 w-4 text-muted-foreground" />
+															</Button>
+														{:else}
+															<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
+																<Trash2 class="h-4 w-4 text-muted-foreground" />
+															</Button>
+														{/if}
+													</div>
+												</div>
+											</Card>
+										</div>
+									{/each}
+								</div>
+							{/if}
 						</div>
 					{/each}
 				</div>
