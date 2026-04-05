@@ -41,6 +41,7 @@ func RegisterTestScraperConfigs() {
 		{"caribbeancom", 40},
 		{"dlgetchu", 40},
 		{"fc2", 35},
+		{"javstash", 10},
 	}
 	for _, sp := range scraperPriorities {
 		scraperutil.RegisterDefaultScraperSettings(sp.name, &ScraperSettings{
@@ -53,7 +54,7 @@ func RegisterTestScraperConfigs() {
 	for _, name := range []string{
 		"r18dev", "dmm", "libredmm", "mgstage", "javlibrary", "javdb",
 		"javbus", "jav321", "tokyohot", "aventertainment", "dlgetchu",
-		"caribbeancom", "fc2",
+		"caribbeancom", "fc2", "javstash",
 	} {
 		scraperutil.RegisterFlattenFunc(name, func(a any) any {
 			cfg, ok := a.(scraperutil.ScraperConfigInterface)
@@ -80,7 +81,7 @@ func RegisterTestScraperConfigs() {
 	for _, name := range []string{
 		"r18dev", "dmm", "libredmm", "mgstage", "javlibrary", "javdb",
 		"javbus", "jav321", "tokyohot", "aventertainment", "dlgetchu",
-		"caribbeancom", "fc2",
+		"caribbeancom", "fc2", "javstash",
 	} {
 		scraperutil.RegisterValidator(name, func(a any) error {
 			return nil // Stub - scraper packages do actual validation

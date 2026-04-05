@@ -1,5 +1,7 @@
 package config
 
+import "encoding/json"
+
 // ScraperSettings holds common scraper configuration fields used by the Scraper interface.
 // Individual scraper configs embed this and add scraper-specific fields.
 // CONF-01: All fields are present: Enabled, Timeout, RateLimit, RetryCount,
@@ -72,6 +74,17 @@ func (s *ScraperSettings) MarshalYAML() (interface{}, error) {
 	}
 
 	return result, nil
+}
+
+// MarshalJSON preserves the full unified scraper settings shape for JSON serialization.
+// Extra fields are flattened to the top level, matching MarshalYAML behavior.
+func (s *ScraperSettings) MarshalJSON() ([]byte, error) {
+	// Reuse MarshalYAML logic
+	result, err := s.MarshalYAML()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(result)
 }
 
 // ToScraperSettings implements ScraperSettingsAdapter.

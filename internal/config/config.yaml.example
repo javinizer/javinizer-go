@@ -65,6 +65,7 @@ scrapers:
         - caribbeancom
         - dlgetchu
         - fc2
+        - javstash
     # NEW: Global scrape_actress default (opt-out behavior)
     scrape_actress: true
 
@@ -200,6 +201,12 @@ scrapers:
         enabled: false
         request_delay: 1000
         base_url: "https://adult.contents.fc2.com"
+    javstash:
+        enabled: false # Opt-in - requires API key from javstash.org
+        api_key: "" # API key for authentication (or set JAVSTASH_API_KEY env var)
+        base_url: "https://javstash.org/graphql"
+        language: en # en | ja
+        request_delay: 1000
 metadata:
     priority:
         actress:

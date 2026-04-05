@@ -7,7 +7,7 @@ import (
 var defaultScraperPriority = []string{
 	"dmm", "r18dev", "libredmm", "mgstage", "javlibrary",
 	"javdb", "javbus", "jav321", "tokyohot", "aventertainment",
-	"dlgetchu", "caribbeancom", "fc2",
+	"dlgetchu", "caribbeancom", "fc2", "javstash",
 }
 
 func getScraperPriorities() []string {
