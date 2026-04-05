@@ -438,7 +438,7 @@ func (r *MovieRepository) ensureActressesExistTx(tx *gorm.DB, actresses []models
 // FindByID finds a movie by its ID
 func (r *MovieRepository) FindByID(id string) (*models.Movie, error) {
 	var movie models.Movie
-	err := r.db.Preload("Actresses").Preload("Genres").Preload("Translations").First(&movie, "id = ?", id).Error
+	err := r.db.Preload("Actresses").Preload("Genres").Preload("Translations", func(db *gorm.DB) *gorm.DB { return db.Order("language ASC") }).First(&movie, "id = ?", id).Error
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +448,7 @@ func (r *MovieRepository) FindByID(id string) (*models.Movie, error) {
 // FindByContentID finds a movie by its content ID
 func (r *MovieRepository) FindByContentID(contentID string) (*models.Movie, error) {
 	var movie models.Movie
-	err := r.db.Preload("Actresses").Preload("Genres").Preload("Translations").First(&movie, "content_id = ?", contentID).Error
+	err := r.db.Preload("Actresses").Preload("Genres").Preload("Translations", func(db *gorm.DB) *gorm.DB { return db.Order("language ASC") }).First(&movie, "content_id = ?", contentID).Error
 	if err != nil {
 		return nil, err
 	}

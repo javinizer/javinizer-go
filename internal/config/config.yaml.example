@@ -381,6 +381,13 @@ file_matching:
     regex_pattern: ([a-zA-Z|tT28]+-\d+[zZ]?[eE]?)(?:-pt)?(\d{1,2})?
 output:
     folder_format: <ID> [<STUDIO>] - <TITLE> (<YEAR>)
+    # Multi-language template tags (for translated metadata):
+    #   <TITLE:EN>      - English title translation
+    #   <TITLE:JA>      - Japanese title translation
+    #   <TITLE:JA|EN>   - Japanese with English fallback
+    #   <MAKER:JA>      - Japanese maker name
+    #   Supported tags: TITLE, MAKER, LABEL, SERIES, DIRECTOR, DESCRIPTION, ORIGINALTITLE, STUDIO
+    # Example: <ID> [<MAKER:JA>] - <TITLE:EN> (<YEAR>)
     # File format supports multi-part templates:
     #   - <PART> or <DISC>: Part number (1, 2, 3...), use <PART:2> for zero-padding (01, 02, 03...)
     #   - <PARTSUFFIX>: Original suffix from filename (e.g., "-pt1", "-A", "-cd2")

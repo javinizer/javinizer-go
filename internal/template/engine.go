@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,6 +26,17 @@ type EngineOptions struct {
 	MaxTemplateBytes    int
 	MaxOutputBytes      int
 	MaxConditionalDepth int
+	// Template language configuration (OPT-IN behavior change)
+	// Setting DefaultLanguage changes how unqualified tags like <TITLE> behave
+	DefaultLanguage   string
+	FallbackLanguages []string
+}
+
+// parsedModifier represents a parsed tag modifier with language awareness
+type parsedModifier struct {
+	isLanguage     bool
+	languageSpec   string
+	legacyModifier string
 }
 
 // Engine is a template processor for format strings
@@ -52,6 +64,9 @@ func NewEngineWithOptions(opts EngineOptions) *Engine {
 	if opts.MaxConditionalDepth <= 0 {
 		opts.MaxConditionalDepth = DefaultMaxConditionalDepth
 	}
+
+	opts.DefaultLanguage = normalizeLanguageCode(opts.DefaultLanguage)
+	opts.FallbackLanguages = normalizeLanguageList(opts.FallbackLanguages)
 
 	return &Engine{
 		// Matches: <ID>, <TITLE:50>, <RELEASEDATE:YYYY-MM-DD>, etc.
@@ -97,6 +112,8 @@ func (e *Engine) ExecuteWithContext(execCtx context.Context, template string, ct
 	}
 
 	// Step 2: Process regular tags
+	// Build replacement map to avoid quadratic string operations
+	tagReplacements := make(map[string]string)
 	matches := e.tagPattern.FindAllStringSubmatch(result, -1)
 
 	for i, match := range matches {
@@ -113,18 +130,24 @@ func (e *Engine) ExecuteWithContext(execCtx context.Context, template string, ct
 			modifier = match[2] // e.g., "50"
 		}
 
-		// Get the value for this tag
-		value, err := e.resolveTag(tagName, modifier, ctx)
-		if err != nil {
-			// If tag cannot be resolved, keep the original tag or use empty string
-			value = ""
+		// Get the value for this tag (only once per unique fullTag)
+		if _, seen := tagReplacements[fullTag]; !seen {
+			value, err := e.resolveTag(tagName, modifier, ctx)
+			if err != nil {
+				// If tag cannot be resolved, use empty string
+				value = ""
+			}
+			tagReplacements[fullTag] = value
 		}
+	}
 
-		// Replace the tag with its value
-		result = strings.Replace(result, fullTag, value, 1)
-		if err := e.ensureOutputWithinLimit(result); err != nil {
-			return "", err
-		}
+	// Replace all tags at once using single-pass replacement
+	result = e.tagPattern.ReplaceAllStringFunc(result, func(match string) string {
+		return tagReplacements[match]
+	})
+
+	if err := e.ensureOutputWithinLimit(result); err != nil {
+		return "", err
 	}
 
 	// Note: sanitization is done by caller if needed
@@ -143,6 +166,9 @@ func (e *Engine) processConditionalsWithContext(execCtx context.Context, templat
 
 	// Find all conditional blocks
 	matches := e.conditionalPattern.FindAllStringSubmatch(result, -1)
+
+	// Build replacement map to avoid quadratic string operations
+	blockReplacements := make(map[string]string)
 
 	for i, match := range matches {
 		if i%25 == 0 {
@@ -170,11 +196,16 @@ func (e *Engine) processConditionalsWithContext(execCtx context.Context, templat
 			replacement = falseContent
 		}
 
-		// Replace the entire conditional block
-		result = strings.Replace(result, fullBlock, replacement, 1)
-		if err := e.ensureOutputWithinLimit(result); err != nil {
-			return "", err
-		}
+		blockReplacements[fullBlock] = replacement
+	}
+
+	// Replace all conditional blocks at once using single-pass replacement
+	result = e.conditionalPattern.ReplaceAllStringFunc(result, func(match string) string {
+		return blockReplacements[match]
+	})
+
+	if err := e.ensureOutputWithinLimit(result); err != nil {
+		return "", err
 	}
 
 	return result, nil
@@ -226,6 +257,8 @@ func (e *Engine) checkExecutionContext(execCtx context.Context) error {
 
 // resolveTag resolves a tag to its value
 func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, error) {
+	parsed := e.parseModifier(tagName, modifier)
+
 	switch tagName {
 	case "ID":
 		value := ctx.ID
@@ -242,14 +275,23 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 		return value, nil
 
 	case "TITLE":
+		if e.isTranslatableTag(tagName) {
+			value := e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx)
+			if parsed.legacyModifier != "" {
+				return e.truncate(value, parsed.legacyModifier), nil
+			}
+			return value, nil
+		}
 		value := ctx.Title
 		if modifier != "" {
-			// Modifier is max length
 			return e.truncate(value, modifier), nil
 		}
 		return value, nil
 
 	case "ORIGINALTITLE":
+		if e.isTranslatableTag(tagName) {
+			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
+		}
 		return ctx.OriginalTitle, nil
 
 	case "YEAR":
@@ -261,10 +303,8 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 	case "RELEASEDATE":
 		if ctx.ReleaseDate != nil {
 			if modifier != "" {
-				// Custom date format
 				return e.formatDate(ctx.ReleaseDate, modifier), nil
 			}
-			// Default: YYYY-MM-DD
 			return ctx.ReleaseDate.Format("2006-01-02"), nil
 		}
 		return "", nil
@@ -276,15 +316,33 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 		return "", nil
 
 	case "DIRECTOR":
+		if e.isTranslatableTag(tagName) {
+			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
+		}
 		return ctx.Director, nil
 
+	case "DESCRIPTION":
+		if e.isTranslatableTag(tagName) {
+			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
+		}
+		return ctx.Description, nil
+
 	case "STUDIO", "MAKER":
+		if e.isTranslatableTag(tagName) {
+			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
+		}
 		return ctx.Maker, nil
 
 	case "LABEL":
+		if e.isTranslatableTag(tagName) {
+			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
+		}
 		return ctx.Label, nil
 
 	case "SERIES":
+		if e.isTranslatableTag(tagName) {
+			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
+		}
 		return ctx.Series, nil
 
 	case "ACTORS", "ACTRESSES":
@@ -548,5 +606,271 @@ func (e *Engine) applyCaseModifier(value, modifier string) string {
 	default:
 		// Unknown modifier, return value as-is
 		return value
+	}
+}
+
+// normalizeLanguageList normalizes and deduplicates a list of language codes.
+// Removes invalid codes and ensures deterministic ordering.
+func normalizeLanguageList(langs []string) []string {
+	if len(langs) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(langs))
+	seen := map[string]struct{}{}
+	for _, lang := range langs {
+		norm := normalizeLanguageCode(lang)
+		if norm == "" {
+			continue
+		}
+		if _, ok := seen[norm]; ok {
+			continue
+		}
+		seen[norm] = struct{}{}
+		out = append(out, norm)
+	}
+	return out
+}
+
+// parseModifier parses a tag modifier into language spec and legacy modifier components.
+// Parsing is STRICT: invalid language specs fall back to treating the modifier as legacy.
+// For TITLE tag: numeric modifiers are preserved for truncation behavior.
+// Language specs are normalized to lowercase 2-letter codes.
+func (e *Engine) parseModifier(tagName, modifier string) parsedModifier {
+	if modifier == "" {
+		return parsedModifier{}
+	}
+
+	// Try to normalize as language spec
+	normalized := normalizeLanguageCode(modifier)
+	if normalized != "" {
+		return parsedModifier{
+			isLanguage:   true,
+			languageSpec: normalized,
+		}
+	}
+
+	// Check for fallback chain (e.g., "ja|en")
+	if strings.Contains(modifier, "|") {
+		// Validate all parts are valid language codes
+		parts := strings.Split(modifier, "|")
+		valid := true
+		for _, part := range parts {
+			if normalizeLanguageCode(part) == "" {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			return parsedModifier{
+				isLanguage:   true,
+				languageSpec: modifier,
+			}
+		}
+	}
+
+	// TITLE is special: numeric modifiers preserved for truncation
+	if tagName == "TITLE" && e.isNumericModifier(modifier) {
+		return parsedModifier{
+			legacyModifier: modifier,
+		}
+	}
+
+	// For translatable tags, detect if modifier looks like a language spec
+	// If it does but is invalid, reject it (don't treat as legacy)
+	if e.isTranslatableTag(tagName) && e.looksLikeLanguageSpec(modifier) {
+		// Modifier looks like a language spec but is invalid
+		// Return empty to reject it (avoids silent typos)
+		return parsedModifier{}
+	}
+
+	// For all other cases, treat as legacy modifier
+	return parsedModifier{
+		legacyModifier: modifier,
+	}
+}
+
+// isNumericModifier checks if a modifier string represents a positive integer.
+func (e *Engine) isNumericModifier(modifier string) bool {
+	if modifier == "" {
+		return false
+	}
+	n, err := strconv.Atoi(modifier)
+	return err == nil && n > 0
+}
+
+// looksLikeLanguageSpec checks if a modifier appears to be intended as a language spec.
+// Returns true for strings that look like language codes but may be invalid:
+// - 2-3 letter alphabetic strings (e.g., "en", "eng")
+// - Codes with regions/scripts (e.g., "en-US", "zh-Hant")
+// - Fallback chains (e.g., "en|ja")
+// Returns false for clearly non-language modifiers (e.g., "UPPERCASE", "YYYY-MM-DD", "50", "-50")
+func (e *Engine) looksLikeLanguageSpec(modifier string) bool {
+	if modifier == "" {
+		return false
+	}
+
+	// Check for fallback chain
+	if strings.Contains(modifier, "|") {
+		return true
+	}
+
+	// Check for region/script suffix pattern: letters followed by separator
+	// e.g., "en-US", "zh_Hant" are language-like
+	// but "-50", "UPPER-CASE" are not
+	modifier = strings.TrimSpace(modifier)
+	if idx := strings.IndexAny(modifier, "-_"); idx > 0 {
+		// Check if the part before separator is alphabetic
+		prefix := modifier[:idx]
+		if len(prefix) >= 2 && len(prefix) <= 3 {
+			for _, r := range strings.ToLower(prefix) {
+				if r < 'a' || r > 'z' {
+					return false
+				}
+			}
+			return true
+		}
+	}
+
+	// Check if it's a short alphabetic string (2-3 letters)
+	modifier = strings.ToLower(modifier)
+	if len(modifier) >= 2 && len(modifier) <= 3 {
+		for _, r := range modifier {
+			if r < 'a' || r > 'z' {
+				return false
+			}
+		}
+		return true
+	}
+
+	return false
+}
+
+// isTranslatableTag checks if a tag name supports translation resolution.
+func (e *Engine) isTranslatableTag(tagName string) bool {
+	translatableTags := []string{
+		"TITLE", "ORIGINALTITLE", "DIRECTOR",
+		"MAKER", "STUDIO", "LABEL", "SERIES",
+		"DESCRIPTION",
+	}
+	for _, t := range translatableTags {
+		if t == tagName {
+			return true
+		}
+	}
+	return false
+}
+
+// languageCandidates builds the language resolution precedence list.
+// Explicit lang > Context default > Engine default > Engine fallbacks.
+// All languages are normalized to ensure consistent map lookups.
+func (e *Engine) languageCandidates(explicitLang string, ctx *Context) []string {
+	var candidates []string
+	seen := map[string]struct{}{}
+
+	addCandidate := func(lang string) {
+		lang = normalizeLanguageCode(lang)
+		if lang == "" {
+			return
+		}
+		if _, exists := seen[lang]; exists {
+			return
+		}
+		seen[lang] = struct{}{}
+		candidates = append(candidates, lang)
+	}
+
+	// 1. Explicit language spec takes highest priority
+	if explicitLang != "" {
+		// Normalize each language in fallback chain
+		for _, lang := range strings.Split(explicitLang, "|") {
+			addCandidate(lang)
+		}
+	}
+
+	// 2. Context-level default language override (normalize)
+	if ctx.DefaultLanguage != "" {
+		addCandidate(ctx.DefaultLanguage)
+	}
+
+	// 3. Engine-level default language (already normalized at construction)
+	if e.options.DefaultLanguage != "" {
+		addCandidate(e.options.DefaultLanguage)
+	}
+
+	// 4. Engine fallback languages (already normalized at construction)
+	for _, lang := range e.options.FallbackLanguages {
+		addCandidate(lang)
+	}
+
+	return candidates
+}
+
+// resolveTranslatedTag resolves a translatable tag using the translation system.
+// Returns the translated value if found, or falls back to base field.
+func (e *Engine) resolveTranslatedTag(tagName, explicitLang string, ctx *Context) string {
+	candidates := e.languageCandidates(explicitLang, ctx)
+
+	for _, lang := range candidates {
+		value := e.translationFieldValue(tagName, lang, ctx)
+		if value != "" {
+			return value
+		}
+	}
+
+	// Fallback to base field (no translation)
+	return e.resolveBaseTag(tagName, ctx)
+}
+
+// resolveBaseTag resolves a tag from the base Context fields (no translation).
+func (e *Engine) resolveBaseTag(tagName string, ctx *Context) string {
+	switch tagName {
+	case "TITLE":
+		return ctx.Title
+	case "ORIGINALTITLE":
+		return ctx.OriginalTitle
+	case "DIRECTOR":
+		return ctx.Director
+	case "MAKER", "STUDIO":
+		return ctx.Maker
+	case "LABEL":
+		return ctx.Label
+	case "SERIES":
+		return ctx.Series
+	case "DESCRIPTION":
+		return ctx.Description
+	default:
+		return ""
+	}
+}
+
+// translationFieldValue extracts a field value from a specific translation.
+func (e *Engine) translationFieldValue(tagName, lang string, ctx *Context) string {
+	if ctx.Translations == nil {
+		return ""
+	}
+
+	translation, ok := ctx.Translations[lang]
+	if !ok {
+		return ""
+	}
+
+	switch tagName {
+	case "TITLE":
+		return translation.Title
+	case "ORIGINALTITLE":
+		return translation.OriginalTitle
+	case "DIRECTOR":
+		return translation.Director
+	case "MAKER", "STUDIO":
+		return translation.Maker
+	case "LABEL":
+		return translation.Label
+	case "SERIES":
+		return translation.Series
+	case "DESCRIPTION":
+		return translation.Description
+	default:
+		return ""
 	}
 }

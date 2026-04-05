@@ -1,6 +1,8 @@
 package template
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/mediainfo"
@@ -49,12 +51,22 @@ type Context struct {
 
 	// Cached mediainfo (lazy-loaded)
 	cachedMediaInfo *mediainfo.VideoInfo
+	mediaInfoError  error // Cached error to avoid repeated analysis failures
 
 	// Additional metadata
 	Rating      float64
 	Description string
 	CoverURL    string
 	TrailerURL  string
+
+	// Translations keyed by normalized language code (e.g. "en", "ja")
+	// IMMUTABLE after construction - safe for concurrent read access
+	Translations map[string]models.MovieTranslation
+
+	// Optional per-context override for rendered language preference
+	// When empty, Engine default language is used
+	// IMPORTANT: Setting this changes behavior of unqualified tags like <TITLE>
+	DefaultLanguage string
 
 	// Output configuration
 	GroupActress bool // Replace multiple actresses with "@Group"
@@ -77,6 +89,7 @@ func NewContextFromMovie(movie *models.Movie) *Context {
 		Description:      movie.Description,
 		CoverURL:         movie.CoverURL,
 		TrailerURL:       movie.TrailerURL,
+		Translations:     buildTranslationMap(movie.Translations),
 	}
 
 	// Extract rating
@@ -125,6 +138,7 @@ func NewContextFromScraperResult(result *models.ScraperResult) *Context {
 		Description:   result.Description,
 		CoverURL:      result.CoverURL,
 		TrailerURL:    result.TrailerURL,
+		Translations:  map[string]models.MovieTranslation{},
 	}
 
 	// Extract rating
@@ -167,25 +181,88 @@ func (c *Context) Clone() *Context {
 		copy(clone.Genres, c.Genres)
 	}
 
+	if c.Translations != nil {
+		clone.Translations = make(map[string]models.MovieTranslation, len(c.Translations))
+		for k, v := range c.Translations {
+			clone.Translations[k] = v
+		}
+	}
+
 	return &clone
 }
 
-// GetMediaInfo lazy-loads and caches video metadata
+// GetMediaInfo lazy-loads and caches video metadata.
+// Caches both success and failure states to avoid repeated expensive analysis.
 func (c *Context) GetMediaInfo() *mediainfo.VideoInfo {
 	if c.cachedMediaInfo != nil {
 		return c.cachedMediaInfo
 	}
 
+	// Return cached failure (nil result already cached)
+	if c.mediaInfoError != nil {
+		return nil
+	}
+
 	if c.VideoFilePath == "" {
+		c.mediaInfoError = fmt.Errorf("no video file path")
 		return nil
 	}
 
 	// Analyze video file
 	info, err := mediainfo.Analyze(c.VideoFilePath)
 	if err != nil {
+		c.mediaInfoError = err
 		return nil
 	}
 
 	c.cachedMediaInfo = info
 	return info
+}
+
+// buildTranslationMap creates a language-keyed map from translation records.
+// Input MUST be deterministically ordered (e.g., by language ASC) to ensure
+// consistent "first wins" behavior for duplicate languages.
+func buildTranslationMap(translations []models.MovieTranslation) map[string]models.MovieTranslation {
+	if len(translations) == 0 {
+		return map[string]models.MovieTranslation{}
+	}
+
+	m := make(map[string]models.MovieTranslation, len(translations))
+	for _, translation := range translations {
+		lang := normalizeLanguageCode(translation.Language)
+		if lang == "" {
+			continue
+		}
+
+		// Keep first non-empty translation for a language
+		// Deterministic because input is ordered
+		if _, exists := m[lang]; !exists {
+			m[lang] = translation
+		}
+	}
+
+	return m
+}
+
+// normalizeLanguageCode normalizes language codes to base language only.
+// This is LOSSY: "en-US" becomes "en", "zh-Hant" becomes "zh".
+// Returns empty string for invalid codes (including 3-letter ISO 639-2 codes like "eng", "jpn").
+func normalizeLanguageCode(lang string) string {
+	lang = strings.TrimSpace(strings.ToLower(lang))
+	if lang == "" {
+		return ""
+	}
+
+	// Normalize separators and drop region/script suffixes
+	lang = strings.ReplaceAll(lang, "_", "-")
+	if idx := strings.Index(lang, "-"); idx > 0 {
+		lang = lang[:idx]
+	}
+
+	// Validate: must be 2-letter alphabetic code
+	if len(lang) != 2 || lang[0] < 'a' || lang[0] > 'z' || lang[1] < 'a' || lang[1] > 'z' {
+		return ""
+	}
+
+	return lang
 }

@@ -65,6 +65,7 @@ func TestNewContextFromMovie(t *testing.T) {
 				FirstName:        "Sakura",
 				LastName:         "Momo",
 				OriginalFilename: "original_file.mp4",
+				Translations:     map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -74,8 +75,9 @@ func TestNewContextFromMovie(t *testing.T) {
 				Title: "Minimal Movie",
 			},
 			want: &Context{
-				ID:    "ABC-123",
-				Title: "Minimal Movie",
+				ID:           "ABC-123",
+				Title:        "Minimal Movie",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -86,8 +88,9 @@ func TestNewContextFromMovie(t *testing.T) {
 				Actresses: []models.Actress{},
 			},
 			want: &Context{
-				ID:    "IPX-001",
-				Title: "No Actress Movie",
+				ID:           "IPX-001",
+				Title:        "No Actress Movie",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -100,11 +103,12 @@ func TestNewContextFromMovie(t *testing.T) {
 				},
 			},
 			want: &Context{
-				ID:        "IPX-001",
-				Title:     "Single Actress",
-				Actresses: []string{"Actress Test"},
-				FirstName: "Test",
-				LastName:  "Actress",
+				ID:           "IPX-001",
+				Title:        "Single Actress",
+				Actresses:    []string{"Actress Test"},
+				FirstName:    "Test",
+				LastName:     "Actress",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -118,11 +122,12 @@ func TestNewContextFromMovie(t *testing.T) {
 				},
 			},
 			want: &Context{
-				ID:        "IPX-001",
-				Title:     "Japanese Names",
-				Actresses: []string{"波多野結衣", "Uehara Ai"},
-				FirstName: "",
-				LastName:  "",
+				ID:           "IPX-001",
+				Title:        "Japanese Names",
+				Actresses:    []string{"波多野結衣", "Uehara Ai"},
+				FirstName:    "",
+				LastName:     "",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -133,8 +138,9 @@ func TestNewContextFromMovie(t *testing.T) {
 				Genres: []models.Genre{},
 			},
 			want: &Context{
-				ID:    "IPX-001",
-				Title: "No Genres",
+				ID:           "IPX-001",
+				Title:        "No Genres",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -145,9 +151,10 @@ func TestNewContextFromMovie(t *testing.T) {
 				RatingScore: 0,
 			},
 			want: &Context{
-				ID:     "IPX-001",
-				Title:  "Zero Rating",
-				Rating: 0,
+				ID:           "IPX-001",
+				Title:        "Zero Rating",
+				Rating:       0,
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -158,9 +165,65 @@ func TestNewContextFromMovie(t *testing.T) {
 				ReleaseDate: nil,
 			},
 			want: &Context{
-				ID:          "IPX-001",
-				Title:       "No Date",
-				ReleaseDate: nil,
+				ID:           "IPX-001",
+				Title:        "No Date",
+				ReleaseDate:  nil,
+				Translations: map[string]models.MovieTranslation{},
+			},
+		},
+		{
+			name: "Movie with translations",
+			movie: &models.Movie{
+				ID:    "IPX-001",
+				Title: "Movie with Translations",
+				Translations: []models.MovieTranslation{
+					{Language: "en", Title: "English Title"},
+					{Language: "ja", Title: "Japanese Title"},
+				},
+			},
+			want: &Context{
+				ID:    "IPX-001",
+				Title: "Movie with Translations",
+				Translations: map[string]models.MovieTranslation{
+					"en": {Language: "en", Title: "English Title"},
+					"ja": {Language: "ja", Title: "Japanese Title"},
+				},
+			},
+		},
+		{
+			name: "Movie with duplicate language translations - first wins",
+			movie: &models.Movie{
+				ID:    "IPX-001",
+				Title: "Duplicate Languages",
+				Translations: []models.MovieTranslation{
+					{Language: "en", Title: "First English"},
+					{Language: "en", Title: "Second English"},
+				},
+			},
+			want: &Context{
+				ID:    "IPX-001",
+				Title: "Duplicate Languages",
+				Translations: map[string]models.MovieTranslation{
+					"en": {Language: "en", Title: "First English"},
+				},
+			},
+		},
+		{
+			name: "Movie with invalid language code translations - filtered",
+			movie: &models.Movie{
+				ID:    "IPX-001",
+				Title: "Invalid Languages",
+				Translations: []models.MovieTranslation{
+					{Language: "en", Title: "Valid English"},
+					{Language: "eng", Title: "Invalid 3-letter"},
+				},
+			},
+			want: &Context{
+				ID:    "IPX-001",
+				Title: "Invalid Languages",
+				Translations: map[string]models.MovieTranslation{
+					"en": {Language: "en", Title: "Valid English"},
+				},
 			},
 		},
 	}
@@ -188,6 +251,7 @@ func TestNewContextFromMovie(t *testing.T) {
 			assert.Equal(t, tt.want.LastName, got.LastName)
 			assert.Equal(t, tt.want.Actresses, got.Actresses)
 			assert.Equal(t, tt.want.Genres, got.Genres)
+			assert.Equal(t, tt.want.Translations, got.Translations)
 		})
 	}
 }
@@ -246,6 +310,7 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				Genres:        []string{"Drama", "Romance"},
 				FirstName:     "Sakura",
 				LastName:      "Momo",
+				Translations:  map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -256,8 +321,9 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				Title:  "Minimal Result",
 			},
 			want: &Context{
-				ID:    "ABC-123",
-				Title: "Minimal Result",
+				ID:           "ABC-123",
+				Title:        "Minimal Result",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -269,9 +335,10 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				Rating: nil,
 			},
 			want: &Context{
-				ID:     "IPX-001",
-				Title:  "No Rating",
-				Rating: 0,
+				ID:           "IPX-001",
+				Title:        "No Rating",
+				Rating:       0,
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -283,9 +350,10 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				Rating: &models.Rating{Score: 0, Votes: 10},
 			},
 			want: &Context{
-				ID:     "IPX-001",
-				Title:  "Zero Rating",
-				Rating: 0,
+				ID:           "IPX-001",
+				Title:        "Zero Rating",
+				Rating:       0,
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -297,8 +365,9 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				Actresses: []models.ActressInfo{},
 			},
 			want: &Context{
-				ID:    "IPX-001",
-				Title: "No Actresses",
+				ID:           "IPX-001",
+				Title:        "No Actresses",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -312,11 +381,12 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				},
 			},
 			want: &Context{
-				ID:        "IPX-001",
-				Title:     "Single Actress",
-				Actresses: []string{"Actress Test"},
-				FirstName: "Test",
-				LastName:  "Actress",
+				ID:           "IPX-001",
+				Title:        "Single Actress",
+				Actresses:    []string{"Actress Test"},
+				FirstName:    "Test",
+				LastName:     "Actress",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -330,11 +400,12 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				},
 			},
 			want: &Context{
-				ID:        "IPX-001",
-				Title:     "Japanese Name",
-				Actresses: []string{"波多野結衣"},
-				FirstName: "",
-				LastName:  "",
+				ID:           "IPX-001",
+				Title:        "Japanese Name",
+				Actresses:    []string{"波多野結衣"},
+				FirstName:    "",
+				LastName:     "",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -346,9 +417,10 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				Genres: []string{},
 			},
 			want: &Context{
-				ID:     "IPX-001",
-				Title:  "No Genres",
-				Genres: []string{},
+				ID:           "IPX-001",
+				Title:        "No Genres",
+				Genres:       []string{},
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -360,9 +432,23 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				Genres: nil,
 			},
 			want: &Context{
+				ID:           "IPX-001",
+				Title:        "Nil Genres",
+				Genres:       nil,
+				Translations: map[string]models.MovieTranslation{},
+			},
+		},
+		{
+			name: "Scraper result initializes empty Translations map",
+			result: &models.ScraperResult{
+				Source: "r18dev",
 				ID:     "IPX-001",
-				Title:  "Nil Genres",
-				Genres: nil,
+				Title:  "Test",
+			},
+			want: &Context{
+				ID:           "IPX-001",
+				Title:        "Test",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 	}
@@ -389,6 +475,7 @@ func TestNewContextFromScraperResult(t *testing.T) {
 			assert.Equal(t, tt.want.LastName, got.LastName)
 			assert.Equal(t, tt.want.Actresses, got.Actresses)
 			assert.Equal(t, tt.want.Genres, got.Genres)
+			assert.Equal(t, tt.want.Translations, got.Translations)
 		})
 	}
 }
@@ -425,6 +512,10 @@ func TestClone(t *testing.T) {
 				CoverURL:         "https://example.com/cover.jpg",
 				TrailerURL:       "https://example.com/trailer.mp4",
 				GroupActress:     true,
+				Translations: map[string]models.MovieTranslation{
+					"en": {Language: "en", Title: "English Title"},
+					"ja": {Language: "ja", Title: "Japanese Title"},
+				},
 			},
 		},
 		{
@@ -444,12 +535,21 @@ func TestClone(t *testing.T) {
 			},
 		},
 		{
-			name: "Context with nil slices",
+			name: "Context with nil slices and nil translations",
 			ctx: &Context{
-				ID:        "IPX-001",
-				Title:     "Nil Slices",
-				Actresses: nil,
-				Genres:    nil,
+				ID:           "IPX-001",
+				Title:        "Nil Slices",
+				Actresses:    nil,
+				Genres:       nil,
+				Translations: nil,
+			},
+		},
+		{
+			name: "Context with empty translations",
+			ctx: &Context{
+				ID:           "IPX-001",
+				Title:        "Empty Translations",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 	}
@@ -484,6 +584,9 @@ func TestClone(t *testing.T) {
 			assert.Equal(t, tt.ctx.Actresses, clone.Actresses)
 			assert.Equal(t, tt.ctx.Genres, clone.Genres)
 
+			// Verify translations map is equal
+			assert.Equal(t, tt.ctx.Translations, clone.Translations)
+
 			// Verify deep copy: modifying clone should not affect original
 			if len(clone.Actresses) > 0 {
 				originalFirst := tt.ctx.Actresses[0]
@@ -510,6 +613,19 @@ func TestClone(t *testing.T) {
 				originalLen := len(tt.ctx.Genres)
 				clone.Genres = append(clone.Genres, "New Genre")
 				assert.Equal(t, originalLen, len(tt.ctx.Genres), "Original slice length should not change")
+			}
+
+			// Verify deep copy: modifying clone Translations should not affect original
+			if len(clone.Translations) > 0 {
+				originalEnTitle := tt.ctx.Translations["en"].Title
+				clone.Translations["en"] = models.MovieTranslation{Language: "en", Title: "Modified Title"}
+				assert.Equal(t, originalEnTitle, tt.ctx.Translations["en"].Title, "Original Translations should not be modified")
+				assert.Equal(t, "Modified Title", clone.Translations["en"].Title, "Clone Translations should be modified")
+
+				// Adding new key to clone should not affect original
+				originalLen := len(tt.ctx.Translations)
+				clone.Translations["new"] = models.MovieTranslation{Language: "new", Title: "New"}
+				assert.Equal(t, originalLen, len(tt.ctx.Translations), "Original Translations length should not change")
 			}
 		})
 	}
@@ -609,6 +725,143 @@ func TestSanitizeFolderPath(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("SanitizeFolderPath() = %q, want %q", got, tt.want)
 			}
+		})
+	}
+}
+
+func TestBuildTranslationMap(t *testing.T) {
+	tests := []struct {
+		name         string
+		translations []models.MovieTranslation
+		wantKeys     []string
+		wantTitles   map[string]string
+	}{
+		{
+			name:         "Empty input",
+			translations: []models.MovieTranslation{},
+			wantKeys:     []string{},
+			wantTitles:   map[string]string{},
+		},
+		{
+			name: "Single translation",
+			translations: []models.MovieTranslation{
+				{Language: "en", Title: "English Title"},
+			},
+			wantKeys:   []string{"en"},
+			wantTitles: map[string]string{"en": "English Title"},
+		},
+		{
+			name: "Multiple translations",
+			translations: []models.MovieTranslation{
+				{Language: "en", Title: "English Title"},
+				{Language: "ja", Title: "Japanese Title"},
+				{Language: "zh", Title: "Chinese Title"},
+			},
+			wantKeys: []string{"en", "ja", "zh"},
+			wantTitles: map[string]string{
+				"en": "English Title",
+				"ja": "Japanese Title",
+				"zh": "Chinese Title",
+			},
+		},
+		{
+			name: "Duplicate languages - first wins",
+			translations: []models.MovieTranslation{
+				{Language: "en", Title: "First English"},
+				{Language: "en", Title: "Second English"},
+			},
+			wantKeys:   []string{"en"},
+			wantTitles: map[string]string{"en": "First English"},
+		},
+		{
+			name: "Invalid language codes filtered out",
+			translations: []models.MovieTranslation{
+				{Language: "en", Title: "Valid English"},
+				{Language: "eng", Title: "Invalid 3-letter"},
+				{Language: "", Title: "Empty language"},
+				{Language: "x", Title: "Single letter"},
+				{Language: "123", Title: "Numeric"},
+			},
+			wantKeys:   []string{"en"},
+			wantTitles: map[string]string{"en": "Valid English"},
+		},
+		{
+			name: "Region suffixes normalized",
+			translations: []models.MovieTranslation{
+				{Language: "en-US", Title: "US English"},
+				{Language: "ja_JP", Title: "JP Japanese"},
+				{Language: "zh-Hant", Title: "Traditional Chinese"},
+			},
+			wantKeys: []string{"en", "ja", "zh"},
+			wantTitles: map[string]string{
+				"en": "US English",
+				"ja": "JP Japanese",
+				"zh": "Traditional Chinese",
+			},
+		},
+		{
+			name: "Mixed case normalized to lowercase",
+			translations: []models.MovieTranslation{
+				{Language: "EN", Title: "Uppercase EN"},
+				{Language: "Ja", Title: "Mixed Ja"},
+			},
+			wantKeys: []string{"en", "ja"},
+			wantTitles: map[string]string{
+				"en": "Uppercase EN",
+				"ja": "Mixed Ja",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildTranslationMap(tt.translations)
+
+			if len(tt.wantKeys) == 0 {
+				assert.Empty(t, got)
+				return
+			}
+
+			assert.Len(t, got, len(tt.wantKeys))
+			for key, wantTitle := range tt.wantTitles {
+				assert.Contains(t, got, key, "Key %s should exist", key)
+				assert.Equal(t, wantTitle, got[key].Title, "Title for key %s", key)
+			}
+		})
+	}
+}
+
+func TestNormalizeLanguageCode(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"Valid lowercase 2-letter", "en", "en"},
+		{"Valid uppercase 2-letter", "EN", "en"},
+		{"Valid mixed case", "Ja", "ja"},
+		{"Region suffix with hyphen", "en-US", "en"},
+		{"Region suffix with underscore", "ja_JP", "ja"},
+		{"Script suffix", "zh-Hant", "zh"},
+		{"Multiple suffixes", "en-US-west", "en"},
+		{"Invalid 3-letter code", "eng", ""},
+		{"Invalid 3-letter Japanese", "jpn", ""},
+		{"Invalid single letter", "x", ""},
+		{"Invalid 3-digit numeric", "123", ""},
+		{"Invalid 2-digit numeric rejected", "12", ""},
+		{"Invalid empty", "", ""},
+		{"Whitespace only", "   ", ""},
+		{"Whitespace trimmed", "  en  ", "en"},
+		{"Whitespace with suffix", "  en-US  ", "en"},
+		{"Underscore only separator", "zh_", "zh"},
+		{"Hyphen at start", "-en", ""},
+		{"Hyphen at end", "en-", "en"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeLanguageCode(tt.input)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

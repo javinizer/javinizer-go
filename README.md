@@ -366,6 +366,38 @@ Javinizer uses a YAML configuration file to control scrapers, output templates, 
 javinizer init  # Creates default config.yaml in current directory
 ```
 
+## Multi-Language Template Tags
+
+Template tags support language selection for translated metadata fields.
+
+### Syntax
+
+- `<TITLE:EN>` - English title translation
+- `<TITLE:JA>` - Japanese title translation
+- `<TITLE:JA|EN>` - Japanese with English fallback (tries JA first, then EN)
+- `<TITLE>` - Base field (uses scraped/original value)
+
+### Supported Tags
+
+Only these tags support language selection: `TITLE`, `MAKER`, `LABEL`, `SERIES`, `DIRECTOR`, `DESCRIPTION`, `ORIGINALTITLE`, `STUDIO` (synonym for `MAKER`)
+
+### Limitations
+
+- Language codes are normalized to base language only (e.g., `en-US` → `en`)
+- Regional/script variants cannot be distinguished
+- Language codes must be lowercase 2-letter codes (`en`, `ja`, `zh`, `ko`, etc.)
+
+### Example
+
+```yaml
+output:
+  folder_format: <ID> [<MAKER:JA>] - <TITLE:EN> (<YEAR>)
+```
+
+Result: `ROYD-191 [ROYD] - A Beautiful Day (2024)`
+
+See [Template System](./docs/04-template-system.md) for full documentation.
+
 ## Documentation
 
 - [Getting Started](./docs/01-getting-started.md) - Installation and first steps
