@@ -7,6 +7,10 @@ Javinizer Go uses a flexible template system for customizing folder and file nam
 - [Template Syntax](#template-syntax)
 - [Available Tags](#available-tags)
 - [Modifiers](#modifiers)
+  - [Case Modifiers](#case-modifiers)
+  - [Date Modifiers](#date-modifiers)
+  - [Delimiter Modifiers](#delimiter-modifiers)
+  - [Language Modifiers](#language-modifiers)
 - [Conditional Logic](#conditional-logic)
 - [Examples](#examples)
 - [Advanced Usage](#advanced-usage)
@@ -46,17 +50,17 @@ BEAUTIFUL DAY
 |-----|-------------|---------|
 | `<ID>` | JAV ID | `IPX-535` |
 | `<CONTENTID>` | Content ID (lowercase, no hyphen) | `ipx00535` |
-| `<TITLE>` | Movie title | `Beautiful Day` |
-| `<ORIGINALTITLE>` | Japanese/alternate title | `美しい日` |
+| `<TITLE>` | Movie title (supports [language modifiers](#language-modifiers)) | `Beautiful Day` |
+| `<ORIGINALTITLE>` | Japanese/alternate title (supports [language modifiers](#language-modifiers)) | `美しい日` |
 
 ### Production Information
 
 | Tag | Description | Example |
 |-----|-------------|---------|
-| `<STUDIO>` or `<MAKER>` | Studio/maker name | `Idea Pocket` |
-| `<LABEL>` | Label name | `IP Label` |
-| `<SERIES>` | Series name | `Tsubomi Series` |
-| `<DIRECTOR>` | Director name | `John Director` |
+| `<STUDIO>` or `<MAKER>` | Studio/maker name (supports [language modifiers](#language-modifiers)) | `Idea Pocket` |
+| `<LABEL>` | Label name (supports [language modifiers](#language-modifiers)) | `IP Label` |
+| `<SERIES>` | Series name (supports [language modifiers](#language-modifiers)) | `Tsubomi Series` |
+| `<DIRECTOR>` | Director name (supports [language modifiers](#language-modifiers)) | `John Director` |
 
 ### Date and Time
 
@@ -87,7 +91,7 @@ BEAUTIFUL DAY
 
 | Tag | Description | Example |
 |-----|-------------|---------|
-| `<DESCRIPTION>` | Description/plot | `Long description text...` |
+| `<DESCRIPTION>` | Description/plot (supports [language modifiers](#language-modifiers)) | `Long description text...` |
 
 ### Indexing
 
@@ -165,6 +169,71 @@ Result:
 ```
 IPX-535 [Solowork, Beautiful Girl, Slender]
 ```
+
+### Language Modifiers
+
+Some fields support multiple language translations. Use language modifiers to specify which language version to display:
+
+**Syntax:**
+```
+<TAG:XX>
+```
+
+Where `XX` is a 2-letter ISO 639-1 language code (e.g., `en`, `ja`, `zh`, `ko`).
+
+**Supported translatable fields:**
+
+| Tag | Languages Available |
+|-----|---------------------|
+| `<TITLE:XX>` | Movie title in specified language |
+| `<ORIGINALTITLE:XX>` | Original title in specified language |
+| `<DESCRIPTION:XX>` | Description in specified language |
+| `<DIRECTOR:XX>` | Director name in specified language |
+| `<MAKER:XX>` or `<STUDIO:XX>` | Studio name in specified language |
+| `<LABEL:XX>` | Label name in specified language |
+| `<SERIES:XX>` | Series name in specified language |
+
+**Examples:**
+
+```yaml
+output:
+  folder_format: "<ID> - <TITLE:ja> (<TITLE:en>)"
+```
+
+Result:
+```
+IPX-535 - 美しい日 (Beautiful Day)
+```
+
+**Bilingual folder names:**
+```yaml
+output:
+  folder_format: "<ID> [<TITLE:ja>] - <TITLE:en>"
+```
+
+Result:
+```
+IPX-535 [美しい日] - Beautiful Day
+```
+
+**Japanese director and studio:**
+```yaml
+output:
+  folder_format: "<ID> by <DIRECTOR:ja> - <MAKER:ja>"
+```
+
+Result:
+```
+IPX-535 by 田中太郎 - アイデアポケット
+```
+
+**Fallback behavior:**
+
+If a translation in the requested language is not available:
+1. Falls back to the base field (no language specified)
+2. If base field is also empty, returns empty string
+
+**Note:** Language data availability depends on the scraper. Currently, only R18.dev provides both English (`en`) and Japanese (`ja`) translations in a single response. Other scrapers would need multiple requests to fetch different languages.
 
 ## Conditional Logic
 
@@ -286,6 +355,13 @@ output:
   folder_format: "<CONTENTID> - <TITLE>"
 ```
 Result: `ipx00535 - Beautiful Day/`
+
+**Bilingual (Japanese/English):**
+```yaml
+output:
+  folder_format: "<ID> - <TITLE:ja> (<TITLE:en>)"
+```
+Result: `IPX-535 - 美しい日 (Beautiful Day)/`
 
 ### File Formats
 
