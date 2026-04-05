@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1912,4 +1913,50 @@ func TestScraper_Search_ROYD191_Japanese(t *testing.T) {
 	assert.Contains(t, result.Series, "兄嫁", "Series should be in Japanese")
 	assert.Contains(t, result.Genres[0], "若妻", "Genres should be in Japanese")
 	assert.Equal(t, "川尻", result.Director, "Director should be in Japanese (name_kanji)")
+}
+
+func TestScraper_TranslationsPopulated(t *testing.T) {
+	// Test that translations are populated for both English and Japanese
+	cfg := config.ScraperSettings{
+		Enabled:  true,
+		Language: "en", // Default to English, but should populate both
+	}
+	scraper := New(cfg, testGlobalProxy, testGlobalFlareSolverr)
+
+	var data R18Response
+	err := json.Unmarshal(loadTestData(t, "royd191_response.json"), &data)
+	require.NoError(t, err)
+
+	result, err := scraper.parseResponse(&data, "https://r18.dev/test")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Verify translations are populated
+	assert.NotEmpty(t, result.Translations, "Translations should be populated")
+
+	// Should have both English and Japanese translations
+	require.Len(t, result.Translations, 2, "Should have both EN and JA translations")
+
+	// Find English translation
+	var enTranslation, jaTranslation *models.MovieTranslation
+	for i := range result.Translations {
+		if result.Translations[i].Language == "en" {
+			enTranslation = &result.Translations[i]
+		}
+		if result.Translations[i].Language == "ja" {
+			jaTranslation = &result.Translations[i]
+		}
+	}
+
+	// Verify English translation exists and has correct data
+	require.NotNil(t, enTranslation, "English translation should exist")
+	assert.Equal(t, "en", enTranslation.Language)
+	assert.NotEmpty(t, enTranslation.Title, "English title should be populated")
+	assert.Equal(t, "r18dev", enTranslation.SourceName)
+
+	// Verify Japanese translation exists and has correct data
+	require.NotNil(t, jaTranslation, "Japanese translation should exist")
+	assert.Equal(t, "ja", jaTranslation.Language)
+	assert.Contains(t, jaTranslation.Title, "兄嫁", "Japanese title should contain Japanese characters")
+	assert.Equal(t, "r18dev", jaTranslation.SourceName)
 }

@@ -19,28 +19,29 @@ type Rating struct {
 
 // ScraperResult represents the raw data returned by a scraper
 type ScraperResult struct {
-	Source           string        `json:"source"`
-	SourceURL        string        `json:"source_url"`
-	Language         string        `json:"language"` // ISO 639-1 code: en, ja, zh, etc.
-	ID               string        `json:"id"`
-	ContentID        string        `json:"content_id"`
-	Title            string        `json:"title"`
-	OriginalTitle    string        `json:"original_title"` // Japanese/original language title
-	Description      string        `json:"description"`
-	ReleaseDate      *time.Time    `json:"release_date"`
-	Runtime          int           `json:"runtime"`
-	Director         string        `json:"director"`
-	Maker            string        `json:"maker"`
-	Label            string        `json:"label"`
-	Series           string        `json:"series"`
-	Rating           *Rating       `json:"rating"`
-	Actresses        []ActressInfo `json:"actresses"`
-	Genres           []string      `json:"genres"`
-	PosterURL        string        `json:"poster_url"`         // Portrait/box art image
-	CoverURL         string        `json:"cover_url"`          // Landscape/fanart image
-	ShouldCropPoster bool          `json:"should_crop_poster"` // Whether poster needs cropping from cover
-	ScreenshotURL    []string      `json:"screenshot_urls"`
-	TrailerURL       string        `json:"trailer_url"`
+	Source           string             `json:"source"`
+	SourceURL        string             `json:"source_url"`
+	Language         string             `json:"language"` // ISO 639-1 code: en, ja, zh, etc.
+	ID               string             `json:"id"`
+	ContentID        string             `json:"content_id"`
+	Title            string             `json:"title"`
+	OriginalTitle    string             `json:"original_title"` // Japanese/original language title
+	Description      string             `json:"description"`
+	ReleaseDate      *time.Time         `json:"release_date"`
+	Runtime          int                `json:"runtime"`
+	Director         string             `json:"director"`
+	Maker            string             `json:"maker"`
+	Label            string             `json:"label"`
+	Series           string             `json:"series"`
+	Rating           *Rating            `json:"rating"`
+	Actresses        []ActressInfo      `json:"actresses"`
+	Genres           []string           `json:"genres"`
+	PosterURL        string             `json:"poster_url"`         // Portrait/box art image
+	CoverURL         string             `json:"cover_url"`          // Landscape/fanart image
+	ShouldCropPoster bool               `json:"should_crop_poster"` // Whether poster needs cropping from cover
+	ScreenshotURL    []string           `json:"screenshot_urls"`
+	TrailerURL       string             `json:"trailer_url"`
+	Translations     []MovieTranslation `json:"translations,omitempty"` // Additional language translations (optional)
 }
 
 // NormalizeMediaURLs applies post-scrape media URL normalization hooks.

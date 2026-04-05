@@ -406,6 +406,9 @@ func (s *Scraper) parseResponse(data *R18Response, sourceURL string) (*models.Sc
 		Runtime:       data.Runtime,
 	}
 
+	// Build translations for both languages if API provides both English and Japanese data
+	result.Translations = s.buildTranslations(data, movieID)
+
 	// Parse release date (now in YYYY-MM-DD format)
 	if data.ReleaseDate != "" {
 		t, err := time.Parse("2006-01-02", data.ReleaseDate)
@@ -780,6 +783,64 @@ type R18Response struct {
 		High string `json:"high"`
 		Low  string `json:"low"`
 	} `json:"sample"`
+}
+
+// buildTranslations creates translation records for both English and Japanese
+// if the API provides data in both languages
+func (s *Scraper) buildTranslations(data *R18Response, movieID string) []models.MovieTranslation {
+	translations := make([]models.MovieTranslation, 0, 2)
+
+	// Add English translation if English data is available
+	if data.TitleEn != "" || data.MakerNameEn != "" || data.LabelNameEn != "" ||
+		data.SeriesNameEn != "" || data.DescriptionEn != "" {
+
+		// Build director from English preference
+		directorEn := ""
+		if len(data.Directors) > 0 {
+			directorEn = cleanString(getPreferredString(data.Directors[0].NameRomaji, data.Directors[0].NameKanji))
+		} else {
+			directorEn = cleanString(getPreferredString(data.DirectorEn, data.Director))
+		}
+
+		translations = append(translations, models.MovieTranslation{
+			Language:      "en",
+			Title:         cleanString(data.TitleEn),
+			OriginalTitle: cleanString(data.TitleJA),
+			Description:   cleanString(data.DescriptionEn),
+			Director:      directorEn,
+			Maker:         cleanString(data.MakerNameEn),
+			Label:         cleanString(data.LabelNameEn),
+			Series:        cleanString(data.SeriesNameEn),
+			SourceName:    s.Name(),
+		})
+	}
+
+	// Add Japanese translation if Japanese data is available
+	if data.TitleJA != "" || data.MakerNameJa != "" || data.LabelNameJa != "" ||
+		data.SeriesNameJa != "" {
+
+		// Build director from Japanese preference
+		directorJa := ""
+		if len(data.Directors) > 0 {
+			directorJa = cleanString(getPreferredString(data.Directors[0].NameKanji, data.Directors[0].NameRomaji))
+		} else {
+			directorJa = cleanString(getPreferredString(data.Director, data.DirectorEn))
+		}
+
+		translations = append(translations, models.MovieTranslation{
+			Language:      "ja",
+			Title:         cleanString(data.TitleJA),
+			OriginalTitle: cleanString(data.TitleJA),
+			Description:   cleanString(data.Description),
+			Director:      directorJa,
+			Maker:         cleanString(data.MakerNameJa),
+			Label:         cleanString(data.LabelNameJa),
+			Series:        cleanString(data.SeriesNameJa),
+			SourceName:    s.Name(),
+		})
+	}
+
+	return translations
 }
 
 func init() {

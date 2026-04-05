@@ -955,7 +955,49 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult, movie *m
 	translations := make([]models.MovieTranslation, 0, len(results))
 
 	for _, result := range results {
-		// Skip results without language metadata
+		// First, process any translations provided by the scraper (e.g., R18.dev provides both EN and JA)
+		if len(result.Translations) > 0 {
+			for _, trans := range result.Translations {
+				// Check if this translation language is already added
+				existingIdx := -1
+				for i, existing := range translations {
+					if existing.Language == trans.Language {
+						existingIdx = i
+						break
+					}
+				}
+
+				if existingIdx >= 0 {
+					// Merge with existing translation (prefer non-empty values)
+					if trans.Title != "" && translations[existingIdx].Title == "" {
+						translations[existingIdx].Title = trans.Title
+					}
+					if trans.OriginalTitle != "" && translations[existingIdx].OriginalTitle == "" {
+						translations[existingIdx].OriginalTitle = trans.OriginalTitle
+					}
+					if trans.Description != "" && translations[existingIdx].Description == "" {
+						translations[existingIdx].Description = trans.Description
+					}
+					if trans.Director != "" && translations[existingIdx].Director == "" {
+						translations[existingIdx].Director = trans.Director
+					}
+					if trans.Maker != "" && translations[existingIdx].Maker == "" {
+						translations[existingIdx].Maker = trans.Maker
+					}
+					if trans.Label != "" && translations[existingIdx].Label == "" {
+						translations[existingIdx].Label = trans.Label
+					}
+					if trans.Series != "" && translations[existingIdx].Series == "" {
+						translations[existingIdx].Series = trans.Series
+					}
+				} else {
+					// Add new translation
+					translations = append(translations, trans)
+				}
+			}
+		}
+
+		// Skip results without language metadata for the legacy path
 		if result.Language == "" {
 			continue
 		}
@@ -1003,7 +1045,41 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult, movie *m
 			SourceName:    result.Source,
 		}
 
-		translations = append(translations, translation)
+		// Check if this language already exists (from scraper translations above)
+		existingIdx := -1
+		for i, existing := range translations {
+			if existing.Language == result.Language {
+				existingIdx = i
+				break
+			}
+		}
+
+		if existingIdx >= 0 {
+			// Merge with existing translation (prefer non-empty values)
+			if translation.Title != "" && translations[existingIdx].Title == "" {
+				translations[existingIdx].Title = translation.Title
+			}
+			if translation.OriginalTitle != "" && translations[existingIdx].OriginalTitle == "" {
+				translations[existingIdx].OriginalTitle = translation.OriginalTitle
+			}
+			if translation.Description != "" && translations[existingIdx].Description == "" {
+				translations[existingIdx].Description = translation.Description
+			}
+			if translation.Director != "" && translations[existingIdx].Director == "" {
+				translations[existingIdx].Director = translation.Director
+			}
+			if translation.Maker != "" && translations[existingIdx].Maker == "" {
+				translations[existingIdx].Maker = translation.Maker
+			}
+			if translation.Label != "" && translations[existingIdx].Label == "" {
+				translations[existingIdx].Label = translation.Label
+			}
+			if translation.Series != "" && translations[existingIdx].Series == "" {
+				translations[existingIdx].Series = translation.Series
+			}
+		} else {
+			translations = append(translations, translation)
+		}
 	}
 
 	return translations
