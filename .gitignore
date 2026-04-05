@@ -74,6 +74,7 @@ COVERAGE_REPORT.md
 .superturtle/
 .planning/
 .superpowers/
+.tmprepro/
 # Allow contracts but ignore other superpowers content
 docs/superpowers/*
 !docs/superpowers/contracts/
