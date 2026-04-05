@@ -90,7 +90,7 @@ javinizer scrape <ID> [flags]
 
 **Flags:**
 ```bash
---source string   # Specific scraper to use (r18dev, dmm)
+--scrapers strings   # Specific scraper(s) to use (e.g., r18dev, dmm)
 ```
 
 **Examples:**
@@ -737,7 +737,7 @@ javinizer api --verbose
 - `POST /api/v1/auth/setup` - First-run username/password setup
 - `POST /api/v1/auth/login` - Login and issue session cookie
 - `POST /api/v1/scrape` - Scrape metadata for a movie ID
-- `GET /api/v1/movie/:id` - Get movie metadata by ID
+- `GET /api/v1/movies/:id` - Get movie metadata by ID
 - `GET /api/v1/movies` - List cached movies
 - `GET /api/v1/config` - Get current configuration
 

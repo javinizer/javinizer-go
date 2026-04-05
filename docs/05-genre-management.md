@@ -113,7 +113,7 @@ javinizer genre add "Hi-Vision" "HD"
 
 ## Combining with Ignore Filter
 
-You can combine genre replacements with the ignore filter in `config.yaml`:
+You can combine genre replacements with the ignore filter in `configs/config.yaml`:
 
 ```yaml
 metadata:

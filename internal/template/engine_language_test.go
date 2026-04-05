@@ -808,6 +808,32 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 			want:    "Base Title",
 			wantErr: false,
 		},
+		{
+			name:       "Invalid 3-letter with region eng-US uses base field",
+			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			template:   "<TITLE:eng-US>",
+			ctx: &Context{
+				Title: "Base Title",
+				Translations: map[string]models.MovieTranslation{
+					"en": {Language: "en", Title: "English Title"},
+				},
+			},
+			want:    "Base Title",
+			wantErr: false,
+		},
+		{
+			name:       "Invalid 3-letter with underscore jpn_JP uses base field",
+			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			template:   "<DIRECTOR:jpn_JP>",
+			ctx: &Context{
+				Director: "Base Director",
+				Translations: map[string]models.MovieTranslation{
+					"en": {Language: "en", Director: "English Director"},
+				},
+			},
+			want:    "Base Director",
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

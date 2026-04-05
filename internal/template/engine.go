@@ -708,7 +708,7 @@ func (e *Engine) looksLikeLanguageSpec(modifier string) bool {
 	trimmed := strings.TrimSpace(modifier)
 	if idx := strings.IndexAny(trimmed, "-_"); idx > 0 {
 		prefix := trimmed[:idx]
-		if len(prefix) == 2 {
+		if len(prefix) >= 2 && len(prefix) <= 3 {
 			for _, r := range strings.ToLower(prefix) {
 				if r < 'a' || r > 'z' {
 					return false

@@ -128,7 +128,7 @@ make lint
 
 # Coverage
 make coverage
-make coverage-fast      # Faster local coverage iteration
+make coverage-pkg      # Per-package breakdown
 make coverage-html      # View in browser
 make coverage-check     # Check threshold
 ```
@@ -288,7 +288,7 @@ If coverage is below 75%, you have options:
 make coverage-html
 
 # Check per-package breakdown
-make coverage-func
+make coverage-pkg
 
 # Run with lower threshold temporarily
 ./scripts/check_coverage.sh 20 coverage.out

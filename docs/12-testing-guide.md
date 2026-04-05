@@ -20,11 +20,8 @@ This guide covers testing practices, tools, and coverage requirements for the ja
 # Run all tests
 make test
 
-# Run tests with coverage report (uses go-acc automatically via go run)
+# Run tests with coverage report
 make coverage
-
-# Run faster local coverage report (short mode)
-make coverage-fast
 
 # View coverage in browser
 make coverage-html
@@ -35,15 +32,7 @@ make coverage-check
 
 ### Development Tools
 
-This project uses `go run` to execute development tools without requiring global installation. Tools are declared in `tools.go` and tracked in `go.mod`.
-
-**Benefits:**
-- ✅ No global installation needed
-- ✅ Version-controlled dependencies
-- ✅ Consistent across all environments
-- ✅ Works in CI/CD automatically
-
-The `make coverage` command runs strict coverage via `go-acc` (used by CI/release gates). For faster local iteration, use `make coverage-fast`.
+This project uses standard Go tooling for testing and coverage.
 
 ### All Test Commands
 
@@ -54,10 +43,9 @@ The `make coverage` command runs strict coverage via `go-acc` (used by CI/releas
 | `make test-race` | Run race detector on concurrent packages | Before committing concurrent code changes |
 | `make test-verbose` | Run tests with verbose output and no caching | Debugging test failures |
 | `make bench` | Run benchmark tests | Performance testing |
-| `make coverage` | Generate strict coverage.out file (go-acc) | CI/release-quality coverage |
-| `make coverage-fast` | Generate faster local coverage.out file | Daily local iteration |
+| `make coverage` | Generate coverage.out file | CI/release-quality coverage |
 | `make coverage-html` | Open HTML coverage report in browser | Visual coverage analysis |
-| `make coverage-func` | Display Go statement coverage breakdown by function | Identify specific gaps |
+| `make coverage-pkg` | Display coverage breakdown by package | Identify specific gaps |
 | `make coverage-check` | Verify Codecov-compatible line coverage meets 75% threshold | Pre-push validation |
 | `make ci` | Run full CI suite (vet + lint + coverage + race) | Before opening PR |
 
@@ -71,7 +59,7 @@ go test ./internal/worker/...
 go test -race ./internal/worker/...
 
 # Test a specific function
-go test -v -run TestPoolSubmit ./internal/worker
+go test -v -run TestPool_Submit ./internal/worker
 
 # Test with coverage for one package
 go test -coverprofile=coverage.out ./internal/matcher/...
@@ -389,7 +377,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 }
 ```
 
-See `cmd/javinizer/commands/update/command_test.go` for the complete 544-line test suite achieving 85.4% coverage with 20 tests covering flags, integration scenarios, and unit functionality.
+See `cmd/javinizer/commands/update/command_test.go` for the complete test suite covering flags, integration scenarios, and unit functionality.
 
 #### Testing API Command (Epic 7 Pattern)
 
@@ -694,22 +682,23 @@ func (m *Model) ProcessFiles() {
 
 **After (Dependency Injection):**
 
+*Note: The following are illustrative patterns showing dependency injection for testability. Actual interface and function signatures may differ in the codebase.*
+
 ```go
-// internal/tui/interfaces.go:15 (NEW in Epic 9)
-type WorkerPoolInterface interface {
+// Example dependency injection pattern (illustrative)
+type PoolInterface interface {
     Submit(task worker.Task) error
-    Wait()
+    Wait() error
     Stop()
 }
 
-// internal/tui/processor.go:28 (Story 9.1a)
 type ProcessingCoordinator struct {
-    pool WorkerPoolInterface  // Interface, not concrete type
+    pool PoolInterface  // Interface, not concrete type
     cfg  *config.Config
     db   database.DB
 }
 
-func NewProcessingCoordinator(pool WorkerPoolInterface, cfg *config.Config, db database.DB) *ProcessingCoordinator {
+func NewProcessingCoordinator(pool PoolInterface, cfg *config.Config, db database.DB) *ProcessingCoordinator {
     return &ProcessingCoordinator{pool: pool, cfg: cfg, db: db}
 }
 
@@ -798,36 +787,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 **After (Pure State Transformation Functions):**
 
 ```go
-// internal/tui/state.go:18 (Story 9.2)
+// internal/tui/state.go:113 (Story 9.2)
 // Pure function: takes current state, returns NEW state (immutable)
-func HandleNavigationDown(currentIndex int, itemCount int) int {
-    if itemCount == 0 {
-        return 0
+func MoveCursorUp(state State) State {
+    newState := state
+    if newState.Cursor > 0 {
+        newState.Cursor--
     }
-    newIndex := currentIndex + 1
-    if newIndex >= itemCount {
-        return itemCount - 1  // Clamp at bottom
-    }
-    return newIndex
+    return newState
 }
 
-func HandleNavigationUp(currentIndex int) int {
-    newIndex := currentIndex - 1
-    if newIndex < 0 {
-        return 0  // Clamp at top
+func MoveCursorDown(state State, maxItems int) State {
+    newState := state
+    if maxItems > 0 && newState.Cursor < maxItems-1 {
+        newState.Cursor++
     }
-    return newIndex
+    return newState
 }
 
-// internal/tui/update.go:85 (AFTER Epic 9)
+// Example Update function using pure state transformers
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     switch msg := msg.(type) {
     case tea.KeyMsg:
         if msg.String() == "j" {
-            m.currentIndex = HandleNavigationDown(m.currentIndex, len(m.files))
+            m.state = MoveCursorDown(m.state, len(m.files))
         }
         if msg.String() == "k" {
-            m.currentIndex = HandleNavigationUp(m.currentIndex)
+            m.state = MoveCursorUp(m.state)
         }
     }
     return m, nil
@@ -837,23 +823,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 **Test Pattern:**
 
 ```go
-// internal/tui/state_test.go:28
-func TestHandleNavigationDown(t *testing.T) {
+// Example test for cursor movement (illustrative pattern)
+func TestMoveCursorDown(t *testing.T) {
     tests := []struct {
         name         string
-        currentIndex int
+        cursor       int
         itemCount    int
         expected     int
     }{
         {
             name:         "move down within bounds",
-            currentIndex: 5,
+            cursor:       5,
             itemCount:    10,
             expected:     6,
         },
         {
             name:         "clamp at bottom boundary",
-            currentIndex: 9,
+            cursor:       9,
             itemCount:    10,
             expected:     9,
         },
@@ -867,8 +853,9 @@ func TestHandleNavigationDown(t *testing.T) {
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            result := HandleNavigationDown(tt.currentIndex, tt.itemCount)
-            assert.Equal(t, tt.expected, result)
+            state := State{Cursor: tt.cursor}
+            result := MoveCursorDown(state, tt.itemCount)
+            assert.Equal(t, tt.expected, result.Cursor)
         })
     }
 }
@@ -920,33 +907,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 **After (Pure Message Handler Functions):**
 
 ```go
-// internal/tui/handlers.go:22 (Story 9.3)
+// internal/tui/handlers.go:17 (Story 9.3)
 // Pure function: takes current state + message, returns updated state
-func HandleProgressUpdate(tasks map[string]TaskState, msg ProgressUpdateMsg, bytesDownloaded int64) (map[string]TaskState, int64) {
-    updatedTasks := make(map[string]TaskState, len(tasks))
-    for k, v := range tasks {
-        updatedTasks[k] = v  // Copy map
+func HandleProgressUpdate(tasks map[string]*worker.TaskProgress, update worker.ProgressUpdate) map[string]*worker.TaskProgress {
+    // Create new tasks map to ensure immutability
+    newTasks := make(map[string]*worker.TaskProgress)
+    for id, task := range tasks {
+        if id == update.TaskID {
+            // Create a copy of the task being updated
+            updatedTask := *task
+            updatedTask.Status = update.Status
+            updatedTask.Progress = update.Progress
+            updatedTask.Message = update.Message
+            updatedTask.BytesDone = update.BytesDone
+            newTasks[id] = &updatedTask
+        } else {
+            // Keep other tasks unchanged
+            newTasks[id] = task
+        }
     }
-
-    updatedTasks[msg.ID] = TaskState{
-        ID:          msg.ID,
-        Description: msg.Description,
-        Progress:    msg.Progress,
-        Status:      "in_progress",
-    }
-
-    newBytesDownloaded := bytesDownloaded + msg.BytesDelta
-
-    return updatedTasks, newBytesDownloaded
+    return newTasks
 }
-
-func HandleTaskComplete(tasks map[string]TaskState, taskID string) map[string]TaskState {
-    updatedTasks := make(map[string]TaskState, len(tasks))
-    for k, v := range tasks {
-        updatedTasks[k] = v
-    }
-
-    if task, exists := updatedTasks[taskID]; exists {
         task.Status = "completed"
         task.Progress = 1.0
         updatedTasks[taskID] = task
@@ -955,13 +936,11 @@ func HandleTaskComplete(tasks map[string]TaskState, taskID string) map[string]Ta
     return updatedTasks
 }
 
-// internal/tui/update.go:45 (AFTER Epic 9)
+// Example Update function using pure handlers
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     switch msg := msg.(type) {
-    case ProgressUpdateMsg:
-        m.tasks, m.bytesDownloaded = HandleProgressUpdate(m.tasks, msg, m.bytesDownloaded)
-    case TaskCompleteMsg:
-        m.tasks = HandleTaskComplete(m.tasks, msg.ID)
+    case worker.ProgressUpdate:
+        m.tasks = HandleProgressUpdate(m.tasks, msg)
     }
     return m, nil
 }
@@ -970,31 +949,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 **Test Pattern:**
 
 ```go
-// internal/tui/handlers_test.go:35
+// Example test for progress handler (illustrative pattern)
 func TestHandleProgressUpdate(t *testing.T) {
-    initialTasks := map[string]TaskState{
-        "task-1": {ID: "task-1", Description: "Old task", Progress: 0.5},
+    initialTasks := map[string]*worker.TaskProgress{
+        "task-1": {TaskID: "task-1", Description: "Old task", Progress: 0.5},
     }
 
-    msg := ProgressUpdateMsg{
-        ID:          "task-2",
+    msg := worker.ProgressUpdate{
+        TaskID:      "task-2",
         Description: "New task",
         Progress:    0.25,
-        BytesDelta:  1024,
     }
 
     // Execute: Pure function, no side effects
-    updatedTasks, newBytes := HandleProgressUpdate(initialTasks, msg, 5000)
-
-    // Verify: Original unchanged (immutability)
-    assert.Len(t, initialTasks, 1)
-    assert.Equal(t, int64(5000), int64(5000))  // Original bytes unchanged
+    updatedTasks := HandleProgressUpdate(initialTasks, msg)
 
     // Verify: New state correct
     assert.Len(t, updatedTasks, 2)
     assert.Equal(t, "New task", updatedTasks["task-2"].Description)
     assert.Equal(t, 0.25, updatedTasks["task-2"].Progress)
-    assert.Equal(t, int64(6024), newBytes)
 }
 ```
 
@@ -1040,10 +1013,12 @@ func (m *Model) renderTaskList() string {
 
 **After (Pure Transformation Functions):**
 
+*Note: The following are illustrative patterns showing how to refactor impure functions to pure functions for testability. These are examples, not actual code from the codebase.*
+
 ```go
-// internal/tui/transforms.go:18 (Story 9.4)
+// Example pure function for formatting (illustrative pattern - not in codebase)
 // Pure function: bytes → human-readable string
-func FormatFileSize(bytes int64) string {
+func formatFileSize(bytes int64) string {
     if bytes < 1024 {
         return fmt.Sprintf("%d B", bytes)
     } else if bytes < 1024*1024 {
@@ -1054,11 +1029,11 @@ func FormatFileSize(bytes int64) string {
     return fmt.Sprintf("%.2f GB", float64(bytes)/(1024*1024*1024))
 }
 
-func FormatProgressPercent(progress float64) string {
+func formatProgressPercent(progress float64) string {
     return fmt.Sprintf("%.1f%%", progress*100)
 }
 
-func FormatElapsedTime(duration time.Duration) string {
+func formatElapsedTime(duration time.Duration) string {
     if duration < time.Minute {
         return fmt.Sprintf("%.0fs", duration.Seconds())
     } else if duration < time.Hour {
@@ -1067,11 +1042,11 @@ func FormatElapsedTime(duration time.Duration) string {
     return fmt.Sprintf("%.1fh", duration.Hours())
 }
 
-// internal/tui/components.go:125 (AFTER Epic 9)
+// Using pure functions in rendering (AFTER Epic 9)
 func (m *Model) renderTaskList() string {
     var lines []string
     for _, task := range m.tasks {
-        sizeStr := FormatFileSize(task.BytesDownloaded)  // Pure function
+        sizeStr := formatFileSize(task.BytesDownloaded)  // Pure function
         progressBar := renderProgressBar(task.Progress)
         lines = append(lines, fmt.Sprintf("%s %s %s", task.Description, progressBar, sizeStr))
     }
@@ -1082,7 +1057,7 @@ func (m *Model) renderTaskList() string {
 **Test Pattern:**
 
 ```go
-// internal/tui/transforms_test.go:22
+// Example test for pure formatting function (illustrative pattern)
 func TestFormatFileSize(t *testing.T) {
     tests := []struct {
         name     string
@@ -1098,7 +1073,7 @@ func TestFormatFileSize(t *testing.T) {
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            result := FormatFileSize(tt.bytes)
+            result := formatFileSize(tt.bytes)
             assert.Equal(t, tt.expected, result)
         })
     }
@@ -1224,7 +1199,6 @@ TUI package is excluded by default in the `make coverage` target because:
 The MVP pattern enables **confident TUI feature development** with **regression testing** for business logic, while acknowledging that visual rendering requires manual verification.
 
 **References:**
-- Epic 9 Tech Spec: `docs-no-commit/sprint-artifacts/tech-spec-epic-9.md`
 - All test files: `internal/tui/*_test.go`
 - CLAUDE.md TUI Testing Pattern section (comprehensive guide)
 

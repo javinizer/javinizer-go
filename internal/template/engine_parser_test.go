@@ -206,6 +206,8 @@ func TestParseModifier(t *testing.T) {
 		{"Valid language ko", "TITLE", "ko", true, "ko", "", false},
 		{"Valid language de", "TITLE", "de", true, "de", "", false},
 		{"Valid language fr", "TITLE", "fr", true, "fr", "", false},
+		{"Invalid 3-letter with region eng-US rejected", "TITLE", "eng-US", false, "", "", true},
+		{"Invalid 3-letter with underscore jpn_JP rejected", "TITLE", "jpn_JP", false, "", "", true},
 	}
 
 	for _, tt := range tests {

@@ -6,7 +6,7 @@ Javinizer Go uses SQLite for caching metadata, storing actress information, and 
 
 **Default**: `data/javinizer.db`
 
-Configure in `config.yaml`:
+Configure in `configs/config.yaml`:
 ```yaml
 database:
   type: sqlite

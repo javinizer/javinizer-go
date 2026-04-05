@@ -106,7 +106,7 @@ sqlite3 data/javinizer.db ".recover" | sqlite3 data/javinizer-recovered.db
 **Solutions**:
 - Check internet connection
 - Try again later (site may be down)
-- Use different scraper: `--source dmm`
+- Use different scraper: `--scrapers dmm`
 - Increase timeout in code (requires rebuild)
 
 ### "404 Not Found"
@@ -136,8 +136,8 @@ scrapers:
     enabled: true
 
 # Test each scraper individually
-javinizer scrape IPX-535 --source r18dev
-javinizer scrape IPX-535 --source dmm
+javinizer scrape IPX-535 --scrapers r18dev
+javinizer scrape IPX-535 --scrapers dmm
 ```
 
 ### "Rate limited"

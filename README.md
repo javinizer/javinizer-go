@@ -358,7 +358,7 @@ Javinizer uses a YAML configuration file to control scrapers, output templates, 
 **Documentation:**
 - [Configuration Guide](./docs/02-configuration.md) - Detailed option reference
 - [Example Config](./configs/config.yaml.example) - Fully commented configuration
-- [Template System](./docs/06-template-system.md) - Output template syntax and functions
+- [Template System](./docs/04-template-system.md) - Output template syntax and functions
 - [Genre Management](./docs/05-genre-management.md) - Genre replacement workflow
 
 **Initialize config:**
@@ -406,7 +406,7 @@ See [Template System](./docs/04-template-system.md) for full documentation.
 - [CLI Reference](./docs/03-cli-reference.md) - Command-line interface guide
 - [TUI Guide](./docs/11-tui.md) - Interactive terminal UI
 - [API Reference](./docs/07-api-reference.md) - REST API endpoints
-- [Template System](./docs/06-template-system.md) - Output naming templates
+- [Template System](./docs/04-template-system.md) - Output naming templates
 - [Genre Management](./docs/05-genre-management.md) - Genre replacement rules
 - [Troubleshooting](./docs/10-troubleshooting.md) - Common issues and solutions
 

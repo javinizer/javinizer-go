@@ -63,8 +63,6 @@ BEAUTIFUL DAY
 | Tag | Description | Example |
 |-----|-------------|---------|
 | `<YEAR>` | Release year (4 digits) | `2020` |
-| `<MONTH>` | Release month (2 digits) | `09` |
-| `<DAY>` | Release day (2 digits) | `13` |
 | `<RELEASEDATE>` | Full release date | `2020-09-13` |
 | `<RELEASEDATE:format>` | Custom date format | See [Date Modifiers](#date-modifiers) |
 | `<RUNTIME>` | Runtime in minutes | `120` |
@@ -89,7 +87,6 @@ BEAUTIFUL DAY
 
 | Tag | Description | Example |
 |-----|-------------|---------|
-| `<RATING>` | Rating score | `4.5` |
 | `<DESCRIPTION>` | Description/plot | `Long description text...` |
 
 ### Indexing
