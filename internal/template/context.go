@@ -3,6 +3,7 @@ package template
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/mediainfo"
@@ -49,9 +50,10 @@ type Context struct {
 	PartSuffix  string // Original part suffix detected from filename (e.g., "-pt1", "-A")
 	IsMultiPart bool   // Whether this is a multi-part file
 
-	// Cached mediainfo (lazy-loaded)
+	// Cached mediainfo (lazy-loaded with thread-safe initialization)
+	mediaInfoOnce   sync.Once
 	cachedMediaInfo *mediainfo.VideoInfo
-	mediaInfoError  error // Cached error to avoid repeated analysis failures
+	mediaInfoError  error
 
 	// Additional metadata
 	Rating      float64
@@ -166,11 +168,38 @@ func NewContextFromScraperResult(result *models.ScraperResult) *Context {
 	return ctx
 }
 
-// Clone creates a copy of the context
+// Clone creates a copy of the context.
+// Preserves cached mediainfo to avoid duplicate expensive analysis.
 func (c *Context) Clone() *Context {
-	clone := *c
+	clone := Context{
+		ID:               c.ID,
+		ContentID:        c.ContentID,
+		Title:            c.Title,
+		OriginalTitle:    c.OriginalTitle,
+		ReleaseDate:      c.ReleaseDate,
+		Runtime:          c.Runtime,
+		Director:         c.Director,
+		FirstName:        c.FirstName,
+		LastName:         c.LastName,
+		Maker:            c.Maker,
+		Label:            c.Label,
+		Series:           c.Series,
+		OriginalFilename: c.OriginalFilename,
+		VideoFilePath:    c.VideoFilePath,
+		Index:            c.Index,
+		PartNumber:       c.PartNumber,
+		PartSuffix:       c.PartSuffix,
+		IsMultiPart:      c.IsMultiPart,
+		Rating:           c.Rating,
+		Description:      c.Description,
+		CoverURL:         c.CoverURL,
+		TrailerURL:       c.TrailerURL,
+		DefaultLanguage:  c.DefaultLanguage,
+		GroupActress:     c.GroupActress,
+		cachedMediaInfo:  c.cachedMediaInfo,
+		mediaInfoError:   c.mediaInfoError,
+	}
 
-	// Deep copy slices
 	if c.Actresses != nil {
 		clone.Actresses = make([]string, len(c.Actresses))
 		copy(clone.Actresses, c.Actresses)
@@ -192,31 +221,20 @@ func (c *Context) Clone() *Context {
 }
 
 // GetMediaInfo lazy-loads and caches video metadata.
-// Caches both success and failure states to avoid repeated expensive analysis.
+// Thread-safe: uses sync.Once to ensure single initialization even under concurrent access.
+// Preserves pre-existing cached values from Clone() to avoid duplicate expensive analysis.
 func (c *Context) GetMediaInfo() *mediainfo.VideoInfo {
-	if c.cachedMediaInfo != nil {
-		return c.cachedMediaInfo
-	}
-
-	// Return cached failure (nil result already cached)
-	if c.mediaInfoError != nil {
-		return nil
-	}
-
-	if c.VideoFilePath == "" {
-		c.mediaInfoError = fmt.Errorf("no video file path")
-		return nil
-	}
-
-	// Analyze video file
-	info, err := mediainfo.Analyze(c.VideoFilePath)
-	if err != nil {
-		c.mediaInfoError = err
-		return nil
-	}
-
-	c.cachedMediaInfo = info
-	return info
+	c.mediaInfoOnce.Do(func() {
+		if c.cachedMediaInfo != nil || c.mediaInfoError != nil {
+			return
+		}
+		if c.VideoFilePath == "" {
+			c.mediaInfoError = fmt.Errorf("no video file path")
+			return
+		}
+		c.cachedMediaInfo, c.mediaInfoError = mediainfo.Analyze(c.VideoFilePath)
+	})
+	return c.cachedMediaInfo
 }
 
 // buildTranslationMap creates a language-keyed map from translation records.

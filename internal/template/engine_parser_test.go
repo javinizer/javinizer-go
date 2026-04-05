@@ -169,42 +169,43 @@ func TestParseModifier(t *testing.T) {
 		wantIsLanguage bool
 		wantLangSpec   string
 		wantLegacy     string
+		wantRejected   bool
 	}{
-		{"Empty modifier", "TITLE", "", false, "", ""},
-		{"Valid language spec en", "TITLE", "en", true, "en", ""},
-		{"Valid language spec ja", "TITLE", "ja", true, "ja", ""},
-		{"Valid language spec zh", "TITLE", "zh", true, "zh", ""},
-		{"Valid uppercase EN normalized", "TITLE", "EN", true, "en", ""},
-		{"Valid mixed case En normalized", "TITLE", "En", true, "en", ""},
-		{"Invalid 3-letter eng rejected as invalid language spec", "TITLE", "eng", false, "", ""},
-		{"Numeric modifier for TITLE preserved", "TITLE", "50", false, "", "50"},
-		{"Numeric modifier for TITLE zero", "TITLE", "0", false, "", "0"},
-		{"Non-TITLE tag with numeric treated as legacy", "DIRECTOR", "50", false, "", "50"},
-		{"Non-TITLE tag with language spec", "DIRECTOR", "en", true, "en", ""},
-		{"MAKER tag with language spec", "MAKER", "ja", true, "ja", ""},
-		{"STUDIO tag with language spec", "STUDIO", "zh", true, "zh", ""},
-		{"LABEL tag with language spec", "LABEL", "en", true, "en", ""},
-		{"SERIES tag with language spec", "SERIES", "ja", true, "ja", ""},
-		{"DESCRIPTION tag with language spec", "DESCRIPTION", "en", true, "en", ""},
-		{"ORIGINALTITLE tag with language spec", "ORIGINALTITLE", "ja", true, "ja", ""},
-		{"ID tag with language spec (not translatable)", "ID", "en", true, "en", ""},
-		{"Valid region suffix normalized", "TITLE", "en-US", true, "en", ""},
-		{"Valid whitespace trimmed and normalized", "TITLE", "  en  ", true, "en", ""},
-		{"Case modifier uppercase", "ID", "UPPERCASE", false, "", "UPPERCASE"},
-		{"Case modifier lowercase", "ID", "LOWERCASE", false, "", "LOWERCASE"},
-		{"TITLE with case modifier treated as legacy", "TITLE", "UPPERCASE", false, "", "UPPERCASE"},
-		{"TITLE with UPPERCASE and language fallback", "TITLE", "UPPER", false, "", "UPPER"},
-		{"TITLE with valid numeric", "TITLE", "100", false, "", "100"},
-		{"TITLE with negative numeric treated as legacy", "TITLE", "-50", false, "", "-50"},
-		{"TITLE with alphanumeric treated as legacy", "TITLE", "50abc", false, "", "50abc"},
-		{"RELEASEDATE with format pattern", "RELEASEDATE", "YYYY-MM-DD", false, "", "YYYY-MM-DD"},
-		{"ACTORS with delimiter", "ACTORS", " and ", false, "", " and "},
-		{"GENRES with delimiter", "GENRES", "|", false, "", "|"},
-		{"INDEX with padding", "INDEX", "3", false, "", "3"},
-		{"PART with padding", "PART", "2", false, "", "2"},
-		{"Valid language ko", "TITLE", "ko", true, "ko", ""},
-		{"Valid language de", "TITLE", "de", true, "de", ""},
-		{"Valid language fr", "TITLE", "fr", true, "fr", ""},
+		{"Empty modifier", "TITLE", "", false, "", "", false},
+		{"Valid language spec en", "TITLE", "en", true, "en", "", false},
+		{"Valid language spec ja", "TITLE", "ja", true, "ja", "", false},
+		{"Valid language spec zh", "TITLE", "zh", true, "zh", "", false},
+		{"Valid uppercase EN normalized", "TITLE", "EN", true, "en", "", false},
+		{"Valid mixed case En normalized", "TITLE", "En", true, "en", "", false},
+		{"Invalid 3-letter eng rejected", "TITLE", "eng", false, "", "", true},
+		{"Numeric modifier for TITLE preserved", "TITLE", "50", false, "", "50", false},
+		{"Numeric modifier for TITLE zero", "TITLE", "0", false, "", "0", false},
+		{"Non-TITLE tag with numeric treated as legacy", "DIRECTOR", "50", false, "", "50", false},
+		{"Non-TITLE tag with language spec", "DIRECTOR", "en", true, "en", "", false},
+		{"MAKER tag with language spec", "MAKER", "ja", true, "ja", "", false},
+		{"STUDIO tag with language spec", "STUDIO", "zh", true, "zh", "", false},
+		{"LABEL tag with language spec", "LABEL", "en", true, "en", "", false},
+		{"SERIES tag with language spec", "SERIES", "ja", true, "ja", "", false},
+		{"DESCRIPTION tag with language spec", "DESCRIPTION", "en", true, "en", "", false},
+		{"ORIGINALTITLE tag with language spec", "ORIGINALTITLE", "ja", true, "ja", "", false},
+		{"ID tag with language spec (not translatable)", "ID", "en", true, "en", "", false},
+		{"Valid region suffix normalized", "TITLE", "en-US", true, "en", "", false},
+		{"Valid whitespace trimmed and normalized", "TITLE", "  en  ", true, "en", "", false},
+		{"Case modifier uppercase", "ID", "UPPERCASE", false, "", "UPPERCASE", false},
+		{"Case modifier lowercase", "ID", "LOWERCASE", false, "", "LOWERCASE", false},
+		{"TITLE with case modifier treated as legacy", "TITLE", "UPPERCASE", false, "", "UPPERCASE", false},
+		{"TITLE with UPPERCASE and language fallback", "TITLE", "UPPER", false, "", "UPPER", false},
+		{"TITLE with valid numeric", "TITLE", "100", false, "", "100", false},
+		{"TITLE with negative numeric treated as legacy", "TITLE", "-50", false, "", "-50", false},
+		{"TITLE with alphanumeric treated as legacy", "TITLE", "50abc", false, "", "50abc", false},
+		{"RELEASEDATE with format pattern", "RELEASEDATE", "YYYY-MM-DD", false, "", "YYYY-MM-DD", false},
+		{"ACTORS with delimiter", "ACTORS", " and ", false, "", " and ", false},
+		{"GENRES with delimiter", "GENRES", "|", false, "", "|", false},
+		{"INDEX with padding", "INDEX", "3", false, "", "3", false},
+		{"PART with padding", "PART", "2", false, "", "2", false},
+		{"Valid language ko", "TITLE", "ko", true, "ko", "", false},
+		{"Valid language de", "TITLE", "de", true, "de", "", false},
+		{"Valid language fr", "TITLE", "fr", true, "fr", "", false},
 	}
 
 	for _, tt := range tests {
@@ -213,6 +214,7 @@ func TestParseModifier(t *testing.T) {
 			assert.Equal(t, tt.wantIsLanguage, got.isLanguage, "isLanguage mismatch")
 			assert.Equal(t, tt.wantLangSpec, got.languageSpec, "languageSpec mismatch")
 			assert.Equal(t, tt.wantLegacy, got.legacyModifier, "legacyModifier mismatch")
+			assert.Equal(t, tt.wantRejected, got.rejectedLanguage, "rejectedLanguage mismatch")
 		})
 	}
 }

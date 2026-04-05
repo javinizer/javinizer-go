@@ -782,6 +782,32 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 			want:    "Japanese Title That Is Very Long",
 			wantErr: false,
 		},
+		{
+			name:       "Invalid 3-letter language spec uses base field not default",
+			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			template:   "<TITLE:eng>",
+			ctx: &Context{
+				Title: "Base Title",
+				Translations: map[string]models.MovieTranslation{
+					"en": {Language: "en", Title: "English Title"},
+				},
+			},
+			want:    "Base Title",
+			wantErr: false,
+		},
+		{
+			name:       "Invalid fallback chain uses base field not default",
+			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			template:   "<TITLE:foo|bar>",
+			ctx: &Context{
+				Title: "Base Title",
+				Translations: map[string]models.MovieTranslation{
+					"en": {Language: "en", Title: "English Title"},
+				},
+			},
+			want:    "Base Title",
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

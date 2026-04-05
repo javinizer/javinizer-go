@@ -34,9 +34,10 @@ type EngineOptions struct {
 
 // parsedModifier represents a parsed tag modifier with language awareness
 type parsedModifier struct {
-	isLanguage     bool
-	languageSpec   string
-	legacyModifier string
+	isLanguage       bool
+	languageSpec     string
+	legacyModifier   string
+	rejectedLanguage bool
 }
 
 // Engine is a template processor for format strings
@@ -275,7 +276,7 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 		return value, nil
 
 	case "TITLE":
-		if e.isTranslatableTag(tagName) {
+		if e.isTranslatableTag(tagName) && !parsed.rejectedLanguage {
 			value := e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx)
 			if parsed.legacyModifier != "" {
 				return e.truncate(value, parsed.legacyModifier), nil
@@ -289,7 +290,7 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 		return value, nil
 
 	case "ORIGINALTITLE":
-		if e.isTranslatableTag(tagName) {
+		if e.isTranslatableTag(tagName) && !parsed.rejectedLanguage {
 			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
 		}
 		return ctx.OriginalTitle, nil
@@ -316,31 +317,31 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 		return "", nil
 
 	case "DIRECTOR":
-		if e.isTranslatableTag(tagName) {
+		if e.isTranslatableTag(tagName) && !parsed.rejectedLanguage {
 			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
 		}
 		return ctx.Director, nil
 
 	case "DESCRIPTION":
-		if e.isTranslatableTag(tagName) {
+		if e.isTranslatableTag(tagName) && !parsed.rejectedLanguage {
 			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
 		}
 		return ctx.Description, nil
 
 	case "STUDIO", "MAKER":
-		if e.isTranslatableTag(tagName) {
+		if e.isTranslatableTag(tagName) && !parsed.rejectedLanguage {
 			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
 		}
 		return ctx.Maker, nil
 
 	case "LABEL":
-		if e.isTranslatableTag(tagName) {
+		if e.isTranslatableTag(tagName) && !parsed.rejectedLanguage {
 			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
 		}
 		return ctx.Label, nil
 
 	case "SERIES":
-		if e.isTranslatableTag(tagName) {
+		if e.isTranslatableTag(tagName) && !parsed.rejectedLanguage {
 			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
 		}
 		return ctx.Series, nil
@@ -551,14 +552,12 @@ func (e *Engine) TruncateTitleBytes(title string, maxBytes int) string {
 	return truncated + marker
 }
 
-// ValidatePathLength checks if a path exceeds the maximum length
 func (e *Engine) ValidatePathLength(path string, maxLen int) error {
 	if maxLen <= 0 {
-		return nil // No validation if maxLen is not set
+		return nil
 	}
-
 	if len(path) > maxLen {
-		return fmt.Errorf("path length %d exceeds limit %d: %s", len(path), maxLen, path)
+		return fmt.Errorf("path length %d exceeds limit %d", len(path), maxLen)
 	}
 	return nil
 }
@@ -677,11 +676,9 @@ func (e *Engine) parseModifier(tagName, modifier string) parsedModifier {
 	}
 
 	// For translatable tags, detect if modifier looks like a language spec
-	// If it does but is invalid, reject it (don't treat as legacy)
+	// If it does but is invalid, reject it to preserve base-field fallback behavior
 	if e.isTranslatableTag(tagName) && e.looksLikeLanguageSpec(modifier) {
-		// Modifier looks like a language spec but is invalid
-		// Return empty to reject it (avoids silent typos)
-		return parsedModifier{}
+		return parsedModifier{rejectedLanguage: true}
 	}
 
 	// For all other cases, treat as legacy modifier
@@ -699,30 +696,19 @@ func (e *Engine) isNumericModifier(modifier string) bool {
 	return err == nil && n > 0
 }
 
-// looksLikeLanguageSpec checks if a modifier appears to be intended as a language spec.
-// Returns true for strings that look like language codes but may be invalid:
-// - 2-3 letter alphabetic strings (e.g., "en", "eng")
-// - Codes with regions/scripts (e.g., "en-US", "zh-Hant")
-// - Fallback chains (e.g., "en|ja")
-// Returns false for clearly non-language modifiers (e.g., "UPPERCASE", "YYYY-MM-DD", "50", "-50")
 func (e *Engine) looksLikeLanguageSpec(modifier string) bool {
 	if modifier == "" {
 		return false
 	}
 
-	// Check for fallback chain
 	if strings.Contains(modifier, "|") {
 		return true
 	}
 
-	// Check for region/script suffix pattern: letters followed by separator
-	// e.g., "en-US", "zh_Hant" are language-like
-	// but "-50", "UPPER-CASE" are not
-	modifier = strings.TrimSpace(modifier)
-	if idx := strings.IndexAny(modifier, "-_"); idx > 0 {
-		// Check if the part before separator is alphabetic
-		prefix := modifier[:idx]
-		if len(prefix) >= 2 && len(prefix) <= 3 {
+	trimmed := strings.TrimSpace(modifier)
+	if idx := strings.IndexAny(trimmed, "-_"); idx > 0 {
+		prefix := trimmed[:idx]
+		if len(prefix) == 2 {
 			for _, r := range strings.ToLower(prefix) {
 				if r < 'a' || r > 'z' {
 					return false
@@ -730,12 +716,12 @@ func (e *Engine) looksLikeLanguageSpec(modifier string) bool {
 			}
 			return true
 		}
+		return false
 	}
 
-	// Check if it's a short alphabetic string (2-3 letters)
-	modifier = strings.ToLower(modifier)
-	if len(modifier) >= 2 && len(modifier) <= 3 {
-		for _, r := range modifier {
+	lower := strings.ToLower(trimmed)
+	if len(lower) >= 2 && len(lower) <= 3 {
+		for _, r := range lower {
 			if r < 'a' || r > 'z' {
 				return false
 			}
@@ -746,19 +732,13 @@ func (e *Engine) looksLikeLanguageSpec(modifier string) bool {
 	return false
 }
 
-// isTranslatableTag checks if a tag name supports translation resolution.
 func (e *Engine) isTranslatableTag(tagName string) bool {
-	translatableTags := []string{
-		"TITLE", "ORIGINALTITLE", "DIRECTOR",
-		"MAKER", "STUDIO", "LABEL", "SERIES",
-		"DESCRIPTION",
+	switch tagName {
+	case "TITLE", "ORIGINALTITLE", "DIRECTOR", "MAKER", "STUDIO", "LABEL", "SERIES", "DESCRIPTION":
+		return true
+	default:
+		return false
 	}
-	for _, t := range translatableTags {
-		if t == tagName {
-			return true
-		}
-	}
-	return false
 }
 
 // languageCandidates builds the language resolution precedence list.
