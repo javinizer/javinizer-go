@@ -18,6 +18,33 @@ import (
 // JobStatus represents the status of a job
 type JobStatus string
 
+// Job State Machine:
+//
+// Normal flow:
+//
+//	Pending → Running → Completed → Organized
+//
+// State descriptions:
+//   - Pending: Job created, waiting to start scraping
+//   - Running: Scraping in progress (files being processed)
+//   - Completed: Scraping finished, metadata available for review/editing
+//   - Failed: Job failed during scraping (terminal state)
+//   - Cancelled: Job was cancelled by user (terminal state)
+//   - Organized: Files successfully organized (terminal state)
+//
+// Organization retry flow:
+//
+//	Completed → Running (organize) → Completed (if failed > 0)
+//	Completed → Running (organize) → Organized (if failed == 0)
+//
+// Key rules:
+//   - Only "Completed" jobs can be organized
+//   - If organization has any failures, job stays "Completed" to enable retry
+//   - If organization fully succeeds (failed == 0), job transitions to "Organized"
+//   - "Organized" jobs cannot be organized again (terminal state)
+//
+// Terminal states (no further transitions):
+//   - Failed, Cancelled, Organized
 const (
 	JobStatusPending   JobStatus = "pending"
 	JobStatusRunning   JobStatus = "running"
@@ -554,6 +581,10 @@ func (job *BatchJob) MarkStarted() {
 	job.Status = JobStatusRunning
 	job.StartedAt = time.Now()
 	job.CompletedAt = nil
+	job.OrganizedAt = nil
+	// Create a new Done channel for this run
+	// This allows re-using jobs for retry workflows
+	job.Done = make(chan struct{})
 }
 
 // MarkCompleted marks the job as completed

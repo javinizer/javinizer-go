@@ -60,8 +60,8 @@ func TestProcessOrganizeJob_HandlesExcludedInvalidAndUnmatchedFiles(t *testing.T
 	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry)
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusOrganized {
-		t.Fatalf("job status = %q, want organized", status.Status)
+	if status.Status != worker.JobStatusCompleted {
+		t.Fatalf("job status = %q, want completed (failed=1, so should stay completed for retry)", status.Status)
 	}
 	if status.Completed != 3 {
 		t.Fatalf("completed count = %d, want 3", status.Completed)

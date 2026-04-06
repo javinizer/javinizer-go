@@ -1301,3 +1301,338 @@ func TestOrganizeJobSecurityValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestOrganizeJobRetryWorkflow tests the state machine for organization retry
+func TestOrganizeJobRetryWorkflow(t *testing.T) {
+	tests := []struct {
+		name                string
+		setupJob            func(*worker.JobQueue, *config.Config) *worker.BatchJob
+		simulateOrganize    func(*worker.BatchJob)
+		validateStatus      func(*testing.T, *worker.BatchJob)
+		canRetry            bool
+		expectedFinalStatus worker.JobStatus
+	}{
+		{
+			name: "successful organization transitions to Organized",
+			setupJob: func(jq *worker.JobQueue, cfg *config.Config) *worker.BatchJob {
+				job := jq.CreateJob([]string{"/test/file.mp4"})
+				movie := &models.Movie{ID: "TEST-001", Title: "Test Movie"}
+				result := &worker.FileResult{
+					FilePath:  "/test/file.mp4",
+					MovieID:   "TEST-001",
+					Status:    worker.JobStatusCompleted,
+					Data:      movie,
+					StartedAt: time.Now(),
+				}
+				job.UpdateFileResult("/test/file.mp4", result)
+				job.MarkCompleted()
+				return job
+			},
+			simulateOrganize: func(job *worker.BatchJob) {
+				// Simulate successful organization (no failures)
+				job.MarkStarted()
+				job.MarkOrganized()
+			},
+			validateStatus: func(t *testing.T, job *worker.BatchJob) {
+				// After successful organization, should be "Organized"
+				assert.Equal(t, worker.JobStatusOrganized, job.Status)
+			},
+			canRetry:            false,
+			expectedFinalStatus: worker.JobStatusOrganized,
+		},
+		{
+			name: "organization with failures stays Completed for retry",
+			setupJob: func(jq *worker.JobQueue, cfg *config.Config) *worker.BatchJob {
+				job := jq.CreateJob([]string{"/test/file.mp4"})
+				movie := &models.Movie{ID: "TEST-002", Title: "Test Movie"}
+				result := &worker.FileResult{
+					FilePath:  "/test/file.mp4",
+					MovieID:   "TEST-002",
+					Status:    worker.JobStatusCompleted,
+					Data:      movie,
+					StartedAt: time.Now(),
+				}
+				job.UpdateFileResult("/test/file.mp4", result)
+				job.MarkCompleted()
+				return job
+			},
+			simulateOrganize: func(job *worker.BatchJob) {
+				// Simulate organization with failures
+				// (This is what processOrganizeJob does when failed > 0)
+				job.MarkStarted()
+				job.MarkCompleted() // Re-marks as completed instead of organized
+			},
+			validateStatus: func(t *testing.T, job *worker.BatchJob) {
+				// After organization with failures, should remain "Completed" for retry
+				assert.Equal(t, worker.JobStatusCompleted, job.Status)
+			},
+			canRetry:            true,
+			expectedFinalStatus: worker.JobStatusCompleted,
+		},
+		{
+			name: "job with mixed results (completed + failed) stays Completed",
+			setupJob: func(jq *worker.JobQueue, cfg *config.Config) *worker.BatchJob {
+				job := jq.CreateJob([]string{"/test/file1.mp4", "/test/file2.mp4"})
+				movie1 := &models.Movie{ID: "TEST-003", Title: "Test Movie 1"}
+				result1 := &worker.FileResult{
+					FilePath:  "/test/file1.mp4",
+					MovieID:   "TEST-003",
+					Status:    worker.JobStatusCompleted,
+					Data:      movie1,
+					StartedAt: time.Now(),
+				}
+				job.UpdateFileResult("/test/file1.mp4", result1)
+
+				// File 2 failed during scraping - won't be organized
+				result2 := &worker.FileResult{
+					FilePath:  "/test/file2.mp4",
+					MovieID:   "TEST-004",
+					Status:    worker.JobStatusFailed,
+					Error:     "Scraping failed",
+					StartedAt: time.Now(),
+				}
+				job.UpdateFileResult("/test/file2.mp4", result2)
+				job.MarkCompleted()
+				return job
+			},
+			simulateOrganize: func(job *worker.BatchJob) {
+				// Simulate organization (files don't exist, so will fail)
+				// This will transition to Completed (failed > 0)
+				job.MarkStarted()
+				job.MarkCompleted()
+			},
+			validateStatus: func(t *testing.T, job *worker.BatchJob) {
+				// With partial results, should stay "Completed" for potential retry
+				assert.Equal(t, worker.JobStatusCompleted, job.Status)
+			},
+			canRetry:            true,
+			expectedFinalStatus: worker.JobStatusCompleted,
+		},
+		{
+			name: "job with all files skipped/excluded stays Completed",
+			setupJob: func(jq *worker.JobQueue, cfg *config.Config) *worker.BatchJob {
+				job := jq.CreateJob([]string{"/test/file1.mp4", "/test/file2.mp4"})
+
+				// Both files failed during scraping - nothing to organize
+				result1 := &worker.FileResult{
+					FilePath:  "/test/file1.mp4",
+					Status:    worker.JobStatusFailed,
+					Error:     "Scraping failed",
+					StartedAt: time.Now(),
+				}
+				job.UpdateFileResult("/test/file1.mp4", result1)
+
+				result2 := &worker.FileResult{
+					FilePath:  "/test/file2.mp4",
+					Status:    worker.JobStatusFailed,
+					Error:     "Scraping failed",
+					StartedAt: time.Now(),
+				}
+				job.UpdateFileResult("/test/file2.mp4", result2)
+				job.MarkCompleted()
+				return job
+			},
+			simulateOrganize: func(job *worker.BatchJob) {
+				// Simulate organization with zero files processed (organized == 0, failed == 0)
+				// Should stay Completed (not transition to Organized)
+				job.MarkStarted()
+				job.MarkCompleted()
+			},
+			validateStatus: func(t *testing.T, job *worker.BatchJob) {
+				// With zero files processed, should stay "Completed" (not "Organized")
+				assert.Equal(t, worker.JobStatusCompleted, job.Status)
+			},
+			canRetry:            true,
+			expectedFinalStatus: worker.JobStatusCompleted,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			initTestWebSocket(t)
+
+			cfg := config.DefaultConfig()
+			cfg.API.Security.AllowedDirectories = []string{"/test"}
+			cfg.Output.FolderFormat = "<ID>"
+			cfg.Output.FileFormat = "<ID>"
+
+			deps := createTestDeps(t, cfg, "")
+			job := tt.setupJob(deps.JobQueue, cfg)
+
+			// Verify job is in Completed state before organization
+			assert.Equal(t, worker.JobStatusCompleted, job.Status, "Job should be Completed before organization")
+
+			// Simulate the organization state transition
+			tt.simulateOrganize(job)
+
+			// Validate final status
+			tt.validateStatus(t, job)
+
+			// Test retry capability through the API
+			router := gin.New()
+			router.POST("/batch/:id/organize", organizeJob(deps))
+
+			body, err := json.Marshal(OrganizeRequest{
+				Destination: "/test/output",
+				CopyOnly:    true,
+			})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest("POST", "/batch/"+job.ID+"/organize", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			if tt.canRetry {
+				// Retry should be accepted (job is still in Completed state)
+				assert.Equal(t, 200, w.Code, "Retry should be allowed for job in Completed state")
+			} else {
+				// Retry should be rejected (job is in Organized state)
+				assert.Equal(t, 400, w.Code, "Retry should be rejected for job in Organized state")
+				assert.Contains(t, w.Body.String(), "Job must be completed before organizing")
+			}
+		})
+	}
+}
+
+// TestJobStateMachineTransitions documents and validates the job state machine
+func TestJobStateMachineTransitions(t *testing.T) {
+	t.Run("state machine transitions are correct", func(t *testing.T) {
+		initTestWebSocket(t)
+
+		cfg := config.DefaultConfig()
+		cfg.API.Security.AllowedDirectories = []string{"/test"}
+		cfg.Output.FolderFormat = "<ID>"
+		cfg.Output.FileFormat = "<ID>"
+
+		deps := createTestDeps(t, cfg, "")
+
+		// Start with pending job
+		job := deps.JobQueue.CreateJob([]string{"/test/file.mp4"})
+		assert.Equal(t, worker.JobStatusPending, job.Status, "Initial state should be Pending")
+
+		// Mark as started (running)
+		job.MarkStarted()
+		assert.Equal(t, worker.JobStatusRunning, job.Status, "After MarkStarted should be Running")
+
+		// Mark as completed (after scraping)
+		job.MarkCompleted()
+		assert.Equal(t, worker.JobStatusCompleted, job.Status, "After MarkCompleted should be Completed")
+
+		// Simulate successful organization
+		job.MarkStarted() // Organization starts
+		job.MarkOrganized()
+		assert.Equal(t, worker.JobStatusOrganized, job.Status, "After successful organization should be Organized")
+
+		// Create another job to test failed organization path
+		job2 := deps.JobQueue.CreateJob([]string{"/test/file2.mp4"})
+		job2.MarkStarted()
+		job2.MarkCompleted()
+		assert.Equal(t, worker.JobStatusCompleted, job2.Status, "Job2 should be Completed after scraping")
+
+		// Simulate failed organization (should stay Completed)
+		job2.MarkStarted() // Organization starts
+		// In real scenario, processOrganizeJob would call MarkCompleted instead of MarkOrganized
+		job2.MarkCompleted() // This is what happens when failed > 0
+		assert.Equal(t, worker.JobStatusCompleted, job2.Status, "After failed organization should stay Completed")
+	})
+
+	t.Run("organized job cannot be organized again", func(t *testing.T) {
+		initTestWebSocket(t)
+
+		cfg := config.DefaultConfig()
+		cfg.API.Security.AllowedDirectories = []string{"/test"}
+
+		deps := createTestDeps(t, cfg, "")
+
+		job := deps.JobQueue.CreateJob([]string{"/test/file.mp4"})
+		job.MarkCompleted()
+		job.MarkOrganized()
+
+		router := gin.New()
+		router.POST("/batch/:id/organize", organizeJob(deps))
+
+		body, err := json.Marshal(OrganizeRequest{
+			Destination: "/test/output",
+		})
+		require.NoError(t, err)
+
+		req := httptest.NewRequest("POST", "/batch/"+job.ID+"/organize", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, 400, w.Code)
+		assert.Contains(t, w.Body.String(), "Job must be completed before organizing")
+	})
+
+	t.Run("completed job can be organized (retry)", func(t *testing.T) {
+		initTestWebSocket(t)
+
+		cfg := config.DefaultConfig()
+		cfg.API.Security.AllowedDirectories = []string{"/test"}
+		cfg.Output.FolderFormat = "<ID>"
+		cfg.Output.FileFormat = "<ID>"
+
+		deps := createTestDeps(t, cfg, "")
+
+		job := deps.JobQueue.CreateJob([]string{"/test/file.mp4"})
+		movie := &models.Movie{ID: "TEST-001", Title: "Test"}
+		result := &worker.FileResult{
+			FilePath:  "/test/file.mp4",
+			MovieID:   "TEST-001",
+			Status:    worker.JobStatusCompleted,
+			Data:      movie,
+			StartedAt: time.Now(),
+		}
+		job.UpdateFileResult("/test/file.mp4", result)
+		job.MarkCompleted()
+
+		router := gin.New()
+		router.POST("/batch/:id/organize", organizeJob(deps))
+
+		body, err := json.Marshal(OrganizeRequest{
+			Destination: "/test/output",
+			CopyOnly:    true,
+		})
+		require.NoError(t, err)
+
+		req := httptest.NewRequest("POST", "/batch/"+job.ID+"/organize", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, 200, w.Code, "Completed job should be organizizable (retry allowed)")
+	})
+
+	t.Run("MarkStarted clears OrganizedAt timestamp for retry", func(t *testing.T) {
+		initTestWebSocket(t)
+
+		cfg := config.DefaultConfig()
+		cfg.API.Security.AllowedDirectories = []string{"/test"}
+
+		deps := createTestDeps(t, cfg, "")
+
+		// Create and organize a job
+		job := deps.JobQueue.CreateJob([]string{"/test/file.mp4"})
+		job.MarkStarted()
+		job.MarkCompleted()
+		job.MarkStarted()
+		job.MarkOrganized()
+
+		// Verify OrganizedAt is set
+		snap := job.GetStatus()
+		require.NotNil(t, snap.OrganizedAt, "OrganizedAt should be set after organization")
+
+		// Simulate retry - MarkStarted should clear OrganizedAt
+		job.MarkStarted()
+
+		// Verify OrganizedAt is cleared
+		snap2 := job.GetStatus()
+		assert.Nil(t, snap2.OrganizedAt, "OrganizedAt should be cleared on MarkStarted for retry")
+		assert.Equal(t, worker.JobStatusRunning, snap2.Status, "Status should be Running after MarkStarted")
+	})
+}

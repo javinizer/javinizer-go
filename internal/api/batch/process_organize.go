@@ -213,7 +213,19 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 		Progress: 100,
 		Message:  fmt.Sprintf("Organized %d files, %d failed", organized, failed),
 	})
-	job.MarkOrganized()
+
+	// Only transition to "Organized" state if ALL files organized successfully
+	// If any files failed, keep job in "Completed" state to enable retry
+	// If no files were processed (all skipped/excluded), stay in "Completed" for inspection
+	// State machine: Pending → Running → Completed → Organized (only on full success with actual work)
+	//                Pending → Running → Completed (stays here if failed > 0 or organized == 0)
+	if failed == 0 && organized > 0 {
+		job.MarkOrganized()
+	} else {
+		// Re-mark as completed to ensure job is in retryable state
+		// (MarkStarted was called at the beginning of organization)
+		job.MarkCompleted()
+	}
 	if jobQueue != nil {
 		jobQueue.PersistJob(job)
 	}
