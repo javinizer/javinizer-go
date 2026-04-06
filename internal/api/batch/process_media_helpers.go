@@ -20,9 +20,9 @@ import (
 func cleanupJobTempPosters(jobID string, tempDir string) {
 	posterDir := filepath.Join(tempDir, "posters", jobID)
 	if err := os.RemoveAll(posterDir); err != nil {
-		logging.Debugf("[Job %s] Failed to clean temp poster dir: %v", jobID, err)
+		logging.Warnf("[Job %s] Failed to clean temp poster dir: %v", jobID, err)
 	} else {
-		logging.Debugf("[Job %s] Cleaned temp poster directory", jobID)
+		logging.Debugf("[Job %s] Cleaned up temporary poster directory: %s", jobID, posterDir)
 	}
 }
 

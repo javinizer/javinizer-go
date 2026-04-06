@@ -404,6 +404,8 @@ func (jq *JobQueue) DeleteJob(id string, tempDir string) {
 	tempPosterDir := filepath.Join(tempDir, "posters", id)
 	if err := os.RemoveAll(tempPosterDir); err != nil {
 		logging.Warnf("Failed to clean up temp posters for job %s: %v", id, err)
+	} else {
+		logging.Debugf("[Job %s] Cleaned up temporary poster directory: %s", id, tempPosterDir)
 	}
 
 	// Delete from database
