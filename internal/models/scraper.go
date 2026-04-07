@@ -186,6 +186,30 @@ type ScraperDownloadProxyResolver interface {
 	ResolveDownloadProxyForHost(host string) (downloadOverride *config.ProxyConfig, scraperProxy *config.ProxyConfig, handled bool)
 }
 
+// URLHandler is an optional interface for scrapers that can handle direct URL scraping.
+// Implementations should return true for URLs they can process and extract the movie ID.
+//
+// This enables extensible URL detection - scrapers declare which URLs they handle
+// instead of hardcoding patterns in the matcher.
+type URLHandler interface {
+	// CanHandleURL returns true if this scraper can handle the given URL
+	CanHandleURL(url string) bool
+
+	// ExtractIDFromURL extracts the movie ID from a URL this scraper can handle
+	// Returns (id, nil) on success or ("", error) if extraction fails
+	ExtractIDFromURL(url string) (string, error)
+}
+
+// DirectURLScraper is an optional interface for scrapers that can directly scrape URLs.
+// Scrapers implementing this interface can extract more accurate metadata from direct URLs
+// than from ID-based search results.
+type DirectURLScraper interface {
+	// ScrapeURL directly scrapes metadata from a URL.
+	// Returns ScraperResult on success, or error with typed ScraperError on failure.
+	// Implementations should return ScraperErrorKindNotFound for non-existent pages.
+	ScrapeURL(url string) (*ScraperResult, error)
+}
+
 // ContentIDResolver is an optional interface for scrapers that can resolve
 // a JAV ID to its DMM content-ID format (e.g., "ipx-123" -> "118BDP-00118").
 //

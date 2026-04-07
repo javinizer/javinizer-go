@@ -5,10 +5,84 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper/javlibrary"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCanHandleURL(t *testing.T) {
+	settings := config.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}
+	s := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected bool
+	}{
+		{"javlibrary.com", "https://www.javlibrary.com/en/?v=javli123", true},
+		{"with query param", "http://www.javlibrary.com/?v=javli123", true},
+		{"other site", "https://www.example.com/ABC-123", false},
+		{"malformed URL", "not-a-url", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.CanHandleURL(tt.url)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestExtractIDFromURL(t *testing.T) {
+	settings := config.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}
+	s := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+		wantErr  bool
+	}{
+		{"query param v", "https://www.javlibrary.com/en/?v=javli123", "javli123", false},
+		{"path with v", "https://www.javlibrary.com/?v=javli456", "javli456", false},
+		{"empty path", "https://www.javlibrary.com/", "", true},
+		{"short segment", "https://www.javlibrary.com/abc", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.ExtractIDFromURL(tt.url)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestScraperInterfaceCompliance(t *testing.T) {
+	settings := config.ScraperSettings{
+		Enabled:  false,
+		Language: "en",
+		BaseURL:  "http://www.javlibrary.com",
+	}
+	s := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	var _ models.Scraper = s
+	var _ models.URLHandler = s
+	var _ models.DirectURLScraper = s
+}
 
 func requireJavLibraryIntegration(t *testing.T) {
 	t.Helper()

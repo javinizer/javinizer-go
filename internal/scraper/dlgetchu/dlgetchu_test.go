@@ -11,6 +11,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -900,4 +901,65 @@ func TestSearchWithHTTPError(t *testing.T) {
 	assert.Nil(t, result)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found on DLgetchu")
+}
+
+func TestCanHandleURL(t *testing.T) {
+	s := New(testSettings("https://dl.getchu.com"), nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected bool
+	}{
+		{"dl.getchu.com", "https://dl.getchu.com/i/item12345", true},
+		{"getchu.com", "https://www.getchu.com/i/item12345", true},
+		{"with path", "http://dl.getchu.com/i/item12345", true},
+		{"other site", "https://www.example.com/item/12345", false},
+		{"malformed URL", "not-a-url", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.CanHandleURL(tt.url)
+			assert.Equal(t, tt.expected, got, "CanHandleURL(%q) = %v, want %v", tt.url, got, tt.expected)
+		})
+	}
+}
+
+func TestExtractIDFromURL(t *testing.T) {
+	s := New(testSettings("https://dl.getchu.com"), nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+		wantErr  bool
+	}{
+		{"standard path", "https://dl.getchu.com/i/item12345", "12345", false},
+		{"getchu.com path", "https://www.getchu.com/i/item67890", "67890", false},
+		{"with trailing slash", "https://dl.getchu.com/i/item12345/", "12345", false},
+		{"item ID in HTML context", "https://dl.getchu.com/i/item 作品ID: 54321", "54321", false},
+		{"invalid URL", "not-a-url", "", true},
+		{"non-item path", "https://dl.getchu.com/other", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.ExtractIDFromURL(tt.url)
+			if tt.wantErr {
+				assert.Error(t, err, "ExtractIDFromURL(%q) expected error, got nil", tt.url)
+			} else {
+				assert.NoError(t, err, "ExtractIDFromURL(%q) unexpected error: %v", tt.url, err)
+				assert.Equal(t, tt.expected, got, "ExtractIDFromURL(%q) = %q, want %q", tt.url, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestScraperInterfaceCompliance_DLgetchu(t *testing.T) {
+	s := New(testSettings("https://dl.getchu.com"), nil, config.FlareSolverrConfig{})
+	var _ models.Scraper = s
+	var _ models.URLHandler = s
+	var _ models.DirectURLScraper = s
 }

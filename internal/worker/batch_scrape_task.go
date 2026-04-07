@@ -139,6 +139,7 @@ func (t *BatchScrapeTask) Execute(ctx context.Context) error {
 		t.force,
 		t.updateMode,
 		t.selectedScrapers,
+		nil, // No priority override for batch scraping
 		t.processedMovieIDs,
 		t.cfg,
 		t.scalarStrategy,

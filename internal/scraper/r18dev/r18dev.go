@@ -3,6 +3,7 @@ package r18dev
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,6 +25,9 @@ const (
 	baseURL = "https://r18.dev"
 	apiURL  = baseURL + "/videos/vod/movies/detail/-/combined=%s/json"
 )
+
+// Package-level compiled regex for performance
+var r18IDRegex = regexp.MustCompile(`/(id|combined)=([^/?&]+)`)
 
 // Scraper implements the R18.dev scraper
 type Scraper struct {
@@ -136,6 +140,72 @@ func (s *Scraper) Config() *config.ScraperSettings {
 // Close cleans up resources held by the scraper
 func (s *Scraper) Close() error {
 	return nil
+}
+
+// CanHandleURL returns true if this scraper can handle the given URL
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "r18.dev") || strings.HasSuffix(host, "r18.com")
+}
+
+// ExtractIDFromURL extracts the movie ID from an R18.dev URL
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	matches := r18IDRegex.FindStringSubmatch(urlStr)
+	if len(matches) > 2 {
+		return matches[2], nil
+	}
+
+	return "", fmt.Errorf("failed to extract ID from R18.dev URL")
+}
+
+func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(urlStr) {
+		return nil, models.NewScraperNotFoundError("R18.dev", "URL not handled by R18.dev scraper")
+	}
+
+	if !s.enabled {
+		return nil, fmt.Errorf("R18.dev scraper is disabled")
+	}
+
+	id, err := s.ExtractIDFromURL(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
+	}
+
+	logging.Debugf("R18.dev ScrapeURL: Extracted ID %s from URL %s", id, urlStr)
+
+	resp, err := s.doRequestWithRetry(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch data from R18.dev: %w", err)
+	}
+
+	if resp.StatusCode() != 200 {
+		return nil, models.NewScraperStatusError(
+			"R18.dev",
+			resp.StatusCode(),
+			fmt.Sprintf("R18.dev returned status code %d", resp.StatusCode()),
+		)
+	}
+
+	contentType := resp.Header().Get("Content-Type")
+	if strings.Contains(contentType, "text/html") {
+		return nil, models.NewScraperNotFoundError("R18.dev", "movie not found on R18.dev (returned HTML)")
+	}
+
+	var data R18Response
+	if err := json.Unmarshal(resp.Body(), &data); err != nil {
+		bodyPreview := string(resp.Body())
+		if len(bodyPreview) > 200 {
+			bodyPreview = bodyPreview[:200]
+		}
+		return nil, fmt.Errorf("failed to parse R18.dev response (preview: %s): %w", bodyPreview, err)
+	}
+
+	return s.parseResponse(&data, urlStr)
 }
 
 // ValidateConfig validates the scraper configuration.

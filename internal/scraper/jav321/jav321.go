@@ -146,6 +146,66 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 }
 
 // GetURL returns the detail page URL for an ID.
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "jav321.com")
+}
+
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+	path := strings.Trim(u.Path, "/")
+	if strings.HasPrefix(path, "video/") {
+		id := strings.TrimPrefix(path, "video/")
+		id = strings.TrimSuffix(id, "/")
+		if id != "" {
+			return strings.ToUpper(id), nil
+		}
+	}
+	return "", fmt.Errorf("failed to extract ID from URL")
+}
+
+func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(rawURL) {
+		return nil, models.NewScraperNotFoundError("Jav321", "URL not handled by Jav321 scraper")
+	}
+
+	id, err := s.ExtractIDFromURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
+	}
+
+	html, status, err := s.fetchPage(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch Jav321 detail page: %w", err)
+	}
+	if status == 404 {
+		return nil, models.NewScraperNotFoundError("Jav321", "page not found")
+	}
+	if status == 429 {
+		return nil, models.NewScraperStatusError("Jav321", 429, "rate limited")
+	}
+	if status == 403 || status == 451 {
+		return nil, models.NewScraperStatusError("Jav321", status, "access blocked")
+	}
+	if status != 200 {
+		return nil, models.NewScraperStatusError("Jav321", status, fmt.Sprintf("Jav321 returned status code %d", status))
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Jav321 detail page: %w", err)
+	}
+
+	return parseDetailPage(doc, rawURL, id), nil
+}
+
 func (s *Scraper) GetURL(id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {

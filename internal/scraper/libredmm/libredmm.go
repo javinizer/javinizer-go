@@ -32,6 +32,8 @@ var (
 	cidRegex                 = regexp.MustCompile(`(?i)(?:^|[?&])(cid|id)=([^&]+)`)
 	dmmPrefixedCIDRegex      = regexp.MustCompile(`^(\d{3,}[a-z]+)0+(\d+.*)$`)
 	dmmSampleFilenamePattern = regexp.MustCompile(`(?i)\.jpe?g$`)
+	// URL extraction pattern
+	libreDMPathRegex = regexp.MustCompile(`/movies/([^/?&]+)`)
 )
 
 type actressPayload struct {
@@ -144,6 +146,135 @@ func (s *Scraper) Config() *config.ScraperSettings {
 // Close cleans up resources held by the scraper
 func (s *Scraper) Close() error {
 	return nil
+}
+
+// CanHandleURL returns true if this scraper can handle the given URL
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "libredmm.com")
+}
+
+// ExtractIDFromURL extracts the movie ID from a LibreDMM URL
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", err
+	}
+
+	// Check for search query parameter
+	if q := strings.TrimSpace(u.Query().Get("q")); q != "" {
+		return q, nil
+	}
+
+	// Extract from /movies/{id}, /movies/{id}.json, or /cid/{id} path
+	matches := libreDMPathRegex.FindStringSubmatch(u.Path)
+	if len(matches) > 1 {
+		return strings.TrimSuffix(matches[1], ".json"), nil
+	}
+
+	// Check for /cid/{id} format (case-insensitive)
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) >= 2 && strings.EqualFold(parts[0], "cid") {
+		id, _ := url.PathUnescape(parts[1])
+		id = strings.TrimSuffix(id, ".json")
+		if id != "" {
+			return id, nil
+		}
+	}
+
+	return "", fmt.Errorf("failed to extract ID from LibreDMM URL")
+}
+
+func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(urlStr) {
+		return nil, models.NewScraperNotFoundError("LibreDMM", "URL not handled by LibreDMM scraper")
+	}
+
+	if !s.enabled {
+		return nil, fmt.Errorf("LibreDMM scraper is disabled")
+	}
+
+	id, err := s.ExtractIDFromURL(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
+	}
+
+	var targetURL string
+	if normalized, ok := normalizeMovieURL(urlStr, s.baseURL); ok {
+		targetURL = normalized
+	} else {
+		targetURL, err = s.GetURL(id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize URL: %w", err)
+		}
+	}
+
+	attempts := s.maxPollAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	for attempt := 1; attempt <= attempts; attempt++ {
+		payload, finalURL, status, err := s.fetchMovieJSON(targetURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query LibreDMM: %w", err)
+		}
+		if finalURL != "" {
+			targetURL = finalURL
+		}
+
+		switch status {
+		case 200:
+			if msg := cleanString(payload.Err); msg != "" {
+				return nil, fmt.Errorf("LibreDMM returned error: %s", msg)
+			}
+			return payloadToResult(payload, targetURL, id, s.client.GetClient()), nil
+		case 202:
+			msg := cleanString(payload.Err)
+			if msg == "" {
+				msg = "processing"
+			}
+			if attempt == attempts {
+				return nil, fmt.Errorf("LibreDMM is still %s for %s", msg, id)
+			}
+			time.Sleep(s.pollInterval)
+		case 404:
+			return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
+		case 502:
+			msg := cleanString(payload.Err)
+			if msg != "" {
+				return nil, models.NewScraperStatusError(
+					"LibreDMM",
+					502,
+					fmt.Sprintf("LibreDMM is temporarily unavailable (HTTP 502 Bad Gateway; host may be down): %s", msg),
+				)
+			}
+			return nil, models.NewScraperStatusError(
+				"LibreDMM",
+				502,
+				"LibreDMM is temporarily unavailable (HTTP 502 Bad Gateway; host may be down)",
+			)
+		default:
+			if msg := cleanString(payload.Err); msg != "" {
+				return nil, models.NewScraperStatusError(
+					"LibreDMM",
+					status,
+					fmt.Sprintf("LibreDMM returned status code %d: %s", status, msg),
+				)
+			}
+			return nil, models.NewScraperStatusError(
+				"LibreDMM",
+				status,
+				fmt.Sprintf("LibreDMM returned status code %d", status),
+			)
+		}
+	}
+
+	return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
 }
 
 // ValidateConfig validates the scraper configuration.
@@ -519,14 +650,25 @@ func normalizeMovieURL(raw, base string) (string, bool) {
 	}
 
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(parts) >= 2 && strings.EqualFold(parts[0], "movies") {
-		id, _ := url.PathUnescape(parts[1])
-		id = strings.TrimSuffix(id, ".json")
-		id = cleanString(id)
-		if id == "" {
-			return "", false
+	if len(parts) >= 2 {
+		if strings.EqualFold(parts[0], "movies") {
+			id, _ := url.PathUnescape(parts[1])
+			id = strings.TrimSuffix(id, ".json")
+			id = cleanString(id)
+			if id == "" {
+				return "", false
+			}
+			return strings.TrimRight(base, "/") + "/movies/" + url.PathEscape(id) + ".json", true
 		}
-		return strings.TrimRight(base, "/") + "/movies/" + url.PathEscape(id) + ".json", true
+		if strings.EqualFold(parts[0], "cid") {
+			id, _ := url.PathUnescape(parts[1])
+			id = strings.TrimSuffix(id, ".json")
+			id = cleanString(id)
+			if id == "" {
+				return "", false
+			}
+			return strings.TrimRight(base, "/") + "/movies/" + url.PathEscape(id) + ".json", true
+		}
 	}
 
 	return "", false
@@ -555,9 +697,15 @@ func extractIDFromURL(raw string) string {
 	}
 
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(parts) >= 2 && strings.EqualFold(parts[0], "movies") {
-		id, _ := url.PathUnescape(parts[1])
-		return strings.TrimSpace(strings.TrimSuffix(id, ".json"))
+	if len(parts) >= 2 {
+		if strings.EqualFold(parts[0], "movies") {
+			id, _ := url.PathUnescape(parts[1])
+			return strings.TrimSpace(strings.TrimSuffix(id, ".json"))
+		}
+		if strings.EqualFold(parts[0], "cid") {
+			id, _ := url.PathUnescape(parts[1])
+			return strings.TrimSpace(strings.TrimSuffix(id, ".json"))
+		}
 	}
 
 	return ""

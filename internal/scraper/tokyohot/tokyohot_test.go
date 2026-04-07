@@ -10,9 +10,67 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCanHandleURL(t *testing.T) {
+	s := New(testSettings("https://www.tokyo-hot.com"), nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected bool
+	}{
+		{"tokyo-hot.com", "https://www.tokyo-hot.com/product/N1234/", true},
+		{"other site", "https://www.example.com/ABC-123", false},
+		{"malformed URL", "not-a-url", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.CanHandleURL(tt.url)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestExtractIDFromURL_TokyoHot(t *testing.T) {
+	s := New(testSettings("https://www.tokyo-hot.com"), nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+		wantErr  bool
+	}{
+		{"product URL", "https://www.tokyo-hot.com/product/N1234/", "N1234", false},
+		{"with query params", "https://www.tokyo-hot.com/product/ABC-567/?lang=en", "ABC-567", false},
+		{"empty path", "https://www.tokyo-hot.com/", "", true},
+		{"no product path", "https://www.tokyo-hot.com/pages/about", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.ExtractIDFromURL(tt.url)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestScraperInterfaceCompliance_TokyoHot(t *testing.T) {
+	s := New(testSettings("https://www.tokyo-hot.com"), nil, config.FlareSolverrConfig{})
+	var _ models.Scraper = s
+	var _ models.URLHandler = s
+	var _ models.DirectURLScraper = s
+}
 
 func testSettings(baseURL string) config.ScraperSettings {
 	return config.ScraperSettings{

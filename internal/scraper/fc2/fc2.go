@@ -148,6 +148,65 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 }
 
 // ResolveSearchQuery normalizes FC2/PPV identifiers from free-form input.
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "fc2.com")
+}
+
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	if m := articleURLRegex.FindStringSubmatch(urlStr); len(m) > 1 {
+		return canonicalFC2ID(m[1]), nil
+	}
+	return "", fmt.Errorf("failed to extract ID from FC2 URL")
+}
+
+func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(rawURL) {
+		return nil, models.NewScraperNotFoundError("FC2", "URL not handled by FC2 scraper")
+	}
+
+	articleID := extractArticleID(rawURL)
+	if articleID == "" {
+		return nil, models.NewScraperNotFoundError("FC2", "failed to extract article ID from URL")
+	}
+
+	html, status, err := s.fetchPage(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch FC2 detail page: %w", err)
+	}
+	if status == 404 {
+		return nil, models.NewScraperNotFoundError("FC2", "page not found")
+	}
+	if status == 429 {
+		return nil, models.NewScraperStatusError("FC2", 429, "rate limited")
+	}
+	if status == 403 || status == 451 {
+		return nil, models.NewScraperStatusError("FC2", status, "access blocked")
+	}
+	if status != 200 {
+		return nil, models.NewScraperStatusError("FC2", status, fmt.Sprintf("FC2 returned status code %d", status))
+	}
+	if isFC2NotFoundPage(html) {
+		return nil, models.NewScraperNotFoundError("FC2", "page not found")
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse FC2 detail page: %w", err)
+	}
+
+	result := parseDetailPage(doc, html, rawURL, articleID)
+	if result == nil || strings.TrimSpace(result.ID) == "" {
+		return nil, models.NewScraperNotFoundError("FC2", "failed to parse FC2 page")
+	}
+
+	return result, nil
+}
+
 func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	articleID := extractArticleID(input)
 	if articleID == "" {

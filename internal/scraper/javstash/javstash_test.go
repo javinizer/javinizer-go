@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -318,4 +319,71 @@ func TestNormalizeLanguage(t *testing.T) {
 			assert.Equal(t, tt.want, normalizeLanguage(tt.input))
 		})
 	}
+}
+
+func TestCanHandleURL(t *testing.T) {
+	s := &Scraper{baseURL: "https://javstash.org/graphql"}
+
+	tests := []struct {
+		name     string
+		url      string
+		expected bool
+	}{
+		{"javstash.org", "https://javstash.org/scenes/abc123", true},
+		{"www.javstash.org", "https://www.javstash.org/scenes/abc123", true},
+		{"other site", "https://www.example.com/scenes/abc123", false},
+		{"malformed URL", "not-a-url", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.CanHandleURL(tt.url)
+			assert.Equal(t, tt.expected, got, "CanHandleURL(%q) = %v, want %v", tt.url, got, tt.expected)
+		})
+	}
+}
+
+func TestExtractIDFromURL(t *testing.T) {
+	s := &Scraper{baseURL: "https://javstash.org/graphql"}
+
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+		wantErr  bool
+	}{
+		{"standard path", "https://javstash.org/scenes/abc123", "abc123", false},
+		{"with trailing slash", "https://javstash.org/scenes/abc123/", "abc123", false},
+		{"nested path", "https://javstash.org/en/scenes/def456", "def456", false},
+		{"empty path", "https://javstash.org/", "", true},
+		{"short segment", "https://javstash.org/a", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.ExtractIDFromURL(tt.url)
+			if tt.wantErr {
+				assert.Error(t, err, "ExtractIDFromURL(%q) expected error, got nil", tt.url)
+			} else {
+				assert.NoError(t, err, "ExtractIDFromURL(%q) unexpected error: %v", tt.url, err)
+				assert.Equal(t, tt.expected, got, "ExtractIDFromURL(%q) = %q, want %q", tt.url, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestScrapeURL_ReturnsNotSupported(t *testing.T) {
+	s := &Scraper{enabled: true, apiKey: "test-key"}
+
+	_, err := s.ScrapeURL("https://javstash.org/scenes/abc123")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not support direct URL scraping")
+}
+
+func TestScraperInterfaceCompliance_JavStash(t *testing.T) {
+	s := &Scraper{}
+	var _ models.Scraper = s
+	var _ models.URLHandler = s
+	var _ models.DirectURLScraper = s
 }

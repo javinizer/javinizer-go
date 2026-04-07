@@ -8,6 +8,74 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+func TestCanHandleURL(t *testing.T) {
+	s := &Scraper{baseURL: "https://www.javbus.com"}
+
+	tests := []struct {
+		name     string
+		url      string
+		expected bool
+	}{
+		{"javbus.com", "https://www.javbus.com/ABC-123", true},
+		{"javbus.org", "https://www.javbus.org/ABC-123", true},
+		{"with language", "https://www.javbus.com/ja/ABC-123", true},
+		{"other site", "https://www.example.com/ABC-123", false},
+		{"malformed URL", "not-a-url", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.CanHandleURL(tt.url)
+			if got != tt.expected {
+				t.Errorf("CanHandleURL(%q) = %v, want %v", tt.url, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExtractIDFromURL(t *testing.T) {
+	s := &Scraper{baseURL: "https://www.javbus.com"}
+
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+		wantErr  bool
+	}{
+		{"standard", "https://www.javbus.com/ABC-123", "ABC-123", false},
+		{"with language en", "https://www.javbus.com/en/ABC-123", "ABC-123", false},
+		{"with language ja", "https://www.javbus.com/ja/ABC-123", "ABC-123", false},
+		{"javbus.org", "https://www.javbus.org/ABC-123", "ABC-123", false},
+		{"empty path", "https://www.javbus.com/", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.ExtractIDFromURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ExtractIDFromURL(%q) expected error, got nil", tt.url)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("ExtractIDFromURL(%q) unexpected error: %v", tt.url, err)
+				}
+				if got != tt.expected {
+					t.Errorf("ExtractIDFromURL(%q) = %q, want %q", tt.url, got, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+func TestScraperInterfaceCompliance(t *testing.T) {
+	s := &Scraper{baseURL: "https://www.javbus.com"}
+	var _ models.Scraper = s
+	var _ models.URLHandler = s
+	var _ models.DirectURLScraper = s
+}
+
 func TestExtractCoverURL_PrefersBigImageHref(t *testing.T) {
 	html := `
 <html><body>

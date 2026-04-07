@@ -3,9 +3,41 @@ package matcher
 import (
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// mockURLHandlerScraper is a test scraper that implements URLHandler
+type mockURLHandlerScraper struct {
+	name       string
+	enabled    bool
+	canHandle  bool
+	extractID  string
+	extractErr error
+}
+
+func (m *mockURLHandlerScraper) Name() string { return m.name }
+func (m *mockURLHandlerScraper) Search(_ string) (*models.ScraperResult, error) {
+	return nil, nil
+}
+func (m *mockURLHandlerScraper) GetURL(_ string) (string, error) { return "", nil }
+func (m *mockURLHandlerScraper) IsEnabled() bool                 { return m.enabled }
+func (m *mockURLHandlerScraper) Config() *config.ScraperSettings { return nil }
+func (m *mockURLHandlerScraper) Close() error                    { return nil }
+
+// URLHandler implementation
+func (m *mockURLHandlerScraper) CanHandleURL(_ string) bool {
+	return m.canHandle
+}
+
+func (m *mockURLHandlerScraper) ExtractIDFromURL(_ string) (string, error) {
+	if m.extractErr != nil {
+		return "", m.extractErr
+	}
+	return m.extractID, nil
+}
 
 func TestParseInput(t *testing.T) {
 	tests := []struct {
@@ -22,58 +54,6 @@ func TestParseInput(t *testing.T) {
 			expectedID:    "IPX-535",
 			expectedHint:  "",
 			expectedIsURL: false,
-		},
-		{
-			name:          "DMM URL with cid",
-			input:         "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
-			expectedID:    "ipx00535",
-			expectedHint:  "dmm",
-			expectedIsURL: true,
-		},
-		{
-			name:          "DMM URL with id parameter",
-			input:         "https://video.dmm.co.jp/detail?id=abc123",
-			expectedID:    "abc123",
-			expectedHint:  "dmm",
-			expectedIsURL: true,
-		},
-		{
-			name:          "R18.dev URL",
-			input:         "https://r18.dev/videos/vod/movies/detail/-/id=ipx00535/",
-			expectedID:    "ipx00535",
-			expectedHint:  "r18dev",
-			expectedIsURL: true,
-		},
-		{
-			name:          "R18.com URL",
-			input:         "https://www.r18.com/videos/vod/movies/detail/-/id=ipx00535/",
-			expectedID:    "ipx00535",
-			expectedHint:  "r18dev",
-			expectedIsURL: true,
-		},
-		{
-			name:          "LibreDMM movie URL",
-			input:         "https://www.libredmm.com/movies/IPX-535",
-			expectedID:    "IPX-535",
-			expectedHint:  "libredmm",
-			expectedIsURL: true,
-		},
-		{
-			name:          "LibreDMM search URL",
-			input:         "https://www.libredmm.com/search?q=IPX535&format=json",
-			expectedID:    "IPX535",
-			expectedHint:  "libredmm",
-			expectedIsURL: true,
-		},
-		{
-			name:        "Empty input",
-			input:       "",
-			expectError: true,
-		},
-		{
-			name:        "Whitespace only",
-			input:       "   ",
-			expectError: true,
 		},
 		{
 			name:          "JAV ID with spaces",
@@ -97,25 +77,21 @@ func TestParseInput(t *testing.T) {
 			expectedIsURL: false,
 		},
 		{
-			name:        "DMM URL without content ID",
-			input:       "https://www.dmm.co.jp/",
+			name:        "Empty input",
+			input:       "",
 			expectError: true,
 		},
 		{
-			name:        "R18.dev URL without ID",
-			input:       "https://r18.dev/",
-			expectError: true,
-		},
-		{
-			name:        "LibreDMM URL without movie ID",
-			input:       "https://www.libredmm.com/",
+			name:        "Whitespace only",
+			input:       "   ",
 			expectError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParseInput(tt.input)
+			// Parser is now agnostic - with nil registry, all inputs treated as plain IDs
+			result, err := ParseInput(tt.input, nil)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -130,125 +106,326 @@ func TestParseInput(t *testing.T) {
 	}
 }
 
-func TestExtractDMMContentID(t *testing.T) {
+func TestParseInputWithRegistry(t *testing.T) {
 	tests := []struct {
-		name     string
-		url      string
-		expected string
+		name          string
+		input         string
+		setupRegistry func() *models.ScraperRegistry
+		expectedID    string
+		expectedHint  string
+		expectedIsURL bool
+		expectError   bool
 	}{
 		{
-			name:     "cid parameter",
-			url:      "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
-			expected: "ipx00535",
+			name:  "DMM scraper handles URL",
+			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
+			setupRegistry: func() *models.ScraperRegistry {
+				reg := models.NewScraperRegistry()
+				reg.Register(&mockURLHandlerScraper{
+					name:      "dmm",
+					enabled:   true,
+					canHandle: true,
+					extractID: "ipx00535",
+				})
+				return reg
+			},
+			expectedID:    "ipx00535",
+			expectedHint:  "dmm",
+			expectedIsURL: true,
 		},
 		{
-			name:     "id parameter",
-			url:      "https://video.dmm.co.jp/detail?id=abc123",
-			expected: "abc123",
+			name:  "R18dev scraper handles URL",
+			input: "https://r18.dev/videos/vod/movies/detail/-/id=ipx00535/",
+			setupRegistry: func() *models.ScraperRegistry {
+				reg := models.NewScraperRegistry()
+				reg.Register(&mockURLHandlerScraper{
+					name:      "r18dev",
+					enabled:   true,
+					canHandle: true,
+					extractID: "ipx00535",
+				})
+				return reg
+			},
+			expectedID:    "ipx00535",
+			expectedHint:  "r18dev",
+			expectedIsURL: true,
 		},
 		{
-			name:     "id parameter with ampersand",
-			url:      "https://video.dmm.co.jp/detail?foo=bar&id=abc123",
-			expected: "abc123",
+			name:  "LibreDMM scraper handles URL",
+			input: "https://www.libredmm.com/movies/IPX-535",
+			setupRegistry: func() *models.ScraperRegistry {
+				reg := models.NewScraperRegistry()
+				reg.Register(&mockURLHandlerScraper{
+					name:      "libredmm",
+					enabled:   true,
+					canHandle: true,
+					extractID: "IPX-535",
+				})
+				return reg
+			},
+			expectedID:    "IPX-535",
+			expectedHint:  "libredmm",
+			expectedIsURL: true,
 		},
 		{
-			name:     "cid with query parameters",
-			url:      "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/?ref=list",
-			expected: "ipx00535",
+			name:  "Registry scraper not enabled - falls through to plain ID",
+			input: "https://javbus.com/IPX-535",
+			setupRegistry: func() *models.ScraperRegistry {
+				reg := models.NewScraperRegistry()
+				reg.Register(&mockURLHandlerScraper{
+					name:      "javbus",
+					enabled:   false,
+					canHandle: true,
+					extractID: "IPX-535",
+				})
+				return reg
+			},
+			expectedID:    "https://javbus.com/IPX-535", // Not a handled URL, treated as raw ID
+			expectedHint:  "",
+			expectedIsURL: false,
 		},
 		{
-			name:     "no match",
-			url:      "https://www.dmm.co.jp/",
-			expected: "",
+			name:  "Registry scraper cannot handle URL - treats as plain ID",
+			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
+			setupRegistry: func() *models.ScraperRegistry {
+				reg := models.NewScraperRegistry()
+				reg.Register(&mockURLHandlerScraper{
+					name:      "javbus",
+					enabled:   true,
+					canHandle: false,
+				})
+				return reg
+			},
+			expectedID:    "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
+			expectedHint:  "",
+			expectedIsURL: false,
 		},
 		{
-			name:     "malformed cid",
-			url:      "https://www.dmm.co.jp/cid=/",
-			expected: "",
+			name:  "Multiple scrapers - first match wins",
+			input: "https://javbus.com/IPX-535",
+			setupRegistry: func() *models.ScraperRegistry {
+				reg := models.NewScraperRegistry()
+				reg.Register(&mockURLHandlerScraper{
+					name:      "javbus",
+					enabled:   true,
+					canHandle: true,
+					extractID: "IPX-535",
+				})
+				reg.Register(&mockURLHandlerScraper{
+					name:      "javdb",
+					enabled:   true,
+					canHandle: true,
+					extractID: "IPX-535-DB",
+				})
+				return reg
+			},
+			expectedID:    "IPX-535", // javbus registered first alphabetically
+			expectedHint:  "javbus",
+			expectedIsURL: true,
+		},
+		{
+			name:  "Empty registry treats all input as plain ID",
+			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
+			setupRegistry: func() *models.ScraperRegistry {
+				return models.NewScraperRegistry()
+			},
+			expectedID:    "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
+			expectedHint:  "",
+			expectedIsURL: false,
+		},
+		{
+			name:  "Nil registry treats all input as plain ID",
+			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
+			setupRegistry: func() *models.ScraperRegistry {
+				return nil
+			},
+			expectedID:    "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
+			expectedHint:  "",
+			expectedIsURL: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractDMMContentID(tt.url)
+			registry := tt.setupRegistry()
+			result, err := ParseInput(tt.input, registry)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedID, result.ID)
+			assert.Equal(t, tt.expectedHint, result.ScraperHint)
+			assert.Equal(t, tt.expectedIsURL, result.IsURL)
+		})
+	}
+}
+
+func TestReorderWithPriority(t *testing.T) {
+	tests := []struct {
+		name     string
+		scrapers []string
+		priority string
+		expected []string
+	}{
+		{
+			name:     "priority at start",
+			scrapers: []string{"r18dev", "dmm", "javlibrary"},
+			priority: "r18dev",
+			expected: []string{"r18dev", "dmm", "javlibrary"},
+		},
+		{
+			name:     "priority in middle",
+			scrapers: []string{"r18dev", "dmm", "javlibrary"},
+			priority: "dmm",
+			expected: []string{"dmm", "r18dev", "javlibrary"},
+		},
+		{
+			name:     "priority at end",
+			scrapers: []string{"r18dev", "dmm", "javlibrary"},
+			priority: "javlibrary",
+			expected: []string{"javlibrary", "r18dev", "dmm"},
+		},
+		{
+			name:     "priority not in list",
+			scrapers: []string{"r18dev", "dmm"},
+			priority: "javlibrary",
+			expected: []string{"javlibrary", "r18dev", "dmm"},
+		},
+		{
+			name:     "empty scrapers list",
+			scrapers: []string{},
+			priority: "r18dev",
+			expected: []string{"r18dev"},
+		},
+		{
+			name:     "single scraper - same as priority",
+			scrapers: []string{"r18dev"},
+			priority: "r18dev",
+			expected: []string{"r18dev"},
+		},
+		{
+			name:     "empty priority",
+			scrapers: []string{"r18dev", "dmm"},
+			priority: "",
+			expected: []string{"r18dev", "dmm"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ReorderWithPriority(tt.scrapers, tt.priority)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestExtractR18DevID(t *testing.T) {
+func TestCalculateOptimalScrapers(t *testing.T) {
 	tests := []struct {
-		name     string
-		url      string
-		expected string
+		name            string
+		requestScrapers []string
+		configPriority  []string
+		parsed          *ParsedInput
+		expected        []string
 	}{
 		{
-			name:     "standard format",
-			url:      "https://r18.dev/videos/vod/movies/detail/-/id=ipx00535/",
-			expected: "ipx00535",
+			name:            "no URL - uses config priority",
+			requestScrapers: []string{},
+			configPriority:  []string{"dmm", "r18dev", "javlibrary"},
+			parsed: &ParsedInput{
+				ID:                 "IPX-123",
+				IsURL:              false,
+				CompatibleScrapers: nil,
+				ScraperHint:        "",
+			},
+			expected: []string{"dmm", "r18dev", "javlibrary"},
 		},
 		{
-			name:     "with query parameters",
-			url:      "https://r18.dev/videos/vod/movies/detail/-/id=abc123/?ref=list",
-			expected: "abc123",
+			name:            "no URL - user override",
+			requestScrapers: []string{"javdb", "javbus"},
+			configPriority:  []string{"dmm", "r18dev"},
+			parsed: &ParsedInput{
+				ID:                 "IPX-123",
+				IsURL:              false,
+				CompatibleScrapers: nil,
+				ScraperHint:        "",
+			},
+			expected: []string{"javdb", "javbus"},
 		},
 		{
-			name:     "r18.com domain",
-			url:      "https://www.r18.com/videos/vod/movies/detail/-/id=test123/",
-			expected: "test123",
+			name:            "URL - filters to compatible and prioritizes hint",
+			requestScrapers: []string{},
+			configPriority:  []string{"dmm", "r18dev", "javlibrary", "javdb"},
+			parsed: &ParsedInput{
+				ID:                 "kitaike429",
+				IsURL:              true,
+				CompatibleScrapers: []string{"dmm", "javdb"},
+				ScraperHint:        "dmm",
+			},
+			expected: []string{"dmm", "javdb"},
 		},
 		{
-			name:     "no match",
-			url:      "https://r18.dev/",
-			expected: "",
+			name:            "URL - user selection filtered to compatible",
+			requestScrapers: []string{"dmm", "r18dev", "javlibrary"},
+			configPriority:  []string{"dmm", "javdb"},
+			parsed: &ParsedInput{
+				ID:                 "kitaike429",
+				IsURL:              true,
+				CompatibleScrapers: []string{"dmm"},
+				ScraperHint:        "dmm",
+			},
+			expected: []string{"dmm"},
 		},
 		{
-			name:     "malformed id",
-			url:      "https://r18.dev/videos/vod/movies/detail/-/id=/",
-			expected: "",
+			name:            "URL - no compatible scrapers falls back to original",
+			requestScrapers: []string{"javlibrary"},
+			configPriority:  []string{"dmm", "r18dev"},
+			parsed: &ParsedInput{
+				ID:                 "unknown123",
+				IsURL:              true,
+				CompatibleScrapers: []string{}, // Empty - no compatible scrapers
+				ScraperHint:        "",
+			},
+			expected: []string{"javlibrary"},
+		},
+		{
+			name:            "URL - compatible scrapers empty and no user selection uses config",
+			requestScrapers: []string{},
+			configPriority:  []string{"dmm", "r18dev", "javlibrary"},
+			parsed: &ParsedInput{
+				ID:                 "unknown123",
+				IsURL:              true,
+				CompatibleScrapers: []string{}, // Empty - no compatible scrapers
+				ScraperHint:        "",
+			},
+			expected: []string{"dmm", "r18dev", "javlibrary"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractR18DevID(tt.url)
+			result := CalculateOptimalScrapers(tt.requestScrapers, tt.configPriority, tt.parsed)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestExtractLibreDMMID(t *testing.T) {
-	tests := []struct {
-		name     string
-		url      string
-		expected string
-	}{
-		{
-			name:     "movie URL",
-			url:      "https://www.libredmm.com/movies/IPX-535",
-			expected: "IPX-535",
-		},
-		{
-			name:     "movie JSON URL",
-			url:      "https://www.libredmm.com/movies/IPX-535.json",
-			expected: "IPX-535",
-		},
-		{
-			name:     "search URL",
-			url:      "https://www.libredmm.com/search?q=IPX535&format=json",
-			expected: "IPX535",
-		},
-		{
-			name:     "no match",
-			url:      "https://www.libredmm.com/",
-			expected: "",
-		},
-	}
+func TestCalculateOptimalScrapersWithNilParsed(t *testing.T) {
+	// Test when parsed is nil (no manual input parsing)
+	result := CalculateOptimalScrapers(
+		[]string{"javdb", "javbus"},
+		[]string{"dmm", "r18dev"},
+		nil,
+	)
+	assert.Equal(t, []string{"javdb", "javbus"}, result)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractLibreDMMID(tt.url)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+	// Test when parsed is nil and no user selection
+	result = CalculateOptimalScrapers(
+		[]string{},
+		[]string{"dmm", "r18dev"},
+		nil,
+	)
+	assert.Equal(t, []string{"dmm", "r18dev"}, result)
 }

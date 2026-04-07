@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -187,6 +188,34 @@ func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
 		return fmt.Errorf("javstash: timeout must be non-negative, got %d", cfg.Timeout)
 	}
 	return nil
+}
+
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "javstash.org")
+}
+
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+	path := strings.Trim(u.Path, "/")
+	parts := strings.Split(path, "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] != "" && len(parts[i]) > 3 {
+			return parts[i], nil
+		}
+	}
+	return "", fmt.Errorf("failed to extract ID from JavStash URL")
+}
+
+func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+	return nil, models.NewScraperNotFoundError("Javstash", "JavStash is a GraphQL-based API and does not support direct URL scraping. Use ID-based search instead.")
 }
 
 func (s *Scraper) GetURL(id string) (string, error) {

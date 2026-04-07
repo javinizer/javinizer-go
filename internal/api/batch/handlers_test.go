@@ -1021,6 +1021,22 @@ func TestRescrapeBatchMovie(t *testing.T) {
 			},
 			expectedStatus: 404,
 		},
+		{
+			name: "rescrape with DMM URL - extracts content ID and auto-selects dmm scraper",
+			setupJob: func(jq *worker.JobQueue) (string, string) {
+				job := jq.CreateJob([]string{"/test/kitaike429.mp4"})
+				job.UpdateFileResult("/test/kitaike429.mp4", &worker.FileResult{
+					MovieID: "KITAIKE-429",
+					Status:  worker.JobStatusCompleted,
+				})
+				return job.ID, "KITAIKE-429"
+			},
+			requestBody: BatchRescrapeRequest{
+				ManualSearchInput: "https://video.dmm.co.jp/amateur/content/?id=kitaike429",
+				Force:             true,
+			},
+			expectedStatus: 500, // Internal Server Error - scraping fails with mock scraper (no results)
+		},
 	}
 
 	for _, tt := range tests {

@@ -7,8 +7,66 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestCanHandleURL(t *testing.T) {
+	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected bool
+	}{
+		{"caribbeancom.com", "https://www.caribbeancom.com/moviepages/120614-753/index.html", true},
+		{"en subdomain", "https://en.caribbeancom.com/eng/moviepages/120614-753/index.html", true},
+		{"other site", "https://www.example.com/ABC-123", false},
+		{"malformed URL", "not-a-url", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.CanHandleURL(tt.url)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestExtractIDFromURL_Caribbeancom(t *testing.T) {
+	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+		wantErr  bool
+	}{
+		{"moviepages URL", "https://www.caribbeancom.com/moviepages/120614-753/index.html", "120614-753", false},
+		{"with underscore", "https://www.caribbeancom.com/moviepages/120614_753/", "120614-753", false},
+		{"invalid URL", "https://www.example.com/ABC-123", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.ExtractIDFromURL(tt.url)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestScraperInterfaceCompliance_Caribbeancom(t *testing.T) {
+	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+	var _ models.Scraper = s
+	var _ models.URLHandler = s
+	var _ models.DirectURLScraper = s
+}
 
 func TestResolveSearchQuery(t *testing.T) {
 	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})

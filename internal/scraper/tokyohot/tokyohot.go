@@ -148,6 +148,75 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 }
 
 // GetURL finds the TokyoHot detail URL for an ID.
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "tokyo-hot.com")
+}
+
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+	path := strings.Trim(u.Path, "/")
+	if strings.HasPrefix(path, "product/") {
+		id := strings.TrimPrefix(path, "product/")
+		id = strings.TrimSuffix(id, "/")
+		if id != "" {
+			return strings.ToUpper(extractID(id)), nil
+		}
+	}
+	parts := strings.Split(path, "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] != "" {
+			if extracted := extractID(parts[i]); extracted != "" {
+				return strings.ToUpper(extracted), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("failed to extract ID from TokyoHot URL")
+}
+
+func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(rawURL) {
+		return nil, models.NewScraperNotFoundError("TokyoHot", "URL not handled by TokyoHot scraper")
+	}
+
+	id, err := s.ExtractIDFromURL(rawURL)
+	if err != nil {
+		id = ""
+	}
+
+	detailURL := s.applyLanguage(rawURL)
+	html, status, err := s.fetchPage(detailURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch TokyoHot detail page: %w", err)
+	}
+	if status == 404 {
+		return nil, models.NewScraperNotFoundError("TokyoHot", "page not found")
+	}
+	if status == 429 {
+		return nil, models.NewScraperStatusError("TokyoHot", 429, "rate limited")
+	}
+	if status == 403 || status == 451 {
+		return nil, models.NewScraperStatusError("TokyoHot", status, "access blocked")
+	}
+	if status != 200 {
+		return nil, models.NewScraperStatusError("TokyoHot", status, fmt.Sprintf("TokyoHot returned status code %d", status))
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse TokyoHot detail page: %w", err)
+	}
+
+	return parseDetailPage(doc, detailURL, id, s.language), nil
+}
+
 func (s *Scraper) GetURL(id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {

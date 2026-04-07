@@ -2,6 +2,7 @@ package javlibrary
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -135,6 +136,76 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 }
 
 // GetURL returns the search URL for a given ID
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "javlibrary.com")
+}
+
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+	query := u.Query()
+	if v := query.Get("v"); v != "" {
+		return v, nil
+	}
+	if keyword := query.Get("keyword"); keyword != "" {
+		return strings.ToUpper(keyword), nil
+	}
+	path := strings.Trim(u.Path, "/")
+	parts := strings.Split(path, "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] != "" && len(parts[i]) > 4 {
+			return parts[i], nil
+		}
+	}
+	return "", fmt.Errorf("failed to extract ID from URL")
+}
+
+func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(rawURL) {
+		return nil, models.NewScraperNotFoundError("JavLibrary", "URL not handled by JavLibrary scraper")
+	}
+
+	id, err := s.ExtractIDFromURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
+	}
+
+	var detailURL string
+	var resultLanguage string
+	if u, parseErr := url.Parse(rawURL); parseErr == nil && u.Query().Get("v") != "" {
+		detailURL = rawURL
+		path := strings.Trim(u.Path, "/")
+		parts := strings.Split(path, "/")
+		if len(parts) > 0 && isValidLanguage(parts[0]) {
+			resultLanguage = parts[0]
+		}
+	}
+	if detailURL == "" {
+		detailURL = fmt.Sprintf("%s/%s/?v=%s", s.baseURL, s.language, id)
+	}
+	if resultLanguage == "" {
+		resultLanguage = s.language
+	}
+
+	html, err := s.fetchPage(detailURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch JavLibrary page: %w", err)
+	}
+
+	if strings.Contains(html, `id="video_info"`) {
+		return s.parseDetailPage(html, id, detailURL, resultLanguage)
+	}
+
+	return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
+}
+
 func (s *Scraper) GetURL(id string) (string, error) {
 	return fmt.Sprintf("%s/%s/vl_searchbyid.php?keyword=%s", s.baseURL, s.language, id), nil
 }
@@ -159,7 +230,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	// Check if search landed directly on a detail page (contains video_info div)
 	if strings.Contains(html, `id="video_info"`) {
 		logging.Debugf("JavLibrary: Search landed directly on detail page for %s", id)
-		return s.parseDetailPage(html, id, searchURL)
+		return s.parseDetailPage(html, id, searchURL, s.language)
 	}
 
 	// Otherwise, look for a movie link in search results
@@ -180,7 +251,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, fmt.Errorf("failed to fetch detail page: %w", err)
 	}
 
-	return s.parseDetailPage(detailHTML, id, detailURL)
+	return s.parseDetailPage(detailHTML, id, detailURL, s.language)
 }
 
 // fetchPage fetches a page via FlareSolverr (if enabled) or direct HTTP
@@ -242,11 +313,11 @@ func (s *Scraper) fetchPage(url string) (string, error) {
 }
 
 // parseDetailPage parses a JavLibrary detail page HTML
-func (s *Scraper) parseDetailPage(html string, id string, sourceURL string) (*models.ScraperResult, error) {
+func (s *Scraper) parseDetailPage(html string, id string, sourceURL string, language string) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
-		Language:  s.language,
+		Language:  language,
 		ID:        id,
 	}
 

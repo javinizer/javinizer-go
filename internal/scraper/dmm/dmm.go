@@ -2,6 +2,7 @@ package dmm
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -46,6 +47,9 @@ var (
 	actressArticleIDRegex = regexp.MustCompile(`/article=actress/id=(\d+)`)
 	actressParenRegex     = regexp.MustCompile(`\(.*\)|（.*）`)
 	actressJapaneseCharRe = regexp.MustCompile(`\p{Hiragana}|\p{Katakana}|\p{Han}`)
+	// URL extraction patterns
+	dmmCIDRegex = regexp.MustCompile(`cid=([^/?&]+)`)
+	dmmIDRegex  = regexp.MustCompile(`[?&]id=([^/?&]+)`)
 )
 
 // Scraper implements the DMM/Fanza scraper
@@ -123,6 +127,36 @@ func (s *Scraper) Config() *config.ScraperSettings {
 // Close cleans up resources held by the scraper
 func (s *Scraper) Close() error {
 	return nil
+}
+
+// CanHandleURL returns true if this scraper can handle the given URL
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if strings.HasPrefix(host, "pics.") || strings.HasPrefix(host, "awsimgsrc.") {
+		return false
+	}
+	return strings.HasSuffix(host, "dmm.co.jp") || strings.HasSuffix(host, "dmm.com")
+}
+
+// ExtractIDFromURL extracts the movie ID from a DMM URL
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	// Try cid= format first (www.dmm.co.jp)
+	matches := dmmCIDRegex.FindStringSubmatch(urlStr)
+	if len(matches) > 1 {
+		return matches[1], nil
+	}
+
+	// Try id= format (video.dmm.co.jp)
+	matches = dmmIDRegex.FindStringSubmatch(urlStr)
+	if len(matches) > 1 {
+		return matches[1], nil
+	}
+
+	return "", fmt.Errorf("failed to extract content ID from DMM URL")
 }
 
 // ValidateConfig validates the scraper configuration.
@@ -455,6 +489,65 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 				resp.StatusCode(),
 				fmt.Sprintf("DMM returned status code %d", resp.StatusCode()),
 			)
+		}
+
+		doc, err = goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse HTML: %w", err)
+		}
+	}
+
+	return s.parseHTML(doc, url)
+}
+
+// ScrapeURL directly scrapes metadata from a DMM URL.
+// This provides more accurate results than ID-based search when the exact URL is known.
+func (s *Scraper) ScrapeURL(url string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(url) {
+		return nil, models.NewScraperNotFoundError("DMM", "URL not handled by DMM scraper")
+	}
+
+	var doc *goquery.Document
+
+	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
+		logging.Debug("DMM ScrapeURL: Using browser mode for video.dmm.co.jp page")
+
+		bodyHTML, err := FetchWithBrowser(url, s.browserConfig.Timeout, s.proxyProfile)
+		if err != nil {
+			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("browser fetch failed: %v", err))
+		}
+
+		doc, err = goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
+		if err != nil {
+			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("failed to parse HTML from browser: %v", err))
+		}
+	} else {
+		resp, err := s.client.R().Get(url)
+		if err != nil {
+			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("failed to fetch URL: %v", err))
+		}
+
+		if resp.StatusCode() == 404 {
+			return nil, models.NewScraperNotFoundError("DMM", "page not found")
+		}
+
+		if resp.StatusCode() == 429 {
+			return nil, models.NewScraperStatusError("DMM", 429, "rate limited")
+		}
+
+		if resp.StatusCode() == 403 || resp.StatusCode() == 451 {
+			return nil, models.NewScraperStatusError("DMM", resp.StatusCode(),
+				fmt.Sprintf("DMM access blocked (status %d, likely geo-restriction)", resp.StatusCode()))
+		}
+
+		if resp.StatusCode() >= 500 {
+			return nil, models.NewScraperStatusError("DMM", resp.StatusCode(),
+				fmt.Sprintf("DMM returned server error %d", resp.StatusCode()))
+		}
+
+		if resp.StatusCode() != 200 {
+			return nil, models.NewScraperStatusError("DMM", resp.StatusCode(),
+				fmt.Sprintf("DMM returned status code %d", resp.StatusCode()))
 		}
 
 		doc, err = goquery.NewDocumentFromReader(strings.NewReader(resp.String()))

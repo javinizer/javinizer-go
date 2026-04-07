@@ -160,6 +160,75 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 }
 
 // GetURL attempts to find a detail URL for the given movie ID.
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "javbus.com") || strings.HasSuffix(host, "javbus.org")
+}
+
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+	path := strings.Trim(u.Path, "/")
+	if path == "" {
+		return "", fmt.Errorf("URL has no path, not a detail page")
+	}
+	parts := strings.Split(path, "/")
+	var candidates []string
+	for _, p := range parts {
+		if p == "en" || p == "ja" || p == "zh" || p == "cn" || p == "tw" {
+			continue
+		}
+		if p != "" {
+			candidates = append(candidates, p)
+		}
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("URL has no ID path segment, not a detail page")
+	}
+	if len(candidates) > 1 {
+		return "", fmt.Errorf("URL has multiple path segments (%v), not a detail page", candidates)
+	}
+	return strings.ToUpper(candidates[0]), nil
+}
+
+func (s *Scraper) ScrapeURL(url string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(url) {
+		return nil, models.NewScraperNotFoundError("JavBus", "URL not handled by JavBus scraper")
+	}
+
+	detailURL := s.applyLanguageToURL(url)
+	html, status, err := s.fetchPage(detailURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch JavBus detail page: %w", err)
+	}
+	if status == 404 {
+		return nil, models.NewScraperNotFoundError("JavBus", "page not found")
+	}
+	if status == 429 {
+		return nil, models.NewScraperStatusError("JavBus", 429, "rate limited")
+	}
+	if status == 403 || status == 451 {
+		return nil, models.NewScraperStatusError("JavBus", status, "access blocked")
+	}
+	if status != 200 {
+		return nil, models.NewScraperStatusError("JavBus", status, fmt.Sprintf("JavBus returned status code %d", status))
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JavBus detail page: %w", err)
+	}
+
+	id, _ := s.ExtractIDFromURL(url)
+	return s.parseDetailPage(doc, detailURL, id)
+}
+
 func (s *Scraper) GetURL(id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {

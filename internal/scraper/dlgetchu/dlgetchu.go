@@ -153,6 +153,68 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 }
 
 // GetURL resolves detail URL for an ID.
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "dl.getchu.com") || strings.HasSuffix(host, "getchu.com")
+}
+
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	if m := itemIDRegex.FindStringSubmatch(urlStr); len(m) > 1 {
+		return strings.TrimSpace(m[1]), nil
+	}
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+	if strings.Contains(u.Path, "/i/item") {
+		path := strings.TrimPrefix(u.Path, "/i/item")
+		path = strings.TrimSuffix(path, "/")
+		if path != "" {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("failed to extract ID from DLgetchu URL")
+}
+
+func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(rawURL) {
+		return nil, models.NewScraperNotFoundError("DLgetchu", "URL not handled by DLgetchu scraper")
+	}
+
+	id, err := s.ExtractIDFromURL(rawURL)
+	if err != nil {
+		id = ""
+	}
+
+	html, status, err := s.fetchPage(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch DLgetchu detail page: %w", err)
+	}
+	if status == 404 {
+		return nil, models.NewScraperNotFoundError("DLgetchu", "page not found")
+	}
+	if status == 429 {
+		return nil, models.NewScraperStatusError("DLgetchu", 429, "rate limited")
+	}
+	if status == 403 || status == 451 {
+		return nil, models.NewScraperStatusError("DLgetchu", status, "access blocked")
+	}
+	if status != 200 {
+		return nil, models.NewScraperStatusError("DLgetchu", status, fmt.Sprintf("DLgetchu returned status code %d", status))
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse DLgetchu detail page: %w", err)
+	}
+
+	return parseDetailPage(doc, html, rawURL, id), nil
+}
+
 func (s *Scraper) GetURL(id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {

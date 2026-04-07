@@ -165,6 +165,13 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 					actress_sources: response.actress_sources ?? newResults[filePath].actress_sources
 				};
 				deps.setJob({ ...currentJob, results: newResults });
+
+				// Update rescrapeMovieId with the new ID from the rescrape result
+				// This ensures consecutive rescrapes use the correct movie ID
+				const newMovieId = updatedMovie?.id || updatedMovie?.content_id || rescrapeMovieId;
+				if (newMovieId && newMovieId !== rescrapeMovieId) {
+					deps.setRescrapeMovieId(newMovieId);
+				}
 			}
 
 			const editedMovies = new Map(deps.getEditedMovies());

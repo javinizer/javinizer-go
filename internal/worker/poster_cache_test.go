@@ -141,6 +141,7 @@ func TestPosterRegenerationOnCacheHit(t *testing.T) {
 		false,            // force=false
 		false,            // updateMode=false
 		nil,              // no selected scrapers
+		nil,              // no priority override
 		nil,              // no processedMovieIDs tracking
 		cfg,              // config
 		"prefer-scraper", // scalarStrategy
@@ -199,6 +200,7 @@ func TestPosterRegenerationOnCacheHit(t *testing.T) {
 		false,            // force=false (use cache)
 		false,            // updateMode=false
 		nil,              // no selected scrapers
+		nil,              // no priority override
 		nil,              // no processedMovieIDs tracking
 		cfg,              // config
 		"prefer-scraper", // scalarStrategy

@@ -25,6 +25,63 @@ func TestScraperInterfaceCompliance(t *testing.T) {
 	var _ models.ScraperQueryResolver = s
 }
 
+func TestCanHandleURL(t *testing.T) {
+	s := New(testSettings(), nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected bool
+	}{
+		{"fc2.com", "https://adult.contents.fc2.com/article/12345678/", true},
+		{"other fc2 subdomain", "https://contents.fc2.com/article/12345678", true},
+		{"other site", "https://www.example.com/ABC-123", false},
+		{"malformed URL", "not-a-url", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.CanHandleURL(tt.url)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestExtractIDFromURL_FC2(t *testing.T) {
+	s := New(testSettings(), nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+		wantErr  bool
+	}{
+		{"article URL", "https://adult.contents.fc2.com/article/12345678/", "FC2-PPV-12345678", false},
+		{"with query params", "https://adult.contents.fc2.com/article/12345678/?lang=en", "FC2-PPV-12345678", false},
+		{"invalid URL", "https://www.example.com/ABC-123", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.ExtractIDFromURL(tt.url)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestScraperInterfaceCompliance_FC2(t *testing.T) {
+	s := New(testSettings(), nil, config.FlareSolverrConfig{})
+	var _ models.Scraper = s
+	var _ models.URLHandler = s
+	var _ models.DirectURLScraper = s
+}
+
 func TestNameAndEnabled(t *testing.T) {
 	settings := testSettings()
 	s := New(settings, nil, config.FlareSolverrConfig{})

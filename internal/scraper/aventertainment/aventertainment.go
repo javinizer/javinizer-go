@@ -163,6 +163,75 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 
 // ResolveSearchQuery maps non-standard filename IDs to AVEntertainment-friendly
 // query formats.
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "aventertainments.com")
+}
+
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+	if itemNo := u.Query().Get("item_no"); itemNo != "" {
+		return extractID(itemNo), nil
+	}
+	path := strings.Trim(u.Path, "/")
+	parts := strings.Split(path, "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] != "" && len(parts[i]) > 3 {
+			if extracted := extractID(parts[i]); extracted != "" {
+				return extracted, nil
+			}
+			if _, err := strconv.Atoi(parts[i]); err == nil {
+				return parts[i], nil
+			}
+		}
+	}
+	return "", fmt.Errorf("failed to extract ID from AVEntertainment URL")
+}
+
+func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(rawURL) {
+		return nil, models.NewScraperNotFoundError("AVEntertainment", "URL not handled by AVEntertainment scraper")
+	}
+
+	id, err := s.ExtractIDFromURL(rawURL)
+	if err != nil {
+		logging.Debugf("AVEntertainment: URL ID extraction failed, falling back to HTML parsing: %v", err)
+		id = ""
+	}
+
+	detailURL := s.applyLanguage(rawURL)
+	html, status, err := s.fetchPage(detailURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch AVEntertainment detail page: %w", err)
+	}
+	if status == 404 {
+		return nil, models.NewScraperNotFoundError("AVEntertainment", "page not found")
+	}
+	if status == 429 {
+		return nil, models.NewScraperStatusError("AVEntertainment", 429, "rate limited")
+	}
+	if status == 403 || status == 451 {
+		return nil, models.NewScraperStatusError("AVEntertainment", status, "access blocked")
+	}
+	if status != 200 {
+		return nil, models.NewScraperStatusError("AVEntertainment", status, fmt.Sprintf("AVEntertainment returned status code %d", status))
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse AVEntertainment detail page: %w", err)
+	}
+
+	return parseDetailPage(doc, html, detailURL, id, s.language, s.scrapeBonus), nil
+}
+
 func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	norm := normalizeResolverInput(input)
 	if norm == "" {

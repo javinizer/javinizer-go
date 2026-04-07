@@ -78,7 +78,7 @@ func compareNFO(deps *ServerDependencies) gin.HandlerFunc {
 		response.NFOData = parseResult.Movie
 
 		// Step 3: Scrape fresh data
-		parsed, err := matcher.ParseInput(movieID)
+		parsed, err := matcher.ParseInput(movieID, deps.GetRegistry())
 		if err != nil {
 			c.JSON(400, ErrorResponse{Error: fmt.Sprintf("Invalid movie ID: %v", err)})
 			return

@@ -667,7 +667,7 @@ func executeManualSearch(m *Model) (*Model, tea.Cmd) {
 	}
 
 	// Parse input (URL or ID)
-	parsed, err := matcher.ParseInput(input)
+	parsed, err := matcher.ParseInput(input, m.processor.registry)
 	if err != nil {
 		// Show error in logs
 		m.AddLog("error", fmt.Sprintf("Invalid input: %v", err))

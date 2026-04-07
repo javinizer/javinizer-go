@@ -33,7 +33,7 @@ func TestParseDetailPage(t *testing.T) {
 <span class="star"><a href="/star/mary">Mary Major</a></span>
 </body></html>`
 
-	result, err := s.parseDetailPage(html, "IPX-123", "https://www.javlibrary.com/en/?v=abc")
+	result, err := s.parseDetailPage(html, "IPX-123", "https://www.javlibrary.com/en/?v=abc", "en")
 	if err != nil {
 		t.Fatalf("parseDetailPage returned error: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestParseDetailPage_FullData(t *testing.T) {
 <a href="https://example.com/trailer.mp4">trailer</a>
 </body></html>`
 
-	result, err := s.parseDetailPage(html, "IPX-123", "https://www.javlibrary.com/en/?v=test")
+	result, err := s.parseDetailPage(html, "IPX-123", "https://www.javlibrary.com/en/?v=test", "en")
 	if err != nil {
 		t.Fatalf("parseDetailPage returned error: %v", err)
 	}

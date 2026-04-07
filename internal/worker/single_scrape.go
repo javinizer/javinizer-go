@@ -38,22 +38,53 @@ func scraperSearchWithContext(ctx context.Context, scraper models.Scraper, id st
 
 	resultCh := make(chan result, 1)
 
-	// Run scraper.Search() in a goroutine
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				resultCh <- result{nil, fmt.Errorf("scraper panic: %v", r)}
+			}
+		}()
 		scraperResult, err := scraper.Search(id)
 		resultCh <- result{scraperResult, err}
 	}()
 
-	// Wait for either result or context cancellation
 	select {
 	case <-ctx.Done():
-		// Context cancelled - scraper goroutine will continue but result will be ignored
 		return nil, ctx.Err()
 	case res := <-resultCh:
 		if res.scraperResult != nil {
 			res.scraperResult.NormalizeMediaURLs()
 		}
 		return res.scraperResult, res.err
+	}
+}
+
+func scraperSearchWithURL(ctx context.Context, scraper models.DirectURLScraper, url string) (*models.ScraperResult, error) {
+	type result struct {
+		res *models.ScraperResult
+		err error
+	}
+
+	resultCh := make(chan result, 1)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				resultCh <- result{nil, fmt.Errorf("scraper panic: %v", r)}
+			}
+		}()
+		res, err := scraper.ScrapeURL(url)
+		resultCh <- result{res: res, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r := <-resultCh:
+		if r.res != nil {
+			r.res.NormalizeMediaURLs()
+		}
+		return r.res, r.err
 	}
 }
 
@@ -64,6 +95,19 @@ func scraperListContains(scrapers []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func extractIDFromURL(urlStr string, registry *models.ScraperRegistry) string {
+	for _, scraper := range registry.GetAll() {
+		if handler, ok := scraper.(models.URLHandler); ok {
+			if handler.CanHandleURL(urlStr) {
+				if id, err := handler.ExtractIDFromURL(urlStr); err == nil && id != "" {
+					return id
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func resolveScraperQueryForInputs(scraper models.Scraper, inputs ...string) (string, bool) {
@@ -132,19 +176,21 @@ func RunBatchScrapeOnce(
 	force bool,
 	updateMode bool,
 	selectedScrapers []string,
+	scraperPriorityOverride []string,
 	processedMovieIDs map[string]bool,
 	cfg *config.Config,
 	scalarStrategy string,
 	arrayStrategy string,
 ) (*models.Movie, *FileResult, error) {
-	logging.Debugf("[Batch %s] Starting scrape for file %d: %s (force=%v, customScrapers=%v, queryOverride=%s)",
-		job.ID, fileIndex, filePath, force, selectedScrapers, queryOverride)
+	logging.Debugf("[Batch %s] Starting scrape for file %d: %s (force=%v, customScrapers=%v, priorityOverride=%v, queryOverride=%s)",
+		job.ID, fileIndex, filePath, force, selectedScrapers, scraperPriorityOverride, queryOverride)
 
 	startTime := time.Now()
 
 	// Step 1: Determine the query (use queryOverride if provided, otherwise extract from filename)
 	var movieID string
 	var rawFilenameQuery string
+	var resolvedID string
 	var matchResultPtr *matcher.MatchResult // Store full match result for multi-part info
 	matcherMissFallback := false
 
@@ -152,6 +198,13 @@ func RunBatchScrapeOnce(
 		movieID = queryOverride
 		matchResultPtr = nil // No match result when using manual override
 		logging.Debugf("[Batch %s] File %d: Using manual search query: %s", job.ID, fileIndex, movieID)
+		if strings.HasPrefix(strings.ToLower(queryOverride), "http://") || strings.HasPrefix(strings.ToLower(queryOverride), "https://") {
+			extractedID := extractIDFromURL(queryOverride, registry)
+			if extractedID != "" {
+				logging.Debugf("[Batch %s] File %d: URL detected, extracted ID: %s (using for movieID and fallback search)", job.ID, fileIndex, extractedID)
+				movieID = extractedID
+			}
+		}
 	} else {
 		// Extract ID from filename using matcher
 		fileInfo := scanner.FileInfo{
@@ -400,7 +453,6 @@ func RunBatchScrapeOnce(
 	}
 
 	// Step 3: Perform DMM content-ID resolution (only if not using manual query)
-	var resolvedID string
 	shouldResolveDMMContentID := queryOverride == "" && !matcherMissFallback &&
 		(len(selectedScrapers) == 0 || scraperListContains(selectedScrapers, "dmm"))
 	if shouldResolveDMMContentID {
@@ -441,12 +493,16 @@ func RunBatchScrapeOnce(
 
 	// Determine scraper order for this run.
 	// - Custom mode: use user-selected scrapers (selectedScrapers)
+	// - Priority override mode: use scraperPriorityOverride (URL filtering, etc.)
 	// - Default mode: use configured global priority (cfg.Scrapers.Priority)
 	// - Fallback: use registry enabled order if config priority is unavailable
 	var scraperNames []string
 	if len(selectedScrapers) > 0 {
 		scraperNames = selectedScrapers
 		logging.Debugf("[Batch %s] File %d: Using custom scraper priority: %v", job.ID, fileIndex, selectedScrapers)
+	} else if len(scraperPriorityOverride) > 0 {
+		scraperNames = scraperPriorityOverride
+		logging.Debugf("[Batch %s] File %d: Using priority override (URL-filtered): %v", job.ID, fileIndex, scraperPriorityOverride)
 	} else {
 		if cfg != nil && len(cfg.Scrapers.Priority) > 0 {
 			scraperNames = cfg.Scrapers.Priority
@@ -509,6 +565,41 @@ func RunBatchScrapeOnce(
 				EndedAt:   &now,
 			}, ctx.Err()
 		default:
+		}
+
+		// Step 4.5: Try direct URL scraping if input is a URL
+		// queryOverride contains the URL when user provides URL input
+		if queryOverride != "" {
+			// Check if this scraper can handle the URL and supports direct scraping
+			if handler, ok := scraper.(models.URLHandler); ok && handler.CanHandleURL(queryOverride) {
+				if directScraper, ok := scraper.(models.DirectURLScraper); ok {
+					logging.Debugf("[Batch %s] File %d: Trying direct URL scrape for %s",
+						job.ID, fileIndex, scraper.Name())
+
+					scraperResult, err := scraperSearchWithURL(ctx, directScraper, queryOverride)
+					if err == nil {
+						// Success - use direct scrape result
+						logging.Debugf("[Batch %s] File %d: Direct URL scrape succeeded for %s",
+							job.ID, fileIndex, scraper.Name())
+						results = append(results, scraperResult)
+						continue // Skip to next scraper
+					}
+
+					// Failed - classify error and log fallback reason
+					if scraperErr, ok := models.AsScraperError(err); ok {
+						if scraperErr.Kind == models.ScraperErrorKindNotFound {
+							logging.Debugf("[Batch %s] File %d: Direct URL not found, falling back to ID search",
+								job.ID, fileIndex)
+						} else {
+							logging.Debugf("[Batch %s] File %d: Direct URL scrape failed (%s), falling back to ID search",
+								job.ID, fileIndex, scraperErr.Kind)
+						}
+					} else {
+						logging.Debugf("[Batch %s] File %d: Direct URL scrape failed: %v, falling back to ID search",
+							job.ID, fileIndex, err)
+					}
+				}
+			}
 		}
 
 		scraperQuery := resolvedID

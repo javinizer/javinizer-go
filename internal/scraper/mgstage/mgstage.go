@@ -2,6 +2,7 @@ package mgstage
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -154,6 +155,69 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 // ResolveSearchQuery normalizes MGStage-specific IDs from free-form input.
 // This is primarily used by batch scraping to preserve 3-digit numeric prefixes
 // (e.g., "259LUXU-1806"), which generic filename matching can strip to "LUXU-1806".
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "mgstage.com")
+}
+
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	if m := mgstageURLIDRe.FindStringSubmatch(urlStr); len(m) > 1 {
+		return strings.ToUpper(m[1]), nil
+	}
+	return "", fmt.Errorf("failed to extract ID from MGStage URL")
+}
+
+func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(rawURL) {
+		return nil, models.NewScraperNotFoundError("MGStage", "URL not handled by MGStage scraper")
+	}
+
+	id, err := s.ExtractIDFromURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
+	}
+
+	s.waitForRateLimit()
+	resp, err := s.client.R().Get(rawURL)
+	s.updateLastRequestTime()
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch data from MGStage: %w", err)
+	}
+	if resp.StatusCode() == 404 {
+		return nil, models.NewScraperNotFoundError("MGStage", "page not found")
+	}
+	if resp.StatusCode() == 429 {
+		return nil, models.NewScraperStatusError("MGStage", 429, "rate limited")
+	}
+	if resp.StatusCode() == 403 || resp.StatusCode() == 451 {
+		return nil, models.NewScraperStatusError("MGStage", resp.StatusCode(), "access blocked")
+	}
+	if resp.StatusCode() != 200 {
+		return nil, s.httpStatusError("detail", resp.StatusCode())
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	result, err := s.parseHTML(doc, rawURL)
+	if err != nil {
+		return nil, err
+	}
+
+	if !mgstageIDsMatch(id, result.ID) {
+		return nil, models.NewScraperNotFoundError("MGStage", fmt.Sprintf("movie %s not found on MGStage", id))
+	}
+
+	return result, nil
+}
+
 func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	input = strings.TrimSpace(input)
 	if input == "" {

@@ -2,12 +2,45 @@ package movie
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
+
+type scraperPanicError struct {
+	message string
+}
+
+func (e *scraperPanicError) Error() string {
+	return e.message
+}
+
+func isScraperPanicError(err error) bool {
+	_, ok := err.(*scraperPanicError)
+	return ok
+}
+
+func safeScrapeURL(scraper models.DirectURLScraper, url string) (result *models.ScraperResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = &scraperPanicError{message: fmt.Sprintf("scraper panic during direct URL scrape: %v", r)}
+		}
+	}()
+	return scraper.ScrapeURL(url)
+}
+
+func safeSearch(scraper models.Scraper, id string) (result *models.ScraperResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = &scraperPanicError{message: fmt.Sprintf("scraper panic during search: %v", r)}
+		}
+	}()
+	return scraper.Search(id)
+}
 
 // scrapeMovie godoc
 // @Summary Scrape movie metadata
@@ -26,29 +59,55 @@ func scrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 		var req ScrapeRequest
 
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 			return
 		}
+
+		req.ID = strings.TrimSpace(req.ID)
 
 		logging.Infof("API scrape request for ID: %s, Force: %v, Custom scrapers: %v",
 			req.ID, req.Force, req.SelectedScrapers)
 
-		// Parse input (might be URL)
-		parsed, err := matcher.ParseInput(req.ID)
+		parsed, err := matcher.ParseInput(req.ID, deps.GetRegistry())
 		if err != nil {
-			c.JSON(400, ErrorResponse{Error: fmt.Sprintf("Invalid input: %v", err)})
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		// Determine scraper list
-		scrapersToUse := deps.GetConfig().Scrapers.Priority
-		if len(req.SelectedScrapers) > 0 {
-			scrapersToUse = req.SelectedScrapers
+		if parsed.IsURL {
+			logging.Infof("URL detected: %s (extracted ID: %s, scraper hint: %s)", req.ID, parsed.ID, parsed.ScraperHint)
+		}
+
+		scrapersToUse := matcher.CalculateOptimalScrapers(
+			req.SelectedScrapers,
+			deps.GetConfig().Scrapers.Priority,
+			parsed,
+		)
+
+		// Log scraper selection for URL inputs
+		if parsed.IsURL && len(parsed.CompatibleScrapers) > 0 {
+			if len(req.SelectedScrapers) > 0 {
+				logging.Infof("URL detected, filtered scrapers from %v to URL-compatible: %v", req.SelectedScrapers, scrapersToUse)
+			} else if parsed.ScraperHint != "" {
+				logging.Infof("URL detected, using compatible scrapers with %s prioritized: %v", parsed.ScraperHint, scrapersToUse)
+			} else {
+				logging.Infof("URL detected, using URL-compatible scrapers: %v", scrapersToUse)
+			}
+		} else if len(req.SelectedScrapers) > 0 {
 			logging.Infof("Using custom scrapers from request: %v", scrapersToUse)
-		} else if parsed.IsURL && parsed.ScraperHint != "" {
-			// Only auto-prioritize scraper hint if user didn't provide custom scrapers
-			scrapersToUse = reorderWithPriority(scrapersToUse, parsed.ScraperHint)
-			logging.Infof("URL detected, prioritized %s scraper", parsed.ScraperHint)
+		}
+
+		// Warn if URL detected but no compatible scrapers
+		if parsed.IsURL && len(parsed.CompatibleScrapers) == 0 {
+			logging.Warnf("URL detected but no registered scrapers can handle it. Input may fail to scrape.")
+		}
+
+		// Check if request was cancelled before starting expensive operations
+		select {
+		case <-c.Request.Context().Done():
+			c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "Request cancelled by client"})
+			return
+		default:
 		}
 
 		// Clear cache if custom scrapers or force
@@ -65,7 +124,7 @@ func scrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 		if !usingCustomScrapers && !req.Force {
 			if movie, err := deps.MovieRepo.FindByID(parsed.ID); err == nil {
 				logging.Info("Found in cache!")
-				c.JSON(200, ScrapeResponse{
+				c.JSON(http.StatusOK, ScrapeResponse{
 					Cached: true,
 					Movie:  movie,
 				})
@@ -76,13 +135,56 @@ func scrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 		// Scrape from sources in priority order - use getters for thread-safe access
 		results := []*models.ScraperResult{}
 		scrapeErrors := []string{}
+		anyPanic := false
 
 		for _, scraper := range deps.GetRegistry().GetByPriority(scrapersToUse) {
+			select {
+			case <-c.Request.Context().Done():
+				c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "Request cancelled by client"})
+				return
+			default:
+			}
+
 			logging.Infof("Scraping from %s...", scraper.Name())
-			result, err := scraper.Search(parsed.ID)
+
+			var result *models.ScraperResult
+			var err error
+
+			if parsed.IsURL {
+				if handler, ok := scraper.(models.URLHandler); ok && handler.CanHandleURL(req.ID) {
+					if directScraper, ok := scraper.(models.DirectURLScraper); ok {
+						logging.Debugf("Trying direct URL scrape for %s", scraper.Name())
+						result, err = safeScrapeURL(directScraper, req.ID)
+						if err == nil {
+							logging.Debugf("Direct URL scrape succeeded for %s", scraper.Name())
+							result.NormalizeMediaURLs()
+							results = append(results, result)
+							continue
+						}
+						if isScraperPanicError(err) {
+							anyPanic = true
+							logging.Errorf("Scraper %s panicked during direct URL scrape: %v", scraper.Name(), err)
+							scrapeErrors = append(scrapeErrors, fmt.Sprintf("%s (direct URL): %v", scraper.Name(), err))
+						} else if scraperErr, ok := models.AsScraperError(err); ok {
+							scrapeErrors = append(scrapeErrors, fmt.Sprintf("%s (direct URL): %v", scraper.Name(), scraperErr))
+							logging.Debugf("Direct URL scrape failed for %s (%s), falling back to ID search", scraper.Name(), scraperErr.Kind)
+						} else {
+							scrapeErrors = append(scrapeErrors, fmt.Sprintf("%s (direct URL): %v", scraper.Name(), err))
+							logging.Debugf("Direct URL scrape failed for %s: %v, falling back to ID search", scraper.Name(), err)
+						}
+					}
+				}
+			}
+
+			result, err = safeSearch(scraper, parsed.ID)
 			if err != nil {
+				if isScraperPanicError(err) {
+					anyPanic = true
+					logging.Errorf("Scraper %s panicked: %v", scraper.Name(), err)
+				} else {
+					logging.Warnf("%s: %v", scraper.Name(), err)
+				}
 				scrapeErrors = append(scrapeErrors, fmt.Sprintf("%s: %v", scraper.Name(), err))
-				logging.Warnf("%s: %v", scraper.Name(), err)
 				continue
 			}
 			result.NormalizeMediaURLs()
@@ -90,23 +192,32 @@ func scrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		if len(results) == 0 {
-			c.JSON(404, ErrorResponse{
+			if anyPanic {
+				c.JSON(http.StatusInternalServerError, ErrorResponse{
+					Error:  "Internal scraper error - one or more scrapers crashed",
+					Errors: scrapeErrors,
+				})
+				return
+			}
+			c.JSON(http.StatusNotFound, ErrorResponse{
 				Error:  "Movie not found",
 				Errors: scrapeErrors,
 			})
 			return
 		}
 
-		// Aggregate results - use custom priority if provided, otherwise use config priority
+		// Aggregate results - use the actual scrapers that were queried
+		// If user explicitly selected scrapers, use those (filtered to URL-compatible if URL)
+		// Otherwise use default aggregation
 		var movie *models.Movie
 		if len(req.SelectedScrapers) > 0 {
-			logging.Infof("Aggregating with custom priority: %v", req.SelectedScrapers)
-			movie, err = deps.GetAggregator().AggregateWithPriority(results, req.SelectedScrapers)
+			logging.Infof("Aggregating with custom priority: %v", scrapersToUse)
+			movie, err = deps.GetAggregator().AggregateWithPriority(results, scrapersToUse)
 		} else {
 			movie, err = deps.GetAggregator().Aggregate(results)
 		}
 		if err != nil {
-			c.JSON(500, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -117,24 +228,13 @@ func scrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 			logging.Errorf("Failed to save movie to database: %v", err)
 		}
 
-		c.JSON(200, ScrapeResponse{
+		c.JSON(http.StatusOK, ScrapeResponse{
 			Cached:      false,
 			Movie:       movie,
 			SourcesUsed: len(results),
 			Errors:      scrapeErrors,
 		})
 	}
-}
-
-// reorderWithPriority moves priority scraper to front of list
-func reorderWithPriority(scrapers []string, priority string) []string {
-	result := []string{priority}
-	for _, s := range scrapers {
-		if s != priority {
-			result = append(result, s)
-		}
-	}
-	return result
 }
 
 // getMovie godoc
@@ -154,7 +254,7 @@ func getMovie(deps *ServerDependencies) gin.HandlerFunc {
 
 		movie, err := deps.MovieRepo.FindByID(id)
 		if err != nil {
-			c.JSON(404, ErrorResponse{Error: "Movie not found"})
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Movie not found"})
 			return
 		}
 
@@ -169,7 +269,7 @@ func getMovie(deps *ServerDependencies) gin.HandlerFunc {
 			logging.Debugf("Provenance requested for movie %s, but no file context available", id)
 		}
 
-		c.JSON(200, response)
+		c.JSON(http.StatusOK, response)
 	}
 }
 
@@ -190,11 +290,11 @@ func listMovies(deps *ServerDependencies) gin.HandlerFunc {
 
 		movies, err := deps.MovieRepo.List(limit, offset)
 		if err != nil {
-			c.JSON(500, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		c.JSON(200, MoviesResponse{
+		c.JSON(http.StatusOK, MoviesResponse{
 			Movies: movies,
 			Count:  len(movies),
 		})

@@ -31,7 +31,9 @@ var (
 	runtimeRegex     = regexp.MustCompile(`(\d+)`)
 	ratingRegex      = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)`)
 	votesRegex       = regexp.MustCompile(`([0-9][0-9,]*)`)
-	dateFormats      = []string{
+	// URL extraction pattern
+	javdbVideoPathRegex = regexp.MustCompile(`/v/([A-Za-z0-9]+)`)
+	dateFormats         = []string{
 		"2006-01-02",
 		"2006/01/02",
 		"2006.01.02",
@@ -131,6 +133,108 @@ func (s *Scraper) Close() error {
 	return nil
 }
 
+// CanHandleURL returns true if this scraper can handle the given URL
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	baseURLHost := s.baseURL
+	if baseURLHost == "" {
+		baseURLHost = defaultBaseURL
+	}
+	if parsedBase, err := url.Parse(baseURLHost); err == nil {
+		baseURLHost = parsedBase.Hostname()
+	}
+	return host == strings.ToLower(baseURLHost) || strings.HasSuffix(host, "."+strings.ToLower(baseURLHost))
+}
+
+// ExtractIDFromURL extracts the movie ID from a JavDB URL
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse JavDB URL: %w", err)
+	}
+	matches := javdbVideoPathRegex.FindStringSubmatch(u.Path)
+	if len(matches) > 1 {
+		return matches[1], nil
+	}
+
+	return "", fmt.Errorf("failed to extract ID from JavDB URL")
+}
+
+// ScrapeURL directly scrapes metadata from a JavDB URL.
+// This provides more accurate results than ID-based search when the exact URL is known.
+func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(urlStr) {
+		return nil, models.NewScraperNotFoundError("JavDB", "URL not handled by JavDB scraper")
+	}
+
+	if !s.enabled {
+		return nil, fmt.Errorf("JavDB scraper is disabled")
+	}
+
+	// Extract video ID from URL for fallback
+	videoID, err := s.ExtractIDFromURL(urlStr)
+	if err != nil {
+		logging.Debugf("JavDB ScrapeURL: Failed to extract ID from URL: %v", err)
+		videoID = ""
+	}
+
+	// Fetch the page using existing method (handles FlareSolverr, rate limiting, Cloudflare)
+	html, err := s.fetchPage(urlStr)
+	if err != nil {
+		// Check if it's a scraper error and return as-is
+		if scraperErr, ok := models.AsScraperError(err); ok {
+			return nil, scraperErr
+		}
+		return nil, fmt.Errorf("failed to fetch JavDB page: %w", err)
+	}
+
+	// Parse HTML into document
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JavDB HTML: %w", err)
+	}
+
+	// Use existing parseDetailPage method
+	result, err := s.parseDetailPage(doc, urlStr, videoID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify we got meaningful metadata
+	if !hasDetailMetadata(result, videoID) {
+		// Check if this might be a Cloudflare challenge page or login page
+		if models.IsCloudflareChallengePage(html) {
+			return nil, models.NewScraperChallengeError("JavDB",
+				"JavDB returned a Cloudflare challenge page (request blocked; check FlareSolverr/proxy configuration)")
+		}
+
+		// Retry once with direct HTTP request
+		logging.Warnf("JavDB ScrapeURL: Parsed sparse detail response, retrying via direct request")
+		retryHTML, err := s.fetchPageDirect(urlStr)
+		if err != nil {
+			return nil, fmt.Errorf("parsed sparse detail page and direct retry failed: %w", err)
+		}
+		retryDoc, err := goquery.NewDocumentFromReader(strings.NewReader(retryHTML))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse retried detail page HTML: %w", err)
+		}
+		result, err = s.parseDetailPage(retryDoc, urlStr, videoID)
+		if err != nil {
+			return nil, err
+		}
+		if !hasDetailMetadata(result, videoID) {
+			return nil, fmt.Errorf("JavDB returned non-detail content for %s", urlStr)
+		}
+	}
+
+	logging.Debugf("JavDB ScrapeURL: Successfully scraped %s (ID=%s, Title=%s)", urlStr, result.ID, result.Title)
+	return result, nil
+}
+
 // ValidateConfig validates the scraper configuration.
 // Returns error if config is invalid, nil if valid.
 func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
@@ -175,10 +279,46 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	return fmt.Sprintf(s.baseURL+searchPath, url.QueryEscape(strings.TrimSpace(id))), nil
 }
 
+// isJavDBVideoCode checks if an ID looks like a JavDB video code
+// JavDB video codes are alphanumeric (case-insensitive) and typically 4-10 characters
+// Examples: AbJEe, 5aB3d, etc.
+func isJavDBVideoCode(id string) bool {
+	if len(id) < 3 || len(id) > 12 {
+		return false
+	}
+	for _, c := range id {
+		if !unicode.IsLetter(c) && !unicode.IsDigit(c) {
+			return false
+		}
+	}
+	return true
+}
+
 // Search looks up a movie by ID and scrapes metadata.
 func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("JavDB scraper is disabled")
+	}
+
+	// If ID looks like a JavDB video code (alphanumeric, short), try direct URL first
+	// JavDB URLs are /v/{code} where code is typically 4-6 alphanumeric characters
+	cleanID := strings.TrimSpace(id)
+	if isJavDBVideoCode(cleanID) {
+		directURL := fmt.Sprintf("%s/v/%s", s.baseURL, cleanID)
+		logging.Debugf("JavDB: ID '%s' looks like video code, trying direct URL: %s", cleanID, directURL)
+
+		html, err := s.fetchPage(directURL)
+		if err == nil {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+			if err == nil {
+				result, err := s.parseDetailPage(doc, directURL, cleanID)
+				if err == nil && hasDetailMetadata(result, cleanID) {
+					logging.Debugf("JavDB: Found movie via direct URL: %s", directURL)
+					return result, nil
+				}
+			}
+		}
+		logging.Debugf("JavDB: Direct URL lookup failed for '%s', falling back to search", cleanID)
 	}
 
 	detailURL, err := s.findDetailURL(id)

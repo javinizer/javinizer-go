@@ -4,11 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
@@ -73,9 +78,21 @@ func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 		// Find the file result with this movie ID
 		status := job.GetStatus()
 		var foundFilePath string
+		var oldMovieID string
 		for filePath, result := range status.Results {
 			if result.MovieID == movieID {
 				foundFilePath = filePath
+				// Get the actual movie ID from the Movie object, not the query string
+				// Posters are stored as {movie.ID}.jpg, and movie.ID may differ from
+				// result.MovieID if ID normalization occurred during scraping
+				if result.Data != nil {
+					if oldMovie, ok := result.Data.(*models.Movie); ok {
+						oldMovieID = oldMovie.ID
+					}
+				}
+				if oldMovieID == "" {
+					oldMovieID = result.MovieID
+				}
 				break
 			}
 		}
@@ -102,10 +119,68 @@ func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 		defer cancel()
 
 		// Determine query override (for manual search)
-		queryOverride := req.ManualSearchInput
-		if queryOverride == "" {
+		var queryOverride string
+
+		// Parse manual input first if provided
+		var parsed *matcher.ParsedInput
+		if req.ManualSearchInput != "" {
+			var err error
+			parsed, err = matcher.ParseInput(req.ManualSearchInput, deps.GetRegistry())
+			if err != nil {
+				logging.Warnf("Failed to parse manual input '%s': %v, using as-is", req.ManualSearchInput, err)
+				queryOverride = strings.TrimSpace(req.ManualSearchInput)
+			} else {
+				if parsed.IsURL {
+					queryOverride = req.ManualSearchInput
+					logging.Infof("Manual input is a URL, preserving for direct scraping: %s (extracted ID: %s, scraper hint: %s)", req.ManualSearchInput, parsed.ID, parsed.ScraperHint)
+				} else {
+					queryOverride = parsed.ID
+					logging.Debugf("Manual input is not a URL, using as movie ID: %s", parsed.ID)
+				}
+			}
+		} else {
 			// Use movieID as query if no manual input provided
 			queryOverride = movieID
+		}
+
+		// Determine which scrapers to use:
+		// - selectedScrapers: only set when user explicitly selected (triggers custom mode, skips cache)
+		// - scraperPriorityOverride: set when URL filtering needed (optimizes scraper order without skipping cache)
+		var selectedScrapers []string
+		var scraperPriorityOverride []string
+
+		if len(req.SelectedScrapers) > 0 {
+			// User explicitly selected scrapers -> custom mode
+			selectedScrapers = matcher.CalculateOptimalScrapers(
+				req.SelectedScrapers,
+				deps.GetConfig().Scrapers.Priority,
+				parsed,
+			)
+		} else if parsed != nil && parsed.IsURL && len(parsed.CompatibleScrapers) > 0 {
+			// URL detected -> use priority override for filtering (doesn't skip cache)
+			scraperPriorityOverride = matcher.CalculateOptimalScrapers(
+				nil,
+				deps.GetConfig().Scrapers.Priority,
+				parsed,
+			)
+		}
+
+		// Log scraper selection for debugging
+		if parsed != nil && parsed.IsURL && len(parsed.CompatibleScrapers) > 0 {
+			if len(req.SelectedScrapers) > 0 {
+				logging.Infof("URL provided: filtered scrapers from %v to URL-compatible: %v", req.SelectedScrapers, selectedScrapers)
+			} else if parsed.ScraperHint != "" {
+				logging.Infof("URL provided: using compatible scrapers with %s prioritized: %v", parsed.ScraperHint, scraperPriorityOverride)
+			} else {
+				logging.Infof("URL provided: using URL-compatible scrapers: %v", scraperPriorityOverride)
+			}
+		} else if len(req.SelectedScrapers) > 0 {
+			logging.Infof("Using custom scrapers: %v", selectedScrapers)
+		}
+
+		// Warn if URL detected but no compatible scrapers
+		if parsed != nil && parsed.IsURL && len(parsed.CompatibleScrapers) == 0 {
+			logging.Warnf("URL detected but no registered scrapers can handle it. Input may fail to scrape.")
 		}
 
 		movie, result, err := worker.RunBatchScrapeOnce(
@@ -123,11 +198,12 @@ func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 			cfg.Scrapers.Referer,   // referer
 			req.Force,              // force rescrape
 			req.Preset != "" || req.ScalarStrategy != "" || req.ArrayStrategy != "", // updateMode - true if preset or either strategy provided
-			req.SelectedScrapers, // selectedScrapers (empty = use defaults)
-			nil,                  // processedMovieIDs (nil = no deduplication for single file rescrape)
-			cfg,                  // cfg (needed for NFO path construction)
-			req.ScalarStrategy,   // scalarStrategy - scalar field merge behavior (prefer-scraper, prefer-nfo)
-			req.ArrayStrategy,    // arrayStrategy - array field merge behavior (merge, replace)
+			selectedScrapers,        // selectedScrapers (nil unless user explicitly selected)
+			scraperPriorityOverride, // scraperPriorityOverride (for URL filtering, doesn't skip cache)
+			nil,                     // processedMovieIDs (nil = no deduplication for single file rescrape)
+			cfg,                     // cfg (needed for NFO path construction)
+			req.ScalarStrategy,      // scalarStrategy - scalar field merge behavior (prefer-scraper, prefer-nfo)
+			req.ArrayStrategy,       // arrayStrategy - array field merge behavior (merge, replace)
 		)
 
 		if err != nil {
@@ -169,6 +245,40 @@ func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 			result.PartSuffix = info.PartSuffix
 			logging.Debugf("[Rescrape] Applied discovery multipart metadata for %s: IsMultiPart=%v, PartNumber=%d",
 				foundFilePath, info.IsMultiPart, info.PartNumber)
+		}
+
+		// Clean up old temp poster if movie ID changed during rescrape
+		// IMPORTANT: We use movie.ID (the actual normalized ID from the Movie object)
+		// instead of result.MovieID (the query string), because posters are stored as
+		// {movie.ID}.jpg. If the scraper normalizes the ID (e.g., "ipx-123" -> "IPX-123"),
+		// result.MovieID would be "ipx-123" but the poster file is "IPX-123.jpg".
+		// We also check if any other result's movie has the same ID to protect multipart siblings.
+		if movie != nil && movie.ID != "" && oldMovieID != "" && movie.ID != oldMovieID {
+			otherMovieUsingOldID := false
+			for filePath, otherResult := range status.Results {
+				if filePath != foundFilePath && otherResult.Data != nil {
+					if otherMovie, ok := otherResult.Data.(*models.Movie); ok && otherMovie.ID == oldMovieID {
+						otherMovieUsingOldID = true
+						logging.Debugf("[Rescrape] Skipping poster cleanup for %s - other result %s still uses this ID", oldMovieID, filePath)
+						break
+					}
+				}
+			}
+
+			if !otherMovieUsingOldID {
+				oldPosterPath := filepath.Join(cfg.System.TempDir, "posters", jobID, oldMovieID+".jpg")
+				oldPosterFullPath := filepath.Join(cfg.System.TempDir, "posters", jobID, oldMovieID+"-full.jpg")
+				if _, err := os.Stat(oldPosterPath); err == nil {
+					if err := os.Remove(oldPosterPath); err != nil {
+						logging.Warnf("[Rescrape] Failed to remove old temp poster %s: %v", oldPosterPath, err)
+					} else {
+						logging.Infof("[Rescrape] Removed old temp poster for movie ID %s (replaced by %s)", oldMovieID, movie.ID)
+					}
+				}
+				if _, err := os.Stat(oldPosterFullPath); err == nil {
+					_ = os.Remove(oldPosterFullPath)
+				}
+			}
 		}
 
 		job.UpdateFileResult(foundFilePath, result)

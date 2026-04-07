@@ -3,8 +3,67 @@ package aventertainment
 import (
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestCanHandleURL(t *testing.T) {
+	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected bool
+	}{
+		{"aventertainments.com", "https://www.aventertainments.com/ppv/detail/12345/", true},
+		{"other site", "https://www.example.com/ABC-123", false},
+		{"malformed URL", "not-a-url", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.CanHandleURL(tt.url)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestExtractIDFromURL_AVEntertainment(t *testing.T) {
+	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+		wantErr  bool
+	}{
+		{"ppv detail URL with 1pondo ID", "https://www.aventertainments.com/ppv/detail/1pon-123456-789/", "1PON-123456-789", false},
+		{"with query params", "https://www.aventertainments.com/product_lists?item_no=1pon_020326_001", "1PON-020326-001", false},
+		{"empty path", "https://www.aventertainments.com/", "", true},
+		{"no valid ID pattern", "https://www.aventertainments.com/pages/about", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.ExtractIDFromURL(tt.url)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestScraperInterfaceCompliance_AVEntertainment(t *testing.T) {
+	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+	var _ models.Scraper = s
+	var _ models.URLHandler = s
+	var _ models.DirectURLScraper = s
+}
 
 func TestParseRuntime(t *testing.T) {
 	tests := []struct {

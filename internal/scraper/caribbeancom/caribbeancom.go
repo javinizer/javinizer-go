@@ -154,6 +154,58 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 }
 
 // ResolveSearchQuery normalizes Caribbeancom-style IDs from free-form input.
+func (s *Scraper) CanHandleURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.HasSuffix(host, "caribbeancom.com")
+}
+
+func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+	if m := movieIDFromPageRe.FindStringSubmatch(urlStr); len(m) > 1 {
+		return normalizeMovieID(m[1]), nil
+	}
+	return "", fmt.Errorf("failed to extract ID from Caribbeancom URL")
+}
+
+func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+	if !s.CanHandleURL(rawURL) {
+		return nil, models.NewScraperNotFoundError("Caribbeancom", "URL not handled by Caribbeancom scraper")
+	}
+
+	id, err := s.ExtractIDFromURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
+	}
+
+	detailURL := s.applyLanguage(rawURL)
+	html, status, err := s.fetchPage(detailURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch Caribbeancom detail page: %w", err)
+	}
+	if status == 404 {
+		return nil, models.NewScraperNotFoundError("Caribbeancom", "page not found")
+	}
+	if status == 429 {
+		return nil, models.NewScraperStatusError("Caribbeancom", 429, "rate limited")
+	}
+	if status == 403 || status == 451 {
+		return nil, models.NewScraperStatusError("Caribbeancom", status, "access blocked")
+	}
+	if status != 200 {
+		return nil, models.NewScraperStatusError("Caribbeancom", status, fmt.Sprintf("Caribbeancom returned status code %d", status))
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Caribbeancom detail page: %w", err)
+	}
+
+	return parseDetailPage(doc, html, detailURL, id, s.language), nil
+}
+
 func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	input = strings.TrimSpace(strings.ToLower(input))
 	if input == "" {

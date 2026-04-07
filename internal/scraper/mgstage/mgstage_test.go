@@ -18,6 +18,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCanHandleURL(t *testing.T) {
+	s := &Scraper{}
+
+	tests := []struct {
+		name     string
+		url      string
+		expected bool
+	}{
+		{"mgstage.com", "https://www.mgstage.com/product/product_detail/MIDE-123/", true},
+		{"other site", "https://www.example.com/ABC-123", false},
+		{"malformed URL", "not-a-url", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.CanHandleURL(tt.url)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestExtractIDFromURL_MGStage(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+	}{
+		{"product URL", "https://www.mgstage.com/product/product_detail/MIDE-123/", "MIDE-123"},
+		{"with query params", "https://www.mgstage.com/product/product_detail/MIDE-456/?ref=search", "MIDE-456"},
+		{"invalid URL", "https://www.example.com/ABC-123", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractIDFromURL(tt.url)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestScraperInterfaceCompliance_MGStage(t *testing.T) {
+	s := &Scraper{}
+	var _ models.Scraper = s
+	var _ models.URLHandler = s
+	var _ models.DirectURLScraper = s
+}
+
 func testSettings(baseURL string) config.ScraperSettings {
 	return config.ScraperSettings{
 		Enabled:   true,
