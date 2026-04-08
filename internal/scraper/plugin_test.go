@@ -107,16 +107,10 @@ func TestRegisterScraper_NilHandlerRejected(t *testing.T) {
 	ResetConstructors()
 	ResetDefaults()
 
-	// Register a nil constructor
-	RegisterScraper("nil-handler", nil)
-
-	// Verify Create returns error when trying to use nil constructor
-	settings := config.ScraperSettings{Enabled: true}
-	scraper, err := Create("nil-handler", settings, nil, nil)
-
-	assert.Error(t, err)
-	assert.Nil(t, scraper)
-	assert.Contains(t, err.Error(), "nil", "Error should indicate nil constructor was used")
+	// Register a nil constructor - should panic at init-time (preferable to runtime crashes)
+	require.Panics(t, func() {
+		RegisterScraper("nil-handler", nil)
+	}, "RegisterScraper should panic for nil constructor")
 }
 
 func TestRegisterScraperDefaults_NilSettingsRejected(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -224,6 +225,7 @@ type ContentIDResolver interface {
 
 // ScraperRegistry manages available scrapers
 type ScraperRegistry struct {
+	mu       sync.RWMutex
 	scrapers map[string]Scraper
 }
 
@@ -236,23 +238,34 @@ func NewScraperRegistry() *ScraperRegistry {
 
 // Register adds a scraper to the registry
 func (r *ScraperRegistry) Register(scraper Scraper) {
+	if scraper == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.scrapers[scraper.Name()] = scraper
 }
 
 // Reset clears all registered scrapers from the registry.
 // Primarily used for test isolation.
 func (r *ScraperRegistry) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.scrapers = make(map[string]Scraper)
 }
 
 // Get retrieves a scraper by name
 func (r *ScraperRegistry) Get(name string) (Scraper, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	scraper, exists := r.scrapers[name]
 	return scraper, exists
 }
 
 // GetAll returns all registered scrapers in sorted key order for deterministic iteration
 func (r *ScraperRegistry) GetAll() []Scraper {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	keys := make([]string, 0, len(r.scrapers))
 	for k := range r.scrapers {
 		keys = append(keys, k)
@@ -261,13 +274,17 @@ func (r *ScraperRegistry) GetAll() []Scraper {
 
 	scrapers := make([]Scraper, 0, len(r.scrapers))
 	for _, k := range keys {
-		scrapers = append(scrapers, r.scrapers[k])
+		if r.scrapers[k] != nil {
+			scrapers = append(scrapers, r.scrapers[k])
+		}
 	}
 	return scrapers
 }
 
 // GetEnabled returns all enabled scrapers in sorted key order for deterministic iteration
 func (r *ScraperRegistry) GetEnabled() []Scraper {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	keys := make([]string, 0, len(r.scrapers))
 	for k := range r.scrapers {
 		keys = append(keys, k)
@@ -276,8 +293,9 @@ func (r *ScraperRegistry) GetEnabled() []Scraper {
 
 	scrapers := make([]Scraper, 0)
 	for _, k := range keys {
-		if r.scrapers[k].IsEnabled() {
-			scrapers = append(scrapers, r.scrapers[k])
+		scraper := r.scrapers[k]
+		if scraper != nil && scraper.IsEnabled() {
+			scrapers = append(scrapers, scraper)
 		}
 	}
 	return scrapers
@@ -291,11 +309,14 @@ func (r *ScraperRegistry) GetByPriority(priority []string) []Scraper {
 		return r.GetEnabled()
 	}
 
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	scrapers := make([]Scraper, 0)
 
 	// Add scrapers in priority order (only if enabled)
 	for _, name := range priority {
-		if scraper, exists := r.scrapers[name]; exists && scraper.IsEnabled() {
+		if scraper, exists := r.scrapers[name]; exists && scraper != nil && scraper.IsEnabled() {
 			scrapers = append(scrapers, scraper)
 		}
 	}

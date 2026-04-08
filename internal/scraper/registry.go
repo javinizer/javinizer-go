@@ -34,6 +34,10 @@ func NewDefaultScraperRegistry(cfg *config.Config, db *database.DB) (*models.Scr
 
 	// Initialize all scrapers via their registered constructors
 	for name, constructor := range constructors {
+		if constructor == nil {
+			logging.Warnf("Nil constructor registered for %s, skipping", name)
+			continue
+		}
 		// PLUGIN-01: Get scraper settings from Overrides map (populated by NormalizeScraperConfigs)
 		settings := cfg.Scrapers.Overrides[name]
 		if settings == nil {

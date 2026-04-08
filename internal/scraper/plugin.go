@@ -3,6 +3,7 @@ package scraper
 import (
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -14,19 +15,29 @@ import (
 // Parameters: settings, db, globalScrapersConfig
 type ScraperConstructor func(config.ScraperSettings, *database.DB, *config.ScrapersConfig) (models.Scraper, error)
 
-// globalConstructorRegistry holds scraper constructors for init()-based registration
-var globalConstructorRegistry = make(map[string]ScraperConstructor)
+var (
+	globalConstructorRegistry = make(map[string]ScraperConstructor)
+	constructorMu             sync.RWMutex
+)
 
 // RegisterScraper registers a scraper constructor for init()-based auto-registration.
 // This is called from each scraper package's init() function.
 // The constructor will be called by NewDefaultScraperRegistry with actual config and db.
+// Panics if constructor is nil - init-time failures are preferable to runtime crashes.
 func RegisterScraper(name string, constructor ScraperConstructor) {
+	if constructor == nil {
+		panic(fmt.Sprintf("RegisterScraper: cannot register nil constructor for %q", name))
+	}
+	constructorMu.Lock()
+	defer constructorMu.Unlock()
 	globalConstructorRegistry[name] = constructor
 }
 
 // GetScraperConstructors returns a copy of all registered scraper constructors.
 // Primarily used by NewDefaultScraperRegistry.
 func GetScraperConstructors() map[string]ScraperConstructor {
+	constructorMu.RLock()
+	defer constructorMu.RUnlock()
 	result := make(map[string]ScraperConstructor, len(globalConstructorRegistry))
 	for k, v := range globalConstructorRegistry {
 		result[k] = v
@@ -37,6 +48,8 @@ func GetScraperConstructors() map[string]ScraperConstructor {
 // ResetConstructors clears the constructor registry.
 // Primarily used for test isolation.
 func ResetConstructors() {
+	constructorMu.Lock()
+	defer constructorMu.Unlock()
 	globalConstructorRegistry = make(map[string]ScraperConstructor)
 }
 
@@ -47,13 +60,17 @@ type DefaultSettings struct {
 	Priority int
 }
 
-// globalDefaultsRegistry holds scraper default settings for priority-based ordering
-var globalDefaultsRegistry = make(map[string]DefaultSettings)
+var (
+	globalDefaultsRegistry = make(map[string]DefaultSettings)
+	defaultsMu             sync.RWMutex
+)
 
 // RegisterScraperDefaults registers default settings and priority for a scraper.
 // Called from each scraper package's init() function.
 // Also registers with scraperutil for config.go to use via GetDefaultScraperSettings().
 func RegisterScraperDefaults(name string, defaults DefaultSettings) {
+	defaultsMu.Lock()
+	defer defaultsMu.Unlock()
 	globalDefaultsRegistry[name] = defaults
 	// Also register with scraperutil so config.go can build defaults via GetDefaultScraperSettings()
 	// Settings is stored as any to avoid import cycle with config package.
@@ -62,6 +79,8 @@ func RegisterScraperDefaults(name string, defaults DefaultSettings) {
 
 // GetRegisteredDefaults returns a copy of all registered scraper defaults.
 func GetRegisteredDefaults() map[string]DefaultSettings {
+	defaultsMu.RLock()
+	defer defaultsMu.RUnlock()
 	result := make(map[string]DefaultSettings, len(globalDefaultsRegistry))
 	for k, v := range globalDefaultsRegistry {
 		result[k] = v
@@ -72,6 +91,8 @@ func GetRegisteredDefaults() map[string]DefaultSettings {
 // ResetDefaults clears the defaults registry.
 // Primarily used for test isolation.
 func ResetDefaults() {
+	defaultsMu.Lock()
+	defer defaultsMu.Unlock()
 	globalDefaultsRegistry = make(map[string]DefaultSettings)
 	scraperutil.ResetDefaults() // Also clear scraperutil's defaults registry
 }
@@ -103,7 +124,10 @@ func Create(
 	db *database.DB,
 	globalScrapersConfig *config.ScrapersConfig,
 ) (models.Scraper, error) {
+	constructorMu.RLock()
 	constructor, exists := globalConstructorRegistry[name]
+	constructorMu.RUnlock()
+
 	if !exists {
 		return nil, fmt.Errorf("scraper not found: %q (available: %v)", name, getRegisteredScraperNames())
 	}
@@ -124,6 +148,8 @@ func Create(
 
 // getRegisteredScraperNames returns sorted list of registered scraper names for error messages.
 func getRegisteredScraperNames() []string {
+	constructorMu.RLock()
+	defer constructorMu.RUnlock()
 	names := make([]string, 0, len(globalConstructorRegistry))
 	for name := range globalConstructorRegistry {
 		names = append(names, name)
