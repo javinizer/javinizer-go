@@ -58,6 +58,7 @@ const (
 type FileResult struct {
 	FilePath       string            `json:"file_path"`
 	MovieID        string            `json:"movie_id"`
+	Revision       uint64            `json:"revision"`
 	Status         JobStatus         `json:"status"`
 	Error          string            `json:"error,omitempty"`
 	PosterError    *string           `json:"poster_error,omitempty"`
@@ -128,6 +129,34 @@ type BatchJob struct {
 	CancelFunc    context.CancelFunc       `json:"-"`
 	Done          chan struct{}            `json:"-"`
 	mu            sync.RWMutex             `json:"-"`
+	deleted       bool                     `json:"-"` // Tombstone flag - prevents persist after deletion
+}
+
+// Lock acquires the job's write lock for exclusive access
+// Use this when performing mutations that require atomic state validation
+func (job *BatchJob) Lock() {
+	job.mu.Lock()
+}
+
+// Unlock releases the job's write lock
+func (job *BatchJob) Unlock() {
+	job.mu.Unlock()
+}
+
+// RLock acquires the job's read lock for shared access
+func (job *BatchJob) RLock() {
+	job.mu.RLock()
+}
+
+// RUnlock releases the job's read lock
+func (job *BatchJob) RUnlock() {
+	job.mu.RUnlock()
+}
+
+// IsDeleted returns the tombstone flag
+// Caller must hold at least RLock to safely read this value
+func (job *BatchJob) IsDeleted() bool {
+	return job.deleted
 }
 
 // FileMatchInfo stores match metadata for a file (populated during discovery)
@@ -290,6 +319,11 @@ func (jq *JobQueue) persistToDatabase(job *BatchJob) {
 	}
 
 	job.mu.RLock()
+	if job.deleted {
+		job.mu.RUnlock()
+		logging.Debugf("[Job %s] Skipping persist - job marked as deleted", job.ID)
+		return
+	}
 	defer job.mu.RUnlock()
 
 	// Marshal fields to JSON
@@ -421,6 +455,11 @@ func (jq *JobQueue) DeleteJob(id string, tempDir string) {
 		case <-time.After(5 * time.Second):
 			logging.Warnf("DeleteJob: timed out waiting for job %s to finish, proceeding with cleanup", id)
 		}
+
+		// Set tombstone before removal to prevent PersistJob from recreating DB row
+		job.mu.Lock()
+		job.deleted = true
+		job.mu.Unlock()
 	}
 
 	// Now safe to clean up filesystem and remove from map
@@ -474,12 +513,23 @@ func (job *BatchJob) UpdateFileResult(filePath string, result *FileResult) {
 	job.mu.Lock()
 	defer job.mu.Unlock()
 
+	// Increment Revision for CAS - use existing revision + 1, or 1 for new results
+	existing := job.Results[filePath]
+	if existing != nil {
+		result.Revision = existing.Revision + 1
+	} else {
+		result.Revision = 1
+	}
+
 	job.Results[filePath] = result
 
 	// Update counters
 	completed := 0
 	failed := 0
 	for _, r := range job.Results {
+		if r == nil {
+			continue
+		}
 		switch r.Status {
 		case JobStatusCompleted:
 			completed++
@@ -539,6 +589,9 @@ func (job *BatchJob) AtomicUpdateFileResult(filePath string, updateFn func(*File
 		return err
 	}
 
+	// Increment Revision for CAS
+	updated.Revision = current.Revision + 1
+
 	// Write back the updated result
 	job.Results[filePath] = updated
 
@@ -546,6 +599,9 @@ func (job *BatchJob) AtomicUpdateFileResult(filePath string, updateFn func(*File
 	completed := 0
 	failed := 0
 	for _, r := range job.Results {
+		if r == nil {
+			continue
+		}
 		switch r.Status {
 		case JobStatusCompleted:
 			completed++
@@ -701,7 +757,6 @@ func (job *BatchJob) GetStatus() *BatchJob {
 	results := make(map[string]*FileResult, len(job.Results))
 	for k, v := range job.Results {
 		if v == nil {
-			results[k] = nil
 			continue
 		}
 		// Deep copy the FileResult struct
