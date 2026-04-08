@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -50,7 +49,8 @@ type Scraper struct {
 	requestDelay    time.Duration
 	proxyOverride   *config.ProxyConfig
 	downloadProxy   *config.ProxyConfig
-	lastRequestTime atomic.Value
+	mu              sync.Mutex // protects lastRequestTime and rate limiting
+	lastRequestTime time.Time
 	settings        config.ScraperSettings // stores the full settings for Config() method
 	cookieMu        sync.Mutex             // protects cookie mutations on shared client
 }
@@ -438,8 +438,7 @@ func (s *Scraper) findDetailURL(id string) (string, error) {
 }
 
 func (s *Scraper) fetchPage(targetURL string) (string, error) {
-	s.waitForRateLimit()
-	defer s.updateLastRequestTime()
+	s.waitAndUpdateRateLimit()
 
 	resp, err := s.client.R().Get(targetURL)
 	if err == nil && resp != nil && resp.StatusCode() == 200 {
@@ -476,8 +475,7 @@ func (s *Scraper) fetchPage(targetURL string) (string, error) {
 }
 
 func (s *Scraper) fetchPageDirect(targetURL string) (string, error) {
-	s.waitForRateLimit()
-	defer s.updateLastRequestTime()
+	s.waitAndUpdateRateLimit()
 
 	resp, err := s.client.R().Get(targetURL)
 	return s.fetchPageDirectResponse(resp, err)
@@ -633,26 +631,16 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 	return result, nil
 }
 
-func (s *Scraper) waitForRateLimit() {
-	if s.requestDelay <= 0 {
-		return
-	}
-	lastReq := s.lastRequestTime.Load()
-	if lastReq == nil {
-		return
-	}
-	lastTime, ok := lastReq.(time.Time)
-	if !ok || lastTime.IsZero() {
-		return
-	}
-	elapsed := time.Since(lastTime)
-	if elapsed < s.requestDelay {
-		time.Sleep(s.requestDelay - elapsed)
-	}
-}
+func (s *Scraper) waitAndUpdateRateLimit() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-func (s *Scraper) updateLastRequestTime() {
-	s.lastRequestTime.Store(time.Now())
+	if s.requestDelay > 0 && !s.lastRequestTime.IsZero() {
+		if elapsed := time.Since(s.lastRequestTime); elapsed < s.requestDelay {
+			time.Sleep(s.requestDelay - elapsed)
+		}
+	}
+	s.lastRequestTime = time.Now()
 }
 
 func normalizeIDForCompare(id string) string {

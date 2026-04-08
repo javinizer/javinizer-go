@@ -63,7 +63,7 @@ func TestSearch_RetriesSparseDetailWithDirectSuccess(t *testing.T) {
 		requestDelay: 0,
 		settings:     config.ScraperSettings{Enabled: true},
 	}
-	scraper.lastRequestTime.Store(time.Time{})
+	scraper.lastRequestTime = time.Time{}
 
 	result, err := scraper.Search("IPX-123")
 	require.NoError(t, err)
@@ -109,7 +109,7 @@ func TestSearch_FailsWhenDirectRetryStillSparse(t *testing.T) {
 		requestDelay: 0,
 		settings:     config.ScraperSettings{Enabled: true},
 	}
-	scraper.lastRequestTime.Store(time.Time{})
+	scraper.lastRequestTime = time.Time{}
 
 	result, err := scraper.Search("IPX-123")
 	require.Error(t, err)
