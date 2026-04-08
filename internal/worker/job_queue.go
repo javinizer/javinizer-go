@@ -351,7 +351,8 @@ func (jq *JobQueue) persistToDatabase(job *BatchJob) {
 		return
 	}
 
-	tempDir := job.GetTempDir()
+	// Read TempDir directly since we already hold RLock (GetTempDir would re-acquire)
+	tempDir := job.TempDir
 
 	dbJob := &models.Job{
 		ID:            job.ID,

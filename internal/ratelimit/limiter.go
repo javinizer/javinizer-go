@@ -31,6 +31,7 @@ func (l *Limiter) Wait(ctx context.Context) error {
 	}
 
 	waitDuration := l.nextAllowedTime.Sub(now)
+	mySlot := l.nextAllowedTime // Save the slot we reserved (our wake-up time)
 	l.nextAllowedTime = l.nextAllowedTime.Add(l.delay)
 	l.mu.Unlock()
 
@@ -39,7 +40,16 @@ func (l *Limiter) Wait(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		l.mu.Lock()
-		l.nextAllowedTime = l.nextAllowedTime.Add(-l.delay)
+		// Only rollback if nextAllowedTime hasn't been advanced past our slot's end.
+		// This prevents erasing slots reserved by other waiters who came after us.
+		if !l.nextAllowedTime.After(mySlot.Add(l.delay)) {
+			newTime := l.nextAllowedTime.Add(-l.delay)
+			// Clamp to not go before now - we can't give away slots in the past
+			if now := time.Now(); newTime.Before(now) {
+				newTime = now
+			}
+			l.nextAllowedTime = newTime
+		}
 		l.mu.Unlock()
 		return ctx.Err()
 	}

@@ -35,11 +35,16 @@ func scanDirectory(deps *ServerDependencies) gin.HandlerFunc {
 		// Read current config (respects config reloads)
 		cfg := deps.GetConfig()
 
-		validPath, err := core.ValidateScanPath(req.Path, &cfg.API.Security)
+		// Use TOCTOU-safe validation that opens the directory.
+		// The open file handle prevents the directory from being replaced with a symlink.
+		// Non-recursive scans use the handle directly (full TOCTOU protection).
+		// Recursive scans have a residual TOCTOU window (filepath.WalkDir reopens by path).
+		dirFile, validPath, err := core.ValidateAndOpenPath(req.Path, &cfg.API.Security)
 		if err != nil {
 			apperrors.WriteAPIError(c, err)
 			return
 		}
+		defer func() { _ = dirFile.Close() }()
 
 		// Create context with timeout from config
 		timeout := time.Duration(cfg.API.Security.ScanTimeoutSeconds) * time.Second
@@ -51,12 +56,14 @@ func scanDirectory(deps *ServerDependencies) gin.HandlerFunc {
 		var result *scanner.ScanResult
 
 		if req.Recursive {
-			// Recursive scan with resource limits and optional filter
-			// Filter skips directories that don't match, improving performance
+			// Recursive scan with resource limits and optional filter.
+			// NOTE: Has a residual TOCTOU window because filepath.WalkDir reopens
+			// directories by path. Full protection would require fd-based traversal.
 			result, err = scan.ScanWithFilter(ctx, validPath, cfg.API.Security.MaxFilesPerScan, req.Filter)
 		} else {
-			// Non-recursive scan (immediate children only)
-			result, err = scan.ScanSingle(validPath)
+			// Non-recursive scan (immediate children only) - TOCTOU-safe
+			// Uses the open file handle to read directory entries directly.
+			result, err = scan.ScanSingleFromHandle(dirFile, validPath)
 		}
 
 		if err != nil {

@@ -209,6 +209,11 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 }
 
 // ScanSingle scans a single file or directory (non-recursive)
+//
+// WARNING: This method has a TOCTOU vulnerability. Between path validation and
+// the internal Stat/ReadDir calls, the path could be replaced with a symlink.
+// For TOCTOU-safe scanning, use ScanSingleFromHandle with a pre-validated
+// directory handle from ValidateAndOpenPath.
 func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 	result := &ScanResult{
 		Files:   make([]FileInfo, 0),
@@ -293,6 +298,75 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 			result.Files = append(result.Files, fileInfo)
 		} else {
 			trackSkipped(result, absPath)
+		}
+	}
+
+	return result, nil
+}
+
+// ScanSingleFromHandle scans an open directory handle (non-recursive, TOCTOU-safe).
+//
+// This is the TOCTOU-safe version of ScanSingle. It reads directory entries
+// directly from the provided file handle, preventing symlink swap attacks
+// between validation and scanning.
+//
+// The canonicalPath is used for recording paths in the returned FileInfo
+// structures. It should be the absolute, symlink-resolved path that was
+// validated before opening the handle.
+//
+// The caller retains ownership of the file handle and must close it after
+// this call returns.
+func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*ScanResult, error) {
+	result := &ScanResult{
+		Files:   make([]FileInfo, 0),
+		Skipped: make([]string, 0),
+		Errors:  make([]error, 0),
+	}
+
+	// Guard against nil directory handle
+	if dir == nil {
+		return nil, errors.New("ScanSingleFromHandle: nil directory handle")
+	}
+
+	// Read directory entries directly from the open handle (TOCTOU-safe)
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range entries {
+		fullPath := filepath.Join(canonicalPath, entry.Name())
+
+		// Get file info without following symlinks
+		info, err := entry.Info()
+		if err != nil {
+			result.Errors = append(result.Errors, err)
+			continue
+		}
+
+		// Skip directories (non-recursive scan)
+		if info.IsDir() {
+			continue
+		}
+
+		// Skip symlinks (security policy)
+		if info.Mode()&os.ModeSymlink != 0 {
+			trackSkipped(result, fullPath)
+			continue
+		}
+
+		if s.shouldIncludeFile(fullPath, entry) {
+			fileInfo := FileInfo{
+				Path:      fullPath,
+				Name:      info.Name(),
+				Extension: filepath.Ext(fullPath),
+				Size:      info.Size(),
+				ModTime:   info.ModTime(),
+				Dir:       canonicalPath,
+			}
+			result.Files = append(result.Files, fileInfo)
+		} else {
+			trackSkipped(result, fullPath)
 		}
 	}
 

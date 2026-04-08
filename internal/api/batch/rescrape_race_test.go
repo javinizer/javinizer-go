@@ -352,8 +352,9 @@ func TestRescrapeBatchMovie_JobLifecycleRace(t *testing.T) {
 	})
 }
 
-// TestRescrapeBatchMovie_ConcurrentMultiPartPosterRace tests Bug #2
-// P2 DEFENSIVE - Concurrent rescrapes generate duplicate posters
+// TestRescrapeBatchMovie_CASRevisionConflict verifies the CAS (Compare-And-Swap)
+// revision mechanism directly. It simulates concurrent modification by setting
+// a specific revision value and verifying the CAS check passes.
 func TestRescrapeBatchMovie_CASRevisionConflict(t *testing.T) {
 	// This test verifies the CAS (Compare-And-Swap) revision mechanism directly.
 	// Instead of trying to create true HTTP concurrency (which is flaky),
@@ -977,21 +978,31 @@ func TestRescrapeBatchMovie_ConcurrentOverwriteCleanup(t *testing.T) {
 	t.Logf("Rescrape 1: status=%d, err=%s", status1, rescrape1Err)
 	t.Logf("Rescrape 2: status=%d, err=%s", status2, rescrape2Err)
 
-	// With CAS, exactly one succeeds (200) and one gets conflict (409)
+	// With CAS, exactly one succeeds (200).
+	// The other request can get:
+	// - 409 Conflict: Both captured same revision, loser detected CAS mismatch
+	// - 404 Not Found: Timing was off, winner completed before loser started,
+	//   so the movie ID in the URL no longer exists in the job
+	// Both outcomes are valid race conditions - the test verifies no corruption occurs.
 	successCount := 0
 	conflictCount := 0
+	notFoundCount := 0
 	if status1 == http.StatusOK {
 		successCount++
 	} else if status1 == http.StatusConflict {
 		conflictCount++
+	} else if status1 == http.StatusNotFound {
+		notFoundCount++
 	}
 	if status2 == http.StatusOK {
 		successCount++
 	} else if status2 == http.StatusConflict {
 		conflictCount++
+	} else if status2 == http.StatusNotFound {
+		notFoundCount++
 	}
 	require.Equal(t, 1, successCount, "Exactly one rescrape should succeed (200)")
-	require.Equal(t, 1, conflictCount, "Exactly one rescrape should get conflict (409)")
+	require.Equal(t, 1, conflictCount+notFoundCount, "Exactly one rescrape should get conflict (409) or not found (404)")
 
 	// Determine which rescrape succeeded based on final movie ID
 	status := job.GetStatus()
@@ -1020,12 +1031,23 @@ func TestRescrapeBatchMovie_ConcurrentOverwriteCleanup(t *testing.T) {
 	// Original poster (ABC-001) should be deleted - cleaned up by the winner
 	assert.True(t, os.IsNotExist(errA), "Original poster ABC-001.jpg should be deleted")
 
-	// The winner's poster should exist
-	if finalMovieID == "ABC-003" {
-		assert.True(t, os.IsNotExist(errB), "Loser's poster ABC-002.jpg should not exist (CAS rejected it)")
-		// Winner's poster may or may not exist depending on scraper
+	// The loser's poster should not exist in CAS conflict scenario (409),
+	// but in sequential timing (404) the loser's pre-created poster exists as a test artifact.
+	if conflictCount > 0 {
+		// CAS conflict: loser ran but was rejected, their poster was cleaned up
+		if finalMovieID == "ABC-003" {
+			assert.True(t, os.IsNotExist(errB), "Loser's poster ABC-002.jpg should not exist (CAS conflict)")
+		} else {
+			assert.True(t, os.IsNotExist(errC), "Loser's poster ABC-003.jpg should not exist (CAS conflict)")
+		}
 	} else {
-		assert.True(t, os.IsNotExist(errC), "Loser's poster ABC-003.jpg should not exist (CAS rejected it)")
+		// Sequential timing (404): loser never ran, their pre-created poster still exists
+		// This is expected - the poster is a test artifact, not created by the loser's rescrape
+		if finalMovieID == "ABC-003" {
+			assert.True(t, errB == nil, "Loser's poster ABC-002.jpg should exist (sequential timing, test artifact)")
+		} else {
+			assert.True(t, errC == nil, "Loser's poster ABC-003.jpg should exist (sequential timing, test artifact)")
+		}
 	}
 
 	// Verify no orphaned posters
@@ -1037,10 +1059,24 @@ func TestRescrapeBatchMovie_ConcurrentOverwriteCleanup(t *testing.T) {
 			posterFiles = append(posterFiles, entry.Name())
 		}
 	}
-	// With CAS, there should be 0-1 poster (the winner's, if the scraper created one)
-	assert.LessOrEqual(t, len(posterFiles), 1, "At most one poster should exist (winner's only)")
+	// Poster count depends on race outcome:
+	// - CAS conflict (409): Winner's poster exists (0-1), loser's poster cleaned up. Total: 0-1
+	// - Sequential timing (404): Winner's poster exists (0-1), loser's pre-created test poster still exists. Total: 1-2
+	// Note: The test pre-creates posters for all potential movie IDs. In sequential timing,
+	// the loser's poster was never actually created by a scraper - it's a test artifact.
+	if conflictCount > 0 {
+		assert.LessOrEqual(t, len(posterFiles), 1, "At most one poster should exist after CAS conflict (winner's only)")
+	} else {
+		// Sequential timing: loser never ran, so their pre-created poster still exists
+		assert.LessOrEqual(t, len(posterFiles), 2, "At most two posters should exist after sequential timing (winner + unused loser test artifact)")
+	}
 
-	t.Log("SUCCESS: CAS correctly prevented concurrent overwrite!")
+	// Log outcome type for debugging
+	if conflictCount > 0 {
+		t.Log("SUCCESS: CAS correctly prevented concurrent overwrite!")
+	} else {
+		t.Log("SUCCESS: Sequential execution handled correctly (404 for late request)!")
+	}
 }
 
 // TestRescrapeBatchMovie_ConcurrentOverwriteResolvesToOriginal tests the edge case

@@ -249,8 +249,82 @@ func pathHasPrefix(path, prefix string) bool {
 }
 
 // ValidateScanPath validates and sanitizes user-provided paths for scanning.
+// Returns the canonical path string. For TOCTOU-safe operations, use ValidateAndOpenPath.
 func ValidateScanPath(userPath string, cfg *config.SecurityConfig) (string, error) {
 	return validateScanPath(userPath, cfg)
+}
+
+// ValidateAndOpenPath validates a user-provided path and returns an open *os.File
+// to the validated directory, along with its canonical path.
+//
+// This is the TOCTOU-safe version of ValidateScanPath. By holding the file
+// descriptor open, symlink swap attacks between validation and use are prevented.
+// On Unix, inode verification detects symlink swap attacks between the pre-open
+// stat and the post-open file handle. On Windows, pre-open identity is unavailable,
+// so only post-open TOCTOU protection is provided (the open handle references the
+// actual file object).
+//
+// The caller MUST close the returned file when done:
+//
+//	f, path, err := core.ValidateAndOpenPath(req.Path, cfg)
+//	if err != nil { ... }
+//	defer f.Close()
+//	// Use f.ReadDir() or path (file remains open, preventing swap)
+func ValidateAndOpenPath(userPath string, cfg *config.SecurityConfig) (*os.File, string, error) {
+	canonicalPath, err := validateScanPath(userPath, cfg)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Get pre-open file identity for TOCTOU verification
+	preInfo, err := os.Stat(canonicalPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, "", apperrors.NewPathError(apperrors.ErrPathNotExist, canonicalPath)
+		}
+		return nil, "", apperrors.ErrPathInvalid
+	}
+
+	preIdentity, err := getFileIdentity(preInfo)
+	if err != nil {
+		// On platforms without inode support, we skip verification but still proceed
+		// The file handle still provides TOCTOU protection via the open descriptor
+		preIdentity = fileIdentity{}
+	}
+
+	// Open the validated directory to prevent TOCTOU symlink swap attacks.
+	// The file descriptor keeps a reference to the validated directory inode.
+	f, err := os.Open(canonicalPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, "", apperrors.NewPathError(apperrors.ErrPathNotExist, canonicalPath)
+		}
+		return nil, "", apperrors.ErrPathInvalid
+	}
+
+	// Post-open inode verification: detect symlink swap attacks
+	// This compares the identity of the opened file with the pre-open stat.
+	// If they differ, a swap attack occurred between stat and open.
+	postIdentity, err := getFileIdentityFromFd(f)
+	if err == nil && preIdentity != (fileIdentity{}) {
+		if preIdentity != postIdentity {
+			_ = f.Close()
+			return nil, "", apperrors.NewPathError(apperrors.ErrInodeMismatch, canonicalPath)
+		}
+	}
+
+	// Verify the opened file is still a directory (extra safety check)
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, "", apperrors.ErrPathInvalid
+	}
+	if !info.IsDir() {
+		_ = f.Close()
+		return nil, "", apperrors.NewPathError(apperrors.ErrPathNotDir, canonicalPath)
+	}
+
+	return f, canonicalPath, nil
 }
 
 // ExpandHomeDir expands "~/" paths.

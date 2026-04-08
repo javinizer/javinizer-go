@@ -35,14 +35,16 @@ func browseDirectory(deps *ServerDependencies) gin.HandlerFunc {
 		// Read current config (respects config reloads)
 		cfg := deps.GetConfig()
 
-		validPath, err := core.ValidateScanPath(req.Path, &cfg.API.Security)
+		// Use TOCTOU-safe validation that opens the directory
+		dirFile, validPath, err := core.ValidateAndOpenPath(req.Path, &cfg.API.Security)
 		if err != nil {
 			apperrors.WriteAPIError(c, err)
 			return
 		}
+		defer func() { _ = dirFile.Close() }()
 
-		// Read directory contents
-		entries, err := os.ReadDir(validPath)
+		// Read directory contents using the open file handle (TOCTOU-safe)
+		entries, err := dirFile.ReadDir(-1)
 		if err != nil {
 			c.JSON(500, ErrorResponse{Error: err.Error()})
 			return

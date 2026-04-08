@@ -1509,3 +1509,216 @@ func TestValidateScanPath_Symlink(t *testing.T) {
 			"Expected ErrPathNotDir, got %v", err)
 	})
 }
+
+// TestCanonicalizePath_SymlinkAncestor tests the edge case where a parent directory
+// is a symlink but the final leaf component doesn't exist.
+//
+// This documents the behavior of canonicalizePath which walks up to find the
+// nearest existing ancestor for missing paths. This approach is:
+// - Asymmetric: A/B (exists symlink) and A/B/C (missing) behave differently
+// - Raceable: The ancestor could disappear between resolution and use
+//
+// SECURITY NOTE: Non-resolvable parent directories (e.g., broken symlink in path)
+// should be rejected rather than walked past, to prevent symlink-based attacks.
+func TestCanonicalizePath_SymlinkAncestor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping symlink tests on Windows (requires admin privileges)")
+	}
+
+	t.Run("parent symlink with missing leaf resolves symlink correctly", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create real directory
+		realDir := filepath.Join(tempDir, "real")
+		require.NoError(t, os.Mkdir(realDir, 0755))
+
+		// Create symlink to real directory
+		symlinkDir := filepath.Join(tempDir, "symlink")
+		require.NoError(t, os.Symlink(realDir, symlinkDir))
+
+		// Path through symlink to non-existent child
+		missingPath := filepath.Join(symlinkDir, "nonexistent", "child")
+
+		got, err := canonicalizePath(missingPath)
+		require.NoError(t, err)
+
+		// Should resolve the symlink in the path
+		// Result should contain the real path with missing components appended
+		assert.True(t, filepath.IsAbs(got))
+		assert.Contains(t, got, "real") // Symlink was resolved
+		assert.Contains(t, got, "nonexistent")
+		assert.Contains(t, got, "child")
+	})
+
+	t.Run("broken symlink in path returns error", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create symlink pointing to non-existent target (broken symlink)
+		brokenSymlink := filepath.Join(tempDir, "broken")
+		require.NoError(t, os.Symlink("/nonexistent/target", brokenSymlink))
+
+		// Path through broken symlink
+		pathThroughBroken := filepath.Join(brokenSymlink, "child")
+
+		// filepath.EvalSymlinks on a broken symlink returns an error
+		got, err := canonicalizePath(pathThroughBroken)
+
+		// SECURITY: canonicalizePath correctly returns an error when it encounters
+		// a symlink that cannot be resolved (broken symlink).
+		// This prevents path confusion attacks where a symlink target is later
+		// created pointing to a sensitive location.
+		require.Error(t, err) // Expected: error for broken symlink
+		assert.Empty(t, got)
+		// The error indicates the symlink target doesn't exist
+		assert.Contains(t, err.Error(), "no such file or directory")
+	})
+
+	t.Run("multiple missing components under symlink", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		realDir := filepath.Join(tempDir, "real")
+		require.NoError(t, os.Mkdir(realDir, 0755))
+
+		symlinkDir := filepath.Join(tempDir, "symlink")
+		require.NoError(t, os.Symlink(realDir, symlinkDir))
+
+		// Multiple missing levels under symlink
+		missingPath := filepath.Join(symlinkDir, "a", "b", "c", "d")
+
+		got, err := canonicalizePath(missingPath)
+		require.NoError(t, err)
+		assert.True(t, filepath.IsAbs(got))
+		assert.Contains(t, got, "real")
+		// All missing components should be preserved
+		assert.Contains(t, got, "a")
+		assert.Contains(t, got, "b")
+		assert.Contains(t, got, "c")
+		assert.Contains(t, got, "d")
+	})
+
+	t.Run("symlink chain with missing leaf", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create chain: final -> mid -> real
+		realDir := filepath.Join(tempDir, "real")
+		require.NoError(t, os.Mkdir(realDir, 0755))
+
+		midSymlink := filepath.Join(tempDir, "mid")
+		require.NoError(t, os.Symlink(realDir, midSymlink))
+
+		finalSymlink := filepath.Join(tempDir, "final")
+		require.NoError(t, os.Symlink(midSymlink, finalSymlink))
+
+		// Path through chain to non-existent child
+		missingPath := filepath.Join(finalSymlink, "nonexistent")
+
+		got, err := canonicalizePath(missingPath)
+		require.NoError(t, err)
+		assert.True(t, filepath.IsAbs(got))
+		// All symlinks should be resolved to the real path
+		assert.Contains(t, got, "real")
+		assert.NotContains(t, got, "mid")
+		assert.NotContains(t, got, "final")
+	})
+}
+
+// TestCanonicalizePath_TransientMissingAncestor documents the race condition
+// where an ancestor directory disappears between resolution and use.
+//
+// RACE CONDITION: canonicalizePath finds existing ancestor at time of call,
+// but the ancestor could be deleted before the caller uses the result.
+// This is inherent to TOCTOU (time-of-check-time-of-use) vulnerabilities.
+//
+// MITIGATION: Callers should validate the returned path still exists
+// and matches expected permissions before using it.
+func TestCanonicalizePath_TransientMissingAncestor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping symlink tests on Windows (requires admin privileges)")
+	}
+
+	t.Run("documents race condition with transient ancestor", func(t *testing.T) {
+		// This test documents the behavior but cannot reliably test the race
+		// because it requires precise timing of concurrent filesystem operations.
+		//
+		// The canonicalizePath function:
+		// 1. Calls filepath.EvalSymlinks on the full path (fails if missing)
+		// 2. Walks up directory tree to find existing ancestor
+		// 3. Resolves symlinks on that ancestor
+		// 4. Appends missing components back
+		//
+		// RACE: Between step 3 and the caller using the result, the ancestor
+		// could be deleted or replaced with a symlink.
+		//
+		// This test verifies the current behavior (walks up successfully)
+		// and documents the inherent race for future hardening.
+
+		tempDir := t.TempDir()
+		existingDir := filepath.Join(tempDir, "existing")
+		require.NoError(t, os.Mkdir(existingDir, 0755))
+
+		missingPath := filepath.Join(existingDir, "transient", "child")
+
+		got, err := canonicalizePath(missingPath)
+		require.NoError(t, err)
+		assert.True(t, filepath.IsAbs(got))
+
+		// The path includes the existing directory resolved
+		resolvedExisting, _ := filepath.EvalSymlinks(existingDir)
+		assert.Equal(t, filepath.Join(resolvedExisting, "transient", "child"), got)
+
+		// DOCUMENTATION: If "existing" was deleted between canonicalizePath
+		// and the caller using "got", subsequent operations would fail.
+		// No mitigation is possible without filesystem locks (unavailable on Unix).
+	})
+}
+
+// TestCanonicalizePath_NonResolvableParent documents that paths with
+// non-resolvable parents (e.g., permission denied, broken symlink loops)
+// should ideally be rejected rather than walked past.
+//
+// CURRENT BEHAVIOR: The implementation walks up until it finds any
+// resolvable ancestor, which may not be the desired security behavior.
+//
+// RECOMMENDED BEHAVIOR: Paths should be rejected if any parent component
+// cannot be resolved, to prevent symlink-based directory escape attacks.
+func TestCanonicalizePath_NonResolvableParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping symlink tests on Windows (requires admin privileges)")
+	}
+
+	t.Run("symlink loop detection returns error", func(t *testing.T) {
+		// Symlink loops are detected by filepath.EvalSymlinks
+		tempDir := t.TempDir()
+
+		loopA := filepath.Join(tempDir, "loopA")
+		loopB := filepath.Join(tempDir, "loopB")
+
+		// Create symlink loop: loopA -> loopB -> loopA
+		require.NoError(t, os.Symlink(loopB, loopA))
+		require.NoError(t, os.Symlink(loopA, loopB))
+
+		pathInLoop := filepath.Join(loopA, "child")
+
+		got, err := canonicalizePath(pathInLoop)
+
+		// SECURITY: canonicalizePath correctly returns an error for symlink loops.
+		// filepath.EvalSymlinks detects the loop and returns "too many links" error.
+		// This prevents infinite loops and symlink-based filesystem attacks.
+		require.Error(t, err) // Expected: error for symlink loop
+		assert.Empty(t, got)
+		assert.Contains(t, err.Error(), "too many links")
+	})
+
+	t.Run("permission denied on parent is propagated", func(t *testing.T) {
+		// permission scenarios, so we document the expected behavior:
+		//
+		// If os.Lstat or filepath.EvalSymlinks returns permission denied,
+		// canonicalizePath should propagate that error rather than walking up.
+		//
+		// This prevents: /allowed/sensitive -> /forbidden (symlink)
+		// where /allowed has restricted permissions but parent is world-readable.
+
+		// Skip on CI where we can't set up permission scenarios
+		t.Skip("Requires manual testing with restricted permissions")
+	})
+}

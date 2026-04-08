@@ -2,7 +2,6 @@ package batch
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -27,10 +26,19 @@ func TestIsCaseInsensitiveFSCached_CachesResult(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	result1 := isCaseInsensitiveFSCached(filepath.Join(tmpDir, "test1.jpg"))
-	result2 := isCaseInsensitiveFSCached(filepath.Join(tmpDir, "test2.jpg"))
+	// Pass the directory itself, which is how callers actually use this function.
+	// The cache key should be the exact path passed, not its parent.
+	result1 := isCaseInsensitiveFSCached(tmpDir)
+	result2 := isCaseInsensitiveFSCached(tmpDir)
 
 	assert.Equal(t, result1, result2, "cached results should match for same directory")
+
+	// Verify cache hit occurred
+	fsCaseCacheMu.RLock()
+	cached, exists := fsCaseCache[tmpDir]
+	fsCaseCacheMu.RUnlock()
+	assert.True(t, exists, "result should be cached under exact directory path")
+	assert.Equal(t, result1, cached, "cached value should match returned value")
 }
 
 func TestIsCaseInsensitiveFS_HandlesNonexistentDir(t *testing.T) {

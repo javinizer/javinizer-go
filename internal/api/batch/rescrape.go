@@ -50,19 +50,20 @@ func isCaseInsensitiveFS(path string) bool {
 }
 
 func isCaseInsensitiveFSCached(path string) bool {
-	dir := filepath.Dir(path)
+	// Use path directly as cache key - callers already pass the directory to test.
+	// Previously used filepath.Dir(path) which incorrectly cached on the parent.
 
 	fsCaseCacheMu.RLock()
-	if result, ok := fsCaseCache[dir]; ok {
+	if result, ok := fsCaseCache[path]; ok {
 		fsCaseCacheMu.RUnlock()
 		return result
 	}
 	fsCaseCacheMu.RUnlock()
 
-	result := isCaseInsensitiveFS(dir)
+	result := isCaseInsensitiveFS(path)
 
 	fsCaseCacheMu.Lock()
-	fsCaseCache[dir] = result
+	fsCaseCache[path] = result
 	fsCaseCacheMu.Unlock()
 
 	return result

@@ -211,6 +211,114 @@ func TestScanner_ScanSingle(t *testing.T) {
 	})
 }
 
+func TestScanner_ScanSingleFromHandle(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create test files
+	testFiles := []string{
+		"movie1.mp4",
+		"movie2.mkv",
+		"movie3-trailer.mp4",
+		"document.txt",
+	}
+
+	for _, name := range testFiles {
+		path := filepath.Join(tmpDir, name)
+		if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
+			t.Fatalf("Failed to create file: %v", err)
+		}
+	}
+
+	cfg := &config.MatchingConfig{
+		Extensions:      []string{".mp4", ".mkv"},
+		MinSizeMB:       0,
+		ExcludePatterns: []string{"*-trailer*"},
+	}
+	scanner := NewScanner(afero.NewOsFs(), cfg)
+
+	t.Run("Scan from open directory handle", func(t *testing.T) {
+		// Open the directory handle
+		dirFile, err := os.Open(tmpDir)
+		if err != nil {
+			t.Fatalf("Failed to open directory: %v", err)
+		}
+		defer dirFile.Close()
+
+		result, err := scanner.ScanSingleFromHandle(dirFile, tmpDir)
+		if err != nil {
+			t.Fatalf("ScanSingleFromHandle failed: %v", err)
+		}
+
+		// Should find: movie1.mp4, movie2.mkv (not movie3-trailer.mp4)
+		expectedCount := 2
+		if len(result.Files) != expectedCount {
+			t.Errorf("Expected %d files, got %d", expectedCount, len(result.Files))
+		}
+
+		// Verify skipped files include movie3-trailer.mp4 and document.txt
+		if result.SkippedCount < 2 {
+			t.Errorf("Expected at least 2 skipped files, got %d", result.SkippedCount)
+		}
+	})
+
+	t.Run("Scan with nested directories", func(t *testing.T) {
+		// Create nested structure
+		subdir := filepath.Join(tmpDir, "subdir")
+		if err := os.Mkdir(subdir, 0755); err != nil {
+			t.Fatalf("Failed to create subdirectory: %v", err)
+		}
+		nestedFile := filepath.Join(subdir, "nested.mp4")
+		if err := os.WriteFile(nestedFile, []byte("test"), 0644); err != nil {
+			t.Fatalf("Failed to create nested file: %v", err)
+		}
+
+		// Open the root directory
+		dirFile, err := os.Open(tmpDir)
+		if err != nil {
+			t.Fatalf("Failed to open directory: %v", err)
+		}
+		defer dirFile.Close()
+
+		result, err := scanner.ScanSingleFromHandle(dirFile, tmpDir)
+		if err != nil {
+			t.Fatalf("ScanSingleFromHandle failed: %v", err)
+		}
+
+		// Should NOT include nested.mp4 (non-recursive scan)
+		for _, f := range result.Files {
+			if f.Name == "nested.mp4" {
+				t.Error("ScanSingleFromHandle should be non-recursive, but found nested file")
+			}
+		}
+	})
+
+	t.Run("FileInfo contains correct paths", func(t *testing.T) {
+		dirFile, err := os.Open(tmpDir)
+		if err != nil {
+			t.Fatalf("Failed to open directory: %v", err)
+		}
+		defer dirFile.Close()
+
+		result, err := scanner.ScanSingleFromHandle(dirFile, tmpDir)
+		if err != nil {
+			t.Fatalf("ScanSingleFromHandle failed: %v", err)
+		}
+
+		// Verify FileInfo fields use canonicalPath
+		for _, f := range result.Files {
+			if !filepath.IsAbs(f.Path) {
+				t.Errorf("Expected absolute path, got %s", f.Path)
+			}
+			if f.Dir != tmpDir {
+				t.Errorf("Expected Dir to be %s, got %s", tmpDir, f.Dir)
+			}
+			if filepath.Dir(f.Path) != tmpDir {
+				t.Errorf("Expected path parent to be %s, got %s", tmpDir, filepath.Dir(f.Path))
+			}
+		}
+	})
+}
+
 func TestScanner_Filter(t *testing.T) {
 	tmpDir := t.TempDir()
 

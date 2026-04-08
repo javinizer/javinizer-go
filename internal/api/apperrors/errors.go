@@ -39,6 +39,18 @@ func (e *PathError) Is(target error) bool {
 }
 
 var (
+	// ErrInodeExtraction is returned when file identity cannot be extracted
+	ErrInodeExtraction = errors.New("cannot extract file identity")
+
+	// ErrInodeMismatch is returned when inode verification fails (possible symlink swap)
+	ErrInodeMismatch = &PathError{
+		Code:            ErrorCode("INODE_MISMATCH"),
+		Message:         "security violation: file identity changed",
+		OperatorMessage: "File was replaced or swapped after validation (possible symlink attack)",
+		HTTPStatus:      http.StatusInternalServerError,
+		DocsURL:         "",
+	}
+
 	ErrAllowedDirsEmpty = &PathError{
 		Code:            CodeAllowedDirsEmpty,
 		Message:         "access denied: no allowed directories configured",
