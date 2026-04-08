@@ -9,6 +9,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +25,7 @@ func NewTestClient(server *httptest.Server) *resty.Client {
 }
 
 func TestScraper_Name(t *testing.T) {
-	s := &Scraper{}
+	s := &Scraper{rateLimiter: ratelimit.NewLimiter(0)}
 	assert.Equal(t, "javstash", s.Name())
 }
 
@@ -39,7 +40,7 @@ func TestScraper_IsEnabled(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Scraper{enabled: tt.enabled}
+			s := &Scraper{enabled: tt.enabled, rateLimiter: ratelimit.NewLimiter(0)}
 			assert.Equal(t, tt.want, s.IsEnabled())
 		})
 	}
@@ -104,7 +105,7 @@ func TestScraper_ValidateConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Scraper{}
+			s := &Scraper{rateLimiter: ratelimit.NewLimiter(0)}
 			err := s.ValidateConfig(tt.cfg)
 			if tt.wantErr {
 				require.Error(t, err)
@@ -118,8 +119,9 @@ func TestScraper_ValidateConfig(t *testing.T) {
 
 func TestScraper_Search_MissingAPIKey(t *testing.T) {
 	s := &Scraper{
-		enabled: true,
-		apiKey:  "",
+		enabled:     true,
+		apiKey:      "",
+		rateLimiter: ratelimit.NewLimiter(0),
 	}
 	_, err := s.Search("IPX-535")
 	require.Error(t, err)
@@ -128,8 +130,9 @@ func TestScraper_Search_MissingAPIKey(t *testing.T) {
 
 func TestScraper_Search_EmptyID(t *testing.T) {
 	s := &Scraper{
-		enabled: true,
-		apiKey:  "test-key",
+		enabled:     true,
+		apiKey:      "test-key",
+		rateLimiter: ratelimit.NewLimiter(0),
 	}
 	_, err := s.Search("")
 	require.Error(t, err)
@@ -142,8 +145,9 @@ func TestScraper_Search_EmptyID(t *testing.T) {
 
 func TestScraper_GetURL_EmptyID(t *testing.T) {
 	s := &Scraper{
-		enabled: true,
-		apiKey:  "test-key",
+		enabled:     true,
+		apiKey:      "test-key",
+		rateLimiter: ratelimit.NewLimiter(0),
 	}
 	_, err := s.GetURL("")
 	require.Error(t, err)
@@ -186,11 +190,12 @@ func TestScraper_Search_Success(t *testing.T) {
 	defer server.Close()
 
 	s := &Scraper{
-		enabled:  true,
-		apiKey:   "test-api-key",
-		baseURL:  server.URL,
-		client:   NewTestClient(server),
-		settings: config.ScraperSettings{},
+		enabled:     true,
+		apiKey:      "test-api-key",
+		baseURL:     server.URL,
+		client:      NewTestClient(server),
+		rateLimiter: ratelimit.NewLimiter(0),
+		settings:    config.ScraperSettings{},
 	}
 
 	result, err := s.Search("IPX-535")
@@ -268,11 +273,12 @@ func TestScraper_Search_NotFound(t *testing.T) {
 	defer server.Close()
 
 	s := &Scraper{
-		enabled:  true,
-		apiKey:   "test-api-key",
-		baseURL:  server.URL,
-		client:   NewTestClient(server),
-		settings: config.ScraperSettings{},
+		enabled:     true,
+		apiKey:      "test-api-key",
+		baseURL:     server.URL,
+		client:      NewTestClient(server),
+		rateLimiter: ratelimit.NewLimiter(0),
+		settings:    config.ScraperSettings{},
 	}
 
 	_, err := s.Search("NOTFOUND-999")
@@ -291,11 +297,12 @@ func TestScraper_Search_Unauthorized(t *testing.T) {
 	defer server.Close()
 
 	s := &Scraper{
-		enabled:  true,
-		apiKey:   "invalid-key",
-		baseURL:  server.URL,
-		client:   NewTestClient(server),
-		settings: config.ScraperSettings{},
+		enabled:     true,
+		apiKey:      "test-api-key",
+		baseURL:     server.URL,
+		client:      NewTestClient(server),
+		rateLimiter: ratelimit.NewLimiter(0),
+		settings:    config.ScraperSettings{},
 	}
 
 	_, err := s.Search("IPX-535")
@@ -322,7 +329,7 @@ func TestNormalizeLanguage(t *testing.T) {
 }
 
 func TestCanHandleURL(t *testing.T) {
-	s := &Scraper{baseURL: "https://javstash.org/graphql"}
+	s := &Scraper{baseURL: "https://javstash.org/graphql", rateLimiter: ratelimit.NewLimiter(0)}
 
 	tests := []struct {
 		name     string
@@ -345,7 +352,7 @@ func TestCanHandleURL(t *testing.T) {
 }
 
 func TestExtractIDFromURL(t *testing.T) {
-	s := &Scraper{baseURL: "https://javstash.org/graphql"}
+	s := &Scraper{baseURL: "https://javstash.org/graphql", rateLimiter: ratelimit.NewLimiter(0)}
 
 	tests := []struct {
 		name     string
@@ -374,7 +381,7 @@ func TestExtractIDFromURL(t *testing.T) {
 }
 
 func TestScrapeURL_ReturnsNotSupported(t *testing.T) {
-	s := &Scraper{enabled: true, apiKey: "test-key"}
+	s := &Scraper{enabled: true, apiKey: "test-key", rateLimiter: ratelimit.NewLimiter(0)}
 
 	_, err := s.ScrapeURL("https://javstash.org/scenes/abc123")
 	require.Error(t, err)
@@ -382,7 +389,7 @@ func TestScrapeURL_ReturnsNotSupported(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance_JavStash(t *testing.T) {
-	s := &Scraper{}
+	s := &Scraper{rateLimiter: ratelimit.NewLimiter(0)}
 	var _ models.Scraper = s
 	var _ models.URLHandler = s
 	var _ models.DirectURLScraper = s

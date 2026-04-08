@@ -745,31 +745,3 @@ func TestExtractScreenshotURLEdgeCases(t *testing.T) {
 	assert.Contains(t, screenshots, "https://www.tokyo-hot.com/gallery/2.jpg")
 	assert.Contains(t, screenshots, "https://www.tokyo-hot.com/thumb/vcap_1.jpg")
 }
-
-// TestWaitForRateLimit tests rate limit waiting
-func TestWaitForRateLimit(t *testing.T) {
-	settings := testSettings("https://www.tokyo-hot.com")
-	settings.RateLimit = 50
-	s := New(settings, nil, config.FlareSolverrConfig{})
-
-	// Set last request time to just now
-	s.lastRequestTime.Store(time.Now().Add(-10 * time.Millisecond))
-
-	start := time.Now()
-	s.waitForRateLimit()
-	elapsed := time.Since(start)
-
-	// Should wait for remaining time (at least 40ms)
-	assert.GreaterOrEqual(t, elapsed, 40*time.Millisecond)
-}
-
-// TestUpdateLastRequestTime tests updating the last request time
-func TestUpdateLastRequestTime(t *testing.T) {
-	settings := testSettings("https://www.tokyo-hot.com")
-	s := New(settings, nil, config.FlareSolverrConfig{})
-
-	s.updateLastRequestTime()
-	loadedTime, ok := s.lastRequestTime.Load().(time.Time)
-	assert.True(t, ok, "Should load time.Time")
-	assert.False(t, loadedTime.IsZero(), "Time should not be zero")
-}

@@ -1,13 +1,13 @@
 package javstash
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -16,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
@@ -24,14 +25,13 @@ const (
 )
 
 type Scraper struct {
-	client          *resty.Client
-	enabled         bool
-	apiKey          string
-	baseURL         string
-	language        string
-	requestDelay    time.Duration
-	lastRequestTime atomic.Value
-	settings        config.ScraperSettings
+	client      *resty.Client
+	enabled     bool
+	apiKey      string
+	baseURL     string
+	language    string
+	rateLimiter *ratelimit.Limiter
+	settings    config.ScraperSettings
 }
 
 type GraphQLRequest struct {
@@ -123,21 +123,19 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	}
 
 	lang := normalizeLanguage(settings.Language)
-	requestDelay := time.Duration(settings.RateLimit) * time.Millisecond
 
 	s := &Scraper{
-		client:       client,
-		enabled:      settings.Enabled,
-		apiKey:       apiKey,
-		baseURL:      baseURL,
-		language:     lang,
-		requestDelay: requestDelay,
-		settings:     settings,
+		client:      client,
+		enabled:     settings.Enabled,
+		apiKey:      apiKey,
+		baseURL:     baseURL,
+		language:    lang,
+		rateLimiter: ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
+		settings:    settings,
 	}
-	s.lastRequestTime.Store(time.Time{})
 
-	if requestDelay > 0 {
-		logging.Infof("Javstash: Rate limiting enabled with %v delay between requests", requestDelay)
+	if settings.RateLimit > 0 {
+		logging.Infof("Javstash: Rate limiting enabled with %dms delay between requests", settings.RateLimit)
 	}
 
 	return s
@@ -233,7 +231,9 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, fmt.Errorf("javstash: api_key is required (set in config or JAVSTASH_API_KEY env var)")
 	}
 
-	s.waitForRateLimit()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return nil, fmt.Errorf("javstash: rate limit wait failed: %w", err)
+	}
 
 	searchTerm := strings.TrimSpace(id)
 
@@ -272,8 +272,6 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		SetHeader("ApiKey", s.apiKey).
 		SetBody(body).
 		Post(s.baseURL)
-
-	s.updateLastRequestTime()
 
 	if err != nil {
 		return nil, fmt.Errorf("javstash: request failed: %w", err)
@@ -409,33 +407,6 @@ func cleanString(s string) string {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
 	return s
-}
-
-func (s *Scraper) waitForRateLimit() {
-	if s.requestDelay == 0 {
-		return
-	}
-
-	lastReq := s.lastRequestTime.Load()
-	if lastReq == nil {
-		return
-	}
-
-	lastTime := lastReq.(time.Time)
-	if lastTime.IsZero() {
-		return
-	}
-
-	elapsed := time.Since(lastTime)
-	if elapsed < s.requestDelay {
-		waitTime := s.requestDelay - elapsed
-		logging.Debugf("Javstash: Rate limit wait: %v", waitTime)
-		time.Sleep(waitTime)
-	}
-}
-
-func (s *Scraper) updateLastRequestTime() {
-	s.lastRequestTime.Store(time.Now())
 }
 
 func init() {

@@ -1,12 +1,12 @@
 package mgstage
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -16,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
@@ -27,14 +28,13 @@ const (
 
 // Scraper implements the MGStage scraper
 type Scraper struct {
-	client          *resty.Client
-	enabled         bool
-	usingProxy      bool
-	requestDelay    time.Duration
-	proxyOverride   *config.ProxyConfig
-	downloadProxy   *config.ProxyConfig
-	lastRequestTime atomic.Value           // stores time.Time of last request for rate limiting
-	settings        config.ScraperSettings // stores the full settings for Config() method
+	client        *resty.Client
+	enabled       bool
+	usingProxy    bool
+	proxyOverride *config.ProxyConfig
+	downloadProxy *config.ProxyConfig
+	rateLimiter   *ratelimit.Limiter
+	settings      config.ScraperSettings
 }
 
 var (
@@ -79,24 +79,14 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		logging.Infof("MGStage: Using proxy %s", httpclient.SanitizeProxyURL(proxyCfg.URL))
 	}
 
-	// Calculate request delay from config (milliseconds to duration)
-	requestDelay := time.Duration(settings.RateLimit) * time.Millisecond
-
 	scraper := &Scraper{
 		client:        client,
 		enabled:       settings.Enabled,
 		usingProxy:    usingProxy,
-		requestDelay:  requestDelay,
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
+		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		settings:      settings,
-	}
-
-	// Initialize lastRequestTime with zero time
-	scraper.lastRequestTime.Store(time.Time{})
-
-	if requestDelay > 0 {
-		logging.Infof("MGStage: Rate limiting enabled with %v delay between requests", requestDelay)
 	}
 
 	return scraper
@@ -184,9 +174,10 @@ func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
 		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
 	}
 
-	s.waitForRateLimit()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return nil, err
+	}
 	resp, err := s.client.R().Get(rawURL)
-	s.updateLastRequestTime()
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from MGStage: %w", err)
@@ -251,23 +242,23 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	searchID := normalizeIDForSearch(id)
 	url := fmt.Sprintf(searchURL, searchID)
 
-	s.waitForRateLimit()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return "", err
+	}
 
 	resp, err := s.client.R().Get(url)
-	s.updateLastRequestTime()
 
 	if err != nil {
 		return "", fmt.Errorf("failed to search MGStage: %w", err)
 	}
 
 	if resp.StatusCode() != 200 {
-		// Search can be blocked while direct product URLs still work.
-		// Try direct URL fallback before returning hard failure.
 		directURL := fmt.Sprintf(productURL, id)
-		s.waitForRateLimit()
+		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+			return "", err
+		}
 
 		directResp, directErr := s.client.R().Get(directURL)
-		s.updateLastRequestTime()
 
 		if directErr == nil && directResp.StatusCode() == 200 {
 			return directURL, nil
@@ -314,10 +305,11 @@ func (s *Scraper) GetURL(id string) (string, error) {
 
 	// If no match found in search, try direct product URL
 	directURL := fmt.Sprintf(productURL, id)
-	s.waitForRateLimit()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return "", err
+	}
 
 	resp, err = s.client.R().Get(directURL)
-	s.updateLastRequestTime()
 
 	if err == nil && resp.StatusCode() == 200 {
 		return directURL, nil
@@ -333,10 +325,11 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, err
 	}
 
-	s.waitForRateLimit()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return nil, err
+	}
 
 	resp, err := s.client.R().Get(url)
-	s.updateLastRequestTime()
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from MGStage: %w", err)
@@ -456,37 +449,6 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 	}
 
 	return result, nil
-}
-
-// waitForRateLimit enforces the request delay between requests
-func (s *Scraper) waitForRateLimit() {
-	if s.requestDelay == 0 {
-		return // No rate limiting configured
-	}
-
-	// Get last request time
-	lastReq := s.lastRequestTime.Load()
-	if lastReq == nil {
-		return // First request, no need to wait
-	}
-
-	lastTime := lastReq.(time.Time)
-	if lastTime.IsZero() {
-		return // First request, no need to wait
-	}
-
-	// Calculate how long to wait
-	elapsed := time.Since(lastTime)
-	if elapsed < s.requestDelay {
-		waitTime := s.requestDelay - elapsed
-		logging.Debugf("MGStage: Rate limit wait: %v", waitTime)
-		time.Sleep(waitTime)
-	}
-}
-
-// updateLastRequestTime updates the timestamp of the last request
-func (s *Scraper) updateLastRequestTime() {
-	s.lastRequestTime.Store(time.Now())
 }
 
 func (s *Scraper) httpStatusError(stage string, statusCode int) error {

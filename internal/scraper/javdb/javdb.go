@@ -1,6 +1,7 @@
 package javdb
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 	"golang.org/x/net/html"
 )
@@ -42,17 +44,15 @@ var (
 
 // Scraper implements the JavDB scraper.
 type Scraper struct {
-	client          *resty.Client
-	flaresolverr    *httpclient.FlareSolverr
-	enabled         bool
-	baseURL         string
-	requestDelay    time.Duration
-	proxyOverride   *config.ProxyConfig
-	downloadProxy   *config.ProxyConfig
-	mu              sync.Mutex // protects lastRequestTime and rate limiting
-	lastRequestTime time.Time
-	settings        config.ScraperSettings // stores the full settings for Config() method
-	cookieMu        sync.Mutex             // protects cookie mutations on shared client
+	client        *resty.Client
+	flaresolverr  *httpclient.FlareSolverr
+	enabled       bool
+	baseURL       string
+	proxyOverride *config.ProxyConfig
+	downloadProxy *config.ProxyConfig
+	rateLimiter   *ratelimit.Limiter
+	settings      config.ScraperSettings // stores the full settings for Config() method
+	cookieMu      sync.Mutex             // protects cookie mutations on shared client
 }
 
 // New creates a new JavDB scraper.
@@ -96,7 +96,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		flaresolverr:  flaresolverr,
 		enabled:       settings.Enabled,
 		baseURL:       strings.TrimRight(baseURL, "/"),
-		requestDelay:  time.Duration(settings.RateLimit) * time.Millisecond,
+		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		settings:      settings,
@@ -438,7 +438,9 @@ func (s *Scraper) findDetailURL(id string) (string, error) {
 }
 
 func (s *Scraper) fetchPage(targetURL string) (string, error) {
-	s.waitAndUpdateRateLimit()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return "", err
+	}
 
 	resp, err := s.client.R().Get(targetURL)
 	if err == nil && resp != nil && resp.StatusCode() == 200 {
@@ -475,7 +477,9 @@ func (s *Scraper) fetchPage(targetURL string) (string, error) {
 }
 
 func (s *Scraper) fetchPageDirect(targetURL string) (string, error) {
-	s.waitAndUpdateRateLimit()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return "", err
+	}
 
 	resp, err := s.client.R().Get(targetURL)
 	return s.fetchPageDirectResponse(resp, err)
@@ -629,18 +633,6 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 	}
 
 	return result, nil
-}
-
-func (s *Scraper) waitAndUpdateRateLimit() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.requestDelay > 0 && !s.lastRequestTime.IsZero() {
-		if elapsed := time.Since(s.lastRequestTime); elapsed < s.requestDelay {
-			time.Sleep(s.requestDelay - elapsed)
-		}
-	}
-	s.lastRequestTime = time.Now()
 }
 
 func normalizeIDForCompare(id string) string {

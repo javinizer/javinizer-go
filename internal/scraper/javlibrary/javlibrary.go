@@ -1,6 +1,7 @@
 package javlibrary
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	scraper "github.com/javinizer/javinizer-go/internal/scraper"
 )
 
@@ -31,6 +33,7 @@ type Scraper struct {
 	language      string
 	proxyOverride *config.ProxyConfig
 	downloadProxy *config.ProxyConfig
+	rateLimiter   *ratelimit.Limiter
 	settings      config.ScraperSettings // stores the full settings for Config() method
 	cookieMu      sync.Mutex             // protects cookie mutations on shared client
 }
@@ -94,6 +97,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		language:      language,
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
+		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		settings:      settings,
 	}
 }
@@ -263,6 +267,11 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 
 // fetchPage fetches a page via FlareSolverr (if enabled) or direct HTTP
 func (s *Scraper) fetchPage(url string) (string, error) {
+	// Rate limit before fetching
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return "", fmt.Errorf("JavLibrary: rate limit wait failed: %w", err)
+	}
+
 	// Try direct request first and only escalate to FlareSolverr on blocked/challenge responses.
 	resp, err := s.client.R().Get(url)
 	if err == nil && resp != nil && resp.StatusCode() == 200 {

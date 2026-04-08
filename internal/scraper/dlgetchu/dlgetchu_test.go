@@ -302,49 +302,6 @@ func TestDecodeBody(t *testing.T) {
 	assert.Empty(t, result)
 }
 
-// TestWaitForRateLimit tests rate limiting behavior
-func TestWaitForRateLimit(t *testing.T) {
-	settings := testSettings("https://dl.getchu.com")
-	settings.RateLimit = 50
-	s := New(settings, nil, config.FlareSolverrConfig{})
-
-	// Set last request time to 10ms ago, should wait ~40ms
-	s.lastRequestTime.Store(time.Now().Add(-10 * time.Millisecond))
-	start := time.Now()
-	s.waitForRateLimit()
-	elapsed := time.Since(start)
-
-	// Allow 15ms tolerance for system scheduling variability
-	// Expected wait is ~40ms (50ms delay - 10ms already elapsed)
-	assert.GreaterOrEqual(t, elapsed, 25*time.Millisecond, "Should wait at least 25ms (with tolerance)")
-	assert.LessOrEqual(t, elapsed, 100*time.Millisecond, "Should not wait excessively long")
-}
-
-// TestWaitForRateLimitNoWait tests that no wait occurs when enough time has passed
-func TestWaitForRateLimitNoWait(t *testing.T) {
-	settings := testSettings("https://dl.getchu.com")
-	settings.RateLimit = 50
-	s := New(settings, nil, config.FlareSolverrConfig{})
-
-	// Set last request time to 100ms ago, should not wait
-	s.lastRequestTime.Store(time.Now().Add(-100 * time.Millisecond))
-	start := time.Now()
-	s.waitForRateLimit()
-	elapsed := time.Since(start)
-
-	// Should complete almost immediately (< 10ms tolerance)
-	assert.Less(t, elapsed, 10*time.Millisecond, "Should not wait when enough time has passed")
-}
-
-func TestUpdateLastRequestTime(t *testing.T) {
-	settings := testSettings("https://dl.getchu.com")
-	s := New(settings, nil, config.FlareSolverrConfig{})
-	s.updateLastRequestTime()
-	loadedTime, ok := s.lastRequestTime.Load().(time.Time)
-	assert.True(t, ok)
-	assert.False(t, loadedTime.IsZero())
-}
-
 func TestResolveURL(t *testing.T) {
 	assert.Equal(t, "https://example.com/x/y.jpg", resolveURL("https://example.com/i/item1", "/x/y.jpg"))
 }

@@ -1,6 +1,7 @@
 package r18dev
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -1789,10 +1790,10 @@ func TestWaitForRateLimit(t *testing.T) {
 	}
 
 	scraper := New(cfg, testGlobalProxy, testGlobalFlareSolverr)
-	scraper.waitAndUpdateRateLimit()
+	_ = scraper.rateLimiter.Wait(context.Background())
 
 	start := time.Now()
-	scraper.waitAndUpdateRateLimit()
+	_ = scraper.rateLimiter.Wait(context.Background())
 	elapsed := time.Since(start)
 
 	assert.GreaterOrEqual(t, elapsed.Milliseconds(), int64(90))
@@ -1808,7 +1809,7 @@ func TestWaitForRateLimit_NoDelay(t *testing.T) {
 	scraper := New(cfg, testGlobalProxy, testGlobalFlareSolverr)
 
 	start := time.Now()
-	scraper.waitAndUpdateRateLimit()
+	_ = scraper.rateLimiter.Wait(context.Background())
 	elapsed := time.Since(start)
 
 	assert.Less(t, elapsed.Milliseconds(), int64(10))
@@ -1818,17 +1819,7 @@ func TestUpdateLastRequestTime(t *testing.T) {
 	cfg := createTestSettings(true)
 	scraper := New(cfg, testGlobalProxy, testGlobalFlareSolverr)
 
-	scraper.mu.Lock()
-	lastTime := scraper.lastRequestTime
-	scraper.mu.Unlock()
-	assert.True(t, lastTime.IsZero())
-
-	scraper.waitAndUpdateRateLimit()
-
-	scraper.mu.Lock()
-	updatedTime := scraper.lastRequestTime
-	scraper.mu.Unlock()
-	assert.False(t, updatedTime.IsZero())
+	_ = scraper.rateLimiter.Wait(context.Background())
 }
 
 func TestNormalizeIDWithoutStripping(t *testing.T) {

@@ -1,6 +1,7 @@
 package libredmm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,7 +9,6 @@ import (
 	"path"
 	"regexp"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -19,6 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
@@ -66,10 +67,9 @@ type Scraper struct {
 	client          *resty.Client
 	enabled         bool
 	baseURL         string
-	requestDelay    time.Duration
 	proxyOverride   *config.ProxyConfig
 	downloadProxy   *config.ProxyConfig
-	lastRequestTime atomic.Value
+	rateLimiter     *ratelimit.Limiter
 	pollInterval    time.Duration
 	maxPollAttempts int
 	settings        config.ScraperSettings // stores the full settings for Config() method
@@ -116,14 +116,13 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		client:          client,
 		enabled:         settings.Enabled,
 		baseURL:         base,
-		requestDelay:    time.Duration(settings.RateLimit) * time.Millisecond,
 		proxyOverride:   settings.Proxy,
 		downloadProxy:   settings.DownloadProxy,
+		rateLimiter:     ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		pollInterval:    defaultPollInterval,
 		maxPollAttempts: defaultPollAttempts,
 		settings:        settings,
 	}
-	s.lastRequestTime.Store(time.Time{})
 
 	if usingProxy {
 		logging.Infof("LibreDMM: Using proxy %s", httpclient.SanitizeProxyURL(proxyCfg.URL))
@@ -416,9 +415,11 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 }
 
 func (s *Scraper) fetchMovieJSON(targetURL string) (*moviePayload, string, int, error) {
-	s.waitForRateLimit()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return nil, "", 0, err
+	}
+
 	resp, err := s.client.R().Get(targetURL)
-	s.updateLastRequestTime()
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -613,24 +614,6 @@ func firstNonEmpty(values []string) string {
 		}
 	}
 	return ""
-}
-
-func (s *Scraper) waitForRateLimit() {
-	if s.requestDelay <= 0 {
-		return
-	}
-	lastReq := s.lastRequestTime.Load()
-	lastTime, ok := lastReq.(time.Time)
-	if !ok || lastTime.IsZero() {
-		return
-	}
-	if elapsed := time.Since(lastTime); elapsed < s.requestDelay {
-		time.Sleep(s.requestDelay - elapsed)
-	}
-}
-
-func (s *Scraper) updateLastRequestTime() {
-	s.lastRequestTime.Store(time.Now())
 }
 
 func normalizeMovieURL(raw, base string) (string, bool) {

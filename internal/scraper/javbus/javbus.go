@@ -1,13 +1,13 @@
 package javbus
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
@@ -37,16 +38,14 @@ var (
 
 // Scraper implements the JavBus scraper.
 type Scraper struct {
-	client          *resty.Client
-	enabled         bool
-	baseURL         string
-	language        string
-	requestDelay    time.Duration
-	proxyOverride   *config.ProxyConfig
-	downloadProxy   *config.ProxyConfig
-	mu              sync.Mutex // protects lastRequestTime and rate limiting
-	lastRequestTime time.Time
-	settings        config.ScraperSettings // stores the full settings for Config() method
+	client        *resty.Client
+	enabled       bool
+	baseURL       string
+	language      string
+	proxyOverride *config.ProxyConfig
+	downloadProxy *config.ProxyConfig
+	rateLimiter   *ratelimit.Limiter
+	settings      config.ScraperSettings // stores the full settings for Config() method
 }
 
 // New creates a new JavBus scraper.
@@ -93,7 +92,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		enabled:       settings.Enabled,
 		baseURL:       base,
 		language:      lang,
-		requestDelay:  time.Duration(settings.RateLimit) * time.Millisecond,
+		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		settings:      settings,
@@ -365,7 +364,9 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 }
 
 func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
-	s.waitAndUpdateRateLimit()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return "", 0, err
+	}
 
 	resp, err := s.client.R().Get(targetURL)
 	if err != nil {
@@ -694,18 +695,6 @@ func parseDate(raw string) *time.Time {
 		}
 	}
 	return nil
-}
-
-func (s *Scraper) waitAndUpdateRateLimit() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.requestDelay > 0 && !s.lastRequestTime.IsZero() {
-		if elapsed := time.Since(s.lastRequestTime); elapsed < s.requestDelay {
-			time.Sleep(s.requestDelay - elapsed)
-		}
-	}
-	s.lastRequestTime = time.Now()
 }
 
 func normalizeLanguage(lang string) string {

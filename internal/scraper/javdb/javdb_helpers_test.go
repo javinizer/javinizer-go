@@ -1,6 +1,7 @@
 package javdb
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"golang.org/x/net/html"
 )
 
@@ -96,13 +98,12 @@ func TestFindDetailURL_Fallbacks(t *testing.T) {
 		})
 
 		scraper := &Scraper{
-			client:       client,
-			enabled:      true,
-			baseURL:      "https://javdb.test",
-			requestDelay: 0,
-			settings:     config.ScraperSettings{Enabled: true},
+			client:      client,
+			enabled:     true,
+			baseURL:     "https://javdb.test",
+			rateLimiter: ratelimit.NewLimiter(0),
+			settings:    config.ScraperSettings{Enabled: true},
 		}
-		scraper.lastRequestTime = time.Time{}
 
 		got, err := scraper.findDetailURL("XYZ-999")
 		if err != nil {
@@ -122,13 +123,12 @@ func TestFindDetailURL_Fallbacks(t *testing.T) {
 		})
 
 		scraper := &Scraper{
-			client:       client,
-			enabled:      true,
-			baseURL:      "https://javdb.test",
-			requestDelay: 0,
-			settings:     config.ScraperSettings{Enabled: true},
+			client:      client,
+			enabled:     true,
+			baseURL:     "https://javdb.test",
+			rateLimiter: ratelimit.NewLimiter(0),
+			settings:    config.ScraperSettings{Enabled: true},
 		}
-		scraper.lastRequestTime = time.Time{}
 
 		_, err := scraper.findDetailURL("XYZ-999")
 		if err == nil {
@@ -218,13 +218,12 @@ func TestFetchPage(t *testing.T) {
 
 		client := resty.New()
 		scraper := &Scraper{
-			client:       client,
-			enabled:      true,
-			baseURL:      server.URL,
-			requestDelay: 0,
-			settings:     config.ScraperSettings{Enabled: true},
+			client:      client,
+			enabled:     true,
+			baseURL:     server.URL,
+			rateLimiter: ratelimit.NewLimiter(0),
+			settings:    config.ScraperSettings{Enabled: true},
 		}
-		scraper.lastRequestTime = time.Time{}
 
 		html, err := scraper.fetchPage(server.URL)
 		if err != nil {
@@ -240,13 +239,12 @@ func TestFetchPage(t *testing.T) {
 		client.SetTransport(&errorRoundTripper{err: errors.New("boom")})
 
 		scraper := &Scraper{
-			client:       client,
-			enabled:      true,
-			baseURL:      "https://javdb.test",
-			requestDelay: 0,
-			settings:     config.ScraperSettings{Enabled: true},
+			client:      client,
+			enabled:     true,
+			baseURL:     "https://javdb.test",
+			rateLimiter: ratelimit.NewLimiter(0),
+			settings:    config.ScraperSettings{Enabled: true},
 		}
-		scraper.lastRequestTime = time.Time{}
 
 		_, err := scraper.fetchPage("https://javdb.test/page")
 		if err == nil || !strings.Contains(err.Error(), "boom") {
@@ -256,20 +254,27 @@ func TestFetchPage(t *testing.T) {
 }
 
 func TestWaitForRateLimitAndHelpers(t *testing.T) {
-	scraper := &Scraper{requestDelay: 20 * time.Millisecond}
-	scraper.lastRequestTime = time.Now()
+	scraper := &Scraper{rateLimiter: ratelimit.NewLimiter(20 * time.Millisecond)}
 
 	start := time.Now()
-	scraper.waitAndUpdateRateLimit()
-	if time.Since(start) < 15*time.Millisecond {
-		t.Fatal("waitForRateLimit did not delay")
+	if err := scraper.rateLimiter.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait() error = %v", err)
 	}
 
-	scraper.requestDelay = 0
+	if err := scraper.rateLimiter.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if time.Since(start) < 15*time.Millisecond {
+		t.Fatal("rate limiter did not delay second call")
+	}
+
+	scraper.rateLimiter = ratelimit.NewLimiter(0)
 	start = time.Now()
-	scraper.waitAndUpdateRateLimit()
+	if err := scraper.rateLimiter.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
 	if time.Since(start) > 10*time.Millisecond {
-		t.Fatal("waitForRateLimit delayed unexpectedly")
+		t.Fatal("zero-delay limiter delayed unexpectedly")
 	}
 }
 

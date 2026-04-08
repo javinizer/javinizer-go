@@ -1,13 +1,13 @@
 package r18dev
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
@@ -34,13 +35,11 @@ type Scraper struct {
 	client            *resty.Client
 	enabled           bool
 	language          string
-	requestDelay      time.Duration
 	maxRetries        int
 	respectRetryAfter bool
 	proxyOverride     *config.ProxyConfig
 	downloadProxy     *config.ProxyConfig
-	mu                sync.Mutex // protects lastRequestTime and rate limiting
-	lastRequestTime   time.Time
+	rateLimiter       *ratelimit.Limiter
 	settings          config.ScraperSettings // stores the full settings for Config() method
 }
 
@@ -90,9 +89,6 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		logging.Infof("R18Dev: Using proxy %s", httpclient.SanitizeProxyURL(proxyConfig.URL))
 	}
 
-	// Calculate request delay from config (milliseconds to duration)
-	requestDelay := time.Duration(settings.RateLimit) * time.Millisecond
-
 	// Set defaults for rate limiting if not configured
 	maxRetries := settings.RetryCount
 	if maxRetries == 0 {
@@ -105,7 +101,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		client:            client,
 		enabled:           settings.Enabled,
 		language:          language,
-		requestDelay:      requestDelay,
+		rateLimiter:       ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		maxRetries:        maxRetries,
 		respectRetryAfter: respectRetryAfter,
 		proxyOverride:     settings.Proxy,
@@ -113,8 +109,8 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		settings:          settings,
 	}
 
-	if requestDelay > 0 {
-		logging.Infof("R18Dev: Rate limiting enabled with %v delay between requests", requestDelay)
+	if settings.RateLimit > 0 {
+		logging.Infof("R18Dev: Rate limiting enabled with %v delay between requests", time.Duration(settings.RateLimit)*time.Millisecond)
 	}
 
 	return scraper
@@ -259,28 +255,15 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	return fmt.Sprintf(apiURL, normalized), nil
 }
 
-func (s *Scraper) waitAndUpdateRateLimit() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.requestDelay > 0 && !s.lastRequestTime.IsZero() {
-		elapsed := time.Since(s.lastRequestTime)
-		if elapsed < s.requestDelay {
-			waitTime := s.requestDelay - elapsed
-			logging.Debugf("R18: Rate limit wait: %v", waitTime)
-			time.Sleep(waitTime)
-		}
-	}
-	s.lastRequestTime = time.Now()
-}
-
 // doRequestWithRetry performs an HTTP request with retry logic for rate limiting
 func (s *Scraper) doRequestWithRetry(url string) (*resty.Response, error) {
 	var resp *resty.Response
 	var err error
 
 	for attempt := 0; attempt <= s.maxRetries; attempt++ {
-		s.waitAndUpdateRateLimit()
+		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+			return nil, err
+		}
 
 		resp, err = s.client.R().
 			SetHeader("Accept-Encoding", "").

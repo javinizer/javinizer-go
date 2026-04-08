@@ -1,13 +1,13 @@
 package tokyohot
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
@@ -32,15 +33,14 @@ var (
 
 // Scraper implements the TokyoHot scraper.
 type Scraper struct {
-	client          *resty.Client
-	enabled         bool
-	baseURL         string
-	language        string
-	requestDelay    time.Duration
-	proxyOverride   *config.ProxyConfig
-	downloadProxy   *config.ProxyConfig
-	lastRequestTime atomic.Value
-	settings        config.ScraperSettings // stores the full settings for Config() method
+	client        *resty.Client
+	enabled       bool
+	baseURL       string
+	language      string
+	proxyOverride *config.ProxyConfig
+	downloadProxy *config.ProxyConfig
+	rateLimiter   *ratelimit.Limiter
+	settings      config.ScraperSettings // stores the full settings for Config() method
 }
 
 // New creates a new TokyoHot scraper.
@@ -87,12 +87,11 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		enabled:       settings.Enabled,
 		baseURL:       base,
 		language:      lang,
-		requestDelay:  time.Duration(settings.RateLimit) * time.Millisecond,
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
+		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		settings:      settings,
 	}
-	s.lastRequestTime.Store(time.Time{})
 
 	if usingProxy {
 		logging.Infof("TokyoHot: Using proxy %s", httpclient.SanitizeProxyURL(proxyCfg.URL))
@@ -623,8 +622,9 @@ func (s *Scraper) applyLanguage(rawURL string) string {
 }
 
 func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
-	s.waitForRateLimit()
-	defer s.updateLastRequestTime()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return "", 0, err
+	}
 
 	resp, err := s.client.R().Get(targetURL)
 	if err != nil {
@@ -638,27 +638,6 @@ func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
 		)
 	}
 	return html, resp.StatusCode(), nil
-}
-
-func (s *Scraper) waitForRateLimit() {
-	if s.requestDelay <= 0 {
-		return
-	}
-	lastReq := s.lastRequestTime.Load()
-	if lastReq == nil {
-		return
-	}
-	lastTime, ok := lastReq.(time.Time)
-	if !ok || lastTime.IsZero() {
-		return
-	}
-	if elapsed := time.Since(lastTime); elapsed < s.requestDelay {
-		time.Sleep(s.requestDelay - elapsed)
-	}
-}
-
-func (s *Scraper) updateLastRequestTime() {
-	s.lastRequestTime.Store(time.Now())
 }
 
 func normalizeID(v string) string {

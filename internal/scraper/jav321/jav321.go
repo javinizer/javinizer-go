@@ -1,13 +1,13 @@
 package jav321
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
@@ -34,14 +35,13 @@ var (
 
 // Scraper implements the Jav321 scraper.
 type Scraper struct {
-	client          *resty.Client
-	enabled         bool
-	baseURL         string
-	requestDelay    time.Duration
-	proxyOverride   *config.ProxyConfig
-	downloadProxy   *config.ProxyConfig
-	lastRequestTime atomic.Value
-	settings        config.ScraperSettings // stores the full settings for Config() method
+	client        *resty.Client
+	enabled       bool
+	baseURL       string
+	proxyOverride *config.ProxyConfig
+	downloadProxy *config.ProxyConfig
+	rateLimiter   *ratelimit.Limiter
+	settings      config.ScraperSettings // stores the full settings for Config() method
 }
 
 // New creates a new Jav321 scraper.
@@ -85,12 +85,11 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		client:        client,
 		enabled:       settings.Enabled,
 		baseURL:       base,
-		requestDelay:  time.Duration(settings.RateLimit) * time.Millisecond,
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
+		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		settings:      settings,
 	}
-	s.lastRequestTime.Store(time.Time{})
 
 	if usingProxy {
 		logging.Infof("Jav321: Using proxy %s", httpclient.SanitizeProxyURL(proxyCfg.URL))
@@ -219,9 +218,10 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	}
 
 	searchURL := s.baseURL + "/search"
-	s.waitForRateLimit()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return "", err
+	}
 	resp, err := s.client.R().SetFormData(map[string]string{"sn": id}).Post(searchURL)
-	s.updateLastRequestTime()
 	if err != nil {
 		return "", fmt.Errorf("failed to search Jav321: %w", err)
 	}
@@ -609,8 +609,9 @@ func extractScreenshotURLs(doc *goquery.Document, base string) []string {
 }
 
 func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
-	s.waitForRateLimit()
-	defer s.updateLastRequestTime()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return "", 0, err
+	}
 
 	resp, err := s.client.R().Get(targetURL)
 	if err != nil {
@@ -624,27 +625,6 @@ func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
 		)
 	}
 	return html, resp.StatusCode(), nil
-}
-
-func (s *Scraper) waitForRateLimit() {
-	if s.requestDelay <= 0 {
-		return
-	}
-	lastReq := s.lastRequestTime.Load()
-	if lastReq == nil {
-		return
-	}
-	lastTime, ok := lastReq.(time.Time)
-	if !ok || lastTime.IsZero() {
-		return
-	}
-	if elapsed := time.Since(lastTime); elapsed < s.requestDelay {
-		time.Sleep(s.requestDelay - elapsed)
-	}
-}
-
-func (s *Scraper) updateLastRequestTime() {
-	s.lastRequestTime.Store(time.Now())
 }
 
 func normalizeID(v string) string {

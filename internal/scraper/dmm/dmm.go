@@ -1,6 +1,7 @@
 package dmm
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
@@ -63,6 +65,7 @@ type Scraper struct {
 	proxyProfile  *config.ProxyProfile // Store effective proxy profile for browser operations
 	proxyOverride *config.ProxyConfig
 	downloadProxy *config.ProxyConfig
+	rateLimiter   *ratelimit.Limiter
 	settings      config.ScraperSettings // stores the full settings for Config() method
 }
 
@@ -123,6 +126,7 @@ func New(settings config.ScraperSettings, globalConfig *config.ScrapersConfig, c
 		proxyProfile:  proxyProfile, // Store effective proxy profile for browser operations
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
+		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		settings:      settings,
 	}
 }
@@ -251,6 +255,11 @@ func (s *Scraper) ResolveContentID(id string) (string, error) {
 		searchURLFormatted := fmt.Sprintf(searchURL, query)
 		logging.Debugf("DMM: Resolving content-id using search query variation: %s", query)
 
+		// Rate limit before fetching
+		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+			return "", fmt.Errorf("DMM: rate limit wait failed: %w", err)
+		}
+
 		// Fetch the search page (cookies are set globally on the client)
 		resp, err := s.client.R().Get(searchURLFormatted)
 		if err != nil {
@@ -363,6 +372,12 @@ func (s *Scraper) GetURL(id string) (string, error) {
 		logging.Debugf("DMM: About to make HTTP GET request to: %s", searchURLFormatted)
 		logging.Debugf("DMM: HTTP client transport proxy setting: %v", s.client.GetClient().Transport != nil)
 
+		// Rate limit before fetching
+		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+			logging.Debugf("DMM: Rate limit wait failed for query '%s': %v", searchQuery, err)
+			continue
+		}
+
 		resp, err := s.client.R().Get(searchURLFormatted)
 		if err != nil || resp.StatusCode() != 200 {
 			logging.Debugf("DMM: Search failed for query '%s': status=%d, err=%v", searchQuery, resp.StatusCode(), err)
@@ -428,6 +443,12 @@ func (s *Scraper) GetURL(id string) (string, error) {
 		logging.Debugf("DMM: Best candidate has low priority (%d), trying direct URLs for %s", allCandidates[0].priority, baseID)
 
 		for _, directURL := range directURLs {
+			// Rate limit before fetching
+			if err := s.rateLimiter.Wait(context.Background()); err != nil {
+				logging.Debugf("DMM: Rate limit wait failed for direct URL: %v", err)
+				continue
+			}
+
 			// Quick GET request to check if URL exists (HEAD doesn't follow redirects reliably)
 			resp, err := s.client.R().
 				SetDoNotParseResponse(true). // Don't parse body, just check status
@@ -497,6 +518,11 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 			return nil, fmt.Errorf("failed to parse HTML from browser: %w", err)
 		}
 	} else {
+		// Rate limit before fetching
+		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+			return nil, fmt.Errorf("DMM: rate limit wait failed: %w", err)
+		}
+
 		// Use regular HTTP client (cookies are set globally on the client)
 		resp, err := s.client.R().Get(url)
 		if err != nil {
@@ -542,6 +568,11 @@ func (s *Scraper) ScrapeURL(url string) (*models.ScraperResult, error) {
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("failed to parse HTML from browser: %v", err))
 		}
 	} else {
+		// Rate limit before fetching
+		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("rate limit wait failed: %v", err))
+		}
+
 		resp, err := s.client.R().Get(url)
 		if err != nil {
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("failed to fetch URL: %v", err))
@@ -1366,6 +1397,12 @@ func (s *Scraper) tryActressThumbURLs(firstName, lastName string, dmmID int) str
 // Returns variants with different split points for lastname_firstname format
 func (s *Scraper) extractRomajiVariantsFromActressPage(dmmID int) []string {
 	url := fmt.Sprintf("https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=%d/", dmmID)
+
+	// Rate limit before fetching
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		logging.Debugf("DMM: Rate limit wait failed for actress page: %v", err)
+		return nil
+	}
 
 	resp, err := s.client.R().Get(url)
 	if err != nil || resp.StatusCode() != 200 {

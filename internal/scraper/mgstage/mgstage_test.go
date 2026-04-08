@@ -14,12 +14,13 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCanHandleURL(t *testing.T) {
-	s := &Scraper{}
+	s := &Scraper{rateLimiter: ratelimit.NewLimiter(0)}
 
 	tests := []struct {
 		name     string
@@ -60,7 +61,7 @@ func TestExtractIDFromURL_MGStage(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance_MGStage(t *testing.T) {
-	s := &Scraper{}
+	s := &Scraper{rateLimiter: ratelimit.NewLimiter(0)}
 	var _ models.Scraper = s
 	var _ models.URLHandler = s
 	var _ models.DirectURLScraper = s
@@ -221,10 +222,10 @@ func TestHTTPStatusError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := resty.New()
 			scraper := &Scraper{
-				client:       client,
-				enabled:      true,
-				usingProxy:   tt.usingProxy,
-				requestDelay: 0,
+				client:      client,
+				enabled:     true,
+				rateLimiter: ratelimit.NewLimiter(0),
+				usingProxy:  tt.usingProxy,
 			}
 
 			err := scraper.httpStatusError(tt.stage, tt.statusCode)
@@ -609,11 +610,10 @@ func TestGetURLErrorPaths(t *testing.T) {
 			client.SetTransport(rt)
 
 			scraper := &Scraper{
-				client:       client,
-				enabled:      true,
-				requestDelay: 0,
+				client:      client,
+				enabled:     true,
+				rateLimiter: ratelimit.NewLimiter(0),
 			}
-			scraper.lastRequestTime.Store(time.Time{})
 
 			url, err := scraper.GetURL("MIDE-123")
 
@@ -1210,8 +1210,7 @@ func TestIsEnabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scraper := &Scraper{
-				enabled:      tt.enabled,
-				requestDelay: 0,
+				enabled: tt.enabled,
 			}
 
 			result := scraper.IsEnabled()
@@ -1350,72 +1349,6 @@ func TestResolveSearchQuery(t *testing.T) {
 	}
 }
 
-// TestWaitForRateLimit tests rate limiting behavior
-func TestWaitForRateLimit(t *testing.T) {
-	tests := []struct {
-		name      string
-		delay     time.Duration
-		lastReq   time.Time
-		wantBlock bool
-	}{
-		{
-			name:      "no delay configured",
-			delay:     0,
-			lastReq:   time.Now().Add(-100 * time.Millisecond),
-			wantBlock: false,
-		},
-		{
-			name:      "zero time last request",
-			delay:     100 * time.Millisecond,
-			lastReq:   time.Time{},
-			wantBlock: false,
-		},
-		{
-			name:      "enough time elapsed",
-			delay:     100 * time.Millisecond,
-			lastReq:   time.Now().Add(-200 * time.Millisecond),
-			wantBlock: false,
-		},
-		{
-			name:      "need to wait",
-			delay:     100 * time.Millisecond,
-			lastReq:   time.Now().Add(-50 * time.Millisecond),
-			wantBlock: true,
-		},
-		{
-			name:      "exactly at delay boundary",
-			delay:     100 * time.Millisecond,
-			lastReq:   time.Now().Add(-100 * time.Millisecond),
-			wantBlock: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			scraper := &Scraper{
-				requestDelay: tt.delay,
-				enabled:      true,
-			}
-			scraper.lastRequestTime.Store(tt.lastReq)
-
-			start := time.Now()
-			scraper.waitForRateLimit()
-			elapsed := time.Since(start)
-
-			if tt.wantBlock {
-				assert.Greater(t, elapsed, tt.delay/2, "Should have waited")
-			} else {
-				// When delay is 0, we expect no meaningful wait (just minimal execution time)
-				if tt.delay == 0 {
-					assert.Less(t, elapsed, 10*time.Millisecond, "Should not have waited")
-				} else {
-					assert.Less(t, elapsed, tt.delay/4, "Should not have waited")
-				}
-			}
-		})
-	}
-}
-
 // TestSearchIntegration tests parseHTML integration with full product page
 func TestSearchIntegration(t *testing.T) {
 	if testing.Short() {
@@ -1509,11 +1442,10 @@ func TestSearch_ErrorPaths(t *testing.T) {
 			client.SetHeader("Cookie", "adc=1")
 
 			scraper := &Scraper{
-				client:       client,
-				enabled:      true,
-				requestDelay: 0,
+				client:      client,
+				enabled:     true,
+				rateLimiter: ratelimit.NewLimiter(0),
 			}
-			scraper.lastRequestTime.Store(time.Time{})
 
 			result, err := scraper.Search("TEST-000")
 

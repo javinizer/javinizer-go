@@ -1,13 +1,13 @@
 package fc2
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
@@ -36,14 +37,13 @@ var (
 
 // Scraper implements the FC2 scraper.
 type Scraper struct {
-	client          *resty.Client
-	enabled         bool
-	baseURL         string
-	requestDelay    time.Duration
-	proxyOverride   *config.ProxyConfig
-	downloadProxy   *config.ProxyConfig
-	lastRequestTime atomic.Value
-	settings        config.ScraperSettings // stores the full settings for Config() method
+	client        *resty.Client
+	enabled       bool
+	baseURL       string
+	proxyOverride *config.ProxyConfig
+	downloadProxy *config.ProxyConfig
+	rateLimiter   *ratelimit.Limiter
+	settings      config.ScraperSettings
 }
 
 // New creates a new FC2 scraper.
@@ -87,12 +87,11 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		client:        client,
 		enabled:       settings.Enabled,
 		baseURL:       base,
-		requestDelay:  time.Duration(settings.RateLimit) * time.Millisecond,
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
+		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		settings:      settings,
 	}
-	s.lastRequestTime.Store(time.Time{})
 
 	if usingProxy {
 		logging.Infof("FC2: Using proxy %s", httpclient.SanitizeProxyURL(proxyCfg.URL))
@@ -665,34 +664,15 @@ func (s *Scraper) buildArticleURL(articleID string) string {
 }
 
 func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
-	s.waitForRateLimit()
-	defer s.updateLastRequestTime()
+	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		return "", 0, err
+	}
 
 	resp, err := s.client.R().Get(targetURL)
 	if err != nil {
 		return "", 0, err
 	}
 	return resp.String(), resp.StatusCode(), nil
-}
-
-func (s *Scraper) waitForRateLimit() {
-	if s.requestDelay <= 0 {
-		return
-	}
-
-	last, _ := s.lastRequestTime.Load().(time.Time)
-	if last.IsZero() {
-		return
-	}
-
-	elapsed := time.Since(last)
-	if elapsed < s.requestDelay {
-		time.Sleep(s.requestDelay - elapsed)
-	}
-}
-
-func (s *Scraper) updateLastRequestTime() {
-	s.lastRequestTime.Store(time.Now())
 }
 
 func init() {
