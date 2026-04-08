@@ -153,7 +153,8 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 	if host == "" {
 		return nil, nil, false
 	}
-	if strings.HasSuffix(host, "javbus.com") || strings.HasSuffix(host, "javbus.org") {
+	if host == "javbus.com" || strings.HasSuffix(host, ".javbus.com") ||
+		host == "javbus.org" || strings.HasSuffix(host, ".javbus.org") {
 		return s.downloadProxy, s.proxyOverride, true
 	}
 	return nil, nil, false
@@ -166,7 +167,8 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	return strings.HasSuffix(host, "javbus.com") || strings.HasSuffix(host, "javbus.org")
+	return host == "javbus.com" || strings.HasSuffix(host, ".javbus.com") ||
+		host == "javbus.org" || strings.HasSuffix(host, ".javbus.org")
 }
 
 func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
@@ -869,7 +871,8 @@ func normalizeJavbusImageURL(raw string) string {
 	u.Fragment = ""
 
 	host := strings.ToLower(u.Hostname())
-	if strings.HasSuffix(host, "dmm.co.jp") || strings.HasSuffix(host, "dmm.com") {
+	if host == "dmm.co.jp" || strings.HasSuffix(host, ".dmm.co.jp") ||
+		host == "dmm.com" || strings.HasSuffix(host, ".dmm.com") {
 		segments := strings.Split(u.Path, "/")
 		for i, seg := range segments {
 			if seg == "" {

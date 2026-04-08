@@ -646,7 +646,7 @@ func (s *Scraper) applyLanguage(rawURL string) string {
 	}
 
 	hostname := strings.ToLower(u.Hostname())
-	if !strings.Contains(hostname, "caribbeancom.com") {
+	if hostname != "caribbeancom.com" && !strings.HasSuffix(hostname, ".caribbeancom.com") {
 		return rawURL
 	}
 

@@ -269,7 +269,8 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 	if host == "" {
 		return nil, nil, false
 	}
-	if strings.HasSuffix(host, "jdbstatic.com") || strings.HasSuffix(host, "javdb.com") {
+	if host == "jdbstatic.com" || strings.HasSuffix(host, ".jdbstatic.com") ||
+		host == "javdb.com" || strings.HasSuffix(host, ".javdb.com") {
 		return s.downloadProxy, s.proxyOverride, true
 	}
 	return nil, nil, false

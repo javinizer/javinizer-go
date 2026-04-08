@@ -147,7 +147,8 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	return strings.HasSuffix(host, "r18.dev") || strings.HasSuffix(host, "r18.com")
+	return host == "r18.dev" || strings.HasSuffix(host, ".r18.dev") ||
+		host == "r18.com" || strings.HasSuffix(host, ".r18.com")
 }
 
 // ExtractIDFromURL extracts the movie ID from an R18.dev URL
@@ -243,10 +244,13 @@ func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
 // ResolveDownloadProxyForHost declares R18.dev-owned media hosts for downloader proxy routing.
 func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
-	if host == "" || !strings.Contains(host, "r18.dev") {
+	if host == "" {
 		return nil, nil, false
 	}
-	return s.downloadProxy, s.proxyOverride, true
+	if host == "r18.dev" || strings.HasSuffix(host, ".r18.dev") {
+		return s.downloadProxy, s.proxyOverride, true
+	}
+	return nil, nil, false
 }
 
 // GetURL constructs the URL for a given movie ID
