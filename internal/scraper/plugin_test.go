@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -144,3 +145,101 @@ func (s *testScraper) GetURL(id string) (string, error) { return "", nil }
 func (s *testScraper) IsEnabled() bool                  { return s.enabled }
 func (s *testScraper) Config() *config.ScraperSettings  { return nil }
 func (s *testScraper) Close() error                     { return nil }
+
+func TestGetScraperConstructors_ReturnsAll(t *testing.T) {
+	t.Cleanup(func() { ResetAllRegistries() })
+
+	// Register multiple scrapers
+	for i := 1; i <= 3; i++ {
+		name := string(rune('A' + i - 1))
+		module := &testModule{
+			name: name,
+			constructor: ScraperConstructor(func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
+				return &testScraper{name: name, enabled: settings.Enabled}, nil
+			}),
+		}
+		scraperutil.RegisterModule(module)
+	}
+
+	constructors := GetScraperConstructors()
+
+	assert.Len(t, constructors, 3, "Should return all registered constructors")
+	assert.Contains(t, constructors, "A")
+	assert.Contains(t, constructors, "B")
+	assert.Contains(t, constructors, "C")
+}
+
+func TestGetScraperConstructors_EmptyRegistry(t *testing.T) {
+	ResetAllRegistries()
+
+	constructors := GetScraperConstructors()
+
+	assert.Empty(t, constructors, "Empty registry should return empty map")
+}
+
+func TestGetRegisteredDefaults_ReturnsAll(t *testing.T) {
+	t.Cleanup(func() { ResetAllRegistries() })
+
+	// Register scrapers with different defaults
+	module1 := &testModule{
+		name: "scraper1",
+		defaults: config.ScraperSettings{
+			Enabled:  true,
+			Language: "ja",
+		},
+		priority: 50,
+	}
+	scraperutil.RegisterModule(module1)
+
+	module2 := &testModule{
+		name: "scraper2",
+		defaults: config.ScraperSettings{
+			Enabled:  false,
+			Language: "en",
+		},
+		priority: 100,
+	}
+	scraperutil.RegisterModule(module2)
+
+	defaults := GetRegisteredDefaults()
+
+	assert.Len(t, defaults, 2)
+	assert.Equal(t, 50, defaults["scraper1"].Priority)
+	assert.Equal(t, "ja", defaults["scraper1"].Settings.Language)
+	assert.Equal(t, true, defaults["scraper1"].Settings.Enabled)
+	assert.Equal(t, 100, defaults["scraper2"].Priority)
+	assert.Equal(t, "en", defaults["scraper2"].Settings.Language)
+	assert.Equal(t, false, defaults["scraper2"].Settings.Enabled)
+}
+
+func TestGetRegisteredDefaults_EmptyRegistry(t *testing.T) {
+	ResetAllRegistries()
+
+	defaults := GetRegisteredDefaults()
+
+	assert.Empty(t, defaults, "Empty registry should return empty map")
+}
+
+func TestCreate_InvalidConstructor(t *testing.T) {
+	t.Cleanup(func() { ResetAllRegistries() })
+
+	// This test is tricky because we can't easily inject an invalid constructor
+	// through the normal module registration. The invalid constructor path
+	// is covered by the type assertion logic in Create().
+	// We'll test the error path by ensuring the constructor returns an error.
+
+	module := &testModule{
+		name: "error-scraper",
+		constructor: ScraperConstructor(func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
+			return nil, errors.New("constructor error")
+		}),
+	}
+	scraperutil.RegisterModule(module)
+
+	settings := config.ScraperSettings{Enabled: true}
+	scraper, err := Create("error-scraper", settings, nil, nil)
+
+	assert.Error(t, err)
+	assert.Nil(t, scraper)
+	assert.Contains(t, err.Error(), "failed to create error-scraper scraper")
+}

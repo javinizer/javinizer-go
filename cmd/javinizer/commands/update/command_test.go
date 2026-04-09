@@ -122,10 +122,6 @@ func TestFlags_MutuallyExclusiveOptions(t *testing.T) {
 
 // TestRun_Integration_NoVideoFiles tests graceful handling when no video files exist
 func TestRun_Integration_NoVideoFiles(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
-
 	tmpDir := t.TempDir()
 	configPath, _ := testutil.CreateTestConfig(t, nil)
 
@@ -143,10 +139,6 @@ func TestRun_Integration_NoVideoFiles(t *testing.T) {
 
 // TestRun_Integration_InvalidPath tests error handling for invalid paths
 func TestRun_Integration_InvalidPath(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
-
 	configPath, _ := testutil.CreateTestConfig(t, nil)
 
 	cmd := update.NewCommand()
@@ -158,10 +150,6 @@ func TestRun_Integration_InvalidPath(t *testing.T) {
 
 // TestRun_Integration_DryRunMode tests that dry-run mode doesn't modify files
 func TestRun_Integration_DryRunMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
-
 	tmpDir := t.TempDir()
 	configPath, _ := testutil.CreateTestConfig(t, nil)
 
@@ -186,10 +174,6 @@ func TestRun_Integration_DryRunMode(t *testing.T) {
 
 // TestRun_Integration_PresetApplication tests preset flag application
 func TestRun_Integration_PresetApplication(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
-
 	tests := []struct {
 		name   string
 		preset string
@@ -352,10 +336,6 @@ func TestConstructNFOPath_EmptyIDFallback(t *testing.T) {
 
 // TestRun_Integration_WithExistingNFO tests NFO merge with existing file
 func TestRun_Integration_WithExistingNFO(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
-
 	tmpDir := t.TempDir()
 	configPath, _ := testutil.CreateTestConfig(t, nil)
 
@@ -393,10 +373,6 @@ func TestRun_Integration_WithExistingNFO(t *testing.T) {
 
 // TestRun_Integration_InvalidConfig tests error handling for invalid config
 func TestRun_Integration_InvalidConfig(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
-
 	tmpDir := t.TempDir()
 
 	// Use a non-existent config file
@@ -412,10 +388,6 @@ func TestRun_Integration_InvalidConfig(t *testing.T) {
 
 // TestRun_Integration_MergeStrategies tests different merge strategies
 func TestRun_Integration_MergeStrategies(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
-
 	strategies := []struct {
 		name           string
 		scalarStrategy string
@@ -460,10 +432,6 @@ func TestRun_Integration_MergeStrategies(t *testing.T) {
 
 // TestRun_Integration_DownloadMediaEnabled tests media download path
 func TestRun_Integration_DownloadMediaEnabled(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
-
 	tmpDir := t.TempDir()
 	configPath, _ := testutil.CreateTestConfig(t, nil)
 

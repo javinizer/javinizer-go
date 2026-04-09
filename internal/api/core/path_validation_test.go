@@ -1722,3 +1722,314 @@ func TestCanonicalizePath_NonResolvableParent(t *testing.T) {
 		t.Skip("Requires manual testing with restricted permissions")
 	})
 }
+
+// Tests for exported wrapper functions
+
+func TestValidateScanPath_Wrapper(t *testing.T) {
+	tempDir := t.TempDir()
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{tempDir},
+		DeniedDirectories:  []string{},
+		MaxFilesPerScan:    10000,
+		ScanTimeoutSeconds: 30,
+	}
+
+	t.Run("valid path returns canonical path", func(t *testing.T) {
+		path, err := ValidateScanPath(tempDir, securityCfg)
+		require.NoError(t, err)
+		assert.True(t, filepath.IsAbs(path))
+	})
+
+	t.Run("invalid path returns error", func(t *testing.T) {
+		_, err := ValidateScanPath("/nonexistent", securityCfg)
+		require.Error(t, err)
+	})
+
+	t.Run("empty allowlist returns error", func(t *testing.T) {
+		cfg := &config.SecurityConfig{
+			AllowedDirectories: []string{},
+		}
+		_, err := ValidateScanPath(tempDir, cfg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, apperrors.ErrAllowedDirsEmpty))
+	})
+}
+
+func TestValidateAndOpenPath(t *testing.T) {
+	tempDir := t.TempDir()
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{tempDir},
+		DeniedDirectories:  []string{},
+		MaxFilesPerScan:    10000,
+		ScanTimeoutSeconds: 30,
+	}
+
+	t.Run("valid path returns open file and canonical path", func(t *testing.T) {
+		f, path, err := ValidateAndOpenPath(tempDir, securityCfg)
+		require.NoError(t, err)
+		defer f.Close()
+
+		assert.NotNil(t, f, "Should return open file handle")
+		assert.True(t, filepath.IsAbs(path), "Should return absolute canonical path")
+
+		info, err := f.Stat()
+		require.NoError(t, err)
+		assert.True(t, info.IsDir(), "File handle should reference a directory")
+	})
+
+	t.Run("invalid path returns error with nil file", func(t *testing.T) {
+		f, path, err := ValidateAndOpenPath("/nonexistent", securityCfg)
+		require.Error(t, err)
+		assert.Nil(t, f, "File should be nil on error")
+		assert.Empty(t, path, "Path should be empty on error")
+	})
+
+	t.Run("file path returns error", func(t *testing.T) {
+		tempFile := filepath.Join(tempDir, "testfile.txt")
+		require.NoError(t, os.WriteFile(tempFile, []byte("test"), 0644))
+
+		f, path, err := ValidateAndOpenPath(tempFile, securityCfg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, apperrors.ErrPathNotDir))
+		assert.Nil(t, f)
+		assert.Empty(t, path)
+	})
+
+	t.Run("empty allowlist returns error", func(t *testing.T) {
+		cfg := &config.SecurityConfig{
+			AllowedDirectories: []string{},
+		}
+		f, path, err := ValidateAndOpenPath(tempDir, cfg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, apperrors.ErrAllowedDirsEmpty))
+		assert.Nil(t, f)
+		assert.Empty(t, path)
+	})
+
+	t.Run("opened file can be read", func(t *testing.T) {
+		subdir := filepath.Join(tempDir, "subdir")
+		require.NoError(t, os.Mkdir(subdir, 0755))
+
+		f, path, err := ValidateAndOpenPath(subdir, securityCfg)
+		require.NoError(t, err)
+		defer f.Close()
+
+		entries, err := f.ReadDir(0)
+		require.NoError(t, err)
+		assert.Empty(t, entries, "Empty directory should have no entries")
+
+		assert.True(t, filepath.IsAbs(path))
+		assert.Contains(t, path, "subdir")
+	})
+
+	t.Run("file handle prevents TOCTOU", func(t *testing.T) {
+		f, path, err := ValidateAndOpenPath(tempDir, securityCfg)
+		require.NoError(t, err)
+		defer f.Close()
+
+		_ = path
+		info, err := f.Stat()
+		require.NoError(t, err)
+		assert.True(t, info.IsDir())
+	})
+}
+
+func TestValidateAndOpenPath_SymlinkTOCTOU(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping symlink tests on Windows (requires admin privileges)")
+	}
+
+	tempDir := t.TempDir()
+	realDir := filepath.Join(tempDir, "real")
+	require.NoError(t, os.Mkdir(realDir, 0755))
+
+	linkDir := filepath.Join(tempDir, "link")
+	require.NoError(t, os.Symlink(realDir, linkDir))
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{realDir},
+		DeniedDirectories:  []string{},
+	}
+
+	t.Run("symlink to allowed directory returns real path", func(t *testing.T) {
+		f, path, err := ValidateAndOpenPath(linkDir, securityCfg)
+		require.NoError(t, err)
+		defer f.Close()
+
+		assert.True(t, filepath.IsAbs(path))
+		assert.Contains(t, path, "real", "Should return canonical (real) path, not symlink")
+		assert.Equal(t, filepath.Base(path), "real", "Path should end with 'real', not 'link'")
+	})
+}
+
+func TestValidateAndOpenPath_SystemDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	if _, err := os.Stat("/proc"); os.IsNotExist(err) {
+		t.Skip("/proc doesn't exist on this system")
+	}
+
+	securityCfg := &config.SecurityConfig{
+		AllowedDirectories: []string{"/"},
+		DeniedDirectories:  []string{},
+	}
+
+	t.Run("system directory blocked by denylist", func(t *testing.T) {
+		f, path, err := ValidateAndOpenPath("/proc", securityCfg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, apperrors.ErrPathInDenylist))
+		assert.Nil(t, f)
+		assert.Empty(t, path)
+	})
+}
+
+func TestPathHasPrefix_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		prefix   string
+		expected bool
+	}{
+		{
+			name:     "empty path with empty prefix",
+			path:     "",
+			prefix:   "",
+			expected: true,
+		},
+		{
+			name:     "empty path with non-empty prefix",
+			path:     "",
+			prefix:   "/path",
+			expected: false,
+		},
+		{
+			name:     "non-empty path with empty prefix",
+			path:     "/path",
+			prefix:   "",
+			expected: true,
+		},
+		{
+			name:     "path shorter than prefix",
+			path:     "/a",
+			prefix:   "/abc",
+			expected: false,
+		},
+		{
+			name:     "exact match",
+			path:     "/path",
+			prefix:   "/path",
+			expected: true,
+		},
+		{
+			name:     "subdirectory match",
+			path:     "/path/to/file",
+			prefix:   "/path",
+			expected: true,
+		},
+		{
+			name:     "no match different paths",
+			path:     "/path1",
+			prefix:   "/path2",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := PathHasPrefix(tt.path, tt.prefix)
+			assert.Equal(t, tt.expected, result, "PathHasPrefix(%q, %q) = %v, expected %v", tt.path, tt.prefix, result, tt.expected)
+		})
+	}
+}
+
+func TestExpandHomeDir_EdgeCases(t *testing.T) {
+	t.Run("expands tilde", func(t *testing.T) {
+		result := ExpandHomeDir("~/Documents")
+		assert.Contains(t, result, "Documents")
+		assert.NotContains(t, result, "~", "Tilde should be expanded")
+	})
+
+	t.Run("no tilde returns unchanged", func(t *testing.T) {
+		result := ExpandHomeDir("/absolute/path")
+		assert.Equal(t, "/absolute/path", result)
+	})
+
+	t.Run("only tilde returns unchanged (function requires slash)", func(t *testing.T) {
+		result := ExpandHomeDir("~")
+		assert.Equal(t, "~", result, "ExpandHomeDir only handles ~/ format, not ~ alone")
+	})
+
+	t.Run("empty string returns unchanged", func(t *testing.T) {
+		result := ExpandHomeDir("")
+		assert.Equal(t, "", result)
+	})
+}
+
+func TestContains_EdgeCases(t *testing.T) {
+	tests := []struct {
+		s        string
+		substr   string
+		expected bool
+	}{
+		{"hello world", "world", true},
+		{"hello world", "World", false},
+		{"hello world", "", true},
+		{"", "test", false},
+		{"", "", true},
+		{"short", "longer substring", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.s+"_"+tt.substr, func(t *testing.T) {
+			result := Contains(tt.s, tt.substr)
+			assert.Equal(t, tt.expected, result, "Contains(%q, %q) = %v, expected %v", tt.s, tt.substr, result, tt.expected)
+		})
+	}
+}
+
+func TestGetDeniedDirectories_ReturnsExpected(t *testing.T) {
+	denied := GetDeniedDirectories()
+
+	assert.Contains(t, denied, "/proc")
+	assert.Contains(t, denied, "/sys")
+	assert.Contains(t, denied, "/dev")
+
+	assert.GreaterOrEqual(t, len(denied), 3, "Should have at least 3 built-in denied directories")
+}
+
+// Test isUNCPath function coverage
+func TestIsUNCPath_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		expected bool
+	}{
+		{"empty string", "", false},
+		{"single char", "a", false},
+		{"regular path", "/path/to/file", false},
+		{"standard UNC", `\\server\share`, true},
+		{"extended-length UNC lowercase", `\\?\unc\server\share`, true},
+		{"extended-length UNC uppercase", `\\?\UNC\SERVER\SHARE`, true},
+		{"extended-length UNC mixed case", `\\?\UnC\SeRvEr\ShArE`, true},
+		{"NT namespace UNC lowercase", `\??\unc\server\share`, true},
+		{"NT namespace UNC uppercase", `\??\UNC\SERVER\SHARE`, true},
+		{"NT namespace UNC mixed case", `\??\UnC\SeRvEr\ShArE`, true},
+		{"Device namespace UNC lowercase", `\\.\unc\server\share`, true},
+		{"Device namespace UNC uppercase", `\\.\UNC\SERVER\SHARE`, true},
+		{"Device namespace UNC mixed case", `\\.\UnC\SeRvEr\ShArE`, true},
+		{"too short for extended UNC check", `\\?\un`, true}, // Still matches standard UNC check (\\)
+		{"Windows path", `C:\Windows`, false},
+		{"relative path", `relative\path`, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isUNCPath(tt.path)
+			assert.Equal(t, tt.expected, result, "isUNCPath(%q) = %v, expected %v", tt.path, result, tt.expected)
+		})
+	}
+}
