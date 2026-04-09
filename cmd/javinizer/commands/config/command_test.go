@@ -54,8 +54,7 @@ func TestMigrateCommand_Structure(t *testing.T) {
 func TestMigrateCommand_CurrentVersionNoOp(t *testing.T) {
 	configPath, _ := testutil.CreateTestConfig(t, nil)
 
-	os.Setenv("JAVINIZER_CONFIG", configPath)
-	defer os.Unsetenv("JAVINIZER_CONFIG")
+	t.Setenv("JAVINIZER_CONFIG", configPath)
 
 	rootCmd := &cobra.Command{Use: "root"}
 	configCmd := configcmd.NewCommand()
@@ -75,8 +74,7 @@ func TestMigrateCommand_DryRun(t *testing.T) {
 		cfg.ConfigVersion = 1
 	})
 
-	os.Setenv("JAVINIZER_CONFIG", configPath)
-	defer os.Unsetenv("JAVINIZER_CONFIG")
+	t.Setenv("JAVINIZER_CONFIG", configPath)
 
 	rootCmd := &cobra.Command{Use: "root"}
 	configCmd := configcmd.NewCommand()
@@ -95,9 +93,23 @@ func TestMigrateCommand_DryRun(t *testing.T) {
 	assert.Contains(t, stdout, "WARNING")
 }
 
+func TestMigrateCommand_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	// TODO: This test requires refactoring the migrate command to support:
+	// 1. A --force flag to skip confirmation prompt, OR
+	// 2. An injected io.Reader for stdin mocking
+	// The migration logic (MigrateToCurrent + Save) at command.go:95-109
+	// remains untested because the confirmation prompt blocks CI execution.
+	//
+	// For now, the DryRun test covers the migration logic verification
+	// without the actual write, and the success path is manually tested.
+	t.Skip("migration command requires refactoring for stdin mocking")
+}
+
 func TestMigrateCommand_ConfigNotFound(t *testing.T) {
-	os.Setenv("JAVINIZER_CONFIG", "/nonexistent/path/config.yaml")
-	defer os.Unsetenv("JAVINIZER_CONFIG")
+	t.Setenv("JAVINIZER_CONFIG", "/nonexistent/path/config.yaml")
 
 	rootCmd := &cobra.Command{Use: "root"}
 	configCmd := configcmd.NewCommand()
@@ -115,8 +127,7 @@ func TestMigrateCommand_InvalidConfig(t *testing.T) {
 	err := os.WriteFile(invalidConfigPath, []byte("invalid: yaml: content: ["), 0644)
 	require.NoError(t, err)
 
-	os.Setenv("JAVINIZER_CONFIG", invalidConfigPath)
-	defer os.Unsetenv("JAVINIZER_CONFIG")
+	t.Setenv("JAVINIZER_CONFIG", invalidConfigPath)
 
 	rootCmd := &cobra.Command{Use: "root"}
 	configCmd := configcmd.NewCommand()
@@ -142,7 +153,7 @@ func TestMigrateCommand_FlagDefaults(t *testing.T) {
 }
 
 func TestMigrateCommand_DefaultConfigPath(t *testing.T) {
-	os.Unsetenv("JAVINIZER_CONFIG")
+	t.Setenv("JAVINIZER_CONFIG", "")
 
 	rootCmd := &cobra.Command{Use: "root"}
 	configCmd := configcmd.NewCommand()

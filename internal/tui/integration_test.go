@@ -17,6 +17,9 @@ import (
 // TestTUI_FileBrowserNavigation tests keyboard navigation in the file browser.
 // Verifies j/k key presses update cursor correctly and respect boundaries.
 func TestTUI_FileBrowserNavigation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	// Setup: create temp directory with 5 test video files
 	tmpDir := t.TempDir()
 	createTestVideos(t, tmpDir, 5)
@@ -55,6 +58,9 @@ func TestTUI_FileBrowserNavigation(t *testing.T) {
 // TestTUI_ViewSwitching tests view transitions and state preservation.
 // Verifies tab key cycles through views and data is preserved.
 func TestTUI_ViewSwitching(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	// Setup: initialize model with test config
 	_, cfg := testutil.CreateTestConfig(t, nil)
 	model := New(cfg)
@@ -94,6 +100,9 @@ func TestTUI_ViewSwitching(t *testing.T) {
 // TestTUI_ProgressTracking tests progress message handling and task state updates.
 // Verifies progress messages update task state correctly via handlers integration.
 func TestTUI_ProgressTracking(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	// Setup: initialize model
 	_, cfg := testutil.CreateTestConfig(t, nil)
 	model := New(cfg)
@@ -129,6 +138,9 @@ func TestTUI_ProgressTracking(t *testing.T) {
 // TestTUI_TaskCompletionFlow tests task completion and state transitions.
 // Verifies ProgressMsg with TaskStatusSuccess marks task as complete correctly.
 func TestTUI_TaskCompletionFlow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	// Setup: initialize model with task
 	_, cfg := testutil.CreateTestConfig(t, nil)
 	model := New(cfg)

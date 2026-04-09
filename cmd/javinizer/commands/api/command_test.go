@@ -319,6 +319,9 @@ func TestNewCommand_FlagDefaults(t *testing.T) {
 
 // TestRun_HostFlagOverride verifies --host flag overrides config
 func TestRun_HostFlagOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	configPath, _ := setupTagTestDB(t)
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
@@ -341,6 +344,9 @@ func TestRun_HostFlagOverride(t *testing.T) {
 
 // TestRun_PortFlagOverride verifies --port flag overrides config
 func TestRun_PortFlagOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	configPath, _ := setupTagTestDB(t)
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
@@ -363,6 +369,9 @@ func TestRun_PortFlagOverride(t *testing.T) {
 
 // TestRun_BothFlagsOverride verifies both host and port can be overridden
 func TestRun_BothFlagsOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	configPath, _ := setupTagTestDB(t)
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
@@ -386,6 +395,9 @@ func TestRun_BothFlagsOverride(t *testing.T) {
 
 // TestRun_ConfigLoading verifies config is loaded correctly
 func TestRun_ConfigLoading(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
@@ -401,6 +413,9 @@ func TestRun_ConfigLoading(t *testing.T) {
 
 // TestRun_DatabaseInit verifies database initialization and migrations
 func TestRun_DatabaseInit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
@@ -420,6 +435,9 @@ func TestRun_DatabaseInit(t *testing.T) {
 
 // TestRun_ScraperRegistry verifies scraper initialization
 func TestRun_ScraperRegistry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
@@ -436,6 +454,9 @@ func TestRun_ScraperRegistry(t *testing.T) {
 
 // TestRun_Repositories verifies repository initialization
 func TestRun_Repositories(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
@@ -456,6 +477,9 @@ func TestRun_Repositories(t *testing.T) {
 
 // TestRun_Aggregator verifies aggregator initialization
 func TestRun_Aggregator(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
@@ -470,6 +494,9 @@ func TestRun_Aggregator(t *testing.T) {
 
 // TestRun_JobQueue verifies job queue initialization
 func TestRun_JobQueue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
@@ -489,6 +516,9 @@ func TestRun_JobQueue(t *testing.T) {
 // that ensures backend-enforced test-before-save for proxy configuration.
 // See: Proxy System Prevention Plan - Task 2
 func TestRun_TokenStoreInitialized(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()

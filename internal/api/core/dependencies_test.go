@@ -89,11 +89,22 @@ func TestServerDependencies_Shutdown(t *testing.T) {
 	t.Run("calls runtime shutdown", func(t *testing.T) {
 		rt := NewRuntimeState()
 		_ = rt.ResetWebSocketHub()
+		require.NotNil(t, rt.wsHubShutdown, "Shutdown channel should be set")
 
 		deps := &ServerDependencies{Runtime: rt}
-		deps.Shutdown()
 
-		time.Sleep(100 * time.Millisecond)
+		shutdownDone := make(chan struct{})
+		go func() {
+			deps.Shutdown()
+			close(shutdownDone)
+		}()
+
+		select {
+		case <-shutdownDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Shutdown did not complete within 2 seconds")
+		}
+
 		assert.Nil(t, rt.wsHubCancel, "Runtime shutdown should clear cancel function")
 	})
 }

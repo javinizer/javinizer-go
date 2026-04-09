@@ -264,6 +264,9 @@ func TestRegisterAndUnregister_ChannelOperations(t *testing.T) {
 
 // TestHub_Run tests the main hub event loop
 func TestHub_Run(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	hub := NewHub()
 
 	// Start the hub in a goroutine
@@ -345,6 +348,9 @@ func TestHub_Run(t *testing.T) {
 
 // TestClient_WritePump tests the client write pump
 func TestClient_WritePump(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	t.Run("write message successfully", func(t *testing.T) {
 		// Create a pipe to simulate a connection
 		serverConn, clientConn, httpServer := createTestConnections(t)
@@ -409,6 +415,9 @@ func TestClient_WritePump(t *testing.T) {
 
 // TestClient_ReadPump tests the client read pump
 func TestClient_ReadPump(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	t.Run("read messages and unregister on close", func(t *testing.T) {
 		hub := NewHub()
 		ctx, cancel := context.WithCancel(context.Background())

@@ -20,14 +20,29 @@ func TestNewRuntimeState(t *testing.T) {
 func TestDefaultRuntimeState(t *testing.T) {
 	t.Run("returns nil when not set", func(t *testing.T) {
 		defaultRuntimeMu.Lock()
+		original := defaultRuntime
 		defaultRuntime = nil
 		defaultRuntimeMu.Unlock()
+		t.Cleanup(func() {
+			defaultRuntimeMu.Lock()
+			defaultRuntime = original
+			defaultRuntimeMu.Unlock()
+		})
 
 		rt := DefaultRuntimeState()
 		assert.Nil(t, rt, "DefaultRuntimeState should return nil when not initialized")
 	})
 
 	t.Run("returns runtime when set", func(t *testing.T) {
+		defaultRuntimeMu.Lock()
+		original := defaultRuntime
+		defaultRuntimeMu.Unlock()
+		t.Cleanup(func() {
+			defaultRuntimeMu.Lock()
+			defaultRuntime = original
+			defaultRuntimeMu.Unlock()
+		})
+
 		rt := NewRuntimeState()
 		SetDefaultRuntimeState(rt)
 
@@ -37,6 +52,15 @@ func TestDefaultRuntimeState(t *testing.T) {
 }
 
 func TestSetDefaultRuntimeState(t *testing.T) {
+	defaultRuntimeMu.Lock()
+	original := defaultRuntime
+	defaultRuntimeMu.Unlock()
+	t.Cleanup(func() {
+		defaultRuntimeMu.Lock()
+		defaultRuntime = original
+		defaultRuntimeMu.Unlock()
+	})
+
 	rt1 := NewRuntimeState()
 	SetDefaultRuntimeState(rt1)
 	assert.Equal(t, rt1, DefaultRuntimeState(), "First SetDefaultRuntimeState should work")
@@ -58,10 +82,20 @@ func TestRuntimeState_Shutdown(t *testing.T) {
 		rt := NewRuntimeState()
 		hub := rt.ResetWebSocketHub()
 		require.NotNil(t, hub, "ResetWebSocketHub should return a hub")
+		require.NotNil(t, rt.wsHubShutdown, "Shutdown channel should be set")
 
-		rt.Shutdown()
+		shutdownDone := make(chan struct{})
+		go func() {
+			rt.Shutdown()
+			close(shutdownDone)
+		}()
 
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-shutdownDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Shutdown did not complete within 2 seconds")
+		}
+
 		assert.Nil(t, rt.wsHubCancel, "WebSocket hub cancel should be cleared after shutdown")
 		assert.Nil(t, rt.wsHubShutdown, "WebSocket hub shutdown channel should be cleared")
 	})
@@ -86,8 +120,6 @@ func TestRuntimeState_ResetWebSocketHub(t *testing.T) {
 		hub2 := rt.ResetWebSocketHub()
 		assert.NotNil(t, hub2, "Second ResetWebSocketHub should return a hub")
 		assert.NotEqual(t, hub1, hub2, "Each ResetWebSocketHub should create a new hub")
-
-		time.Sleep(100 * time.Millisecond)
 	})
 }
 
