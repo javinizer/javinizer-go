@@ -33,6 +33,14 @@ var (
 	dmmSampleFilenamePattern = regexp.MustCompile(`(?i)\.jpe?g$`)
 	// URL extraction pattern
 	libreDMPathRegex = regexp.MustCompile(`/movies/([^/?&]+)`)
+	// ANSI escape sequence pattern for stripping terminal color codes
+	ansiEscapeRegex = regexp.MustCompile("\x1b\\[[0-9;]*[a-zA-Z]")
+	// Pattern to strip bare ESC character (0x1b) that may be injected by proxies
+	// This handles cases where ESC appears without the bracket `[`
+	escCharRegex = regexp.MustCompile("\x1b")
+	// Pattern to strip other control characters (0x00-0x1F) except tab, newline, carriage return
+	// These can be injected by broken proxies or terminal wrappers
+	controlCharRegex = regexp.MustCompile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
 )
 
 type actressPayload struct {
@@ -425,7 +433,10 @@ func (s *Scraper) fetchMovieJSON(targetURL string) (*moviePayload, string, int, 
 	payload := &moviePayload{}
 	body := resp.Body()
 	if len(body) > 0 {
-		if err := json.Unmarshal(body, payload); err != nil && resp.StatusCode() == 200 {
+		// Strip ANSI escape codes and control characters before JSON parsing.
+		// These can appear in responses from proxies or terminal wrappers.
+		cleanBody := stripANSICodes(string(body))
+		if err := json.Unmarshal([]byte(cleanBody), payload); err != nil && resp.StatusCode() == 200 {
 			return nil, "", resp.StatusCode(), fmt.Errorf("failed to parse JSON response: %w", err)
 		}
 	}
@@ -839,6 +850,34 @@ func cleanString(v string) string {
 	v = strings.ReplaceAll(v, "\u00a0", " ")
 	v = strings.Join(strings.Fields(v), " ")
 	return v
+}
+
+// stripANSICodes removes ANSI escape sequences and control characters from a string.
+// These can appear in responses from proxies or terminal wrappers.
+// Handles ANSI sequences, bare ESC characters, and other control characters.
+// Also attempts to extract valid JSON from garbage data.
+func stripANSICodes(s string) string {
+	// First strip standard ANSI sequences
+	s = ansiEscapeRegex.ReplaceAllString(s, "")
+	// Then strip any remaining bare ESC characters
+	s = escCharRegex.ReplaceAllString(s, "")
+	// Finally strip other control characters (except tab, newline, CR)
+	s = controlCharRegex.ReplaceAllString(s, "")
+
+	// If the string doesn't start with valid JSON characters,
+	// try to find the start of the JSON content
+	s = strings.TrimSpace(s)
+	if len(s) > 0 && s[0] != '{' && s[0] != '[' {
+		// Find the first '{' or '[' which should be the start of JSON
+		for i, c := range s {
+			if c == '{' || c == '[' {
+				s = s[i:]
+				break
+			}
+		}
+	}
+
+	return s
 }
 
 func isHTTPURL(v string) bool {
