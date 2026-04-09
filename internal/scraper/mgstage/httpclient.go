@@ -1,8 +1,6 @@
 package mgstage
 
 import (
-	"time"
-
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
@@ -11,35 +9,14 @@ import (
 // NewHTTPClient creates a new HTTP client for the MGStage scraper.
 // HTTP-01: Per-scraper HTTP client ownership.
 func NewHTTPClient(cfg *config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) (*resty.Client, error) {
-	// Handle nil globalProxy to avoid dereference panic
-	globalProxyVal := config.ProxyConfig{}
-	if globalProxy != nil {
-		globalProxyVal = *globalProxy
-	}
-	proxyCfg := config.ResolveScraperProxy(globalProxyVal, cfg.Proxy)
-
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if timeout == 0 {
-		timeout = 30 * time.Second
-	}
-	retryCount := cfg.RetryCount
-	if retryCount == 0 {
-		retryCount = 3
-	}
-
-	client, err := httpclient.NewRestyClient(proxyCfg, timeout, retryCount)
-	if err != nil {
-		return nil, err
-	}
-
-	userAgent := config.ResolveScraperUserAgent(cfg.UserAgent)
-	client.SetHeader("User-Agent", userAgent)
-	client.SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	client.SetHeader("Accept-Language", "ja,en-US;q=0.7,en;q=0.3")
-	client.SetHeader("Accept-Encoding", "gzip, deflate, br")
-	client.SetHeader("Connection", "keep-alive")
-	client.SetHeader("Upgrade-Insecure-Requests", "1")
-	client.SetHeader("Cookie", "adc=1")
-
-	return client, nil
+	return httpclient.FromScraperSettings(cfg, globalProxy, globalFlareSolverr,
+		httpclient.WithHeaders(httpclient.CombineHeaders(
+			httpclient.StandardHTMLHeaders(),
+			httpclient.UserAgentHeader(cfg.UserAgent),
+			map[string]string{"Accept-Language": "ja,en-US;q=0.7,en;q=0.3"},
+		)),
+		httpclient.WithCookies(map[string]string{
+			"adc": "1",
+		}),
+	).BuildClient()
 }

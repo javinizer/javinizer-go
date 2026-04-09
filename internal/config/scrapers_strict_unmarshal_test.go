@@ -64,9 +64,12 @@ type untaggedPluginConfig struct {
 
 func TestLoadAllowsKnownScraperWithUntaggedExportedFields(t *testing.T) {
 	scraperName := fmt.Sprintf("untagged_%d", time.Now().UnixNano())
-	scraperutil.RegisterConfigFactory(scraperName, func() any {
-		return &untaggedPluginConfig{}
-	})
+
+	module := &testConfigModule{
+		name:          scraperName,
+		configFactory: scraperutil.ConfigFactory(func() any { return &untaggedPluginConfig{} }),
+	}
+	scraperutil.RegisterModule(module)
 
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
@@ -93,5 +96,19 @@ scrapers:
 	if !got.Enabled {
 		t.Fatalf("expected scraper %q to be enabled", scraperName)
 	}
-	// Note: Extra field has been removed; custom fields now handled via concrete types
 }
+
+type testConfigModule struct {
+	name          string
+	configFactory scraperutil.ConfigFactory
+}
+
+func (m *testConfigModule) Name() string        { return m.name }
+func (m *testConfigModule) Description() string { return "Test Config" }
+func (m *testConfigModule) Constructor() any    { return nil }
+func (m *testConfigModule) Validator() any      { return nil }
+func (m *testConfigModule) ConfigFactory() any  { return m.configFactory }
+func (m *testConfigModule) Options() any        { return nil }
+func (m *testConfigModule) Defaults() any       { return nil }
+func (m *testConfigModule) Priority() int       { return 0 }
+func (m *testConfigModule) FlattenFunc() any    { return nil }

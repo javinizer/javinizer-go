@@ -19,7 +19,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
-	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
 const (
@@ -1556,18 +1555,4 @@ func (s *Scraper) extractTrailerURL(doc *goquery.Document, sourceURL string) str
 	})
 
 	return trailerURL
-}
-
-func init() {
-	scraper.RegisterScraper("dmm", func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		contentIDRepo := database.NewContentIDMappingRepository(db)
-		return New(settings, globalConfig, contentIDRepo), nil
-	})
-	// Register default settings and priority
-	scraper.RegisterScraperDefaults("dmm", scraper.DefaultSettings{
-		Settings: config.ScraperSettings{
-			Enabled: false,
-		},
-		Priority: 90,
-	})
 }

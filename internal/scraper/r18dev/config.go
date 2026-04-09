@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 // R18DevConfig holds R18.dev scraper configuration.
@@ -21,50 +20,6 @@ type R18DevConfig struct {
 	DownloadProxy     *config.ProxyConfig       `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 	Priority          int                       `yaml:"priority" json:"priority"`                                 // Scraper's priority (higher = higher priority)
 	FlareSolverr      config.FlareSolverrConfig `yaml:"flaresolverr" json:"flaresolverr"`                         // FlareSolverr config for Cloudflare bypass
-}
-
-func init() {
-	scraperutil.RegisterValidator("r18dev", func(a any) error {
-		return (&R18DevConfig{}).ValidateConfig(a.(*config.ScraperSettings))
-	})
-	// PLUGIN-01: Register config field accessor for registry-based iteration
-	// Note: getter methods were removed in Phase 01. The normalize function will
-	// fall back to scraperConfigs map directly if this returns nil.
-	scraperutil.RegisterScraperConfig("r18dev", func(a any) any {
-		return nil
-	})
-	// TASK 5: Register ConfigFactory for UnmarshalYAML
-	scraperutil.RegisterConfigFactory("r18dev", func() any {
-		return &R18DevConfig{}
-	})
-	// TASK 3: Register flatten function for registry-based type conversion
-	scraperutil.RegisterFlattenFunc("r18dev", func(cfg any) any {
-		c, ok := cfg.(scraperutil.ScraperConfigInterface)
-		if !ok {
-			return nil
-		}
-		proxy := c.GetProxy()
-		downloadProxy := c.GetDownloadProxy()
-		var proxyVal, downloadProxyVal *config.ProxyConfig
-		if proxy != nil {
-			proxyVal = proxy.(*config.ProxyConfig)
-		}
-		if downloadProxy != nil {
-			downloadProxyVal = downloadProxy.(*config.ProxyConfig)
-		}
-		// Use type assertion to access R18Dev-specific RespectRetryAfter field
-		if r18Cfg, ok := cfg.(*R18DevConfig); ok {
-			_ = r18Cfg // r18Cfg is not used directly anymore since RespectRetryAfter moved to config
-			return &config.ScraperSettings{
-				Enabled:       c.IsEnabled(),
-				Language:      "", // r18dev scraper type doesn't have language field
-				RateLimit:     c.GetRequestDelay(),
-				Proxy:         proxyVal,
-				DownloadProxy: downloadProxyVal,
-			}
-		}
-		return nil
-	})
 }
 
 // IsEnabled implements scraperutil.ScraperConfigInterface.

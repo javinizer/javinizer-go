@@ -553,8 +553,10 @@ func TestResolvePriorities_PrefersConfiguredScraperPriorityOverRegistryDefaults(
 	scraperutil.ResetDefaults()
 	defer scraperutil.ResetDefaults()
 
-	scraperutil.RegisterDefaultScraperSettings("r18dev", config.ScraperSettings{}, 100)
-	scraperutil.RegisterDefaultScraperSettings("dmm", config.ScraperSettings{}, 50)
+	module1 := &testPriorityModule{name: "r18dev", priority: 100}
+	module2 := &testPriorityModule{name: "dmm", priority: 50}
+	scraperutil.RegisterModule(module1)
+	scraperutil.RegisterModule(module2)
 
 	cfg := &config.Config{
 		Scrapers: config.ScrapersConfig{
@@ -571,6 +573,21 @@ func TestResolvePriorities_PrefersConfiguredScraperPriorityOverRegistryDefaults(
 	priority := agg.GetResolvedPriorities()["Title"]
 	assert.Equal(t, []string{"dmm", "r18dev"}, priority)
 }
+
+type testPriorityModule struct {
+	name     string
+	priority int
+}
+
+func (m *testPriorityModule) Name() string        { return m.name }
+func (m *testPriorityModule) Description() string { return "Test " + m.name }
+func (m *testPriorityModule) Constructor() any    { return nil }
+func (m *testPriorityModule) Validator() any      { return nil }
+func (m *testPriorityModule) ConfigFactory() any  { return nil }
+func (m *testPriorityModule) Options() any        { return nil }
+func (m *testPriorityModule) Defaults() any       { return config.ScraperSettings{} }
+func (m *testPriorityModule) Priority() int       { return m.priority }
+func (m *testPriorityModule) FlattenFunc() any    { return nil }
 
 // TestAggregateWithPriority_ShouldCropPoster tests that ShouldCropPoster matches the PosterURL source
 func TestAggregateWithPriority_ShouldCropPoster(t *testing.T) {

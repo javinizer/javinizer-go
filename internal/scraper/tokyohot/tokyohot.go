@@ -14,12 +14,10 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
-	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
 const defaultBaseURL = "https://www.tokyo-hot.com"
@@ -700,19 +698,4 @@ func isHTTPURL(v string) bool {
 		return false
 	}
 	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
-}
-
-func init() {
-	scraper.RegisterScraper("tokyohot", func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		return New(settings, &globalConfig.Proxy, globalConfig.FlareSolverr), nil
-	})
-	// Register default settings and priority
-	scraper.RegisterScraperDefaults("tokyohot", scraper.DefaultSettings{
-		Settings: config.ScraperSettings{
-			Enabled:   false,
-			RateLimit: 1000,
-			BaseURL:   "https://www.tokyo-hot.com",
-		},
-		Priority: 50,
-	})
 }

@@ -81,3 +81,4 @@ COVERAGE_REPORT.md
 docs/superpowers/*
 !docs/superpowers/contracts/
 .worktrees/
+context.md

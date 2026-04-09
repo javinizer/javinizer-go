@@ -6,7 +6,6 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/configutil"
-	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 // Config holds JavLibrary scraper configuration.
@@ -21,51 +20,6 @@ type JavLibraryConfig struct {
 	Proxy         *config.ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 	DownloadProxy *config.ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"`
 	Priority      int                 `yaml:"priority" json:"priority"` // Scraper's priority (higher = higher priority)
-}
-
-func init() {
-	scraperutil.RegisterValidator("javlibrary", func(a any) error {
-		return (&JavLibraryConfig{}).ValidateConfig(a.(*config.ScraperSettings))
-	})
-	// PLUGIN-01: Register config field accessor for registry-based iteration
-	// Note: getter methods were removed in Phase 01. The normalize function will
-	// fall back to scraperConfigs map directly if this returns nil.
-	scraperutil.RegisterScraperConfig("javlibrary", func(a any) any {
-		return nil
-	})
-	// TASK 5: Register ConfigFactory for UnmarshalYAML
-	scraperutil.RegisterConfigFactory("javlibrary", func() any {
-		return &JavLibraryConfig{}
-	})
-	// TASK 3: Register flatten function for registry-based type conversion
-	scraperutil.RegisterFlattenFunc("javlibrary", func(cfg any) any {
-		c, ok := cfg.(scraperutil.ScraperConfigInterface)
-		if !ok {
-			return nil
-		}
-		proxy := c.GetProxy()
-		downloadProxy := c.GetDownloadProxy()
-		var proxyVal, downloadProxyVal *config.ProxyConfig
-		if proxy != nil {
-			proxyVal = proxy.(*config.ProxyConfig)
-		}
-		if downloadProxy != nil {
-			downloadProxyVal = downloadProxy.(*config.ProxyConfig)
-		}
-		// Use type assertion to access JavLibrary-specific fields
-		if jlCfg, ok := cfg.(*JavLibraryConfig); ok {
-			return &config.ScraperSettings{
-				Enabled:       c.IsEnabled(),
-				Language:      jlCfg.Language,
-				RateLimit:     c.GetRequestDelay(),
-				BaseURL:       jlCfg.BaseURL,
-				Cookies:       jlCfg.Cookies,
-				Proxy:         proxyVal,
-				DownloadProxy: downloadProxyVal,
-			}
-		}
-		return nil
-	})
 }
 
 // IsEnabled implements scraperutil.ScraperConfigInterface.

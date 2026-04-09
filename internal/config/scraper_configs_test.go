@@ -4,26 +4,9 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
-// RegisterTestScraperConfigs registers all 13 scraper configs with scraperutil
-// for tests that need to validate scraper configurations.
-// This replaces the backward-compatibility fallback that was removed from normalizeScraperConfigs.
-//
-// Usage: Call this at the start of test functions that need scraper validation,
-// then call cfg.Validate() normally.
-//
-// Note: This registers validators that use stub validation (return nil) since
-// we don't import actual scraper packages. For full validation, tests should
-// import the specific scraper packages they need.
 func RegisterTestScraperConfigs() {
-	scraperutil.ResetScraperConfigs()
-	scraperutil.ResetValidators()
-	scraperutil.ResetConfigFactories()
-	scraperutil.ResetFlattenFuncs()
-	scraperutil.ResetDefaults()
+	scraperutil.ResetAllRegistries()
 
-	// Register default scraper settings for all 13 scrapers with correct priorities
-	// Priorities: higher number = higher priority (run first)
-	// These match the priorities registered by each scraper package's init()
 	scraperPriorities := []struct {
 		name     string
 		priority int
@@ -44,19 +27,20 @@ func RegisterTestScraperConfigs() {
 		{"javstash", 10},
 	}
 	for _, sp := range scraperPriorities {
-		scraperutil.RegisterDefaultScraperSettings(sp.name, &ScraperSettings{
-			Enabled: true,
-		}, sp.priority)
+		module := &testScraperModule{
+			name:     sp.name,
+			priority: sp.priority,
+			defaults: &ScraperSettings{Enabled: true},
+		}
+		scraperutil.RegisterModule(module)
 	}
 
-	// Register FlattenFunc for each scraper using config package types.
-	// This ensures FlatToScraperConfig uses the registry path, not the fallback.
 	for _, name := range []string{
 		"r18dev", "dmm", "libredmm", "mgstage", "javlibrary", "javdb",
 		"javbus", "jav321", "tokyohot", "aventertainment", "dlgetchu",
 		"caribbeancom", "fc2", "javstash",
 	} {
-		scraperutil.RegisterFlattenFunc(name, func(a any) any {
+		flattenFn := scraperutil.FlattenFunc(func(a any) any {
 			cfg, ok := a.(scraperutil.ScraperConfigInterface)
 			if !ok {
 				return nil
@@ -74,22 +58,40 @@ func RegisterTestScraperConfigs() {
 			}
 			return sc
 		})
+		module := &testScraperModule{
+			name:        name,
+			flattenFunc: flattenFn,
+		}
+		scraperutil.RegisterModule(module)
 	}
 
-	// Register stub validators (actual validation happens in scraper packages)
-	// These return nil to pass validation without doing full scraper-specific checks
 	for _, name := range []string{
 		"r18dev", "dmm", "libredmm", "mgstage", "javlibrary", "javdb",
 		"javbus", "jav321", "tokyohot", "aventertainment", "dlgetchu",
 		"caribbeancom", "fc2", "javstash",
 	} {
-		scraperutil.RegisterValidator(name, func(a any) error {
-			return nil // Stub - scraper packages do actual validation
-		})
+		module := &testScraperModule{
+			name:      name,
+			validator: scraperutil.ValidatorFunc(func(a any) error { return nil }),
+		}
+		scraperutil.RegisterModule(module)
 	}
-
-	// ConfigFactory registration removed: all 13 scraper packages register their own
-	// ConfigFactory via init() functions in their respective config.go files.
-	// Tests that import scraper packages will have their ConfigFactory registered automatically.
-	// This approach eliminates duplicate registrations and circular dependency issues.
 }
+
+type testScraperModule struct {
+	name        string
+	priority    int
+	defaults    any
+	validator   scraperutil.ValidatorFunc
+	flattenFunc scraperutil.FlattenFunc
+}
+
+func (m *testScraperModule) Name() string        { return m.name }
+func (m *testScraperModule) Description() string { return "Test " + m.name }
+func (m *testScraperModule) Constructor() any    { return nil }
+func (m *testScraperModule) Validator() any      { return m.validator }
+func (m *testScraperModule) ConfigFactory() any  { return nil }
+func (m *testScraperModule) Options() any        { return nil }
+func (m *testScraperModule) Defaults() any       { return m.defaults }
+func (m *testScraperModule) Priority() int       { return m.priority }
+func (m *testScraperModule) FlattenFunc() any    { return m.flattenFunc }

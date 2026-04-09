@@ -14,13 +14,11 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
-	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
 const (
@@ -849,19 +847,4 @@ func isHTTPURL(v string) bool {
 		return false
 	}
 	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
-}
-
-func init() {
-	scraper.RegisterScraper("libredmm", func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		return New(settings, &globalConfig.Proxy, globalConfig.FlareSolverr), nil
-	})
-	// Register default settings and priority
-	scraper.RegisterScraperDefaults("libredmm", scraper.DefaultSettings{
-		Settings: config.ScraperSettings{
-			Enabled:   false,
-			RateLimit: 1000,
-			BaseURL:   "https://www.libredmm.com",
-		},
-		Priority: 95,
-	})
 }

@@ -1,74 +1,19 @@
 package javlibrary
 
 import (
-	"time"
-
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
 	httpclient "github.com/javinizer/javinizer-go/internal/httpclient"
-	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
 // NewHTTPClient creates an HTTP client and FlareSolverr for the javlibrary scraper.
 // HTTP-01, HTTP-03: Per-scraper HTTP client and FlareSolverr ownership.
-// Checks cfg.UseFlareSolverr to determine whether to enable FlareSolverr.
+// Uses builder pattern for consistent HTTP client construction.
 // Returns client, flaresolverr, and error.
 func NewHTTPClient(cfg *config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) (*resty.Client, *httpclient.FlareSolverr, error) {
-	// Handle nil globalProxy to avoid dereference panic
-	globalProxyVal := config.ProxyConfig{}
-	if globalProxy != nil {
-		globalProxyVal = *globalProxy
-	}
-	// Resolve proxy per-scraper (HTTP-02)
-	proxyCfg := config.ResolveScraperProxy(globalProxyVal, cfg.Proxy)
-
-	// Use timeout from ScraperConfig, default to 30s
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if timeout == 0 {
-		timeout = 30 * time.Second
-	}
-
-	// Use RetryCount from ScraperConfig, default to 3
-	retryCount := cfg.RetryCount
-	if retryCount == 0 {
-		retryCount = 3
-	}
-
-	// When cfg.UseFlareSolverr is true and global FlareSolverr is enabled,
-	// the FlareSolverr client will be initialized.
-	// Proxy profile is used directly by NewRestyClientWithFlareSolverr via buildFlareSolverrRequestProxy.
-	var client *resty.Client
-	var fs *httpclient.FlareSolverr
-	var err error
-
-	if cfg.UseFlareSolverr && globalFlareSolverr.Enabled {
-		// Use global proxy profile if scraper-specific proxy URL is empty but global proxy has one
-		proxyForFS := proxyCfg
-		if proxyCfg.URL == "" {
-			globalProfile := config.ResolveGlobalProxy(globalProxyVal)
-			if globalProfile != nil && globalProfile.URL != "" {
-				proxyForFS = globalProfile
-			}
-		}
-
-		// Pass FlareSolverr config separately since it's no longer embedded in ProxyConfig
-		client, fs, err = httpclient.NewRestyClientWithFlareSolverr(
-			proxyForFS,
-			globalFlareSolverr,
-			timeout,
-			retryCount,
-		)
-		if err != nil {
-			logging.Errorf("JavLibrary: Failed to create FlareSolverr: %v", err)
-			// Fall through to create client without FlareSolverr
-			client, err = httpclient.NewRestyClient(proxyCfg, timeout, retryCount)
-		}
-	} else {
-		client, err = httpclient.NewRestyClient(proxyCfg, timeout, retryCount)
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return client, fs, nil
+	builder := httpclient.FromScraperSettings(cfg, globalProxy, globalFlareSolverr,
+		httpclient.WithHeaders(httpclient.StandardHTMLHeaders()),
+		httpclient.WithHeaders(httpclient.UserAgentHeader(cfg.UserAgent)),
+	)
+	return builder.BuildWithFlareSolverr()
 }

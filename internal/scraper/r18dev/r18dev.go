@@ -13,13 +13,11 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
-	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
 const (
@@ -875,18 +873,4 @@ func (s *Scraper) buildTranslations(data *R18Response, movieID string) []models.
 	}
 
 	return translations
-}
-
-func init() {
-	scraper.RegisterScraper("r18dev", func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		return New(settings, &globalConfig.Proxy, globalConfig.FlareSolverr), nil
-	})
-	// Register default settings and priority
-	scraper.RegisterScraperDefaults("r18dev", scraper.DefaultSettings{
-		Settings: config.ScraperSettings{
-			Enabled:  true,
-			Language: "en",
-		},
-		Priority: 100,
-	})
 }

@@ -326,17 +326,6 @@ func TestIsJavbusChallengePage(t *testing.T) {
 	}
 }
 
-func TestBuildCookieHeader_UsesBuiltInVerificationCookiesOnly(t *testing.T) {
-	got := buildCookieHeader()
-	want := "age=verified; dv=1; existmag=mag"
-	if got != want {
-		t.Fatalf("buildCookieHeader() = %q, want %q", got, want)
-	}
-	if strings.Contains(strings.ToLower(got), "phpsessid=") {
-		t.Fatalf("buildCookieHeader() should not include PHPSESSID, got %q", got)
-	}
-}
-
 func TestJavbusChallengeErrorType(t *testing.T) {
 	err := models.NewScraperChallengeError("JavBus", "JavBus returned a driver verification challenge page")
 	if scraperErr, ok := models.AsScraperError(err); !ok || scraperErr.Kind != models.ScraperErrorKindBlocked {

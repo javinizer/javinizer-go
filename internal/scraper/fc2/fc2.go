@@ -13,12 +13,10 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
-	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
 const defaultBaseURL = "https://adult.contents.fc2.com"
@@ -673,19 +671,4 @@ func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
 		return "", 0, err
 	}
 	return resp.String(), resp.StatusCode(), nil
-}
-
-func init() {
-	scraper.RegisterScraper("fc2", func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		return New(settings, &globalConfig.Proxy, globalConfig.FlareSolverr), nil
-	})
-	// Register default settings and priority
-	scraper.RegisterScraperDefaults("fc2", scraper.DefaultSettings{
-		Settings: config.ScraperSettings{
-			Enabled:   false,
-			RateLimit: 1000,
-			BaseURL:   "https://adult.contents.fc2.com",
-		},
-		Priority: 35,
-	})
 }

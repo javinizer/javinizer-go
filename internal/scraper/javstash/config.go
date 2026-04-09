@@ -7,7 +7,6 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/configutil"
-	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 type JavstashConfig struct {
@@ -19,47 +18,6 @@ type JavstashConfig struct {
 	UserAgent     string              `yaml:"user_agent" json:"user_agent"`
 	Proxy         *config.ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 	DownloadProxy *config.ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"`
-}
-
-func init() {
-	scraperutil.RegisterValidator("javstash", func(a any) error {
-		return (&JavstashConfig{}).ValidateConfig(a.(*config.ScraperSettings))
-	})
-	scraperutil.RegisterScraperConfig("javstash", func(a any) any {
-		return nil
-	})
-	scraperutil.RegisterConfigFactory("javstash", func() any {
-		return &JavstashConfig{}
-	})
-	scraperutil.RegisterFlattenFunc("javstash", func(cfg any) any {
-		c, ok := cfg.(scraperutil.ScraperConfigInterface)
-		if !ok {
-			return nil
-		}
-		proxy := c.GetProxy()
-		downloadProxy := c.GetDownloadProxy()
-		var proxyVal, downloadProxyVal *config.ProxyConfig
-		if proxy != nil {
-			proxyVal = proxy.(*config.ProxyConfig)
-		}
-		if downloadProxy != nil {
-			downloadProxyVal = downloadProxy.(*config.ProxyConfig)
-		}
-		if jsCfg, ok := cfg.(*JavstashConfig); ok {
-			return &config.ScraperSettings{
-				Enabled:       c.IsEnabled(),
-				Language:      jsCfg.Language,
-				RateLimit:     c.GetRequestDelay(),
-				BaseURL:       jsCfg.BaseURL,
-				Proxy:         proxyVal,
-				DownloadProxy: downloadProxyVal,
-				Extra: map[string]any{
-					"api_key": jsCfg.APIKey,
-				},
-			}
-		}
-		return nil
-	})
 }
 
 func (c *JavstashConfig) IsEnabled() bool { return c.Enabled }

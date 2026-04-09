@@ -14,12 +14,10 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
-	"github.com/javinizer/javinizer-go/internal/scraper"
 	"golang.org/x/net/html"
 )
 
@@ -1156,18 +1154,4 @@ func extractTrailerURL(doc *goquery.Document, baseURL string) string {
 		}
 	}
 	return ""
-}
-
-func init() {
-	scraper.RegisterScraper("javdb", func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		return New(settings, &globalConfig.Proxy, globalConfig.FlareSolverr), nil
-	})
-	// Register default settings and priority
-	scraper.RegisterScraperDefaults("javdb", scraper.DefaultSettings{
-		Settings: config.ScraperSettings{
-			Enabled:   false,
-			RateLimit: 1000,
-		},
-		Priority: 75,
-	})
 }

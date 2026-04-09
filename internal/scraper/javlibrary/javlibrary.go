@@ -12,12 +12,10 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
-	scraper "github.com/javinizer/javinizer-go/internal/scraper"
 )
 
 // SupportedLanguages lists the language codes supported by JavLibrary.
@@ -81,9 +79,6 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		logging.Warnf("JavLibrary: unsupported language %q, falling back to 'en' (supported: %v)", language, SupportedLanguages)
 		language = "en"
 	}
-
-	userAgent := config.ResolveScraperUserAgent(settings.UserAgent)
-	client.SetHeader("User-Agent", userAgent)
 
 	if usingProxy && resolvedProxy != nil {
 		logging.Infof("JavLibrary: Using proxy %s", httpclient.SanitizeProxyURL(resolvedProxy.URL))
@@ -854,19 +849,4 @@ func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
 		return fmt.Errorf("javlibrary: timeout must be non-negative, got %d", cfg.Timeout)
 	}
 	return nil
-}
-
-func init() {
-	scraper.RegisterScraper("javlibrary", func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		return New(settings, &globalConfig.Proxy, globalConfig.FlareSolverr), nil
-	})
-	// Register default settings and priority
-	scraper.RegisterScraperDefaults("javlibrary", scraper.DefaultSettings{
-		Settings: config.ScraperSettings{
-			Enabled:   false,
-			Language:  "en",
-			RateLimit: 1000,
-		},
-		Priority: 80,
-	})
 }

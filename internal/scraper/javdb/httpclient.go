@@ -1,64 +1,19 @@
 package javdb
 
 import (
-	"time"
-
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
-	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
 // NewHTTPClient creates an HTTP client and FlareSolverr for the JavDB scraper.
 // HTTP-01, HTTP-03: Per-scraper HTTP client and FlareSolverr ownership.
+// Uses builder pattern for consistent HTTP client construction.
 // Returns client, flaresolverr, and error.
 func NewHTTPClient(cfg *config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) (*resty.Client, *httpclient.FlareSolverr, error) {
-	// Resolve proxy per-scraper (HTTP-02)
-	proxyCfg := config.ResolveScraperProxy(*globalProxy, cfg.Proxy)
-
-	// Use timeout from ScraperSettings, default to 30s
-	timeout := time.Duration(cfg.Timeout) * time.Second
-	if timeout == 0 {
-		timeout = 30 * time.Second
-	}
-
-	// Use RetryCount from ScraperConfig, default to 3
-	retryCount := cfg.RetryCount
-	if retryCount == 0 {
-		retryCount = 3
-	}
-
-	var fs *httpclient.FlareSolverr
-	var err error
-
-	// Check for FlareSolverr on ScraperConfig directly (HTTP-03)
-	if globalFlareSolverr.Enabled && cfg.UseFlareSolverr {
-		// Pass FlareSolverr config separately since it's no longer embedded in ProxyConfig
-		_, fs, err = httpclient.NewRestyClientWithFlareSolverr(
-			proxyCfg,
-			globalFlareSolverr,
-			timeout,
-			retryCount,
-		)
-		if err != nil {
-			logging.Errorf("JavDB: Failed to create FlareSolverr: %v", err)
-			// Fall through to create client without FlareSolverr
-		}
-	}
-
-	// Create client (with or without FlareSolverr)
-	client, err := httpclient.NewRestyClient(proxyCfg, timeout, retryCount)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Apply UserAgent from ScraperConfig
-	userAgent := config.ResolveScraperUserAgent(cfg.UserAgent)
-	client.SetHeader("User-Agent", userAgent)
-	client.SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	client.SetHeader("Accept-Language", "en-US,en;q=0.9,ja;q=0.8,zh;q=0.7")
-	client.SetHeader("Connection", "keep-alive")
-	client.SetHeader("Upgrade-Insecure-Requests", "1")
-
-	return client, fs, nil
+	builder := httpclient.FromScraperSettings(cfg, globalProxy, globalFlareSolverr,
+		httpclient.WithHeaders(httpclient.StandardHTMLHeaders()),
+		httpclient.WithHeaders(httpclient.UserAgentHeader(cfg.UserAgent)),
+	)
+	return builder.BuildWithFlareSolverr()
 }

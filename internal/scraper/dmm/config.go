@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 // Config holds DMM/Fanza scraper configuration.
@@ -20,44 +19,6 @@ type DMMConfig struct {
 	// NEW: Per-scraper browser and scrape_actress settings
 	UseBrowser    bool `yaml:"use_browser" json:"use_browser"`
 	ScrapeActress bool `yaml:"scrape_actress" json:"scrape_actress"`
-}
-
-func init() {
-	scraperutil.RegisterValidator("dmm", func(a any) error {
-		return (&DMMConfig{}).ValidateConfig(a.(*config.ScraperSettings))
-	})
-	// PLUGIN-01: Register config field accessor for registry-based iteration
-	// Note: getter methods were removed in Phase 01. The normalize function will
-	// fall back to scraperConfigs map directly if this returns nil.
-	scraperutil.RegisterScraperConfig("dmm", func(a any) any {
-		return nil
-	})
-	// TASK 5: Register ConfigFactory for UnmarshalYAML
-	scraperutil.RegisterConfigFactory("dmm", func() any {
-		return &DMMConfig{}
-	})
-	// TASK 3: Register flatten function for registry-based type conversion
-	scraperutil.RegisterFlattenFunc("dmm", func(cfg any) any {
-		dmmCfg, ok := cfg.(*DMMConfig)
-		if !ok {
-			return nil
-		}
-
-		settings := &config.ScraperSettings{
-			Enabled:       dmmCfg.IsEnabled(),
-			RateLimit:     dmmCfg.GetRequestDelay(),
-			Proxy:         dmmCfg.Proxy,
-			DownloadProxy: dmmCfg.DownloadProxy,
-			UseBrowser:    dmmCfg.UseBrowser,
-		}
-
-		// ScrapeActress is a pointer in ScraperSettings, so set it only if enabled
-		if dmmCfg.ScrapeActress {
-			settings.ScrapeActress = &dmmCfg.ScrapeActress
-		}
-
-		return settings
-	})
 }
 
 // IsEnabled implements scraperutil.ScraperConfigInterface.

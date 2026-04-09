@@ -14,12 +14,10 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
-	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
 const (
@@ -929,44 +927,4 @@ func canonicalizeDMMPrefixedContentID(seg string) string {
 	}
 
 	return seg + suffix + ext
-}
-
-func buildCookieHeader() string {
-	parts := make([]string, 0, 4)
-	appendCookie := func(name, value string) {
-		value = sanitizeCookieValue(value)
-		if value == "" {
-			return
-		}
-		parts = append(parts, name+"="+value)
-	}
-
-	appendCookie("age", defaultAge)
-	appendCookie("dv", defaultDV)
-	appendCookie("existmag", defaultExistMag)
-
-	return strings.Join(parts, "; ")
-}
-
-func sanitizeCookieValue(v string) string {
-	v = strings.TrimSpace(v)
-	v = strings.ReplaceAll(v, ";", "")
-	v = strings.ReplaceAll(v, "\r", "")
-	v = strings.ReplaceAll(v, "\n", "")
-	return v
-}
-
-func init() {
-	scraper.RegisterScraper("javbus", func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		return New(settings, &globalConfig.Proxy, globalConfig.FlareSolverr), nil
-	})
-	// Register default settings and priority
-	scraper.RegisterScraperDefaults("javbus", scraper.DefaultSettings{
-		Settings: config.ScraperSettings{
-			Enabled:   false,
-			Language:  "ja",
-			RateLimit: 1000,
-		},
-		Priority: 70,
-	})
 }

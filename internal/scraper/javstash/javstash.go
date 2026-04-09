@@ -12,12 +12,10 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
-	"github.com/javinizer/javinizer-go/internal/scraper"
 )
 
 const (
@@ -407,23 +405,4 @@ func cleanString(s string) string {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
 	return s
-}
-
-func init() {
-	scraper.RegisterScraper("javstash", func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		var globalProxy config.ProxyConfig
-		var globalFlareSolverr config.FlareSolverrConfig
-		if globalConfig != nil {
-			globalProxy = globalConfig.Proxy
-			globalFlareSolverr = globalConfig.FlareSolverr
-		}
-		return New(settings, &globalProxy, globalFlareSolverr), nil
-	})
-	scraper.RegisterScraperDefaults("javstash", scraper.DefaultSettings{
-		Settings: config.ScraperSettings{
-			Enabled:  false,
-			Language: "en",
-		},
-		Priority: 10,
-	})
 }
