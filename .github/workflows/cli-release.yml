@@ -563,6 +563,90 @@ jobs:
     if: needs.prepare-release.outputs.create_release == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Extract changelog notes for version
+        id: changelog
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -uo pipefail
+          
+          # Extract the section for this version from CHANGELOG.md
+          # Format: ## [vX.Y.Z] - YYYY-MM-DD ... until next ## [
+          
+          changelog_file="CHANGELOG.md"
+          notes_file="/tmp/release_notes.md"
+          delimiter="EOF_$(date +%s)_$$"
+          
+          if [[ ! -f "${changelog_file}" ]]; then
+            echo "CHANGELOG.md not found, falling back to auto-generated notes"
+            echo "notes=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          if [[ ! -r "${changelog_file}" ]]; then
+            echo "::error::CHANGELOG.md exists but is not readable"
+            exit 1
+          fi
+          
+          # Find the line number where this version starts (fixed-string match)
+          # Capture both output and exit status to distinguish "no match" from errors
+          set +o pipefail
+          grep_output=$(grep -Fn -- "## [${VERSION}]" "${changelog_file}" 2>&1) || grep_status=$?
+          set -o pipefail
+          
+          if [[ -n "${grep_status:-}" && "${grep_status}" -ne 1 ]]; then
+            # grep exit 1 = no match (expected); other codes = error
+            echo "::error::grep failed on CHANGELOG.md: ${grep_output}"
+            exit 1
+          fi
+          
+          start_line=$(echo "${grep_output}" | head -1 | cut -d: -f1)
+          
+          if [[ -z "${start_line}" ]]; then
+            echo "Version ${VERSION} not found in CHANGELOG.md, falling back to auto-generated notes"
+            echo "notes=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          # Find the line number where the next version section starts
+          set +o pipefail
+          next_output=$(tail -n +"$((start_line + 1))" "${changelog_file}" | grep -Fn "## [" 2>&1) || next_status=$?
+          set -o pipefail
+          
+          if [[ -n "${next_status:-}" && "${next_status}" -ne 1 ]]; then
+            echo "::error::Failed to find next version section: ${next_output}"
+            exit 1
+          fi
+          
+          next_line=$(echo "${next_output}" | head -1 | cut -d: -f1)
+          
+          if [[ -z "${next_line}" ]]; then
+            # No next section, extract to end of file
+            tail -n +"${start_line}" "${changelog_file}" > "${notes_file}"
+          else
+            # Extract from start_line to next_line (exclusive)
+            total_lines=$((start_line + next_line - 1))
+            head -n "${total_lines}" "${changelog_file}" | tail -n +"${start_line}" > "${notes_file}"
+          fi
+          
+          echo "Extracted release notes:"
+          cat "${notes_file}"
+          echo ""
+          
+          # Store the path for the release action
+          echo "notes_file=${notes_file}" >> "$GITHUB_OUTPUT"
+          
+          # Set multiline output for GitHub Actions with unique delimiter
+          {
+            echo "notes<<${delimiter}"
+            cat "${notes_file}"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Download linux-amd64 artifact
         uses: actions/download-artifact@v7
         with:
@@ -616,8 +700,9 @@ jobs:
           tag_name: ${{ needs.prepare-release.outputs.tag_name }}
           target_commitish: ${{ github.sha }}
           name: ${{ needs.prepare-release.outputs.release_name }}
+          body: ${{ steps.changelog.outputs.notes }}
           files: ./release/*
-          generate_release_notes: true
+          generate_release_notes: ${{ steps.changelog.outputs.notes == '' }}
           draft: ${{ needs.prepare-release.outputs.draft == 'true' }}
           prerelease: ${{ needs.prepare-release.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: true

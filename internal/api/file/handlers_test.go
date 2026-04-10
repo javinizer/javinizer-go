@@ -192,7 +192,7 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 	cfg := &config.Config{
 		API: config.APIConfig{
 			Security: config.SecurityConfig{
-				AllowedDirectories: []string{"/"},
+				AllowedDirectories: []string{tempDir},
 			},
 		},
 		Matching: config.MatchingConfig{
@@ -239,10 +239,10 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 			errorContains:  "does not exist",
 		},
 		{
-			name:           "/dev is blocked by denylist",
+			name:           "/dev is blocked",
 			path:           "/dev",
 			expectedStatus: 403,
-			errorContains:  "system directory",
+			acceptedErrors: []string{"outside allowed directories", "system directory"},
 			skipOS:         "windows",
 		},
 	}

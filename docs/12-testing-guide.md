@@ -1412,3 +1412,72 @@ When adding new features:
 - Overall coverage: 62% → 64% (+2%)
 - New package coverage: 85%
 ```
+
+## Test Framework and Setup
+
+### Testing Frameworks
+
+The project uses the following testing frameworks and tools:
+
+| Framework/Tool | Version | Purpose |
+|---------------|---------|---------|
+| Go `testing` package | Standard library (Go 1.25.0) | Core test framework |
+| `github.com/stretchr/testify` | v1.11.1 | Assertions and test helpers |
+| `go.uber.org/goleak` | v1.3.0 | Goroutine leak detection |
+| `github.com/spf13/afero` | v1.15.0 | In-memory filesystem for tests |
+
+### Setup Requirements
+
+No additional setup is required beyond the standard Go installation. All testing dependencies are managed through `go.mod`.
+
+**Prerequisites:**
+- Go 1.25.0 or later
+- Dependencies installed (`go mod download` or `make deps`)
+
+### Test Helpers
+
+The project provides a shared test utilities package at `internal/testutil/` with helper functions:
+
+| Helper | Purpose | Usage |
+|--------|---------|-------|
+| `CaptureOutput()` | Captures stdout/stderr for CLI testing | Test console output without side effects |
+| `CreateRootCommandWithConfig()` | Creates cobra command with config flag | Test commands that need `--config` |
+| `SetupTestDB()` | Creates temporary database with migrations | Integration tests requiring database |
+| `CreateTestConfig()` | Generates test configuration file | Unit/integration tests needing config |
+
+**Example:**
+
+```go
+import "github.com/javinizer/javinizer-go/internal/testutil"
+
+func TestWithDatabase(t *testing.T) {
+    configPath, dbPath := testutil.SetupTestDB(t)
+    // Database is ready with all migrations applied
+    // Temporary directory is auto-cleaned by t.TempDir()
+}
+```
+
+### File Naming Conventions
+
+| File Pattern | Purpose |
+|-------------|---------|
+| `*_test.go` | Standard unit tests |
+| `*_integration_test.go` | Integration tests (use `testing.Short()` to skip) |
+| `testdata/` | Test fixture data directory |
+
+### Goroutine Leak Detection
+
+For tests involving concurrent code, use `goleak` to detect leaked goroutines:
+
+```go
+import (
+    "testing"
+    "go.uber.org/goleak"
+)
+
+func TestMain(m *testing.M) {
+    goleak.VerifyTestMain(m)
+}
+```
+
+This is automatically run in CI for packages in `internal/worker/`, `internal/tui/`, `internal/websocket/`, and `internal/api/`.

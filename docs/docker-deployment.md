@@ -12,6 +12,15 @@ This guide explains how to deploy Javinizer using Docker and Docker Compose.
 - [Configuration](#configuration)
 - [Development Mode](#development-mode)
 - [Troubleshooting](#troubleshooting)
+- [Docker Commands Reference](#docker-commands-reference)
+- [Security Considerations](#security-considerations)
+- [Production Deployment](#production-deployment)
+- [Deployment Targets](#deployment-targets)
+- [Build Pipeline](#build-pipeline)
+- [Rollback Procedure](#rollback-procedure)
+- [Monitoring](#monitoring)
+- [Next Steps](#next-steps)
+- [Support](#support)
 
 ---
 
@@ -503,6 +512,252 @@ services:
 # Set user/group to match your host user
 PUID=$(id -u) PGID=$(id -g) docker-compose up -d
 ```
+
+---
+
+## Deployment Targets
+
+Javinizer supports multiple deployment methods:
+
+### Docker (Recommended)
+
+Docker deployment is the recommended approach for most users. Benefits:
+- Isolated environment with all dependencies
+- Consistent behavior across platforms
+- Easy setup and teardown
+- Volume management for persistent data
+- Built-in health checks
+
+**Docker Compose** is the primary deployment method documented in this guide.
+
+### Standalone Binary
+
+Javinizer can also run as a standalone binary without Docker. Pre-built binaries are available for:
+- **Linux**: `amd64`, `arm64`
+- **macOS**: `amd64`, `arm64` (Apple Silicon), `universal`
+- **Windows**: `amd64`
+
+Download from [GitHub Releases](https://github.com/javinizer/javinizer-go/releases).
+
+**Advantages**:
+- No Docker runtime required
+- Lower resource overhead
+- Direct filesystem access
+- Faster startup time
+
+**Considerations**:
+- Requires manual dependency management (SQLite libraries)
+- User must manage permissions manually
+- No automatic health checks
+- Configuration and database paths must be configured explicitly
+
+For standalone binary deployment, see the [Getting Started Guide](./01-getting-started.md).
+
+---
+
+## Build Pipeline
+
+Javinizer uses GitHub Actions for automated builds and releases.
+
+### CI/CD Workflow
+
+The build pipeline is defined in `.github/workflows/cli-release.yml`:
+
+**Triggers**:
+- **Tag push**: Creates stable releases when tags matching `v*` are pushed (e.g., `v1.2.3`)
+- **Scheduled**: Builds nightly snapshots daily at midnight UTC
+- **Manual**: Supports manual releases via workflow dispatch (stable, prerelease, or snapshot)
+
+**Build Steps**:
+
+1. **Prepare release metadata**:
+   - Resolves version from `internal/version/version.txt`
+   - Generates build metadata (version, commit SHA, build date)
+   - Validates version format and matches tracked version
+
+2. **Build web assets**:
+   - Compiles SvelteKit frontend with Node.js 22
+   - Bundles static assets for embedding in the binary
+
+3. **Build binaries** (parallel jobs):
+   - **Linux**: `amd64`, `arm64` (with cross-compilation toolchain)
+   - **macOS**: `amd64`, `arm64`, and universal binary (lipo merge)
+   - **Windows**: `amd64` with CGO support
+
+4. **Build Docker images**:
+   - Multi-architecture builds (`linux/amd64`, `linux/arm64`)
+   - Pushes to GitHub Container Registry (`ghcr.io`)
+   - Tags: version-specific, `latest` (stable releases), `nightly` (nightly builds)
+
+5. **Create GitHub release**:
+   - Uploads all binary artifacts
+   - Generates checksums (SHA256)
+   - Auto-generates release notes from commit history
+
+### Test Workflow
+
+The test workflow (`.github/workflows/test.yml`) runs on every push and pull request:
+
+**Jobs**:
+- **Unit Tests**: Runs `go test ./...` with coverage reporting to Codecov
+- **Race Detector**: Tests concurrent code with race detection enabled
+- **Linting**: Runs `golangci-lint`, `go vet`, and format checks
+- **Build Verification**: Compiles binary and verifies embedded web UI
+- **Docker Build**: Builds Docker image and verifies metadata
+
+**Coverage Threshold**: 75% minimum line coverage enforced
+
+### Release Types
+
+| Type | Trigger | Version Format | Latest Tag | Prerelease |
+|------|---------|----------------|------------|------------|
+| Stable | Tag push `v*` (e.g., `v1.2.3`) | `vX.Y.Z` | ✅ | No |
+| Prerelease | Manual dispatch | `vX.Y.Z-rc.N` | ✅ | Yes |
+| Nightly | Scheduled (midnight UTC) | `vX.Y.Z-nightly-YYYYMMDD` | No | Yes |
+| Snapshot | Manual dispatch | `v0.0.0-snapshot.YYYYMMDDHHMMSS-HASH` | No | Yes |
+
+---
+
+## Rollback Procedure
+
+If a deployment encounters issues, you can revert to a previous version:
+
+### Docker Rollback
+
+1. **Stop the current container**:
+   ```bash
+   docker-compose down
+   ```
+
+2. **Identify the previous image version**:
+   ```bash
+   # List available images
+   docker images | grep javinizer
+   
+   # Or check GitHub releases for previous versions
+   # https://github.com/javinizer/javinizer-go/releases
+   ```
+
+3. **Redeploy the previous version**:
+   ```bash
+   # Option 1: Pull specific version from GHCR
+   docker pull ghcr.io/javinizer/javinizer-go:v1.2.3
+   docker tag ghcr.io/javinizer/javinizer-go:v1.2.3 javinizer:latest
+   docker-compose up -d
+   
+   # Option 2: Build from previous Git tag
+   git checkout v1.2.3
+   docker-compose build
+   docker-compose up -d
+   git checkout master  # Return to main branch
+   ```
+
+4. **Verify the rollback**:
+   ```bash
+   # Check container version
+   docker-compose exec javinizer javinizer --version
+   
+   # Verify web UI is accessible
+   curl http://localhost:8080/health
+   ```
+
+### Standalone Binary Rollback
+
+1. **Download the previous binary** from [GitHub Releases](https://github.com/javinizer/javinizer-go/releases)
+
+2. **Stop the current service**:
+   ```bash
+   # If running as a service
+   sudo systemctl stop javinizer
+   
+   # Or kill the process directly
+   pkill javinizer
+   ```
+
+3. **Replace the binary**:
+   ```bash
+   # Backup current binary
+   cp /usr/local/bin/javinizer /usr/local/bin/javinizer.backup
+   
+   # Replace with previous version
+   tar -xzf javinizer-v1.2.3-linux-amd64.tar.gz
+   sudo mv javinizer-v1.2.3-linux-amd64 /usr/local/bin/javinizer
+   sudo chmod +x /usr/local/bin/javinizer
+   ```
+
+4. **Restart the service**:
+   ```bash
+   sudo systemctl start javinizer
+   ```
+
+### Database Compatibility
+
+**Note**: Database and configuration files are typically backward-compatible across minor versions. However:
+- Major version jumps may require database migration
+- Always backup `./data/` directory before rollback
+- Check release notes for breaking changes
+
+### Rollback Decision Matrix
+
+| Issue Type | Rollback Action | Alternative |
+|------------|-----------------|-------------|
+| Application crash | Rollback binary/image | Fix forward if simple bug |
+| Database corruption | Restore from backup | Export/import metadata |
+| Performance regression | Rollback to previous version | Tune configuration |
+| Security vulnerability | Upgrade to patched version | Apply workaround config |
+
+---
+
+## Monitoring
+
+Javinizer does not currently include built-in monitoring or observability integrations (e.g., Sentry, Datadog, Prometheus, OpenTelemetry).
+
+### Current Observability Features
+
+**Health Checks**:
+- HTTP endpoint: `/health`
+- Returns `200 OK` when the API server is running
+- Integrated with Docker health check in `docker-compose.yml`
+
+**Logging**:
+- Structured JSON logging to stdout
+- Configurable log levels: `debug`, `info`, `warn`, `error`
+- Log file output via `logging.output` configuration
+- Container logs accessible via `docker-compose logs`
+
+**Metrics**:
+- No built-in metrics collection
+- No Prometheus endpoint
+- No performance counters exposed
+
+### Recommended Monitoring Setup
+
+For production deployments, consider adding external monitoring:
+
+**Application Performance Monitoring (APM)**:
+<!-- VERIFY: APM integration configuration -->
+- Integrate a Go APM library (e.g., OpenTelemetry, Datadog) for tracing
+- Add instrumentation to key functions (scraper execution, database queries)
+- Export traces to an observability platform
+
+**Log Aggregation**:
+<!-- VERIFY: Log aggregation platform configuration -->
+- Forward container logs to a centralized logging platform (ELK, Loki, CloudWatch)
+- Use log forwarding agents (Promtail, Fluentd, Filebeat)
+- Configure structured logging for better parsing
+
+**Uptime Monitoring**:
+- Monitor the `/health` endpoint with external tools
+- Set up alerts for service unavailability
+- Consider Uptime Kuma, Pingdom, or cloud provider health checks
+
+**Resource Monitoring**:
+- Use Docker stats: `docker stats javinizer`
+- Monitor container resource usage (CPU, memory, disk I/O)
+- Set up resource alerts for abnormal usage patterns
+
+**Future Enhancements**:
+Monitoring capabilities may be added in future releases. Track progress on GitHub issues labeled with `monitoring` or `observability`.
 
 ---
 

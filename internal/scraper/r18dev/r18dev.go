@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraper/image/placeholder"
 )
 
 const (
@@ -593,6 +594,20 @@ func (s *Scraper) parseResponse(data *R18Response, sourceURL string) (*models.Sc
 		}
 	} else if len(data.Images.SampleImages) > 0 {
 		result.ScreenshotURL = data.Images.SampleImages
+	}
+
+	// Filter placeholder screenshots using DMM default hashes
+	if len(result.ScreenshotURL) > 0 {
+		cfg := placeholder.ConfigFromSettings(&s.settings, placeholder.DefaultDMMPlaceholderHashes)
+		if cfg.Enabled {
+			filtered, count, err := placeholder.FilterURLs(context.Background(), s.client, result.ScreenshotURL, cfg)
+			if err != nil {
+				logging.Warnf("r18dev: placeholder filter error: %v", err)
+			} else if count > 0 {
+				logging.Debugf("r18dev: Filtered %d placeholder screenshots", count)
+				result.ScreenshotURL = filtered
+			}
+		}
 	}
 
 	// Parse trailer - try top-level sample_url first (newer API), then nested Sample (older API)

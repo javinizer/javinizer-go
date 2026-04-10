@@ -923,6 +923,618 @@ services:
       - JAVINIZER_CONFIG=/config/config.yaml
 ```
 
+## Environment Variables
+
+Environment variables override configuration file settings and are particularly useful for Docker deployments and secrets management.
+
+### Core Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `JAVINIZER_CONFIG` | Optional | `configs/config.yaml` | Override config file path |
+| `JAVINIZER_DB` | Optional | `data/javinizer.db` | Override database path |
+| `JAVINIZER_LOG_DIR` | Optional | - | Relocate log file outputs to this directory |
+| `JAVINIZER_TEMP_DIR` | Optional | `data/temp` | Override temp directory for file processing |
+| `JAVINIZER_DATA_DIR` | Optional | - | Override data directory (reserved for future use) |
+| `LOG_LEVEL` | Optional | `info` | Override log level (`debug`, `info`, `warn`, `error`) |
+| `UMASK` | Optional | `002` | Override file creation mask (e.g., `002` for `rwxrwxr-x`) |
+| `PORT` | Optional | `8080` | Override API server port |
+
+### Docker Deployment Variables
+
+These variables are specific to Docker deployments and container orchestration:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PUID` | Optional | `1000` | User ID for file ownership in container |
+| `PGID` | Optional | `1000` | Group ID for file ownership in container |
+| `TZ` | Optional | `UTC` | Container timezone (IANA format: `America/New_York`) |
+| `HOST_PORT` | Optional | `8080` | Host port to expose Javinizer web UI |
+| `FLARESOLVERR_HOST_PORT` | Optional | `8191` | Host port to expose FlareSolverr API |
+| `MEDIA_PATH` | Recommended | - | Absolute path to media library on host system |
+
+### Scraper API Keys
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `JAVSTASH_API_KEY` | Optional* | - | Javstash scraper API key (required if using javstash scraper) |
+| `CHROME_BIN` | Optional | - | Path to Chrome/Chromium binary (auto-detected if empty) |
+| `CHROME_PATH` | Optional | - | Alternative path to Chrome/Chromium binary |
+
+*Required when the javstash scraper is enabled.
+
+### Translation Provider Credentials
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `TRANSLATION_PROVIDER` | Optional | `openai` | Translation provider (`openai`, `deepl`, `google`, `openai_compatible`, `anthropic`) |
+| `TRANSLATION_SOURCE_LANGUAGE` | Optional | `ja` | Source language for translation |
+| `TRANSLATION_TARGET_LANGUAGE` | Optional | `en` | Target language for translation |
+| `OPENAI_API_KEY` | Optional* | - | OpenAI API key for translation |
+| `OPENAI_BASE_URL` | Optional | `https://api.openai.com/v1` | OpenAI API base URL |
+| `OPENAI_MODEL` | Optional | `gpt-4o-mini` | OpenAI model for translation |
+| `DEEPL_API_KEY` | Optional* | - | DeepL API key for translation |
+| `GOOGLE_TRANSLATE_API_KEY` | Optional* | - | Google Translate API key |
+| `OPENAI_COMPATIBLE_API_KEY` | Optional* | - | OpenAI-compatible API key (e.g., Ollama) |
+| `ANTHROPIC_API_KEY` | Optional* | - | Anthropic API key for translation |
+
+*Required when the corresponding translation provider is enabled.
+
+### Version Check Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GH_TOKEN` | Optional | - | GitHub token for version check (higher priority) |
+| `GITHUB_TOKEN` | Optional | - | GitHub token for version check (fallback) |
+
+### Development Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `JAVINIZER_DEV_MODE` | Optional | `false` | Enable development mode for frontend hot-reload |
+| `JAVINIZER_RUN_FLARESOLVERR_TESTS` | Optional | - | Enable FlareSolverr integration tests (`1` to enable) |
+| `VITE_API_URL` | Optional | - | Frontend API URL for development |
+
+### API Initialization Variables
+
+These variables are applied during first-time configuration initialization:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `JAVINIZER_INIT_SERVER_HOST` | Optional | `localhost` | Initial server host |
+| `JAVINIZER_INIT_ALLOWED_DIRECTORIES` | Optional | - | Comma-separated list of allowed directories |
+| `JAVINIZER_INIT_ALLOWED_ORIGINS` | Optional | - | Comma-separated list of allowed CORS origins |
+
+### Priority Order
+
+Environment variables override configuration file values in the following order (highest priority first):
+
+1. **Environment variables** (e.g., `LOG_LEVEL`, `JAVINIZER_DB`)
+2. **Configuration file** (`configs/config.yaml`)
+3. **Default values** (from `DefaultConfig()`)
+
+### Docker Example
+
+Create a `.env` file from the example:
+
+```bash
+cp .env.example .env
+```
+
+Example `.env` file for Docker:
+
+```bash
+# User/Group mapping
+PUID=1000
+PGID=1000
+
+# Ports
+HOST_PORT=8080
+FLARESOLVERR_HOST_PORT=8191
+
+# Timezone
+TZ=America/New_York
+
+# Media library path (REQUIRED for Docker)
+MEDIA_PATH=/path/to/your/jav-library
+
+# Optional overrides
+LOG_LEVEL=debug
+UMASK=002
+```
+
+Docker Compose automatically loads variables from `.env` file.
+
+## Required vs Optional Settings
+
+Javinizer is designed to work out-of-the-box with minimal configuration. Most settings have sensible defaults, and the application will start successfully without any configuration file (it will create one automatically).
+
+### Settings That Cause Startup Failure
+
+The following settings will cause the application to fail on startup if misconfigured:
+
+| Setting | Failure Condition | Error Message |
+|---------|------------------|---------------|
+| Config file parsing | Invalid YAML syntax | `Failed to load config: <error>` |
+| Config version | Newer version than supported | `config version X is newer than supported version Y` |
+| Javstash scraper | Enabled without API key | `javstash: api_key is required (set in config or JAVSTASH_API_KEY env var)` |
+
+**Note:** Javinizer creates a default configuration file on first run if one doesn't exist. No settings are required to be set manually.
+
+### Settings That Cause Scraping Failure
+
+These settings don't prevent startup but may cause operations to fail:
+
+| Setting | Failure Condition | Context |
+|---------|------------------|---------|
+| Proxy configuration | Enabled with empty URL | Proxy is automatically disabled with warning |
+| Translation provider | Enabled without API key | Translation will fail but scraping continues |
+| Required fields | Missing required field data | Aggregation fails if `metadata.required_fields` has missing data |
+
+### Settings with Validation Warnings
+
+The application logs warnings for misconfigured settings but continues to run:
+
+| Setting | Warning Condition | Behavior |
+|---------|------------------|----------|
+| Scraper proxy | `enabled: true` with empty URL | Disabled with warning message |
+| Download proxy | `enabled: true` with empty URL | Disabled with warning message |
+| Umask | Invalid octal value | Error logged, umask not applied |
+
+### Default Behavior Without Configuration
+
+When no configuration file exists:
+
+1. **Config creation**: Javinizer creates `configs/config.yaml` with all default values
+2. **Database**: SQLite database created at `data/javinizer.db`
+3. **Logs**: Output to `stdout` and `data/logs/javinizer.log`
+4. **Scrapers**: All scrapers available with default settings
+5. **Server**: Binds to `localhost:8080`
+6. **Security**: Empty allowed directories (no allowlist restriction, but built-in denylist applies)
+
+### Minimal Configuration Required
+
+For most use cases, you only need to customize:
+
+```yaml
+# Optional: API security (recommended for production)
+api:
+  security:
+    allowed_directories:
+      - /path/to/media
+```
+
+All other settings have working defaults.
+
+## Default Values
+
+Javinizer provides sensible defaults for all configuration options. These defaults are defined in the `DefaultConfig()` function and ensure the application works immediately after installation.
+
+### Server Defaults
+
+```yaml
+server:
+  host: localhost
+  port: 8080
+
+api:
+  security:
+    allowed_directories: []  # No allowlist restriction
+    denied_directories: []   # Only built-in system directories blocked
+    max_files_per_scan: 10000
+    scan_timeout_seconds: 30
+    allowed_origins:
+      - "http://localhost:8080"
+      - "http://localhost:5173"
+      - "http://127.0.0.1:8080"
+      - "http://127.0.0.1:5173"
+```
+
+### Scraper Defaults
+
+```yaml
+scrapers:
+  user_agent: "Javinizer (+https://github.com/javinizer/Javinizer)"
+  referer: "https://www.dmm.co.jp/"
+  timeout_seconds: 30
+  request_timeout_seconds: 60
+  priority:
+    - dmm
+    - r18dev
+    - libredmm
+    - mgstage
+    - javlibrary
+    - javdb
+    - javbus
+    - jav321
+    - tokyohot
+    - aventertainment
+    - dlgetchu
+    - caribbeancom
+    - fc2
+    - javstash
+  scrape_actress: true
+  flaresolverr:
+    enabled: false
+    url: "http://localhost:8191/v1"
+    timeout: 30
+    max_retries: 3
+    session_ttl: 300
+  browser:
+    enabled: false
+    timeout: 30
+    max_retries: 3
+    headless: true
+    stealth_mode: true
+  proxy:
+    enabled: false
+```
+
+### File Matching Defaults
+
+```yaml
+file_matching:
+  extensions:
+    - .mp4
+    - .mkv
+    - .avi
+    - .wmv
+    - .flv
+  min_size_mb: 0
+  exclude_patterns:
+    - '*-trailer*'
+    - '*-sample*'
+  regex_enabled: false
+  regex_pattern: '([a-zA-Z|tT28]+-\d+[zZ]?[eE]?)(?:-pt)?(\d{1,2})?'
+```
+
+### Output Defaults
+
+```yaml
+output:
+  folder_format: "<ID> [<STUDIO>] - <TITLE> (<YEAR>)"
+  file_format: "<ID><IF:MULTIPART>-pt<PART></IF>"
+  subfolder_format: ["<ID>"]
+  delimiter: ", "
+  max_title_length: 100
+  max_path_length: 240
+  move_subtitles: false
+  subtitle_extensions:
+    - .srt
+    - .ass
+    - .ssa
+    - .smi
+    - .vtt
+  rename_folder_in_place: false
+  move_to_folder: true
+  rename_file: true
+  group_actress: false
+  poster_format: "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg"
+  fanart_format: "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg"
+  trailer_format: "<ID>-trailer.mp4"
+  screenshot_format: "fanart<INDEX>.jpg"
+  screenshot_folder: "extrafanart"
+  screenshot_padding: 1
+  actress_folder: ".actors"
+  actress_format: "<ACTORNAME>.jpg"
+  download_cover: true
+  download_poster: true
+  download_extrafanart: true
+  download_trailer: true
+  download_actress: true
+  download_timeout: 60
+```
+
+### Database Defaults
+
+```yaml
+database:
+  type: sqlite
+  dsn: data/javinizer.db
+  log_level: silent
+```
+
+### Logging Defaults
+
+```yaml
+logging:
+  level: info
+  format: text
+  output: "stdout,data/logs/javinizer.log"
+  max_size_mb: 10
+  max_backups: 5
+  max_age_days: 0
+  compress: true
+```
+
+### Performance Defaults
+
+```yaml
+performance:
+  max_workers: 5
+  worker_timeout: 300
+  buffer_size: 100
+  update_interval: 100
+```
+
+### System Defaults
+
+```yaml
+system:
+  umask: "002"
+  version_check_enabled: true
+  version_check_interval_hours: 24
+  temp_dir: data/temp
+```
+
+### NFO Defaults
+
+```yaml
+metadata:
+  nfo:
+    enabled: true
+    display_name: "<TITLE>"
+    filename_template: "<ID>.nfo"
+    first_name_order: true
+    actress_language_ja: false
+    per_file: false
+    unknown_actress_text: "Unknown"
+    actress_as_tag: false
+    add_generic_role: false
+    alt_name_role: false
+    include_original_path: false
+    include_stream_details: false
+    include_fanart: true
+    include_trailer: true
+    rating_source: "dmm"  # First scraper in priority list
+```
+
+### Translation Defaults
+
+```yaml
+metadata:
+  translation:
+    enabled: false
+    provider: openai
+    source_language: ja
+    target_language: en
+    timeout_seconds: 60
+    apply_to_primary: true
+    overwrite_existing_target: true
+    fields:
+      title: true
+      original_title: true
+      description: true
+      director: true
+      maker: true
+      label: true
+      series: true
+      genres: true
+      actresses: true
+    openai:
+      base_url: "https://api.openai.com/v1"
+      api_key: ""
+      model: "gpt-4o-mini"
+    deepl:
+      mode: "free"
+      base_url: ""
+      api_key: ""
+    google:
+      mode: "free"
+      base_url: ""
+      api_key: ""
+    openai_compatible:
+      base_url: "http://localhost:11434/v1"
+      api_key: ""
+      model: ""
+    anthropic:
+      base_url: "https://api.anthropic.com"
+      api_key: ""
+      model: "claude-sonnet-4-20250514"
+```
+
+### Metadata Management Defaults
+
+```yaml
+metadata:
+  actress_database:
+    enabled: true
+    auto_add: true
+    convert_alias: false
+  genre_replacement:
+    enabled: true
+    auto_add: true
+  tag_database:
+    enabled: false
+  ignore_genres: []
+```
+
+### How Defaults Are Applied
+
+1. **First run**: If no config file exists, Javinizer creates one with all defaults
+2. **Config migration**: If config file has older `config_version`, missing fields are filled with defaults
+3. **Environment overrides**: Environment variables override both config and defaults
+4. **CLI flags**: Command-line flags override all other sources
+
+To view your current configuration with all defaults applied:
+
+```bash
+javinizer info
+```
+
+## Per-Environment Configuration
+
+Javinizer does not use separate configuration files for different environments (development, staging, production). Instead, use environment variables and Docker configurations for environment-specific settings.
+
+### Environment Variable Strategy
+
+Use environment variables to override settings per environment:
+
+**Development:**
+```bash
+export LOG_LEVEL=debug
+export JAVINIZER_DB=data/javinizer-dev.db
+export JAVINIZER_TEMP_DIR=/tmp/javinizer-dev
+javinizer api
+```
+
+**Production:**
+```bash
+export LOG_LEVEL=info
+export JAVINIZER_DB=/var/lib/javinizer/javinizer.db
+export UMASK=022
+javinizer api
+```
+
+### Docker Environment Configuration
+
+Docker deployments use `.env` files for per-environment settings:
+
+**Development (`.env.dev`):**
+```bash
+LOG_LEVEL=debug
+JAVINIZER_DEV_MODE=true
+VITE_API_URL=http://localhost:8080
+```
+
+**Production (`.env.prod`):**
+```bash
+LOG_LEVEL=info
+TZ=UTC
+PUID=1000
+PGID=1000
+UMASK=022
+```
+
+Use with Docker Compose:
+
+```bash
+# Development
+docker-compose --env-file .env.dev up
+
+# Production
+docker-compose --env-file .env.prod up
+```
+
+### Config File Location Strategy
+
+For different environments, maintain separate config directories:
+
+```bash
+# Directory structure
+configs/
+  ├── config.yaml           # Default/shared config
+  ├── dev/
+  │   └── config.yaml       # Development overrides
+  └── prod/
+      └── config.yaml       # Production overrides
+
+# Development
+export JAVINIZER_CONFIG=configs/dev/config.yaml
+javinizer api
+
+# Production
+export JAVINIZER_CONFIG=configs/prod/config.yaml
+javinizer api
+```
+
+### Docker Volume Strategy
+
+Use Docker volumes to inject environment-specific configuration:
+
+```yaml
+# docker-compose.yml
+services:
+  javinizer:
+    image: javinizer/javinizer:latest
+    volumes:
+      - ./config/prod:/config:ro  # Production config
+      - ./data:/data
+    environment:
+      - JAVINIZER_CONFIG=/config/config.yaml
+```
+
+### Common Environment-Specific Settings
+
+**Security (production only):**
+```yaml
+api:
+  security:
+    allowed_directories:
+      - /media
+    allowed_origins:
+      - "https://javinizer.example.com"
+```
+
+**Logging (per environment):**
+- Development: `LOG_LEVEL=debug`
+- Staging: `LOG_LEVEL=info`
+- Production: `LOG_LEVEL=warn`
+
+**Database (per environment):**
+- Development: `JAVINIZER_DB=data/javinizer-dev.db`
+- Production: `JAVINIZER_DB=/var/lib/javinizer/javinizer.db`
+
+**CORS origins (per environment):**
+- Development: `http://localhost:*`
+- Production: `https://your-domain.com`
+
+### Secrets Management
+
+For production deployments, avoid storing sensitive values in config files:
+
+**Using environment variables for secrets:**
+```bash
+# Translation API keys
+export OPENAI_API_KEY=sk-...
+export DEEPL_API_KEY=...
+
+# Scraper API keys
+export JAVSTASH_API_KEY=...
+
+# GitHub token for version check
+export GH_TOKEN=ghp_...
+```
+
+**Using Docker secrets:**
+```yaml
+services:
+  javinizer:
+    environment:
+      - OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
+    secrets:
+      - openai_api_key
+
+secrets:
+  openai_api_key:
+    file: ./secrets/openai_api_key.txt
+```
+
+**Using Kubernetes secrets:**
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: javinizer-secrets
+type: Opaque
+data:
+  openai-api-key: <base64-encoded>
+---
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+      - name: javinizer
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: javinizer-secrets
+              key: openai-api-key
+```
+
 ---
 
 **Next**: [CLI Reference](./03-cli-reference.md)

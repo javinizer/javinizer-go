@@ -1933,17 +1933,20 @@ func TestFilterPlaceholderScreenshots(t *testing.T) {
 			wantLen:        0,
 		},
 		{
-			name: "no hashes configured - detection skipped",
+			name: "small image filtered via default hash match",
 			setupServer: func() *httptest.Server {
-				// Server should never be called when no hashes configured
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					t.Error("should not make HTTP request when no hashes configured")
+					if r.Method == http.MethodHead {
+						w.Header().Set("Content-Length", "100")
+						return
+					}
+					w.Write(placeholderImage)
 				}))
 			},
 			urls:           []string{"small-image"},
 			thresholdBytes: 10 * 1024,
-			hashes:         []string{},
-			wantLen:        1, // All URLs kept when no hashes - detection skipped
+			hashes:         []string{placeholderHash},
+			wantLen:        0,
 		},
 		{
 			name: "large file kept",

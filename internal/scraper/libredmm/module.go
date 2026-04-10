@@ -52,6 +52,22 @@ func (m *scraperModule) Options() any {
 			Description: "LibreDMM base URL",
 			Type:        "string",
 		},
+		contracts.ScraperOption{
+			Key:         "placeholder_threshold",
+			Label:       "Placeholder Threshold",
+			Description: "File size threshold in KB for detecting placeholder screenshots. Files smaller than this are checked against known placeholder hashes.",
+			Type:        "number",
+			Default:     10,
+			Min:         intPtr(1),
+			Max:         intPtr(1000),
+			Unit:        "KB",
+		},
+		contracts.ScraperOption{
+			Key:         "extra_placeholder_hashes",
+			Label:       "Extra Placeholder Hashes",
+			Description: "Additional SHA256 hashes of known placeholder images. Each hash is a 64-character hex string.",
+			Type:        "string",
+		},
 	}
 }
 func (m *scraperModule) Defaults() any {

@@ -7,7 +7,7 @@
 	import Card from './ui/Card.svelte';
 	import ImageViewer from './ImageViewer.svelte';
 	import VideoModal from './VideoModal.svelte';
-	import { Plus, Trash2, Image as ImageIcon, Play, RotateCcw } from 'lucide-svelte';
+	import { Plus, Trash2, Image as ImageIcon, Play, RotateCcw, Info, ChevronDown } from 'lucide-svelte';
 
 	interface Props {
 		movie: Movie;
@@ -34,6 +34,9 @@
 
 	// Trailer modal state
 	let showTrailerModal = $state(false);
+
+	// Disclaimer expand state
+	let showDisclaimer = $state(false);
 
 	// Sync state when movie prop changes
 	$effect(() => {
@@ -313,6 +316,23 @@
 						Remove All
 					{/snippet}
 				</Button>
+			{/if}
+		</div>
+
+		<!-- Placeholder filtering disclaimer (collapsible) -->
+		<div class="mb-3">
+			<button
+				onclick={() => (showDisclaimer = !showDisclaimer)}
+				class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+			>
+				<Info class="h-3 w-3" />
+				<span>Why fewer screenshots?</span>
+				<ChevronDown class="h-3 w-3 transition-transform {showDisclaimer ? 'rotate-180' : ''}" />
+			</button>
+			{#if showDisclaimer}
+				<p class="mt-1.5 text-xs text-muted-foreground pl-5">
+					Placeholder images are automatically filtered during scraping via hash match or file size threshold.
+				</p>
 			{/if}
 		</div>
 

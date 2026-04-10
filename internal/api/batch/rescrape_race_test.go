@@ -776,6 +776,12 @@ func TestRescrapeBatchMovie_PosterCleanup(t *testing.T) {
 // P0 PLATFORM - Case-only ID change in overlapping rescrapes should NOT delete poster on macOS/Windows
 // This test verifies the guard logic in the overlapping rescrape cleanup path (lines 493-518)
 func TestRescrapeBatchMovie_OverlappingRescrape_CaseInsensitiveFS(t *testing.T) {
+	// Skip on case-sensitive filesystems (Linux typically uses ext4 which is case-sensitive)
+	tempDir := t.TempDir()
+	if !isCaseInsensitiveFS(tempDir) {
+		t.Skip("Skipping on case-sensitive filesystem - test is for case-insensitive FS behavior")
+	}
+
 	initTestWebSocket(t)
 	gin.SetMode(gin.TestMode)
 

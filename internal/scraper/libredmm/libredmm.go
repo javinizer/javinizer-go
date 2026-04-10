@@ -19,6 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraper/image/placeholder"
 )
 
 const (
@@ -237,7 +238,9 @@ func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
 			if msg := cleanString(payload.Err); msg != "" {
 				return nil, fmt.Errorf("LibreDMM returned error: %s", msg)
 			}
-			return payloadToResult(payload, targetURL, id, s.client.GetClient()), nil
+			result := payloadToResult(payload, targetURL, id, s.client.GetClient())
+			s.filterPlaceholderScreenshots(result)
+			return result, nil
 		case 202:
 			msg := cleanString(payload.Err)
 			if msg == "" {
@@ -375,7 +378,9 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 			if msg := cleanString(payload.Err); msg != "" {
 				return nil, fmt.Errorf("LibreDMM returned error: %s", msg)
 			}
-			return payloadToResult(payload, targetURL, id, s.client.GetClient()), nil
+			result := payloadToResult(payload, targetURL, id, s.client.GetClient())
+			s.filterPlaceholderScreenshots(result)
+			return result, nil
 		case 202:
 			msg := cleanString(payload.Err)
 			if msg == "" {
@@ -886,4 +891,25 @@ func isHTTPURL(v string) bool {
 		return false
 	}
 	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+func (s *Scraper) filterPlaceholderScreenshots(result *models.ScraperResult) {
+	if len(result.ScreenshotURL) == 0 {
+		return
+	}
+
+	cfg := placeholder.ConfigFromSettings(&s.settings, placeholder.DefaultDMMPlaceholderHashes)
+	if !cfg.Enabled {
+		return
+	}
+
+	filtered, count, err := placeholder.FilterURLs(context.Background(), s.client, result.ScreenshotURL, cfg)
+	if err != nil {
+		logging.Warnf("libredmm: placeholder filter error: %v", err)
+		return
+	}
+	if count > 0 {
+		logging.Debugf("libredmm: Filtered %d placeholder screenshots", count)
+		result.ScreenshotURL = filtered
+	}
 }

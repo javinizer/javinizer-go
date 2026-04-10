@@ -303,6 +303,91 @@ Now that you have the basics working, explore these topics:
 4. **Use descriptive filenames** - Include the JAV ID for accurate matching
 5. **Check genre replacements** - Run `javinizer genre list` to see active replacements
 
+## Common Setup Issues
+
+### Port 8080 Already in Use
+
+**Problem**: Default API server port (8080) conflicts with another service.
+
+**Solution**:
+```bash
+# Option 1: Use a different port
+PORT=3000 javinizer web
+
+# Option 2: Change in config.yaml
+server:
+  port: 3000
+
+# Option 3: For Docker users, set HOST_PORT in .env
+HOST_PORT=3000
+```
+
+### Permission Denied When Running Binary
+
+**Problem**: Binary lacks execute permission.
+
+**Solution**:
+```bash
+chmod +x javinizer
+```
+
+### Permission Denied During File Operations
+
+**Problem**: Insufficient permissions to read/write files.
+
+**Solutions**:
+- Check directory permissions: `ls -la /path/to/videos`
+- Fix permissions: `chmod 755 /path/to/videos`
+- Run with appropriate user privileges
+- For Docker: Ensure `PUID`/`PGID` match your host user (check with `id -u` and `id -g`)
+
+### Missing Configuration or Database
+
+**Problem**: "Config file not found" or "Database not initialized" errors.
+
+**Solution**:
+```bash
+# Initialize configuration and database
+javinizer init
+
+# Or restore from backup
+cp backup/config.yaml configs/
+cp backup/javinizer.db data/
+```
+
+### Docker Container Permission Issues
+
+**Problem**: Container cannot access mounted volumes.
+
+**Solution**:
+```bash
+# Get your host user IDs
+id -u   # Shows your UID
+id -g   # Shows your GID
+
+# Set in .env file
+PUID=1000  # Replace with your UID
+PGID=1000  # Replace with your GID
+```
+
+On Unraid, common values are `PUID=99` and `PGID=100`.
+
+### Scraper Fails with Cookie Error
+
+**Problem**: Certain scrapers (e.g., MGStage) require authentication cookies.
+
+**Solution**:
+```yaml
+# Add required cookies in config.yaml
+scrapers:
+  mgstage:
+    enabled: true
+    cookies:
+      adc: "1"  # Age verification cookie
+```
+
+For detailed troubleshooting, see the [Troubleshooting Guide](./10-troubleshooting.md).
+
 ## Getting Help
 
 - **Built-in Help**: `javinizer <command> --help`

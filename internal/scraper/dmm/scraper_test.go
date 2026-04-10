@@ -6,6 +6,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestScraperImplementsInterface verifies that DMM Scraper implements the models.Scraper interface.
@@ -181,6 +182,161 @@ func TestScraperConfigDefaults(t *testing.T) {
 	assert.NotNil(t, scraper.client, "HTTP client should always be initialized")
 	assert.False(t, scraper.scrapeActress, "scrapeActress should default to false")
 	assert.False(t, scraper.useBrowser, "useBrowser should default to false")
-	// BrowserConfig.Timeout uses default value (30)
 	assert.Equal(t, 30, scraper.browserConfig.Timeout, "browserConfig.Timeout should use default value")
+}
+
+func TestNewSettingsPassthrough(t *testing.T) {
+	tests := []struct {
+		name           string
+		settings       config.ScraperSettings
+		globalTimeout  int
+		wantRetryCount int
+		wantRateLimit  int
+		wantTimeout    int
+	}{
+		{
+			name: "retry_count passthrough",
+			settings: config.ScraperSettings{
+				Enabled:    true,
+				RetryCount: 5,
+			},
+			globalTimeout:  0,
+			wantRetryCount: 5,
+			wantRateLimit:  0,
+			wantTimeout:    30,
+		},
+		{
+			name: "rate_limit passthrough",
+			settings: config.ScraperSettings{
+				Enabled:   true,
+				RateLimit: 100,
+			},
+			globalTimeout:  0,
+			wantRetryCount: 0,
+			wantRateLimit:  100,
+			wantTimeout:    30,
+		},
+		{
+			name: "timeout from settings",
+			settings: config.ScraperSettings{
+				Enabled: true,
+				Timeout: 60,
+			},
+			globalTimeout:  0,
+			wantRetryCount: 0,
+			wantRateLimit:  0,
+			wantTimeout:    60,
+		},
+		{
+			name: "timeout fallback to global config",
+			settings: config.ScraperSettings{
+				Enabled: true,
+				Timeout: 0,
+			},
+			globalTimeout:  45,
+			wantRetryCount: 0,
+			wantRateLimit:  0,
+			wantTimeout:    45,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			globalConfig := createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false)
+			globalConfig.TimeoutSeconds = tt.globalTimeout
+
+			scraper := New(tt.settings, globalConfig, nil)
+			require.NotNil(t, scraper, "New should return a non-nil scraper")
+
+			cfg := scraper.Config()
+			assert.Equal(t, tt.wantRetryCount, cfg.RetryCount, "RetryCount should match expected value")
+			assert.Equal(t, tt.wantRateLimit, cfg.RateLimit, "RateLimit should match expected value")
+			assert.Equal(t, tt.wantTimeout, cfg.Timeout, "Timeout should match expected value")
+		})
+	}
+}
+
+func TestNewProxySettingsPassthrough(t *testing.T) {
+	tests := []struct {
+		name         string
+		settings     config.ScraperSettings
+		globalConfig *config.ScrapersConfig
+		wantProxy    bool
+		wantProfile  string
+	}{
+		{
+			name: "scraper proxy with profile",
+			settings: config.ScraperSettings{
+				Enabled: true,
+				Proxy: &config.ProxyConfig{
+					Enabled: true,
+					Profile: "test-profile",
+					Profiles: map[string]config.ProxyProfile{
+						"test-profile": {
+							URL: "http://test-proxy:8080",
+						},
+					},
+				},
+			},
+			globalConfig: createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false),
+			wantProxy:    true,
+			wantProfile:  "test-profile",
+		},
+		{
+			name: "scraper proxy without profile disabled",
+			settings: config.ScraperSettings{
+				Enabled: true,
+				Proxy: &config.ProxyConfig{
+					Enabled: false,
+				},
+			},
+			globalConfig: createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false),
+			wantProxy:    false,
+			wantProfile:  "",
+		},
+		{
+			name: "download_proxy preserved in config",
+			settings: config.ScraperSettings{
+				Enabled: true,
+				DownloadProxy: &config.ProxyConfig{
+					Enabled: true,
+					Profile: "download-profile",
+					Profiles: map[string]config.ProxyProfile{
+						"download-profile": {
+							URL: "http://download-proxy:8080",
+						},
+					},
+				},
+			},
+			globalConfig: createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false),
+			wantProxy:    false,
+			wantProfile:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scraper := New(tt.settings, tt.globalConfig, nil)
+			require.NotNil(t, scraper, "New should return a non-nil scraper")
+
+			cfg := scraper.Config()
+			if tt.settings.Proxy != nil {
+				assert.Equal(t, tt.settings.Proxy.Enabled, cfg.Proxy != nil && cfg.Proxy.Enabled, "Proxy.Enabled should be preserved in config")
+				if tt.settings.Proxy.Profile != "" {
+					assert.Equal(t, tt.settings.Proxy.Profile, cfg.Proxy.Profile, "Proxy.Profile should be preserved in config")
+				}
+			}
+
+			if tt.settings.DownloadProxy != nil {
+				assert.NotNil(t, cfg.DownloadProxy, "DownloadProxy should be preserved in config")
+				if tt.settings.DownloadProxy.Profile != "" {
+					assert.Equal(t, tt.settings.DownloadProxy.Profile, cfg.DownloadProxy.Profile, "DownloadProxy.Profile should be preserved in config")
+				}
+			}
+
+			if tt.wantProxy && tt.wantProfile != "" {
+				assert.NotNil(t, scraper.proxyProfile, "proxyProfile should be set when proxy is enabled with valid profile")
+			}
+		})
+	}
 }

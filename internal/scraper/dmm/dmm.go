@@ -19,6 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraper/image/placeholder"
 )
 
 const (
@@ -65,37 +66,47 @@ type Scraper struct {
 	proxyOverride *config.ProxyConfig
 	downloadProxy *config.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings // stores the full settings for Config() method
+	settings      config.ScraperSettings
 }
 
-// New creates a new DMM scraper
+func resolveTimeout(scraperTimeout, globalTimeout int) int {
+	if scraperTimeout > 0 {
+		return scraperTimeout
+	}
+	if globalTimeout > 0 {
+		return globalTimeout
+	}
+	return 30
+}
+
 func New(settings config.ScraperSettings, globalConfig *config.ScrapersConfig, contentIDRepo *database.ContentIDMappingRepository) *Scraper {
-	// Guard against nil globalConfig
 	if globalConfig == nil {
 		globalConfig = &config.ScrapersConfig{}
 	}
 
-	// Construct ScraperConfig from ScraperSettings for HTTP client creation
+	resolvedTimeout := resolveTimeout(settings.Timeout, globalConfig.TimeoutSeconds)
+	settings.Timeout = resolvedTimeout
+
 	scraperCfg := &config.ScraperSettings{
 		Enabled:       settings.Enabled,
-		Timeout:       30, // default (seconds)
-		RateLimit:     0,  // DMM doesn't have per-request delay
-		RetryCount:    3,  // default
+		Timeout:       resolvedTimeout,
+		RateLimit:     settings.RateLimit,
+		RetryCount:    settings.RetryCount,
 		UserAgent:     settings.UserAgent,
 		Proxy:         settings.Proxy,
 		DownloadProxy: settings.DownloadProxy,
 	}
 
-	// Create HTTP client via per-scraper NewHTTPClient (HTTP-01)
 	client, proxyProfile, err := NewHTTPClient(scraperCfg, &globalConfig.Proxy, globalConfig.FlareSolverr)
 	if err != nil {
-		// Fallback: try without proxy
 		fallbackCfg := &config.ScraperSettings{
-			Enabled:    settings.Enabled,
-			Timeout:    30,
-			RateLimit:  0,
-			RetryCount: 3,
-			UserAgent:  settings.UserAgent,
+			Enabled:       settings.Enabled,
+			Timeout:       resolveTimeout(settings.Timeout, 0),
+			RateLimit:     settings.RateLimit,
+			RetryCount:    settings.RetryCount,
+			UserAgent:     settings.UserAgent,
+			Proxy:         settings.Proxy,
+			DownloadProxy: settings.DownloadProxy,
 		}
 		var fallbackErr error
 		client, proxyProfile, fallbackErr = NewHTTPClient(fallbackCfg, nil, globalConfig.FlareSolverr)
@@ -106,7 +117,6 @@ func New(settings config.ScraperSettings, globalConfig *config.ScrapersConfig, c
 		logging.Debugf("DMM: Using fallback HTTP client without proxy: %v", err)
 	}
 
-	// Log proxy usage if enabled
 	proxyEnabled := globalConfig.Proxy.Enabled
 	if settings.Proxy != nil && settings.Proxy.Enabled {
 		proxyEnabled = true
@@ -122,7 +132,7 @@ func New(settings config.ScraperSettings, globalConfig *config.ScrapersConfig, c
 		useBrowser:    settings.ShouldUseBrowser(globalConfig.Browser.Enabled),
 		browserConfig: globalConfig.Browser,
 		contentIDRepo: contentIDRepo,
-		proxyProfile:  proxyProfile, // Store effective proxy profile for browser operations
+		proxyProfile:  proxyProfile,
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
@@ -1505,39 +1515,15 @@ func (s *Scraper) filterPlaceholderScreenshots(ctx context.Context, urls []strin
 		return urls
 	}
 
-	hashes := MergePlaceholderHashes(&s.settings)
-
-	// Skip detection if no hashes configured - nothing to filter (per D-14)
-	// This avoids unnecessary HTTP requests when placeholder detection is effectively disabled
-	if len(hashes) == 0 {
+	cfg := placeholder.ConfigFromSettings(&s.settings, placeholder.DefaultDMMPlaceholderHashes)
+	filtered, count, err := placeholder.FilterURLs(ctx, s.client, urls, cfg)
+	if err != nil {
+		logging.Warnf("DMM: Placeholder filter error: %v", err)
 		return urls
 	}
-
-	thresholdKB := GetPlaceholderThreshold(&s.settings)
-	thresholdBytes := int64(thresholdKB * 1024)
-
-	filtered := make([]string, 0, len(urls))
-	filteredCount := 0
-
-	for _, url := range urls {
-		isPlaceholder, err := IsPlaceholder(ctx, s.client, url, thresholdBytes, hashes)
-		if err != nil {
-			logging.Warnf("DMM: Placeholder check failed for %s: %v", url, err)
-			filtered = append(filtered, url)
-			continue
-		}
-
-		if isPlaceholder {
-			filteredCount++
-		} else {
-			filtered = append(filtered, url)
-		}
+	if count > 0 {
+		logging.Debugf("DMM: Filtered %d placeholder screenshots from results", count)
 	}
-
-	if filteredCount > 0 {
-		logging.Debugf("DMM: Filtered %d placeholder screenshots from results", filteredCount)
-	}
-
 	return filtered
 }
 

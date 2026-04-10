@@ -23,19 +23,20 @@ Javinizer Go is a metadata scraper and file organizer for Japanese Adult Videos 
 
 | Scraper | Enabled by default (`config.yaml.example`) | Language options | Notes |
 |---|---|---|---|
-| `dmm` | Yes | N/A | Supports optional browser mode for JS-rendered pages. |
 | `r18dev` | Yes | `en`, `ja` | JSON API scraper with rate-limit handling options. |
-| `libredmm` | Yes | N/A | Community mirror source. |
+| `dmm` | No | N/A | Supports optional browser mode for JS-rendered pages; placeholder detection for screenshots. |
+| `libredmm` | No | N/A | Community mirror source. |
 | `mgstage` | No | N/A | Usually requires age-verification cookie (`adc=1`). |
 | `javlibrary` | No | `en`, `ja`, `cn`, `tw` | Can use FlareSolverr for Cloudflare challenges. |
 | `javdb` | No | N/A | Can use FlareSolverr; proxy-friendly setup. |
-| `javbus` | No | `ja` | Japanese mode in example config. |
+| `javbus` | No | `ja`, `en`, `zh` | Multi-language support. |
 | `jav321` | No | N/A | Alternative index source. |
-| `tokyohot` | No | `ja` | Tokyo-Hot specific source. |
-| `aventertainment` | No | `en` | Supports bonus screenshot scraping option. |
+| `tokyohot` | No | `ja`, `en`, `zh` | Tokyo-Hot specific source. |
+| `aventertainment` | No | `en`, `ja` | Supports bonus screenshot scraping option. |
 | `dlgetchu` | No | N/A | DLsite/Getchu-related source. |
-| `caribbeancom` | No | `ja` | Caribbeancom-specific source. |
+| `caribbeancom` | No | `ja`, `en` | Caribbeancom-specific source. |
 | `fc2` | No | N/A | FC2 source. |
+| `javstash` | No | `en`, `ja` | GraphQL API scraper; requires API key from javstash.org. |
 
 ## Installation
 
@@ -45,8 +46,8 @@ The easiest way to get started is with Docker:
 
 ```bash
 # 1) Create data directory and download config
-mkdir -p ./javinizer-data
-curl -o ./javinizer-data/config.yaml \
+mkdir -p ./data
+curl -o ./data/config.yaml \
   https://raw.githubusercontent.com/javinizer/javinizer-go/main/configs/config.yaml.example
 
 # 2) Edit config.yaml with your settings (scrapers, output paths, etc.)
@@ -55,7 +56,7 @@ curl -o ./javinizer-data/config.yaml \
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   -p 8080:8080 \
-  -v "$(pwd)/javinizer-data:/javinizer" \
+  -v "$(pwd)/data:/javinizer" \
   -v "/path/to/your/media:/media" \
   ghcr.io/javinizer/javinizer-go:latest
 ```
@@ -120,7 +121,7 @@ javinizer version
 
 ### Build from Source
 
-Requires Go 1.25+ and CGO (for SQLite support). For embedded web UI builds, Node.js 20+ is also required.
+Requires Go 1.25+ and CGO (for SQLite support). For embedded web UI builds, Node.js 20+ is also required (Node 22 used in CI).
 
 ```bash
 go install github.com/javinizer/javinizer-go/cmd/javinizer@latest
@@ -184,6 +185,8 @@ Add custom tags to movies (appears in NFO files):
 javinizer tag add IPX-535 "favorite" "4K"
 javinizer tag list IPX-535
 javinizer tag remove IPX-535 "favorite"
+javinizer tag search "favorite"     # Find movies by tag
+javinizer tag tags                  # List all unique tags
 ```
 
 ### Genre Management
@@ -198,11 +201,13 @@ javinizer genre remove "Creampie"
 
 ### History Tracking
 
-View and rollback file organization operations:
+View file organization operations:
 
 ```bash
-javinizer history list
-javinizer history rollback <operation-id>
+javinizer history list           # List recent operations
+javinizer history stats           # Show operation statistics
+javinizer history movie <id>      # Show history for specific movie
+javinizer history clean --days 30 # Clean records older than 30 days
 ```
 
 ### System Info
@@ -210,9 +215,7 @@ javinizer history rollback <operation-id>
 Display configuration, scrapers, and database status:
 
 ```bash
-javinizer info
-javinizer info --scrapers  # List enabled scrapers
-javinizer info --config    # Show current configuration
+javinizer info  # Show current configuration and database status
 ```
 
 ### API + Web Server (`web` Alias)
@@ -268,6 +271,7 @@ docker run -p 8080:8080 -v ./data:/javinizer ghcr.io/javinizer/javinizer-go:late
 - **Dashboard** - Quick stats and recent activity
 - **Browse** - View organized movies with covers and metadata
 - **Review** - Batch scrape files, crop posters, edit metadata before organizing
+- **Jobs** - Monitor active batch jobs and progress in real-time
 - **Actresses** - Browse actress database with images
 - **History** - View and rollback organization operations
 - **Settings** - Configure scrapers, output templates, and proxy settings
@@ -313,6 +317,8 @@ See `web/frontend/README.md` for more details.
 
 Docker deployments support environment variable overrides:
 
+### Core Variables
+
 | Variable | Description | Default | Example |
 |----------|-------------|---------|---------|
 | `PUID` | Runtime user ID for container process (preferred) | `1000` | `99` (common on Unraid) |
@@ -322,10 +328,35 @@ Docker deployments support environment variable overrides:
 | `JAVINIZER_CONFIG` | Path to config file | `/javinizer/config.yaml` | `/custom/config.yaml` |
 | `JAVINIZER_DB` | Path to SQLite database | `/javinizer/javinizer.db` | `/custom/db.db` |
 | `JAVINIZER_LOG_DIR` | Relocate file targets from `logging.output` to this directory (does not enable file logging by itself) | `/javinizer/logs` | `/custom/logs` |
+| `JAVINIZER_TEMP_DIR` | Temp directory for downloads | `data/temp` | `/custom/temp` |
 | `LOG_LEVEL` | Logging verbosity | `info` | `debug`, `warn`, `error` |
 | `UMASK` | File permission mask | `002` | `022` (owner-only write) |
 | `TZ` | Timezone for logs | `UTC` | `America/New_York` |
-| `PORT` | API server port | `8080` | `9000` |
+
+### Translation API Keys
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `TRANSLATION_PROVIDER` | Translation provider | `openai`, `deepl`, `google`, `anthropic` |
+| `TRANSLATION_SOURCE_LANGUAGE` | Source language | `ja` |
+| `TRANSLATION_TARGET_LANGUAGE` | Target language | `en` |
+| `OPENAI_API_KEY` | OpenAI API key | `sk-...` |
+| `DEEPL_API_KEY` | DeepL API key | `...` |
+| `GOOGLE_TRANSLATE_API_KEY` | Google Translate API key | `...` |
+| `ANTHROPIC_API_KEY` | Anthropic API key | `...` |
+
+### Scraper API Keys
+
+| Variable | Description |
+|----------|-------------|
+| `JAVSTASH_API_KEY` | JavStash GraphQL API key (get from javstash.org) |
+
+### Development
+
+| Variable | Description |
+|----------|-------------|
+| `CHROME_BIN` | Chrome binary path for browser scraping |
+| `GH_TOKEN` | GitHub token (avoids rate limits for update checks) |
 
 `JAVINIZER_LOG_DIR` examples:
 - `logging.output: stdout` + `JAVINIZER_LOG_DIR=/custom/logs` -> `stdout` (no file output)
@@ -408,6 +439,9 @@ See [Template System](./docs/04-template-system.md) for full documentation.
 - [API Reference](./docs/07-api-reference.md) - REST API endpoints
 - [Template System](./docs/04-template-system.md) - Output naming templates
 - [Genre Management](./docs/05-genre-management.md) - Genre replacement rules
+- [Testing Guide](./docs/12-testing-guide.md) - Testing practices and coverage
+- [Development Guide](./docs/09-development.md) - Contributing and development setup
+- [Architecture](./docs/16-architecture.md) - System architecture overview
 - [Troubleshooting](./docs/10-troubleshooting.md) - Common issues and solutions
 
 ## Support
