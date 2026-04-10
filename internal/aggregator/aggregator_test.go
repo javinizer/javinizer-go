@@ -1695,6 +1695,99 @@ func TestAggregateAllScrapersEmptyResults(t *testing.T) {
 	})
 }
 
+// TestScreenshotsFallback tests screenshot aggregation fallback behavior
+// Validates AGGREGATE-01: Empty arrays treated as "no data"
+// Validates AGGREGATE-02: Fallback to lower priority source when higher has empty screenshots
+func TestScreenshotsFallback(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"dmm", "javbus"},
+		},
+		Metadata: config.MetadataConfig{
+			Priority: config.PriorityConfig{
+				Priority: []string{"dmm", "javbus"},
+			},
+		},
+	}
+
+	agg := New(cfg)
+
+	tests := []struct {
+		name            string
+		results         []*models.ScraperResult
+		priority        []string
+		wantScreenshots []string
+		wantLen         int
+	}{
+		{
+			name: "DMM empty, fallback to JavBus",
+			results: []*models.ScraperResult{
+				{Source: "dmm", ScreenshotURL: []string{}},
+				{Source: "javbus", ScreenshotURL: []string{"url1", "url2", "url3"}},
+			},
+			priority:        []string{"dmm", "javbus"},
+			wantScreenshots: []string{"url1", "url2", "url3"},
+			wantLen:         3,
+		},
+		{
+			name: "DMM populated, no fallback",
+			results: []*models.ScraperResult{
+				{Source: "dmm", ScreenshotURL: []string{"dmm1", "dmm2"}},
+				{Source: "javbus", ScreenshotURL: []string{"javbus1"}},
+			},
+			priority:        []string{"dmm", "javbus"},
+			wantScreenshots: []string{"dmm1", "dmm2"},
+			wantLen:         2,
+		},
+		{
+			name: "All sources empty",
+			results: []*models.ScraperResult{
+				{Source: "dmm", ScreenshotURL: []string{}},
+				{Source: "javbus", ScreenshotURL: nil},
+			},
+			priority:        []string{"dmm", "javbus"},
+			wantScreenshots: []string{},
+			wantLen:         0,
+		},
+		{
+			name: "Multiple sources with screenshots - first priority wins",
+			results: []*models.ScraperResult{
+				{Source: "dmm", ScreenshotURL: []string{"dmm1", "dmm2", "dmm3"}},
+				{Source: "javbus", ScreenshotURL: []string{"javbus1", "javbus2"}},
+			},
+			priority:        []string{"dmm", "javbus"},
+			wantScreenshots: []string{"dmm1", "dmm2", "dmm3"},
+			wantLen:         3,
+		},
+		{
+			name: "Nil treated as empty",
+			results: []*models.ScraperResult{
+				{Source: "dmm", ScreenshotURL: nil},
+				{Source: "javbus", ScreenshotURL: []string{"url1", "url2"}},
+			},
+			priority:        []string{"dmm", "javbus"},
+			wantScreenshots: []string{"url1", "url2"},
+			wantLen:         2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resultsBySource := make(map[string]*models.ScraperResult)
+			for _, result := range tt.results {
+				resultsBySource[result.Source] = result
+			}
+
+			screenshots := agg.getScreenshotsByPriority(resultsBySource, tt.priority)
+
+			assert.Equal(t, tt.wantLen, len(screenshots), "Screenshot count mismatch")
+			if tt.wantLen > 0 {
+				assert.Equal(t, tt.wantScreenshots, screenshots, "Screenshots mismatch")
+			}
+		})
+	}
+}
+
 // TestAggregateConcurrentCacheReload tests cache reload during active aggregation
 // This validates AC-3.7.3: Cache updates during active aggregation → no stale data served
 func TestAggregateConcurrentCacheReload(t *testing.T) {

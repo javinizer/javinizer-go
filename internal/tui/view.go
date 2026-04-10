@@ -308,7 +308,7 @@ func (m *Model) renderCompletionBanner() string {
 	summary.WriteString(Success("✓ Processing Complete! "))
 
 	// Show file count
-	summary.WriteString(fmt.Sprintf("Processed %d files in %v", m.totalFilesCount, elapsed))
+	fmt.Fprintf(&summary, "Processed %d files in %v", m.totalFilesCount, elapsed)
 
 	// Show success/failed counts
 	if m.stats.Success > 0 || m.stats.Failed > 0 {
@@ -386,8 +386,8 @@ func (m *Model) renderSimpleBrowser() string {
 		b.WriteString(line + "\n")
 	}
 
-	b.WriteString(fmt.Sprintf("\n%d files, %d selected\n",
-		len(m.files), len(m.selectedFiles)))
+	fmt.Fprintf(&b, "\n%d files, %d selected\n",
+		len(m.files), len(m.selectedFiles))
 
 	return b.String()
 }
@@ -397,14 +397,14 @@ func (m *Model) renderSimpleDashboard() string {
 
 	b.WriteString(Title("Dashboard") + "\n\n")
 
-	b.WriteString(fmt.Sprintf("Total Tasks:    %d\n", m.stats.Total))
-	b.WriteString(fmt.Sprintf("Running:        %s\n", RunningBadge.Render(fmt.Sprintf("%d", m.stats.Running))))
-	b.WriteString(fmt.Sprintf("Success:        %s\n", Success(fmt.Sprintf("%d", m.stats.Success))))
+	fmt.Fprintf(&b, "Total Tasks:    %d\n", m.stats.Total)
+	fmt.Fprintf(&b, "Running:        %s\n", RunningBadge.Render(fmt.Sprintf("%d", m.stats.Running)))
+	fmt.Fprintf(&b, "Success:        %s\n", Success(fmt.Sprintf("%d", m.stats.Success)))
 	if m.stats.Failed > 0 {
-		b.WriteString(fmt.Sprintf("Failed:         %s\n", Error(fmt.Sprintf("%d", m.stats.Failed))))
+		fmt.Fprintf(&b, "Failed:         %s\n", Error(fmt.Sprintf("%d", m.stats.Failed)))
 	}
-	b.WriteString(fmt.Sprintf("\nProgress:       %.1f%%\n", m.stats.OverallProgress*100))
-	b.WriteString(fmt.Sprintf("Elapsed:        %v\n", m.elapsedTime.Round(time.Second)))
+	fmt.Fprintf(&b, "\nProgress:       %.1f%%\n", m.stats.OverallProgress*100)
+	fmt.Fprintf(&b, "Elapsed:        %v\n", m.elapsedTime.Round(time.Second))
 
 	return b.String()
 }
@@ -444,7 +444,7 @@ func (m *Model) renderSimpleLogs() string {
 		}
 
 		level := levelStyle.Render(fmt.Sprintf("%-5s", strings.ToUpper(log.Level)))
-		b.WriteString(fmt.Sprintf("%s %s %s\n", Dimmed(timestamp), level, log.Message))
+		fmt.Fprintf(&b, "%s %s %s\n", Dimmed(timestamp), level, log.Message)
 	}
 
 	return b.String()
@@ -517,8 +517,8 @@ func (m *Model) renderSimpleSettings() string {
 			checkbox = Success("☑")
 		}
 
-		b.WriteString(fmt.Sprintf("%s%s %s\n", cursorStr, checkbox, setting.name))
-		b.WriteString(fmt.Sprintf("   %s\n\n", Dimmed(setting.desc)))
+		fmt.Fprintf(&b, "%s%s %s\n", cursorStr, checkbox, setting.name)
+		fmt.Fprintf(&b, "   %s\n\n", Dimmed(setting.desc))
 	}
 
 	b.WriteString("\n" + Dimmed("Changes take effect on next processing run"))

@@ -511,13 +511,17 @@ scrapers:
     - r18dev
     - dmm
     - jav321
+  browser:
+    timeout: 60
   r18dev:
     enabled: false
   dmm:
     enabled: true
     scrape_actress: true
-    enable_browser: false
-    browser_timeout: 60
+    use_browser: false
+    placeholder_threshold: 15
+    extra_placeholder_hashes:
+      - "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 `
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "scraper_extended.yaml")
@@ -533,12 +537,15 @@ scrapers:
 	assert.Contains(t, cfg.Scrapers.Priority, "jav321")
 	assert.False(t, cfg.Scrapers.Overrides["r18dev"].Enabled)
 	assert.True(t, cfg.Scrapers.Overrides["dmm"].Enabled)
-	// Note: DMM-specific fields (scrape_actress, enable_browser, browser_timeout)
-	// were previously in Extra map. These tests are disabled during migration to
-	// concrete DMMConfig type.
+	assert.Equal(t, 60, cfg.Scrapers.Browser.Timeout)
+	dmmSettings := cfg.Scrapers.Overrides["dmm"]
+	assert.NotNil(t, dmmSettings)
+	assert.True(t, dmmSettings.ScrapeActress != nil && *dmmSettings.ScrapeActress)
+	assert.False(t, dmmSettings.UseBrowser)
+	assert.NotNil(t, dmmSettings.Extra)
+	assert.Equal(t, 15, dmmSettings.Extra["placeholder_threshold"])
 }
 
-// TestAllPriorityFields tests that the simplified PriorityConfig works
 func TestAllPriorityFields(t *testing.T) {
 	yamlContent := `
 scrapers:

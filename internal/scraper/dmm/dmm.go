@@ -777,15 +777,18 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 	}
 
 	// Extract screenshots - prioritize JSON-LD for new site
+	var screenshots []string
 	if isNewSite {
-		if screenshots := getStringSliceFromMetadata(jsonldMetadata, "screenshots"); len(screenshots) > 0 {
-			result.ScreenshotURL = screenshots
+		if ss := getStringSliceFromMetadata(jsonldMetadata, "screenshots"); len(ss) > 0 {
+			screenshots = ss
 		} else {
-			result.ScreenshotURL = s.extractScreenshots(doc, isNewSite)
+			screenshots = s.extractScreenshots(doc, isNewSite)
 		}
 	} else {
-		result.ScreenshotURL = s.extractScreenshots(doc, isNewSite)
+		screenshots = s.extractScreenshots(doc, isNewSite)
 	}
+	// Filter placeholder screenshots
+	result.ScreenshotURL = s.filterPlaceholderScreenshots(context.Background(), screenshots)
 
 	// Extract trailer URL - prioritize JSON-LD for new site
 	if isNewSite {
@@ -1493,6 +1496,49 @@ func (s *Scraper) extractScreenshots(doc *goquery.Document, isNewSite bool) []st
 	})
 
 	return screenshots
+}
+
+// filterPlaceholderScreenshots filters out placeholder images from screenshot URLs.
+// Returns filtered URLs and logs filtered count at Debug level per D-19.
+func (s *Scraper) filterPlaceholderScreenshots(ctx context.Context, urls []string) []string {
+	if len(urls) == 0 {
+		return urls
+	}
+
+	hashes := MergePlaceholderHashes(&s.settings)
+
+	// Skip detection if no hashes configured - nothing to filter (per D-14)
+	// This avoids unnecessary HTTP requests when placeholder detection is effectively disabled
+	if len(hashes) == 0 {
+		return urls
+	}
+
+	thresholdKB := GetPlaceholderThreshold(&s.settings)
+	thresholdBytes := int64(thresholdKB * 1024)
+
+	filtered := make([]string, 0, len(urls))
+	filteredCount := 0
+
+	for _, url := range urls {
+		isPlaceholder, err := IsPlaceholder(ctx, s.client, url, thresholdBytes, hashes)
+		if err != nil {
+			logging.Warnf("DMM: Placeholder check failed for %s: %v", url, err)
+			filtered = append(filtered, url)
+			continue
+		}
+
+		if isPlaceholder {
+			filteredCount++
+		} else {
+			filtered = append(filtered, url)
+		}
+	}
+
+	if filteredCount > 0 {
+		logging.Debugf("DMM: Filtered %d placeholder screenshots from results", filteredCount)
+	}
+
+	return filtered
 }
 
 // extractTrailerURL extracts the trailer video URL

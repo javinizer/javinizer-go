@@ -918,11 +918,15 @@ func (a *Aggregator) getScreenshotsByPriority(
 ) []string {
 	for _, source := range priority {
 		if result, exists := results[source]; exists {
-			if len(result.ScreenshotURL) > 0 {
+			screenshotCount := len(result.ScreenshotURL)
+			if screenshotCount > 0 {
+				logging.Debugf("Screenshots: Using %s (%d screenshots)", source, screenshotCount)
 				return result.ScreenshotURL
 			}
+			logging.Debugf("Screenshots: %s has 0 screenshots, checking next priority", source)
 		}
 	}
+	logging.Debugf("Screenshots: All sources returned empty screenshots")
 	return []string{}
 }
 

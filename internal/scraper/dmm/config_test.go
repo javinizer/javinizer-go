@@ -129,3 +129,60 @@ func TestValidateConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestDMMConfig_ToScraperSettings(t *testing.T) {
+	testHash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	cfg := &DMMConfig{
+		Enabled:                true,
+		RequestDelay:           500,
+		MaxRetries:             7,
+		UserAgent:              "CustomUA/1.0",
+		UseBrowser:             true,
+		ScrapeActress:          true,
+		PlaceholderThresholdKB: 15,
+		ExtraPlaceholderHashes: []string{testHash},
+	}
+
+	settings := cfg.ToScraperSettings()
+
+	assert.True(t, settings.Enabled, "Enabled should be preserved")
+	assert.Equal(t, 500, settings.RateLimit, "RateLimit (from RequestDelay) should be preserved")
+	assert.Equal(t, 7, settings.RetryCount, "RetryCount (from MaxRetries) should be preserved")
+	assert.Equal(t, "CustomUA/1.0", settings.UserAgent, "UserAgent should be preserved")
+	assert.True(t, settings.UseBrowser, "UseBrowser should be preserved")
+	assert.NotNil(t, settings.ScrapeActress, "ScrapeActress should be set")
+	assert.True(t, *settings.ScrapeActress, "ScrapeActress should be true")
+	assert.NotNil(t, settings.Extra, "Extra should be initialized")
+	assert.Equal(t, 15, settings.Extra["placeholder_threshold"], "Placeholder threshold should be in Extra")
+	assert.NotNil(t, settings.Extra["extra_placeholder_hashes"], "Placeholder hashes should be in Extra")
+}
+
+func TestDMMConfig_ToScraperSettings_ScrapeActressFalse(t *testing.T) {
+	cfg := &DMMConfig{
+		Enabled:       true,
+		ScrapeActress: false,
+	}
+
+	settings := cfg.ToScraperSettings()
+
+	assert.NotNil(t, settings.ScrapeActress, "ScrapeActress should be non-nil even when false")
+	assert.False(t, *settings.ScrapeActress, "ScrapeActress should preserve explicit false value")
+}
+
+func TestDMMConfig_ToScraperSettings_EmptyFields(t *testing.T) {
+	cfg := &DMMConfig{
+		Enabled: true,
+	}
+
+	settings := cfg.ToScraperSettings()
+
+	assert.True(t, settings.Enabled)
+	assert.Equal(t, 0, settings.RateLimit)
+	assert.Equal(t, 0, settings.RetryCount)
+	assert.Empty(t, settings.UserAgent)
+	assert.False(t, settings.UseBrowser)
+	assert.NotNil(t, settings.ScrapeActress, "ScrapeActress should be non-nil")
+	assert.False(t, *settings.ScrapeActress, "ScrapeActress should be false when not set")
+	assert.NotNil(t, settings.Extra)
+	assert.Len(t, settings.Extra, 0, "Extra should be empty when no placeholder fields set")
+}

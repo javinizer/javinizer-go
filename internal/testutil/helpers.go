@@ -340,10 +340,10 @@ func generateDiff(expected, actual string) string {
 
 		if expLine != actLine {
 			if expLine != "" {
-				diff.WriteString(fmt.Sprintf("- [line %d] %s\n", i+1, expLine))
+				fmt.Fprintf(&diff, "- [line %d] %s\n", i+1, expLine)
 			}
 			if actLine != "" {
-				diff.WriteString(fmt.Sprintf("+ [line %d] %s\n", i+1, actLine))
+				fmt.Fprintf(&diff, "+ [line %d] %s\n", i+1, actLine)
 			}
 		}
 	}

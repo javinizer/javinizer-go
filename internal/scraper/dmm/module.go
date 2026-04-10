@@ -44,8 +44,26 @@ func (m *scraperModule) Options() any {
 			Description: "Override global setting: Extract actress names and IDs. Requires global 'Scrape Actress Information' to be enabled.",
 			Type:        "boolean",
 		},
+		contracts.ScraperOption{
+			Key:         "placeholder_threshold",
+			Label:       "Placeholder Threshold",
+			Description: "File size threshold in KB for detecting placeholder images. Files smaller than this are considered potential placeholders.",
+			Type:        "number",
+			Default:     10,
+			Min:         intPtr(1),
+			Max:         intPtr(1000),
+			Unit:        "KB",
+		},
+		contracts.ScraperOption{
+			Key:         "extra_placeholder_hashes",
+			Label:       "Extra Placeholder Hashes",
+			Description: "Additional SHA256 hashes of known placeholder images. Each hash is a 64-character hex string.",
+			Type:        "string",
+		},
 	}
 }
+
+func intPtr(i int) *int { return &i }
 func (m *scraperModule) Defaults() any {
 	return config.ScraperSettings{
 		Enabled: false,

@@ -1,9 +1,13 @@
 package dmm
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -1843,6 +1847,172 @@ func TestMatchesWithVariantSuffix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := matchesWithVariantSuffix(tt.urlCID, tt.searchIDs...)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestFilterPlaceholderScreenshots(t *testing.T) {
+	ctx := context.Background()
+
+	placeholderImage := make([]byte, 100)
+	for i := range placeholderImage {
+		placeholderImage[i] = byte(i)
+	}
+	hash := sha256.Sum256(placeholderImage)
+	placeholderHash := hex.EncodeToString(hash[:])
+
+	nonPlaceholderImage := make([]byte, 500)
+	for i := range nonPlaceholderImage {
+		nonPlaceholderImage[i] = byte(255 - i)
+	}
+
+	tests := []struct {
+		name           string
+		setupServer    func() *httptest.Server
+		urls           []string
+		thresholdBytes int64
+		hashes         []string
+		wantLen        int
+	}{
+		{
+			name: "empty input returns empty output",
+			setupServer: func() *httptest.Server {
+				return nil
+			},
+			urls:           []string{},
+			thresholdBytes: 10 * 1024,
+			hashes:         []string{},
+			wantLen:        0,
+		},
+		{
+			name: "placeholder filtered out",
+			setupServer: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodHead {
+						w.Header().Set("Content-Length", "100")
+						return
+					}
+					w.Write(placeholderImage)
+				}))
+			},
+			urls:           []string{"placeholder-url"},
+			thresholdBytes: 10 * 1024,
+			hashes:         []string{placeholderHash},
+			wantLen:        0,
+		},
+		{
+			name: "non-placeholder kept",
+			setupServer: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodHead {
+						w.Header().Set("Content-Length", "500")
+						return
+					}
+					w.Write(nonPlaceholderImage)
+				}))
+			},
+			urls:           []string{"non-placeholder-url"},
+			thresholdBytes: 10 * 1024,
+			hashes:         []string{placeholderHash},
+			wantLen:        1,
+		},
+		{
+			name: "mixed URLs filtered correctly",
+			setupServer: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodHead {
+						w.Header().Set("Content-Length", "100")
+						return
+					}
+					w.Write(placeholderImage)
+				}))
+			},
+			urls:           []string{"url1", "url2", "url3"},
+			thresholdBytes: 10 * 1024,
+			hashes:         []string{placeholderHash},
+			wantLen:        0,
+		},
+		{
+			name: "no hashes configured - detection skipped",
+			setupServer: func() *httptest.Server {
+				// Server should never be called when no hashes configured
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					t.Error("should not make HTTP request when no hashes configured")
+				}))
+			},
+			urls:           []string{"small-image"},
+			thresholdBytes: 10 * 1024,
+			hashes:         []string{},
+			wantLen:        1, // All URLs kept when no hashes - detection skipped
+		},
+		{
+			name: "large file kept",
+			setupServer: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodHead {
+						w.Header().Set("Content-Length", "15360")
+						return
+					}
+				}))
+			},
+			urls:           []string{"large-image"},
+			thresholdBytes: 10 * 1024,
+			hashes:         []string{},
+			wantLen:        1,
+		},
+		{
+			name: "404 response kept",
+			setupServer: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNotFound)
+				}))
+			},
+			urls:           []string{"missing-image"},
+			thresholdBytes: 10 * 1024,
+			hashes:         []string{},
+			wantLen:        1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := tt.setupServer()
+			if server != nil {
+				defer server.Close()
+			}
+
+			// Replace URL placeholder with actual server URL
+			urls := make([]string, len(tt.urls))
+			for i, u := range tt.urls {
+				if server != nil {
+					urls[i] = server.URL
+				} else {
+					urls[i] = u
+				}
+			}
+
+			// Create scraper with test settings
+			settings := config.ScraperSettings{
+				Enabled: true,
+			}
+			if len(tt.hashes) > 0 {
+				settings.Extra = map[string]any{
+					ConfigKeyExtraPlaceholderHashes: tt.hashes,
+				}
+			}
+
+			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			require.NotNil(t, scraper)
+
+			// Set threshold via extra if needed
+			if tt.thresholdBytes != 10*1024 {
+				scraper.settings.Extra = map[string]any{
+					ConfigKeyPlaceholderThreshold: int(tt.thresholdBytes / 1024),
+				}
+			}
+
+			filtered := scraper.filterPlaceholderScreenshots(ctx, urls)
+			assert.Equal(t, tt.wantLen, len(filtered))
 		})
 	}
 }
