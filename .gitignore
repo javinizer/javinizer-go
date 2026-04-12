@@ -83,6 +83,9 @@ docs/superpowers/*
 .worktrees/
 context.md
 
+# Graphify output
+graphify-out/
+
 # Taskplane runtime artifacts (machine-specific, do not commit)
 .pi/batch-state.json
 .pi/batch-history.json
