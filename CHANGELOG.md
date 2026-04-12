@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.4-alpha] - 2026-04-12
+
+### Added
+
+- 5-mode OperationMode enum (organize, in-place, in-place-norenamefolder, metadata-only, preview) with strategy pattern
+- Auto-migration from legacy `MoveToFolder`/`RenameFolderInPlace` boolean flags to OperationMode in config
+- OperationMode wired through full API stack with 4-mode frontend selector
+- `LooksLikeTemplatedTitle()` with UTF-8 safe rune-based detection for double-templating prevention
+- NFOTitle field to ParseResult for future NFO preservation logic
+- Regression tests for double-templating and display title edge cases
+- `internal/types/operation_mode.go` package with validation and parsing
+- Config pipeline system for structured migration paths
+- Operation mode tests across organizer, config, API, and worker packages
+
+### Changed
+
+- Renamed `display_name` to `display_title` across Go backend and TypeScript frontend
+- DisplayTitle is now the canonical editable field with aggregator always setting it
+- DisplayTitle handling simplified: always regenerate from template with fallback to Title
+- Preview mode removed from frontend UI (kept in backend API)
+- Strategy pattern replaces monolithic Organizer with separate strategies per operation mode
+- Database migration 000003 for column rename (display_name → display_title)
+- 123 files changed, ~6,665 lines added, ~988 lines removed
+
+### Fixed
+
+- NFO and media generation for in-place and metadata-only modes (ShouldGenerateMetadata)
+- History logging for metadata-only and in-place modes
+- Preview missing screenshots for metadata-only mode
+- Date clearing now emits undefined instead of empty string for `*time.Time` fields
+- Date formatting guards against invalid dates
+- DisplayTitle not regenerated when user edits Title — now always recomputed from template
+
 ## [v0.2.3-alpha] - 2026-04-10
 
 ### Added

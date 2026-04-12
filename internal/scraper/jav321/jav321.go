@@ -47,9 +47,9 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	// Build ScraperConfig for HTTP client (HTTP-01 pattern)
 	configForHTTP := &config.ScraperSettings{
 		Enabled:       settings.Enabled,
-		Timeout:       30,
+		Timeout:       settings.Timeout,
 		RateLimit:     settings.RateLimit,
-		RetryCount:    3,
+		RetryCount:    settings.RetryCount,
 		UserAgent:     settings.UserAgent,
 		Proxy:         settings.Proxy,
 		DownloadProxy: settings.DownloadProxy,
@@ -70,7 +70,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	usingProxy := err == nil && proxyEnabled && strings.TrimSpace(proxyCfg.URL) != ""
 	if err != nil {
 		logging.Errorf("Jav321: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
-		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
+		client = httpclient.NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)
 	}
 
 	base := strings.TrimSpace(settings.BaseURL)

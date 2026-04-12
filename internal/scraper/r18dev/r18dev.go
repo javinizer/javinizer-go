@@ -47,7 +47,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	// Create scraper config for HTTP client ownership (HTTP-01)
 	scraperCfg := &config.ScraperSettings{
 		Enabled:       settings.Enabled,
-		Timeout:       30, // default
+		Timeout:       settings.Timeout,
 		RateLimit:     settings.RateLimit,
 		RetryCount:    settings.RetryCount,
 		UserAgent:     settings.UserAgent,
@@ -59,7 +59,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	client, err := NewHTTPClient(scraperCfg, globalProxy, globalFlareSolverr)
 	if err != nil {
 		logging.Errorf("R18Dev: Failed to create HTTP client: %v, using explicit no-proxy fallback", err)
-		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
+		client = httpclient.NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)
 	}
 
 	language := normalizeLanguage(settings.Language)

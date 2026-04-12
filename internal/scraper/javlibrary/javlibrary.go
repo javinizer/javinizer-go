@@ -43,8 +43,8 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		Enabled:         settings.Enabled,
 		Language:        settings.Language,
 		RateLimit:       settings.RateLimit,
-		Timeout:         30, // default, will be overridden if ScraperConfig has it
-		RetryCount:      3,  // default
+		Timeout:         settings.Timeout,
+		RetryCount:      settings.RetryCount,
 		UserAgent:       settings.UserAgent,
 		Proxy:           settings.Proxy,
 		DownloadProxy:   settings.DownloadProxy,
@@ -61,7 +61,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	}
 	if err != nil {
 		logging.Errorf("JavLibrary: Failed to create HTTP client with proxy/flaresolverr: %v, using explicit no-proxy fallback", err)
-		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
+		client = httpclient.NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)
 		flaresolverr = nil
 	}
 

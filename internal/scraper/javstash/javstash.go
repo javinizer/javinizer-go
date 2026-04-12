@@ -117,7 +117,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	client, err := NewHTTPClient(scraperCfg, globalProxy, globalFlareSolverr)
 	if err != nil {
 		logging.Errorf("Javstash: Failed to create HTTP client: %v, using fallback", err)
-		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
+		client = httpclient.NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)
 	}
 
 	lang := normalizeLanguage(settings.Language)

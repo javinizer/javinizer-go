@@ -58,9 +58,9 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	// Create scraper config for HTTP client ownership (HTTP-01)
 	javdbScraperCfg := &config.ScraperSettings{
 		Enabled:       settings.Enabled,
-		Timeout:       30, // default
+		Timeout:       settings.Timeout,
 		RateLimit:     settings.RateLimit,
-		RetryCount:    3, // default
+		RetryCount:    settings.RetryCount,
 		UserAgent:     settings.UserAgent,
 		Proxy:         settings.Proxy,
 		DownloadProxy: settings.DownloadProxy,
@@ -80,7 +80,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	usingProxy := err == nil && proxyEnabled && proxyCfg != nil && strings.TrimSpace(proxyCfg.URL) != ""
 	if err != nil {
 		logging.Errorf("JavDB: Failed to create HTTP client with proxy/flaresolverr: %v, using explicit no-proxy fallback", err)
-		client = httpclient.NewRestyClientNoProxy(30*time.Second, 3)
+		client = httpclient.NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)
 		flaresolverr = nil
 	}
 

@@ -1,5 +1,5 @@
 .PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder
-.PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci simulate-ci
+.PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci config-drift simulate-ci
 .PHONY: fmt lint vet swagger docs mocks
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
@@ -42,7 +42,8 @@ help:
 	@echo "  make mocks              - Generate mocks from interfaces (mockery v3)"
 	@echo ""
 	@echo "CI/CD:"
-	@echo "  make ci                 - Run full CI suite (vet + lint + coverage + race)"
+	@echo "  make ci                 - Run full CI suite (vet + lint + coverage + race + drift)"
+	@echo "  make config-drift       - Validate config synchronization (no hardcoded values)"
 	@echo "  make simulate-ci        - Simulate GitHub Actions CI locally"
 	@echo ""
 	@echo "Web Frontend:"
@@ -167,8 +168,12 @@ coverage-pkg: coverage
 coverage-check: coverage
 	@./scripts/check_coverage.sh 75 coverage.out
 
+# Validate config synchronization (defaults.go matches config.yaml.example, no hardcoded scraper values)
+config-drift:
+	@./scripts/validate-config-sync.sh
+
 # Run full CI test suite
-ci: vet lint coverage-check test-race
+ci: vet lint coverage-check test-race config-drift
 	@echo "All CI checks passed!"
 
 # Simulate GitHub Actions CI locally (with pretty output)
