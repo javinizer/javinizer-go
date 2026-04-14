@@ -65,6 +65,12 @@ func TestDefaultConfigMatchesExample(t *testing.T) {
 		assert.Equal(t, exampleCfg.Output.DownloadActress, defaultCfg.Output.DownloadActress, "output.download_actress mismatch")
 	})
 
+	t.Run("OutputConfig_Toggles", func(t *testing.T) {
+		assert.Equal(t, exampleCfg.Output.RenameFile, defaultCfg.Output.RenameFile, "output.rename_file mismatch")
+		assert.Equal(t, exampleCfg.Output.MoveToFolder, defaultCfg.Output.MoveToFolder, "output.move_to_folder mismatch")
+		assert.Equal(t, exampleCfg.Output.AllowRevert, defaultCfg.Output.AllowRevert, "output.allow_revert mismatch")
+	})
+
 	t.Run("OutputConfig_Formats", func(t *testing.T) {
 		assert.Equal(t, exampleCfg.Output.FolderFormat, defaultCfg.Output.FolderFormat, "output.folder_format mismatch")
 		assert.Equal(t, exampleCfg.Output.FileFormat, defaultCfg.Output.FileFormat, "output.file_format mismatch")

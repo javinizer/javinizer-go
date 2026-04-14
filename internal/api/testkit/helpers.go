@@ -148,6 +148,7 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.S
 	movieRepo := database.NewMovieRepository(db)
 	actressRepo := database.NewActressRepository(db)
 	jobRepo := database.NewJobRepository(db)
+	batchFileOpRepo := database.NewBatchFileOperationRepository(db)
 
 	// Initialize scraper registry
 	registry := models.NewScraperRegistry()
@@ -165,16 +166,17 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.S
 	jobQueue := worker.NewJobQueue(jobRepo, "")
 
 	deps := &core.ServerDependencies{
-		ConfigFile:  configFile,
-		Registry:    registry,
-		DB:          db,
-		Aggregator:  agg,
-		MovieRepo:   movieRepo,
-		ActressRepo: actressRepo,
-		JobRepo:     jobRepo,
-		Matcher:     mat,
-		JobQueue:    jobQueue,
-		Runtime:     core.NewRuntimeState(),
+		ConfigFile:      configFile,
+		Registry:        registry,
+		DB:              db,
+		Aggregator:      agg,
+		MovieRepo:       movieRepo,
+		ActressRepo:     actressRepo,
+		JobRepo:         jobRepo,
+		BatchFileOpRepo: batchFileOpRepo,
+		Matcher:         mat,
+		JobQueue:        jobQueue,
+		Runtime:         core.NewRuntimeState(),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)

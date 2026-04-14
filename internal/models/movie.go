@@ -150,6 +150,7 @@ func (MovieTag) TableName() string {
 type History struct {
 	ID           uint      `json:"id" gorm:"primaryKey"`
 	MovieID      string    `json:"movie_id" gorm:"index"`          // Foreign key to movies.content_id (nullable for historical records)
+	BatchJobID   *string   `json:"batch_job_id" gorm:"index"`      // Foreign key to jobs.id (nullable: historical records have no batch job)
 	Operation    string    `json:"operation"`                      // "scrape", "organize", "download", "nfo"
 	OriginalPath string    `json:"original_path"`                  // Source file path
 	NewPath      string    `json:"new_path"`                       // Destination file path

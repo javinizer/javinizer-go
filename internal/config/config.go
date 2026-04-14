@@ -165,6 +165,7 @@ type OutputConfig struct {
 	RenameFolderInPlace bool                `yaml:"rename_folder_in_place" json:"rename_folder_in_place"`
 	MoveToFolder        bool                `yaml:"move_to_folder" json:"move_to_folder"` // Move/copy files to organized folders (default: true)
 	RenameFile          bool                `yaml:"rename_file" json:"rename_file"`       // Rename files using file_format template (default: true)
+	AllowRevert         bool                `yaml:"allow_revert" json:"allow_revert"`     // Enable revert operations (default: false — opt-in for safety)
 	GroupActress        bool                `yaml:"group_actress" json:"group_actress"`   // Replace multiple actresses with "@Group" in templates (default: false)
 	PosterFormat        string              `yaml:"poster_format" json:"poster_format"`
 	FanartFormat        string              `yaml:"fanart_format" json:"fanart_format"`

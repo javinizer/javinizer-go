@@ -10,8 +10,10 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/auth"
 	"github.com/javinizer/javinizer-go/internal/api/batch"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/api/events"
 	"github.com/javinizer/javinizer-go/internal/api/file"
 	"github.com/javinizer/javinizer-go/internal/api/history"
+	"github.com/javinizer/javinizer-go/internal/api/jobs"
 	"github.com/javinizer/javinizer-go/internal/api/movie"
 	"github.com/javinizer/javinizer-go/internal/api/realtime"
 	"github.com/javinizer/javinizer-go/internal/api/system"
@@ -112,6 +114,8 @@ func registerAPIV1Routes(router *gin.Engine, deps *core.ServerDependencies) {
 	file.RegisterRoutes(protected, deps)
 	batch.RegisterRoutes(protected, deps)
 	history.RegisterRoutes(protected, deps)
+	jobs.RegisterRoutes(protected, deps)
+	events.RegisterRoutes(protected, deps)
 	temp.RegisterRoutes(protected, deps)
 }
 

@@ -13,11 +13,15 @@
 		AlertTriangle,
 		FolderOpen,
 		Trash2,
-		Eye
+		Eye,
+		Undo2
 	} from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import RevertConfirmationModal from '$lib/components/RevertConfirmationModal.svelte';
 	import { apiClient } from '$lib/api/client';
+	import { toastStore } from '$lib/stores/toast';
 	import type { BatchJobResponse, FileResult } from '$lib/api/types';
 
 	let jobs = $state<BatchJobResponse[]>([]);
@@ -28,6 +32,14 @@
 	let error = $state<string | null>(null);
 	let listRenderVersion = $state(0);
 	let activeFilter = $state<string>('all');
+
+	// Revert modal state
+	let revertModalOpen = $state(false);
+	let revertTargetId = $state('');
+	let revertFileCount = $state(0);
+
+	// Config state (for allow_revert check)
+	let config: any = $state<any>(null);
 
 	async function loadJobs() {
 		if (!hasLoadedOnce) {
@@ -127,6 +139,32 @@
 		}
 	}
 
+	function openRevertModal(jobId: string, fileCount: number) {
+		revertTargetId = jobId;
+		revertFileCount = fileCount;
+		revertModalOpen = true;
+	}
+
+	function getRevertableCount(job: BatchJobResponse): number {
+		return job.operation_count - (job.reverted_count ?? 0);
+	}
+
+	async function handleRevertConfirm(): Promise<void> {
+		try {
+			const result = await apiClient.revertBatchJob(revertTargetId);
+			revertModalOpen = false;
+			if (result.failed === 0) {
+				toastStore.success(`Successfully reverted ${result.succeeded} file${result.succeeded !== 1 ? 's' : ''}`);
+			} else {
+				toastStore.warning(`Reverted ${result.succeeded} of ${result.total}. ${result.failed} failed.`);
+			}
+			await loadJobs();
+		} catch (e) {
+			toastStore.error(`Revert failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+			revertModalOpen = false;
+		}
+	}
+
 	function formatDate(dateStr: string): string {
 		const date = new Date(dateStr);
 		const now = new Date();
@@ -155,6 +193,8 @@
 				return { icon: CheckCircle2, color: 'text-purple-500', bg: 'bg-purple-500/10', label: 'Organized' };
 			case 'cancelled':
 				return { icon: CircleX, color: 'text-gray-400', bg: 'bg-gray-500/10', label: 'Cancelled' };
+			case 'reverted':
+				return { icon: Undo2, color: 'text-yellow-500', bg: 'bg-yellow-500/10', label: 'Reverted' };
 			default:
 				return { icon: Clock, color: 'text-gray-400', bg: 'bg-gray-500/10', label: status };
 		}
@@ -186,21 +226,23 @@
 
 	onMount(() => {
 		const statusParam = $page.url.searchParams.get('status');
-		if (statusParam && ['running', 'completed', 'failed', 'cancelled', 'organized'].includes(statusParam)) {
+		if (statusParam && ['running', 'completed', 'failed', 'cancelled', 'organized', 'reverted'].includes(statusParam)) {
 			activeFilter = statusParam;
 		} else {
 			activeFilter = 'all';
 		}
 		loadJobs();
+		// Load config to check allow_revert setting
+		apiClient.getConfig().then((c) => { config = c; }).catch(() => {});
 	});
 </script>
 
 <div class="min-h-screen bg-background">
-	<div class="container mx-auto px-4 py-8 max-w-5xl">
+	<div class="container mx-auto px-4 py-8 max-w-7xl">
 		<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
 			<div>
 				<h1 class="text-2xl font-bold tracking-tight">Jobs</h1>
-				<p class="text-muted-foreground text-sm mt-1">Manage your batch scrape jobs</p>
+				<p class="text-muted-foreground text-sm mt-1">Manage your batch jobs and organize history</p>
 			</div>
 			<div class="flex items-center gap-2">
 				<Button variant="outline" size="sm" onclick={loadJobs} disabled={isRefreshing || isClearing}>
@@ -237,7 +279,7 @@
 
 		{#if !loading || hasLoadedOnce}
 			<div class="flex flex-wrap gap-1.5 mb-6" in:fade={{ duration: 150 }}>
-				{#each ['all', 'running', 'failed', 'completed', 'cancelled', 'organized'] as filter}
+				{#each ['all', 'running', 'failed', 'completed', 'cancelled', 'organized', 'reverted'] as filter}
 					{@const count = filter === 'all' ? jobs.length : getStatusCount(filter)}
 					<Button
 						variant={activeFilter === filter ? 'default' : 'ghost'}
@@ -275,7 +317,7 @@
 			{#key listRenderVersion}
 				<div class="space-y-3" in:fade={{ duration: 150 }}>
 					{#each filteredJobs() as job, index (`${job.id}-${listRenderVersion}`)}
-						{@const config = getStatusConfig(job.status)}
+						{@const statusConfig = getStatusConfig(job.status)}
 						{@const poster = getFirstPoster(job)}
 						<div
 							in:fly={{ y: 10, duration: 200, delay: Math.min(index * 30, 150) }}
@@ -305,9 +347,9 @@
 											<span class="font-mono text-xs text-muted-foreground">
 												{job.id.slice(0, 8)}
 											</span>
-											<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium {config.bg} {config.color}">
-												<config.icon class="h-3 w-3" />
-												{config.label}
+											<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium {statusConfig.bg} {statusConfig.color}">
+												<statusConfig.icon class="h-3 w-3" />
+												{statusConfig.label}
 											</span>
 										</div>
 										<p class="text-sm truncate mb-1.5" title={job.files?.[0]}>
@@ -352,6 +394,22 @@
 											<Button variant="ghost" size="sm" onclick={() => dismissJob(job.id)} title="Dismiss">
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
+										{:else if job.status.toLowerCase() === 'organized'}
+											<Button variant="default" size="sm" onclick={() => goto(`/jobs/${job.id}`)}>
+												<ArrowRight class="h-4 w-4 mr-1" />
+												View Details
+											</Button>
+											{#if config?.output?.allow_revert}
+											<Button
+												variant="outline"
+												size="sm"
+												class="text-destructive hover:bg-destructive/10"
+												onclick={() => openRevertModal(job.id, getRevertableCount(job))}
+											>
+												<Undo2 class="h-4 w-4 mr-1" />
+												Revert
+											</Button>
+											{/if}
 										{:else if job.status.toLowerCase() === 'failed'}
 											<Button variant="outline" size="sm" onclick={() => goto(`/review/${job.id}`)}>
 												<Eye class="h-4 w-4 mr-1" />
@@ -375,3 +433,13 @@
 		{/if}
 	</div>
 </div>
+
+<!-- Revert Confirmation Modal -->
+<RevertConfirmationModal
+	bind:open={revertModalOpen}
+	mode="batch"
+	targetId={revertTargetId}
+	fileCount={revertFileCount}
+	onConfirm={handleRevertConfirm}
+	onCancel={() => (revertModalOpen = false)}
+/>

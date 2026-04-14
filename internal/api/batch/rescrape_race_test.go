@@ -50,13 +50,14 @@ func setJobDeleted(job *worker.BatchJob, deleted bool) {
 		StartedAt                   time.Time
 		CompletedAt                 *time.Time
 		OrganizedAt                 *time.Time
+		RevertedAt                  *time.Time
 		MoveToFolderOverride        *bool
 		RenameFolderInPlaceOverride *bool
 		OperationModeOverride       string
 		CancelFunc                  context.CancelFunc
 		Done                        chan struct{}
 		Mu                          sync.RWMutex
-		Deleted                     bool // exported version for offset calculation
+		Deleted                     bool
 	}
 
 	// Calculate offset to Deleted field

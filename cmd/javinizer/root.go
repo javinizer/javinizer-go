@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/history"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/info"
 	initcmd "github.com/javinizer/javinizer-go/cmd/javinizer/commands/init"
+	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/logs"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/scrape"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/sort"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/tag"
@@ -66,6 +67,7 @@ func init() {
 		history.NewCommand(),
 		info.NewCommand(),
 		initcmd.NewCommand(),
+		logs.NewCommand(),
 		scrape.NewCommand(),
 		sort.NewCommand(),
 		tag.NewCommand(),

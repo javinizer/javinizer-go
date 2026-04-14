@@ -117,8 +117,8 @@ func (_c *MockScraper_Config_Call) Run(run func()) *MockScraper_Config_Call {
 	return _c
 }
 
-func (_c *MockScraper_Config_Call) Return(scraperConfig *config.ScraperSettings) *MockScraper_Config_Call {
-	_c.Call.Return(scraperConfig)
+func (_c *MockScraper_Config_Call) Return(scraperSettings *config.ScraperSettings) *MockScraper_Config_Call {
+	_c.Call.Return(scraperSettings)
 	return _c
 }
 

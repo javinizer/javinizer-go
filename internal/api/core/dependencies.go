@@ -8,6 +8,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/eventlog"
+	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -28,21 +30,25 @@ type AuthProvider interface {
 // Access to Config, Registry, Aggregator, and Matcher must be synchronized
 // to prevent data races during config reload.
 type ServerDependencies struct {
-	mu          sync.RWMutex
-	config      atomic.Pointer[config.Config]
-	ConfigFile  string
-	Registry    *models.ScraperRegistry
-	DB          *database.DB
-	Aggregator  *aggregator.Aggregator
-	MovieRepo   *database.MovieRepository
-	ActressRepo *database.ActressRepository
-	HistoryRepo *database.HistoryRepository
-	JobRepo     *database.JobRepository
-	Matcher     *matcher.Matcher
-	JobQueue    *worker.JobQueue
-	Auth        AuthProvider
-	Runtime     *RuntimeState
-	TokenStore  *TokenStore
+	mu              sync.RWMutex
+	config          atomic.Pointer[config.Config]
+	ConfigFile      string
+	Registry        *models.ScraperRegistry
+	DB              *database.DB
+	Aggregator      *aggregator.Aggregator
+	MovieRepo       *database.MovieRepository
+	ActressRepo     *database.ActressRepository
+	HistoryRepo     *database.HistoryRepository
+	JobRepo         *database.JobRepository
+	BatchFileOpRepo *database.BatchFileOperationRepository
+	EventRepo       *database.EventRepository
+	EventEmitter    eventlog.EventEmitter
+	Reverter        *history.Reverter
+	Matcher         *matcher.Matcher
+	JobQueue        *worker.JobQueue
+	Auth            AuthProvider
+	Runtime         *RuntimeState
+	TokenStore      *TokenStore
 }
 
 // EnsureRuntime initializes runtime state when absent.

@@ -8,21 +8,26 @@ packages:
     config:
       dir: "internal/mocks"
       filename: "{{.InterfaceName}}.go"
+      pkgname: "mocks"
     interfaces:
       MovieRepositoryInterface:
       ActressRepositoryInterface:
       GenreReplacementRepositoryInterface:
       HistoryRepositoryInterface:
+      BatchFileOperationRepositoryInterface:
+      EventRepositoryInterface:
       MovieTagRepositoryInterface:
       ActressAliasRepositoryInterface:
       ContentIDMappingRepositoryInterface:
       MovieTranslationRepositoryInterface:
+      JobRepositoryInterface:
 
   # HTTP client interface from internal/httpclient
   github.com/javinizer/javinizer-go/internal/httpclient:
     config:
       dir: "internal/mocks"
       filename: "{{.InterfaceName}}.go"
+      pkgname: "mocks"
     interfaces:
       HTTPClient:
 
@@ -31,6 +36,7 @@ packages:
     config:
       dir: "internal/mocks"
       filename: "{{.InterfaceName}}.go"
+      pkgname: "mocks"
     interfaces:
       Scraper:
 
@@ -39,5 +45,15 @@ packages:
     config:
       dir: "internal/mocks"
       filename: "{{.InterfaceName}}.go"
+      pkgname: "mocks"
     interfaces:
       AggregatorInterface:
+
+  # EventEmitter interface from internal/eventlog
+  github.com/javinizer/javinizer-go/internal/eventlog:
+    config:
+      dir: "internal/mocks"
+      filename: "{{.InterfaceName}}.go"
+      pkgname: "mocks"
+    interfaces:
+      EventEmitter:

@@ -11,6 +11,7 @@ const (
 	JobStatusFailed    JobStatus = "failed"
 	JobStatusCancelled JobStatus = "cancelled"
 	JobStatusOrganized JobStatus = "organized"
+	JobStatusReverted  JobStatus = "reverted"
 )
 
 type Job struct {
@@ -29,6 +30,7 @@ type Job struct {
 	StartedAt     time.Time  `json:"started_at" gorm:"index"`
 	CompletedAt   *time.Time `json:"completed_at"`
 	OrganizedAt   *time.Time `json:"organized_at"`
+	RevertedAt    *time.Time `json:"reverted_at"`
 }
 
 func (Job) TableName() string {

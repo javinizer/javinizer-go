@@ -91,6 +91,8 @@ definitions:
         type: integer
       id:
         type: string
+      operation_count:
+        type: integer
       operation_mode_override:
         type: string
       progress:
@@ -99,6 +101,8 @@ definitions:
         additionalProperties:
           $ref: '#/definitions/contracts.BatchFileResult'
         type: object
+      reverted_count:
+        type: integer
       started_at:
         type: string
       status:
@@ -655,6 +659,9 @@ definitions:
         type: string
       actress_format:
         type: string
+      allow_revert:
+        description: 'Enable revert operations (default: false — opt-in for safety)'
+        type: boolean
       delimiter:
         type: string
       download_actress:
@@ -1049,6 +1056,48 @@ definitions:
         example: 1024000000
         type: integer
     type: object
+  contracts.JobListItem:
+    properties:
+      completed:
+        example: 9
+        type: integer
+      completed_at:
+        example: "2026-04-12T10:05:00Z"
+        type: string
+      destination:
+        example: /path/to/output
+        type: string
+      failed:
+        example: 1
+        type: integer
+      id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      operation_count:
+        example: 10
+        type: integer
+      organized_at:
+        example: "2026-04-12T10:05:00Z"
+        type: string
+      progress:
+        example: 0.9
+        type: number
+      reverted_at:
+        example: "2026-04-12T11:00:00Z"
+        type: string
+      reverted_count:
+        example: 7
+        type: integer
+      started_at:
+        example: "2026-04-12T10:00:00Z"
+        type: string
+      status:
+        example: organized
+        type: string
+      total_files:
+        example: 10
+        type: integer
+    type: object
   contracts.MergeStatistics:
     properties:
       conflicts_resolved:
@@ -1070,6 +1119,48 @@ definitions:
         example: 15
         type: integer
     type: object
+  contracts.OperationItem:
+    properties:
+      created_at:
+        example: "2026-04-12T10:05:00Z"
+        type: string
+      id:
+        example: 1
+        type: integer
+      in_place_renamed:
+        example: false
+        type: boolean
+      movie_id:
+        example: ABC-123
+        type: string
+      new_path:
+        example: /dest/ABC-123 [Studio]/ABC-123.mp4
+        type: string
+      operation_type:
+        example: move
+        type: string
+      original_path:
+        example: /source/ABC-123.mp4
+        type: string
+      revert_status:
+        example: pending
+        type: string
+      reverted_at:
+        example: "2026-04-12T11:00:00Z"
+        type: string
+    type: object
+  contracts.OverlapInfo:
+    properties:
+      created_at:
+        example: "2026-04-12T12:00:00Z"
+        type: string
+      job_id:
+        example: 660e8400-e29b-41d4-a716-446655440001
+        type: string
+      operation_count:
+        example: 3
+        type: integer
+    type: object
   contracts.PathAutocompleteSuggestion:
     properties:
       is_dir:
@@ -1080,6 +1171,40 @@ definitions:
         type: string
       path:
         example: /path/to/videos
+        type: string
+    type: object
+  contracts.RevertCheckResponse:
+    properties:
+      job_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      overlapping_batches:
+        items:
+          $ref: '#/definitions/contracts.OverlapInfo'
+        type: array
+    type: object
+  contracts.RevertFileError:
+    properties:
+      error:
+        example: file not found
+        type: string
+      movie_id:
+        example: ABC-123
+        type: string
+      new_path:
+        example: /dest/ABC-123 [Studio]/ABC-123.mp4
+        type: string
+      operation_id:
+        example: 5
+        type: integer
+      original_path:
+        example: /source/ABC-123.mp4
+        type: string
+      outcome:
+        example: skipped
+        type: string
+      reason:
+        example: anchor_missing
         type: string
     type: object
   contracts.ScraperChoice:
@@ -1138,6 +1263,52 @@ definitions:
       unit:
         example: seconds
         type: string
+    type: object
+  events.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  events.deleteEventsResponse:
+    properties:
+      deleted:
+        type: integer
+      message:
+        type: string
+    type: object
+  events.eventListResponse:
+    properties:
+      events:
+        items:
+          $ref: '#/definitions/models.Event'
+        type: array
+      total:
+        type: integer
+    type: object
+  events.eventStatsResponse:
+    properties:
+      by_severity:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      by_source:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      by_type:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      total:
+        type: integer
     type: object
   file.BrowseRequest:
     properties:
@@ -1288,6 +1459,106 @@ definitions:
       total:
         type: integer
     type: object
+  jobs.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  jobs.JobListItem:
+    properties:
+      completed:
+        example: 9
+        type: integer
+      completed_at:
+        example: "2026-04-12T10:05:00Z"
+        type: string
+      destination:
+        example: /path/to/output
+        type: string
+      failed:
+        example: 1
+        type: integer
+      id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      operation_count:
+        example: 10
+        type: integer
+      organized_at:
+        example: "2026-04-12T10:05:00Z"
+        type: string
+      progress:
+        example: 0.9
+        type: number
+      reverted_at:
+        example: "2026-04-12T11:00:00Z"
+        type: string
+      reverted_count:
+        example: 7
+        type: integer
+      started_at:
+        example: "2026-04-12T10:00:00Z"
+        type: string
+      status:
+        example: organized
+        type: string
+      total_files:
+        example: 10
+        type: integer
+    type: object
+  jobs.JobListResponse:
+    properties:
+      jobs:
+        items:
+          $ref: '#/definitions/contracts.JobListItem'
+        type: array
+    type: object
+  jobs.OperationListResponse:
+    properties:
+      job_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      job_status:
+        example: organized
+        type: string
+      operations:
+        items:
+          $ref: '#/definitions/contracts.OperationItem'
+        type: array
+      total:
+        example: 10
+        type: integer
+    type: object
+  jobs.RevertResultResponse:
+    properties:
+      errors:
+        items:
+          $ref: '#/definitions/contracts.RevertFileError'
+        type: array
+      failed:
+        example: 1
+        type: integer
+      job_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      skipped:
+        example: 1
+        type: integer
+      status:
+        example: reverted
+        type: string
+      succeeded:
+        example: 9
+        type: integer
+      total:
+        example: 10
+        type: integer
+    type: object
   models.Actress:
     properties:
       aliases:
@@ -1310,6 +1581,24 @@ definitions:
       thumb_url:
         type: string
       updated_at:
+        type: string
+    type: object
+  models.Event:
+    properties:
+      context:
+        description: JSON-encoded details
+        type: string
+      created_at:
+        type: string
+      event_type:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+      severity:
+        type: string
+      source:
         type: string
     type: object
   models.Genre:
@@ -2390,6 +2679,102 @@ paths:
       summary: Get current working directory
       tags:
       - web
+  /api/v1/events:
+    delete:
+      description: Delete events older than a specified number of days
+      parameters:
+      - description: Delete events older than N days (minimum 1)
+        in: query
+        name: older_than_days
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/events.deleteEventsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/events.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/events.ErrorResponse'
+      summary: Delete old events
+      tags:
+      - events
+    get:
+      description: Get a paginated list of structured events with composable type,
+        severity, source, and date range filters
+      parameters:
+      - description: Filter by event type (scraper, organize, system)
+        in: query
+        name: type
+        type: string
+      - description: Filter by severity (debug, info, warn, error)
+        in: query
+        name: severity
+        type: string
+      - description: Filter by source (e.g., r18dev, organizer, server)
+        in: query
+        name: source
+        type: string
+      - description: Start date (ISO 8601, e.g., 2026-01-01T00:00:00Z)
+        in: query
+        name: start
+        type: string
+      - description: End date (ISO 8601, e.g., 2026-01-31T23:59:59Z)
+        in: query
+        name: end
+        type: string
+      - default: 50
+        description: Max events to return (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset for pagination
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/events.eventListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/events.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/events.ErrorResponse'
+      summary: List events
+      tags:
+      - events
+  /api/v1/events/stats:
+    get:
+      description: Get event counts grouped by type, severity, and source
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/events.eventStatsResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/events.ErrorResponse'
+      summary: Get event statistics
+      tags:
+      - events
   /api/v1/history:
     delete:
       description: Delete multiple history records based on criteria
@@ -2511,6 +2896,201 @@ paths:
       summary: Get history statistics
       tags:
       - history
+  /api/v1/jobs:
+    get:
+      description: Get a list of batch jobs with operation counts and optional status
+        filter
+      parameters:
+      - description: Filter by job status (organized, reverted, completed, etc.)
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/jobs.JobListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+      summary: List batch jobs
+      tags:
+      - jobs
+  /api/v1/jobs/{id}:
+    get:
+      description: Get details for a specific batch job by ID
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/jobs.JobListItem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+      summary: Get a single batch job
+      tags:
+      - jobs
+  /api/v1/jobs/{id}/operations:
+    get:
+      description: Get all file operations for a specific batch job with before/after
+        paths
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/jobs.OperationListResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+      summary: List operations for a batch job
+      tags:
+      - jobs
+  /api/v1/jobs/{id}/operations/{movieId}/revert:
+    post:
+      description: Revert file operations for a specific movie within a batch job
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Movie ID
+        in: path
+        name: movieId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/jobs.RevertResultResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "403":
+          description: Revert is disabled
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+      summary: Revert a specific movie within a batch job
+      tags:
+      - jobs
+  /api/v1/jobs/{id}/revert:
+    post:
+      description: Revert all file organization operations for a batch job, moving
+        files back to original paths
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/jobs.RevertResultResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "403":
+          description: Revert is disabled
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+      summary: Revert a batch job
+      tags:
+      - jobs
+  /api/v1/jobs/{id}/revert-check:
+    get:
+      description: Returns advisory information about later batches that share file
+        paths with the target batch. This does NOT block the revert — it provides
+        warnings only (D-07).
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/contracts.RevertCheckResponse'
+        "403":
+          description: Revert is disabled
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/jobs.ErrorResponse'
+      summary: Check for overlapping batches before revert
+      tags:
+      - jobs
   /api/v1/movies:
     get:
       description: Get a paginated list of all movies cached in the database. Supports

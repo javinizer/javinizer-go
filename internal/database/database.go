@@ -84,6 +84,14 @@ func (db *DB) AutoMigrate() error {
 	return db.RunMigrationsOnStartup(context.Background())
 }
 
+// SqliteTimeFormat is used to format time.Time values for SQLite datetime comparisons.
+// SQLite stores timestamps as TEXT in inconsistent formats (RFC3339 with T/Z, with
+// fractional seconds, etc.) and GORM binds time.Time as "2006-01-02 15:04:05" (space,
+// no TZ). Direct TEXT comparison between these formats produces wrong results because
+// 'T' > ' ' and fractional seconds alter lexicographic order. Wrapping both sides in
+// datetime() normalizes to a consistent format before comparison.
+const SqliteTimeFormat = "2006-01-02 15:04:05"
+
 func normalizeSQLiteDSN(dsn string) string {
 	normalized := strings.ToLower(strings.TrimSpace(dsn))
 	if normalized != ":memory:" {
@@ -1068,7 +1076,7 @@ func (r *HistoryRepository) FindRecent(limit int) ([]models.History, error) {
 // FindByDateRange finds history records within a date range
 func (r *HistoryRepository) FindByDateRange(start, end time.Time) ([]models.History, error) {
 	var history []models.History
-	err := r.db.Where("created_at BETWEEN ? AND ?", start, end).Order("created_at DESC").Find(&history).Error
+	err := r.db.Where("datetime(created_at) BETWEEN datetime(?) AND datetime(?)", start.Format(SqliteTimeFormat), end.Format(SqliteTimeFormat)).Order("created_at DESC").Find(&history).Error
 	return history, err
 }
 
@@ -1105,13 +1113,20 @@ func (r *HistoryRepository) DeleteByMovieID(movieID string) error {
 
 // DeleteOlderThan removes history records older than the specified date
 func (r *HistoryRepository) DeleteOlderThan(date time.Time) error {
-	return r.db.Where("created_at < ?", date).Delete(&models.History{}).Error
+	return r.db.Where("datetime(created_at) < datetime(?)", date.Format(SqliteTimeFormat)).Delete(&models.History{}).Error
 }
 
 // List returns a paginated list of history records
 func (r *HistoryRepository) List(limit, offset int) ([]models.History, error) {
 	var history []models.History
 	err := r.db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&history).Error
+	return history, err
+}
+
+// FindByBatchJobID returns history records for a specific batch job
+func (r *HistoryRepository) FindByBatchJobID(batchJobID string) ([]models.History, error) {
+	var history []models.History
+	err := r.db.Where("batch_job_id = ?", batchJobID).Order("created_at ASC").Find(&history).Error
 	return history, err
 }
 
@@ -1270,4 +1285,263 @@ func (r *MovieTagRepository) GetUniqueTagsList() ([]string, error) {
 	var tags []string
 	err := r.db.Model(&models.MovieTag{}).Distinct("tag").Order("tag ASC").Pluck("tag", &tags).Error
 	return tags, err
+}
+
+// BatchFileOperationRepository provides database operations for batch file operations
+type BatchFileOperationRepository struct {
+	db *DB
+}
+
+// NewBatchFileOperationRepository creates a new batch file operation repository
+func NewBatchFileOperationRepository(db *DB) *BatchFileOperationRepository {
+	return &BatchFileOperationRepository{db: db}
+}
+
+// Create adds a new batch file operation record
+func (r *BatchFileOperationRepository) Create(op *models.BatchFileOperation) error {
+	return r.db.Create(op).Error
+}
+
+// CreateBatch inserts multiple batch file operation records in a single transaction
+func (r *BatchFileOperationRepository) CreateBatch(ops []*models.BatchFileOperation) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for _, op := range ops {
+			if err := tx.Create(op).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// FindByID finds a batch file operation by its primary key
+func (r *BatchFileOperationRepository) FindByID(id uint) (*models.BatchFileOperation, error) {
+	var op models.BatchFileOperation
+	err := r.db.First(&op, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &op, nil
+}
+
+// FindByBatchJobID returns all operations for a specific batch job
+func (r *BatchFileOperationRepository) FindByBatchJobID(batchJobID string) ([]models.BatchFileOperation, error) {
+	var ops []models.BatchFileOperation
+	err := r.db.Where("batch_job_id = ?", batchJobID).Order("id ASC").Find(&ops).Error
+	return ops, err
+}
+
+// FindByBatchJobIDAndRevertStatus returns operations filtered by batch job and revert status
+func (r *BatchFileOperationRepository) FindByBatchJobIDAndRevertStatus(batchJobID string, revertStatus string) ([]models.BatchFileOperation, error) {
+	var ops []models.BatchFileOperation
+	err := r.db.Where("batch_job_id = ? AND revert_status = ?", batchJobID, revertStatus).Order("id ASC").Find(&ops).Error
+	return ops, err
+}
+
+// UpdateRevertStatus changes the revert status and sets reverted_at when status is "reverted"
+func (r *BatchFileOperationRepository) UpdateRevertStatus(id uint, status string) error {
+	updates := map[string]interface{}{
+		"revert_status": status,
+		"updated_at":    time.Now().UTC(),
+	}
+	if status == models.RevertStatusReverted {
+		updates["reverted_at"] = time.Now().UTC()
+	}
+	return r.db.Model(&models.BatchFileOperation{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// CountByBatchJobID returns the count of operations for a specific batch job
+func (r *BatchFileOperationRepository) CountByBatchJobID(batchJobID string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.BatchFileOperation{}).Where("batch_job_id = ?", batchJobID).Count(&count).Error
+	return count, err
+}
+
+// CountByBatchJobIDAndRevertStatus returns the count of operations filtered by batch job and revert status
+func (r *BatchFileOperationRepository) CountByBatchJobIDAndRevertStatus(batchJobID string, status string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.BatchFileOperation{}).Where("batch_job_id = ? AND revert_status = ?", batchJobID, status).Count(&count).Error
+	return count, err
+}
+
+// Update persists changes to an existing BatchFileOperation record using GORM Save (upsert).
+// Updates all fields including UpdatedAt.
+func (r *BatchFileOperationRepository) Update(op *models.BatchFileOperation) error {
+	return r.db.Save(op).Error
+}
+
+// EventRepository provides database operations for structured event logging
+type EventRepository struct {
+	db *DB
+}
+
+// NewEventRepository creates a new event repository
+func NewEventRepository(db *DB) *EventRepository {
+	return &EventRepository{db: db}
+}
+
+// Create adds a new event record
+func (r *EventRepository) Create(event *models.Event) error {
+	return r.db.Create(event).Error
+}
+
+// FindByID finds an event by its primary key
+func (r *EventRepository) FindByID(id uint) (*models.Event, error) {
+	var event models.Event
+	err := r.db.First(&event, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &event, nil
+}
+
+// FindByType returns events matching the given event type, ordered by created_at DESC
+func (r *EventRepository) FindByType(eventType string, limit, offset int) ([]models.Event, error) {
+	var events []models.Event
+	err := r.db.Where("event_type = ?", eventType).Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error
+	return events, err
+}
+
+// FindBySeverity returns events matching the given severity, ordered by created_at DESC
+func (r *EventRepository) FindBySeverity(severity string, limit, offset int) ([]models.Event, error) {
+	var events []models.Event
+	err := r.db.Where("severity = ?", severity).Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error
+	return events, err
+}
+
+// FindByTypeAndSeverity returns events matching both type and severity, ordered by created_at DESC
+func (r *EventRepository) FindByTypeAndSeverity(eventType, severity string, limit, offset int) ([]models.Event, error) {
+	var events []models.Event
+	err := r.db.Where("event_type = ? AND severity = ?", eventType, severity).Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error
+	return events, err
+}
+
+// FindBySource returns events matching the given source, ordered by created_at DESC
+func (r *EventRepository) FindBySource(source string, limit, offset int) ([]models.Event, error) {
+	var events []models.Event
+	err := r.db.Where("source = ?", source).Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error
+	return events, err
+}
+
+// FindByDateRange returns events within the time bounds (inclusive start, exclusive end), ordered by created_at DESC
+func (r *EventRepository) FindByDateRange(start, end time.Time, limit, offset int) ([]models.Event, error) {
+	var events []models.Event
+	err := r.db.Where("datetime(created_at) >= datetime(?) AND datetime(created_at) < datetime(?)", start.Format(SqliteTimeFormat), end.Format(SqliteTimeFormat)).Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error
+	return events, err
+}
+
+// FindFiltered returns events matching all non-zero filter fields, ordered by created_at DESC
+func (r *EventRepository) FindFiltered(filter EventFilter, limit, offset int) ([]models.Event, error) {
+	query := r.db.Order("created_at DESC").Limit(limit).Offset(offset)
+	if filter.EventType != "" {
+		query = query.Where("event_type = ?", filter.EventType)
+	}
+	if filter.Severity != "" {
+		query = query.Where("severity = ?", filter.Severity)
+	}
+	if filter.Source != "" {
+		query = query.Where("source = ?", filter.Source)
+	}
+	if filter.Start != nil {
+		query = query.Where("datetime(created_at) >= datetime(?)", filter.Start.UTC().Format(SqliteTimeFormat))
+	}
+	if filter.End != nil {
+		query = query.Where("datetime(created_at) < datetime(?)", filter.End.UTC().Format(SqliteTimeFormat))
+	}
+	var events []models.Event
+	err := query.Find(&events).Error
+	return events, err
+}
+
+// CountFiltered returns the count of events matching all non-zero filter fields
+func (r *EventRepository) CountFiltered(filter EventFilter) (int64, error) {
+	query := r.db.Model(&models.Event{})
+	if filter.EventType != "" {
+		query = query.Where("event_type = ?", filter.EventType)
+	}
+	if filter.Severity != "" {
+		query = query.Where("severity = ?", filter.Severity)
+	}
+	if filter.Source != "" {
+		query = query.Where("source = ?", filter.Source)
+	}
+	if filter.Start != nil {
+		query = query.Where("datetime(created_at) >= datetime(?)", filter.Start.UTC().Format(SqliteTimeFormat))
+	}
+	if filter.End != nil {
+		query = query.Where("datetime(created_at) < datetime(?)", filter.End.UTC().Format(SqliteTimeFormat))
+	}
+	var count int64
+	err := query.Count(&count).Error
+	return count, err
+}
+
+// List returns all events ordered by created_at DESC with pagination
+func (r *EventRepository) List(limit, offset int) ([]models.Event, error) {
+	var events []models.Event
+	err := r.db.Order("created_at DESC").Limit(limit).Offset(offset).Find(&events).Error
+	return events, err
+}
+
+// Count returns the total number of event records
+func (r *EventRepository) Count() (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Event{}).Count(&count).Error
+	return count, err
+}
+
+// CountByType returns the count of events for a given type
+func (r *EventRepository) CountByType(eventType string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Event{}).Where("event_type = ?", eventType).Count(&count).Error
+	return count, err
+}
+
+// CountBySeverity returns the count of events for a given severity
+func (r *EventRepository) CountBySeverity(severity string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Event{}).Where("severity = ?", severity).Count(&count).Error
+	return count, err
+}
+
+func (r *EventRepository) CountByTypeAndSeverity(eventType, severity string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Event{}).Where("event_type = ? AND severity = ?", eventType, severity).Count(&count).Error
+	return count, err
+}
+
+// CountBySource returns the count of events for a given source
+func (r *EventRepository) CountBySource(source string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Event{}).Where("source = ?", source).Count(&count).Error
+	return count, err
+}
+
+// CountGroupBySource returns event counts grouped by source
+func (r *EventRepository) CountGroupBySource() (map[string]int64, error) {
+	type result struct {
+		Source string
+		Count  int64
+	}
+	var results []result
+	err := r.db.Model(&models.Event{}).Select("source, count(*) as count").Group("source").Find(&results).Error
+	if err != nil {
+		return nil, err
+	}
+	bySource := make(map[string]int64, len(results))
+	for _, r := range results {
+		bySource[r.Source] = r.Count
+	}
+	return bySource, nil
+}
+
+func (r *EventRepository) CountByDateRange(start, end time.Time) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Event{}).Where("datetime(created_at) >= datetime(?) AND datetime(created_at) < datetime(?)", start.Format(SqliteTimeFormat), end.Format(SqliteTimeFormat)).Count(&count).Error
+	return count, err
+}
+
+// DeleteOlderThan removes events before the cutoff date (for event table cleanup)
+func (r *EventRepository) DeleteOlderThan(date time.Time) error {
+	return r.db.Where("datetime(created_at) < datetime(?)", date.Format(SqliteTimeFormat)).Delete(&models.Event{}).Error
 }

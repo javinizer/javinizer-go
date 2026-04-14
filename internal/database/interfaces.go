@@ -52,6 +52,7 @@ type HistoryRepositoryInterface interface {
 	Create(history *models.History) error
 	FindByID(id uint) (*models.History, error)
 	FindByMovieID(movieID string) ([]models.History, error)
+	FindByBatchJobID(batchJobID string) ([]models.History, error)
 	FindByOperation(operation string, limit int) ([]models.History, error)
 	FindByStatus(status string, limit int) ([]models.History, error)
 	FindRecent(limit int) ([]models.History, error)
@@ -103,4 +104,48 @@ type JobRepositoryInterface interface {
 	List() ([]models.Job, error)
 	Delete(id string) error
 	DeleteOrganizedOlderThan(date time.Time) error
+}
+
+// BatchFileOperationRepositoryInterface defines the contract for batch file operation operations
+type BatchFileOperationRepositoryInterface interface {
+	Create(op *models.BatchFileOperation) error
+	CreateBatch(ops []*models.BatchFileOperation) error
+	FindByID(id uint) (*models.BatchFileOperation, error)
+	FindByBatchJobID(batchJobID string) ([]models.BatchFileOperation, error)
+	FindByBatchJobIDAndRevertStatus(batchJobID string, revertStatus string) ([]models.BatchFileOperation, error)
+	Update(op *models.BatchFileOperation) error
+	UpdateRevertStatus(id uint, status string) error
+	CountByBatchJobID(batchJobID string) (int64, error)
+	CountByBatchJobIDAndRevertStatus(batchJobID string, status string) (int64, error)
+}
+
+// EventFilter holds optional filter parameters for composable event queries
+type EventFilter struct {
+	EventType string
+	Severity  string
+	Source    string
+	Start     *time.Time
+	End       *time.Time
+}
+
+// EventRepositoryInterface defines the contract for structured event logging operations
+type EventRepositoryInterface interface {
+	Create(event *models.Event) error
+	FindByID(id uint) (*models.Event, error)
+	FindByType(eventType string, limit, offset int) ([]models.Event, error)
+	FindBySeverity(severity string, limit, offset int) ([]models.Event, error)
+	FindByTypeAndSeverity(eventType, severity string, limit, offset int) ([]models.Event, error)
+	FindBySource(source string, limit, offset int) ([]models.Event, error)
+	FindByDateRange(start, end time.Time, limit, offset int) ([]models.Event, error)
+	FindFiltered(filter EventFilter, limit, offset int) ([]models.Event, error)
+	CountFiltered(filter EventFilter) (int64, error)
+	List(limit, offset int) ([]models.Event, error)
+	Count() (int64, error)
+	CountByType(eventType string) (int64, error)
+	CountBySeverity(severity string) (int64, error)
+	CountByTypeAndSeverity(eventType, severity string) (int64, error)
+	CountBySource(source string) (int64, error)
+	CountGroupBySource() (map[string]int64, error)
+	CountByDateRange(start, end time.Time) (int64, error)
+	DeleteOlderThan(date time.Time) error
 }

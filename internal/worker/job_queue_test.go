@@ -5,7 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/mocks"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -297,6 +300,23 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 		assert.True(t, job.CompletedAt.Before(afterCancellation) || job.CompletedAt.Equal(afterCancellation))
 	})
 
+	t.Run("MarkReverted", func(t *testing.T) {
+		jq := NewJobQueue(nil, "")
+		job := jq.CreateJob([]string{"file1.mp4"})
+		job.MarkStarted()
+		job.MarkCompleted()
+		job.MarkOrganized()
+
+		beforeReverted := time.Now()
+		job.MarkReverted()
+		afterReverted := time.Now()
+
+		assert.Equal(t, JobStatusReverted, job.Status)
+		require.NotNil(t, job.RevertedAt)
+		assert.True(t, job.RevertedAt.After(beforeReverted) || job.RevertedAt.Equal(beforeReverted))
+		assert.True(t, job.RevertedAt.Before(afterReverted) || job.RevertedAt.Equal(afterReverted))
+	})
+
 	t.Run("Full workflow: pending -> running -> completed", func(t *testing.T) {
 		jq := NewJobQueue(nil, "")
 		files := []string{"file1.mp4", "file2.mkv"}
@@ -328,6 +348,27 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 		assert.Equal(t, JobStatusCompleted, job.Status)
 		assert.NotNil(t, job.CompletedAt)
 		assert.Equal(t, 100.0, job.Progress)
+	})
+
+	t.Run("Revert workflow: organized -> reverted", func(t *testing.T) {
+		jq := NewJobQueue(nil, "")
+		job := jq.CreateJob([]string{"file1.mp4"})
+		job.MarkStarted()
+		job.MarkCompleted()
+		job.MarkOrganized()
+
+		assert.Equal(t, JobStatusOrganized, job.Status)
+
+		// Done channel should be closed after MarkOrganized
+		select {
+		case <-job.Done:
+		default:
+			t.Fatal("Done channel should be closed after MarkOrganized")
+		}
+
+		job.MarkReverted()
+		assert.Equal(t, JobStatusReverted, job.Status)
+		require.NotNil(t, job.RevertedAt)
 	})
 }
 
@@ -838,4 +879,63 @@ func TestBatchJob_IsExcluded(t *testing.T) {
 		// Non-existent file should not be excluded
 		assert.False(t, job.IsExcluded("non-existent.mp4"))
 	})
+}
+
+// TestMarkReverted_StatusAndTimestamp verifies MarkReverted sets status and timestamp
+func TestMarkReverted_StatusAndTimestamp(t *testing.T) {
+	jq := NewJobQueue(nil, "")
+	job := jq.CreateJob([]string{"file1.mp4"})
+	job.MarkStarted()
+	job.MarkCompleted()
+	job.MarkOrganized()
+
+	beforeReverted := time.Now()
+	job.MarkReverted()
+
+	assert.Equal(t, JobStatusReverted, job.Status)
+	require.NotNil(t, job.RevertedAt)
+	assert.True(t, job.RevertedAt.After(beforeReverted) || job.RevertedAt.Equal(beforeReverted))
+}
+
+// TestMarkReverted_DoneChannelClosed verifies Done channel is closed after MarkReverted
+func TestMarkReverted_DoneChannelClosed(t *testing.T) {
+	jq := NewJobQueue(nil, "")
+	job := jq.CreateJob([]string{"file1.mp4"})
+	job.MarkStarted()
+	job.MarkCompleted()
+	job.MarkOrganized()
+
+	// Done channel should be closed after MarkOrganized
+	select {
+	case <-job.Done:
+	default:
+		t.Fatal("Done channel should be closed after MarkOrganized")
+	}
+
+	// MarkReverted should still work (idempotent close)
+	job.MarkReverted()
+	assert.Equal(t, JobStatusReverted, job.Status)
+
+	// Done channel should still be closed
+	select {
+	case <-job.Done:
+	default:
+		t.Fatal("Done channel should be closed after MarkReverted")
+	}
+}
+
+// TestCleanupOldOrganizedJobs_DoesNotDeleteReverted verifies that the cleanup
+// goroutine does NOT delete any jobs (it is now a no-op per D-05/HIST-11).
+func TestCleanupOldOrganizedJobs_DoesNotDeleteReverted(t *testing.T) {
+	mockRepo := mocks.NewMockJobRepositoryInterface(t)
+
+	// NewJobQueue calls loadFromDatabase → List()
+	mockRepo.On("List").Return([]models.Job{}, nil)
+
+	jq := NewJobQueue(mockRepo, "")
+	jq.cleanupOldOrganizedJobs()
+
+	// Verify that DeleteOrganizedOlderThan was NOT called (cleanup is disabled)
+	mockRepo.AssertNotCalled(t, "DeleteOrganizedOlderThan", mock.Anything)
+	mockRepo.AssertExpectations(t)
 }

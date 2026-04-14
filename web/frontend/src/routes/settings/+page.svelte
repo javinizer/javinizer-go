@@ -192,7 +192,7 @@
 			const scraperEnabledMap: Record<string, boolean> = {};
 
 			response.scrapers.forEach(scraper => {
-				scraperDisplayNames[scraper.name] = scraper.display_name;
+				scraperDisplayNames[scraper.name] = scraper.display_title;
 				scraperOptionsMap[scraper.name] = scraper.options || [];
 				scraperEnabledMap[scraper.name] = scraper.enabled;
 			});

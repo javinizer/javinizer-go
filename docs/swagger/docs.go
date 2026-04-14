@@ -868,6 +868,149 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/events": {
+            "get": {
+                "description": "Get a paginated list of structured events with composable type, severity, source, and date range filters",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "events"
+                ],
+                "summary": "List events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by event type (scraper, organize, system)",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by severity (debug, info, warn, error)",
+                        "name": "severity",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by source (e.g., r18dev, organizer, server)",
+                        "name": "source",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (ISO 8601, e.g., 2026-01-01T00:00:00Z)",
+                        "name": "start",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (ISO 8601, e.g., 2026-01-31T23:59:59Z)",
+                        "name": "end",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Max events to return (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset for pagination",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/events.eventListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/events.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/events.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete events older than a specified number of days",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "events"
+                ],
+                "summary": "Delete old events",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Delete events older than N days (minimum 1)",
+                        "name": "older_than_days",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/events.deleteEventsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/events.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/events.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/stats": {
+            "get": {
+                "description": "Get event counts grouped by type, severity, and source",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "events"
+                ],
+                "summary": "Get event statistics",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/events.eventStatsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/events.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/history": {
             "get": {
                 "description": "Get a paginated list of history records with optional filtering",
@@ -1047,6 +1190,294 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/history.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/jobs": {
+            "get": {
+                "description": "Get a list of batch jobs with operation counts and optional status filter",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "List batch jobs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by job status (organized, reverted, completed, etc.)",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.JobListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/jobs/{id}": {
+            "get": {
+                "description": "Get details for a specific batch job by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Get a single batch job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.JobListItem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/jobs/{id}/operations": {
+            "get": {
+                "description": "Get all file operations for a specific batch job with before/after paths",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "List operations for a batch job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.OperationListResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/jobs/{id}/operations/{movieId}/revert": {
+            "post": {
+                "description": "Revert file operations for a specific movie within a batch job",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Revert a specific movie within a batch job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Movie ID",
+                        "name": "movieId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.RevertResultResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Revert is disabled",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/jobs/{id}/revert": {
+            "post": {
+                "description": "Revert all file organization operations for a batch job, moving files back to original paths",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Revert a batch job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.RevertResultResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Revert is disabled",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/jobs/{id}/revert-check": {
+            "get": {
+                "description": "Returns advisory information about later batches that share file paths with the target batch. This does NOT block the revert — it provides warnings only (D-07).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Check for overlapping batches before revert",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/contracts.RevertCheckResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Revert is disabled",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/jobs.ErrorResponse"
                         }
                     }
                 }
@@ -1830,6 +2261,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "operation_count": {
+                    "type": "integer"
+                },
                 "operation_mode_override": {
                     "type": "string"
                 },
@@ -1841,6 +2275,9 @@ const docTemplate = `{
                     "additionalProperties": {
                         "$ref": "#/definitions/contracts.BatchFileResult"
                     }
+                },
+                "reverted_count": {
+                    "type": "integer"
                 },
                 "started_at": {
                     "type": "string"
@@ -2631,6 +3068,10 @@ const docTemplate = `{
                 "actress_format": {
                     "type": "string"
                 },
+                "allow_revert": {
+                    "description": "Enable revert operations (default: false — opt-in for safety)",
+                    "type": "boolean"
+                },
                 "delimiter": {
                     "type": "string"
                 },
@@ -3196,6 +3637,63 @@ const docTemplate = `{
                 }
             }
         },
+        "contracts.JobListItem": {
+            "type": "object",
+            "properties": {
+                "completed": {
+                    "type": "integer",
+                    "example": 9
+                },
+                "completed_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:05:00Z"
+                },
+                "destination": {
+                    "type": "string",
+                    "example": "/path/to/output"
+                },
+                "failed": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "operation_count": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "organized_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:05:00Z"
+                },
+                "progress": {
+                    "type": "number",
+                    "example": 0.9
+                },
+                "reverted_at": {
+                    "type": "string",
+                    "example": "2026-04-12T11:00:00Z"
+                },
+                "reverted_count": {
+                    "type": "integer",
+                    "example": 7
+                },
+                "started_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:00:00Z"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "organized"
+                },
+                "total_files": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
         "contracts.MergeStatistics": {
             "type": "object",
             "properties": {
@@ -3225,6 +3723,64 @@ const docTemplate = `{
                 }
             }
         },
+        "contracts.OperationItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:05:00Z"
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "in_place_renamed": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "movie_id": {
+                    "type": "string",
+                    "example": "ABC-123"
+                },
+                "new_path": {
+                    "type": "string",
+                    "example": "/dest/ABC-123 [Studio]/ABC-123.mp4"
+                },
+                "operation_type": {
+                    "type": "string",
+                    "example": "move"
+                },
+                "original_path": {
+                    "type": "string",
+                    "example": "/source/ABC-123.mp4"
+                },
+                "revert_status": {
+                    "type": "string",
+                    "example": "pending"
+                },
+                "reverted_at": {
+                    "type": "string",
+                    "example": "2026-04-12T11:00:00Z"
+                }
+            }
+        },
+        "contracts.OverlapInfo": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-04-12T12:00:00Z"
+                },
+                "job_id": {
+                    "type": "string",
+                    "example": "660e8400-e29b-41d4-a716-446655440001"
+                },
+                "operation_count": {
+                    "type": "integer",
+                    "example": 3
+                }
+            }
+        },
         "contracts.PathAutocompleteSuggestion": {
             "type": "object",
             "properties": {
@@ -3239,6 +3795,54 @@ const docTemplate = `{
                 "path": {
                     "type": "string",
                     "example": "/path/to/videos"
+                }
+            }
+        },
+        "contracts.RevertCheckResponse": {
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "overlapping_batches": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.OverlapInfo"
+                    }
+                }
+            }
+        },
+        "contracts.RevertFileError": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "file not found"
+                },
+                "movie_id": {
+                    "type": "string",
+                    "example": "ABC-123"
+                },
+                "new_path": {
+                    "type": "string",
+                    "example": "/dest/ABC-123 [Studio]/ABC-123.mp4"
+                },
+                "operation_id": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "original_path": {
+                    "type": "string",
+                    "example": "/source/ABC-123.mp4"
+                },
+                "outcome": {
+                    "type": "string",
+                    "example": "skipped"
+                },
+                "reason": {
+                    "type": "string",
+                    "example": "anchor_missing"
                 }
             }
         },
@@ -3319,6 +3923,75 @@ const docTemplate = `{
                 "unit": {
                     "type": "string",
                     "example": "seconds"
+                }
+            }
+        },
+        "events.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "events.deleteEventsResponse": {
+            "type": "object",
+            "properties": {
+                "deleted": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "events.eventListResponse": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Event"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "events.eventStatsResponse": {
+            "type": "object",
+            "properties": {
+                "by_severity": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "by_source": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "by_type": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -3544,6 +4217,147 @@ const docTemplate = `{
                 }
             }
         },
+        "jobs.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "jobs.JobListItem": {
+            "type": "object",
+            "properties": {
+                "completed": {
+                    "type": "integer",
+                    "example": 9
+                },
+                "completed_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:05:00Z"
+                },
+                "destination": {
+                    "type": "string",
+                    "example": "/path/to/output"
+                },
+                "failed": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "operation_count": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "organized_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:05:00Z"
+                },
+                "progress": {
+                    "type": "number",
+                    "example": 0.9
+                },
+                "reverted_at": {
+                    "type": "string",
+                    "example": "2026-04-12T11:00:00Z"
+                },
+                "reverted_count": {
+                    "type": "integer",
+                    "example": 7
+                },
+                "started_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:00:00Z"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "organized"
+                },
+                "total_files": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
+        "jobs.JobListResponse": {
+            "type": "object",
+            "properties": {
+                "jobs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.JobListItem"
+                    }
+                }
+            }
+        },
+        "jobs.OperationListResponse": {
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "job_status": {
+                    "type": "string",
+                    "example": "organized"
+                },
+                "operations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.OperationItem"
+                    }
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
+        "jobs.RevertResultResponse": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contracts.RevertFileError"
+                    }
+                },
+                "failed": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "job_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "skipped": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "status": {
+                    "type": "string",
+                    "example": "reverted"
+                },
+                "succeeded": {
+                    "type": "integer",
+                    "example": 9
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
         "models.Actress": {
             "type": "object",
             "properties": {
@@ -3574,6 +4388,33 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Event": {
+            "type": "object",
+            "properties": {
+                "context": {
+                    "description": "JSON-encoded details",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "source": {
                     "type": "string"
                 }
             }
