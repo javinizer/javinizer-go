@@ -240,6 +240,7 @@ func TestProcessBatchJobConcurrent(t *testing.T) {
 			nil,              // moveToFolderOverride
 			nil,              // renameFolderInPlaceOverride
 			"",               // operationModeOverride
+			nil,              // emitter
 		)
 		close(done)
 	}()
@@ -326,6 +327,7 @@ func TestProcessBatchJobCancellation(t *testing.T) {
 			nil,              // moveToFolderOverride
 			nil,              // renameFolderInPlaceOverride
 			"",               // operationModeOverride
+			nil,              // emitter
 		)
 		close(done)
 	}()
@@ -409,6 +411,7 @@ func TestProcessBatchJobRaceConditions(t *testing.T) {
 			nil,              // moveToFolderOverride
 			nil,              // renameFolderInPlaceOverride
 			"",               // operationModeOverride
+			nil,              // emitter
 		)
 		close(done)
 	}()
@@ -611,6 +614,7 @@ func TestBatchScrapeTaskDatabaseSafety(t *testing.T) {
 			nil,              // moveToFolderOverride
 			nil,              // renameFolderInPlaceOverride
 			"",               // operationModeOverride
+			nil,              // emitter
 		)
 		close(done)
 	}()
@@ -710,6 +714,7 @@ func TestWorkerPoolErrorHandling(t *testing.T) {
 			nil,              // moveToFolderOverride
 			nil,              // renameFolderInPlaceOverride
 			"",               // operationModeOverride
+			nil,              // emitter
 		)
 		close(done)
 	}()

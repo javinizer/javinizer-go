@@ -57,7 +57,7 @@ func TestProcessOrganizeJob_HandlesExcludedInvalidAndUnmatchedFiles(t *testing.T
 	})
 	job.ExcludeFile(excludedPath)
 
-	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry)
+	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry, nil)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusCompleted {
@@ -108,7 +108,7 @@ func TestProcessUpdateMode_SkipsExcludedAndInvalidResults(t *testing.T) {
 	})
 	job.ExcludeFile(excludedPath)
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background())
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusCompleted {
@@ -147,7 +147,7 @@ func TestProcessUpdateMode_RespectsNFOEnabledConfig(t *testing.T) {
 		Data:     &models.Movie{ID: "IPX-666", Title: "NFO Disabled Test"},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background())
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusCompleted {
@@ -188,7 +188,7 @@ func TestProcessOrganizeJob_SkipsNFOWhenDisabled(t *testing.T) {
 
 	// copyOnly=true copies files to destDir without moving original
 	// NFO generation should be skipped since cfg.Metadata.NFO.Enabled = false
-	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry)
+	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry, nil)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusOrganized {

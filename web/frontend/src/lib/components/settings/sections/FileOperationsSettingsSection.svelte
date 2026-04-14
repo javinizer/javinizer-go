@@ -69,6 +69,17 @@
 		}}
 	/>
 
+	<SettingsSubsection title="Revert">
+		<FormToggle
+			label="Allow Revert"
+			description="Enable the revert feature to undo organize operations and restore files to their original locations. When disabled, revert buttons are hidden and revert API calls are blocked."
+			checked={config.output.allow_revert ?? false}
+			onchange={(val) => {
+				config.output.allow_revert = val;
+			}}
+		/>
+	</SettingsSubsection>
+
 	<SettingsSubsection title="Subtitle Handling">
 		<FormToggle
 			label="Move subtitles"

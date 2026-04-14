@@ -420,6 +420,7 @@ output:
     rename_folder_in_place: false
     move_to_folder: true
     rename_file: true
+    allow_revert: false
     group_actress: false
     # Media file naming templates (support placeholders like <ID>, <TITLE>, <INDEX>, etc.)
     poster_format: <ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg    # Vertical poster image (e.g., IPX-535-poster.jpg, IPX-535-pt1-poster.jpg)

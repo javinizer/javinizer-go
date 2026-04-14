@@ -3,10 +3,12 @@ package batch
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/eventlog"
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -21,7 +23,7 @@ import (
 )
 
 // processOrganizeJob processes file organization for a completed scrape job
-func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destination string, copyOnly bool, linkModeRaw string, db *database.DB, cfg *config.Config, registry *models.ScraperRegistry) {
+func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destination string, copyOnly bool, linkModeRaw string, db *database.DB, cfg *config.Config, registry *models.ScraperRegistry, emitter eventlog.EventEmitter) {
 	// Determine effective operation mode and apply overrides
 	outputConfig := cfg.Output
 	if job.OperationModeOverride != "" {
@@ -89,6 +91,7 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 	}
 
 	historyLogger := history.NewLogger(db)
+	batchFileOpRepo := database.NewBatchFileOperationRepository(db)
 	linkMode, err := organizer.ParseLinkMode(linkModeRaw)
 	if err != nil {
 		broadcastProgress(&ws.ProgressMessage{
@@ -97,6 +100,11 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 			Progress: 0,
 			Message:  fmt.Sprintf("Invalid link mode: %v", err),
 		})
+		if emitter != nil {
+			if emitErr := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("Organize job %s failed: invalid link mode", job.ID), models.SeverityError, map[string]interface{}{"job_id": job.ID, "error": err.Error()}); emitErr != nil {
+				logging.Warnf("Failed to emit organize error event: %v", emitErr)
+			}
+		}
 		job.MarkFailed()
 		if jobQueue != nil {
 			jobQueue.PersistJob(job)
@@ -113,6 +121,11 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 			Progress: 0,
 			Message:  fmt.Sprintf("Failed to create HTTP client: %v", err),
 		})
+		if emitter != nil {
+			if emitErr := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("Organize job %s failed: HTTP client setup error", job.ID), models.SeverityError, map[string]interface{}{"job_id": job.ID, "error": err.Error()}); emitErr != nil {
+				logging.Warnf("Failed to emit organize error event: %v", emitErr)
+			}
+		}
 		job.MarkFailed()
 		if jobQueue != nil {
 			jobQueue.PersistJob(job)
@@ -129,6 +142,13 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 		Progress: 0,
 		Message:  "Starting file organization",
 	})
+
+	// Emit organize event for job start
+	if emitter != nil {
+		if err := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("File organization started for job %s", job.ID), models.SeverityInfo, map[string]interface{}{"job_id": job.ID, "mode": string(effectiveMode)}); err != nil {
+			logging.Warnf("Failed to emit organize start event: %v", err)
+		}
+	}
 
 	status := job.GetStatus()
 	organized := 0
@@ -174,6 +194,30 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 		var result *organizer.OrganizeResult
 		var organizeErr error
 
+		// Capture NFO snapshot BEFORE organize (D-01: crash-safe)
+		sourceDir := filepath.Dir(filePath)
+		sourceNFOFilename := nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Metadata.NFO.PerFile, match.IsMultiPart, match.PartSuffix)
+		snapshotCandidates := []string{
+			filepath.Join(sourceDir, sourceNFOFilename),
+			filepath.Join(sourceDir, movie.ID+".nfo"),
+		}
+		if cfg.Metadata.NFO.PerFile && filePath != "" {
+			videoName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+			videoNFO := filepath.Join(sourceDir, videoName+".nfo")
+			if videoNFO != snapshotCandidates[0] && videoNFO != snapshotCandidates[1] {
+				snapshotCandidates = append(snapshotCandidates, videoNFO)
+			}
+		}
+		snapshotResult := history.ReadNFOSnapshot(afero.NewOsFs(), snapshotCandidates...)
+		opType := history.DetermineOperationType(!copyOnly, linkMode, false)
+		preRecord := history.NewPreOrganizeRecord(
+			job.ID, movie.ID, filePath, snapshotResult.Content, "", sourceDir, opType, false,
+		)
+		if err := batchFileOpRepo.Create(preRecord); err != nil {
+			logging.Warnf("Failed to persist pre-organize record for %s: %v", movie.ID, err)
+			// Continue organizing — snapshot data is best-effort but must not block organize
+		}
+
 		if effectiveMode == types.OperationModeOrganize {
 			// Use existing Organizer for organize mode (trusted code path)
 			result, organizeErr = org.OrganizeWithLinkMode(match, movie, destination, false, false, copyOnly, linkMode)
@@ -193,6 +237,13 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 		if organizeErr != nil {
 			logging.Errorf("Failed to organize %s: %v", filePath, organizeErr)
 			failed++
+
+			// Emit organize event for failure
+			if emitter != nil {
+				if err := emitter.EmitOrganizeEvent("file_move", fmt.Sprintf("Failed to organize %s", movie.ID), models.SeverityError, map[string]interface{}{"job_id": job.ID, "movie_id": movie.ID, "file": filePath, "error": organizeErr.Error()}); err != nil {
+					logging.Warnf("Failed to emit organize failure event: %v", err)
+				}
+			}
 
 			// Log failed organize operation
 			if logErr := historyLogger.LogOrganize(movie.ID, filePath, "", false, organizeErr); logErr != nil {
@@ -221,8 +272,9 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 		}
 
 		postMoveIssueCount := 0
+		var downloadPaths []string
+		var partSuffix string
 
-		// Surface subtitle move failures clearly in logs for support/debug workflows.
 		for _, subtitle := range result.Subtitles {
 			if subtitle.Error != nil {
 				postMoveIssueCount++
@@ -230,9 +282,7 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 			}
 		}
 
-		// Copy temp cropped poster and download all media files
 		if result.ShouldGenerateMetadata {
-			// Create multipart info from match for template conditionals
 			var multipart *downloader.MultipartInfo
 			if match.IsMultiPart {
 				multipart = &downloader.MultipartInfo{
@@ -242,23 +292,20 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 				}
 			}
 
-			// Copy temp cropped poster BEFORE downloads (so downloader skips it)
-			copyTempCroppedPoster(job, movie, result.FolderPath, cfg, "Organize", multipart)
+			posterPath := copyTempCroppedPoster(job, movie, result.FolderPath, cfg, "Organize", multipart)
+			if posterPath != "" {
+				downloadPaths = append(downloadPaths, posterPath)
+			}
 
-			// Download all media files and log to history
-			downloadMediaFilesWithHistory(dl, movie, result.FolderPath, cfg, historyLogger, multipart)
+			dlPaths := downloadMediaFilesWithHistory(dl, movie, result.FolderPath, cfg, historyLogger, multipart)
+			downloadPaths = append(downloadPaths, dlPaths...)
 		}
 
-		// Generate NFO file
 		if result.ShouldGenerateMetadata && cfg.Metadata.NFO.Enabled {
-			// Determine part suffix for multi-part files (only if per_file is enabled)
-			partSuffix := ""
 			if cfg.Metadata.NFO.PerFile && match.IsMultiPart {
 				partSuffix = match.PartSuffix
 			}
 
-			// Pass the video file path for stream details extraction
-			// Use NewPath (destination) after move/copy, fall back to OriginalPath
 			videoFilePath := result.NewPath
 			if videoFilePath == "" {
 				videoFilePath = result.OriginalPath
@@ -269,8 +316,7 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 				logging.Warnf("[post-move] mode=Organize movie=%s file=%s stage=nfo_generate folder=%s video=%s part_suffix=%q err=%v", movie.ID, filePath, result.FolderPath, videoFilePath, partSuffix, nfoErr)
 			}
 
-			// Log NFO generation to history
-			nfoPath := filepath.Join(result.FolderPath, movie.ID+".nfo")
+			nfoPath := filepath.Join(result.FolderPath, nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Metadata.NFO.PerFile, match.IsMultiPart, partSuffix))
 			if logErr := historyLogger.LogNFO(movie.ID, nfoPath, nfoErr); logErr != nil {
 				logging.Warnf("Failed to log NFO history for %s: %v", movie.ID, logErr)
 			}
@@ -282,7 +328,40 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 			logging.Warnf("[post-move] mode=Organize movie=%s file=%s stage=summary issues=%d moved_path=%s folder=%s", movie.ID, filePath, postMoveIssueCount, result.NewPath, result.FolderPath)
 		}
 
+		if preRecord.ID > 0 {
+			nfoPath := ""
+			generatedNFOPath := ""
+			if result.ShouldGenerateMetadata && cfg.Metadata.NFO.Enabled {
+				generatedNFOPath = filepath.Join(result.FolderPath, nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Metadata.NFO.PerFile, match.IsMultiPart, partSuffix))
+				if snapshotResult.FoundPath != "" {
+					nfoPath = snapshotResult.FoundPath
+				} else {
+					nfoPath = generatedNFOPath
+				}
+			} else if snapshotResult.FoundPath != "" {
+				nfoPath = snapshotResult.FoundPath
+			}
+			preRecord.NFOPath = nfoPath
+			generatedFilesJSON := history.BuildGeneratedFilesJSON(generatedNFOPath, result.Subtitles, downloadPaths)
+			inPlaceRenamed := result.InPlaceRenamed
+			originalDir := sourceDir
+			if result.InPlaceRenamed && result.OldDirectoryPath != "" {
+				originalDir = result.OldDirectoryPath
+			}
+			history.UpdatePostOrganize(preRecord, result.NewPath, inPlaceRenamed, originalDir, generatedFilesJSON)
+			if err := batchFileOpRepo.Update(preRecord); err != nil {
+				logging.Warnf("Failed to update post-organize record for %s: %v", movie.ID, err)
+			}
+		}
+
 		organized++
+
+		// Emit organize event for successful file
+		if emitter != nil {
+			if err := emitter.EmitOrganizeEvent("file_move", fmt.Sprintf("Organized %s", movie.ID), models.SeverityInfo, map[string]interface{}{"job_id": job.ID, "movie_id": movie.ID, "file": filePath, "new_path": result.NewPath}); err != nil {
+				logging.Warnf("Failed to emit organize success event: %v", err)
+			}
+		}
 
 		broadcastProgress(&ws.ProgressMessage{
 			JobID:    job.ID,
@@ -300,6 +379,19 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 		Progress: 100,
 		Message:  fmt.Sprintf("Organized %d files, %d failed", organized, failed),
 	})
+
+	// Emit organize event for job completion
+	if emitter != nil {
+		sev := models.SeverityInfo
+		if failed > 0 && organized > 0 {
+			sev = models.SeverityWarn
+		} else if failed > 0 && organized == 0 {
+			sev = models.SeverityError
+		}
+		if err := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("File organization completed for job %s", job.ID), sev, map[string]interface{}{"job_id": job.ID, "organized": organized, "failed": failed}); err != nil {
+			logging.Warnf("Failed to emit organize complete event: %v", err)
+		}
+	}
 
 	// Only transition to "Organized" state if ALL files organized successfully
 	// If any files failed, keep job in "Completed" state to enable retry

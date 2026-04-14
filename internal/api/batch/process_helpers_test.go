@@ -19,17 +19,17 @@ import (
 )
 
 func TestCopyTempCroppedPoster(t *testing.T) {
-	t.Run("missing temp poster returns false", func(t *testing.T) {
+	t.Run("missing temp poster returns empty string", func(t *testing.T) {
 		cfg := config.DefaultConfig()
 		destDir := t.TempDir()
 		job := &worker.BatchJob{ID: "missing-temp-poster"}
 		movie := &models.Movie{ID: "IPX-001"}
 
-		ok := copyTempCroppedPoster(job, movie, destDir, cfg, "Update", nil)
-		assert.False(t, ok)
+		result := copyTempCroppedPoster(job, movie, destDir, cfg, "Update", nil)
+		assert.Equal(t, "", result)
 	})
 
-	t.Run("download poster disabled returns false even when temp poster exists", func(t *testing.T) {
+	t.Run("download poster disabled returns empty string even when temp poster exists", func(t *testing.T) {
 		cfg := config.DefaultConfig()
 		cfg.Output.DownloadPoster = false
 
@@ -46,8 +46,8 @@ func TestCopyTempCroppedPoster(t *testing.T) {
 		tempPosterPath := filepath.Join(tempPosterDir, movie.ID+".jpg")
 		require.NoError(t, os.WriteFile(tempPosterPath, []byte("poster-bytes"), 0o644))
 
-		ok := copyTempCroppedPoster(job, movie, destDir, cfg, "Update", nil)
-		assert.False(t, ok)
+		result := copyTempCroppedPoster(job, movie, destDir, cfg, "Update", nil)
+		assert.Equal(t, "", result)
 
 		files, err := os.ReadDir(destDir)
 		require.NoError(t, err)
@@ -74,8 +74,8 @@ func TestCopyTempCroppedPoster(t *testing.T) {
 		require.NoError(t, os.WriteFile(tempPosterPath, []byte("poster-bytes"), 0o644))
 
 		multipart := &downloader.MultipartInfo{IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"}
-		ok := copyTempCroppedPoster(job, movie, destDir, cfg, "Update", multipart)
-		require.True(t, ok)
+		result := copyTempCroppedPoster(job, movie, destDir, cfg, "Update", multipart)
+		require.NotEmpty(t, result)
 
 		files, err := os.ReadDir(destDir)
 		require.NoError(t, err)
@@ -167,7 +167,7 @@ func TestProcessUpdateMode_NoCompletedResults(t *testing.T) {
 		Error:    "scrape failed",
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background())
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusCompleted, status.Status)
@@ -181,7 +181,7 @@ func TestProcessOrganizeJob_InvalidLinkModeMarksFailed(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 	job := deps.JobQueue.CreateJob(nil)
 
-	processOrganizeJob(job, deps.JobQueue, t.TempDir(), false, "not-a-valid-link-mode", deps.DB, cfg, deps.Registry)
+	processOrganizeJob(job, deps.JobQueue, t.TempDir(), false, "not-a-valid-link-mode", deps.DB, cfg, deps.Registry, nil)
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusFailed, status.Status)
@@ -209,7 +209,7 @@ func TestProcessUpdateMode_SuccessfulResults(t *testing.T) {
 	cfg.Output.DownloadCover = false
 	cfg.Output.DownloadPoster = false
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background())
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusCompleted, status.Status)
@@ -245,7 +245,7 @@ func TestProcessUpdateMode_MixedResults(t *testing.T) {
 	cfg.Output.DownloadCover = false
 	cfg.Output.DownloadPoster = false
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background())
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusCompleted, status.Status)

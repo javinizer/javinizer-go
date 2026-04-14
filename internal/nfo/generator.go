@@ -626,3 +626,36 @@ func (g *Generator) extractStreamDetails(videoFilePath string) *StreamDetails {
 
 	return streamDetails
 }
+
+// ResolveNFOFilename computes the NFO filename for a movie using the same logic
+// as Generate, without writing the file. This ensures that history/revert code
+// tracks the exact path the generator will use.
+func ResolveNFOFilename(movie *models.Movie, nfoFilenameTemplate string, groupActress bool, perFile bool, isMultiPart bool, partSuffix string) string {
+	tmplCtx := template.NewContextFromMovie(movie)
+	tmplCtx.GroupActress = groupActress
+	engine := template.NewEngine()
+	filename, err := engine.Execute(nfoFilenameTemplate, tmplCtx)
+	if err != nil {
+		sanitized := template.SanitizeFilename(movie.ID)
+		if sanitized == "" {
+			sanitized = "metadata"
+		}
+		return sanitized + ".nfo"
+	}
+	basename := filename
+	lower := strings.ToLower(basename)
+	if strings.HasSuffix(lower, ".nfo") {
+		basename = basename[:len(basename)-4]
+	}
+	sanitized := template.SanitizeFilename(basename)
+	if sanitized == "" {
+		sanitized = template.SanitizeFilename(movie.ID)
+		if sanitized == "" {
+			sanitized = "metadata"
+		}
+	}
+	if partSuffix != "" && perFile {
+		sanitized += partSuffix
+	}
+	return sanitized + ".nfo"
+}

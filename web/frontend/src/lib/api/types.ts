@@ -172,6 +172,8 @@ export interface BatchJobResponse {
 	total_files: number;
 	completed: number;
 	failed: number;
+	operation_count: number;
+	reverted_count: number;
 	excluded: Record<string, boolean>;
 	progress: number;
 	destination: string;
@@ -368,14 +370,14 @@ export interface ScraperOption {
 
 export interface ScraperInfo {
 	name: string;
-	display_name: string;
+	display_title: string;
 	enabled: boolean;
 	options?: ScraperOption[];
 }
 
 export interface Scraper {
 	name: string;
-	display_name: string;
+	display_title: string;
 	enabled: boolean;
 	options?: Record<string, any>;
 }
@@ -514,4 +516,103 @@ export interface DeleteHistoryBulkParams {
 
 export interface DeleteHistoryBulkResponse {
 	deleted: number;
+}
+
+// Batch job types (History & Revert — Phase 5)
+export interface JobListItem {
+	id: string;
+	status: string;
+	total_files: number;
+	completed: number;
+	failed: number;
+	operation_count: number;
+	reverted_count: number;
+	progress: number;
+	destination: string;
+	started_at: string;
+	completed_at?: string;
+	organized_at?: string;
+	reverted_at?: string;
+}
+
+export interface JobListResponse {
+	jobs: JobListItem[];
+}
+
+export interface OperationItem {
+	id: number;
+	movie_id: string;
+	original_path: string;
+	new_path: string;
+	operation_type: string;
+	revert_status: string;
+	reverted_at?: string;
+	in_place_renamed: boolean;
+	created_at: string;
+}
+
+export interface OperationListResponse {
+	job_id: string;
+	job_status: string;
+	operations: OperationItem[];
+	total: number;
+}
+
+export interface RevertResultResponse {
+	job_id: string;
+	status: string;
+	total: number;
+	succeeded: number;
+	failed: number;
+	errors?: RevertFileError[];
+}
+
+export interface RevertFileError {
+	operation_id: number;
+	movie_id: string;
+	original_path: string;
+	new_path: string;
+	error: string;
+}
+
+// Event types (Logs page)
+export interface EventItem {
+	id: number;
+	event_type: string;
+	severity: string;
+	message: string;
+	context: string;
+	source: string;
+	created_at: string;
+}
+
+export interface EventListResponse {
+	events: EventItem[];
+	total: number;
+}
+
+export interface EventStatsResponse {
+	total: number;
+	by_type: Record<string, number>;
+	by_severity: Record<string, number>;
+	by_source: Record<string, number>;
+}
+
+export interface EventListParams {
+	type?: string;
+	severity?: string;
+	source?: string;
+	start?: string;
+	end?: string;
+	limit?: number;
+	offset?: number;
+}
+
+export interface DeleteEventsParams {
+	older_than_days: number;
+}
+
+export interface DeleteEventsResponse {
+	deleted: number;
+	message: string;
 }

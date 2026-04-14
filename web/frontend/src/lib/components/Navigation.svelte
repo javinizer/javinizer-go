@@ -2,7 +2,7 @@
 	import { page } from '$app/stores';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
-	import { House, FolderOpen, Settings, History, Film, Users, LogOut, Activity } from 'lucide-svelte';
+	import { FolderOpen, Settings, Film, Users, LogOut, Activity, FileText, ChevronDown } from 'lucide-svelte';
 
 	interface Props {
 		authenticated?: boolean;
@@ -13,16 +13,45 @@
 	let { authenticated = false, username = '', onLogout }: Props = $props();
 
 	const navItems = [
-		{ href: '/', label: 'Home', icon: House },
+		{ href: '/browse', label: 'Scrape', icon: FolderOpen },
 		{ href: '/jobs', label: 'Jobs', icon: Activity },
-		{ href: '/browse', label: 'Browse & Scrape', icon: FolderOpen },
-		{ href: '/actresses', label: 'Actresses', icon: Users },
-		{ href: '/settings', label: 'Settings', icon: Settings },
-		{ href: '/history', label: 'History', icon: History }
+		{ href: '/actresses', label: 'Actresses', icon: Users }
 	];
 
+	const subMenuItems = [
+		{ href: '/logs', label: 'Logs', icon: FileText },
+		{ href: '/settings', label: 'Settings', icon: Settings }
+	];
+
+	let subMenuOpen = $state(false);
+
 	const currentPath = $derived($page.url.pathname);
+
+	const isSubMenuActive = $derived(
+		subMenuItems.some((item) => currentPath === item.href || currentPath.startsWith(item.href + '/'))
+	);
+
+	function toggleSubMenu() {
+		subMenuOpen = !subMenuOpen;
+	}
+
+	function closeSubMenu() {
+		subMenuOpen = false;
+	}
+
+	function handleSubMenuClick() {
+		closeSubMenu();
+	}
+
+	function handleClickOutside(event: MouseEvent) {
+		const target = event.target as HTMLElement;
+		if (!target.closest('[data-submenu]')) {
+			closeSubMenu();
+		}
+	}
 </script>
+
+<svelte:window onclick={handleClickOutside} />
 
 <nav
 	class="sticky top-0 z-50 border-b bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80"
@@ -31,7 +60,7 @@
 	<div class="container mx-auto px-4">
 		<div class="flex items-center justify-between h-16">
 			<!-- Logo -->
-			<a href="/" class="flex items-center gap-2 font-bold text-xl">
+			<a href="/" class="flex items-center gap-2 font-bold text-xl transition-opacity duration-200 hover:opacity-80">
 				<Film class="h-6 w-6 text-primary" />
 				<span>Javinizer</span>
 			</a>
@@ -51,10 +80,49 @@
 						<span class="hidden md:inline">{item.label}</span>
 					</a>
 				{/each}
+
+				<!-- Settings & Logs dropdown -->
+				<div class="relative" data-submenu>
+					<button
+						type="button"
+						onclick={toggleSubMenu}
+						class="flex items-center gap-1.5 px-3 py-2 rounded-md transition-all duration-200 {isSubMenuActive
+							? 'bg-primary text-primary-foreground shadow-sm -translate-y-0.5'
+							: 'hover:bg-accent hover:-translate-y-px'}"
+					>
+						<Settings class="h-4 w-4" />
+						<ChevronDown
+							class="h-3 w-3 transition-transform duration-200 {subMenuOpen ? 'rotate-180' : ''}"
+						/>
+					</button>
+
+					{#if subMenuOpen}
+						<div
+							class="absolute right-0 top-full mt-1 w-44 rounded-lg border bg-card p-1 shadow-lg"
+							in:fly={{ y: -4, duration: 120 }}
+						>
+							{#each subMenuItems as item}
+								{@const Icon = item.icon}
+								<a
+									href={item.href}
+									onclick={handleSubMenuClick}
+									class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all duration-150 {currentPath ===
+									item.href
+										? 'bg-accent text-accent-foreground font-medium'
+										: 'hover:bg-accent hover:translate-x-0.5'}"
+								>
+									<Icon class="h-4 w-4" />
+									{item.label}
+								</a>
+							{/each}
+						</div>
+					{/if}
+				</div>
+
 				{#if authenticated}
 					<button
 						type="button"
-						class="flex items-center gap-2 px-4 py-2 rounded-md transition-all duration-200 hover:bg-accent hover:-translate-y-px"
+						class="flex items-center gap-2 px-4 py-2 rounded-md transition-all duration-200 hover:bg-accent hover:-translate-y-px hover:text-destructive"
 						onclick={() => onLogout?.()}
 						title="Logout"
 					>

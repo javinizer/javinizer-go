@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/cobra"
@@ -30,6 +31,7 @@ func NewCommand() *cobra.Command {
 	historyListCmd.Flags().IntP("limit", "n", 20, "Number of records to show")
 	historyListCmd.Flags().StringP("operation", "o", "", "Filter by operation type (scrape, organize, download, nfo)")
 	historyListCmd.Flags().StringP("status", "s", "", "Filter by status (success, failed, reverted)")
+	historyListCmd.Flags().StringP("batch", "b", "", "Show batch job details and operations for a specific batch ID")
 
 	historyStatsCmd := &cobra.Command{
 		Use:   "stats",
@@ -60,11 +62,19 @@ func NewCommand() *cobra.Command {
 	}
 	historyCleanCmd.Flags().IntP("days", "d", 30, "Delete records older than this many days")
 
-	historyCmd.AddCommand(historyListCmd, historyStatsCmd, historyMovieCmd, historyCleanCmd)
+	revertCmd := NewRevertCommand()
+
+	historyCmd.AddCommand(historyListCmd, historyStatsCmd, historyMovieCmd, historyCleanCmd, revertCmd)
 	return historyCmd
 }
 
 func runHistoryList(cmd *cobra.Command, args []string, configFile string) error {
+	// Check for --batch flag (batch-centric view)
+	batchID, _ := cmd.Flags().GetString("batch")
+	if batchID != "" {
+		return runHistoryListBatch(cmd, batchID, configFile)
+	}
+
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -299,6 +309,100 @@ func runHistoryClean(cmd *cobra.Command, args []string, configFile string) error
 	}
 
 	return nil
+}
+
+// runHistoryListBatch shows batch-centric view when --batch flag is provided (D-06, HIST-01, HIST-02).
+func runHistoryListBatch(cmd *cobra.Command, batchID string, configFile string) error {
+	cfg, err := config.LoadOrCreate(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	deps, err := commandutil.NewDependencies(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize dependencies: %w", err)
+	}
+	defer func() { _ = deps.Close() }()
+
+	jobRepo := database.NewJobRepository(deps.DB)
+	batchFileOpRepo := database.NewBatchFileOperationRepository(deps.DB)
+
+	// Load job
+	job, err := jobRepo.FindByID(batchID)
+	if err != nil {
+		return fmt.Errorf("batch job not found: %s", batchID)
+	}
+
+	// Load operations
+	ops, err := batchFileOpRepo.FindByBatchJobID(batchID)
+	if err != nil {
+		return fmt.Errorf("failed to load operations: %w", err)
+	}
+
+	// Compute counts
+	opCount := int64(len(ops))
+	revertedCount, _ := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(batchID, models.RevertStatusReverted)
+	pendingCount, _ := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(batchID, models.RevertStatusApplied)
+
+	// Print batch header
+	fmt.Printf("=== Batch Job: %s ===\n", batchID)
+
+	statusIcon := "✅"
+	switch job.Status {
+	case "reverted":
+		statusIcon = "↩️"
+	case "failed":
+		statusIcon = "❌"
+	case "pending", "running":
+		statusIcon = "⏳"
+	}
+	fmt.Printf("Status:      %s %s\n", statusIcon, job.Status)
+	fmt.Printf("Total Files: %d\n", job.TotalFiles)
+	fmt.Printf("Started:     %s\n", job.StartedAt.Format("2006-01-02 15:04:05"))
+	if job.OrganizedAt != nil {
+		fmt.Printf("Organized:   %s\n", job.OrganizedAt.Format("2006-01-02 15:04:05"))
+	}
+	if job.RevertedAt != nil {
+		fmt.Printf("Reverted:    %s\n", job.RevertedAt.Format("2006-01-02 15:04:05"))
+	}
+	fmt.Printf("Operations:  %d total, %d reverted, %d pending\n", opCount, revertedCount, pendingCount)
+
+	if len(ops) == 0 {
+		fmt.Println("\nNo operations found for this batch")
+		return nil
+	}
+
+	// Print operations table
+	fmt.Println()
+	fmt.Printf("%-5s %-10s %-6s %-14s %-50s %-50s\n",
+		"ID", "Movie ID", "Type", "Revert Status", "Original Path", "New Path")
+	fmt.Println(strings.Repeat("-", 135))
+
+	for _, op := range ops {
+		origPath := truncatePath(op.OriginalPath, 47)
+		newPath := truncatePath(op.NewPath, 47)
+
+		fmt.Printf("%-5d %-10s %-6s %-14s %-50s %-50s\n",
+			op.ID,
+			op.MovieID,
+			op.OperationType,
+			op.RevertStatus,
+			origPath,
+			newPath,
+		)
+	}
+
+	fmt.Printf("\nShowing %d operation(s) for batch %s\n", len(ops), batchID)
+
+	return nil
+}
+
+// truncatePath truncates a path for readability, prefixing with "..." if too long.
+func truncatePath(path string, maxLen int) string {
+	if len(path) <= maxLen {
+		return path
+	}
+	return "..." + path[len(path)-(maxLen-3):]
 }
 
 func percentage(part, total int64) float64 {

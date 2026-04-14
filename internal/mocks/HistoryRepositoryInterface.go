@@ -415,6 +415,68 @@ func (_c *MockHistoryRepositoryInterface_DeleteOlderThan_Call) RunAndReturn(run 
 	return _c
 }
 
+// FindByBatchJobID provides a mock function for the type MockHistoryRepositoryInterface
+func (_mock *MockHistoryRepositoryInterface) FindByBatchJobID(batchJobID string) ([]models.History, error) {
+	ret := _mock.Called(batchJobID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindByBatchJobID")
+	}
+
+	var r0 []models.History
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(string) ([]models.History, error)); ok {
+		return returnFunc(batchJobID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(string) []models.History); ok {
+		r0 = returnFunc(batchJobID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.History)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
+		r1 = returnFunc(batchJobID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockHistoryRepositoryInterface_FindByBatchJobID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByBatchJobID'
+type MockHistoryRepositoryInterface_FindByBatchJobID_Call struct {
+	*mock.Call
+}
+
+// FindByBatchJobID is a helper method to define mock.On call
+//   - batchJobID string
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByBatchJobID(batchJobID interface{}) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
+	return &MockHistoryRepositoryInterface_FindByBatchJobID_Call{Call: _e.mock.On("FindByBatchJobID", batchJobID)}
+}
+
+func (_c *MockHistoryRepositoryInterface_FindByBatchJobID_Call) Run(run func(batchJobID string)) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_FindByBatchJobID_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
+	_c.Call.Return(historys, err)
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_FindByBatchJobID_Call) RunAndReturn(run func(batchJobID string) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FindByDateRange provides a mock function for the type MockHistoryRepositoryInterface
 func (_mock *MockHistoryRepositoryInterface) FindByDateRange(start time.Time, end time.Time) ([]models.History, error) {
 	ret := _mock.Called(start, end)

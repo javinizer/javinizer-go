@@ -54,7 +54,7 @@ func TestProcessUpdateMode_GeneratesMergedNFO(t *testing.T) {
 		},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background())
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusCompleted {
@@ -102,7 +102,7 @@ func TestProcessUpdateMode_TemplatedTitleNotDoubleApplied(t *testing.T) {
 		},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background())
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusCompleted {
@@ -149,7 +149,7 @@ func TestProcessUpdateMode_CancelledContextMarksJobCancelled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, ctx)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, ctx, nil)
 
 	if status := job.GetStatus(); status.Status != worker.JobStatusCancelled {
 		t.Fatalf("job status = %q, want cancelled", status.Status)
@@ -191,7 +191,7 @@ func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 		},
 	})
 
-	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry)
+	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry, nil)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusOrganized {

@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
@@ -81,7 +82,7 @@ func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		// Start processing in background - use getters for thread-safe access
-		go processBatchJob(job, deps.JobQueue, deps.GetRegistry(), deps.GetAggregator(), deps.MovieRepo, deps.GetMatcher(), req.Strict, req.Force, req.Update, req.Destination, deps.GetConfig(), req.SelectedScrapers, req.ScalarStrategy, req.ArrayStrategy, deps.DB, req.MoveToFolder, req.RenameFolderInPlace, req.OperationMode)
+		go processBatchJob(job, deps.JobQueue, deps.GetRegistry(), deps.GetAggregator(), deps.MovieRepo, deps.GetMatcher(), req.Strict, req.Force, req.Update, req.Destination, deps.GetConfig(), req.SelectedScrapers, req.ScalarStrategy, req.ArrayStrategy, deps.DB, req.MoveToFolder, req.RenameFolderInPlace, req.OperationMode, deps.EventEmitter)
 
 		c.JSON(200, BatchScrapeResponse{
 			JobID: job.ID,
@@ -262,18 +263,34 @@ func listBatchJobs(deps *ServerDependencies) gin.HandlerFunc {
 				excluded = make(map[string]bool)
 			}
 
+			opCount, err := deps.BatchFileOpRepo.CountByBatchJobID(job.ID)
+			if err != nil {
+				logging.Errorf("Failed to count operations for job %s: %v", job.ID, err)
+				c.JSON(500, ErrorResponse{Error: "Failed to retrieve operation counts"})
+				return
+			}
+
+			revertedCount, err := deps.BatchFileOpRepo.CountByBatchJobIDAndRevertStatus(job.ID, models.RevertStatusReverted)
+			if err != nil {
+				logging.Errorf("Failed to count reverted operations for job %s: %v", job.ID, err)
+				c.JSON(500, ErrorResponse{Error: "Failed to retrieve revert counts"})
+				return
+			}
+
 			response.Jobs = append(response.Jobs, contracts.BatchJobResponse{
-				ID:          job.ID,
-				Status:      job.Status,
-				TotalFiles:  job.TotalFiles,
-				Completed:   job.Completed,
-				Failed:      job.Failed,
-				Excluded:    excluded,
-				Progress:    job.Progress,
-				Destination: job.Destination,
-				Results:     results,
-				StartedAt:   job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-				CompletedAt: completedAt,
+				ID:             job.ID,
+				Status:         job.Status,
+				TotalFiles:     job.TotalFiles,
+				Completed:      job.Completed,
+				Failed:         job.Failed,
+				OperationCount: opCount,
+				RevertedCount:  revertedCount,
+				Excluded:       excluded,
+				Progress:       job.Progress,
+				Destination:    job.Destination,
+				Results:        results,
+				StartedAt:      job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+				CompletedAt:    completedAt,
 			})
 		}
 

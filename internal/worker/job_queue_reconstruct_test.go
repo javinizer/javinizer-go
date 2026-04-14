@@ -140,7 +140,7 @@ func TestJobQueue_ReconstructBatchJob(t *testing.T) {
 	t.Run("close_done_channel_for_terminal_states", func(t *testing.T) {
 		jq := &JobQueue{jobs: make(map[string]*BatchJob)}
 
-		statuses := []JobStatus{JobStatusCompleted, JobStatusFailed, JobStatusCancelled, JobStatusOrganized}
+		statuses := []JobStatus{JobStatusCompleted, JobStatusFailed, JobStatusCancelled, JobStatusOrganized, JobStatusReverted}
 		for _, status := range statuses {
 			dbJob := &models.Job{
 				ID:     "test-job",
@@ -318,5 +318,35 @@ func TestJobQueue_ReconstructBatchJob(t *testing.T) {
 		result := jq.reconstructBatchJob(dbJob)
 		assert.NotNil(t, result)
 		// Should not panic or error
+	})
+
+	t.Run("reverted_status_copies_reverted_at", func(t *testing.T) {
+		jq := &JobQueue{jobs: make(map[string]*BatchJob)}
+
+		revertedAt := time.Date(2026, 4, 12, 10, 30, 0, 0, time.UTC)
+		organizedAt := time.Date(2026, 4, 12, 9, 0, 0, 0, time.UTC)
+
+		dbJob := &models.Job{
+			ID:          "test-job-reverted",
+			Status:      string(JobStatusReverted),
+			OrganizedAt: &organizedAt,
+			RevertedAt:  &revertedAt,
+		}
+
+		result := jq.reconstructBatchJob(dbJob)
+		require.NotNil(t, result)
+		assert.Equal(t, JobStatusReverted, result.Status)
+		require.NotNil(t, result.RevertedAt)
+		assert.Equal(t, revertedAt, *result.RevertedAt)
+		require.NotNil(t, result.OrganizedAt)
+		assert.Equal(t, organizedAt, *result.OrganizedAt)
+
+		// Verify Done channel is closed for reverted status
+		select {
+		case <-result.Done:
+			// Channel is closed, as expected
+		default:
+			t.Error("Done channel should be closed for reverted status")
+		}
 	})
 }

@@ -155,7 +155,7 @@
 						</div>
 
 						<!-- Scraper name -->
-						<span class="flex-1 text-sm font-medium">{scraper.display_name}</span>
+						<span class="flex-1 text-sm font-medium">{scraper.display_title}</span>
 
 						<!-- Move buttons -->
 						<div class="flex gap-1">
@@ -215,7 +215,7 @@
 							: ''}"
 					>
 						<span class="text-sm text-muted-foreground mr-2">+</span>
-						<span class="flex-1 text-sm">{scraper.display_name}</span>
+						<span class="flex-1 text-sm">{scraper.display_title}</span>
 					</button>
 				{/each}
 			</div>

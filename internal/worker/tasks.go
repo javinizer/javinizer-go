@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -333,6 +334,27 @@ type OrganizeTask struct {
 	organizer       *organizer.Organizer
 	progressTracker *ProgressTracker
 	dryRun          bool
+	batchJobID      string                                         // Optional: batch job ID for snapshot capture
+	batchFileOpRepo database.BatchFileOperationRepositoryInterface // Optional: for persisting snapshots
+	nfoConfig       *nfo.Config                                    // Optional: NFO config for filename resolution
+}
+
+// OrganizeTaskOption configures optional behavior for organize tasks.
+type OrganizeTaskOption func(*OrganizeTask)
+
+// WithSnapshotCapture enables snapshot capture for the organize task.
+func WithSnapshotCapture(batchJobID string, repo database.BatchFileOperationRepositoryInterface) OrganizeTaskOption {
+	return func(t *OrganizeTask) {
+		t.batchJobID = batchJobID
+		t.batchFileOpRepo = repo
+	}
+}
+
+// WithNFOConfig sets the NFO config for filename resolution.
+func WithNFOConfig(cfg *nfo.Config) OrganizeTaskOption {
+	return func(t *OrganizeTask) {
+		t.nfoConfig = cfg
+	}
 }
 
 // NewOrganizeTask creates a new organize task
@@ -377,6 +399,28 @@ func NewOrganizeTask(
 		progressTracker: progressTracker,
 		dryRun:          dryRun,
 	}
+}
+
+// NewOrganizeTaskWithOptions creates a new organize task with optional configuration.
+func NewOrganizeTaskWithOptions(
+	match matcher.MatchResult,
+	movie *models.Movie,
+	destPath string,
+	moveFiles bool,
+	forceUpdate bool,
+	org *organizer.Organizer,
+	progressTracker *ProgressTracker,
+	dryRun bool,
+	linkMode organizer.LinkMode,
+	options ...OrganizeTaskOption,
+) *OrganizeTask {
+	task := NewOrganizeTask(match, movie, destPath, moveFiles, forceUpdate, org, progressTracker, dryRun, linkMode)
+	for _, opt := range options {
+		if opt != nil {
+			opt(task)
+		}
+	}
+	return task
 }
 
 func (t *OrganizeTask) Execute(ctx context.Context) error {
@@ -425,6 +469,31 @@ func (t *OrganizeTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
+	// Capture NFO snapshot before organize (D-01: crash-safe)
+	var preRecord *models.BatchFileOperation
+	var snapshotResult history.NFOSnapshotResult
+	if t.batchJobID != "" && t.batchFileOpRepo != nil {
+		sourceDir := filepath.Dir(t.match.File.Path)
+		var sourceNFOFilename string
+		if t.nfoConfig != nil {
+			sourceNFOFilename = nfo.ResolveNFOFilename(t.movie, t.nfoConfig.NFOFilenameTemplate, t.nfoConfig.GroupActress, t.nfoConfig.PerFile, t.match.IsMultiPart, t.match.PartSuffix)
+		} else {
+			sourceNFOFilename = t.movie.ID + ".nfo"
+		}
+		snapshotResult = history.ReadNFOSnapshot(afero.NewOsFs(),
+			filepath.Join(sourceDir, sourceNFOFilename),
+			filepath.Join(sourceDir, t.movie.ID+".nfo"),
+		)
+		opType := history.DetermineOperationType(t.moveFiles, t.linkMode, false)
+		preRecord = history.NewPreOrganizeRecord(
+			t.batchJobID, t.movie.ID, t.match.File.Path, snapshotResult.Content,
+			"", sourceDir, opType, false,
+		)
+		if err := t.batchFileOpRepo.Create(preRecord); err != nil {
+			logging.Warnf("[%s] Failed to persist pre-organize snapshot: %v", t.movie.ID, err)
+		}
+	}
+
 	// Execute plan
 	t.progressTracker.Update(t.id, 0.6, "Executing plan...", 0)
 	var result *organizer.OrganizeResult
@@ -452,6 +521,35 @@ func (t *OrganizeTask) Execute(ctx context.Context) error {
 	if result.Error != nil {
 		logging.Debugf("[%s] Organize result contains error: %v", t.movie.ID, result.Error)
 		return fmt.Errorf("organize error: %w", result.Error)
+	}
+
+	// Update BatchFileOperation record with post-organize data (D-02, D-03)
+	if preRecord != nil && preRecord.ID > 0 {
+		var subtitleResults []organizer.SubtitleResult
+		if result != nil {
+			subtitleResults = result.Subtitles
+		}
+		nfoPath := ""
+		if result != nil && result.ShouldGenerateMetadata {
+			if t.nfoConfig != nil {
+				nfoFilename := nfo.ResolveNFOFilename(t.movie, t.nfoConfig.NFOFilenameTemplate, t.nfoConfig.GroupActress, t.nfoConfig.PerFile, t.match.IsMultiPart, t.match.PartSuffix)
+				nfoPath = filepath.Join(result.FolderPath, nfoFilename)
+			} else {
+				nfoPath = filepath.Join(result.FolderPath, t.movie.ID+".nfo")
+			}
+		} else if snapshotResult.FoundPath != "" {
+			nfoPath = snapshotResult.FoundPath
+		}
+		preRecord.NFOPath = nfoPath
+		generatedJSON := history.BuildGeneratedFilesJSON(nfoPath, subtitleResults, nil)
+		originalDir := filepath.Dir(t.match.File.Path)
+		if result != nil && result.InPlaceRenamed && result.OldDirectoryPath != "" {
+			originalDir = result.OldDirectoryPath
+		}
+		history.UpdatePostOrganize(preRecord, result.NewPath, result.InPlaceRenamed, originalDir, generatedJSON)
+		if err := t.batchFileOpRepo.Update(preRecord); err != nil {
+			logging.Warnf("[%s] Failed to update post-organize record: %v", t.movie.ID, err)
+		}
 	}
 
 	logging.Debugf("[%s] File organized successfully to: %s", t.movie.ID, result.NewPath)
@@ -844,7 +942,11 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 	// Step 4: Organize file (move/copy video file to target directory)
 	// Update mode is in-place metadata refresh and never reorganizes files.
 	if t.organizeEnabled && !t.updateMode {
-		organizeTask := NewOrganizeTask(
+		var opts []OrganizeTaskOption
+		if t.cfg != nil {
+			opts = append(opts, WithNFOConfig(nfo.ConfigFromAppConfig(&t.cfg.Metadata.NFO, &t.cfg.Output, &t.cfg.Metadata, nil)))
+		}
+		organizeTask := NewOrganizeTaskWithOptions(
 			t.match,
 			movie,
 			t.destPath,
@@ -854,6 +956,7 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 			t.progressTracker,
 			t.dryRun,
 			t.linkMode,
+			opts...,
 		)
 		if err := organizeTask.Execute(ctx); err != nil {
 			return fmt.Errorf("organize failed: %w", err)

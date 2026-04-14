@@ -13,10 +13,14 @@ import (
 	apiserver "github.com/javinizer/javinizer-go/internal/api/server"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/eventlog"
+	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 
 	_ "github.com/javinizer/javinizer-go/docs/swagger" // Import generated docs
@@ -138,23 +142,43 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 	// Initialize history repository
 	historyRepo := database.NewHistoryRepository(db)
 
+	// Initialize new repositories and emitter for history/logging separation
+	batchFileOpRepo := database.NewBatchFileOperationRepository(db)
+	eventRepo := database.NewEventRepository(db)
+	eventEmitter := eventlog.NewEmitter(eventRepo)
+
+	// Initialize reverter for batch-level file revert
+	reverter := history.NewReverter(afero.NewOsFs(), batchFileOpRepo)
+
 	// Create server dependencies
 	apiDeps := &apicore.ServerDependencies{
-		ConfigFile:  configFile,
-		Registry:    registry,
-		DB:          db,
-		Aggregator:  agg,
-		MovieRepo:   movieRepo,
-		ActressRepo: actressRepo,
-		HistoryRepo: historyRepo,
-		Matcher:     mat,
-		JobRepo:     jobRepo,
-		JobQueue:    jobQueue,
-		Auth:        authManager,
-		TokenStore:  apicore.NewTokenStore(),
+		ConfigFile:      configFile,
+		Registry:        registry,
+		DB:              db,
+		Aggregator:      agg,
+		MovieRepo:       movieRepo,
+		ActressRepo:     actressRepo,
+		HistoryRepo:     historyRepo,
+		BatchFileOpRepo: batchFileOpRepo,
+		EventRepo:       eventRepo,
+		EventEmitter:    eventEmitter,
+		Reverter:        reverter,
+		Matcher:         mat,
+		JobRepo:         jobRepo,
+		JobQueue:        jobQueue,
+		Auth:            authManager,
+		TokenStore:      apicore.NewTokenStore(),
 	}
 	// Initialize atomic config pointer
 	apiDeps.SetConfig(cfg)
+
+	// Emit server startup event
+	if err := eventEmitter.EmitSystemEvent("server", "Javinizer API server initialized", models.SeverityInfo, map[string]interface{}{
+		"host": cfg.Server.Host,
+		"port": cfg.Server.Port,
+	}); err != nil {
+		logging.Warnf("Failed to emit server startup event: %v", err)
+	}
 
 	return apiDeps, nil
 }

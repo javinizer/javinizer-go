@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/eventlog"
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -26,7 +27,7 @@ import (
 // arrayStrategy determines how to merge array fields (merge, replace)
 // moveToFolderOverride and renameFolderInPlaceOverride allow per-job folder mode overrides.
 // operationModeOverride allows per-job operation mode override (organize, in-place, metadata-only, preview).
-func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *models.ScraperRegistry, agg *aggregator.Aggregator, movieRepo *database.MovieRepository, mat *matcher.Matcher, strict, force, updateMode bool, destination string, cfg *config.Config, selectedScrapers []string, scalarStrategy string, arrayStrategy string, db *database.DB, moveToFolderOverride *bool, renameFolderInPlaceOverride *bool, operationModeOverride string) {
+func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *models.ScraperRegistry, agg *aggregator.Aggregator, movieRepo *database.MovieRepository, mat *matcher.Matcher, strict, force, updateMode bool, destination string, cfg *config.Config, selectedScrapers []string, scalarStrategy string, arrayStrategy string, db *database.DB, moveToFolderOverride *bool, renameFolderInPlaceOverride *bool, operationModeOverride string, emitter eventlog.EventEmitter) {
 	// Setup context for cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	job.SetCancelFunc(cancel)
@@ -35,6 +36,13 @@ func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *
 	job.MarkStarted()
 	if jobQueue != nil {
 		jobQueue.PersistJob(job)
+	}
+
+	// Emit system event for batch job started
+	if emitter != nil {
+		if err := emitter.EmitSystemEvent("batch", fmt.Sprintf("Batch scrape job %s started", job.ID), models.SeverityInfo, map[string]interface{}{"job_id": job.ID, "file_count": len(job.Files)}); err != nil {
+			logging.Warnf("Failed to emit batch start event: %v", err)
+		}
 	}
 
 	// Log which scrapers will be used
@@ -79,10 +87,10 @@ func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *
 
 	// Create a map to track which movie IDs have had posters generated
 	// This prevents redundant poster downloads/crops for multi-part files
-	//
-	// NOTE: The worker package (internal/worker/single_scrape.go) uses a package-level
-	// mutex (processedMovieIDsMutex) to protect concurrent access to this map.
 	processedMovieIDs := make(map[string]bool)
+
+	// Track files that failed at submission time to avoid double-emitting events
+	submitFailedFiles := make(map[string]bool)
 
 	// Submit tasks to pool
 	for i, filePath := range job.Files {
@@ -90,6 +98,11 @@ func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *
 		select {
 		case <-ctx.Done():
 			job.MarkCancelled()
+			if emitter != nil {
+				if err := emitter.EmitSystemEvent("batch", fmt.Sprintf("Batch scrape job %s cancelled", job.ID), models.SeverityWarn, map[string]interface{}{"job_id": job.ID}); err != nil {
+					logging.Warnf("Failed to emit batch cancel event: %v", err)
+				}
+			}
 			if jobQueue != nil {
 				jobQueue.PersistJob(job)
 			}
@@ -139,6 +152,13 @@ func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *
 		// Submit to pool (blocks if pool is full)
 		if err := pool.Submit(task); err != nil {
 			logging.Errorf("Failed to submit task for %s: %v", filePath, err)
+			submitFailedFiles[filePath] = true
+			// Emit scraper event for task submission failure
+			if emitter != nil {
+				if err := emitter.EmitScraperEvent("batch", fmt.Sprintf("Failed to submit scrape task for %s", filePath), models.SeverityError, map[string]interface{}{"job_id": job.ID, "file": filePath, "error": fmt.Sprintf("Failed to submit task: %v", err)}); err != nil {
+					logging.Warnf("Failed to emit scrape task failure event: %v", err)
+				}
+			}
 			// Update job with failure
 			result := &worker.FileResult{
 				FilePath:  filePath,
@@ -166,6 +186,19 @@ func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *
 		jobQueue.PersistJob(job)
 	}
 
+	// Emit system event for batch job completed
+	if emitter != nil {
+		sev := models.SeverityInfo
+		if job.Failed > 0 && job.Completed > 0 {
+			sev = models.SeverityWarn
+		} else if job.Failed > 0 && job.Completed == 0 {
+			sev = models.SeverityError
+		}
+		if err := emitter.EmitSystemEvent("batch", fmt.Sprintf("Batch scrape job %s completed", job.ID), sev, map[string]interface{}{"job_id": job.ID, "completed": job.Completed, "failed": job.Failed}); err != nil {
+			logging.Warnf("Failed to emit batch complete event: %v", err)
+		}
+	}
+
 	// Log history for all scrape operations
 	historyLogger := history.NewLogger(db)
 	status := job.GetStatus()
@@ -183,6 +216,14 @@ func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *
 		}
 		if err := historyLogger.LogScrape(movieID, filePath, nil, scrapeErr); err != nil {
 			logging.Warnf("Failed to log history for %s: %v", filePath, err)
+		}
+		if scrapeErr != nil && !submitFailedFiles[filePath] {
+			// Emit scraper event for scrape failure (skip if already emitted at submit time)
+			if emitter != nil {
+				if err := emitter.EmitScraperEvent("batch", fmt.Sprintf("Scrape failed for %s", movieID), models.SeverityWarn, map[string]interface{}{"job_id": job.ID, "movie_id": movieID, "file": filePath, "error": fileResult.Error}); err != nil {
+					logging.Warnf("Failed to emit scrape failure event: %v", err)
+				}
+			}
 		}
 	}
 

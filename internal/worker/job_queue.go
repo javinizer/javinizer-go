@@ -31,20 +31,26 @@ type JobStatus string
 //   - Failed: Job failed during scraping (terminal state)
 //   - Cancelled: Job was cancelled by user (terminal state)
 //   - Organized: Files successfully organized (terminal state)
+//   - Reverted: Files reverted to original state (terminal state)
 //
 // Organization retry flow:
 //
 //	Completed → Running (organize) → Completed (if failed > 0)
 //	Completed → Running (organize) → Organized (if failed == 0)
 //
+// Revert flow:
+//
+//	Organized → Reverted
+//
 // Key rules:
 //   - Only "Completed" jobs can be organized
 //   - If organization has any failures, job stays "Completed" to enable retry
 //   - If organization fully succeeds (failed == 0), job transitions to "Organized"
 //   - "Organized" jobs cannot be organized again (terminal state)
+//   - "Reverted" jobs are never deleted by cleanup (no time limit on revert)
 //
 // Terminal states (no further transitions):
-//   - Failed, Cancelled, Organized
+//   - Failed, Cancelled, Organized, Reverted
 const (
 	JobStatusPending   JobStatus = "pending"
 	JobStatusRunning   JobStatus = "running"
@@ -52,6 +58,7 @@ const (
 	JobStatusFailed    JobStatus = "failed"
 	JobStatusCancelled JobStatus = "cancelled"
 	JobStatusOrganized JobStatus = "organized"
+	JobStatusReverted  JobStatus = "reverted"
 )
 
 // FileResult represents the result of processing a single file
@@ -126,6 +133,7 @@ type BatchJob struct {
 	StartedAt                   time.Time                `json:"started_at"`
 	CompletedAt                 *time.Time               `json:"completed_at,omitempty"`
 	OrganizedAt                 *time.Time               `json:"organized_at,omitempty"`
+	RevertedAt                  *time.Time               `json:"reverted_at,omitempty"`
 	MoveToFolderOverride        *bool                    `json:"move_to_folder_override,omitempty"`
 	RenameFolderInPlaceOverride *bool                    `json:"rename_folder_in_place_override,omitempty"`
 	OperationModeOverride       string                   `json:"operation_mode_override,omitempty"`
@@ -204,16 +212,11 @@ func (jq *JobQueue) StartCleanup() {
 	}()
 }
 
-// cleanupOldOrganizedJobs deletes organized jobs older than 24 hours
+// cleanupOldOrganizedJobs is disabled per D-05/HIST-11:
+// organized batch jobs must persist indefinitely for revert eligibility.
+// Reverted jobs are also never deleted per D-06.
 func (jq *JobQueue) cleanupOldOrganizedJobs() {
-	if jq.jobRepo == nil {
-		return
-	}
-
-	threshold := time.Now().Add(-24 * time.Hour)
-	if err := jq.jobRepo.DeleteOrganizedOlderThan(threshold); err != nil {
-		logging.Warnf("JobQueue: failed to cleanup old organized jobs: %v", err)
-	}
+	// No-op: organized and reverted jobs must persist for revert eligibility
 }
 
 // loadFromDatabase loads existing jobs from the database on startup
@@ -250,6 +253,7 @@ func (jq *JobQueue) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 		StartedAt:     dbJob.StartedAt,
 		CompletedAt:   dbJob.CompletedAt,
 		OrganizedAt:   dbJob.OrganizedAt,
+		RevertedAt:    dbJob.RevertedAt,
 		Results:       make(map[string]*FileResult),
 		Excluded:      make(map[string]bool),
 		FileMatchInfo: make(map[string]FileMatchInfo),
@@ -308,7 +312,7 @@ func (jq *JobQueue) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 
 	// Close Done channel for terminal states
 	switch batchJob.Status {
-	case JobStatusCompleted, JobStatusFailed, JobStatusCancelled, JobStatusOrganized:
+	case JobStatusCompleted, JobStatusFailed, JobStatusCancelled, JobStatusOrganized, JobStatusReverted:
 		close(batchJob.Done)
 	}
 
@@ -373,6 +377,7 @@ func (jq *JobQueue) persistToDatabase(job *BatchJob) {
 		StartedAt:     job.StartedAt,
 		CompletedAt:   job.CompletedAt,
 		OrganizedAt:   job.OrganizedAt,
+		RevertedAt:    job.RevertedAt,
 	}
 
 	// Try to update first, if not found then create
@@ -712,6 +717,20 @@ func (job *BatchJob) MarkOrganized() {
 	}
 }
 
+// MarkReverted marks the job as reverted
+func (job *BatchJob) MarkReverted() {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.Status = JobStatusReverted
+	now := time.Now()
+	job.RevertedAt = &now
+	select {
+	case <-job.Done:
+	default:
+		close(job.Done)
+	}
+}
+
 // SetCancelFunc sets the cancel function for the job (thread-safe)
 func (job *BatchJob) SetCancelFunc(cancelFunc context.CancelFunc) {
 	job.mu.Lock()
@@ -849,6 +868,12 @@ func (job *BatchJob) GetStatus() *BatchJob {
 		organizedAt = &t
 	}
 
+	revertedAt := job.RevertedAt
+	if revertedAt != nil {
+		t := *revertedAt
+		revertedAt = &t
+	}
+
 	return &BatchJob{
 		ID:                          job.ID,
 		Status:                      job.Status,
@@ -865,6 +890,7 @@ func (job *BatchJob) GetStatus() *BatchJob {
 		StartedAt:                   job.StartedAt,
 		CompletedAt:                 completedAt,
 		OrganizedAt:                 organizedAt,
+		RevertedAt:                  revertedAt,
 		MoveToFolderOverride:        job.MoveToFolderOverride,
 		RenameFolderInPlaceOverride: job.RenameFolderInPlaceOverride,
 		OperationModeOverride:       job.OperationModeOverride,
