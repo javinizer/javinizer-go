@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -18,6 +19,8 @@ import (
 
 func setupAuthenticatedTestServer(t *testing.T) (*gin.Engine, *ServerDependencies) {
 	t.Helper()
+
+	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
 
 	cfg := config.DefaultConfig()
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
@@ -50,6 +53,11 @@ func newJSONRequest(t *testing.T, method, path string, payload any, cookie *http
 	req.Header.Set("Content-Type", "application/json")
 	if cookie != nil {
 		req.AddCookie(cookie)
+	}
+	if path == "/api/v1/auth/setup" {
+		if secret := os.Getenv("JAVINIZER_SETUP_SECRET"); secret != "" {
+			req.Header.Set("X-Setup-Secret", secret)
+		}
 	}
 	return req
 }
@@ -458,4 +466,99 @@ func TestAuth_LoginRateLimited(t *testing.T) {
 	blockedW := httptest.NewRecorder()
 	router.ServeHTTP(blockedW, blockedReq)
 	assert.Equal(t, http.StatusTooManyRequests, blockedW.Code)
+}
+
+func TestAuth_SetupRejectedFromRemoteWithoutSecret(t *testing.T) {
+	router, _ := setupAuthenticatedTestServer(t)
+
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/setup", nil)
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	assert.Equal(t, http.StatusForbidden, setupW.Code)
+
+	var errResp ErrorResponse
+	require.NoError(t, json.Unmarshal(setupW.Body.Bytes(), &errResp))
+	assert.Contains(t, errResp.Error, "bootstrap secret")
+}
+
+func TestAuth_SetupAllowedFromLocalhostWithoutSecret(t *testing.T) {
+	cfg := config.DefaultConfig()
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	deps := createTestDeps(t, cfg, configFile)
+
+	manager, err := NewAuthManager(configFile, time.Hour)
+	require.NoError(t, err)
+	deps.Auth = manager
+
+	router := NewServer(deps)
+	t.Cleanup(func() {
+		cleanupServerHub(t, deps)
+		_ = deps.DB.Close()
+	})
+
+	body := map[string]string{"username": "admin", "password": "password123"}
+	bodyBytes, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.RemoteAddr = "127.0.0.1:12345"
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	assert.Equal(t, http.StatusOK, setupW.Code)
+}
+
+func TestAuth_SetupAllowedWithCorrectBootstrapSecret(t *testing.T) {
+	router, _ := setupAuthenticatedTestServer(t)
+
+	body := map[string]string{"username": "admin", "password": "password123"}
+	bodyBytes, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.Header.Set("X-Setup-Secret", "test-bootstrap-secret")
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	assert.Equal(t, http.StatusOK, setupW.Code)
+}
+
+func TestAuth_SetupRejectedWithWrongBootstrapSecret(t *testing.T) {
+	router, _ := setupAuthenticatedTestServer(t)
+
+	body := map[string]string{"username": "admin", "password": "password123"}
+	bodyBytes, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.Header.Set("X-Setup-Secret", "wrong-secret")
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	assert.Equal(t, http.StatusForbidden, setupW.Code)
+
+	var errResp ErrorResponse
+	require.NoError(t, json.Unmarshal(setupW.Body.Bytes(), &errResp))
+	assert.Contains(t, errResp.Error, "bootstrap secret")
+}
+
+func TestAuth_SetupAlreadyInitializedReturns409(t *testing.T) {
+	router, _ := setupAuthenticatedTestServer(t)
+
+	setupReq := newJSONRequest(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
+		"username": "admin",
+		"password": "password123",
+	}, nil)
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	require.Equal(t, http.StatusOK, setupW.Code)
+
+	setupAgainReq := newJSONRequest(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
+		"username": "admin",
+		"password": "password123",
+	}, nil)
+	setupAgainW := httptest.NewRecorder()
+	router.ServeHTTP(setupAgainW, setupAgainReq)
+	assert.Equal(t, http.StatusConflict, setupAgainW.Code)
 }

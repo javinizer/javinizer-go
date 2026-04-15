@@ -1,6 +1,12 @@
 config_version: 3
 # API authentication credentials are stored in `auth.credentials.json` next to this file.
 # To reset credentials, stop the server, delete that file, then restart `javinizer api`.
+#
+# Setup endpoint protection (first-arriver takeover prevention):
+# Set JAVINIZER_SETUP_SECRET environment variable to require a bootstrap secret
+# for the /auth/setup endpoint. If not set, setup is only available from localhost.
+# Example: export JAVINIZER_SETUP_SECRET="my-secret-key"
+# When set, include X-Setup-Secret: my-secret-key header in the setup request.
 
 server:
     host: localhost

@@ -3,10 +3,12 @@ package auth
 import (
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
 const sessionCookieName = "javinizer_session"
@@ -91,11 +93,33 @@ func getAuthStatus(deps *ServerDependencies) gin.HandlerFunc {
 	}
 }
 
+func isLocalhost(ip string) bool {
+	return ip == "127.0.0.1" || ip == "::1" || ip == "[::1]"
+}
+
 func setupAuth(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps == nil || deps.Auth == nil {
 			c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "authentication is unavailable"})
 			return
+		}
+
+		bootstrapSecret := os.Getenv("JAVINIZER_SETUP_SECRET")
+		clientIP := c.ClientIP()
+
+		if bootstrapSecret != "" {
+			headerSecret := c.GetHeader("X-Setup-Secret")
+			if headerSecret != bootstrapSecret {
+				logging.Warnf("Setup attempt rejected from %s: invalid bootstrap secret", clientIP)
+				c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{Error: "setup requires a bootstrap secret"})
+				return
+			}
+		} else {
+			if !isLocalhost(clientIP) {
+				logging.Warnf("Setup attempt rejected from %s: remote access without bootstrap secret", clientIP)
+				c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{Error: "setup is only available from localhost"})
+				return
+			}
 		}
 
 		if deps.Auth.IsInitialized() {
