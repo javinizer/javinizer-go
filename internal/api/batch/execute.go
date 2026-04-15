@@ -104,7 +104,7 @@ func organizeJob(deps *ServerDependencies) gin.HandlerFunc {
 					})
 				}
 			}()
-			ctx, cancel := context.WithCancel(c.Request.Context())
+			ctx, cancel := context.WithCancel(context.Background())
 			job.SetCancelFunc(cancel)
 			defer cancel()
 			processOrganizeJob(ctx, job, deps.JobQueue, req.Destination, req.CopyOnly, req.LinkMode, deps.DB, cfg, deps.GetRegistry(), deps.EventEmitter)
