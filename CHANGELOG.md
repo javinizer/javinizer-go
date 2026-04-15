@@ -5,6 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.6-alpha] - 2026-04-16
+
+### Added
+
+- SSRF protection package (`internal/ssrf`) with `NewSSRFSafeClient()`, `WrapTransportWithSSRFCheck()`, and `CheckRedirect()` validation blocking private/loopback/link-local IPs
+- Typed scraper error model (`models.ScraperError`) with categorized error kinds (network, parsing, not-found, rate-limit, auth, timeout, context-cancelled)
+- Config redaction utility (`internal/config/redact.go`) for safe logging of sensitive fields (API keys, passwords, tokens)
+- Panic recovery middleware for batch processing with structured error reporting
+- Job queue improvements: context-aware cancellation, improved state transitions, structured error aggregation
+- Batch query support for movie repository (`FindMoviesByIDs`, `FindMoviesByContentIDs`) reducing N+1 database queries
+- Translation service typed errors with retry classification
+- Panic recovery tests for batch execute pipeline
+
+### Changed
+
+- Context propagation threaded through all 14 scrapers: `.SetContext(ctx)` on every resty request in ctx-aware methods
+- Context threaded through full DMM actress thumbnail chain: `parseHTML` → `extractActresses` → `extractActressFromLink` → `tryActressThumbURLs` → `extractRomajiVariantsFromActressPageCtx`
+- Context threaded through JavDB `Search` retry and `ScrapeURL` paths via `fetchPageDirectCtx`
+- Context threaded through DMM `FetchWithBrowser` as chromedp parent context
+- Context threaded through `DownloadMediaFiles` → `DownloadAll` chain
+- Aggregator simplified with typed scraper errors replacing ad-hoc error classification
+- Worker pool and scraper task pipeline refactored for structured error handling
+- Downloader retry logic improved with per-error-kind backoff strategies
+- Temp API handlers now use `ssrf.NewSSRFSafeClient()` instead of raw `http.Client`
+- Proxy test client uses `resty.NoRedirectPolicy()` to prevent open-redirect SSRF
+- Removed unused context-free wrapper functions (`fetchPageDirect`, `extractRomajiVariantsFromActressPage`, etc.)
+- 135 files changed, ~2,659 lines added, ~1,265 lines removed
+
+### Fixed
+
+- SSRF redirect bypass: proxy test and temp API handlers now validate redirect destinations against internal IPs
+- Scraper context cancellation gaps: all scraper HTTP requests now respect caller context for proper timeout/cancel propagation
+- DMM actress thumbnail fallback now cancellable (previously used `context.Background()` for romaji lookup and HEAD probes)
+- JavDB ScrapeURL retry path now respects caller context instead of spawning untracked requests
+- Batch organize goroutine immediately cancelled due to deriving context from `c.Request.Context()` instead of `context.Background()`
+
+### Security
+
+- SSRF hardening: `NewSSRFSafeClient()` blocks connections to loopback, private, and link-local IP ranges (prevents cloud metadata credential exfiltration via `169.254.169.254` and internal service access)
+- SSRF redirect validation: `CheckRedirect()` blocks HTTP redirects to internal IP addresses
+- Config redaction prevents API keys and tokens from leaking into logs
+
+## [v0.2.5-alpha] - 2026-04-14
+
+### Added
+
+- Database repository layer extracted into focused repos: `movie_repo`, `actress_repo`, `actress_alias_repo`, `genre_repo`, `genre_replacement_repo`, `movie_tag_repo`, `movie_translation_repo`, `event_repo`, `batch_file_operation_repo`, `history_repo`
+- Database helpers package with `InTransaction()` wrapper and common query builders
+- Scraper config validation tests for all 12 configurable scrapers
+- Shared scraper utility helpers (`internal/scraperutil/helpers.go`) for common extraction patterns
+- Aggregator priority tests for field resolution ordering
+- Organizer strategy tests for all operation modes
+- NFO generator and merger unit tests
+- MediaInfo extended tests: AVI/RIFF parser, MKV, MP4 with edge cases
+- Worker pool error classification tests and poster cache tests
+- Batch revert check tests and lifecycle extra tests
+
+### Changed
+
+- Monolithic `database.go` (~1,436 lines) decomposed into 10 focused repository files
+- All 14 scraper `Search`/`ScrapeURL` methods refactored for consistent error handling and config-driven behavior
+- Jav321 scraper restructured with improved HTML parsing reliability
+- Worker pool improved with structured error wrapping
+- Test coverage increased (67 files changed, ~4,829 lines added, ~2,153 lines removed)
+
+### Fixed
+
+- Aventertainment, DLGetchu, Jav321, JavBus, JavDB, LibreDMM, MGStage, R18Dev, TokyoHot scraper config and edge-case bugs
+- DMM JSON-LD parsing and video.dmm.co.jp extraction robustness
+- FC2 and Caribbeancom scraper config handling
+- Worker pool error reporting for concurrent scrape failures
+
 ## [v0.2.4-alpha] - 2026-04-12
 
 ### Added
