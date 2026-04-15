@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -25,8 +26,12 @@ import (
 // processUpdateJob handles update operation triggered from review page
 // Generates NFOs and downloads media files in place without moving video files
 func processUpdateJob(job *worker.BatchJob, cfg *config.Config, db *database.DB, registry *models.ScraperRegistry, emitter eventlog.EventEmitter) {
-	// Setup context for cancellation (mirrors processBatchJob pattern)
-	ctx, cancel := context.WithCancel(context.Background())
+	// Setup context with configurable timeout (mirrors processBatchJob pattern)
+	timeout := time.Duration(cfg.Performance.WorkerTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 600 * time.Second // Default 10 minutes
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	job.SetCancelFunc(cancel)
 	defer cancel()
 
@@ -107,11 +112,15 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		select {
 		case <-ctx.Done():
 			job.MarkCancelled()
+			cancelMsg := "Update cancelled"
+			if ctx.Err() == context.DeadlineExceeded {
+				cancelMsg = fmt.Sprintf("Update timed out after %ds", cfg.Performance.WorkerTimeout)
+			}
 			broadcastProgress(&ws.ProgressMessage{
 				JobID:    job.ID,
 				Status:   "cancelled",
 				Progress: float64(processedFiles) / float64(totalFiles) * 100,
-				Message:  fmt.Sprintf("Update cancelled (%d/%d files processed)", processedFiles, totalFiles),
+				Message:  fmt.Sprintf("%s (%d/%d files processed)", cancelMsg, processedFiles, totalFiles),
 			})
 			if emitter != nil {
 				if err := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("Update job %s cancelled", job.ID), models.SeverityWarn, map[string]interface{}{"job_id": job.ID, "processed_files": processedFiles}); err != nil {
@@ -314,7 +323,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		// Download all media files to source directory
 		// Use movieToWrite (merged) to include NFO data in downloads
 		// Reuse multipart info created earlier for template rendering
-		results, err := dl.DownloadAll(movieToWrite, sourceDir, multipart)
+		results, err := dl.DownloadAll(ctx, movieToWrite, sourceDir, multipart)
 		if err != nil {
 			logging.Warnf("Failed to download media for %s: %v", movie.ID, err)
 			hasErrors = true

@@ -1,6 +1,7 @@
 package javlibrary_test
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -293,7 +294,7 @@ func TestScraper_SearchDisabled(t *testing.T) {
 
 	scraper := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
 
-	_, err := scraper.Search("IPX-123")
+	_, err := scraper.Search(context.Background(), "IPX-123")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "disabled")
 }
@@ -315,7 +316,7 @@ func TestIntegration_Search(t *testing.T) {
 
 	scraper := javlibrary.New(settings, proxyCfg, config.FlareSolverrConfig{})
 
-	result, err := scraper.Search("IPX-123")
+	result, err := scraper.Search(context.Background(), "IPX-123")
 	if err != nil {
 		t.Skipf("FlareSolverr may not be running: %v", err)
 	}

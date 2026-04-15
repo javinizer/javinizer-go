@@ -3,9 +3,9 @@ package downloader
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -517,7 +517,7 @@ func TestDownloadWithRetry_NetworkErrors(t *testing.T) {
 		// Configure mock: network error, then success
 		mockHTTP.EXPECT().
 			Do(mock.Anything).
-			Return(nil, errors.New("connection refused")).
+			Return(nil, &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")}).
 			Once()
 
 		mockHTTP.EXPECT().
@@ -743,23 +743,48 @@ func TestIsRetryableError(t *testing.T) {
 		},
 		{
 			name:      "connection refused - retryable",
-			err:       fmt.Errorf("failed to download: connection refused"),
+			err:       &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")},
 			wantRetry: true,
 		},
 		{
 			name:      "connection reset - retryable",
-			err:       fmt.Errorf("failed to download: connection reset by peer"),
+			err:       &net.OpError{Op: "read", Net: "tcp", Err: fmt.Errorf("connection reset by peer")},
 			wantRetry: true,
 		},
 		{
 			name:      "no such host - retryable",
-			err:       fmt.Errorf("failed to download: no such host"),
+			err:       &net.DNSError{Err: "no such host", Name: "example.invalid"},
 			wantRetry: true,
 		},
 		{
 			name:      "i/o timeout - retryable",
-			err:       fmt.Errorf("failed to download: i/o timeout"),
+			err:       &net.OpError{Op: "read", Net: "tcp", Err: newTimeoutError()},
 			wantRetry: true,
+		},
+		{
+			name:      "wrapped net.Error - retryable",
+			err:       fmt.Errorf("download failed: %w", &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")}),
+			wantRetry: true,
+		},
+		{
+			name:      "wrapped net.DNSError - retryable",
+			err:       fmt.Errorf("download failed: %w", &net.DNSError{Err: "no such host", Name: "example.invalid"}),
+			wantRetry: true,
+		},
+		{
+			name:      "wrapped net.OpError - retryable",
+			err:       fmt.Errorf("download failed: %w", &net.OpError{Op: "read", Net: "tcp", Err: fmt.Errorf("connection reset by peer")}),
+			wantRetry: true,
+		},
+		{
+			name:      "wrapped statusError 503 - retryable",
+			err:       fmt.Errorf("download failed: %w", &statusError{statusCode: 503}),
+			wantRetry: true,
+		},
+		{
+			name:      "wrapped statusError 404 - non-retryable",
+			err:       fmt.Errorf("download failed: %w", &statusError{statusCode: 404}),
+			wantRetry: false,
 		},
 		{
 			name:      "nil error - non-retryable",
@@ -780,3 +805,11 @@ func TestIsRetryableError(t *testing.T) {
 		})
 	}
 }
+
+type timeoutError struct{}
+
+func (e *timeoutError) Error() string   { return "i/o timeout" }
+func (e *timeoutError) Timeout() bool   { return true }
+func (e *timeoutError) Temporary() bool { return true }
+
+func newTimeoutError() *timeoutError { return &timeoutError{} }

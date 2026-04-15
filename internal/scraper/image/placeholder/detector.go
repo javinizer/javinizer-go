@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 func IsPlaceholder(ctx context.Context, client *resty.Client, url string, cfg Config) (bool, error) {
@@ -36,7 +37,7 @@ func IsPlaceholder(ctx context.Context, client *resty.Client, url string, cfg Co
 	}
 
 	if resp.StatusCode() >= 400 {
-		return false, fmt.Errorf("HTTP error %d", resp.StatusCode())
+		return false, models.NewScraperHTTPError("placeholder", resp.StatusCode(), "HEAD request failed")
 	}
 
 	contentLengthStr := resp.Header().Get("Content-Length")
@@ -60,7 +61,7 @@ func IsPlaceholder(ctx context.Context, client *resty.Client, url string, cfg Co
 	}
 
 	if downloadResp.StatusCode() >= 400 {
-		return false, fmt.Errorf("HTTP error %d on download", downloadResp.StatusCode())
+		return false, models.NewScraperHTTPError("placeholder", downloadResp.StatusCode(), "download failed")
 	}
 
 	body := downloadResp.Body()

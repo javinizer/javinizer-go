@@ -5,6 +5,7 @@ package models
 // Reference: Architecture Decision 8 (concurrent testing with -race flag)
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"strings"
@@ -608,12 +609,14 @@ func TestScraperInterfaceCompliance(t *testing.T) {
 // This demonstrates that any struct with Name(), Search(), GetURL(), IsEnabled() satisfies the interface
 type mockScraperForTest struct{}
 
-func (m *mockScraperForTest) Name() string                             { return "mock" }
-func (m *mockScraperForTest) Search(id string) (*ScraperResult, error) { return nil, nil }
-func (m *mockScraperForTest) GetURL(id string) (string, error)         { return "", nil }
-func (m *mockScraperForTest) IsEnabled() bool                          { return true }
-func (m *mockScraperForTest) Config() *config.ScraperSettings          { return &config.ScraperSettings{} }
-func (m *mockScraperForTest) Close() error                             { return nil }
+func (m *mockScraperForTest) Name() string { return "mock" }
+func (m *mockScraperForTest) Search(_ context.Context, _ string) (*ScraperResult, error) {
+	return nil, nil
+}
+func (m *mockScraperForTest) GetURL(id string) (string, error) { return "", nil }
+func (m *mockScraperForTest) IsEnabled() bool                  { return true }
+func (m *mockScraperForTest) Config() *config.ScraperSettings  { return &config.ScraperSettings{} }
+func (m *mockScraperForTest) Close() error                     { return nil }
 
 // TestActressInfoValidation tests ActressInfo struct validation (AC-2.5.5)
 func TestActressInfoValidation(t *testing.T) {

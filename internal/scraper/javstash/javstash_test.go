@@ -1,6 +1,7 @@
 package javstash
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -124,7 +125,7 @@ func TestScraper_Search_MissingAPIKey(t *testing.T) {
 		apiKey:      "",
 		rateLimiter: ratelimit.NewLimiter(0),
 	}
-	_, err := s.Search("IPX-535")
+	_, err := s.Search(context.Background(), "IPX-535")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "api_key is required")
 }
@@ -135,11 +136,11 @@ func TestScraper_Search_EmptyID(t *testing.T) {
 		apiKey:      "test-key",
 		rateLimiter: ratelimit.NewLimiter(0),
 	}
-	_, err := s.Search("")
+	_, err := s.Search(context.Background(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "id cannot be empty")
 
-	_, err = s.Search("   ")
+	_, err = s.Search(context.Background(), "   ")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "id cannot be empty")
 }
@@ -199,7 +200,7 @@ func TestScraper_Search_Success(t *testing.T) {
 		settings:    config.ScraperSettings{},
 	}
 
-	result, err := s.Search("IPX-535")
+	result, err := s.Search(context.Background(), "IPX-535")
 	require.NoError(t, err)
 	assert.Equal(t, "javstash", result.Source)
 	assert.Equal(t, "Test Movie Title", result.Title)
@@ -282,7 +283,7 @@ func TestScraper_Search_NotFound(t *testing.T) {
 		settings:    config.ScraperSettings{},
 	}
 
-	_, err := s.Search("NOTFOUND-999")
+	_, err := s.Search(context.Background(), "NOTFOUND-999")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no results")
 }
@@ -306,7 +307,7 @@ func TestScraper_Search_Unauthorized(t *testing.T) {
 		settings:    config.ScraperSettings{},
 	}
 
-	_, err := s.Search("IPX-535")
+	_, err := s.Search(context.Background(), "IPX-535")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "API key required")
 }
@@ -384,7 +385,7 @@ func TestExtractIDFromURL(t *testing.T) {
 func TestScrapeURL_ReturnsNotSupported(t *testing.T) {
 	s := &Scraper{enabled: true, apiKey: "test-key", rateLimiter: ratelimit.NewLimiter(0)}
 
-	_, err := s.ScrapeURL("https://javstash.org/scenes/abc123")
+	_, err := s.ScrapeURL(context.Background(), "https://javstash.org/scenes/abc123")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not support direct URL scraping")
 }

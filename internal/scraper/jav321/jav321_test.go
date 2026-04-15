@@ -1,6 +1,7 @@
 package jav321
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -125,7 +126,7 @@ func TestSearch(t *testing.T) {
 	defer server.Close()
 
 	s := New(testSettings(server.URL), nil, config.FlareSolverrConfig{})
-	result, err := s.Search("ABC-123")
+	result, err := s.Search(context.Background(), "ABC-123")
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}

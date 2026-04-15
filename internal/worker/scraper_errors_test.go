@@ -2,11 +2,11 @@ package worker
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestBuildScraperNoResultsError(t *testing.T) {
@@ -18,7 +18,7 @@ func TestBuildScraperNoResultsError(t *testing.T) {
 	t.Run("all not found", func(t *testing.T) {
 		msg := buildScraperNoResultsError([]scraperFailure{
 			{Scraper: "a", Err: models.NewScraperNotFoundError("a", "no match")},
-			{Scraper: "b", Err: errors.New("movie not found")},
+			{Scraper: "b", Err: models.NewScraperNotFoundError("b", "movie not found")},
 		})
 		assert.Contains(t, msg, "Movie not found on configured scrapers")
 		assert.Contains(t, msg, "a:")
@@ -58,33 +58,33 @@ func TestFormatScraperFailure(t *testing.T) {
 		},
 		{
 			name:      "not found message",
-			err:       errors.New("movie not found"),
-			contains:  "movie not found on source",
-			contains2: "details: movie not found",
+			err:       models.NewScraperNotFoundError("stub", "movie not found"),
+			contains:  "movie not found",
+			contains2: "stub:",
 		},
 		{
 			name:      "rate limited with status",
-			err:       errors.New("HTTP 429 from upstream"),
+			err:       models.NewScraperHTTPError("stub", 429, "HTTP 429 from upstream"),
 			contains:  "rate-limited",
-			contains2: "HTTP 429",
+			contains2: "429",
 		},
 		{
 			name:      "blocked with status",
-			err:       errors.New("status code 451 denied"),
+			err:       models.NewScraperHTTPError("stub", 451, "status code 451 denied"),
 			contains:  "blocked access",
-			contains2: "HTTP 451",
+			contains2: "451",
 		},
 		{
 			name:      "unavailable 502 special text",
-			err:       errors.New("HTTP: 502 bad gateway"),
+			err:       models.NewScraperHTTPError("stub", 502, "HTTP: 502 bad gateway"),
 			contains:  "HTTP 502 Bad Gateway",
 			contains2: "temporarily unavailable",
 		},
 		{
 			name:      "other with status",
-			err:       errors.New("status code 418 teapot"),
+			err:       models.NewScraperHTTPError("stub", 418, "status code 418 teapot"),
 			contains:  "scraper request failed",
-			contains2: "details: status code 418 teapot",
+			contains2: "418",
 		},
 		{
 			name:      "other without status",
@@ -155,15 +155,10 @@ func TestClassifyScraperError(t *testing.T) {
 	})
 
 	t.Run("string matching fallbacks", func(t *testing.T) {
-		kind, code, raw := classifyScraperError(errors.New("HTTP status code 429 from upstream"))
+		kind, code, raw := classifyScraperError(models.NewScraperHTTPError("", 429, "HTTP status code 429 from upstream"))
 		assert.Equal(t, scraperErrorRateLimited, kind)
 		assert.Equal(t, 429, code)
 		assert.Equal(t, "HTTP status code 429 from upstream", raw)
-
-		kind, code, raw = classifyScraperError(errors.New("resource not found"))
-		assert.Equal(t, scraperErrorNotFound, kind)
-		assert.Equal(t, 0, code)
-		assert.Equal(t, "resource not found", raw)
 
 		kind, code, raw = classifyScraperError(errors.New("unexpected transport reset"))
 		assert.Equal(t, scraperErrorOther, kind)
@@ -172,28 +167,59 @@ func TestClassifyScraperError(t *testing.T) {
 	})
 }
 
-func TestExtractHTTPStatusCode(t *testing.T) {
-	tests := []struct {
-		raw    string
-		code   int
-		hasHit bool
+func TestClassifyScraperError_ScraperHTTPError(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantKind   scraperErrorKind
+		wantCode   int
+		wantRawLen bool
 	}{
-		{raw: "status code 403 from source", code: 403, hasHit: true},
-		{raw: "HTTP: 502 bad gateway", code: 502, hasHit: true},
-		{raw: "no code here", code: 0, hasHit: false},
+		{
+			name:       "ScraperHTTPError 429 - rate limited",
+			err:        models.NewScraperHTTPError("stub", 429, "slow down"),
+			wantKind:   scraperErrorRateLimited,
+			wantCode:   429,
+			wantRawLen: true,
+		},
+		{
+			name:       "ScraperHTTPError 404 - not found",
+			err:        models.NewScraperHTTPError("stub", 404, "missing"),
+			wantKind:   scraperErrorNotFound,
+			wantCode:   404,
+			wantRawLen: true,
+		},
+		{
+			name:       "ScraperHTTPError 502 - unavailable",
+			err:        models.NewScraperHTTPError("stub", 502, "bad gateway"),
+			wantKind:   scraperErrorUnavailable,
+			wantCode:   502,
+			wantRawLen: true,
+		},
+		{
+			name:       "ScraperHTTPError 418 - other",
+			err:        models.NewScraperHTTPError("stub", 418, "teapot"),
+			wantKind:   scraperErrorOther,
+			wantCode:   418,
+			wantRawLen: true,
+		},
+		{
+			name:       "wrapped ScraperHTTPError",
+			err:        fmt.Errorf("scrape failed: %w", models.NewScraperHTTPError("stub", 429, "rate limited")),
+			wantKind:   scraperErrorRateLimited,
+			wantCode:   429,
+			wantRawLen: true,
+		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.raw, func(t *testing.T) {
-			code, ok := extractHTTPStatusCode(tt.raw)
-			assert.Equal(t, tt.hasHit, ok)
-			if ok {
-				assert.Equal(t, tt.code, code)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kind, code, raw := classifyScraperError(tc.err)
+			assert.Equal(t, tc.wantKind, kind)
+			assert.Equal(t, tc.wantCode, code)
+			if tc.wantRawLen {
+				assert.NotEmpty(t, raw)
 			}
 		})
 	}
-
-	code, ok := extractHTTPStatusCode("status code 12a")
-	require.False(t, ok)
-	assert.Equal(t, 0, code)
 }

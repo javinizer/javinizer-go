@@ -163,7 +163,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from MGStage URL")
 }
 
-func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("MGStage", "URL not handled by MGStage scraper")
 	}
@@ -173,7 +173,7 @@ func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
 		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
 	}
 
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return nil, err
 	}
 	resp, err := s.client.R().Get(rawURL)
@@ -237,11 +237,16 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 
 // GetURL attempts to find the URL for a given movie ID using MGStage search
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.GetURLCtx(context.Background(), id)
+}
+
+// GetURLCtx attempts to find the URL for a given movie ID using MGStage search with context support
+func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
 	// Normalize ID for search (remove hyphens, lowercase)
 	searchID := normalizeIDForSearch(id)
 	url := fmt.Sprintf(searchURL, searchID)
 
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
 
@@ -253,7 +258,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 
 	if resp.StatusCode() != 200 {
 		directURL := fmt.Sprintf(productURL, id)
-		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
 			return "", err
 		}
 
@@ -304,7 +309,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 
 	// If no match found in search, try direct product URL
 	directURL := fmt.Sprintf(productURL, id)
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
 
@@ -317,14 +322,14 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	return "", models.NewScraperNotFoundError("MGStage", "movie not found on MGStage")
 }
 
-// Search searches for and scrapes metadata for a given movie ID
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
-	url, err := s.GetURL(id)
+// Search searches for and scrapes metadata for a given movie ID with context support
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+	url, err := s.GetURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return nil, err
 	}
 

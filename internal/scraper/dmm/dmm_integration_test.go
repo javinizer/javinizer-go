@@ -1,6 +1,7 @@
 package dmm
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -42,7 +43,7 @@ func TestParseHTML_EdgeCases(t *testing.T) {
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
 
-			result, err := scraper.parseHTML(doc, tt.sourceURL)
+			result, err := scraper.parseHTML(context.Background(), doc, tt.sourceURL)
 			require.NoError(t, err)
 			assert.NotNil(t, result)
 			assert.NotEmpty(t, result.Title)

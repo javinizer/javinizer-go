@@ -211,7 +211,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from JavStash URL")
 }
 
-func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	return nil, models.NewScraperNotFoundError("Javstash", "JavStash is a GraphQL-based API and does not support direct URL scraping. Use ID-based search instead.")
 }
 
@@ -222,7 +222,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	return fmt.Sprintf("%s/scenes/%s", strings.TrimSuffix(s.baseURL, "/graphql"), id), nil
 }
 
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, fmt.Errorf("javstash: id cannot be empty or whitespace")
 	}
@@ -230,7 +230,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, fmt.Errorf("javstash: api_key is required (set in config or JAVSTASH_API_KEY env var)")
 	}
 
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("javstash: rate limit wait failed: %w", err)
 	}
 

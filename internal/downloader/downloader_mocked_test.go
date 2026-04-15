@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,7 +99,7 @@ func TestDownload_Success(t *testing.T) {
 			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
 
 			// Execute
-			result, err := downloader.download(tt.url, tt.destPath, MediaTypePoster)
+			result, err := downloader.download(context.Background(), tt.url, tt.destPath, MediaTypePoster)
 
 			// Assert
 			if tt.wantError {
@@ -213,7 +214,7 @@ func TestDownload_ErrorHandling(t *testing.T) {
 			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
 
 			// Execute
-			result, err := downloader.download(tt.url, tt.destPath, MediaTypePoster)
+			result, err := downloader.download(context.Background(), tt.url, tt.destPath, MediaTypePoster)
 
 			// Assert
 			assert.Error(t, err)
@@ -264,7 +265,7 @@ func TestDownload_DirectoryCreation(t *testing.T) {
 	downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
 
 	// Execute
-	result, err := downloader.download(url, destPath, MediaTypePoster)
+	result, err := downloader.download(context.Background(), url, destPath, MediaTypePoster)
 
 	// Assert
 	assert.NoError(t, err)
@@ -311,7 +312,7 @@ func TestDownload_UserAgent(t *testing.T) {
 	downloader := NewDownloader(mockHTTP, memFS, cfg, expectedUserAgent)
 
 	// Execute
-	result, err := downloader.download(url, destPath, MediaTypePoster)
+	result, err := downloader.download(context.Background(), url, destPath, MediaTypePoster)
 
 	// Assert
 	assert.NoError(t, err)
@@ -372,7 +373,7 @@ func TestDownload_RefererHeader(t *testing.T) {
 			cfg := &config.OutputConfig{DownloadTimeout: 60}
 			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
 
-			result, err := downloader.download(tt.url, destPath, MediaTypePoster)
+			result, err := downloader.download(context.Background(), tt.url, destPath, MediaTypePoster)
 			assert.NoError(t, err)
 			assert.True(t, result.Downloaded)
 		})
@@ -381,9 +382,8 @@ func TestDownload_RefererHeader(t *testing.T) {
 
 // TestDownload_ContextUsage tests that download respects context cancellation
 func TestDownload_ContextUsage(t *testing.T) {
-	// Note: The current implementation uses context.Background() internally
-	// This test verifies the current behavior and can be expanded when
-	// context propagation is added (Story 4.2)
+	// The download() method now accepts ctx context.Context and uses it
+	// for HTTP request creation. Cancelled context causes early return.
 
 	goldenPath := filepath.Join("testdata", "poster.jpg.golden")
 	goldenData, err := os.ReadFile(goldenPath)
@@ -414,7 +414,7 @@ func TestDownload_ContextUsage(t *testing.T) {
 	downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
 
 	// Execute
-	result, err := downloader.download(url, destPath, MediaTypePoster)
+	result, err := downloader.download(context.Background(), url, destPath, MediaTypePoster)
 
 	// Assert
 	assert.NoError(t, err)

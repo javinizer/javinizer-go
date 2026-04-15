@@ -33,14 +33,12 @@ func (m *MockScraperWithResults) Name() string {
 	return m.name
 }
 
-func (m *MockScraperWithResults) Search(id string) (*models.ScraperResult, error) {
+func (m *MockScraperWithResults) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	// Clone the result and set the ID to the searched ID
-	// This allows security tests to verify that malicious input is sanitized
 	result := *m.result
-	result.ID = id // Echo back the input ID for security testing
+	result.ID = id
 	return &result, nil
 }
 

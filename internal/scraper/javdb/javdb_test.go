@@ -1,6 +1,7 @@
 package javdb
 
 import (
+	"context"
 	"testing"
 
 	"github.com/go-resty/resty/v2"
@@ -19,7 +20,7 @@ func TestNewScraper(t *testing.T) {
 
 func TestSearch_Disabled(t *testing.T) {
 	scraper := New(config.ScraperSettings{Enabled: false}, &config.ProxyConfig{}, config.FlareSolverrConfig{})
-	_, err := scraper.Search("IPX-123")
+	_, err := scraper.Search(context.Background(), "IPX-123")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "disabled")
 }
@@ -83,7 +84,7 @@ func TestSearch_Success(t *testing.T) {
 		settings:    config.ScraperSettings{Enabled: true},
 	}
 
-	result, err := scraper.Search("IPX-123")
+	result, err := scraper.Search(context.Background(), "IPX-123")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -159,7 +160,7 @@ func TestSearch_Success_EnglishLabels(t *testing.T) {
 		settings:    config.ScraperSettings{Enabled: true},
 	}
 
-	result, err := scraper.Search("SSNI-344")
+	result, err := scraper.Search(context.Background(), "SSNI-344")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "SSNI-344", result.ID)
@@ -213,7 +214,7 @@ func TestSearch_ActorNAIsIgnored(t *testing.T) {
 		settings:    config.ScraperSettings{Enabled: true},
 	}
 
-	result, err := scraper.Search("GPTPJ-018")
+	result, err := scraper.Search(context.Background(), "GPTPJ-018")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Len(t, result.Actresses, 0)
@@ -254,7 +255,7 @@ func TestSearch_ScreenshotSkipsLoginLink(t *testing.T) {
 		settings:    config.ScraperSettings{Enabled: true},
 	}
 
-	result, err := scraper.Search("ABC-123")
+	result, err := scraper.Search(context.Background(), "ABC-123")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, result.ScreenshotURL, 1)
@@ -320,7 +321,7 @@ func TestSearch_PrefersExactIDOverVariant(t *testing.T) {
 		settings:    config.ScraperSettings{Enabled: true},
 	}
 
-	result, err := scraper.Search("ABP-880")
+	result, err := scraper.Search(context.Background(), "ABP-880")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -379,7 +380,7 @@ func TestSearch_FiltersMaleActorsFromActresses(t *testing.T) {
 		settings:    config.ScraperSettings{Enabled: true},
 	}
 
-	result, err := scraper.Search("ABP-880")
+	result, err := scraper.Search(context.Background(), "ABP-880")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -430,7 +431,7 @@ func TestSearch_PrefersFemaleActressRowOverGenericCast(t *testing.T) {
 		settings:    config.ScraperSettings{Enabled: true},
 	}
 
-	result, err := scraper.Search("ABP-880")
+	result, err := scraper.Search(context.Background(), "ABP-880")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -488,7 +489,7 @@ func TestSearch_UsesSymbolGenderMarkersForCast(t *testing.T) {
 		settings:    config.ScraperSettings{Enabled: true},
 	}
 
-	result, err := scraper.Search("ABP-880")
+	result, err := scraper.Search(context.Background(), "ABP-880")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 

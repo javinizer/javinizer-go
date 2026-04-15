@@ -24,22 +24,22 @@ func isScraperPanicError(err error) bool {
 	return ok
 }
 
-func safeScrapeURL(scraper models.DirectURLScraper, url string) (result *models.ScraperResult, err error) {
+func safeScrapeURL(c *gin.Context, scraper models.DirectURLScraper, url string) (result *models.ScraperResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = &scraperPanicError{message: fmt.Sprintf("scraper panic during direct URL scrape: %v", r)}
 		}
 	}()
-	return scraper.ScrapeURL(url)
+	return scraper.ScrapeURL(c.Request.Context(), url)
 }
 
-func safeSearch(scraper models.Scraper, id string) (result *models.ScraperResult, err error) {
+func safeSearch(c *gin.Context, scraper models.Scraper, id string) (result *models.ScraperResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = &scraperPanicError{message: fmt.Sprintf("scraper panic during search: %v", r)}
 		}
 	}()
-	return scraper.Search(id)
+	return scraper.Search(c.Request.Context(), id)
 }
 
 // scrapeMovie godoc
@@ -154,7 +154,7 @@ func scrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 				if handler, ok := scraper.(models.URLHandler); ok && handler.CanHandleURL(req.ID) {
 					if directScraper, ok := scraper.(models.DirectURLScraper); ok {
 						logging.Debugf("Trying direct URL scrape for %s", scraper.Name())
-						result, err = safeScrapeURL(directScraper, req.ID)
+						result, err = safeScrapeURL(c, directScraper, req.ID)
 						if err == nil {
 							logging.Debugf("Direct URL scrape succeeded for %s", scraper.Name())
 							result.NormalizeMediaURLs()
@@ -176,7 +176,7 @@ func scrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 				}
 			}
 
-			result, err = safeSearch(scraper, parsed.ID)
+			result, err = safeSearch(c, scraper, parsed.ID)
 			if err != nil {
 				if isScraperPanicError(err) {
 					anyPanic = true

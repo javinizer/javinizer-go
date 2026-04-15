@@ -117,7 +117,7 @@ func TestDownloadMediaFilesWithHistory(t *testing.T) {
 		}
 		destDir := t.TempDir()
 
-		downloadMediaFilesWithHistory(dl, movie, destDir, cfg, historyLogger, nil)
+		downloadMediaFilesWithHistory(context.Background(), dl, movie, destDir, cfg, historyLogger, nil)
 
 		coverPath := filepath.Join(destDir, "IPX-900-fanart.jpg")
 		_, err := os.Stat(coverPath)
@@ -147,7 +147,7 @@ func TestDownloadMediaFilesWithHistory(t *testing.T) {
 		dl := downloader.NewDownloaderWithNFOConfig(http.DefaultClient, afero.NewOsFs(), &cfg.Output, "test-agent", false, true)
 
 		movie := &models.Movie{ID: "IPX-901"}
-		downloadMediaFilesWithHistory(dl, movie, t.TempDir(), cfg, historyLogger, nil)
+		downloadMediaFilesWithHistory(context.Background(), dl, movie, t.TempDir(), cfg, historyLogger, nil)
 
 		records, err := historyLogger.GetByMovieID(movie.ID)
 		require.NoError(t, err)
@@ -181,7 +181,7 @@ func TestProcessOrganizeJob_InvalidLinkModeMarksFailed(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 	job := deps.JobQueue.CreateJob(nil)
 
-	processOrganizeJob(job, deps.JobQueue, t.TempDir(), false, "not-a-valid-link-mode", deps.DB, cfg, deps.Registry, nil)
+	processOrganizeJob(context.Background(), job, deps.JobQueue, t.TempDir(), false, "not-a-valid-link-mode", deps.DB, cfg, deps.Registry, nil)
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusFailed, status.Status)

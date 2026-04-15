@@ -196,13 +196,13 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return strings.ToUpper(candidates[0]), nil
 }
 
-func (s *Scraper) ScrapeURL(url string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(url) {
 		return nil, models.NewScraperNotFoundError("JavBus", "URL not handled by JavBus scraper")
 	}
 
 	detailURL := s.applyLanguageToURL(url)
-	html, status, err := s.fetchPage(detailURL)
+	html, status, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JavBus detail page: %w", err)
 	}
@@ -272,7 +272,8 @@ func (s *Scraper) GetURL(id string) (string, error) {
 }
 
 // Search searches JavBus for a movie and extracts metadata.
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
+// Search searches JavBus for a movie and extracts metadata with context support.
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("JavBus scraper is disabled")
 	}
@@ -282,7 +283,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, err
 	}
 
-	html, status, err := s.fetchPage(detailURL)
+	html, status, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JavBus detail page: %w", err)
 	}
@@ -362,7 +363,11 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 }
 
 func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+	return s.fetchPageCtx(context.Background(), targetURL)
+}
+
+func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}
 

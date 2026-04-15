@@ -23,13 +23,11 @@ import (
 // @Router /api/v1/config [get]
 func getConfig(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Read current config dynamically (respects config reloads) and include
-		// runtime config file location for UI display.
 		c.JSON(200, struct {
 			*config.Config
 			ConfigFilePath string `json:"config_file_path"`
 		}{
-			Config:         deps.GetConfig(),
+			Config:         deps.GetConfig().Redact(),
 			ConfigFilePath: deps.ConfigFile,
 		})
 	}
@@ -61,6 +59,9 @@ func updateConfig(deps *ServerDependencies) gin.HandlerFunc {
 
 		// Extract config from request
 		newConfig := req.Config
+
+		// Preserve secrets that were redacted in the GET response
+		preserveRedactedSecrets(deps.GetConfig(), &newConfig)
 
 		// Run full config preparation pipeline before save/reload.
 		if _, err := config.Prepare(&newConfig); err != nil {
@@ -259,4 +260,67 @@ func proxyProfilesEqual(a, b map[string]config.ProxyProfile) bool {
 		}
 	}
 	return true
+}
+
+func preserveRedactedSecrets(old, new *config.Config) {
+	if old == nil || new == nil {
+		return
+	}
+
+	if new.Database.DSN == config.RedactedValue {
+		new.Database.DSN = old.Database.DSN
+	}
+
+	if new.Metadata.Translation.OpenAI.APIKey == config.RedactedValue {
+		new.Metadata.Translation.OpenAI.APIKey = old.Metadata.Translation.OpenAI.APIKey
+	}
+	if new.Metadata.Translation.DeepL.APIKey == config.RedactedValue {
+		new.Metadata.Translation.DeepL.APIKey = old.Metadata.Translation.DeepL.APIKey
+	}
+	if new.Metadata.Translation.Google.APIKey == config.RedactedValue {
+		new.Metadata.Translation.Google.APIKey = old.Metadata.Translation.Google.APIKey
+	}
+	if new.Metadata.Translation.OpenAICompatible.APIKey == config.RedactedValue {
+		new.Metadata.Translation.OpenAICompatible.APIKey = old.Metadata.Translation.OpenAICompatible.APIKey
+	}
+	if new.Metadata.Translation.Anthropic.APIKey == config.RedactedValue {
+		new.Metadata.Translation.Anthropic.APIKey = old.Metadata.Translation.Anthropic.APIKey
+	}
+
+	preserveRedactedProxyProfiles(old.Scrapers.Proxy.Profiles, new.Scrapers.Proxy.Profiles)
+	preserveRedactedProxyProfiles(old.Output.DownloadProxy.Profiles, new.Output.DownloadProxy.Profiles)
+
+	if old.Scrapers.Overrides != nil && new.Scrapers.Overrides != nil {
+		for name, oldSettings := range old.Scrapers.Overrides {
+			newSettings, ok := new.Scrapers.Overrides[name]
+			if !ok || oldSettings == nil || newSettings == nil {
+				continue
+			}
+			if oldSettings.Proxy != nil && newSettings.Proxy != nil {
+				preserveRedactedProxyProfiles(oldSettings.Proxy.Profiles, newSettings.Proxy.Profiles)
+			}
+			if oldSettings.DownloadProxy != nil && newSettings.DownloadProxy != nil {
+				preserveRedactedProxyProfiles(oldSettings.DownloadProxy.Profiles, newSettings.DownloadProxy.Profiles)
+			}
+		}
+	}
+}
+
+func preserveRedactedProxyProfiles(old, new map[string]config.ProxyProfile) {
+	if old == nil || new == nil {
+		return
+	}
+	for k, newProfile := range new {
+		oldProfile, ok := old[k]
+		if !ok {
+			continue
+		}
+		if newProfile.Username == config.RedactedValue {
+			newProfile.Username = oldProfile.Username
+		}
+		if newProfile.Password == config.RedactedValue {
+			newProfile.Password = oldProfile.Password
+		}
+		new[k] = newProfile
+	}
 }

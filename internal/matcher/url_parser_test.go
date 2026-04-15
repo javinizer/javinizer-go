@@ -1,6 +1,7 @@
 package matcher
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -20,7 +21,7 @@ type mockURLHandlerScraper struct {
 }
 
 func (m *mockURLHandlerScraper) Name() string { return m.name }
-func (m *mockURLHandlerScraper) Search(_ string) (*models.ScraperResult, error) {
+func (m *mockURLHandlerScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
 	return nil, nil
 }
 func (m *mockURLHandlerScraper) GetURL(_ string) (string, error) { return "", nil }

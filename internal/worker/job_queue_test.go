@@ -939,3 +939,159 @@ func TestCleanupOldOrganizedJobs_DoesNotDeleteReverted(t *testing.T) {
 	mockRepo.AssertNotCalled(t, "DeleteOrganizedOlderThan", mock.Anything)
 	mockRepo.AssertExpectations(t)
 }
+
+func TestBatchJob_GettersSetters(t *testing.T) {
+	t.Run("GetOperationModeOverride and SetOperationModeOverride", func(t *testing.T) {
+		jq := NewJobQueue(nil, "")
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		assert.Empty(t, job.GetOperationModeOverride())
+
+		job.SetOperationModeOverride("organize")
+		assert.Equal(t, "organize", job.GetOperationModeOverride())
+
+		job.SetOperationModeOverride("")
+		assert.Empty(t, job.GetOperationModeOverride())
+	})
+
+	t.Run("GetMoveToFolderOverride and SetMoveToFolderOverride", func(t *testing.T) {
+		jq := NewJobQueue(nil, "")
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		assert.Nil(t, job.GetMoveToFolderOverride())
+
+		tTrue := true
+		job.SetMoveToFolderOverride(&tTrue)
+		result := job.GetMoveToFolderOverride()
+		require.NotNil(t, result)
+		assert.True(t, *result)
+
+		tFalse := false
+		job.SetMoveToFolderOverride(&tFalse)
+		result = job.GetMoveToFolderOverride()
+		require.NotNil(t, result)
+		assert.False(t, *result)
+
+		job.SetMoveToFolderOverride(nil)
+		assert.Nil(t, job.GetMoveToFolderOverride())
+	})
+
+	t.Run("GetRenameFolderInPlaceOverride and SetRenameFolderInPlaceOverride", func(t *testing.T) {
+		jq := NewJobQueue(nil, "")
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		assert.Nil(t, job.GetRenameFolderInPlaceOverride())
+
+		tTrue := true
+		job.SetRenameFolderInPlaceOverride(&tTrue)
+		result := job.GetRenameFolderInPlaceOverride()
+		require.NotNil(t, result)
+		assert.True(t, *result)
+
+		job.SetRenameFolderInPlaceOverride(nil)
+		assert.Nil(t, job.GetRenameFolderInPlaceOverride())
+	})
+
+	t.Run("GetDestination and SetDestination", func(t *testing.T) {
+		jq := NewJobQueue(nil, "")
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		assert.Empty(t, job.GetDestination())
+
+		job.SetDestination("/output/dir")
+		assert.Equal(t, "/output/dir", job.GetDestination())
+	})
+
+	t.Run("GetFiles returns a copy", func(t *testing.T) {
+		jq := NewJobQueue(nil, "")
+		job := jq.CreateJob([]string{"file1.mp4", "file2.mkv"})
+
+		files := job.GetFiles()
+		assert.Equal(t, []string{"file1.mp4", "file2.mkv"}, files)
+
+		files[0] = "modified"
+		originalFiles := job.GetFiles()
+		assert.Equal(t, "file1.mp4", originalFiles[0], "mutation of returned slice should not affect job")
+	})
+
+	t.Run("GetCompleted, GetFailed, GetTotalFiles", func(t *testing.T) {
+		jq := NewJobQueue(nil, "")
+		job := jq.CreateJob([]string{"file1.mp4", "file2.mkv", "file3.avi"})
+
+		assert.Equal(t, 0, job.GetCompleted())
+		assert.Equal(t, 0, job.GetFailed())
+		assert.Equal(t, 3, job.GetTotalFiles())
+
+		now := time.Now()
+		job.UpdateFileResult("file1.mp4", &FileResult{
+			FilePath:  "file1.mp4",
+			Status:    JobStatusCompleted,
+			StartedAt: now,
+		})
+		job.UpdateFileResult("file2.mkv", &FileResult{
+			FilePath:  "file2.mkv",
+			Status:    JobStatusFailed,
+			Error:     "test error",
+			StartedAt: now,
+		})
+
+		assert.Equal(t, 1, job.GetCompleted())
+		assert.Equal(t, 1, job.GetFailed())
+		assert.Equal(t, 3, job.GetTotalFiles())
+	})
+
+	t.Run("concurrent access without race", func(t *testing.T) {
+		jq := NewJobQueue(nil, "")
+		job := jq.CreateJob([]string{"file1.mp4", "file2.mkv", "file3.avi"})
+
+		done := make(chan struct{})
+
+		go func() {
+			defer close(done)
+			for i := 0; i < 100; i++ {
+				job.SetOperationModeOverride("organize")
+				_ = job.GetOperationModeOverride()
+				job.SetDestination("/test/dir")
+				_ = job.GetDestination()
+				t := true
+				job.SetMoveToFolderOverride(&t)
+				_ = job.GetMoveToFolderOverride()
+				job.SetRenameFolderInPlaceOverride(&t)
+				_ = job.GetRenameFolderInPlaceOverride()
+				_ = job.GetFiles()
+				_ = job.GetCompleted()
+				_ = job.GetFailed()
+				_ = job.GetTotalFiles()
+			}
+		}()
+
+		for i := 0; i < 100; i++ {
+			_ = job.GetOperationModeOverride()
+			_ = job.GetDestination()
+			_ = job.GetMoveToFolderOverride()
+			_ = job.GetRenameFolderInPlaceOverride()
+			_ = job.GetFiles()
+			_ = job.GetCompleted()
+			_ = job.GetFailed()
+			_ = job.GetTotalFiles()
+		}
+
+		<-done
+	})
+
+	t.Run("SetFileMatchInfo and GetFileMatchInfo", func(t *testing.T) {
+		jq := NewJobQueue(nil, "")
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		info := FileMatchInfo{MovieID: "ABC-123", IsMultiPart: true, PartNumber: 1}
+		job.SetFileMatchInfo("file1.mp4", info)
+
+		retrieved, ok := job.GetFileMatchInfo("file1.mp4")
+		assert.True(t, ok)
+		assert.Equal(t, "ABC-123", retrieved.MovieID)
+		assert.True(t, retrieved.IsMultiPart)
+
+		_, ok = job.GetFileMatchInfo("nonexistent.mp4")
+		assert.False(t, ok)
+	})
+}

@@ -1,6 +1,7 @@
 package commandutil
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
@@ -17,7 +18,7 @@ import (
 // MediaDownloader defines the interface for downloading media files.
 // This interface allows for easier testing by enabling mock implementations.
 type MediaDownloader interface {
-	DownloadAll(movie *models.Movie, destDir string, multipart *downloader.MultipartInfo) ([]downloader.DownloadResult, error)
+	DownloadAll(ctx context.Context, movie *models.Movie, destDir string, multipart *downloader.MultipartInfo) ([]downloader.DownloadResult, error)
 }
 
 // ScanAndMatch scans files and extracts JAV IDs.
@@ -131,7 +132,7 @@ func ScrapeMetadata(
 				scraperQuery = mappedQuery
 			}
 			logging.Debugf("[%s] Querying scraper: %s (query=%s)", id, scraper.Name(), scraperQuery)
-			if result, err := scraper.Search(scraperQuery); err == nil {
+			if result, err := scraper.Search(context.Background(), scraperQuery); err == nil {
 				logging.Debugf("[%s] Scraper %s returned: Title=%s, Language=%s, Actresses=%d, Genres=%d",
 					id, scraper.Name(), result.Title, result.Language, len(result.Actresses), len(result.Genres))
 				results = append(results, result)
@@ -375,7 +376,7 @@ func DownloadMediaFiles(
 					PartSuffix:  firstMatch.PartSuffix,
 				}
 			}
-			results, err := mediaDownloader.DownloadAll(movie, downloadDir, multipart)
+			results, err := mediaDownloader.DownloadAll(context.Background(), movie, downloadDir, multipart)
 			if err != nil {
 				logging.Infof("Download error for %s: %v", id, err)
 			}

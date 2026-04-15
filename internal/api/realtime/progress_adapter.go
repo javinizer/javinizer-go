@@ -142,15 +142,16 @@ func (a *ProgressAdapter) handleUpdate(update worker.ProgressUpdate) {
 		return
 	}
 
-	// Validate file index
-	if fileIndex < 0 || fileIndex >= len(a.job.Files) {
+	// Validate file index (use GetFiles for thread-safe access)
+	files := a.job.GetFiles()
+	if fileIndex < 0 || fileIndex >= len(files) {
 		logging.Errorf("Invalid file index %d for task %s (total files: %d)",
-			fileIndex, update.TaskID, len(a.job.Files))
+			fileIndex, update.TaskID, len(files))
 		return
 	}
 
 	// Get file path from job
-	filePath := a.job.Files[fileIndex]
+	filePath := files[fileIndex]
 
 	// Convert TaskStatus to string for WebSocket message
 	status := string(update.Status)

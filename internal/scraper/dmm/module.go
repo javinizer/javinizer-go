@@ -50,8 +50,8 @@ func (m *scraperModule) Options() any {
 			Description: "File size threshold in KB for detecting placeholder images. Files smaller than this are considered potential placeholders.",
 			Type:        "number",
 			Default:     10,
-			Min:         intPtr(1),
-			Max:         intPtr(1000),
+			Min:         scraperutil.IntPtr(1),
+			Max:         scraperutil.IntPtr(1000),
 			Unit:        "KB",
 		},
 		contracts.ScraperOption{
@@ -63,7 +63,6 @@ func (m *scraperModule) Options() any {
 	}
 }
 
-func intPtr(i int) *int { return &i }
 func (m *scraperModule) Defaults() any {
 	return config.ScraperSettings{
 		Enabled: false,

@@ -1,6 +1,7 @@
 package scrape
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -221,13 +222,13 @@ func Run(cmd *cobra.Command, args []string, configFile string, deps *commandutil
 
 	for _, scraper := range registry.GetByPriority(scrapersToUse) {
 		logging.Infof("Scraping %s...", scraper.Name())
-		result, err := scraper.Search(resolvedID)
+		result, err := scraper.Search(context.Background(), resolvedID)
 		if err != nil {
 			logging.Warnf("❌ %s: %v", scraper.Name(), err)
 			// If scraping with resolved ID fails, try with original ID before giving up
 			if resolvedID != id {
 				logging.Debugf("Retrying %s with original ID: %s", scraper.Name(), id)
-				result, err = scraper.Search(id)
+				result, err = scraper.Search(context.Background(), id)
 				if err != nil {
 					logging.Warnf("❌ %s (with original ID): %v", scraper.Name(), err)
 					continue

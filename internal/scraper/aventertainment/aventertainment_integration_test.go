@@ -1,6 +1,7 @@
 package aventertainment
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -234,7 +235,7 @@ func TestScraper_Search(t *testing.T) {
 
 	// Search requires actual HTTP request, so we'll test with mock server
 	// Note: Since GetURL is called first, we need to ensure search returns candidates
-	result, err := scraper.Search("IPX-123")
+	result, err := scraper.Search(context.Background(), "IPX-123")
 
 	if err != nil {
 		// Test might fail due to actual HTTP if mock isn't matching, that's okay
@@ -264,7 +265,7 @@ func TestSearchWithParseError(t *testing.T) {
 	scraper := New(settings, nil, config.FlareSolverrConfig{})
 
 	// When no results are found, Search should return an error
-	_, err := scraper.Search("IPX-123")
+	_, err := scraper.Search(context.Background(), "IPX-123")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }

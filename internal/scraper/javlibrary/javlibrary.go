@@ -173,7 +173,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from URL")
 }
 
-func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("JavLibrary", "URL not handled by JavLibrary scraper")
 	}
@@ -200,7 +200,7 @@ func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
 		resultLanguage = s.language
 	}
 
-	html, err := s.fetchPage(detailURL)
+	html, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JavLibrary page: %w", err)
 	}
@@ -217,7 +217,8 @@ func (s *Scraper) GetURL(id string) (string, error) {
 }
 
 // Search searches for a movie by ID
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
+// Search searches for a movie by ID with context support.
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("JavLibrary scraper is disabled")
 	}
@@ -228,7 +229,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	}
 
 	// Fetch the search page
-	html, err := s.fetchPage(searchURL)
+	html, err := s.fetchPageCtx(ctx, searchURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch search page: %w", err)
 	}
@@ -252,7 +253,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	}
 
 	logging.Debugf("JavLibrary: Fetching detail page: %s", detailURL)
-	detailHTML, err := s.fetchPage(detailURL)
+	detailHTML, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch detail page: %w", err)
 	}
@@ -261,9 +262,10 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 }
 
 // fetchPage fetches a page via FlareSolverr (if enabled) or direct HTTP
-func (s *Scraper) fetchPage(url string) (string, error) {
+// fetchPageCtx fetches a page via FlareSolverr (if enabled) or direct HTTP with context support.
+func (s *Scraper) fetchPageCtx(ctx context.Context, url string) (string, error) {
 	// Rate limit before fetching
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", fmt.Errorf("JavLibrary: rate limit wait failed: %w", err)
 	}
 

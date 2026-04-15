@@ -5,6 +5,8 @@
 package mocks
 
 import (
+	"context"
+
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
@@ -276,8 +278,8 @@ func (_c *MockScraper_Name_Call) RunAndReturn(run func() string) *MockScraper_Na
 }
 
 // Search provides a mock function for the type MockScraper
-func (_mock *MockScraper) Search(id string) (*models.ScraperResult, error) {
-	ret := _mock.Called(id)
+func (_mock *MockScraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Search")
@@ -285,18 +287,18 @@ func (_mock *MockScraper) Search(id string) (*models.ScraperResult, error) {
 
 	var r0 *models.ScraperResult
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*models.ScraperResult, error)); ok {
-		return returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*models.ScraperResult, error)); ok {
+		return returnFunc(ctx, id)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *models.ScraperResult); ok {
-		r0 = returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *models.ScraperResult); ok {
+		r0 = returnFunc(ctx, id)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.ScraperResult)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(id)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, id)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -309,19 +311,25 @@ type MockScraper_Search_Call struct {
 }
 
 // Search is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id string
-func (_e *MockScraper_Expecter) Search(id interface{}) *MockScraper_Search_Call {
-	return &MockScraper_Search_Call{Call: _e.mock.On("Search", id)}
+func (_e *MockScraper_Expecter) Search(ctx interface{}, id interface{}) *MockScraper_Search_Call {
+	return &MockScraper_Search_Call{Call: _e.mock.On("Search", ctx, id)}
 }
 
-func (_c *MockScraper_Search_Call) Run(run func(id string)) *MockScraper_Search_Call {
+func (_c *MockScraper_Search_Call) Run(run func(ctx context.Context, id string)) *MockScraper_Search_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -332,7 +340,7 @@ func (_c *MockScraper_Search_Call) Return(scraperResult *models.ScraperResult, e
 	return _c
 }
 
-func (_c *MockScraper_Search_Call) RunAndReturn(run func(id string) (*models.ScraperResult, error)) *MockScraper_Search_Call {
+func (_c *MockScraper_Search_Call) RunAndReturn(run func(ctx context.Context, id string) (*models.ScraperResult, error)) *MockScraper_Search_Call {
 	_c.Call.Return(run)
 	return _c
 }

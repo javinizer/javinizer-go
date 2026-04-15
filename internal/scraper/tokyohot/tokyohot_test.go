@@ -1,6 +1,7 @@
 package tokyohot
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -113,7 +114,7 @@ func TestSearch(t *testing.T) {
 	defer server.Close()
 
 	s := New(testSettings(server.URL), nil, config.FlareSolverrConfig{})
-	result, err := s.Search("N1234")
+	result, err := s.Search(context.Background(), "N1234")
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
@@ -603,7 +604,7 @@ func TestSearchDisabled(t *testing.T) {
 	settings.Enabled = false
 	s := New(settings, nil, config.FlareSolverrConfig{})
 
-	result, err := s.Search("N1234")
+	result, err := s.Search(context.Background(), "N1234")
 
 	assert.Nil(t, result)
 	assert.Error(t, err)
@@ -622,7 +623,7 @@ func TestSearchWithHTTPError(t *testing.T) {
 	settings := testSettings(server.URL)
 	s := New(settings, nil, config.FlareSolverrConfig{})
 
-	result, err := s.Search("N1234")
+	result, err := s.Search(context.Background(), "N1234")
 
 	assert.Nil(t, result)
 	assert.Error(t, err)

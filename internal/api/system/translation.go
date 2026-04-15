@@ -13,6 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const maxTranslationAPIResponseSize = 10 * 1024 * 1024 // 10MB
+
 type DeepLUsageResponse struct {
 	CharacterCount int64  `json:"character_count"`
 	CharacterLimit int64  `json:"character_limit"`
@@ -107,7 +109,7 @@ func fetchOpenAICompatibleModels(ctx context.Context, baseURL, apiKey string) ([
 		_ = resp.Body.Close()
 	}()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationAPIResponseSize))
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +167,7 @@ func fetchAnthropicModels(ctx context.Context, baseURL, apiKey string) ([]string
 		_ = resp.Body.Close()
 	}()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationAPIResponseSize))
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +277,7 @@ func fetchDeepLUsage(ctx context.Context, baseURL, apiKey string) (*DeepLUsageRe
 		_ = resp.Body.Close()
 	}()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationAPIResponseSize))
 	if err != nil {
 		return nil, err
 	}

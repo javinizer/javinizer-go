@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -153,7 +154,7 @@ func (m *MockScraper) Name() string {
 	return m.name
 }
 
-func (m *MockScraper) Search(id string) (*ScraperResult, error) {
+func (m *MockScraper) Search(_ context.Context, id string) (*ScraperResult, error) {
 	return nil, nil
 }
 

@@ -1,6 +1,7 @@
 package dmm
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -245,7 +246,7 @@ func TestSearch_ErrorHandling(t *testing.T) {
 			scraper, cleanup := tt.setupFunc()
 			defer cleanup()
 
-			result, err := scraper.Search(tt.movieID)
+			result, err := scraper.Search(context.Background(), tt.movieID)
 
 			if tt.wantErr {
 				assert.Error(t, err)

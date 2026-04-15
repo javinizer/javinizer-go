@@ -473,8 +473,8 @@ type slowStubScraper struct{}
 
 func (s *slowStubScraper) Name() string { return "slow-scraper" }
 
-func (s *slowStubScraper) Search(id string) (*models.ScraperResult, error) {
-	time.Sleep(100 * time.Millisecond) // Simulate slow scraping
+func (s *slowStubScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
+	time.Sleep(100 * time.Millisecond)
 	releaseDate, _ := time.Parse("2006-01-02", "2024-01-15")
 	return &models.ScraperResult{
 		Source:        s.Name(),
@@ -1290,7 +1290,7 @@ type posterGeneratingStubScraper struct {
 
 func (s *posterGeneratingStubScraper) Name() string { return "poster-gen" }
 
-func (s *posterGeneratingStubScraper) Search(id string) (*models.ScraperResult, error) {
+func (s *posterGeneratingStubScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	releaseDate, _ := time.Parse("2006-01-02", "2024-01-15")
 	return &models.ScraperResult{
 		Source:        s.Name(),

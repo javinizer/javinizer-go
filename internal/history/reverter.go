@@ -190,7 +190,7 @@ func (r *Reverter) revertUpdateMode(op *models.BatchFileOperation) (*RevertFileR
 					Error:        fmt.Sprintf("failed to canonicalize NFO path: %v", err),
 				}, nil
 			}
-			if err := r.fs.MkdirAll(canonicalNfoDir, 0777); err != nil {
+			if err := r.fs.MkdirAll(canonicalNfoDir, 0755); err != nil {
 				if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
 					logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
 				}
@@ -288,7 +288,7 @@ func (r *Reverter) revertMoveMode(op *models.BatchFileOperation) (*RevertFileRes
 		// If OriginalPath differs from current location, rename the file within the directory
 		if sourcePath != op.OriginalPath {
 			targetDir := filepath.Dir(op.OriginalPath)
-			if err := r.fs.MkdirAll(targetDir, 0777); err != nil {
+			if err := r.fs.MkdirAll(targetDir, 0755); err != nil {
 				if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
 					logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
 				}
@@ -355,7 +355,7 @@ func (r *Reverter) revertMoveMode(op *models.BatchFileOperation) (*RevertFileRes
 				Error:        fmt.Sprintf("failed to canonicalize directory path: %v", err),
 			}, nil
 		}
-		if err := r.fs.MkdirAll(canonicalDir, 0777); err != nil {
+		if err := r.fs.MkdirAll(canonicalDir, 0755); err != nil {
 			if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
 				logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
 			}
@@ -415,7 +415,7 @@ func (r *Reverter) revertMoveMode(op *models.BatchFileOperation) (*RevertFileRes
 			nfoDir := filepath.Dir(op.OriginalPath)
 			canonicalNfoDir, err := filepath.Abs(filepath.Clean(nfoDir))
 			if err == nil {
-				_ = r.fs.MkdirAll(canonicalNfoDir, 0777)
+				_ = r.fs.MkdirAll(canonicalNfoDir, 0755)
 				restorePath := filepath.Join(canonicalNfoDir, filepath.Base(nfoPath))
 				if err := afero.WriteFile(r.fs, restorePath, []byte(op.NFOSnapshot), 0666); err != nil {
 					// NFO restore failed — log warning, but the primary revert succeeded (D-05)

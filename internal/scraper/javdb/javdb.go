@@ -164,7 +164,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 
 // ScrapeURL directly scrapes metadata from a JavDB URL.
 // This provides more accurate results than ID-based search when the exact URL is known.
-func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(urlStr) {
 		return nil, models.NewScraperNotFoundError("JavDB", "URL not handled by JavDB scraper")
 	}
@@ -181,7 +181,7 @@ func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
 	}
 
 	// Fetch the page using existing method (handles FlareSolverr, rate limiting, Cloudflare)
-	html, err := s.fetchPage(urlStr)
+	html, err := s.fetchPageCtx(ctx, urlStr)
 	if err != nil {
 		// Check if it's a scraper error and return as-is
 		if scraperErr, ok := models.AsScraperError(err); ok {
@@ -294,7 +294,8 @@ func isJavDBVideoCode(id string) bool {
 }
 
 // Search looks up a movie by ID and scrapes metadata.
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
+// Search looks up a movie by ID and scrapes metadata with context support.
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("JavDB scraper is disabled")
 	}
@@ -306,7 +307,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		directURL := fmt.Sprintf("%s/v/%s", s.baseURL, cleanID)
 		logging.Debugf("JavDB: ID '%s' looks like video code, trying direct URL: %s", cleanID, directURL)
 
-		html, err := s.fetchPage(directURL)
+		html, err := s.fetchPageCtx(ctx, directURL)
 		if err == nil {
 			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 			if err == nil {
@@ -320,12 +321,12 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		logging.Debugf("JavDB: Direct URL lookup failed for '%s', falling back to search", cleanID)
 	}
 
-	detailURL, err := s.findDetailURL(id)
+	detailURL, err := s.findDetailURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	html, err := s.fetchPage(detailURL)
+	html, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch detail page: %w", err)
 	}
@@ -365,13 +366,13 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	return retryResult, nil
 }
 
-func (s *Scraper) findDetailURL(id string) (string, error) {
+func (s *Scraper) findDetailURLCtx(ctx context.Context, id string) (string, error) {
 	searchURL, err := s.GetURL(id)
 	if err != nil {
 		return "", err
 	}
 
-	html, err := s.fetchPage(searchURL)
+	html, err := s.fetchPageCtx(ctx, searchURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch search page: %w", err)
 	}
@@ -431,8 +432,8 @@ func (s *Scraper) findDetailURL(id string) (string, error) {
 	return "", models.NewScraperNotFoundError("JavDB", fmt.Sprintf("movie %s not found on JavDB", id))
 }
 
-func (s *Scraper) fetchPage(targetURL string) (string, error) {
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, error) {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
 
@@ -471,7 +472,11 @@ func (s *Scraper) fetchPage(targetURL string) (string, error) {
 }
 
 func (s *Scraper) fetchPageDirect(targetURL string) (string, error) {
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+	return s.fetchPageDirectCtx(context.Background(), targetURL)
+}
+
+func (s *Scraper) fetchPageDirectCtx(ctx context.Context, targetURL string) (string, error) {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
 

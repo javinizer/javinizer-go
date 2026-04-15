@@ -3,6 +3,7 @@
 package mgstage
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1448,7 +1449,7 @@ func TestSearch_ErrorPaths(t *testing.T) {
 				rateLimiter: ratelimit.NewLimiter(0),
 			}
 
-			result, err := scraper.Search("TEST-000")
+			result, err := scraper.Search(context.Background(), "TEST-000")
 
 			assert.Equal(t, tt.wantErr, err != nil)
 			if tt.wantErr {

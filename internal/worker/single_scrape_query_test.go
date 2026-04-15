@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -16,7 +17,9 @@ type resolverTestScraper struct {
 
 func (s *resolverTestScraper) Name() string { return s.name }
 
-func (s *resolverTestScraper) Search(id string) (*models.ScraperResult, error) { return nil, nil }
+func (s *resolverTestScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
+	return nil, nil
+}
 
 func (s *resolverTestScraper) GetURL(id string) (string, error) { return "", nil }
 

@@ -22,12 +22,14 @@ type MockScraper struct {
 	err     error
 }
 
-func (m *MockScraper) Name() string                                    { return m.name }
-func (m *MockScraper) IsEnabled() bool                                 { return true }
-func (m *MockScraper) GetURL(id string) (string, error)                { return "", nil }
-func (m *MockScraper) Search(id string) (*models.ScraperResult, error) { return m.results, m.err }
-func (m *MockScraper) Close() error                                    { return nil }
-func (m *MockScraper) Config() *config.ScraperSettings                 { return &config.ScraperSettings{Enabled: true} }
+func (m *MockScraper) Name() string                     { return m.name }
+func (m *MockScraper) IsEnabled() bool                  { return true }
+func (m *MockScraper) GetURL(id string) (string, error) { return "", nil }
+func (m *MockScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
+	return m.results, m.err
+}
+func (m *MockScraper) Close() error                    { return nil }
+func (m *MockScraper) Config() *config.ScraperSettings { return &config.ScraperSettings{Enabled: true} }
 
 // TestScrapeTask_ForceRefresh tests that forceRefresh deletes from cache before scraping
 func TestScrapeTask_ForceRefresh(t *testing.T) {
@@ -122,7 +124,7 @@ func TestScrapeTask_ForceRefresh(t *testing.T) {
 
 		// Execute task
 		ctx := context.Background()
-		err := task.Execute(ctx)
+		_, err := task.Execute(ctx)
 		require.NoError(t, err)
 
 		// Should still have old data (from cache)
@@ -146,7 +148,7 @@ func TestScrapeTask_ForceRefresh(t *testing.T) {
 
 		// Execute task
 		ctx := context.Background()
-		err := task.Execute(ctx)
+		_, err := task.Execute(ctx)
 		require.NoError(t, err)
 
 		// Should have new Japanese data (from scraper)
@@ -292,7 +294,7 @@ func TestScrapeTask_ForceRefresh_NotInCache(t *testing.T) {
 
 	// Execute task - should not fail even though movie doesn't exist
 	ctx := context.Background()
-	err = task.Execute(ctx)
+	_, err = task.Execute(ctx)
 	require.NoError(t, err)
 
 	// Should have scraped new data

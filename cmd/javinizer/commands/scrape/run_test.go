@@ -1,6 +1,7 @@
 package scrape_test
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func (m *MockScraper) Name() string {
 	return m.name
 }
 
-func (m *MockScraper) Search(id string) (*models.ScraperResult, error) {
+func (m *MockScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	if m.fail {
 		return nil, assert.AnError
 	}
@@ -42,7 +43,7 @@ func (m *MockScraper) Search(id string) (*models.ScraperResult, error) {
 	releaseDate := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	return &models.ScraperResult{
 		ID:          id,
-		ContentID:   id, // Required for database save
+		ContentID:   id,
 		Title:       "Test Movie " + id,
 		ReleaseDate: &releaseDate,
 		Runtime:     120,

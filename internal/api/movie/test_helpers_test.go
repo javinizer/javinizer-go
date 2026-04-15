@@ -1,6 +1,7 @@
 package movie
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -22,7 +23,7 @@ type mockScraperWithResults struct {
 
 func (m *mockScraperWithResults) Name() string { return m.name }
 
-func (m *mockScraperWithResults) Search(id string) (*models.ScraperResult, error) {
+func (m *mockScraperWithResults) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

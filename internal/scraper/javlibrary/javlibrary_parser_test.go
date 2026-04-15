@@ -1,6 +1,7 @@
 package javlibrary
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -108,7 +109,7 @@ func TestSearch_SearchResultFlow(t *testing.T) {
 	}
 	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
 
-	result, err := s.Search("IPX-123")
+	result, err := s.Search(context.Background(), "IPX-123")
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}

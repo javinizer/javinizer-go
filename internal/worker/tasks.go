@@ -69,7 +69,7 @@ func NewScrapeTask(
 	}
 }
 
-func (t *ScrapeTask) Execute(ctx context.Context) error {
+func (t *ScrapeTask) Execute(ctx context.Context) (*models.Movie, error) {
 	logging.Debugf("[%s] Starting scrape task (dryRun=%v, forceRefresh=%v, customScrapers=%v)", t.javID, t.dryRun, t.forceRefresh, t.customScraperPriority)
 
 	// Determine if we should skip cache
@@ -79,7 +79,6 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 	if t.forceRefresh {
 		logging.Debugf("[%s] Force refresh enabled, attempting to delete from cache", t.javID)
 		if err := t.movieRepo.Delete(t.javID); err != nil {
-			// Log but don't fail - movie might not exist in cache
 			logging.Debugf("[%s] Cache delete failed (movie may not exist): %v", t.javID, err)
 			t.progressTracker.Update(t.id, 0.05, "Clearing cache...", 0)
 		} else {
@@ -87,7 +86,6 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 			t.progressTracker.Update(t.id, 0.1, "Cache cleared, re-scraping...", 0)
 		}
 	} else if !skipCache {
-		// Check cache first (only if not forcing refresh and no custom scrapers)
 		logging.Debugf("[%s] Checking cache for existing metadata", t.javID)
 		if cached, err := t.movieRepo.FindByID(t.javID); err == nil {
 			logging.Debugf("[%s] Found in cache: Title=%s, Maker=%s, Actresses=%d",
@@ -97,14 +95,13 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 				msg = "[DRY RUN] " + msg
 			}
 			t.progressTracker.Update(t.id, 1.0, msg, 0)
-			return nil
+			return cached, nil
 		}
 		logging.Debugf("[%s] Not found in cache, will scrape from sources", t.javID)
 	} else if len(t.customScraperPriority) > 0 {
 		logging.Debugf("[%s] Custom scrapers specified, bypassing cache", t.javID)
 	}
 
-	// Scrape from sources
 	msg := "Querying scrapers..."
 	if t.dryRun {
 		msg = "[DRY RUN] " + msg
@@ -113,7 +110,6 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 
 	results := make([]*models.ScraperResult, 0)
 
-	// Use custom scraper priority if provided, otherwise use default
 	var scrapers []models.Scraper
 	if len(t.customScraperPriority) > 0 {
 		scrapers = t.registry.GetByPriorityForInput(t.customScraperPriority, t.javID)
@@ -127,7 +123,7 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 	for i, scraper := range scrapers {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		default:
 		}
 
@@ -143,7 +139,7 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 			scraperQuery = mappedQuery
 		}
 		logging.Debugf("[%s] Querying scraper: %s (query=%s)", t.javID, scraper.Name(), scraperQuery)
-		result, err := scraper.Search(scraperQuery)
+		result, err := scraper.Search(ctx, scraperQuery)
 		if err != nil {
 			logging.Debugf("[%s] Scraper %s failed: %v", t.javID, scraper.Name(), err)
 			scraperFailures = append(scraperFailures, scraperFailure{
@@ -161,7 +157,7 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 	if len(results) == 0 {
 		errMsg := buildScraperNoResultsError(scraperFailures)
 		logging.Debugf("[%s] No results from any scraper: %s", t.javID, errMsg)
-		return fmt.Errorf("%s", errMsg)
+		return nil, fmt.Errorf("%s", errMsg)
 	}
 
 	logging.Debugf("[%s] Collected %d results from scrapers", t.javID, len(results))
@@ -172,11 +168,10 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 	}
 	t.progressTracker.Update(t.id, 0.8, msg, 0)
 
-	// Aggregate results
 	logging.Debugf("[%s] Starting metadata aggregation", t.javID)
 	movie, err := t.aggregator.Aggregate(results)
 	if err != nil {
-		return fmt.Errorf("failed to aggregate: %w", err)
+		return nil, fmt.Errorf("failed to aggregate: %w", err)
 	}
 
 	logging.Debugf("[%s] Aggregation complete - Final metadata:", t.javID)
@@ -188,7 +183,6 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 	logging.Debugf("[%s]   Genres: %d", t.javID, len(movie.Genres))
 	logging.Debugf("[%s]   Screenshots: %d", t.javID, len(movie.Screenshots))
 
-	// Save to database (skip actual write in dry-run mode)
 	if t.dryRun {
 		preview := fmt.Sprintf("[DRY RUN] Would save: %s - %s", movie.ID, movie.Title)
 		if len(movie.Actresses) > 0 {
@@ -199,21 +193,20 @@ func (t *ScrapeTask) Execute(ctx context.Context) error {
 		}
 		logging.Debugf("[%s] DRY RUN mode - skipping database save", t.javID)
 		t.progressTracker.Update(t.id, 1.0, preview, 0)
-		return nil
+		return movie, nil
 	}
 
 	t.progressTracker.Update(t.id, 0.9, "Saving to database...", 0)
 	logging.Debugf("[%s] Saving metadata to database", t.javID)
 
-	// Use a transaction-safe upsert to avoid UNIQUE constraint errors
 	if err := t.movieRepo.Upsert(movie); err != nil {
 		logging.Debugf("[%s] Database save failed: %v", t.javID, err)
-		return fmt.Errorf("failed to save movie to database: %w", err)
+		return nil, fmt.Errorf("failed to save movie to database: %w", err)
 	}
 
 	logging.Debugf("[%s] Successfully saved to database", t.javID)
 	t.progressTracker.Update(t.id, 1.0, "Completed", 0)
-	return nil
+	return movie, nil
 }
 
 // DownloadTask downloads media for a movie
@@ -295,7 +288,7 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 		partInfo = fmt.Sprintf("part %d", t.multipart.PartNumber)
 	}
 	logging.Debugf("[%s] Initiating DownloadAll for media files (%s)", t.movie.ID, partInfo)
-	results, err := t.downloader.DownloadAll(t.movie, t.targetDir, t.multipart)
+	results, err := t.downloader.DownloadAll(ctx, t.movie, t.targetDir, t.multipart)
 	if err != nil {
 		logging.Debugf("[%s] Download failed: %v", t.movie.ID, err)
 		return fmt.Errorf("download failed: %w", err)
@@ -651,7 +644,8 @@ type ProcessFileTask struct {
 	scalarStrategy        string
 	arrayStrategy         string
 	cfg                   *config.Config
-	customScraperPriority []string // Optional custom scraper priority (nil = use default)
+	customScraperPriority []string         // Optional custom scraper priority (nil = use default)
+	templateEngine        *template.Engine // Shared template engine (safe for concurrent use)
 }
 
 // ProcessFileOptions holds optional settings for process file tasks.
@@ -761,6 +755,7 @@ func NewProcessFileTask(
 		arrayStrategy:         opts.ArrayStrategy,
 		cfg:                   opts.Config,
 		customScraperPriority: customScraperPriority,
+		templateEngine:        template.NewEngine(),
 	}
 }
 
@@ -772,7 +767,6 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 	t.progressTracker.Update(t.id, 0.0, msg, 0)
 
 	var movie *models.Movie
-	var err error
 
 	// Step 1: Scrape metadata (always scrape, even in dry-run)
 	if t.scrapeEnabled {
@@ -786,79 +780,21 @@ func (t *ProcessFileTask) Execute(ctx context.Context) error {
 			t.forceRefresh,
 			t.customScraperPriority,
 		)
-		if err := scrapeTask.Execute(ctx); err != nil {
+		scrapedMovie, err := scrapeTask.Execute(ctx)
+		if err != nil {
 			return fmt.Errorf("scrape failed: %w", err)
 		}
 
-		// In dry-run mode, scraping doesn't save to DB, so we can't fetch it back
-		// We need to scrape again but this time keep the result
-		if t.dryRun {
-			// Re-scrape to get the movie object for preview
-			// Use custom scraper priority if provided
-			var scrapers []models.Scraper
-			if len(t.customScraperPriority) > 0 {
-				scrapers = t.registry.GetByPriority(t.customScraperPriority)
-			} else {
-				scrapers = t.registry.GetByPriority([]string{"r18dev", "dmm"})
-			}
-			results := make([]*models.ScraperResult, 0)
+		if scrapedMovie != nil {
+			movie = scrapedMovie
+		}
 
-			for _, scraper := range scrapers {
-				result, err := scraper.Search(t.match.ID)
-				if err != nil {
-					continue
-				}
-				results = append(results, result)
+		if !t.dryRun && movie != nil {
+			dbMovie, dbErr := t.movieRepo.FindByID(t.match.ID)
+			if dbErr != nil {
+				return fmt.Errorf("failed to get movie from repo: %w", dbErr)
 			}
-
-			if len(results) > 0 {
-				movie, err = t.aggregator.Aggregate(results)
-				if err != nil {
-					t.progressTracker.Update(t.id, 0.35, "[DRY RUN] Using basic metadata", 0)
-					// Create minimal movie for preview
-					movie = &models.Movie{
-						ID:           t.match.ID,
-						DisplayTitle: t.match.ID,
-						Title:        t.match.ID,
-					}
-				} else {
-					// Output detailed metadata in dry-run mode
-					t.progressTracker.Update(t.id, 0.35, "[DRY RUN] Metadata extracted:", 0)
-					if movie.Title != "" {
-						t.progressTracker.Update(t.id, 0.36, fmt.Sprintf("  Title: %s", movie.Title), 0)
-					}
-					if movie.DisplayTitle != "" {
-						t.progressTracker.Update(t.id, 0.37, fmt.Sprintf("  Display Name: %s", movie.DisplayTitle), 0)
-					}
-					if movie.Maker != "" {
-						t.progressTracker.Update(t.id, 0.38, fmt.Sprintf("  Maker: %s", movie.Maker), 0)
-					}
-					if len(movie.Genres) > 0 {
-						genres := make([]string, len(movie.Genres))
-						for i, g := range movie.Genres {
-							genres[i] = g.Name
-						}
-						t.progressTracker.Update(t.id, 0.39, fmt.Sprintf("  Genres: %s", strings.Join(genres, ", ")), 0)
-					}
-					if len(movie.Actresses) > 0 {
-						actresses := make([]string, len(movie.Actresses))
-						for i, a := range movie.Actresses {
-							if a.JapaneseName != "" {
-								actresses[i] = a.JapaneseName
-							} else {
-								actresses[i] = fmt.Sprintf("%s %s", a.FirstName, a.LastName)
-							}
-						}
-						t.progressTracker.Update(t.id, 0.40, fmt.Sprintf("  Actresses: %s", strings.Join(actresses, ", ")), 0)
-					}
-				}
-			}
-		} else {
-			// Not dry-run, get from database
-			movie, err = t.movieRepo.FindByID(t.match.ID)
-			if err != nil {
-				return fmt.Errorf("failed to get movie from repo: %w", err)
-			}
+			movie = dbMovie
 			t.progressTracker.Update(t.id, 0.35, "Got movie metadata", 0)
 		}
 	}
@@ -987,7 +923,7 @@ func (t *ProcessFileTask) mergeWithExistingNFO(ctx context.Context, movie *model
 		tmplCtx.IsMultiPart = true
 	}
 
-	templateEngine := template.NewEngine()
+	templateEngine := t.templateEngine
 	nfoFilename, err := templateEngine.ExecuteWithContext(ctx, t.cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
 	if err != nil {
 		logging.Warnf("[%s] Failed to execute NFO filename template: %v, using default", movie.ID, err)

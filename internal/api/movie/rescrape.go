@@ -51,12 +51,13 @@ func rescrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 
 		for _, scraper := range deps.GetRegistry().GetByPriority(req.SelectedScrapers) {
 			logging.Infof("Rescraping from %s...", scraper.Name())
-			result, err := scraper.Search(movieID)
+			result, err := scraper.Search(c.Request.Context(), movieID)
 			if err != nil {
 				scrapeErrors = append(scrapeErrors, fmt.Sprintf("%s: %v", scraper.Name(), err))
 				logging.Warnf("%s: %v", scraper.Name(), err)
 				continue
 			}
+			result.NormalizeMediaURLs()
 			results = append(results, result)
 		}
 

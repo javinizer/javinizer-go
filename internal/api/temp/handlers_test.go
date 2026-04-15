@@ -1,6 +1,7 @@
 package temp
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -345,6 +347,11 @@ func TestResolveTempImageReferer(t *testing.T) {
 
 func TestServeTempImage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
+	cleanup := ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	})
+	t.Cleanup(cleanup)
 
 	tests := []struct {
 		name           string

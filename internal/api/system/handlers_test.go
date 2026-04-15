@@ -2,8 +2,10 @@ package system
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,8 +49,8 @@ func (m *mockScraper) Name() string {
 	return m.name
 }
 
-func (m *mockScraper) Search(id string) (*models.ScraperResult, error) {
-	return nil, nil
+func (m *mockScraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+	return m.Search(context.Background(), id)
 }
 
 func (m *mockScraper) GetURL(id string) (string, error) {
@@ -475,6 +478,11 @@ func startTestForwardProxy(t *testing.T) *httptest.Server {
 }
 
 func TestTestProxy(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	})
+	t.Cleanup(cleanup)
+
 	t.Run("direct proxy success", func(t *testing.T) {
 		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)

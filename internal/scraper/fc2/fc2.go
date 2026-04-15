@@ -165,7 +165,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from FC2 URL")
 }
 
-func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("FC2", "URL not handled by FC2 scraper")
 	}
@@ -175,7 +175,7 @@ func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
 		return nil, models.NewScraperNotFoundError("FC2", "failed to extract article ID from URL")
 	}
 
-	html, status, err := s.fetchPage(rawURL)
+	html, status, err := s.fetchPageCtx(ctx, rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch FC2 detail page: %w", err)
 	}
@@ -240,7 +240,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 }
 
 // Search scrapes metadata for a given FC2 ID.
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("FC2 scraper is disabled")
 	}
@@ -255,7 +255,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, err
 	}
 
-	html, status, err := s.fetchPage(detailURL)
+	html, status, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch FC2 detail page: %w", err)
 	}
@@ -655,8 +655,8 @@ func (s *Scraper) buildArticleURL(articleID string) string {
 	return fmt.Sprintf("%s/article/%s/", s.baseURL, strings.TrimSpace(articleID))
 }
 
-func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}
 

@@ -179,7 +179,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from DLgetchu URL")
 }
 
-func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("DLgetchu", "URL not handled by DLgetchu scraper")
 	}
@@ -189,7 +189,7 @@ func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
 		id = ""
 	}
 
-	html, status, err := s.fetchPage(rawURL)
+	html, status, err := s.fetchPageCtx(ctx, rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch DLgetchu detail page: %w", err)
 	}
@@ -225,7 +225,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 
 	if numericID := extractNumericID(id); numericID != "" {
 		candidate := fmt.Sprintf("%s/i/item%s", s.baseURL, numericID)
-		_, status, err := s.fetchPage(candidate)
+		_, status, err := s.fetchPageCtx(context.Background(), candidate)
 		if err == nil && status == 200 {
 			return candidate, nil
 		}
@@ -236,7 +236,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 		fmt.Sprintf("%s/gcosin/?search_keyword=%s", s.baseURL, url.QueryEscape(id)),
 		fmt.Sprintf("%s/gcosl/?search_keyword=%s", s.baseURL, url.QueryEscape(id)),
 	} {
-		html, status, err := s.fetchPage(searchURL)
+		html, status, err := s.fetchPageCtx(context.Background(), searchURL)
 		if err != nil || status != 200 {
 			continue
 		}
@@ -253,7 +253,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 }
 
 // Search scrapes metadata from DLgetchu.
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("DLgetchu scraper is disabled")
 	}
@@ -263,7 +263,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, err
 	}
 
-	html, status, err := s.fetchPage(detailURL)
+	html, status, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch DLgetchu detail page: %w", err)
 	}
@@ -414,8 +414,8 @@ func normalizeFullWidthDigits(v string) string {
 	return replacer.Replace(v)
 }
 
-func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}
 

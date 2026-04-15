@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -484,12 +485,14 @@ type mockScraper struct {
 	result *models.ScraperResult
 }
 
-func (m *mockScraper) Name() string                                   { return m.name }
-func (m *mockScraper) Search(_ string) (*models.ScraperResult, error) { return m.result, nil }
-func (m *mockScraper) GetURL(_ string) (string, error)                { return "", nil }
-func (m *mockScraper) IsEnabled() bool                                { return true }
-func (m *mockScraper) Config() *config.ScraperSettings                { return nil }
-func (m *mockScraper) Close() error                                   { return nil }
+func (m *mockScraper) Name() string { return m.name }
+func (m *mockScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
+	return m.result, nil
+}
+func (m *mockScraper) GetURL(_ string) (string, error) { return "", nil }
+func (m *mockScraper) IsEnabled() bool                 { return true }
+func (m *mockScraper) Config() *config.ScraperSettings { return nil }
+func (m *mockScraper) Close() error                    { return nil }
 
 // TestResolvePriorities_ScrapersOverride tests that injected scrapers determine priority order
 func TestResolvePriorities_ScrapersOverride(t *testing.T) {

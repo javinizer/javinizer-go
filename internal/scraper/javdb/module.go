@@ -42,8 +42,8 @@ func (m *scraperModule) Options() any {
 			Label:       "Request Delay",
 			Description: "Delay between requests to avoid rate limiting",
 			Type:        "number",
-			Min:         intPtr(0),
-			Max:         intPtr(5000),
+			Min:         scraperutil.IntPtr(0),
+			Max:         scraperutil.IntPtr(5000),
 			Unit:        "ms",
 		},
 		contracts.ScraperOption{
@@ -91,7 +91,5 @@ func (m *scraperModule) FlattenFunc() any {
 		}
 	})
 }
-
-func intPtr(i int) *int { return &i }
 
 var _ scraperutil.ScraperModule = (*scraperModule)(nil)

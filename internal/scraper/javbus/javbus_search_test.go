@@ -1,6 +1,7 @@
 package javbus
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -69,7 +70,7 @@ func TestScraperGetURLAndSearch(t *testing.T) {
 		t.Fatalf("GetURL() = %q, want %q", got, want)
 	}
 
-	result, err := scraper.Search("ABC-123")
+	result, err := scraper.Search(context.Background(), "ABC-123")
 	if err != nil {
 		t.Fatalf("Search() error = %v", err)
 	}
@@ -153,7 +154,7 @@ func TestScraperSearchReturnsNotFoundAndDisabledErrors(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
 		settings := config.ScraperSettings{Enabled: false}
 		scraper := New(settings, nil, config.FlareSolverrConfig{})
-		_, err := scraper.Search("ABC-123")
+		_, err := scraper.Search(context.Background(), "ABC-123")
 		if err == nil || !strings.Contains(err.Error(), "disabled") {
 			t.Fatalf("expected disabled error, got %v", err)
 		}

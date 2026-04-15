@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ type mockScraperWithResults struct {
 
 func (m *mockScraperWithResults) Name() string { return m.name }
 
-func (m *mockScraperWithResults) Search(id string) (*models.ScraperResult, error) {
+func (m *mockScraperWithResults) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -78,7 +79,7 @@ type mockScraper struct {
 }
 
 func (m *mockScraper) Name() string { return m.name }
-func (m *mockScraper) Search(id string) (*models.ScraperResult, error) {
+func (m *mockScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	return nil, nil
 }
 func (m *mockScraper) GetURL(id string) (string, error) { return "", nil }

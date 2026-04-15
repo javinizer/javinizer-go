@@ -26,44 +26,6 @@ import (
 
 // extractDescriptionNewSite extracts description from video.dmm.co.jp
 func (s *Scraper) extractDescriptionNewSite(doc *goquery.Document) string {
-	// 1. Try to extract from JSON-LD structured data (most reliable)
-	doc.Find(`script[type="application/ld+json"]`).Each(func(i int, sel *goquery.Selection) {
-		jsonText := sel.Text()
-		// Check if this JSON contains description field
-		if strings.Contains(jsonText, `"description"`) {
-			// Extract description using simple string parsing (more reliable than full JSON parsing)
-			// Look for pattern: "description":"text"
-			if idx := strings.Index(jsonText, `"description":"`); idx != -1 {
-				start := idx + len(`"description":"`)
-				// Find the end quote (accounting for escaped quotes)
-				remaining := jsonText[start:]
-				var desc strings.Builder
-				escaped := false
-				for _, ch := range remaining {
-					if escaped {
-						desc.WriteRune(ch)
-						escaped = false
-						continue
-					}
-					if ch == '\\' {
-						escaped = true
-						continue
-					}
-					if ch == '"' {
-						// Found the end
-						result := strings.TrimSpace(desc.String())
-						if len(result) > 30 {
-							return // Will use this description
-						}
-						break
-					}
-					desc.WriteRune(ch)
-				}
-			}
-		}
-	})
-
-	// If we found a description in JSON-LD, return it
 	var jsonDesc string
 	doc.Find(`script[type="application/ld+json"]`).Each(func(i int, sel *goquery.Selection) {
 		jsonText := sel.Text()

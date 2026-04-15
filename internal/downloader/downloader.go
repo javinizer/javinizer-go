@@ -2,8 +2,10 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -27,8 +29,9 @@ type Downloader struct {
 	config              *config.OutputConfig
 	httpClient          httpclient.HTTPClient
 	userAgent           string
-	actorJapaneseNames  bool // Use Japanese names for actress files
-	actorFirstNameOrder bool // true = FirstName LastName, false = LastName FirstName
+	actorJapaneseNames  bool             // Use Japanese names for actress files
+	actorFirstNameOrder bool             // true = FirstName LastName, false = LastName FirstName
+	templateEngine      *template.Engine // Shared template engine (safe for concurrent use)
 }
 
 // DownloadResult represents the result of a download operation
@@ -267,6 +270,7 @@ func NewDownloader(client httpclient.HTTPClient, fs afero.Fs, cfg *config.Output
 		userAgent:           userAgent,
 		actorJapaneseNames:  false, // Default: use English names
 		actorFirstNameOrder: true,  // Default: FirstName LastName
+		templateEngine:      template.NewEngine(),
 	}
 }
 
@@ -295,7 +299,7 @@ func (d *Downloader) generateFilename(movie *models.Movie, templateStr string, i
 		ctx.PartSuffix = multipart.PartSuffix
 	}
 
-	engine := template.NewEngine()
+	engine := d.templateEngine
 	filename, err := engine.Execute(templateStr, ctx)
 	if err != nil {
 		// Fallback to ID-based naming if template fails
@@ -311,7 +315,7 @@ func (d *Downloader) SetDownloadExtrafanart(enabled bool) {
 }
 
 // DownloadCover downloads the movie cover image (fanart)
-func (d *Downloader) DownloadCover(movie *models.Movie, destDir string, multipart *MultipartInfo) (*DownloadResult, error) {
+func (d *Downloader) DownloadCover(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo) (*DownloadResult, error) {
 	if !d.config.DownloadCover || movie.CoverURL == "" {
 		return &DownloadResult{Type: MediaTypeCover, Downloaded: false}, nil
 	}
@@ -323,13 +327,13 @@ func (d *Downloader) DownloadCover(movie *models.Movie, destDir string, multipar
 	}
 	destPath := filepath.Join(destDir, filename)
 
-	return d.download(movie.CoverURL, destPath, MediaTypeCover)
+	return d.download(ctx, movie.CoverURL, destPath, MediaTypeCover)
 }
 
 // DownloadPoster downloads the movie poster
 // If ShouldCropPoster is true, the poster is created by cropping the right 47.2% of the cover image
 // If ShouldCropPoster is false, the poster is downloaded directly without cropping (high-quality poster)
-func (d *Downloader) DownloadPoster(movie *models.Movie, destDir string, multipart *MultipartInfo) (*DownloadResult, error) {
+func (d *Downloader) DownloadPoster(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo) (*DownloadResult, error) {
 	if !d.config.DownloadPoster {
 		return &DownloadResult{Type: MediaTypePoster, Downloaded: false}, nil
 	}
@@ -365,13 +369,13 @@ func (d *Downloader) DownloadPoster(movie *models.Movie, destDir string, multipa
 	// Check if we need to crop the poster or use it directly
 	if !movie.ShouldCropPoster {
 		// High-quality poster - download directly without cropping
-		result, err := d.download(posterURL, destPath, MediaTypePoster)
+		result, err := d.download(ctx, posterURL, destPath, MediaTypePoster)
 		return result, err
 	}
 
 	// Low-quality poster - download and crop from cover
 	tempPath := destPath + ".full.tmp"
-	result, err := d.download(posterURL, tempPath, MediaTypePoster)
+	result, err := d.download(ctx, posterURL, tempPath, MediaTypePoster)
 	if err != nil || !result.Downloaded {
 		_ = d.fs.Remove(tempPath) // Clean up if exists
 		return result, err
@@ -400,7 +404,7 @@ func (d *Downloader) DownloadPoster(movie *models.Movie, destDir string, multipa
 // DownloadExtrafanart downloads screenshots to the extrafanart subdirectory
 // Extrafanart is used by media centers like Kodi/Plex for background images
 // Note: In the original Javinizer, screenshots and extrafanart are the same thing
-func (d *Downloader) DownloadExtrafanart(movie *models.Movie, destDir string, multipart *MultipartInfo) ([]DownloadResult, error) {
+func (d *Downloader) DownloadExtrafanart(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo) ([]DownloadResult, error) {
 	if !d.config.DownloadExtrafanart || len(movie.Screenshots) == 0 {
 		return []DownloadResult{}, nil
 	}
@@ -411,6 +415,12 @@ func (d *Downloader) DownloadExtrafanart(movie *models.Movie, destDir string, mu
 	results := make([]DownloadResult, 0, len(movie.Screenshots))
 
 	for i, url := range movie.Screenshots {
+		select {
+		case <-ctx.Done():
+			return results, ctx.Err()
+		default:
+		}
+
 		// Use configurable screenshot format with index for numbering
 		filename := d.generateFilename(movie, d.config.ScreenshotFormat, i+1, multipart)
 		if filename == "" {
@@ -423,7 +433,7 @@ func (d *Downloader) DownloadExtrafanart(movie *models.Movie, destDir string, mu
 		}
 		destPath := filepath.Join(extrafanartDir, filename)
 
-		result, err := d.download(url, destPath, MediaTypeExtrafanart)
+		result, err := d.download(ctx, url, destPath, MediaTypeExtrafanart)
 		if err != nil {
 			result = &DownloadResult{
 				URL:   url,
@@ -438,7 +448,7 @@ func (d *Downloader) DownloadExtrafanart(movie *models.Movie, destDir string, mu
 }
 
 // DownloadTrailer downloads the movie trailer
-func (d *Downloader) DownloadTrailer(movie *models.Movie, destDir string, multipart *MultipartInfo) (*DownloadResult, error) {
+func (d *Downloader) DownloadTrailer(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo) (*DownloadResult, error) {
 	if !d.config.DownloadTrailer || movie.TrailerURL == "" {
 		return &DownloadResult{Type: MediaTypeTrailer, Downloaded: false}, nil
 	}
@@ -461,7 +471,7 @@ func (d *Downloader) DownloadTrailer(movie *models.Movie, destDir string, multip
 	}
 	destPath := filepath.Join(destDir, filename)
 
-	return d.download(movie.TrailerURL, destPath, MediaTypeTrailer)
+	return d.download(ctx, movie.TrailerURL, destPath, MediaTypeTrailer)
 }
 
 // formatActressName formats an actress name according to NFO settings
@@ -503,7 +513,7 @@ func (d *Downloader) formatActressName(actress models.Actress) string {
 }
 
 // DownloadActressImages downloads actress thumbnail images
-func (d *Downloader) DownloadActressImages(movie *models.Movie, destDir string) ([]DownloadResult, error) {
+func (d *Downloader) DownloadActressImages(ctx context.Context, movie *models.Movie, destDir string) ([]DownloadResult, error) {
 	if !d.config.DownloadActress || len(movie.Actresses) == 0 {
 		return []DownloadResult{}, nil
 	}
@@ -536,7 +546,7 @@ func (d *Downloader) DownloadActressImages(movie *models.Movie, destDir string) 
 		}
 		destPath := filepath.Join(actressDir, filename)
 
-		result, err := d.download(actress.ThumbURL, destPath, MediaTypeActress)
+		result, err := d.download(ctx, actress.ThumbURL, destPath, MediaTypeActress)
 		if err != nil {
 			result = &DownloadResult{
 				URL:   actress.ThumbURL,
@@ -551,35 +561,39 @@ func (d *Downloader) DownloadActressImages(movie *models.Movie, destDir string) 
 }
 
 // DownloadAll downloads all enabled media types for a movie
+// Errors from individual downloads are captured in DownloadResult.Error fields
+// rather than returned as a top-level error. Check individual results for failures.
+// Context cancellation errors are included in result items but do not cause
+// DownloadAll to return an error itself.
 // multipart: nil for single files, or MultipartInfo for multi-part files
 // Each download method checks if the file already exists (file-exists deduplication).
 // Templates without multipart placeholders produce the same filename for all parts,
 // so subsequent parts will skip re-downloading (Downloaded=false).
 // Templates with <IF:MULTIPART> or <PART> produce different filenames, so each part
 // gets its own file. Actress images are only downloaded for single files or first part.
-func (d *Downloader) DownloadAll(movie *models.Movie, destDir string, multipart *MultipartInfo) ([]DownloadResult, error) {
+func (d *Downloader) DownloadAll(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo) ([]DownloadResult, error) {
 	results := make([]DownloadResult, 0)
 
 	// Download cover (fanart)
 	// Note: Each download method has a file-exists check, so if templates produce
 	// the same filename for different parts, the file won't be re-downloaded.
 	// If templates use <IF:MULTIPART> or <PART>, each part gets its own file.
-	if coverResult, _ := d.DownloadCover(movie, destDir, multipart); coverResult != nil {
+	if coverResult, _ := d.DownloadCover(ctx, movie, destDir, multipart); coverResult != nil {
 		results = append(results, *coverResult)
 	}
 
 	// Download poster
-	if posterResult, _ := d.DownloadPoster(movie, destDir, multipart); posterResult != nil {
+	if posterResult, _ := d.DownloadPoster(ctx, movie, destDir, multipart); posterResult != nil {
 		results = append(results, *posterResult)
 	}
 
 	// Download extrafanart (screenshots)
-	if extrafanart, err := d.DownloadExtrafanart(movie, destDir, multipart); err == nil {
+	if extrafanart, err := d.DownloadExtrafanart(ctx, movie, destDir, multipart); err == nil {
 		results = append(results, extrafanart...)
 	}
 
 	// Download trailer
-	if trailerResult, _ := d.DownloadTrailer(movie, destDir, multipart); trailerResult != nil {
+	if trailerResult, _ := d.DownloadTrailer(ctx, movie, destDir, multipart); trailerResult != nil {
 		results = append(results, *trailerResult)
 	}
 
@@ -590,7 +604,7 @@ func (d *Downloader) DownloadAll(movie *models.Movie, destDir string, multipart 
 		partNumber = multipart.PartNumber
 	}
 	if partNumber == 0 || partNumber == 1 {
-		if actresses, err := d.DownloadActressImages(movie, destDir); err == nil {
+		if actresses, err := d.DownloadActressImages(ctx, movie, destDir); err == nil {
 			results = append(results, actresses...)
 		}
 	}
@@ -599,7 +613,7 @@ func (d *Downloader) DownloadAll(movie *models.Movie, destDir string, multipart 
 }
 
 // download performs the actual HTTP download
-func (d *Downloader) download(url, destPath string, mediaType MediaType) (*DownloadResult, error) {
+func (d *Downloader) download(ctx context.Context, url, destPath string, mediaType MediaType) (*DownloadResult, error) {
 	startTime := time.Now()
 
 	result := &DownloadResult{
@@ -607,6 +621,15 @@ func (d *Downloader) download(url, destPath string, mediaType MediaType) (*Downl
 		LocalPath:  destPath,
 		Type:       mediaType,
 		Downloaded: false,
+	}
+
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		result.Error = ctx.Err()
+		result.Duration = time.Since(startTime)
+		return result, result.Error
+	default:
 	}
 
 	// Check if file already exists
@@ -619,14 +642,14 @@ func (d *Downloader) download(url, destPath string, mediaType MediaType) (*Downl
 
 	// Create destination directory
 	destDir := filepath.Dir(destPath)
-	if err := d.fs.MkdirAll(destDir, 0777); err != nil {
+	if err := d.fs.MkdirAll(destDir, 0755); err != nil {
 		result.Error = fmt.Errorf("failed to create directory: %w", err)
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(context.Background(), "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create request: %w", err)
 		result.Duration = time.Since(startTime)
@@ -783,7 +806,7 @@ func (d *Downloader) downloadSimple(ctx context.Context, url, destPath string) e
 
 	// Create destination directory
 	destDir := filepath.Dir(destPath)
-	if err := d.fs.MkdirAll(destDir, 0777); err != nil {
+	if err := d.fs.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -859,55 +882,35 @@ func isRetryableError(err error) bool {
 		return false
 	}
 
-	// Check if it's a statusError
 	var sErr *statusError
-	if statusErr, ok := err.(*statusError); ok {
-		sErr = statusErr
-	} else {
-		// Try to find statusError in wrapped errors
-		for e := err; e != nil; {
-			if se, ok := e.(*statusError); ok {
-				sErr = se
-				break
-			}
-			// Try to unwrap
-			if unwrapper, ok := e.(interface{ Unwrap() error }); ok {
-				e = unwrapper.Unwrap()
-			} else {
-				break
-			}
-		}
-	}
-
-	if sErr != nil {
+	if errors.As(err, &sErr) {
 		switch sErr.statusCode {
 		case http.StatusServiceUnavailable, // 503
 			http.StatusInternalServerError, // 500
 			http.StatusTooManyRequests:     // 429
-			return true // Retryable
+			return true
 		case http.StatusNotFound, // 404
 			http.StatusForbidden,    // 403
 			http.StatusUnauthorized, // 401
 			http.StatusBadRequest:   // 400
-			return false // Non-retryable
+			return false
 		default:
-			// Other status codes: treat as non-retryable by default
 			return false
 		}
 	}
 
-	// Network errors (connection refused, DNS failures, etc.) are retryable
-	// Check for common network error strings
-	errStr := err.Error()
-	if strings.Contains(errStr, "connection refused") ||
-		strings.Contains(errStr, "connection reset") ||
-		strings.Contains(errStr, "no such host") ||
-		strings.Contains(errStr, "i/o timeout") {
+	var netErr net.Error
+	if errors.As(err, &netErr) {
 		return true
 	}
 
-	// Default: non-retryable
-	return false
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+
+	var opErr *net.OpError
+	return errors.As(err, &opErr)
 }
 
 // validateURLScheme checks if the URL uses http or https scheme

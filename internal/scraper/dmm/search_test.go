@@ -1,6 +1,7 @@
 package dmm
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,6 @@ import (
 // TestParseHTMLWithGoldenFiles tests the parseHTML method using golden HTML files.
 // This tests the core scraping logic without requiring HTTP mocking.
 func TestParseHTMLWithGoldenFiles(t *testing.T) {
-	t.Skip("Skipping: DMM Extra field migration in progress")
 	tests := []struct {
 		name             string
 		goldenFile       string
@@ -91,12 +91,13 @@ func TestParseHTMLWithGoldenFiles(t *testing.T) {
 
 			// Create scraper instance with proper initialization
 			settings := config.ScraperSettings{
-				Enabled: true,
+				Enabled:       true,
+				ScrapeActress: ptrBool(true),
 			}
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
 
 			// Call parseHTML
-			result, err := scraper.parseHTML(doc, tt.sourceURL)
+			result, err := scraper.parseHTML(context.Background(), doc, tt.sourceURL)
 
 			// Check error expectations
 			if tt.wantError {
@@ -142,7 +143,6 @@ func TestParseHTMLWithGoldenFiles(t *testing.T) {
 
 // TestParseHTMLFieldExtraction tests specific field extraction logic.
 func TestParseHTMLFieldExtraction(t *testing.T) {
-	t.Skip("Skipping: DMM Extra field migration in progress")
 	// Load the success golden file for detailed field testing
 	htmlContent, err := os.ReadFile(filepath.Join("testdata", "dmm_search_success.html.golden"))
 	require.NoError(t, err)
@@ -151,11 +151,12 @@ func TestParseHTMLFieldExtraction(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := config.ScraperSettings{
-		Enabled: true,
+		Enabled:       true,
+		ScrapeActress: ptrBool(true),
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
 
-	result, err := scraper.parseHTML(doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=abc00123/")
+	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=abc00123/")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -222,7 +223,7 @@ func TestParseHTMLActressDisabled(t *testing.T) {
 	}
 	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
 
-	result, err := scraper.parseHTML(doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=abc00123/")
+	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=abc00123/")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -234,7 +235,6 @@ func TestParseHTMLActressDisabled(t *testing.T) {
 
 // TestParseHTMLMultipleActresses tests extraction of multiple actresses.
 func TestParseHTMLMultipleActresses(t *testing.T) {
-	t.Skip("Skipping: DMM Extra field migration in progress")
 	htmlContent, err := os.ReadFile(filepath.Join("testdata", "dmm_search_multi_actress.html.golden"))
 	require.NoError(t, err)
 
@@ -242,11 +242,12 @@ func TestParseHTMLMultipleActresses(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := config.ScraperSettings{
-		Enabled: true,
+		Enabled:       true,
+		ScrapeActress: ptrBool(true),
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
 
-	result, err := scraper.parseHTML(doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ghi00789/")
+	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ghi00789/")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -272,11 +273,12 @@ func TestParseHTMLEmptyActressList(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := config.ScraperSettings{
-		Enabled: true,
+		Enabled:       true,
+		ScrapeActress: ptrBool(true),
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
 
-	result, err := scraper.parseHTML(doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=def00456/")
+	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=def00456/")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -295,12 +297,13 @@ func TestParseHTMLMalformedHTML(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := config.ScraperSettings{
-		Enabled: true,
+		Enabled:       true,
+		ScrapeActress: ptrBool(true),
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
 
 	// parseHTML should not panic or error on malformed HTML
-	result, err := scraper.parseHTML(doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=jkl00999/")
+	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=jkl00999/")
 
 	assert.NoError(t, err, "parseHTML should handle malformed HTML gracefully")
 	require.NotNil(t, result, "Should return a result even with malformed HTML")
@@ -320,11 +323,12 @@ func TestParseHTML404Page(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := config.ScraperSettings{
-		Enabled: true,
+		Enabled:       true,
+		ScrapeActress: ptrBool(true),
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
 
-	result, err := scraper.parseHTML(doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=notfound/")
+	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=notfound/")
 
 	// parseHTML should not error on 404 pages (HTTP layer should catch 404)
 	assert.NoError(t, err)

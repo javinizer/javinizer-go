@@ -43,6 +43,8 @@ func ParseDate(s string) *time.Time {
 	return nil
 }
 
+func IntPtr(i int) *int { return &i }
+
 func ResolveURL(base, raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

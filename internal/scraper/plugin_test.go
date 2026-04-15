@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -138,7 +139,7 @@ type testScraper struct {
 }
 
 func (s *testScraper) Name() string { return s.name }
-func (s *testScraper) Search(id string) (*models.ScraperResult, error) {
+func (s *testScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
 	return nil, nil
 }
 func (s *testScraper) GetURL(id string) (string, error) { return "", nil }

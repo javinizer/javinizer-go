@@ -2,6 +2,7 @@ package system
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 )
 
 // testProxy godoc
@@ -36,6 +38,11 @@ func testProxy(deps *ServerDependencies) gin.HandlerFunc {
 		}
 		if !isValidHTTPURL(targetURL) {
 			c.JSON(400, ErrorResponse{Error: "target_url must be a valid http(s) URL"})
+			return
+		}
+
+		if err := ssrf.CheckURL(targetURL); err != nil {
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: err.Error()})
 			return
 		}
 

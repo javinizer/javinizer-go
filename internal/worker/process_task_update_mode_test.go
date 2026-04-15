@@ -16,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -99,6 +100,7 @@ func TestProcessFileTask_MergeWithExistingNFO(t *testing.T) {
 			cfg:            cfg,
 			scalarStrategy: "prefer-nfo",
 			arrayStrategy:  "merge",
+			templateEngine: template.NewEngine(),
 		}
 	}
 	baseCfg := testProcessConfig(filepath.Join(tmpDir, "unused.db"))
