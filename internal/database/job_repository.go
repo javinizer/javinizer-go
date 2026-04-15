@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -15,18 +16,24 @@ func NewJobRepository(db *DB) *JobRepository {
 }
 
 func (r *JobRepository) Create(job *models.Job) error {
-	return r.db.Create(job).Error
+	if err := r.db.Create(job).Error; err != nil {
+		return wrapDBErr("create", fmt.Sprintf("job %s", job.ID), err)
+	}
+	return nil
 }
 
 func (r *JobRepository) Update(job *models.Job) error {
-	return r.db.Save(job).Error
+	if err := r.db.Save(job).Error; err != nil {
+		return wrapDBErr("update", fmt.Sprintf("job %s", job.ID), err)
+	}
+	return nil
 }
 
 func (r *JobRepository) FindByID(id string) (*models.Job, error) {
 	var job models.Job
 	err := r.db.First(&job, "id = ?", id).Error
 	if err != nil {
-		return nil, err
+		return nil, wrapDBErr("find", fmt.Sprintf("job %s", id), err)
 	}
 	return &job, nil
 }
@@ -34,13 +41,22 @@ func (r *JobRepository) FindByID(id string) (*models.Job, error) {
 func (r *JobRepository) List() ([]models.Job, error) {
 	var jobs []models.Job
 	err := r.db.Order("started_at DESC").Find(&jobs).Error
-	return jobs, err
+	if err != nil {
+		return nil, wrapDBErr("find", "jobs", err)
+	}
+	return jobs, nil
 }
 
 func (r *JobRepository) Delete(id string) error {
-	return r.db.Delete(&models.Job{}, "id = ?", id).Error
+	if err := r.db.Delete(&models.Job{}, "id = ?", id).Error; err != nil {
+		return wrapDBErr("delete", fmt.Sprintf("job %s", id), err)
+	}
+	return nil
 }
 
 func (r *JobRepository) DeleteOrganizedOlderThan(date time.Time) error {
-	return r.db.Where("status = ? AND organized_at < ?", "organized", date).Delete(&models.Job{}).Error
+	if err := r.db.Where("status = ? AND organized_at < ?", "organized", date).Delete(&models.Job{}).Error; err != nil {
+		return wrapDBErr("delete", "organized jobs", err)
+	}
+	return nil
 }

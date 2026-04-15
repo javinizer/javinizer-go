@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -148,4 +149,74 @@ func TestListBatchJobs_Success(t *testing.T) {
 	jobs, ok := response["jobs"].([]interface{})
 	require.True(t, ok)
 	assert.GreaterOrEqual(t, len(jobs), 2)
+}
+
+func TestListBatchJobs_WithCompletedJob(t *testing.T) {
+	cfg := &config.Config{}
+	deps := createTestDeps(t, cfg, "")
+
+	job := deps.JobQueue.CreateJob([]string{"/path/to/IPX-700.mp4"})
+	started := time.Now().UTC().Add(-2 * time.Minute)
+	ended := time.Now().UTC()
+	job.UpdateFileResult("/path/to/IPX-700.mp4", &worker.FileResult{
+		FilePath:  "/path/to/IPX-700.mp4",
+		MovieID:   "IPX-700",
+		Status:    worker.JobStatusCompleted,
+		Data:      &models.Movie{ID: "IPX-700", Title: "Done"},
+		StartedAt: started,
+		EndedAt:   &ended,
+	})
+	job.MarkCompleted()
+
+	router := gin.New()
+	router.GET("/batch", listBatchJobs(deps))
+
+	req := httptest.NewRequest("GET", "/batch", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+
+	var response contracts.BatchJobListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Jobs, 1)
+	assert.Equal(t, job.ID, response.Jobs[0].ID)
+}
+
+func TestListBatchJobs_EmptyList(t *testing.T) {
+	cfg := &config.Config{}
+	deps := createTestDeps(t, cfg, "")
+
+	router := gin.New()
+	router.GET("/batch", listBatchJobs(deps))
+
+	req := httptest.NewRequest("GET", "/batch", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+
+	var response contracts.BatchJobListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Empty(t, response.Jobs)
+}
+
+func TestListBatchJobs_WithExcludedFiles(t *testing.T) {
+	cfg := &config.Config{}
+	deps := createTestDeps(t, cfg, "")
+
+	deps.JobQueue.CreateJob([]string{"/path/to/IPX-700.mp4", "/path/to/IPX-701.mp4"})
+
+	router := gin.New()
+	router.GET("/batch", listBatchJobs(deps))
+
+	req := httptest.NewRequest("GET", "/batch", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+
+	var response contracts.BatchJobListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Jobs, 1)
 }

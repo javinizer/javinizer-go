@@ -11,6 +11,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -197,7 +198,7 @@ func TestParseDetailPage_Fallbacks(t *testing.T) {
 }
 
 func TestHelpers(t *testing.T) {
-	if got := normalizeLanguage("cn"); got != "zh" {
+	if got := scraperutil.NormalizeLanguage("cn"); got != "zh" {
 		t.Fatalf("normalizeLanguage = %q, want zh", got)
 	}
 	if got := extractID("TokyoHot N-1234 sample"); got != "N-1234" {
@@ -206,7 +207,7 @@ func TestHelpers(t *testing.T) {
 	if got := splitNames("Jane Doe / 花子"); len(got) != 3 {
 		t.Fatalf("splitNames len = %d, want 3", len(got))
 	}
-	if got := resolveURL("https://www.tokyo-hot.com/product/N1234/", "trailer.mp4"); got != "https://www.tokyo-hot.com/product/N1234/trailer.mp4" {
+	if got := scraperutil.ResolveURL("https://www.tokyo-hot.com/product/N1234/", "trailer.mp4"); got != "https://www.tokyo-hot.com/product/N1234/trailer.mp4" {
 		t.Fatalf("resolveURL = %q", got)
 	}
 	if !hasJapanese("花子") {
@@ -371,7 +372,7 @@ func TestNormalizeLanguage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := normalizeLanguage(tt.input)
+			result := scraperutil.NormalizeLanguage(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -443,7 +444,7 @@ func TestCleanStringEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := cleanString(tt.input)
+			result := scraperutil.CleanString(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -544,7 +545,7 @@ func TestResolveURLEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := resolveURL(tt.base, tt.relative)
+			result := scraperutil.ResolveURL(tt.base, tt.relative)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

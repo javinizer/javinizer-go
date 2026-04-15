@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestLoadNewConfigFormat(t *testing.T) {
@@ -190,4 +192,246 @@ func TestResolveScraperUserAgent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateTranslationConfig_Disabled(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Metadata.Translation.Enabled = false
+	err := cfg.validateTranslationConfig()
+	assert.NoError(t, err)
+}
+
+func TestValidateTranslationConfig_OpenAI(t *testing.T) {
+	t.Run("valid openai config", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "openai"
+		cfg.Metadata.Translation.OpenAI.APIKey = "sk-test-key"
+		cfg.Metadata.Translation.OpenAI.Model = "gpt-4o-mini"
+		err := cfg.validateTranslationConfig()
+		assert.NoError(t, err)
+	})
+
+	t.Run("missing openai api key", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "openai"
+		cfg.Metadata.Translation.OpenAI.APIKey = ""
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "api_key")
+	})
+
+	t.Run("invalid openai base url", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "openai"
+		cfg.Metadata.Translation.OpenAI.APIKey = "sk-test"
+		cfg.Metadata.Translation.OpenAI.BaseURL = "not-a-url"
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "base_url")
+	})
+}
+
+func TestValidateTranslationConfig_DeepL(t *testing.T) {
+	t.Run("valid deepl config", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "deepl"
+		cfg.Metadata.Translation.DeepL.APIKey = "test-key"
+		err := cfg.validateTranslationConfig()
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid deepl mode", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "deepl"
+		cfg.Metadata.Translation.DeepL.APIKey = "test-key"
+		cfg.Metadata.Translation.DeepL.Mode = "invalid"
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mode")
+	})
+
+	t.Run("missing deepl api key", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "deepl"
+		cfg.Metadata.Translation.DeepL.APIKey = ""
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "api_key")
+	})
+}
+
+func TestValidateTranslationConfig_Google(t *testing.T) {
+	t.Run("free mode no api key needed", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "google"
+		cfg.Metadata.Translation.Google.Mode = "free"
+		err := cfg.validateTranslationConfig()
+		assert.NoError(t, err)
+	})
+
+	t.Run("paid mode requires api key", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "google"
+		cfg.Metadata.Translation.Google.Mode = "paid"
+		cfg.Metadata.Translation.Google.APIKey = ""
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "api_key")
+	})
+
+	t.Run("invalid google mode", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "google"
+		cfg.Metadata.Translation.Google.Mode = "invalid"
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mode")
+	})
+}
+
+func TestValidateTranslationConfig_OpenAICompatible(t *testing.T) {
+	t.Run("missing base url", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "openai-compatible"
+		cfg.Metadata.Translation.OpenAICompatible.BaseURL = ""
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "base_url")
+	})
+
+	t.Run("missing model", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "openai-compatible"
+		cfg.Metadata.Translation.OpenAICompatible.BaseURL = "http://localhost:11434"
+		cfg.Metadata.Translation.OpenAICompatible.Model = ""
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "model")
+	})
+
+	t.Run("valid config", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "openai-compatible"
+		cfg.Metadata.Translation.OpenAICompatible.BaseURL = "http://localhost:11434"
+		cfg.Metadata.Translation.OpenAICompatible.Model = "llama3"
+		err := cfg.validateTranslationConfig()
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid base url", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "openai-compatible"
+		cfg.Metadata.Translation.OpenAICompatible.BaseURL = "not-a-url"
+		cfg.Metadata.Translation.OpenAICompatible.Model = "llama3"
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "base_url")
+	})
+
+	t.Run("invalid backend type", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "openai-compatible"
+		cfg.Metadata.Translation.OpenAICompatible.BaseURL = "http://localhost:11434"
+		cfg.Metadata.Translation.OpenAICompatible.Model = "llama3"
+		cfg.Metadata.Translation.OpenAICompatible.BackendType = "invalid-backend"
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "backend_type")
+	})
+}
+
+func TestValidateTranslationConfig_Anthropic(t *testing.T) {
+	t.Run("valid anthropic config", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "anthropic"
+		cfg.Metadata.Translation.Anthropic.APIKey = "sk-ant-test"
+		cfg.Metadata.Translation.Anthropic.BaseURL = "https://api.anthropic.com"
+		cfg.Metadata.Translation.Anthropic.Model = "claude-3-haiku"
+		err := cfg.validateTranslationConfig()
+		assert.NoError(t, err)
+	})
+
+	t.Run("missing base url", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "anthropic"
+		cfg.Metadata.Translation.Anthropic.APIKey = "sk-ant-test"
+		cfg.Metadata.Translation.Anthropic.Model = "claude-3-haiku"
+		cfg.Metadata.Translation.Anthropic.BaseURL = ""
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "base_url")
+	})
+
+	t.Run("missing model", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "anthropic"
+		cfg.Metadata.Translation.Anthropic.APIKey = "sk-ant-test"
+		cfg.Metadata.Translation.Anthropic.BaseURL = "https://api.anthropic.com"
+		cfg.Metadata.Translation.Anthropic.Model = ""
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "model")
+	})
+
+	t.Run("missing api key", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "anthropic"
+		cfg.Metadata.Translation.Anthropic.APIKey = ""
+		cfg.Metadata.Translation.Anthropic.BaseURL = "https://api.anthropic.com"
+		cfg.Metadata.Translation.Anthropic.Model = "claude-3"
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "api_key")
+	})
+}
+
+func TestValidateTranslationConfig_InvalidProvider(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Metadata.Translation.Enabled = true
+	cfg.Metadata.Translation.Provider = "nonexistent"
+	err := cfg.validateTranslationConfig()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "provider")
+}
+
+func TestValidateTranslationConfig_Timeout(t *testing.T) {
+	t.Run("timeout too low", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "openai"
+		cfg.Metadata.Translation.OpenAI.APIKey = "sk-test"
+		cfg.Metadata.Translation.TimeoutSeconds = 1
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "timeout")
+	})
+
+	t.Run("timeout too high", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Translation.Enabled = true
+		cfg.Metadata.Translation.Provider = "openai"
+		cfg.Metadata.Translation.OpenAI.APIKey = "sk-test"
+		cfg.Metadata.Translation.TimeoutSeconds = 500
+		err := cfg.validateTranslationConfig()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "timeout")
+	})
 }

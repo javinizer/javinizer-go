@@ -843,3 +843,92 @@ func TestParseMergeStrategy(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeDateField(t *testing.T) {
+	now := time.Now()
+	earlier := now.Add(-24 * time.Hour)
+
+	t.Run("both empty returns nil", func(t *testing.T) {
+		stats := &MergeStats{}
+		provenance := make(map[string]DataSource)
+		result := mergeDateField("release_date", nil, nil, PreferScraper, stats, provenance, now, earlier)
+		assert.Nil(t, result)
+		assert.Equal(t, 1, stats.EmptyFields)
+	})
+
+	t.Run("scraped empty uses nfo", func(t *testing.T) {
+		stats := &MergeStats{}
+		provenance := make(map[string]DataSource)
+		nfoVal := now
+		result := mergeDateField("release_date", nil, &nfoVal, PreferScraper, stats, provenance, now, earlier)
+		assert.Equal(t, nfoVal, *result)
+		assert.Equal(t, 1, stats.FromNFO)
+	})
+
+	t.Run("nfo empty uses scraped", func(t *testing.T) {
+		stats := &MergeStats{}
+		provenance := make(map[string]DataSource)
+		scrapedVal := now
+		result := mergeDateField("release_date", &scrapedVal, nil, PreferScraper, stats, provenance, now, earlier)
+		assert.Equal(t, scrapedVal, *result)
+		assert.Equal(t, 1, stats.FromScraper)
+	})
+
+	t.Run("both present prefer nfo", func(t *testing.T) {
+		stats := &MergeStats{}
+		provenance := make(map[string]DataSource)
+		scrapedVal := now
+		nfoVal := earlier
+		result := mergeDateField("release_date", &scrapedVal, &nfoVal, PreferNFO, stats, provenance, now, earlier)
+		assert.Equal(t, nfoVal, *result)
+		assert.Equal(t, 1, stats.ConflictsResolved)
+		assert.Equal(t, 1, stats.FromNFO)
+	})
+
+	t.Run("both present prefer scraper", func(t *testing.T) {
+		stats := &MergeStats{}
+		provenance := make(map[string]DataSource)
+		scrapedVal := now
+		nfoVal := earlier
+		result := mergeDateField("release_date", &scrapedVal, &nfoVal, PreferScraper, stats, provenance, now, earlier)
+		assert.Equal(t, scrapedVal, *result)
+		assert.Equal(t, 1, stats.ConflictsResolved)
+		assert.Equal(t, 1, stats.FromScraper)
+	})
+
+	t.Run("both present preserve existing", func(t *testing.T) {
+		stats := &MergeStats{}
+		provenance := make(map[string]DataSource)
+		scrapedVal := now
+		nfoVal := earlier
+		result := mergeDateField("release_date", &scrapedVal, &nfoVal, PreserveExisting, stats, provenance, now, earlier)
+		assert.Equal(t, nfoVal, *result)
+	})
+
+	t.Run("both present fill missing only", func(t *testing.T) {
+		stats := &MergeStats{}
+		provenance := make(map[string]DataSource)
+		scrapedVal := now
+		nfoVal := earlier
+		result := mergeDateField("release_date", &scrapedVal, &nfoVal, FillMissingOnly, stats, provenance, now, earlier)
+		assert.Equal(t, nfoVal, *result)
+	})
+
+	t.Run("both present merge arrays", func(t *testing.T) {
+		stats := &MergeStats{}
+		provenance := make(map[string]DataSource)
+		scrapedVal := now
+		nfoVal := earlier
+		result := mergeDateField("release_date", &scrapedVal, &nfoVal, MergeArrays, stats, provenance, now, earlier)
+		assert.Equal(t, scrapedVal, *result)
+	})
+
+	t.Run("scraped zero value treated as empty", func(t *testing.T) {
+		stats := &MergeStats{}
+		provenance := make(map[string]DataSource)
+		zeroTime := time.Time{}
+		nfoVal := now
+		result := mergeDateField("release_date", &zeroTime, &nfoVal, PreferScraper, stats, provenance, now, earlier)
+		assert.Equal(t, nfoVal, *result)
+	})
+}

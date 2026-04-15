@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"golang.org/x/net/html/charset"
 )
 
@@ -298,9 +298,9 @@ func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackID string) 
 	}
 	result.ContentID = result.ID
 
-	title := cleanString(doc.Find("meta[property='og:title']").AttrOr("content", ""))
+	title := scraperutil.CleanString(doc.Find("meta[property='og:title']").AttrOr("content", ""))
 	if title == "" {
-		title = cleanString(doc.Find("title").First().Text())
+		title = scraperutil.CleanString(doc.Find("title").First().Text())
 	}
 	result.Title = title
 	result.OriginalTitle = title
@@ -320,20 +320,20 @@ func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackID string) 
 	}
 
 	if m := descriptionRegex.FindStringSubmatch(html); len(m) > 1 {
-		result.Description = cleanString(stripTags(m[1]))
+		result.Description = scraperutil.CleanString(stripTags(m[1]))
 	}
 	if result.Description == "" {
-		result.Description = cleanString(doc.Find("meta[name='description']").AttrOr("content", ""))
+		result.Description = scraperutil.CleanString(doc.Find("meta[name='description']").AttrOr("content", ""))
 	}
 
 	if m := makerRegex.FindStringSubmatch(html); len(m) > 1 {
-		result.Maker = cleanString(stripTags(m[1]))
+		result.Maker = scraperutil.CleanString(stripTags(m[1]))
 	}
 
 	result.Genres = extractGenres(html)
 
 	if m := coverRegex.FindStringSubmatch(html); len(m) > 1 {
-		result.CoverURL = resolveURL(sourceURL, m[1])
+		result.CoverURL = scraperutil.ResolveURL(sourceURL, m[1])
 	}
 	result.PosterURL = result.CoverURL
 	result.ScreenshotURL = extractScreenshots(html, sourceURL)
@@ -354,7 +354,7 @@ func extractGenres(html string) []string {
 		if len(m) <= 1 {
 			continue
 		}
-		g := cleanString(stripTags(m[1]))
+		g := scraperutil.CleanString(stripTags(m[1]))
 		if g == "" || seen[g] {
 			continue
 		}
@@ -371,7 +371,7 @@ func extractScreenshots(html, base string) []string {
 		if len(m) <= 1 {
 			continue
 		}
-		u := resolveURL(base, m[1])
+		u := scraperutil.ResolveURL(base, m[1])
 		if u == "" || seen[u] {
 			continue
 		}
@@ -386,7 +386,7 @@ func findFirstDetailLink(html, base string) string {
 		return m[0]
 	}
 	if m := detailPathLinkRe.FindStringSubmatch(html); len(m) > 0 {
-		return resolveURL(base, m[0])
+		return scraperutil.ResolveURL(base, m[0])
 	}
 	return ""
 }
@@ -458,40 +458,9 @@ func decodeBody(resp *resty.Response) (string, error) {
 	return string(decoded), nil
 }
 
-func resolveURL(base, raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if strings.HasPrefix(raw, "//") {
-		return "https:" + raw
-	}
-	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
-		return raw
-	}
-	baseURL, err := url.Parse(base)
-	if err != nil {
-		return raw
-	}
-	if strings.HasPrefix(raw, "/") {
-		baseURL.Path = raw
-		baseURL.RawQuery = ""
-		return baseURL.String()
-	}
-	baseURL.Path = path.Join(path.Dir(baseURL.Path), raw)
-	return baseURL.String()
-}
-
 func stripTags(v string) string {
 	re := regexp.MustCompile(`(?s)<[^>]*>`) //nolint:gocritic
 	return re.ReplaceAllString(v, "")
-}
-
-func cleanString(v string) string {
-	v = strings.TrimSpace(v)
-	v = strings.ReplaceAll(v, "\u00a0", " ")
-	v = strings.Join(strings.Fields(v), " ")
-	return v
 }
 
 func isHTTPURL(v string) bool {

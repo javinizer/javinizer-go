@@ -12,6 +12,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -129,7 +130,7 @@ func TestHelpers(t *testing.T) {
 	if got := extractNumericID("作品ID: 54321"); got != "54321" {
 		t.Fatalf("extractNumericID = %q", got)
 	}
-	if got := resolveURL("https://dl.getchu.com/i/item12345", "/x/y.jpg"); got != "https://dl.getchu.com/x/y.jpg" {
+	if got := scraperutil.ResolveURL("https://dl.getchu.com/i/item12345", "/x/y.jpg"); got != "https://dl.getchu.com/x/y.jpg" {
 		t.Fatalf("resolveURL = %q", got)
 	}
 	if !isHTTPURL("https://dl.getchu.com/i/item12345") {
@@ -303,11 +304,11 @@ func TestDecodeBody(t *testing.T) {
 }
 
 func TestResolveURL(t *testing.T) {
-	assert.Equal(t, "https://example.com/x/y.jpg", resolveURL("https://example.com/i/item1", "/x/y.jpg"))
+	assert.Equal(t, "https://example.com/x/y.jpg", scraperutil.ResolveURL("https://example.com/i/item1", "/x/y.jpg"))
 }
 
 func TestCleanString(t *testing.T) {
-	assert.Equal(t, "hello world", cleanString("hello   world"))
+	assert.Equal(t, "hello world", scraperutil.CleanString("hello   world"))
 }
 
 func TestStripTags(t *testing.T) {
@@ -744,7 +745,7 @@ func TestCleanStringEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := cleanString(tt.input)
+			result := scraperutil.CleanString(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -823,7 +824,7 @@ func TestResolveURLEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := resolveURL(tt.base, tt.relative)
+			result := scraperutil.ResolveURL(tt.base, tt.relative)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

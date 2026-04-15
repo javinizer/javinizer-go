@@ -6,6 +6,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 // video_dmm.go contains extraction functions specific to video.dmm.co.jp (new site format).
@@ -93,19 +94,19 @@ func (s *Scraper) extractDescriptionNewSite(doc *goquery.Document) string {
 		}
 	})
 	if jsonDesc != "" {
-		return cleanString(jsonDesc)
+		return scraperutil.CleanString(jsonDesc)
 	}
 
 	// 2. Try og:description meta tag as fallback
 	desc, exists := doc.Find(`meta[property="og:description"]`).Attr("content")
 	if exists && desc != "" {
-		return cleanString(desc)
+		return scraperutil.CleanString(desc)
 	}
 
 	// 3. Try regular meta description as last resort
 	desc, exists = doc.Find(`meta[name="description"]`).Attr("content")
 	if exists && desc != "" {
-		return cleanString(desc)
+		return scraperutil.CleanString(desc)
 	}
 
 	return ""
@@ -356,7 +357,7 @@ func (s *Scraper) extractSeriesNewSite(doc *goquery.Document) string {
 			}
 		}
 	})
-	return cleanString(series)
+	return scraperutil.CleanString(series)
 }
 
 // extractMakerNewSite extracts maker from video.dmm.co.jp
@@ -375,7 +376,7 @@ func (s *Scraper) extractMakerNewSite(doc *goquery.Document) string {
 			}
 		}
 	})
-	return cleanString(maker)
+	return scraperutil.CleanString(maker)
 }
 
 // extractRatingNewSite extracts rating from video.dmm.co.jp JSON-LD data

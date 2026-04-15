@@ -16,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 const (
@@ -120,7 +121,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		client = httpclient.NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)
 	}
 
-	lang := normalizeLanguage(settings.Language)
+	lang := scraperutil.NormalizeLanguage(settings.Language)
 
 	s := &Scraper{
 		client:      client,
@@ -310,10 +311,10 @@ func (s *Scraper) parseScene(scene *Scene, searchID string) (*models.ScraperResu
 		Language:    s.language,
 		ID:          searchID,
 		ContentID:   scene.Code,
-		Title:       cleanString(scene.Title),
-		Description: cleanString(scene.Details),
+		Title:       scraperutil.CleanString(scene.Title),
+		Description: scraperutil.CleanString(scene.Details),
 		Runtime:     scene.Duration,
-		Director:    cleanString(scene.Director),
+		Director:    scraperutil.CleanString(scene.Director),
 	}
 
 	if result.ContentID == "" {
@@ -328,19 +329,19 @@ func (s *Scraper) parseScene(scene *Scene, searchID string) (*models.ScraperResu
 	}
 
 	if scene.Studio != nil {
-		result.Maker = cleanString(scene.Studio.Name)
+		result.Maker = scraperutil.CleanString(scene.Studio.Name)
 	}
 
 	result.Actresses = make([]models.ActressInfo, 0, len(scene.Performers))
 	for _, p := range scene.Performers {
 		result.Actresses = append(result.Actresses, models.ActressInfo{
-			JapaneseName: cleanString(p.Performer.Name),
+			JapaneseName: scraperutil.CleanString(p.Performer.Name),
 		})
 	}
 
 	result.Genres = make([]string, 0, len(scene.Tags))
 	for _, tag := range scene.Tags {
-		result.Genres = append(result.Genres, cleanString(tag.Name))
+		result.Genres = append(result.Genres, scraperutil.CleanString(tag.Name))
 	}
 
 	if len(scene.Images) > 0 {
@@ -387,22 +388,4 @@ func extractDMMContentID(url string) string {
 		return url[start:]
 	}
 	return url[start : start+end]
-}
-
-func normalizeLanguage(lang string) string {
-	lang = strings.ToLower(strings.TrimSpace(lang))
-	if lang == "ja" {
-		return "ja"
-	}
-	return "en"
-}
-
-func cleanString(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	for strings.Contains(s, "  ") {
-		s = strings.ReplaceAll(s, "  ", " ")
-	}
-	return s
 }

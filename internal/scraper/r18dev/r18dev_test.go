@@ -13,6 +13,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -515,7 +516,7 @@ func TestCleanString(t *testing.T) {
 		{
 			name:     "Remove carriage returns",
 			input:    "hello\rworld",
-			expected: "helloworld",
+			expected: "hello world",
 		},
 		{
 			name:     "Multiple spaces",
@@ -541,7 +542,7 @@ func TestCleanString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := cleanString(tt.input)
+			result := scraperutil.CleanString(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -1267,7 +1268,7 @@ func TestNormalizeLanguage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		assert.Equal(t, tt.want, normalizeLanguage(tt.in))
+		assert.Equal(t, tt.want, scraperutil.NormalizeLanguage(tt.in))
 	}
 }
 

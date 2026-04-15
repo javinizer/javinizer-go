@@ -94,6 +94,24 @@ func TestResolvePosterReferer(t *testing.T) {
 			configured: "https://www.dmm.co.jp/",
 			expected:   "https://www.dmm.co.jp/",
 		},
+		{
+			name:       "empty URL with empty referer returns empty",
+			url:        "",
+			configured: "",
+			expected:   "",
+		},
+		{
+			name:       "http URL uses origin fallback",
+			url:        "http://images.example.com/cover.jpg",
+			configured: "",
+			expected:   "http://images.example.com/",
+		},
+		{
+			name:       "nil resolver with configured referer uses configured",
+			url:        "https://example.com/cover.jpg",
+			configured: "https://configured.example/",
+			expected:   "https://configured.example/",
+		},
 	}
 
 	for _, tt := range tests {
@@ -366,4 +384,82 @@ func TestGenerateCroppedPoster_RealSuccess(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	assert.Greater(t, info.Size(), int64(0))
+}
+
+func TestResolvePosterReferer_NilResolver(t *testing.T) {
+	tests := []struct {
+		name       string
+		url        string
+		configured string
+		expected   string
+	}{
+		{
+			name:       "nil resolver uses configured referer",
+			url:        "https://example.com/cover.jpg",
+			configured: "https://configured.example/",
+			expected:   "https://configured.example/",
+		},
+		{
+			name:       "nil resolver with empty referer falls back to origin",
+			url:        "https://images.example.com/cover.jpg",
+			configured: "",
+			expected:   "https://images.example.com/",
+		},
+		{
+			name:       "nil resolver with invalid URL falls back to configured",
+			url:        "://invalid",
+			configured: "https://configured.example/",
+			expected:   "https://configured.example/",
+		},
+		{
+			name:       "nil resolver with empty URL and empty referer",
+			url:        "",
+			configured: "",
+			expected:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			referer := resolvePosterReferer(tt.url, tt.configured, nil)
+			assert.Equal(t, tt.expected, referer,
+				"resolvePosterReferer(%q, %q, nil) = %q, want %q", tt.url, tt.configured, referer, tt.expected)
+		})
+	}
+}
+
+func TestResolvePosterReferer_CustomResolver(t *testing.T) {
+	customResolver := func(downloadURL, configuredReferer string) string {
+		if downloadURL == "https://custom.host/image.jpg" {
+			return "https://custom-referer.example/"
+		}
+		return ""
+	}
+
+	tests := []struct {
+		name       string
+		url        string
+		configured string
+		expected   string
+	}{
+		{
+			name:       "custom resolver overrides for matching URL",
+			url:        "https://custom.host/image.jpg",
+			configured: "https://configured.example/",
+			expected:   "https://custom-referer.example/",
+		},
+		{
+			name:       "custom resolver returns empty, falls back to configured",
+			url:        "https://other.host/image.jpg",
+			configured: "https://configured.example/",
+			expected:   "https://configured.example/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			referer := resolvePosterReferer(tt.url, tt.configured, RefererResolver(customResolver))
+			assert.Equal(t, tt.expected, referer)
+		})
+	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 const (
@@ -516,7 +517,7 @@ func extractTableValue(doc *goquery.Document, headerText string) string {
 		th := row.Find("th").First()
 		if strings.Contains(th.Text(), headerText) {
 			td := row.Find("td").First()
-			value = cleanString(td.Text())
+			value = scraperutil.CleanString(td.Text())
 		}
 	})
 
@@ -531,7 +532,7 @@ func extractTableValue(doc *goquery.Document, headerText string) string {
 				// Get the next sibling which should be the <td>
 				next := sel.Next()
 				if next.Is("td") {
-					value = cleanString(next.Text())
+					value = scraperutil.CleanString(next.Text())
 				}
 			}
 		})
@@ -554,7 +555,7 @@ func extractTableLinkValue(doc *goquery.Document, headerText string) string {
 		th := row.Find("th").First()
 		if strings.Contains(th.Text(), headerText) {
 			link := row.Find("td a").First()
-			value = cleanString(link.Text())
+			value = scraperutil.CleanString(link.Text())
 		}
 	})
 
@@ -570,7 +571,7 @@ func extractTableLinkValue(doc *goquery.Document, headerText string) string {
 				next := sel.Next()
 				if next.Is("td") {
 					link := next.Find("a").First()
-					value = cleanString(link.Text())
+					value = scraperutil.CleanString(link.Text())
 				}
 			}
 		})
@@ -589,7 +590,7 @@ func extractGenres(doc *goquery.Document) []string {
 		th := row.Find("th").First()
 		if strings.Contains(th.Text(), "ジャンル：") {
 			row.Find("td a").Each(func(j int, link *goquery.Selection) {
-				genre := cleanString(link.Text())
+				genre := scraperutil.CleanString(link.Text())
 				if genre != "" && !seen[genre] {
 					seen[genre] = true
 					genres = append(genres, genre)
@@ -604,7 +605,7 @@ func extractGenres(doc *goquery.Document) []string {
 			next := sel.Next()
 			if next.Is("td") {
 				next.Find("a").Each(func(j int, link *goquery.Selection) {
-					genre := cleanString(link.Text())
+					genre := scraperutil.CleanString(link.Text())
 					if genre != "" && !seen[genre] {
 						seen[genre] = true
 						genres = append(genres, genre)
@@ -612,7 +613,7 @@ func extractGenres(doc *goquery.Document) []string {
 				})
 				// Also extract text content if no links (genres might be plain text)
 				if len(genres) == 0 {
-					text := cleanString(next.Text())
+					text := scraperutil.CleanString(next.Text())
 					if text != "" && !seen[text] {
 						seen[text] = true
 						genres = append(genres, text)
@@ -635,7 +636,7 @@ func extractActresses(doc *goquery.Document) []models.ActressInfo {
 		th := row.Find("th").First()
 		if strings.Contains(th.Text(), "出演：") {
 			row.Find("td a").Each(func(j int, link *goquery.Selection) {
-				name := cleanString(link.Text())
+				name := scraperutil.CleanString(link.Text())
 				if name == "" || seen[name] {
 					return
 				}
@@ -651,7 +652,7 @@ func extractActresses(doc *goquery.Document) []models.ActressInfo {
 			next := sel.Next()
 			if next.Is("td") {
 				next.Find("a").Each(func(j int, link *goquery.Selection) {
-					name := cleanString(link.Text())
+					name := scraperutil.CleanString(link.Text())
 					if name == "" || seen[name] {
 						return
 					}
@@ -845,7 +846,7 @@ func extractDescription(doc *goquery.Document) string {
 	}
 
 	for _, selector := range selectors {
-		text := cleanString(doc.Find(selector).First().Text())
+		text := scraperutil.CleanString(doc.Find(selector).First().Text())
 		if text != "" {
 			return text
 		}
@@ -857,26 +858,13 @@ func extractDescription(doc *goquery.Document) string {
 		if !exists {
 			continue
 		}
-		text := cleanString(content)
+		text := scraperutil.CleanString(content)
 		if text != "" && !isGenericMGStageDescription(text) {
 			return text
 		}
 	}
 
 	return ""
-}
-
-// cleanString removes extra whitespace and newlines
-func cleanString(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	s = strings.ReplaceAll(s, "\t", " ")
-	// Replace multiple spaces with single space
-	for strings.Contains(s, "  ") {
-		s = strings.ReplaceAll(s, "  ", " ")
-	}
-	return s
 }
 
 // cleanTitle extracts the clean title from MGStage page title
@@ -886,7 +874,7 @@ func cleanTitle(title string) string {
 	re := regexp.MustCompile(`「([^」]+)」`)
 	matches := re.FindStringSubmatch(title)
 	if len(matches) > 1 {
-		return cleanString(matches[1])
+		return scraperutil.CleanString(matches[1])
 	}
 
 	// Fallback: Remove site suffix patterns
@@ -908,7 +896,7 @@ func cleanTitle(title string) string {
 	title = strings.TrimSuffix(title, " - MGStage")
 	title = strings.TrimSuffix(title, "- MGStage")
 
-	cleaned := cleanString(title)
+	cleaned := scraperutil.CleanString(title)
 	if isGenericMGStageTitle(cleaned) {
 		return ""
 	}
@@ -951,7 +939,7 @@ func mgstageIDsMatch(requestedID, parsedID string) bool {
 }
 
 func isGenericMGStageTitle(title string) bool {
-	title = cleanString(title)
+	title = scraperutil.CleanString(title)
 	if title == "" {
 		return false
 	}
@@ -964,7 +952,7 @@ func isGenericMGStageTitle(title string) bool {
 }
 
 func isGenericMGStageDescription(description string) bool {
-	description = cleanString(description)
+	description = scraperutil.CleanString(description)
 	if description == "" {
 		return false
 	}

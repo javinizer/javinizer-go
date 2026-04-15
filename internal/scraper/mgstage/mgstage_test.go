@@ -15,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1159,9 +1160,9 @@ func TestCleanString(t *testing.T) {
 			want:  "hello world",
 		},
 		{
-			name:  "carriage returns removed (not replaced with space)",
+			name:  "carriage returns replaced with space",
 			input: "hello\rworld",
-			want:  "helloworld", // \r is removed, not replaced with space
+			want:  "hello world",
 		},
 		{
 			name:  "tabs replaced with space",
@@ -1182,7 +1183,7 @@ func TestCleanString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := cleanString(tt.input)
+			result := scraperutil.CleanString(tt.input)
 			assert.Equal(t, tt.want, result)
 		})
 	}

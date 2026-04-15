@@ -15,6 +15,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -318,16 +319,16 @@ func TestCleanString(t *testing.T) {
 	}{
 		{"with newlines", "Hello\nWorld", "Hello World"},
 		{"with tabs", "Hello\tWorld", "Hello World"},
-		{"with carriage returns", "Hello\rWorld", "HelloWorld"},
+		{"with carriage returns", "Hello\rWorld", "Hello World"},
 		{"multiple spaces", "Hello    World", "Hello World"},
 		{"leading/trailing spaces", "  Hello World  ", "Hello World"},
-		{"mixed whitespace", "  Hello\n\tWorld  \r", "Hello World"}, // tabs/newlines -> space, then collapse
+		{"mixed whitespace", "  Hello\n\tWorld  \r", "Hello World"},
 		{"already clean", "Hello World", "Hello World"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := cleanString(tt.input)
+			result := scraperutil.CleanString(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

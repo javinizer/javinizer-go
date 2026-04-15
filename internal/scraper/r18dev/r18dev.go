@@ -19,6 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper/image/placeholder"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 const (
@@ -62,7 +63,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		client = httpclient.NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)
 	}
 
-	language := normalizeLanguage(settings.Language)
+	language := scraperutil.NormalizeLanguage(settings.Language)
 
 	// Add browser-like headers to help bypass protection
 	client.SetHeader("Accept", "application/json, text/html, */*")
@@ -433,9 +434,9 @@ func (s *Scraper) parseResponse(data *R18Response, sourceURL string) (*models.Sc
 		Language:      s.language,
 		ID:            movieID,
 		ContentID:     data.ContentID,
-		Title:         cleanString(selectLocalizedString(s.language, data.TitleEn, data.TitleJA)),
-		OriginalTitle: cleanString(data.TitleJA), // Japanese title
-		Description:   cleanString(selectLocalizedString(s.language, data.DescriptionEn, data.Description)),
+		Title:         scraperutil.CleanString(selectLocalizedString(s.language, data.TitleEn, data.TitleJA)),
+		OriginalTitle: scraperutil.CleanString(data.TitleJA), // Japanese title
+		Description:   scraperutil.CleanString(selectLocalizedString(s.language, data.DescriptionEn, data.Description)),
 		Runtime:       data.Runtime,
 	}
 
@@ -455,33 +456,33 @@ func (s *Scraper) parseResponse(data *R18Response, sourceURL string) (*models.Sc
 	if len(data.Directors) > 0 {
 		// Use directors array (new API format)
 		if s.language == "ja" {
-			result.Director = cleanString(getPreferredString(data.Directors[0].NameKanji, data.Directors[0].NameRomaji))
+			result.Director = scraperutil.CleanString(getPreferredString(data.Directors[0].NameKanji, data.Directors[0].NameRomaji))
 		} else {
-			result.Director = cleanString(getPreferredString(data.Directors[0].NameRomaji, data.Directors[0].NameKanji))
+			result.Director = scraperutil.CleanString(getPreferredString(data.Directors[0].NameRomaji, data.Directors[0].NameKanji))
 		}
 	} else {
 		// Use legacy flat fields
-		result.Director = cleanString(selectLocalizedString(s.language, data.DirectorEn, data.Director))
+		result.Director = scraperutil.CleanString(selectLocalizedString(s.language, data.DirectorEn, data.Director))
 	}
 
 	// Parse maker/studio based on configured language preference.
-	result.Maker = cleanString(selectLocalizedString(s.language, data.MakerNameEn, data.MakerNameJa))
+	result.Maker = scraperutil.CleanString(selectLocalizedString(s.language, data.MakerNameEn, data.MakerNameJa))
 	if result.Maker == "" {
 		// Fallback to nested structure (legacy format)
-		result.Maker = cleanString(selectLocalizedString(s.language, "", data.Maker.Name))
+		result.Maker = scraperutil.CleanString(selectLocalizedString(s.language, "", data.Maker.Name))
 	}
 
-	result.Label = cleanString(selectLocalizedString(s.language, data.LabelNameEn, data.LabelNameJa))
+	result.Label = scraperutil.CleanString(selectLocalizedString(s.language, data.LabelNameEn, data.LabelNameJa))
 	if result.Label == "" {
 		// Fallback to nested structure (legacy format)
-		result.Label = cleanString(selectLocalizedString(s.language, "", data.Label.Name))
+		result.Label = scraperutil.CleanString(selectLocalizedString(s.language, "", data.Label.Name))
 	}
 
 	// Parse series based on configured language preference.
 	if s.language == "ja" {
-		result.Series = cleanString(getPreferredString(data.SeriesNameJa, getPreferredString(data.Series.Name, getPreferredString(data.SeriesName, data.SeriesNameEn))))
+		result.Series = scraperutil.CleanString(getPreferredString(data.SeriesNameJa, getPreferredString(data.Series.Name, getPreferredString(data.SeriesName, data.SeriesNameEn))))
 	} else {
-		result.Series = cleanString(getPreferredString(data.SeriesNameEn, getPreferredString(data.SeriesNameJa, getPreferredString(data.Series.Name, data.SeriesName))))
+		result.Series = scraperutil.CleanString(getPreferredString(data.SeriesNameEn, getPreferredString(data.SeriesNameJa, getPreferredString(data.Series.Name, data.SeriesName))))
 	}
 
 	// Parse actresses with detailed information
@@ -533,7 +534,7 @@ func (s *Scraper) parseResponse(data *R18Response, sourceURL string) (*models.Sc
 			DMMID:        actress.ID,
 			FirstName:    firstName,
 			LastName:     lastName,
-			JapaneseName: cleanString(actress.NameKanji), // Use kanji name as Japanese name
+			JapaneseName: scraperutil.CleanString(actress.NameKanji), // Use kanji name as Japanese name
 			ThumbURL:     thumbURL,
 		})
 	}
@@ -544,10 +545,10 @@ func (s *Scraper) parseResponse(data *R18Response, sourceURL string) (*models.Sc
 		var genreName string
 		if s.language == "ja" {
 			// Japanese mode: prefer name_ja, fallback to name_en, then legacy name
-			genreName = cleanString(getPreferredString(category.NameJa, getPreferredString(category.NameEn, category.Name)))
+			genreName = scraperutil.CleanString(getPreferredString(category.NameJa, getPreferredString(category.NameEn, category.Name)))
 		} else {
 			// English mode: prefer name_en, fallback to name_ja, then legacy name
-			genreName = cleanString(getPreferredString(category.NameEn, getPreferredString(category.NameJa, category.Name)))
+			genreName = scraperutil.CleanString(getPreferredString(category.NameEn, getPreferredString(category.NameJa, category.Name)))
 		}
 		if genreName != "" {
 			result.Genres = append(result.Genres, genreName)
@@ -708,18 +709,6 @@ func contentIDToID(contentID string) string {
 	return strings.ToUpper(contentID)
 }
 
-// cleanString removes extra whitespace and newlines
-func cleanString(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	// Replace multiple spaces with single space
-	for strings.Contains(s, "  ") {
-		s = strings.ReplaceAll(s, "  ", " ")
-	}
-	return s
-}
-
 // getPreferredString returns the first non-empty string from the arguments
 func getPreferredString(preferred, fallback string) string {
 	if preferred != "" {
@@ -733,13 +722,6 @@ func selectLocalizedString(language, englishValue, japaneseValue string) string 
 		return getPreferredString(japaneseValue, englishValue)
 	}
 	return getPreferredString(englishValue, japaneseValue)
-}
-
-func normalizeLanguage(lang string) string {
-	if strings.ToLower(strings.TrimSpace(lang)) == "ja" {
-		return "ja"
-	}
-	return "en"
 }
 
 // R18Response represents the JSON response from R18.dev API (current format)
@@ -844,20 +826,20 @@ func (s *Scraper) buildTranslations(data *R18Response, movieID string) []models.
 		// Build director from English preference
 		directorEn := ""
 		if len(data.Directors) > 0 {
-			directorEn = cleanString(getPreferredString(data.Directors[0].NameRomaji, data.Directors[0].NameKanji))
+			directorEn = scraperutil.CleanString(getPreferredString(data.Directors[0].NameRomaji, data.Directors[0].NameKanji))
 		} else {
-			directorEn = cleanString(getPreferredString(data.DirectorEn, data.Director))
+			directorEn = scraperutil.CleanString(getPreferredString(data.DirectorEn, data.Director))
 		}
 
 		translations = append(translations, models.MovieTranslation{
 			Language:      "en",
-			Title:         cleanString(data.TitleEn),
-			OriginalTitle: cleanString(data.TitleJA),
-			Description:   cleanString(data.DescriptionEn),
+			Title:         scraperutil.CleanString(data.TitleEn),
+			OriginalTitle: scraperutil.CleanString(data.TitleJA),
+			Description:   scraperutil.CleanString(data.DescriptionEn),
 			Director:      directorEn,
-			Maker:         cleanString(data.MakerNameEn),
-			Label:         cleanString(data.LabelNameEn),
-			Series:        cleanString(data.SeriesNameEn),
+			Maker:         scraperutil.CleanString(data.MakerNameEn),
+			Label:         scraperutil.CleanString(data.LabelNameEn),
+			Series:        scraperutil.CleanString(data.SeriesNameEn),
 			SourceName:    s.Name(),
 		})
 	}
@@ -869,20 +851,20 @@ func (s *Scraper) buildTranslations(data *R18Response, movieID string) []models.
 		// Build director from Japanese preference
 		directorJa := ""
 		if len(data.Directors) > 0 {
-			directorJa = cleanString(getPreferredString(data.Directors[0].NameKanji, data.Directors[0].NameRomaji))
+			directorJa = scraperutil.CleanString(getPreferredString(data.Directors[0].NameKanji, data.Directors[0].NameRomaji))
 		} else {
-			directorJa = cleanString(getPreferredString(data.Director, data.DirectorEn))
+			directorJa = scraperutil.CleanString(getPreferredString(data.Director, data.DirectorEn))
 		}
 
 		translations = append(translations, models.MovieTranslation{
 			Language:      "ja",
-			Title:         cleanString(data.TitleJA),
-			OriginalTitle: cleanString(data.TitleJA),
-			Description:   cleanString(data.Description),
+			Title:         scraperutil.CleanString(data.TitleJA),
+			OriginalTitle: scraperutil.CleanString(data.TitleJA),
+			Description:   scraperutil.CleanString(data.Description),
 			Director:      directorJa,
-			Maker:         cleanString(data.MakerNameJa),
-			Label:         cleanString(data.LabelNameJa),
-			Series:        cleanString(data.SeriesNameJa),
+			Maker:         scraperutil.CleanString(data.MakerNameJa),
+			Label:         scraperutil.CleanString(data.LabelNameJa),
+			Series:        scraperutil.CleanString(data.SeriesNameJa),
 			SourceName:    s.Name(),
 		})
 	}

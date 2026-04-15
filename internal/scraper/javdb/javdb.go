@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"golang.org/x/net/html"
 )
 
@@ -33,11 +34,6 @@ var (
 	votesRegex       = regexp.MustCompile(`([0-9][0-9,]*)`)
 	// URL extraction pattern
 	javdbVideoPathRegex = regexp.MustCompile(`/v/([A-Za-z0-9]+)`)
-	dateFormats         = []string{
-		"2006-01-02",
-		"2006/01/02",
-		"2006.01.02",
-	}
 )
 
 // Scraper implements the JavDB scraper.
@@ -408,7 +404,7 @@ func (s *Scraper) findDetailURL(id string) (string, error) {
 			match := idMatchRank(c, targetID)
 			if match > bestMatch {
 				bestMatch = match
-				foundURL = resolveURL(s.baseURL, href)
+				foundURL = scraperutil.ResolveURL(s.baseURL, href)
 			}
 			if match == idMatchExact {
 				return false
@@ -425,7 +421,7 @@ func (s *Scraper) findDetailURL(id string) (string, error) {
 	detailLinks := make([]string, 0, 1)
 	doc.Find(".movie-list .item a[href]").Each(func(_ int, sel *goquery.Selection) {
 		if href, ok := sel.Attr("href"); ok && strings.Contains(href, "/v/") {
-			detailLinks = append(detailLinks, resolveURL(s.baseURL, href))
+			detailLinks = append(detailLinks, scraperutil.ResolveURL(s.baseURL, href))
 		}
 	})
 	if len(detailLinks) == 1 {
@@ -533,8 +529,8 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 	}
 
 	titleNode := doc.Find(".title.is-4").First()
-	fullTitle := cleanString(titleNode.Text())
-	idFromTitle := cleanString(titleNode.Find("strong").First().Text())
+	fullTitle := scraperutil.CleanString(titleNode.Text())
+	idFromTitle := scraperutil.CleanString(titleNode.Find("strong").First().Text())
 	if idFromTitle != "" {
 		result.ID = idFromTitle
 	}
@@ -544,7 +540,7 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 	}
 
 	if fullTitle == "" {
-		fullTitle = cleanString(doc.Find("meta[property='og:title']").AttrOr("content", ""))
+		fullTitle = scraperutil.CleanString(doc.Find("meta[property='og:title']").AttrOr("content", ""))
 	}
 	result.Title = fullTitle
 	result.OriginalTitle = fullTitle
@@ -558,9 +554,9 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 	result.TrailerURL = extractTrailerURL(doc, s.baseURL)
 	result.ScreenshotURL = extractScreenshotURLs(doc, s.baseURL)
 
-	description := cleanString(doc.Find("span[itemprop='description']").First().Text())
+	description := scraperutil.CleanString(doc.Find("span[itemprop='description']").First().Text())
 	if description == "" {
-		description = cleanString(doc.Find(".movie-panel-info .movie-description").First().Text())
+		description = scraperutil.CleanString(doc.Find(".movie-panel-info .movie-description").First().Text())
 	}
 	result.Description = description
 
@@ -572,7 +568,7 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 		if valueNode.Length() == 0 {
 			valueNode = block
 		}
-		valueText := cleanString(valueNode.Text())
+		valueText := scraperutil.CleanString(valueNode.Text())
 
 		switch {
 		case labelContains(label, "番號", "番号", "識別碼", "识别码", "ID"):
@@ -580,7 +576,7 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 				result.ID = valueText
 			}
 		case labelContains(label, "日期", "發行日期", "发行日期", "release"):
-			if t := parseDate(valueText); t != nil {
+			if t := scraperutil.ParseDate(valueText); t != nil {
 				result.ReleaseDate = t
 			}
 		case labelContains(label, "時長", "长度", "長度", "runtime", "length", "duration"):
@@ -622,7 +618,7 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 	if result.ID == "" {
 		result.ID = fallbackID
 	}
-	result.ID = cleanString(result.ID)
+	result.ID = scraperutil.CleanString(result.ID)
 	result.ContentID = result.ID
 
 	if result.Title == "" {
@@ -712,29 +708,8 @@ func trimVariantSuffix(id string) string {
 	return id
 }
 
-func resolveURL(baseURL, rawURL string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return ""
-	}
-	if strings.HasPrefix(rawURL, "//") {
-		return "https:" + rawURL
-	}
-	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
-		return rawURL
-	}
-	if strings.HasPrefix(rawURL, "/") {
-		return strings.TrimRight(baseURL, "/") + rawURL
-	}
-	return strings.TrimRight(baseURL, "/") + "/" + rawURL
-}
-
-func cleanString(s string) string {
-	return strings.TrimSpace(strings.Join(strings.Fields(strings.TrimSpace(s)), " "))
-}
-
 func normalizeLabel(s string) string {
-	s = cleanString(s)
+	s = scraperutil.CleanString(s)
 	s = strings.TrimSuffix(s, ":")
 	s = strings.TrimSuffix(s, "：")
 	return strings.ToLower(s)
@@ -772,24 +747,14 @@ func classifyCastLabel(label string) castLabelKind {
 }
 
 func extractFirstText(sel *goquery.Selection) string {
-	if text := cleanString(sel.Find("a").First().Text()); text != "" {
+	if text := scraperutil.CleanString(sel.Find("a").First().Text()); text != "" {
 		return text
 	}
-	return cleanString(sel.Text())
-}
-
-func parseDate(s string) *time.Time {
-	s = cleanString(s)
-	for _, f := range dateFormats {
-		if t, err := time.Parse(f, s); err == nil {
-			return &t
-		}
-	}
-	return nil
+	return scraperutil.CleanString(sel.Text())
 }
 
 func parseRuntime(s string) int {
-	matches := runtimeRegex.FindStringSubmatch(cleanString(s))
+	matches := runtimeRegex.FindStringSubmatch(scraperutil.CleanString(s))
 	if len(matches) < 2 {
 		return 0
 	}
@@ -798,7 +763,7 @@ func parseRuntime(s string) int {
 }
 
 func parseRating(s string) *models.Rating {
-	s = cleanString(s)
+	s = scraperutil.CleanString(s)
 	if s == "" {
 		return nil
 	}
@@ -844,7 +809,7 @@ func extractActresses(sel *goquery.Selection) []models.ActressInfo {
 	hasSymbolGender := false
 
 	sel.Find("a").Each(func(_ int, a *goquery.Selection) {
-		name := cleanString(a.Text())
+		name := scraperutil.CleanString(a.Text())
 		if name == "" || seen[name] {
 			return
 		}
@@ -916,9 +881,9 @@ func isLikelyMaleActorLink(sel *goquery.Selection) bool {
 	}
 
 	// Common patterns: male marker appears near the anchor in sibling text.
-	context := strings.ToLower(cleanString(sel.Parent().Text()))
+	context := strings.ToLower(scraperutil.CleanString(sel.Parent().Text()))
 	if context == "" {
-		context = strings.ToLower(cleanString(sel.Text()))
+		context = strings.ToLower(scraperutil.CleanString(sel.Text()))
 	}
 
 	hasMaleMarker := strings.Contains(context, "♂") ||
@@ -1039,7 +1004,7 @@ func extractStringList(sel *goquery.Selection) []string {
 	seen := make(map[string]bool)
 
 	sel.Find("a").Each(func(_ int, a *goquery.Selection) {
-		v := cleanString(a.Text())
+		v := scraperutil.CleanString(a.Text())
 		if v != "" && !seen[v] {
 			seen[v] = true
 			values = append(values, v)
@@ -1049,7 +1014,7 @@ func extractStringList(sel *goquery.Selection) []string {
 		return values
 	}
 
-	raw := cleanString(sel.Text())
+	raw := scraperutil.CleanString(sel.Text())
 	if raw == "" || isNotAvailableValue(raw) {
 		return nil
 	}
@@ -1057,7 +1022,7 @@ func extractStringList(sel *goquery.Selection) []string {
 		return r == ',' || r == '/' || r == '、'
 	})
 	for _, p := range parts {
-		v := cleanString(p)
+		v := scraperutil.CleanString(p)
 		if v == "" || isNotAvailableValue(v) {
 			continue
 		}
@@ -1097,7 +1062,7 @@ func extractFirstURL(doc *goquery.Document, selectors []string, baseURL string) 
 		}
 		for _, attr := range []string{"data-original", "data-src", "src"} {
 			if val := node.AttrOr(attr, ""); val != "" {
-				return resolveURL(baseURL, val)
+				return scraperutil.ResolveURL(baseURL, val)
 			}
 		}
 	}
@@ -1112,7 +1077,7 @@ func extractScreenshotURLs(doc *goquery.Document, baseURL string) []string {
 		if strings.Contains(raw, "/login") {
 			return
 		}
-		u := resolveURL(baseURL, raw)
+		u := scraperutil.ResolveURL(baseURL, raw)
 		if u == "" || seen[u] {
 			return
 		}
@@ -1150,7 +1115,7 @@ func extractTrailerURL(doc *goquery.Document, baseURL string) string {
 		"video source[src]",
 	} {
 		if src := doc.Find(selector).First().AttrOr("src", ""); src != "" {
-			return resolveURL(baseURL, src)
+			return scraperutil.ResolveURL(baseURL, src)
 		}
 	}
 	return ""

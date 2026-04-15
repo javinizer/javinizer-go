@@ -852,3 +852,27 @@ func TestStaticFieldsEmpty(t *testing.T) {
 	assert.Empty(t, nfo.Tagline)
 	assert.Empty(t, nfo.Credits)
 }
+
+func TestNormalizeActressNameForDedup(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"simple name", "Alice", "alice"},
+		{"name with spaces", "  Alice  ", "alice"},
+		{"multiple spaces", "Alice   Bob", "alice bob"},
+		{"tabs and newlines", "Alice\t\nBob", "alice bob"},
+		{"empty string", "", ""},
+		{"whitespace only", "   ", ""},
+		{"mixed case", "AlIcE BoB", "alice bob"},
+		{"japanese name", "田中太郎", "田中太郎"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeActressNameForDedup(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

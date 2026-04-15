@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Eyevinn/mp4ff/mp4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -201,7 +202,6 @@ func TestMOVProber_Probe_InvalidBrand(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	// Write a minimal MP4 file structure with isom brand (not QuickTime)
 	ftypSize := uint32(24)
 	ftyp := make([]byte, ftypSize)
 	ftyp[0] = byte(ftypSize >> 24)
@@ -209,12 +209,12 @@ func TestMOVProber_Probe_InvalidBrand(t *testing.T) {
 	ftyp[2] = byte(ftypSize >> 8)
 	ftyp[3] = byte(ftypSize)
 	copy(ftyp[4:8], "ftyp")
-	copy(ftyp[8:12], "isom") // Not QuickTime
+	copy(ftyp[8:12], "isom")
 	ftyp[12] = 0
 	ftyp[13] = 0
 	ftyp[14] = 0
 	ftyp[15] = 2
-	copy(ftyp[16:20], "isom") // compatible brand
+	copy(ftyp[16:20], "isom")
 
 	_, err = f.Write(ftyp)
 	require.NoError(t, err)
@@ -229,4 +229,307 @@ func TestMOVProber_Probe_InvalidBrand(t *testing.T) {
 	prober := NewMOVProber()
 	result := prober.CanProbe([]byte("isom"))
 	assert.False(t, result, "MOV prober should not handle isom brand")
+}
+
+func TestMP4Prober_Name(t *testing.T) {
+	prober := NewMP4Prober()
+	assert.Equal(t, "mp4", prober.Name())
+}
+
+func TestAnalyzeMP4_InvalidFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	invalidPath := filepath.Join(tmpDir, "invalid.mp4")
+	require.NoError(t, os.WriteFile(invalidPath, []byte("not a real mp4 file content at all"), 0644))
+
+	f, err := os.Open(invalidPath)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	_, err = analyzeMP4(f)
+	assert.Error(t, err)
+}
+
+func TestMapMP4VideoCodec_Extended(t *testing.T) {
+	tests := []struct {
+		name     string
+		fourcc   string
+		expected string
+	}{
+		{"avc1", "avc1", "h264"},
+		{"avc3", "avc3", "h264"},
+		{"hvc1", "hvc1", "hevc"},
+		{"hev1", "hev1", "hevc"},
+		{"vp09", "vp09", "vp9"},
+		{"vp08", "vp08", "vp8"},
+		{"av01", "av01", "av1"},
+		{"mp4v", "mp4v", "mpeg4"},
+		{"unknown returns as-is", "custom", "custom"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mapMP4VideoCodec(tt.fourcc)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestMapMP4AudioCodec_Extended(t *testing.T) {
+	tests := []struct {
+		name     string
+		fourcc   string
+		expected string
+	}{
+		{"mp4a", "mp4a", "aac"},
+		{".mp3", ".mp3", "mp3"},
+		{"mp3 space", "mp3 ", "mp3"},
+		{"ac-3", "ac-3", "ac3"},
+		{"ec-3", "ec-3", "eac3"},
+		{"opus", "opus", "opus"},
+		{"fLaC", "fLaC", "flac"},
+		{"unknown returns as-is", "custom", "custom"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mapMP4AudioCodec(tt.fourcc)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func createMinimalTrak(t *testing.T, handlerType string, withStsd bool, withSampleEntry bool) *mp4.TrakBox {
+	t.Helper()
+	trak := mp4.NewTrakBox()
+	mdia := mp4.NewMdiaBox()
+	hdlr, err := mp4.CreateHdlr(handlerType)
+	require.NoError(t, err)
+	mdia.Hdlr = hdlr
+	mdia.AddChild(hdlr)
+
+	minf := mp4.NewMinfBox()
+	stbl := mp4.NewStblBox()
+
+	if withStsd {
+		stsd := mp4.NewStsdBox()
+		if withSampleEntry && handlerType == "vide" {
+			visualEntry := mp4.CreateVisualSampleEntryBox("avc1", 1920, 1080, nil)
+			stsd.AddChild(visualEntry)
+		}
+		if withSampleEntry && handlerType == "soun" {
+			audioEntry := mp4.CreateAudioSampleEntryBox("mp4a", 2, 16, 44100, nil)
+			stsd.AddChild(audioEntry)
+		}
+		stbl.Stsd = stsd
+		stbl.AddChild(stsd)
+	}
+
+	minf.Stbl = stbl
+	minf.AddChild(stbl)
+	mdia.Minf = minf
+	mdia.AddChild(minf)
+	trak.Mdia = mdia
+	trak.AddChild(mdia)
+
+	return trak
+}
+
+func TestExtractMP4VideoInfo_MissingStsd(t *testing.T) {
+	trak := createMinimalTrak(t, "vide", false, false)
+	info := &VideoInfo{}
+	err := extractMP4VideoInfo(trak, info)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "missing sample description")
+}
+
+func TestExtractMP4AudioInfo_MissingStsd(t *testing.T) {
+	trak := createMinimalTrak(t, "soun", false, false)
+	info := &VideoInfo{}
+	err := extractMP4AudioInfo(trak, info)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "missing sample description")
+}
+
+func TestExtractMP4VideoInfo_NoVisualSampleEntry(t *testing.T) {
+	trak := createMinimalTrak(t, "vide", true, false)
+	info := &VideoInfo{}
+	err := extractMP4VideoInfo(trak, info)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no visual sample entry found")
+}
+
+func TestExtractMP4AudioInfo_NoAudioSampleEntry(t *testing.T) {
+	trak := createMinimalTrak(t, "soun", true, false)
+	info := &VideoInfo{}
+	err := extractMP4AudioInfo(trak, info)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no audio sample entry found")
+}
+
+func TestExtractMP4VideoInfo_WithVisualEntry(t *testing.T) {
+	trak := createMinimalTrak(t, "vide", true, true)
+	info := &VideoInfo{}
+	err := extractMP4VideoInfo(trak, info)
+	assert.NoError(t, err)
+	assert.Equal(t, "h264", info.VideoCodec)
+	assert.Equal(t, 1920, info.Width)
+	assert.Equal(t, 1080, info.Height)
+}
+
+func TestExtractMP4AudioInfo_WithAudioEntry(t *testing.T) {
+	trak := createMinimalTrak(t, "soun", true, true)
+	info := &VideoInfo{}
+	err := extractMP4AudioInfo(trak, info)
+	assert.NoError(t, err)
+	assert.Equal(t, "aac", info.AudioCodec)
+	assert.Equal(t, 2, info.AudioChannels)
+	assert.Equal(t, 44100, info.SampleRate)
+}
+
+func TestExtractMP4VideoInfo_NilMdia(t *testing.T) {
+	trak := mp4.NewTrakBox()
+	info := &VideoInfo{}
+	err := extractMP4VideoInfo(trak, info)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "missing sample description")
+}
+
+func TestExtractMP4AudioInfo_NilMdia(t *testing.T) {
+	trak := mp4.NewTrakBox()
+	info := &VideoInfo{}
+	err := extractMP4AudioInfo(trak, info)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "missing sample description")
+}
+
+func TestExtractMP4VideoInfo_NilMinf(t *testing.T) {
+	trak := mp4.NewTrakBox()
+	mdia := mp4.NewMdiaBox()
+	hdlr, err := mp4.CreateHdlr("vide")
+	require.NoError(t, err)
+	mdia.Hdlr = hdlr
+	mdia.AddChild(hdlr)
+	trak.Mdia = mdia
+	trak.AddChild(mdia)
+
+	info := &VideoInfo{}
+	err = extractMP4VideoInfo(trak, info)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "missing sample description")
+}
+
+func TestExtractMP4AudioInfo_NilMinf(t *testing.T) {
+	trak := mp4.NewTrakBox()
+	mdia := mp4.NewMdiaBox()
+	hdlr, err := mp4.CreateHdlr("soun")
+	require.NoError(t, err)
+	mdia.Hdlr = hdlr
+	mdia.AddChild(hdlr)
+	trak.Mdia = mdia
+	trak.AddChild(mdia)
+
+	info := &VideoInfo{}
+	err = extractMP4AudioInfo(trak, info)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "missing sample description")
+}
+
+func TestExtractMP4VideoInfo_WithHEVCEntry(t *testing.T) {
+	trak := mp4.NewTrakBox()
+	mdia := mp4.NewMdiaBox()
+	hdlr, err := mp4.CreateHdlr("vide")
+	require.NoError(t, err)
+	mdia.Hdlr = hdlr
+	mdia.AddChild(hdlr)
+
+	minf := mp4.NewMinfBox()
+	stbl := mp4.NewStblBox()
+	stsd := mp4.NewStsdBox()
+	visualEntry := mp4.CreateVisualSampleEntryBox("hvc1", 3840, 2160, nil)
+	stsd.AddChild(visualEntry)
+	stbl.Stsd = stsd
+	stbl.AddChild(stsd)
+	minf.Stbl = stbl
+	minf.AddChild(stbl)
+	mdia.Minf = minf
+	mdia.AddChild(minf)
+	trak.Mdia = mdia
+	trak.AddChild(mdia)
+
+	info := &VideoInfo{}
+	err = extractMP4VideoInfo(trak, info)
+	assert.NoError(t, err)
+	assert.Equal(t, "hevc", info.VideoCodec)
+	assert.Equal(t, 3840, info.Width)
+	assert.Equal(t, 2160, info.Height)
+}
+
+func TestExtractMP4AudioInfo_WithAC3Entry(t *testing.T) {
+	trak := mp4.NewTrakBox()
+	mdia := mp4.NewMdiaBox()
+	hdlr, err := mp4.CreateHdlr("soun")
+	require.NoError(t, err)
+	mdia.Hdlr = hdlr
+	mdia.AddChild(hdlr)
+
+	minf := mp4.NewMinfBox()
+	stbl := mp4.NewStblBox()
+	stsd := mp4.NewStsdBox()
+	audioEntry := mp4.CreateAudioSampleEntryBox("ac-3", 6, 16, 48000, nil)
+	stsd.AddChild(audioEntry)
+	stbl.Stsd = stsd
+	stbl.AddChild(stsd)
+	minf.Stbl = stbl
+	minf.AddChild(stbl)
+	mdia.Minf = minf
+	mdia.AddChild(minf)
+	trak.Mdia = mdia
+	trak.AddChild(mdia)
+
+	info := &VideoInfo{}
+	err = extractMP4AudioInfo(trak, info)
+	assert.NoError(t, err)
+	assert.Equal(t, "ac3", info.AudioCodec)
+	assert.Equal(t, 6, info.AudioChannels)
+	assert.Equal(t, 48000, info.SampleRate)
+}
+
+func TestAnalyzeMP4_WithFtypOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	mp4Path := filepath.Join(tmpDir, "ftyp_only.mp4")
+
+	f, err := os.Create(mp4Path)
+	require.NoError(t, err)
+
+	ftypSize := uint32(20)
+	ftyp := make([]byte, ftypSize)
+	ftyp[0] = byte(ftypSize >> 24)
+	ftyp[1] = byte(ftypSize >> 16)
+	ftyp[2] = byte(ftypSize >> 8)
+	ftyp[3] = byte(ftypSize)
+	copy(ftyp[4:8], "ftyp")
+	copy(ftyp[8:12], "isom")
+	copy(ftyp[16:20], "isom")
+
+	_, err = f.Write(ftyp)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	f, err = os.Open(mp4Path)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	info, err := analyzeMP4(f)
+	if err != nil {
+		t.Logf("analyzeMP4 with ftyp-only returned error: %v", err)
+	} else {
+		assert.Equal(t, "mp4", info.Container)
+		assert.Equal(t, 0, info.Width)
+		assert.Equal(t, 0, info.Height)
+	}
+}
+
+func TestMOVProber_Name(t *testing.T) {
+	prober := NewMOVProber()
+	assert.Equal(t, "mov", prober.Name())
 }

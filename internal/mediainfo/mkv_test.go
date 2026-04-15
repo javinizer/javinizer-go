@@ -335,3 +335,31 @@ func TestMapMKVAudioCodec_Extended(t *testing.T) {
 		})
 	}
 }
+
+func TestMKVProber_Name(t *testing.T) {
+	prober := NewMKVProber()
+	assert.Equal(t, "mkv", prober.Name())
+}
+
+func TestExtractMKVPartial_WithBitrateAndAspect(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpPath := filepath.Join(tmpDir, "partial.mkv")
+	require.NoError(t, os.WriteFile(tmpPath, []byte{0x1A, 0x45, 0xDF, 0xA3}, 0644))
+
+	f, err := os.Open(tmpPath)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	info := &VideoInfo{
+		Width:    3840,
+		Height:   2160,
+		Duration: 60.0,
+	}
+
+	result, err := extractMKVPartial(f, info, 5000000)
+	require.NoError(t, err)
+	assert.Equal(t, 3840, result.Width)
+	assert.Equal(t, 2160, result.Height)
+	assert.Greater(t, result.Bitrate, 0)
+	assert.InDelta(t, 3840.0/2160.0, result.AspectRatio, 0.001)
+}

@@ -438,6 +438,241 @@ func TestOrganizer_CopyWithLinkMode_SoftLink(t *testing.T) {
 	}
 }
 
+func TestOrganizer_CopyWithLinkMode_Copy(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sourceFile := filepath.Join(tmpDir, "source", "ipx-535.mp4")
+	if err := os.MkdirAll(filepath.Dir(sourceFile), 0755); err != nil {
+		t.Fatalf("Failed to create source directory: %v", err)
+	}
+	if err := os.WriteFile(sourceFile, []byte("test content for copy"), 0644); err != nil {
+		t.Fatalf("Failed to create source file: %v", err)
+	}
+
+	cfg := &config.OutputConfig{
+		FolderFormat: "<ID>",
+		FileFormat:   "<ID>",
+		RenameFile:   true,
+		MoveToFolder: true,
+	}
+	org := NewOrganizer(afero.NewOsFs(), cfg)
+	movie := createTestMovie()
+
+	match := matcher.MatchResult{
+		File: scanner.FileInfo{
+			Path:      sourceFile,
+			Name:      "ipx-535.mp4",
+			Extension: ".mp4",
+		},
+		ID: "IPX-535",
+	}
+
+	destDir := filepath.Join(tmpDir, "dest")
+	plan, err := org.Plan(match, movie, destDir, false)
+	if err != nil {
+		t.Fatalf("Plan failed: %v", err)
+	}
+
+	result, err := org.CopyWithLinkMode(plan, false, LinkModeNone)
+	if err != nil {
+		t.Fatalf("CopyWithLinkMode copy failed: %v", err)
+	}
+
+	if !result.Moved {
+		t.Error("Expected Moved to be true")
+	}
+	if !result.ShouldGenerateMetadata {
+		t.Error("Expected ShouldGenerateMetadata to be true")
+	}
+
+	copiedContent, err := os.ReadFile(result.NewPath)
+	if err != nil {
+		t.Fatalf("Failed to read copied file: %v", err)
+	}
+	if string(copiedContent) != "test content for copy" {
+		t.Errorf("Copied content mismatch: got %q", string(copiedContent))
+	}
+
+	originalContent, err := os.ReadFile(sourceFile)
+	if err != nil {
+		t.Fatalf("Failed to read original file: %v", err)
+	}
+	if string(originalContent) != "test content for copy" {
+		t.Errorf("Original file should still exist after copy: got %q", string(originalContent))
+	}
+}
+
+func TestOrganizer_CopyWithLinkMode_DryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sourceFile := filepath.Join(tmpDir, "source", "ipx-535.mp4")
+	if err := os.MkdirAll(filepath.Dir(sourceFile), 0755); err != nil {
+		t.Fatalf("Failed to create source directory: %v", err)
+	}
+	if err := os.WriteFile(sourceFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create source file: %v", err)
+	}
+
+	cfg := &config.OutputConfig{
+		FolderFormat: "<ID>",
+		FileFormat:   "<ID>",
+		RenameFile:   true,
+		MoveToFolder: true,
+	}
+	org := NewOrganizer(afero.NewOsFs(), cfg)
+	movie := createTestMovie()
+
+	match := matcher.MatchResult{
+		File: scanner.FileInfo{
+			Path:      sourceFile,
+			Name:      "ipx-535.mp4",
+			Extension: ".mp4",
+		},
+		ID: "IPX-535",
+	}
+
+	destDir := filepath.Join(tmpDir, "dest")
+	plan, err := org.Plan(match, movie, destDir, false)
+	if err != nil {
+		t.Fatalf("Plan failed: %v", err)
+	}
+
+	result, err := org.CopyWithLinkMode(plan, true, LinkModeHard)
+	if err != nil {
+		t.Fatalf("CopyWithLinkMode dry-run failed: %v", err)
+	}
+
+	if result.Moved {
+		t.Error("Expected Moved to be false in dry run")
+	}
+}
+
+func TestOrganizer_CopyWithLinkMode_Conflicts(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sourceFile := filepath.Join(tmpDir, "source", "ipx-535.mp4")
+	if err := os.MkdirAll(filepath.Dir(sourceFile), 0755); err != nil {
+		t.Fatalf("Failed to create source directory: %v", err)
+	}
+	if err := os.WriteFile(sourceFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create source file: %v", err)
+	}
+
+	cfg := &config.OutputConfig{
+		FolderFormat: "<ID>",
+		FileFormat:   "<ID>",
+		RenameFile:   true,
+		MoveToFolder: true,
+	}
+	org := NewOrganizer(afero.NewOsFs(), cfg)
+
+	plan := &OrganizePlan{
+		SourcePath: sourceFile,
+		TargetPath: filepath.Join(tmpDir, "dest", "IPX-535.mp4"),
+		TargetDir:  filepath.Join(tmpDir, "dest"),
+		TargetFile: "IPX-535.mp4",
+		WillMove:   true,
+		Conflicts:  []string{"target already exists"},
+	}
+
+	_, err := org.CopyWithLinkMode(plan, false, LinkModeNone)
+	if err == nil {
+		t.Fatal("Expected error for conflicts")
+	}
+	if !strings.Contains(err.Error(), "conflicts detected") {
+		t.Errorf("Expected conflict error, got: %v", err)
+	}
+}
+
+func TestOrganizer_CopyWithLinkMode_NoMove(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &config.OutputConfig{
+		FolderFormat: "<ID>",
+		FileFormat:   "<ID>",
+		RenameFile:   true,
+		MoveToFolder: true,
+	}
+	org := NewOrganizer(afero.NewOsFs(), cfg)
+
+	plan := &OrganizePlan{
+		SourcePath: filepath.Join(tmpDir, "source", "ipx-535.mp4"),
+		TargetPath: filepath.Join(tmpDir, "source", "ipx-535.mp4"),
+		TargetDir:  filepath.Join(tmpDir, "source"),
+		TargetFile: "ipx-535.mp4",
+		WillMove:   false,
+	}
+
+	result, err := org.CopyWithLinkMode(plan, false, LinkModeNone)
+	if err != nil {
+		t.Fatalf("CopyWithLinkMode no-move failed: %v", err)
+	}
+	if result.Moved {
+		t.Error("Expected Moved to be false when WillMove is false")
+	}
+}
+
+func TestOrganizer_CopyWithLinkMode_InvalidLinkMode(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sourceFile := filepath.Join(tmpDir, "source", "ipx-535.mp4")
+	if err := os.MkdirAll(filepath.Dir(sourceFile), 0755); err != nil {
+		t.Fatalf("Failed to create source directory: %v", err)
+	}
+	if err := os.WriteFile(sourceFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create source file: %v", err)
+	}
+
+	cfg := &config.OutputConfig{
+		FolderFormat: "<ID>",
+		FileFormat:   "<ID>",
+		RenameFile:   true,
+		MoveToFolder: true,
+	}
+	org := NewOrganizer(afero.NewOsFs(), cfg)
+
+	plan := &OrganizePlan{
+		SourcePath: sourceFile,
+		TargetPath: filepath.Join(tmpDir, "dest", "IPX-535.mp4"),
+		TargetDir:  filepath.Join(tmpDir, "dest"),
+		TargetFile: "IPX-535.mp4",
+		WillMove:   true,
+	}
+
+	_, err := org.CopyWithLinkMode(plan, false, LinkMode("invalid"))
+	if err == nil {
+		t.Fatal("Expected error for invalid link mode")
+	}
+	if !strings.Contains(err.Error(), "unsupported link mode") {
+		t.Errorf("Expected unsupported link mode error, got: %v", err)
+	}
+}
+
+func TestOrganizer_CopyWithLinkMode_SourceNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &config.OutputConfig{
+		FolderFormat: "<ID>",
+		FileFormat:   "<ID>",
+		RenameFile:   true,
+		MoveToFolder: true,
+	}
+	org := NewOrganizer(afero.NewOsFs(), cfg)
+
+	plan := &OrganizePlan{
+		SourcePath: filepath.Join(tmpDir, "nonexistent", "source.mp4"),
+		TargetPath: filepath.Join(tmpDir, "dest", "IPX-535.mp4"),
+		TargetDir:  filepath.Join(tmpDir, "dest"),
+		TargetFile: "IPX-535.mp4",
+		WillMove:   true,
+	}
+
+	_, err := org.CopyWithLinkMode(plan, false, LinkModeNone)
+	if err == nil {
+		t.Fatal("Expected error for missing source file")
+	}
+}
+
 func TestParseLinkMode(t *testing.T) {
 	mode, err := ParseLinkMode("hard")
 	if err != nil {

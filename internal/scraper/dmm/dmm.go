@@ -20,6 +20,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper/image/placeholder"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 const (
@@ -650,15 +651,15 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 			japaneseTitle = title
 		} else {
 			// Fallback to HTML extraction
-			japaneseTitle = cleanString(doc.Find("h1").First().Text())
+			japaneseTitle = scraperutil.CleanString(doc.Find("h1").First().Text())
 			if japaneseTitle == "" {
 				ogTitle, _ := doc.Find(`meta[property="og:title"]`).Attr("content")
-				japaneseTitle = cleanString(ogTitle)
+				japaneseTitle = scraperutil.CleanString(ogTitle)
 			}
 		}
 	} else {
 		// www.dmm.co.jp uses h1#title.item
-		japaneseTitle = cleanString(doc.Find("h1#title.item").Text())
+		japaneseTitle = scraperutil.CleanString(doc.Find("h1#title.item").Text())
 	}
 
 	result.Title = japaneseTitle
@@ -824,7 +825,7 @@ func (s *Scraper) extractDescription(doc *goquery.Document, isNewSite bool) stri
 	if desc == "" {
 		desc = doc.Find("div.mg-b20.lh4").Text()
 	}
-	return cleanString(desc)
+	return scraperutil.CleanString(desc)
 }
 
 // extractReleaseDate extracts the release date
@@ -860,7 +861,7 @@ func (s *Scraper) extractDirector(doc *goquery.Document) string {
 	matches := directorRegex.FindStringSubmatch(html)
 
 	if len(matches) > 2 {
-		return cleanString(matches[2])
+		return scraperutil.CleanString(matches[2])
 	}
 	return ""
 }
@@ -877,7 +878,7 @@ func (s *Scraper) extractMaker(doc *goquery.Document, isNewSite bool) string {
 	doc.Find("a[href*='?maker='], a[href*='/article=maker/id=']").Each(func(i int, sel *goquery.Selection) {
 		if maker == "" {
 			// Extract text content only (strips HTML tags automatically)
-			maker = cleanString(sel.Text())
+			maker = scraperutil.CleanString(sel.Text())
 		}
 	})
 	return maker
@@ -891,7 +892,7 @@ func (s *Scraper) extractLabel(doc *goquery.Document) string {
 	doc.Find("a[href*='?label='], a[href*='/article=label/id=']").Each(func(i int, sel *goquery.Selection) {
 		if label == "" {
 			// Extract text content only (strips HTML tags automatically)
-			label = cleanString(sel.Text())
+			label = scraperutil.CleanString(sel.Text())
 		}
 	})
 	return label
@@ -908,7 +909,7 @@ func (s *Scraper) extractSeries(doc *goquery.Document, isNewSite bool) string {
 	matches := seriesRegex.FindStringSubmatch(html)
 
 	if len(matches) > 1 {
-		return cleanString(matches[1])
+		return scraperutil.CleanString(matches[1])
 	}
 	return ""
 }
@@ -995,7 +996,7 @@ func (s *Scraper) extractGenres(doc *goquery.Document) []string {
 
 		for _, match := range matches {
 			if len(match) > 1 {
-				genre := cleanString(match[1])
+				genre := scraperutil.CleanString(match[1])
 				if genre != "" {
 					genres = append(genres, genre)
 				}
@@ -1088,7 +1089,7 @@ func (s *Scraper) extractActressesFromStreamingPage(doc *goquery.Document) []mod
 		if len(actresses) > 0 {
 			return
 		}
-		if !strings.Contains(cleanString(heading.Text()), "この商品に出演しているAV女優") {
+		if !strings.Contains(scraperutil.CleanString(heading.Text()), "この商品に出演しているAV女優") {
 			return
 		}
 
@@ -1245,7 +1246,7 @@ func extractActressID(href string) int {
 }
 
 func cleanActressName(name string) string {
-	name = cleanString(name)
+	name = scraperutil.CleanString(name)
 	name = actressParenRegex.ReplaceAllString(name, "")
 	return strings.TrimSpace(name)
 }

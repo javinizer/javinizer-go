@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 const defaultBaseURL = "https://adult.contents.fc2.com"
@@ -308,9 +309,9 @@ func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackArticleID s
 		ShouldCropPoster: false,
 	}
 
-	fullTitle := cleanString(doc.Find("meta[property='og:title']").AttrOr("content", ""))
+	fullTitle := scraperutil.CleanString(doc.Find("meta[property='og:title']").AttrOr("content", ""))
 	if fullTitle == "" {
-		fullTitle = cleanString(doc.Find("title").First().Text())
+		fullTitle = scraperutil.CleanString(doc.Find("title").First().Text())
 	}
 	fullTitle = stripSiteSuffix(fullTitle)
 	result.Title = stripFC2IDPrefix(fullTitle)
@@ -322,9 +323,9 @@ func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackArticleID s
 	}
 	result.OriginalTitle = result.Title
 
-	description := cleanString(doc.Find("meta[property='og:description']").AttrOr("content", ""))
+	description := scraperutil.CleanString(doc.Find("meta[property='og:description']").AttrOr("content", ""))
 	if description == "" {
-		description = cleanString(doc.Find("meta[name='description']").AttrOr("content", ""))
+		description = scraperutil.CleanString(doc.Find("meta[name='description']").AttrOr("content", ""))
 	}
 	description = stripFC2IDPrefix(description)
 	result.Description = description
@@ -333,10 +334,10 @@ func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackArticleID s
 		result.ReleaseDate = releaseDate
 	}
 
-	runtimeText := cleanString(doc.Find(".items_article_MainitemThumb .items_article_info").First().Text())
+	runtimeText := scraperutil.CleanString(doc.Find(".items_article_MainitemThumb .items_article_info").First().Text())
 	result.Runtime = parseRuntime(runtimeText)
 
-	result.Maker = cleanString(doc.Find(".items_article_headerInfo a[href*='/users/']").First().Text())
+	result.Maker = scraperutil.CleanString(doc.Find(".items_article_headerInfo a[href*='/users/']").First().Text())
 	result.Genres = extractTags(doc)
 
 	coverURL := normalizeURL(doc.Find("meta[property='og:image']").AttrOr("content", ""), sourceURL)
@@ -449,18 +450,18 @@ func extractInfoValue(doc *goquery.Document, label string) string {
 
 	var value string
 	doc.Find(".items_article_softDevice p").EachWithBreak(func(_ int, p *goquery.Selection) bool {
-		text := cleanString(p.Text())
+		text := scraperutil.CleanString(p.Text())
 		if !strings.Contains(text, label) {
 			return true
 		}
 
 		parts := strings.SplitN(text, ":", 2)
 		if len(parts) == 2 {
-			value = cleanString(parts[1])
+			value = scraperutil.CleanString(parts[1])
 		} else {
 			parts = strings.SplitN(text, "：", 2)
 			if len(parts) == 2 {
-				value = cleanString(parts[1])
+				value = scraperutil.CleanString(parts[1])
 			}
 		}
 		if value == "" {
@@ -477,7 +478,7 @@ func extractTags(doc *goquery.Document) []string {
 	tags := make([]string, 0)
 
 	doc.Find(".items_article_TagArea a.tagTag").Each(func(_ int, a *goquery.Selection) {
-		tag := cleanString(a.Text())
+		tag := scraperutil.CleanString(a.Text())
 		if tag == "" || seen[tag] {
 			return
 		}
@@ -522,7 +523,7 @@ func parseReleaseDate(raw string) *time.Time {
 }
 
 func parseRuntime(raw string) int {
-	raw = cleanString(raw)
+	raw = scraperutil.CleanString(raw)
 	if raw == "" {
 		return 0
 	}
@@ -599,7 +600,7 @@ func stripFC2IDPrefix(value string) string {
 }
 
 func stripSiteSuffix(title string) string {
-	title = cleanString(title)
+	title = scraperutil.CleanString(title)
 	if title == "" {
 		return ""
 	}
@@ -611,18 +612,11 @@ func stripSiteSuffix(title string) string {
 		}
 		suffix := strings.TrimSpace(title[idx+len(sep):])
 		if strings.Contains(strings.ToLower(suffix), "fc2") {
-			return cleanString(title[:idx])
+			return scraperutil.CleanString(title[:idx])
 		}
 	}
 
 	return title
-}
-
-func cleanString(s string) string {
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\t", " ")
-	return strings.TrimSpace(strings.Join(strings.Fields(s), " "))
 }
 
 func normalizeURL(raw, sourceURL string) string {

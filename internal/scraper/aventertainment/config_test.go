@@ -4,8 +4,48 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestFlattenFunc_WithValidConfig(t *testing.T) {
+	fn := scraperutil.GetFlattenFunc("aventertainment")
+	require.NotNil(t, fn)
+
+	cfg := &AVEntertainmentConfig{Enabled: true, RequestDelay: 1000}
+	result := fn(cfg)
+	require.NotNil(t, result)
+
+	settings, ok := result.(*config.ScraperSettings)
+	require.True(t, ok)
+	assert.True(t, settings.Enabled)
+	assert.Equal(t, 1000, settings.RateLimit)
+	assert.Equal(t, "https://www.aventertainments.com", settings.BaseURL)
+}
+
+func TestFlattenFunc_WithProxy(t *testing.T) {
+	fn := scraperutil.GetFlattenFunc("aventertainment")
+	require.NotNil(t, fn)
+
+	proxyCfg := &config.ProxyConfig{Enabled: true, Profile: "test"}
+	cfg := &AVEntertainmentConfig{Enabled: true, RequestDelay: 500, Proxy: proxyCfg, DownloadProxy: proxyCfg}
+	result := fn(cfg)
+	require.NotNil(t, result)
+
+	settings, ok := result.(*config.ScraperSettings)
+	require.True(t, ok)
+	assert.NotNil(t, settings.Proxy)
+	assert.NotNil(t, settings.DownloadProxy)
+}
+
+func TestFlattenFunc_WithNonScraperConfig(t *testing.T) {
+	fn := scraperutil.GetFlattenFunc("aventertainment")
+	require.NotNil(t, fn)
+
+	result := fn("not a config")
+	assert.Nil(t, result)
+}
 
 func TestValidateConfig(t *testing.T) {
 	tests := []struct {

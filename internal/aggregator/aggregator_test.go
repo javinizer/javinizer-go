@@ -1920,3 +1920,229 @@ func TestAggregateConcurrentCacheReload(t *testing.T) {
 		}
 	})
 }
+
+func TestAggregator_BuildTranslations(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"r18dev", "dmm"},
+		},
+		Metadata: config.MetadataConfig{
+			Priority: config.PriorityConfig{
+				Priority: []string{"r18dev", "dmm"},
+			},
+		},
+	}
+	agg := New(cfg)
+
+	t.Run("merges translations from multiple results", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{
+				Source:   "r18dev",
+				Language: "en",
+				Title:    "English Title",
+				Translations: []models.MovieTranslation{
+					{Language: "en", Title: "English Title", Description: "English desc"},
+					{Language: "ja", Title: "Japanese Title"},
+				},
+			},
+		}
+		movie := &models.Movie{Title: "English Title"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 2)
+
+		var enFound, jaFound bool
+		for _, tr := range translations {
+			if tr.Language == "en" {
+				enFound = true
+				assert.Equal(t, "English Title", tr.Title)
+			}
+			if tr.Language == "ja" {
+				jaFound = true
+				assert.Equal(t, "Japanese Title", tr.Title)
+			}
+		}
+		assert.True(t, enFound)
+		assert.True(t, jaFound)
+	})
+
+	t.Run("deduplicates same language translations", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{
+				Source: "r18dev",
+				Translations: []models.MovieTranslation{
+					{Language: "en", Title: "First Title"},
+					{Language: "en", Description: "Second desc"},
+				},
+			},
+		}
+		movie := &models.Movie{}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+		assert.Equal(t, "First Title", translations[0].Title)
+		assert.Equal(t, "Second desc", translations[0].Description)
+	})
+
+	t.Run("skips non-winner legacy translations", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{Source: "r18dev", Language: "en", Title: "Different Title", Description: "Desc"},
+		}
+		movie := &models.Movie{Title: "Winning Title"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Empty(t, translations)
+	})
+
+	t.Run("includes legacy translation when scraper wins", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{Source: "r18dev", Language: "en", Title: "Winner", Description: "Desc"},
+		}
+		movie := &models.Movie{Title: "Winner"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+		assert.Equal(t, "en", translations[0].Language)
+		assert.Equal(t, "Winner", translations[0].Title)
+	})
+
+	t.Run("skips results without language", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{Source: "r18dev", Language: "", Title: "Title"},
+		}
+		movie := &models.Movie{Title: "Title"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Empty(t, translations)
+	})
+
+	t.Run("winner based on original title match", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{Source: "dmm", Language: "ja", OriginalTitle: "Original"},
+		}
+		movie := &models.Movie{OriginalTitle: "Original"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+		assert.Equal(t, "ja", translations[0].Language)
+	})
+
+	t.Run("winner based on description match", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{Source: "r18dev", Language: "en", Description: "Matched Desc"},
+		}
+		movie := &models.Movie{Description: "Matched Desc"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+	})
+
+	t.Run("winner based on director match", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{Source: "r18dev", Language: "en", Director: "Director A"},
+		}
+		movie := &models.Movie{Director: "Director A"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+	})
+
+	t.Run("winner based on maker match", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{Source: "r18dev", Language: "en", Maker: "Maker X"},
+		}
+		movie := &models.Movie{Maker: "Maker X"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+	})
+
+	t.Run("winner based on label match", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{Source: "r18dev", Language: "en", Label: "Label Y"},
+		}
+		movie := &models.Movie{Label: "Label Y"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+	})
+
+	t.Run("winner based on series match", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{Source: "r18dev", Language: "en", Series: "Series Z"},
+		}
+		movie := &models.Movie{Series: "Series Z"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+	})
+
+	t.Run("merges non-empty fields into existing translation", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{
+				Source: "r18dev",
+				Translations: []models.MovieTranslation{
+					{Language: "en", Title: "Title Only"},
+					{Language: "en", Description: "Desc Added", Director: "Dir Added", Maker: "Maker Added", Label: "Label Added", Series: "Series Added"},
+				},
+			},
+		}
+		movie := &models.Movie{}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+		assert.Equal(t, "Title Only", translations[0].Title)
+		assert.Equal(t, "Desc Added", translations[0].Description)
+		assert.Equal(t, "Dir Added", translations[0].Director)
+		assert.Equal(t, "Maker Added", translations[0].Maker)
+		assert.Equal(t, "Label Added", translations[0].Label)
+		assert.Equal(t, "Series Added", translations[0].Series)
+	})
+
+	t.Run("does not overwrite existing non-empty fields", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{
+				Source: "r18dev",
+				Translations: []models.MovieTranslation{
+					{Language: "en", Title: "First Title", Description: "First Desc"},
+					{Language: "en", Title: "Second Title", Description: "Second Desc"},
+				},
+			},
+		}
+		movie := &models.Movie{}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+		assert.Equal(t, "First Title", translations[0].Title)
+		assert.Equal(t, "First Desc", translations[0].Description)
+	})
+
+	t.Run("legacy translation includes all fields", func(t *testing.T) {
+		results := []*models.ScraperResult{
+			{
+				Source:        "r18dev",
+				Language:      "en",
+				Title:         "Title",
+				OriginalTitle: "OrigTitle",
+				Description:   "Desc",
+				Director:      "Dir",
+				Maker:         "Maker",
+				Label:         "Label",
+				Series:        "Series",
+			},
+		}
+		movie := &models.Movie{Title: "Title"}
+
+		translations := agg.buildTranslations(results, movie)
+		assert.Len(t, translations, 1)
+		assert.Equal(t, "en", translations[0].Language)
+		assert.Equal(t, "Title", translations[0].Title)
+		assert.Equal(t, "OrigTitle", translations[0].OriginalTitle)
+		assert.Equal(t, "Desc", translations[0].Description)
+		assert.Equal(t, "Dir", translations[0].Director)
+		assert.Equal(t, "Maker", translations[0].Maker)
+		assert.Equal(t, "Label", translations[0].Label)
+		assert.Equal(t, "Series", translations[0].Series)
+		assert.Equal(t, "r18dev", translations[0].SourceName)
+	})
+}

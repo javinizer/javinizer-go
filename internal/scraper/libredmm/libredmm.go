@@ -20,6 +20,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraper/image/placeholder"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 const (
@@ -235,14 +236,14 @@ func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
 
 		switch status {
 		case 200:
-			if msg := cleanString(payload.Err); msg != "" {
+			if msg := scraperutil.CleanString(payload.Err); msg != "" {
 				return nil, fmt.Errorf("LibreDMM returned error: %s", msg)
 			}
 			result := payloadToResult(payload, targetURL, id, s.client.GetClient())
 			s.filterPlaceholderScreenshots(result)
 			return result, nil
 		case 202:
-			msg := cleanString(payload.Err)
+			msg := scraperutil.CleanString(payload.Err)
 			if msg == "" {
 				msg = "processing"
 			}
@@ -253,7 +254,7 @@ func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
 		case 404:
 			return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
 		case 502:
-			msg := cleanString(payload.Err)
+			msg := scraperutil.CleanString(payload.Err)
 			if msg != "" {
 				return nil, models.NewScraperStatusError(
 					"LibreDMM",
@@ -267,7 +268,7 @@ func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
 				"LibreDMM is temporarily unavailable (HTTP 502 Bad Gateway; host may be down)",
 			)
 		default:
-			if msg := cleanString(payload.Err); msg != "" {
+			if msg := scraperutil.CleanString(payload.Err); msg != "" {
 				return nil, models.NewScraperStatusError(
 					"LibreDMM",
 					status,
@@ -375,14 +376,14 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 
 		switch status {
 		case 200:
-			if msg := cleanString(payload.Err); msg != "" {
+			if msg := scraperutil.CleanString(payload.Err); msg != "" {
 				return nil, fmt.Errorf("LibreDMM returned error: %s", msg)
 			}
 			result := payloadToResult(payload, targetURL, id, s.client.GetClient())
 			s.filterPlaceholderScreenshots(result)
 			return result, nil
 		case 202:
-			msg := cleanString(payload.Err)
+			msg := scraperutil.CleanString(payload.Err)
 			if msg == "" {
 				msg = "processing"
 			}
@@ -393,7 +394,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		case 404:
 			return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
 		case 502:
-			msg := cleanString(payload.Err)
+			msg := scraperutil.CleanString(payload.Err)
 			if msg != "" {
 				return nil, models.NewScraperStatusError(
 					"LibreDMM",
@@ -407,7 +408,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 				"LibreDMM is temporarily unavailable (HTTP 502 Bad Gateway; host may be down)",
 			)
 		default:
-			if msg := cleanString(payload.Err); msg != "" {
+			if msg := scraperutil.CleanString(payload.Err); msg != "" {
 				return nil, models.NewScraperStatusError(
 					"LibreDMM",
 					status,
@@ -469,34 +470,34 @@ func payloadToResult(payload *moviePayload, sourceURL, fallbackID string, client
 		payload = &moviePayload{}
 	}
 
-	source := cleanString(payload.URL)
+	source := scraperutil.CleanString(payload.URL)
 	if source == "" {
 		source = stripJSONSuffix(sourceURL)
 	}
 	result.SourceURL = source
 
-	id := cleanString(payload.NormalizedID)
+	id := scraperutil.CleanString(payload.NormalizedID)
 	if id == "" {
-		id = cleanString(extractIDFromURL(sourceURL))
+		id = scraperutil.CleanString(extractIDFromURL(sourceURL))
 	}
 	if id == "" {
-		id = cleanString(fallbackID)
+		id = scraperutil.CleanString(fallbackID)
 	}
 	result.ID = id
 
-	contentID := cleanString(payload.Subtitle)
+	contentID := scraperutil.CleanString(payload.Subtitle)
 	if contentID == "" {
 		contentID = id
 	}
 	result.ContentID = contentID
 
-	title := cleanString(payload.Title)
+	title := scraperutil.CleanString(payload.Title)
 	if title == "" {
 		title = id
 	}
 	result.Title = title
 	result.OriginalTitle = title
-	result.Description = cleanString(payload.Description)
+	result.Description = scraperutil.CleanString(payload.Description)
 
 	if t := parseReleaseDate(payload.Date); t != nil {
 		result.ReleaseDate = t
@@ -511,8 +512,8 @@ func payloadToResult(payload *moviePayload, sourceURL, fallbackID string, client
 	result.Genres = dedupeStrings(payload.Genres)
 	result.Actresses = parseActresses(payload.Actresses, sourceURL)
 
-	result.CoverURL = resolveURL(sourceURL, payload.CoverImageURL)
-	result.PosterURL = resolveURL(sourceURL, payload.ThumbnailImageURL)
+	result.CoverURL = scraperutil.ResolveURL(sourceURL, payload.CoverImageURL)
+	result.PosterURL = scraperutil.ResolveURL(sourceURL, payload.ThumbnailImageURL)
 	if result.CoverURL != "" {
 		posterURL, shouldCrop := imageutil.GetOptimalPosterURL(result.CoverURL, client)
 		result.ShouldCropPoster = shouldCrop
@@ -537,7 +538,7 @@ func payloadToResult(payload *moviePayload, sourceURL, fallbackID string, client
 }
 
 func parseReleaseDate(raw string) *time.Time {
-	raw = cleanString(raw)
+	raw = scraperutil.CleanString(raw)
 	if raw == "" {
 		return nil
 	}
@@ -561,14 +562,14 @@ func parseActresses(entries []actressPayload, base string) []models.ActressInfo 
 	out := make([]models.ActressInfo, 0, len(entries))
 
 	for _, actress := range entries {
-		name := cleanString(actress.Name)
+		name := scraperutil.CleanString(actress.Name)
 		if name == "" || seen[name] {
 			continue
 		}
 		seen[name] = true
 
 		info := models.ActressInfo{
-			ThumbURL: toHTTPS(resolveURL(base, actress.ImageURL)),
+			ThumbURL: toHTTPS(scraperutil.ResolveURL(base, actress.ImageURL)),
 		}
 		if hasJapanese(name) {
 			info.JapaneseName = name
@@ -594,7 +595,7 @@ func dedupeResolvedURLs(urls []string, base string) []string {
 	out := make([]string, 0, len(urls))
 
 	for _, raw := range urls {
-		u := normalizeLibredmmScreenshotURL(resolveURL(base, raw))
+		u := normalizeLibredmmScreenshotURL(scraperutil.ResolveURL(base, raw))
 		if u == "" || seen[u] {
 			continue
 		}
@@ -610,7 +611,7 @@ func dedupeStrings(values []string) []string {
 	out := make([]string, 0, len(values))
 
 	for _, value := range values {
-		v := cleanString(value)
+		v := scraperutil.CleanString(value)
 		if v == "" || seen[v] {
 			continue
 		}
@@ -623,7 +624,7 @@ func dedupeStrings(values []string) []string {
 
 func firstNonEmpty(values []string) string {
 	for _, v := range values {
-		if cleaned := cleanString(v); cleaned != "" {
+		if cleaned := scraperutil.CleanString(v); cleaned != "" {
 			return cleaned
 		}
 	}
@@ -644,7 +645,7 @@ func normalizeMovieURL(raw, base string) (string, bool) {
 		return "", false
 	}
 
-	queryID := cleanString(parsed.Query().Get("q"))
+	queryID := scraperutil.CleanString(parsed.Query().Get("q"))
 	if queryID != "" && strings.Contains(strings.ToLower(parsed.Path), "/search") {
 		return buildSearchURL(base, queryID), true
 	}
@@ -654,7 +655,7 @@ func normalizeMovieURL(raw, base string) (string, bool) {
 		if strings.EqualFold(parts[0], "movies") {
 			id, _ := url.PathUnescape(parts[1])
 			id = strings.TrimSuffix(id, ".json")
-			id = cleanString(id)
+			id = scraperutil.CleanString(id)
 			if id == "" {
 				return "", false
 			}
@@ -663,7 +664,7 @@ func normalizeMovieURL(raw, base string) (string, bool) {
 		if strings.EqualFold(parts[0], "cid") {
 			id, _ := url.PathUnescape(parts[1])
 			id = strings.TrimSuffix(id, ".json")
-			id = cleanString(id)
+			id = scraperutil.CleanString(id)
 			if id == "" {
 				return "", false
 			}
@@ -711,33 +712,8 @@ func extractIDFromURL(raw string) string {
 	return ""
 }
 
-func resolveURL(base, raw string) string {
-	raw = cleanString(raw)
-	if raw == "" {
-		return ""
-	}
-	if strings.HasPrefix(raw, "//") {
-		return "https:" + raw
-	}
-	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
-		return raw
-	}
-
-	baseURL, err := url.Parse(base)
-	if err != nil {
-		return raw
-	}
-	if strings.HasPrefix(raw, "/") {
-		baseURL.Path = raw
-		baseURL.RawQuery = ""
-		return baseURL.String()
-	}
-	baseURL.Path = path.Join(path.Dir(baseURL.Path), raw)
-	return baseURL.String()
-}
-
 func normalizeLibredmmScreenshotURL(raw string) string {
-	raw = cleanString(raw)
+	raw = scraperutil.CleanString(raw)
 	if raw == "" {
 		return ""
 	}
@@ -848,13 +824,6 @@ func toHTTPS(raw string) string {
 		return "https://" + strings.TrimPrefix(raw, "http://")
 	}
 	return raw
-}
-
-func cleanString(v string) string {
-	v = strings.TrimSpace(v)
-	v = strings.ReplaceAll(v, "\u00a0", " ")
-	v = strings.Join(strings.Fields(v), " ")
-	return v
 }
 
 // stripANSICodes removes ANSI escape sequences and control characters from a string.

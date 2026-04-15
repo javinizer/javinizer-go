@@ -389,19 +389,6 @@ func extractContentIDFromURL(url string) string {
 	return ""
 }
 
-// cleanString removes extra whitespace and newlines
-func cleanString(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	s = strings.ReplaceAll(s, "\t", " ")
-	// Replace multiple spaces with single space
-	for strings.Contains(s, "  ") {
-		s = strings.ReplaceAll(s, "  ", " ")
-	}
-	return s
-}
-
 // matchesWithVariantSuffix checks if urlCID matches any of the search IDs,
 // allowing for single-letter variant suffixes (a, b, c, d, etc.) that DMM uses
 // to indicate different versions of the same video.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 // JSONLDProduct represents the Product schema from JSON-LD
@@ -152,12 +153,12 @@ func extractMetadataFromJSONLD(doc *goquery.Document) map[string]interface{} {
 
 	// Extract title
 	if product.Name != "" {
-		metadata["title"] = cleanString(product.Name)
+		metadata["title"] = scraperutil.CleanString(product.Name)
 	}
 
 	// Extract description
 	if product.Description != "" {
-		metadata["description"] = cleanString(product.Description)
+		metadata["description"] = scraperutil.CleanString(product.Description)
 	}
 
 	// Extract content ID
@@ -167,7 +168,7 @@ func extractMetadataFromJSONLD(doc *goquery.Document) map[string]interface{} {
 
 	// Extract maker/brand
 	if product.Brand != nil && product.Brand.Name != "" {
-		metadata["maker"] = cleanString(product.Brand.Name)
+		metadata["maker"] = scraperutil.CleanString(product.Brand.Name)
 	}
 
 	// Extract images (cover + screenshots)

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -112,15 +113,19 @@ func (p *Pool) executeTask(task Task) {
 func (p *Pool) Wait() error {
 	p.wg.Wait()
 
-	// Return combined errors
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if len(p.errors) > 0 {
-		return fmt.Errorf("%d task(s) failed", len(p.errors))
+	if len(p.errors) == 0 {
+		return nil
 	}
 
-	return nil
+	if len(p.errors) == 1 {
+		return fmt.Errorf("%d task failed: %w", len(p.errors), p.errors[0])
+	}
+
+	joined := errors.Join(p.errors...)
+	return fmt.Errorf("%d tasks failed: %w", len(p.errors), joined)
 }
 
 // Stop cancels all running tasks and waits for them to finish

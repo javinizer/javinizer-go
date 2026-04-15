@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 const (
@@ -251,13 +251,13 @@ func (s *Scraper) GetURL(id string) (string, error) {
 		if href == "" {
 			return true
 		}
-		text := cleanString(a.Parent().Text())
+		text := scraperutil.CleanString(a.Parent().Text())
 		cand := extractID(text)
 		if cand == "" {
 			cand = extractID(a.Text())
 		}
 		if cand != "" && normalizeID(cand) == target {
-			found = resolveURL(s.baseURL, href)
+			found = scraperutil.ResolveURL(s.baseURL, href)
 			return false
 		}
 		return true
@@ -271,7 +271,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	doc.Find("a[href*='/video/']").Each(func(_ int, a *goquery.Selection) {
 		href := strings.TrimSpace(a.AttrOr("href", ""))
 		if href != "" {
-			candidates = append(candidates, resolveURL(s.baseURL, href))
+			candidates = append(candidates, scraperutil.ResolveURL(s.baseURL, href))
 		}
 	})
 	if len(candidates) == 1 {
@@ -315,14 +315,14 @@ func parseDetailPage(doc *goquery.Document, sourceURL, fallbackID string) *model
 		Language:  "ja",
 	}
 
-	if t := cleanString(doc.Find(".panel-heading h3").First().Text()); t != "" {
+	if t := scraperutil.CleanString(doc.Find(".panel-heading h3").First().Text()); t != "" {
 		result.Title = stripTrailingID(t)
 		result.OriginalTitle = result.Title
 	}
 	if result.Title == "" {
-		title := cleanString(doc.Find("meta[property='og:title']").AttrOr("content", ""))
+		title := scraperutil.CleanString(doc.Find("meta[property='og:title']").AttrOr("content", ""))
 		if title == "" {
-			title = cleanString(doc.Find("title").First().Text())
+			title = scraperutil.CleanString(doc.Find("title").First().Text())
 		}
 		result.Title = stripTrailingSiteName(title)
 		result.OriginalTitle = result.Title
@@ -380,7 +380,7 @@ func extractLabeledValue(html string, labels []string) string {
 	for _, label := range labels {
 		re := regexp.MustCompile(`(?is)<b>\s*` + regexp.QuoteMeta(label) + `\s*</b>\s*:\s*(.*?)<br`) //nolint:gocritic
 		if m := re.FindStringSubmatch(html); len(m) > 1 {
-			return cleanString(stripTags(m[1]))
+			return scraperutil.CleanString(stripTags(m[1]))
 		}
 	}
 	return ""
@@ -390,7 +390,7 @@ func extractLabeledAnchorValue(html string, labels []string) string {
 	for _, label := range labels {
 		re := regexp.MustCompile(`(?is)<b>\s*` + regexp.QuoteMeta(label) + `\s*</b>\s*:\s*.*?<a[^>]*>(.*?)</a>`) //nolint:gocritic
 		if m := re.FindStringSubmatch(html); len(m) > 1 {
-			return cleanString(stripTags(m[1]))
+			return scraperutil.CleanString(stripTags(m[1]))
 		}
 	}
 	return ""
@@ -398,8 +398,8 @@ func extractLabeledAnchorValue(html string, labels []string) string {
 
 func extractDescription(doc *goquery.Document, html string) string {
 	candidates := []string{
-		cleanString(doc.Find("meta[name='description']").AttrOr("content", "")),
-		cleanString(doc.Find("meta[property='og:description']").AttrOr("content", "")),
+		scraperutil.CleanString(doc.Find("meta[name='description']").AttrOr("content", "")),
+		scraperutil.CleanString(doc.Find("meta[property='og:description']").AttrOr("content", "")),
 		extractLabeledValue(html, []string{"説明", "介紹", "介绍", "内容", "description"}),
 	}
 
@@ -413,7 +413,7 @@ func extractDescription(doc *goquery.Document, html string) string {
 }
 
 func isUsableDescription(v string) bool {
-	v = cleanString(v)
+	v = scraperutil.CleanString(v)
 	if v == "" {
 		return false
 	}
@@ -447,7 +447,7 @@ func extractGenres(doc *goquery.Document) []string {
 	seen := map[string]bool{}
 	genres := make([]string, 0)
 	doc.Find("a[href*='/genre/']").Each(func(_ int, a *goquery.Selection) {
-		v := cleanString(a.Text())
+		v := scraperutil.CleanString(a.Text())
 		if v == "" || seen[v] {
 			return
 		}
@@ -469,7 +469,7 @@ func extractActresses(html string) []models.ActressInfo {
 	}
 
 	for _, rawName := range names {
-		name := cleanString(rawName)
+		name := scraperutil.CleanString(rawName)
 		if name == "" || seen[name] || len(name) > 80 {
 			continue
 		}
@@ -513,7 +513,7 @@ func extractLabeledAnchorValues(html string, labels []string) []string {
 			if len(match) <= 1 {
 				continue
 			}
-			v := cleanString(stripTags(match[1]))
+			v := scraperutil.CleanString(stripTags(match[1]))
 			if v == "" || seen[v] {
 				continue
 			}
@@ -523,7 +523,7 @@ func extractLabeledAnchorValues(html string, labels []string) []string {
 
 		if len(values) == 0 {
 			for _, v := range splitValues(stripTags(section)) {
-				v = cleanString(v)
+				v = scraperutil.CleanString(v)
 				if v == "" || seen[v] {
 					continue
 				}
@@ -547,7 +547,7 @@ func splitValues(raw string) []string {
 	})
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
-		p = cleanString(p)
+		p = scraperutil.CleanString(p)
 		if p != "" {
 			out = append(out, p)
 		}
@@ -569,9 +569,9 @@ func extractCoverURL(doc *goquery.Document, base string) string {
 		if strings.HasPrefix(sel, "meta") {
 			attr = "content"
 		}
-		raw := cleanString(node.AttrOr(attr, ""))
+		raw := scraperutil.CleanString(node.AttrOr(attr, ""))
 		if raw != "" {
-			return resolveURL(base, raw)
+			return scraperutil.ResolveURL(base, raw)
 		}
 	}
 	return ""
@@ -581,11 +581,11 @@ func extractScreenshotURLs(doc *goquery.Document, base string) []string {
 	seen := map[string]bool{}
 	urls := make([]string, 0)
 	add := func(raw string) {
-		raw = cleanString(raw)
+		raw = scraperutil.CleanString(raw)
 		if raw == "" {
 			return
 		}
-		u := resolveURL(base, raw)
+		u := scraperutil.ResolveURL(base, raw)
 		if u == "" || seen[u] {
 			return
 		}
@@ -639,53 +639,22 @@ func extractID(v string) string {
 }
 
 func stripTrailingID(title string) string {
-	title = cleanString(title)
+	title = scraperutil.CleanString(title)
 	title = idRegex.ReplaceAllString(title, "")
-	return cleanString(title)
+	return scraperutil.CleanString(title)
 }
 
 func stripTrailingSiteName(v string) string {
-	v = cleanString(v)
+	v = scraperutil.CleanString(v)
 	for _, suffix := range []string{" - JAV321", " | JAV321", " - Jav321"} {
 		v = strings.TrimSuffix(v, suffix)
 	}
-	return cleanString(v)
-}
-
-func resolveURL(base, raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if strings.HasPrefix(raw, "//") {
-		return "https:" + raw
-	}
-	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
-		return raw
-	}
-	baseURL, err := url.Parse(base)
-	if err != nil {
-		return raw
-	}
-	if strings.HasPrefix(raw, "/") {
-		baseURL.Path = raw
-		baseURL.RawQuery = ""
-		return baseURL.String()
-	}
-	baseURL.Path = path.Join(path.Dir(baseURL.Path), raw)
-	return baseURL.String()
+	return scraperutil.CleanString(v)
 }
 
 func stripTags(v string) string {
 	re := regexp.MustCompile(`(?s)<[^>]*>`) //nolint:gocritic
 	return re.ReplaceAllString(v, "")
-}
-
-func cleanString(v string) string {
-	v = strings.TrimSpace(v)
-	v = strings.ReplaceAll(v, "\u00a0", " ")
-	v = strings.Join(strings.Fields(v), " ")
-	return v
 }
 
 func hasJapanese(v string) bool {

@@ -4,8 +4,60 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type mockScraperConfig struct {
+	enabled       bool
+	requestDelay  int
+	proxy         any
+	downloadProxy any
+}
+
+func (m *mockScraperConfig) IsEnabled() bool       { return m.enabled }
+func (m *mockScraperConfig) GetUserAgent() string  { return "" }
+func (m *mockScraperConfig) GetRequestDelay() int  { return m.requestDelay }
+func (m *mockScraperConfig) GetMaxRetries() int    { return 0 }
+func (m *mockScraperConfig) GetProxy() any         { return m.proxy }
+func (m *mockScraperConfig) GetDownloadProxy() any { return m.downloadProxy }
+
+func TestFlattenFunc_WithValidConfig(t *testing.T) {
+	fn := scraperutil.GetFlattenFunc("tokyohot")
+	require.NotNil(t, fn)
+
+	result := fn(&mockScraperConfig{enabled: true, requestDelay: 1000})
+	require.NotNil(t, result)
+
+	settings, ok := result.(*config.ScraperSettings)
+	require.True(t, ok)
+	assert.True(t, settings.Enabled)
+	assert.Equal(t, 1000, settings.RateLimit)
+	assert.Equal(t, "https://www.tokyo-hot.com", settings.BaseURL)
+}
+
+func TestFlattenFunc_WithProxy(t *testing.T) {
+	fn := scraperutil.GetFlattenFunc("tokyohot")
+	require.NotNil(t, fn)
+
+	proxyCfg := &config.ProxyConfig{Enabled: true, Profile: "test"}
+	result := fn(&mockScraperConfig{enabled: true, proxy: proxyCfg, downloadProxy: proxyCfg})
+	require.NotNil(t, result)
+
+	settings, ok := result.(*config.ScraperSettings)
+	require.True(t, ok)
+	assert.NotNil(t, settings.Proxy)
+	assert.NotNil(t, settings.DownloadProxy)
+}
+
+func TestFlattenFunc_WithNonScraperConfig(t *testing.T) {
+	fn := scraperutil.GetFlattenFunc("tokyohot")
+	require.NotNil(t, fn)
+
+	result := fn("not a config")
+	assert.Nil(t, result)
+}
 
 func TestValidateConfig(t *testing.T) {
 	tests := []struct {

@@ -11,6 +11,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 func TestCanHandleURL(t *testing.T) {
@@ -215,10 +216,10 @@ func TestHelpers(t *testing.T) {
 	if isUsableDescription("window.ads bad") {
 		t.Fatal("expected ad-like description to be rejected")
 	}
-	if got := resolveURL("https://jp.jav321.com/video/abc123", "/images/cover.jpg"); got != "https://jp.jav321.com/images/cover.jpg" {
+	if got := scraperutil.ResolveURL("https://jp.jav321.com/video/abc123", "/images/cover.jpg"); got != "https://jp.jav321.com/images/cover.jpg" {
 		t.Fatalf("resolveURL absolute path = %q", got)
 	}
-	if got := resolveURL("https://jp.jav321.com/video/abc123", "shots/1.jpg"); got != "https://jp.jav321.com/video/shots/1.jpg" {
+	if got := scraperutil.ResolveURL("https://jp.jav321.com/video/abc123", "shots/1.jpg"); got != "https://jp.jav321.com/video/shots/1.jpg" {
 		t.Fatalf("resolveURL relative path = %q", got)
 	}
 	if got := extractID("Some release ABC-123 sample"); got != "ABC-123" {

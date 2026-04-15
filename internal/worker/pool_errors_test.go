@@ -2,10 +2,12 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPool_Errors(t *testing.T) {
@@ -130,6 +132,130 @@ func TestPool_Errors(t *testing.T) {
 			res := <-results
 			assert.Len(t, res.errors, numTasks, "Concurrent Errors() call %d returned wrong length", r)
 		}
+	})
+}
+
+// errTestSentinel is a sentinel error for testing errors.Is with the joined error
+var errTestSentinel = errors.New("sentinel error")
+
+// mockTaskWithErr is a task that returns a specific error
+type mockTaskWithErr struct {
+	BaseTask
+	duration time.Duration
+	err      error
+}
+
+func (t *mockTaskWithErr) Execute(ctx context.Context) error {
+	select {
+	case <-time.After(t.duration):
+		return t.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestPool_WaitJoinedErrors(t *testing.T) {
+	t.Run("Wait returns nil when no errors", func(t *testing.T) {
+		progressChan := make(chan ProgressUpdate, 10)
+		tracker := NewProgressTracker(progressChan)
+		pool := NewPool(2, 10*time.Second, tracker)
+		defer pool.Stop()
+
+		task1 := newMockTask("task-1", 50*time.Millisecond, false)
+		task2 := newMockTask("task-2", 50*time.Millisecond, false)
+
+		_ = pool.Submit(task1)
+		_ = pool.Submit(task2)
+
+		err := pool.Wait()
+		assert.NoError(t, err, "Expected no error when all tasks succeed")
+	})
+
+	t.Run("Wait error contains summary count and individual details", func(t *testing.T) {
+		progressChan := make(chan ProgressUpdate, 10)
+		tracker := NewProgressTracker(progressChan)
+		pool := NewPool(2, 10*time.Second, tracker)
+		defer pool.Stop()
+
+		task2 := newMockTask("task-2", 50*time.Millisecond, true)
+		task3 := newMockTask("task-3", 50*time.Millisecond, true)
+
+		_ = pool.Submit(task2)
+		_ = pool.Submit(task3)
+
+		err := pool.Wait()
+		require.Error(t, err, "Expected error from Wait when tasks fail")
+
+		errMsg := err.Error()
+		assert.Contains(t, errMsg, "2 tasks failed", "Error should contain summary count")
+		assert.Contains(t, errMsg, "task-2 failed", "Error should contain task-2 details")
+		assert.Contains(t, errMsg, "task-3 failed", "Error should contain task-3 details")
+	})
+
+	t.Run("Wait error supports errors.Is for individual errors", func(t *testing.T) {
+		progressChan := make(chan ProgressUpdate, 10)
+		tracker := NewProgressTracker(progressChan)
+		pool := NewPool(2, 10*time.Second, tracker)
+		defer pool.Stop()
+
+		task2 := &mockTaskWithErr{
+			BaseTask: BaseTask{id: "task-2", taskType: TaskTypeScrape, description: "sentinel task"},
+			duration: 50 * time.Millisecond,
+			err:      errTestSentinel,
+		}
+		task3 := newMockTask("task-3", 50*time.Millisecond, true)
+
+		_ = pool.Submit(task2)
+		_ = pool.Submit(task3)
+
+		err := pool.Wait()
+		require.Error(t, err, "Expected error from Wait when tasks fail")
+
+		assert.True(t, errors.Is(err, errTestSentinel),
+			"errors.Is should find sentinel error within joined error")
+	})
+
+	t.Run("Wait error supports errors.Unwrap for individual errors", func(t *testing.T) {
+		progressChan := make(chan ProgressUpdate, 10)
+		tracker := NewProgressTracker(progressChan)
+		pool := NewPool(2, 10*time.Second, tracker)
+		defer pool.Stop()
+
+		task2 := newMockTask("task-2", 50*time.Millisecond, true)
+		task3 := newMockTask("task-3", 50*time.Millisecond, true)
+
+		_ = pool.Submit(task2)
+		_ = pool.Submit(task3)
+
+		err := pool.Wait()
+		require.Error(t, err, "Expected error from Wait when tasks fail")
+
+		unwrapped := errors.Unwrap(err)
+		require.NotNil(t, unwrapped, "Wait() error should be unwrappable to the joined error")
+
+		joined, ok := unwrapped.(interface{ Unwrap() []error })
+		require.True(t, ok, "Unwrapped error should implement Unwrap() []error (joined error)")
+
+		innerErrors := joined.Unwrap()
+		assert.Len(t, innerErrors, 2, "Joined error should contain 2 individual errors")
+	})
+
+	t.Run("Errors method still returns individual errors after Wait", func(t *testing.T) {
+		progressChan := make(chan ProgressUpdate, 10)
+		tracker := NewProgressTracker(progressChan)
+		pool := NewPool(2, 10*time.Second, tracker)
+		defer pool.Stop()
+
+		task2 := newMockTask("task-2", 50*time.Millisecond, true)
+		task3 := newMockTask("task-3", 50*time.Millisecond, true)
+
+		_ = pool.Submit(task2)
+		_ = pool.Submit(task3)
+
+		_ = pool.Wait()
+
+		errs := pool.Errors()
+		assert.Len(t, errs, 2, "Errors() should still return 2 individual errors")
 	})
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1165,7 +1166,7 @@ func TestResolveURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveURL(tt.base, tt.raw)
+			got := scraperutil.ResolveURL(tt.base, tt.raw)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -1211,10 +1212,10 @@ func TestApplyLanguage(t *testing.T) {
 	assert.Equal(t, "ja", jaScraper.language)
 
 	// Test normalizeLanguage helper
-	assert.Equal(t, "ja", normalizeLanguage("ja"))
-	assert.Equal(t, "ja", normalizeLanguage("JA"))
-	assert.Equal(t, "en", normalizeLanguage("en"))
-	assert.Equal(t, "en", normalizeLanguage("invalid"))
+	assert.Equal(t, "ja", scraperutil.NormalizeLanguage("ja"))
+	assert.Equal(t, "ja", scraperutil.NormalizeLanguage("JA"))
+	assert.Equal(t, "en", scraperutil.NormalizeLanguage("en"))
+	assert.Equal(t, "en", scraperutil.NormalizeLanguage("invalid"))
 }
 
 // TestNormalizeLanguage tests language normalization
@@ -1248,7 +1249,7 @@ func TestNormalizeLanguage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeLanguage(tt.input)
+			got := scraperutil.NormalizeLanguage(tt.input)
 			assert.Equal(t, tt.want, got)
 		})
 	}

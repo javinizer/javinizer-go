@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -26,7 +27,7 @@ func (r *ContentIDMappingRepository) FindBySearchID(searchID string) (*models.Co
 
 	err := r.db.Where("search_id = ?", normalizedID).First(&mapping).Error
 	if err != nil {
-		return nil, err
+		return nil, wrapDBErr("find", fmt.Sprintf("content ID mapping %s", normalizedID), err)
 	}
 
 	return &mapping, nil
@@ -40,23 +41,32 @@ func (r *ContentIDMappingRepository) Create(mapping *models.ContentIDMapping) er
 
 	// Use upsert to handle duplicates gracefully
 	// This will update the existing record if search_id already exists
-	return r.db.Where(models.ContentIDMapping{SearchID: mapping.SearchID}).
+	if err := r.db.Where(models.ContentIDMapping{SearchID: mapping.SearchID}).
 		Assign(models.ContentIDMapping{
 			ContentID: mapping.ContentID,
 			Source:    mapping.Source,
 		}).
-		FirstOrCreate(mapping).Error
+		FirstOrCreate(mapping).Error; err != nil {
+		return wrapDBErr("create", fmt.Sprintf("content ID mapping %s", mapping.SearchID), err)
+	}
+	return nil
 }
 
 // Delete removes a content ID mapping from the database
 func (r *ContentIDMappingRepository) Delete(searchID string) error {
 	normalizedID := strings.ToUpper(searchID)
-	return r.db.Where("search_id = ?", normalizedID).Delete(&models.ContentIDMapping{}).Error
+	if err := r.db.Where("search_id = ?", normalizedID).Delete(&models.ContentIDMapping{}).Error; err != nil {
+		return wrapDBErr("delete", fmt.Sprintf("content ID mapping %s", normalizedID), err)
+	}
+	return nil
 }
 
 // GetAll retrieves all content ID mappings
 func (r *ContentIDMappingRepository) GetAll() ([]models.ContentIDMapping, error) {
 	var mappings []models.ContentIDMapping
 	err := r.db.Find(&mappings).Error
-	return mappings, err
+	if err != nil {
+		return nil, wrapDBErr("find", "content ID mappings", err)
+	}
+	return mappings, nil
 }

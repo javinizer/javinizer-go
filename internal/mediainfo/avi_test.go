@@ -24,9 +24,9 @@ func createTestAVI(t *testing.T, tmpDir string, videoCodec string, audioFormatTa
 	writeUint32LE(t, f, 10000) // File size (placeholder)
 	writeBytes(t, f, []byte("AVI "))
 
-	// LIST hdrl
+	// LIST hdrl (contains only avih — strl lists are top-level)
 	writeBytes(t, f, []byte("LIST"))
-	hdrlSize := 4 + 8 + 56 + 8 + 48 + 8 + 40 + 8 + 48 + 8 + 18 // Size calculation
+	hdrlSize := 4 + 8 + 56
 	writeUint32LE(t, f, uint32(hdrlSize))
 	writeBytes(t, f, []byte("hdrl"))
 
@@ -48,7 +48,7 @@ func createTestAVI(t *testing.T, tmpDir string, videoCodec string, audioFormatTa
 	writeUint32LE(t, f, 0)       // Reserved[2]
 	writeUint32LE(t, f, 0)       // Reserved[3]
 
-	// LIST strl (video stream)
+	// LIST strl (video stream) — top-level, not inside hdrl
 	writeBytes(t, f, []byte("LIST"))
 	strlVideoSize := 4 + 8 + 48 + 8 + 40
 	writeUint32LE(t, f, uint32(strlVideoSize))
@@ -104,7 +104,7 @@ func createTestAVI(t *testing.T, tmpDir string, videoCodec string, audioFormatTa
 	writeUint32LE(t, f, 0)                // biClrUsed
 	writeUint32LE(t, f, 0)                // biClrImportant
 
-	// LIST strl (audio stream)
+	// LIST strl (audio stream) — top-level, not inside hdrl
 	writeBytes(t, f, []byte("LIST"))
 	strlAudioSize := 4 + 8 + 48 + 8 + 18
 	writeUint32LE(t, f, uint32(strlAudioSize))
@@ -615,9 +615,9 @@ func createTestAVIWithNegativeHeight(t *testing.T, tmpDir string) string {
 	writeUint32LE(t, f, 10000) // File size placeholder
 	writeBytes(t, f, []byte("AVI "))
 
-	// LIST hdrl
+	// LIST hdrl (only avih)
 	writeBytes(t, f, []byte("LIST"))
-	writeUint32LE(t, f, 100) // hdrl size placeholder
+	writeUint32LE(t, f, 68) // 4 + 8 + 56
 	writeBytes(t, f, []byte("hdrl"))
 
 	// avih
@@ -638,9 +638,9 @@ func createTestAVIWithNegativeHeight(t *testing.T, tmpDir string) string {
 	writeUint32LE(t, f, 0)
 	writeUint32LE(t, f, 0)
 
-	// LIST strl
+	// LIST strl (top-level)
 	writeBytes(t, f, []byte("LIST"))
-	writeUint32LE(t, f, 96) // strl size placeholder
+	writeUint32LE(t, f, 100) // 4 + 8 + 48 + 8 + 40
 	writeBytes(t, f, []byte("strl"))
 
 	// strh
@@ -679,11 +679,6 @@ func createTestAVIWithNegativeHeight(t *testing.T, tmpDir string) string {
 	writeUint32LE(t, f, 0)
 	writeUint32LE(t, f, 0)
 
-	// Pad for word alignment
-	if 40%2 != 0 {
-		writeByte(t, f, 0)
-	}
-
 	return aviPath
 }
 
@@ -712,4 +707,103 @@ func writeInt32LE(t *testing.T, f *os.File, value int32) {
 func writeUint16LE(t *testing.T, f *os.File, value uint16) {
 	err := binary.Write(f, binary.LittleEndian, value)
 	require.NoError(t, err)
+}
+
+func TestAnalyzeAVI_WithFullFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	aviPath := createTestAVI(t, tmpDir, "H264", 0x0055)
+
+	f, err := os.Open(aviPath)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	info, err := analyzeAVI(f)
+
+	require.NoError(t, err)
+	assert.Equal(t, "avi", info.Container)
+	assert.Equal(t, 1920, info.Width)
+	assert.Equal(t, 1080, info.Height)
+	assert.Equal(t, "h264", info.VideoCodec)
+	assert.Equal(t, "mp3", info.AudioCodec)
+	assert.Greater(t, info.Duration, 0.0)
+	assert.Greater(t, info.FrameRate, 0.0)
+	assert.Equal(t, 2, info.AudioChannels)
+	assert.Equal(t, 44100, info.SampleRate)
+}
+
+func TestAnalyzeAVI_WithXVIDCodec(t *testing.T) {
+	tmpDir := t.TempDir()
+	aviPath := createTestAVI(t, tmpDir, "XVID", 0x0001)
+
+	f, err := os.Open(aviPath)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	info, err := analyzeAVI(f)
+
+	require.NoError(t, err)
+	assert.Equal(t, "avi", info.Container)
+	assert.Equal(t, "xvid", info.VideoCodec)
+	assert.Equal(t, "pcm", info.AudioCodec)
+}
+
+func TestAnalyzeAVI_NegativeHeight(t *testing.T) {
+	tmpDir := t.TempDir()
+	aviPath := createTestAVIWithNegativeHeight(t, tmpDir)
+
+	f, err := os.Open(aviPath)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	info, err := analyzeAVI(f)
+
+	require.NoError(t, err)
+	assert.Equal(t, "avi", info.Container)
+	assert.Equal(t, 640, info.Width)
+	assert.Equal(t, 480, info.Height)
+}
+
+func TestAnalyzeAVI_WithDifferentCodecs(t *testing.T) {
+	tests := []struct {
+		name           string
+		videoCodec     string
+		audioFormatTag uint16
+		expectedVideo  string
+		expectedAudio  string
+	}{
+		{"HEVC", "HEVC", 0x0055, "h265", "mp3"},
+		{"VP80", "VP80", 0x0001, "vp8", "pcm"},
+		{"VP90", "VP90", 0x2000, "vp9", "ac3"},
+		{"MJPG", "MJPG", 0xF1AC, "mjpeg", "flac"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			aviPath := createTestAVI(t, tmpDir, tt.videoCodec, tt.audioFormatTag)
+
+			f, err := os.Open(aviPath)
+			require.NoError(t, err)
+			defer func() { _ = f.Close() }()
+
+			info, err := analyzeAVI(f)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedVideo, info.VideoCodec)
+			assert.Equal(t, tt.expectedAudio, info.AudioCodec)
+		})
+	}
+}
+
+func TestAnalyzeAVI_SeekError(t *testing.T) {
+	tmpDir := t.TempDir()
+	emptyPath := filepath.Join(tmpDir, "empty.avi")
+	require.NoError(t, os.WriteFile(emptyPath, []byte{}, 0644))
+
+	f, err := os.Open(emptyPath)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	_, err = analyzeAVI(f)
+	assert.Error(t, err)
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -391,14 +392,14 @@ func TestResolveURL(t *testing.T) {
 			name: "URL with query params",
 			base: "https://example.com/foo/bar",
 			raw:  "image.jpg?foo=bar",
-			// Implementation URL-encodes ? as %3F in relative paths
-			want: "https://example.com/foo/image.jpg%3Ffoo=bar",
+			// Shared ResolveURL correctly resolves relative URLs with query params
+			want: "https://example.com/foo/image.jpg?foo=bar",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := resolveURL(tt.base, tt.raw)
+			result := scraperutil.ResolveURL(tt.base, tt.raw)
 			assert.Equal(t, tt.want, result)
 		})
 	}
@@ -529,7 +530,7 @@ func TestCleanString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := cleanString(tt.input)
+			result := scraperutil.CleanString(tt.input)
 			assert.Equal(t, tt.want, result)
 		})
 	}
