@@ -2,7 +2,11 @@ package ssrf
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
+	"time"
 )
 
 func TestIsPrivateIP(t *testing.T) {
@@ -74,5 +78,76 @@ func TestCheckURL(t *testing.T) {
 				t.Errorf("CheckURL(%q) unexpected error: %v", tc.url, err)
 			}
 		})
+	}
+}
+
+func TestNewSSRFSafeClient_BlocksPrivateIPRedirect(t *testing.T) {
+	publicServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("public"))
+	}))
+	defer publicServer.Close()
+
+	client := NewSSRFSafeClient(5 * time.Second)
+
+	cleanup := SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		switch host {
+		case "public.example.com":
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		case "private.example.com":
+			return []net.IP{net.ParseIP("10.0.0.1")}, nil
+		default:
+			return net.LookupIP(host)
+		}
+	})
+	defer cleanup()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://private.example.com/", nil)
+	if err == nil {
+		_, err = client.Do(req)
+	}
+	if err == nil {
+		t.Error("expected error for private IP, got nil")
+	}
+}
+
+func TestNewSSRFSafeClient_BlocksRedirectToPrivateIP(t *testing.T) {
+	redirectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://private.redirect.target/", http.StatusFound)
+	}))
+	defer redirectServer.Close()
+
+	client := NewSSRFSafeClient(5 * time.Second)
+
+	cleanup := SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		switch host {
+		case "public.example.com":
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		case "private.redirect.target":
+			return []net.IP{net.ParseIP("192.168.1.1")}, nil
+		default:
+			return net.LookupIP(host)
+		}
+	})
+	defer cleanup()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://public.example.com/redirect", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	_, err = client.Do(req)
+	if err == nil {
+		t.Error("expected error for redirect to private IP, got nil")
+	}
+}
+
+func TestCheckRedirect_BlocksPrivateIP(t *testing.T) {
+	req := &http.Request{Header: http.Header{}}
+	req.URL, _ = url.Parse("http://192.168.1.1/secret")
+	via := []*http.Request{{}}
+
+	err := CheckRedirect(req, via)
+	if err == nil {
+		t.Error("expected error for redirect to private IP, got nil")
 	}
 }

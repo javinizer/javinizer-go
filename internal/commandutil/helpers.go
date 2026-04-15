@@ -300,6 +300,7 @@ func GenerateNFOs(
 // DownloadMediaFiles downloads covers, posters, screenshots, and trailers.
 // Returns the count of files downloaded and any error.
 func DownloadMediaFiles(
+	ctx context.Context,
 	movies map[string]*models.Movie,
 	matches []matcher.MatchResult,
 	mediaDownloader MediaDownloader,
@@ -376,7 +377,7 @@ func DownloadMediaFiles(
 					PartSuffix:  firstMatch.PartSuffix,
 				}
 			}
-			results, err := mediaDownloader.DownloadAll(context.Background(), movie, downloadDir, multipart)
+			results, err := mediaDownloader.DownloadAll(ctx, movie, downloadDir, multipart)
 			if err != nil {
 				logging.Infof("Download error for %s: %v", id, err)
 			}

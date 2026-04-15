@@ -1,9 +1,12 @@
 package ssrf
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
+	"time"
 )
 
 var ErrSSRFBlocked = fmt.Errorf("SSRF blocked: URL resolves to private/internal IP")
@@ -65,4 +68,69 @@ func CheckURL(rawURL string) error {
 		}
 	}
 	return nil
+}
+
+func CheckRedirect(req *http.Request, via []*http.Request) error {
+	if err := CheckURL(req.URL.String()); err != nil {
+		return fmt.Errorf("SSRF blocked: redirect to private/internal IP: %w", err)
+	}
+	if len(via) >= 10 {
+		return fmt.Errorf("SSRF blocked: too many redirects (>10)")
+	}
+	return nil
+}
+
+func NewSSRFSafeClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	originalDialContext := transport.DialContext
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("SSRF blocked: invalid address %q: %w", addr, err)
+		}
+		ips, err := lookupIP(host)
+		if err != nil {
+			return nil, fmt.Errorf("SSRF blocked: failed to resolve %q: %w", host, err)
+		}
+		for _, ip := range ips {
+			if IsPrivateIP(ip) {
+				return nil, fmt.Errorf("SSRF blocked: %s resolves to private/internal IP %s", host, ip)
+			}
+		}
+		if originalDialContext != nil {
+			return originalDialContext(ctx, network, addr)
+		}
+		return (&net.Dialer{Timeout: 30 * time.Second}).DialContext(ctx, network, addr)
+	}
+
+	return &http.Client{
+		Transport:     transport,
+		Timeout:       timeout,
+		CheckRedirect: CheckRedirect,
+	}
+}
+
+func WrapTransportWithSSRFCheck(transport *http.Transport) *http.Transport {
+	originalDialContext := transport.DialContext
+	if originalDialContext == nil {
+		originalDialContext = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
+	}
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("SSRF blocked: invalid address %q: %w", addr, err)
+		}
+		ips, err := lookupIP(host)
+		if err != nil {
+			return nil, fmt.Errorf("SSRF blocked: failed to resolve %q: %w", host, err)
+		}
+		for _, ip := range ips {
+			if IsPrivateIP(ip) {
+				return nil, fmt.Errorf("SSRF blocked: %s resolves to private/internal IP %s", host, ip)
+			}
+		}
+		return originalDialContext(ctx, network, addr)
+	}
+	return transport
 }

@@ -275,7 +275,7 @@ func (s *Scraper) ResolveContentIDCtx(ctx context.Context, id string) (string, e
 		}
 
 		// Fetch the search page (cookies are set globally on the client)
-		resp, err := s.client.R().Get(searchURLFormatted)
+		resp, err := s.client.R().SetContext(ctx).Get(searchURLFormatted)
 		if err != nil {
 			return "", fmt.Errorf("DMM search unavailable (possible geo-restriction or network error): %w", err)
 		}
@@ -397,7 +397,7 @@ func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
 			continue
 		}
 
-		resp, err := s.client.R().Get(searchURLFormatted)
+		resp, err := s.client.R().SetContext(ctx).Get(searchURLFormatted)
 		if err != nil || resp.StatusCode() != 200 {
 			logging.Debugf("DMM: Search failed for query '%s': status=%d, err=%v", searchQuery, resp.StatusCode(), err)
 			continue
@@ -526,7 +526,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		logging.Debug("DMM: Using browser mode for video.dmm.co.jp page")
 
 		// Use browser to fetch JavaScript-rendered content
-		bodyHTML, err := FetchWithBrowser(url, s.browserConfig.Timeout, s.proxyProfile)
+		bodyHTML, err := FetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile)
 		if err != nil {
 			return nil, fmt.Errorf("browser fetch failed: %w", err)
 		}
@@ -543,7 +543,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 
 		// Use regular HTTP client (cookies are set globally on the client)
-		resp, err := s.client.R().Get(url)
+		resp, err := s.client.R().SetContext(ctx).Get(url)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch data from DMM: %w", err)
 		}
@@ -577,7 +577,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM ScrapeURL: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := FetchWithBrowser(url, s.browserConfig.Timeout, s.proxyProfile)
+		bodyHTML, err := FetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile)
 		if err != nil {
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("browser fetch failed: %v", err))
 		}
@@ -592,7 +592,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("rate limit wait failed: %v", err))
 		}
 
-		resp, err := s.client.R().Get(url)
+		resp, err := s.client.R().SetContext(ctx).Get(url)
 		if err != nil {
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("failed to fetch URL: %v", err))
 		}
@@ -758,11 +758,11 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 		if isStreamingPage {
 			// Streaming pages have actress data, but mixed with recommendations
 			// Use a more targeted extraction
-			result.Actresses = s.extractActressesFromStreamingPage(doc)
+			result.Actresses = s.extractActressesFromStreamingPage(ctx, doc)
 			logging.Debugf("DMM: Extracted %d actresses from streaming page", len(result.Actresses))
 		} else {
 			// Standard pages have clean actress data
-			result.Actresses = s.extractActresses(doc)
+			result.Actresses = s.extractActresses(ctx, doc)
 			logging.Debugf("DMM: Extracted %d actresses", len(result.Actresses))
 		}
 	} else if isMonthlyPage {
@@ -1017,7 +1017,7 @@ func (s *Scraper) extractGenres(doc *goquery.Document) []string {
 }
 
 // extractActresses extracts actress information
-func (s *Scraper) extractActresses(doc *goquery.Document) []models.ActressInfo {
+func (s *Scraper) extractActresses(ctx context.Context, doc *goquery.Document) []models.ActressInfo {
 	actresses := make([]models.ActressInfo, 0)
 	actressIndexByID := make(map[int]int) // Track seen actress IDs to avoid duplicates and merge metadata
 
@@ -1048,7 +1048,7 @@ func (s *Scraper) extractActresses(doc *goquery.Document) []models.ActressInfo {
 
 		// Extract all actress links from this specific content cell only
 		contentCell.Find(actressLinkSelector).Each(func(j int, sel *goquery.Selection) {
-			actress := s.extractActressFromLink(sel)
+			actress := s.extractActressFromLink(ctx, sel)
 			if actress.DMMID == 0 {
 				return
 			}
@@ -1070,7 +1070,7 @@ func (s *Scraper) extractActresses(doc *goquery.Document) []models.ActressInfo {
 // extractActressesFromStreamingPage extracts actresses from video.dmm.co.jp pages
 // These pages load content via JavaScript and may include actress links from recommendations.
 // This function uses a more targeted approach to extract only the movie's actual cast.
-func (s *Scraper) extractActressesFromStreamingPage(doc *goquery.Document) []models.ActressInfo {
+func (s *Scraper) extractActressesFromStreamingPage(ctx context.Context, doc *goquery.Document) []models.ActressInfo {
 	actresses := make([]models.ActressInfo, 0)
 	actressIndexByID := make(map[int]int) // Track actress IDs to avoid duplicates and merge metadata
 
@@ -1078,7 +1078,7 @@ func (s *Scraper) extractActressesFromStreamingPage(doc *goquery.Document) []mod
 	// "この商品に出演しているAV女優" (data-e2eid="actress-information")
 	if castSection := doc.Find(`[data-e2eid='actress-information']`).First(); castSection.Length() > 0 {
 		castSection.Find(actressLinkSelector).Each(func(i int, sel *goquery.Selection) {
-			actress := s.extractActressFromLink(sel)
+			actress := s.extractActressFromLink(ctx, sel)
 			if actress.DMMID == 0 {
 				return
 			}
@@ -1108,7 +1108,7 @@ func (s *Scraper) extractActressesFromStreamingPage(doc *goquery.Document) []mod
 		}
 
 		container.Find(actressLinkSelector).Each(func(j int, sel *goquery.Selection) {
-			actress := s.extractActressFromLink(sel)
+			actress := s.extractActressFromLink(ctx, sel)
 			if actress.DMMID == 0 {
 				return
 			}
@@ -1140,7 +1140,7 @@ func (s *Scraper) extractActressesFromStreamingPage(doc *goquery.Document) []mod
 
 	for _, selector := range metadataSelectors {
 		doc.Find(selector).Each(func(i int, sel *goquery.Selection) {
-			actress := s.extractActressFromLink(sel)
+			actress := s.extractActressFromLink(ctx, sel)
 			if actress.DMMID > 0 {
 				if !upsertActressInfo(&actresses, actressIndexByID, actress) {
 					return
@@ -1165,7 +1165,7 @@ func (s *Scraper) extractActressesFromStreamingPage(doc *goquery.Document) []mod
 }
 
 // extractActressFromLink extracts actress information from a single link element
-func (s *Scraper) extractActressFromLink(sel *goquery.Selection) models.ActressInfo {
+func (s *Scraper) extractActressFromLink(ctx context.Context, sel *goquery.Selection) models.ActressInfo {
 	href, exists := sel.Attr("href")
 	if !exists {
 		return models.ActressInfo{}
@@ -1209,7 +1209,7 @@ func (s *Scraper) extractActressFromLink(sel *goquery.Selection) models.ActressI
 
 	// Try to construct fallback thumbnail URLs if we have no thumb yet
 	if actress.ThumbURL == "" {
-		actress.ThumbURL = s.tryActressThumbURLs(actress.FirstName, actress.LastName, actress.DMMID)
+		actress.ThumbURL = s.tryActressThumbURLs(ctx, actress.FirstName, actress.LastName, actress.DMMID)
 	}
 
 	return actress
@@ -1365,7 +1365,7 @@ func upsertActressInfo(actresses *[]models.ActressInfo, indexByID map[int]int, a
 // 1. If we have English/romaji names, try constructing URL directly
 // 2. If we have DMM ID, fetch actress profile page and extract romaji from hiragana
 // 3. Test each candidate URL and return the first working one
-func (s *Scraper) tryActressThumbURLs(firstName, lastName string, dmmID int) string {
+func (s *Scraper) tryActressThumbURLs(ctx context.Context, firstName, lastName string, dmmID int) string {
 	candidates := make([]string, 0)
 
 	// Strategy 1: Try with provided English/romaji names if available
@@ -1374,14 +1374,14 @@ func (s *Scraper) tryActressThumbURLs(firstName, lastName string, dmmID int) str
 		lastLower := strings.ToLower(lastName)
 
 		candidates = append(candidates,
-			fmt.Sprintf("https://pics.dmm.co.jp/mono/actjpgs/%s_%s.jpg", lastLower, firstLower), // lastname_firstname (most common)
-			fmt.Sprintf("https://pics.dmm.co.jp/mono/actjpgs/%s_%s.jpg", firstLower, lastLower), // firstname_lastname
+			fmt.Sprintf("https://pics.dmm.co.jp/mono/actjpgs/%s_%s.jpg", lastLower, firstLower),
+			fmt.Sprintf("https://pics.dmm.co.jp/mono/actjpgs/%s_%s.jpg", firstLower, lastLower),
 		)
 	}
 
 	// Strategy 2: If we have DMM ID, fetch actress page and extract romaji from hiragana
 	if dmmID > 0 {
-		romajiVariants := s.extractRomajiVariantsFromActressPage(dmmID)
+		romajiVariants := s.extractRomajiVariantsFromActressPageCtx(ctx, dmmID)
 		for _, romaji := range romajiVariants {
 			candidates = append(candidates,
 				fmt.Sprintf("https://pics.dmm.co.jp/mono/actjpgs/%s.jpg", romaji),
@@ -1389,8 +1389,6 @@ func (s *Scraper) tryActressThumbURLs(firstName, lastName string, dmmID int) str
 		}
 	}
 
-	// Create a client that doesn't follow redirects for URL testing
-	// We want to detect 302s and only accept exact 200 responses
 	testClient, err := httpclient.NewRestyClient(s.proxyProfile, 5*time.Second, 0)
 	if err != nil {
 		logging.Debugf("DMM: Failed to create thumbnail probe client with scraper proxy: %v, using explicit no-proxy fallback", err)
@@ -1398,9 +1396,9 @@ func (s *Scraper) tryActressThumbURLs(firstName, lastName string, dmmID int) str
 	}
 	testClient.SetRedirectPolicy(resty.NoRedirectPolicy())
 
-	// Test each candidate URL
 	for _, url := range candidates {
 		resp, err := testClient.R().
+			SetContext(ctx).
 			SetDoNotParseResponse(true).
 			Head(url)
 
@@ -1415,12 +1413,8 @@ func (s *Scraper) tryActressThumbURLs(firstName, lastName string, dmmID int) str
 	return ""
 }
 
-// extractRomajiVariantsFromActressPage fetches the actress profile page and returns multiple romaji variants
+// extractRomajiVariantsFromActressPageCtx fetches the actress profile page and returns multiple romaji variants
 // Returns variants with different split points for lastname_firstname format
-func (s *Scraper) extractRomajiVariantsFromActressPage(dmmID int) []string {
-	return s.extractRomajiVariantsFromActressPageCtx(context.Background(), dmmID)
-}
-
 func (s *Scraper) extractRomajiVariantsFromActressPageCtx(ctx context.Context, dmmID int) []string {
 	url := fmt.Sprintf("https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=%d/", dmmID)
 
@@ -1430,7 +1424,7 @@ func (s *Scraper) extractRomajiVariantsFromActressPageCtx(ctx context.Context, d
 		return nil
 	}
 
-	resp, err := s.client.R().Get(url)
+	resp, err := s.client.R().SetContext(ctx).Get(url)
 	if err != nil || resp.StatusCode() != 200 {
 		logging.Debugf("DMM: Failed to fetch actress page for ID %d", dmmID)
 		return nil

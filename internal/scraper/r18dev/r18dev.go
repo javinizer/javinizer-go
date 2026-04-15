@@ -267,6 +267,7 @@ func (s *Scraper) doRequestWithRetryCtx(ctx context.Context, url string) (*resty
 		}
 
 		resp, err = s.client.R().
+			SetContext(ctx).
 			SetHeader("Accept-Encoding", "").
 			Get(url)
 

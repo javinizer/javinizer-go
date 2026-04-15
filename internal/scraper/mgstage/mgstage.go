@@ -176,7 +176,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return nil, err
 	}
-	resp, err := s.client.R().Get(rawURL)
+	resp, err := s.client.R().SetContext(ctx).Get(rawURL)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from MGStage: %w", err)
@@ -250,7 +250,7 @@ func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
 		return "", err
 	}
 
-	resp, err := s.client.R().Get(url)
+	resp, err := s.client.R().SetContext(ctx).Get(url)
 
 	if err != nil {
 		return "", fmt.Errorf("failed to search MGStage: %w", err)
@@ -262,7 +262,7 @@ func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
 			return "", err
 		}
 
-		directResp, directErr := s.client.R().Get(directURL)
+		directResp, directErr := s.client.R().SetContext(ctx).Get(directURL)
 
 		if directErr == nil && directResp.StatusCode() == 200 {
 			return directURL, nil
@@ -313,7 +313,7 @@ func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
 		return "", err
 	}
 
-	resp, err = s.client.R().Get(directURL)
+	resp, err = s.client.R().SetContext(ctx).Get(directURL)
 
 	if err == nil && resp.StatusCode() == 200 {
 		return directURL, nil
@@ -333,7 +333,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, err
 	}
 
-	resp, err := s.client.R().Get(url)
+	resp, err := s.client.R().SetContext(ctx).Get(url)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from MGStage: %w", err)

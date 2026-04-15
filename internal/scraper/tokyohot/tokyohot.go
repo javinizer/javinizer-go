@@ -218,6 +218,10 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 }
 
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.getURLWithContext(context.Background(), id)
+}
+
+func (s *Scraper) getURLWithContext(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -227,7 +231,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	}
 
 	target := fmt.Sprintf("%s/product/?q=%s", s.baseURL, url.QueryEscape(id))
-	html, status, err := s.fetchPageCtx(context.Background(), target)
+	html, status, err := s.fetchPageCtx(ctx, target)
 	if err != nil {
 		return "", fmt.Errorf("failed to search TokyoHot: %w", err)
 	}
@@ -289,7 +293,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("TokyoHot scraper is disabled")
 	}
 
-	detailURL, err := s.GetURL(id)
+	detailURL, err := s.getURLWithContext(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -613,7 +617,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 		return "", 0, err
 	}
 
-	resp, err := s.client.R().Get(targetURL)
+	resp, err := s.client.R().SetContext(ctx).Get(targetURL)
 	if err != nil {
 		return "", 0, err
 	}

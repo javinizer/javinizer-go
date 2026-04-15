@@ -560,7 +560,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 		var response ProxyTestResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 		assert.False(t, response.Success)
-		assert.Contains(t, response.Message, "failed to create proxy client")
+		assert.Contains(t, response.Message, "failed to create proxy transport")
 		assert.GreaterOrEqual(t, response.DurationMS, int64(0))
 	})
 

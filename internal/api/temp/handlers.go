@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -158,11 +159,7 @@ func serveTempImage(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(cfg, deps.GetRegistry())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create http client"})
-			return
-		}
+		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
 
 		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, parsedURL.String(), nil)
 		if err != nil {

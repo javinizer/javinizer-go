@@ -212,7 +212,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 
 		// Retry once with direct HTTP request
 		logging.Warnf("JavDB ScrapeURL: Parsed sparse detail response, retrying via direct request")
-		retryHTML, err := s.fetchPageDirect(urlStr)
+		retryHTML, err := s.fetchPageDirectCtx(ctx, urlStr)
 		if err != nil {
 			return nil, fmt.Errorf("parsed sparse detail page and direct retry failed: %w", err)
 		}
@@ -348,7 +348,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// FlareSolverr occasionally returns non-detail pages for JavDB detail URLs.
 	// Retry once with direct HTTP using any cookies already set on the client.
 	logging.Warnf("JavDB: Parsed sparse detail response for %s, retrying via direct request", detailURL)
-	retryHTML, err := s.fetchPageDirect(detailURL)
+	retryHTML, err := s.fetchPageDirectCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("parsed sparse detail page and direct retry failed: %w", err)
 	}
@@ -437,7 +437,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, e
 		return "", err
 	}
 
-	resp, err := s.client.R().Get(targetURL)
+	resp, err := s.client.R().SetContext(ctx).Get(targetURL)
 	if err == nil && resp != nil && resp.StatusCode() == 200 {
 		html := resp.String()
 		if !models.IsCloudflareChallengePage(html) {
@@ -471,16 +471,12 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, e
 	return s.fetchPageDirectResponse(resp, err)
 }
 
-func (s *Scraper) fetchPageDirect(targetURL string) (string, error) {
-	return s.fetchPageDirectCtx(context.Background(), targetURL)
-}
-
 func (s *Scraper) fetchPageDirectCtx(ctx context.Context, targetURL string) (string, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
 
-	resp, err := s.client.R().Get(targetURL)
+	resp, err := s.client.R().SetContext(ctx).Get(targetURL)
 	return s.fetchPageDirectResponse(resp, err)
 }
 

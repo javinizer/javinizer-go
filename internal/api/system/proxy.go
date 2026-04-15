@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
@@ -54,7 +55,6 @@ func testProxy(deps *ServerDependencies) gin.HandlerFunc {
 
 		switch req.Mode {
 		case "direct":
-			// Resolve proxy profile from the global config
 			globalProxy := deps.GetConfig().Scrapers.Proxy
 			proxyProfile := config.ResolveScraperProxy(globalProxy, &req.Proxy)
 
@@ -64,14 +64,20 @@ func testProxy(deps *ServerDependencies) gin.HandlerFunc {
 			}
 			resp.ProxyURL = httpclient.SanitizeProxyURL(proxyProfile.URL)
 
-			client, err := httpclient.NewRestyClient(proxyProfile, 30*time.Second, 0)
+			transport, err := httpclient.NewTransport(proxyProfile)
 			if err != nil {
 				resp.Success = false
 				resp.DurationMS = time.Since(start).Milliseconds()
-				resp.Message = fmt.Sprintf("failed to create proxy client: %v", err)
+				resp.Message = fmt.Sprintf("failed to create proxy transport: %v", err)
 				c.JSON(200, resp)
 				return
 			}
+			ssrf.WrapTransportWithSSRFCheck(transport)
+
+			client := resty.New()
+			client.SetTimeout(30 * time.Second)
+			client.SetTransport(transport)
+			client.SetRedirectPolicy(resty.NoRedirectPolicy())
 
 			userAgent := deps.GetConfig().Scrapers.UserAgent
 			if userAgent == "" {

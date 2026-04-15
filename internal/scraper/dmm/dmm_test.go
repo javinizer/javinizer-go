@@ -586,7 +586,7 @@ func TestExtractActresses(t *testing.T) {
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
 
-			actresses := scraper.extractActresses(doc)
+			actresses := scraper.extractActresses(context.Background(), doc)
 			assert.Len(t, actresses, tt.expectedCount)
 
 			for _, name := range tt.checkNames {
@@ -632,7 +632,7 @@ func TestExtractActressesFromStreamingPage_CastSectionPriority(t *testing.T) {
 	doc, err := parseHTMLString(html)
 	require.NoError(t, err)
 
-	actresses := scraper.extractActressesFromStreamingPage(doc)
+	actresses := scraper.extractActressesFromStreamingPage(context.Background(), doc)
 	require.Len(t, actresses, 1)
 	assert.Equal(t, 1056227, actresses[0].DMMID)
 	assert.Equal(t, "広瀬結香", actresses[0].JapaneseName)
@@ -663,7 +663,7 @@ func TestExtractActressesFromStreamingPage_HeadingFallback(t *testing.T) {
 	doc, err := parseHTMLString(html)
 	require.NoError(t, err)
 
-	actresses := scraper.extractActressesFromStreamingPage(doc)
+	actresses := scraper.extractActressesFromStreamingPage(context.Background(), doc)
 	require.Len(t, actresses, 1)
 	assert.Equal(t, 2001, actresses[0].DMMID)
 	assert.Equal(t, "主演女優", actresses[0].JapaneseName)
@@ -685,7 +685,7 @@ func TestExtractActressesFromStreamingPage_SkipsRecommendationOnlyLinks(t *testi
 	doc, err := parseHTMLString(html)
 	require.NoError(t, err)
 
-	actresses := scraper.extractActressesFromStreamingPage(doc)
+	actresses := scraper.extractActressesFromStreamingPage(context.Background(), doc)
 	assert.Len(t, actresses, 0)
 }
 

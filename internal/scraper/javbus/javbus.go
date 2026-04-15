@@ -229,6 +229,10 @@ func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 }
 
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.getURLWithContext(context.Background(), id)
+}
+
+func (s *Scraper) getURLWithContext(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -251,7 +255,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	for _, host := range searchHosts {
 		for _, p := range searchPaths {
 			target := strings.TrimRight(host, "/") + p
-			html, status, err := s.fetchPage(target)
+			html, status, err := s.fetchPageCtx(ctx, target)
 			if err != nil {
 				if scraperErr, ok := models.AsScraperError(err); ok && scraperErr.Kind == models.ScraperErrorKindBlocked {
 					return "", err
@@ -278,7 +282,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("JavBus scraper is disabled")
 	}
 
-	detailURL, err := s.GetURL(id)
+	detailURL, err := s.getURLWithContext(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -362,16 +366,12 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 	return result, nil
 }
 
-func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
-	return s.fetchPageCtx(context.Background(), targetURL)
-}
-
 func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}
 
-	resp, err := s.client.R().Get(targetURL)
+	resp, err := s.client.R().SetContext(ctx).Get(targetURL)
 	if err != nil {
 		return "", 0, err
 	}

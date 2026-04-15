@@ -268,6 +268,10 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 
 // GetURL resolves a detail page URL from movie ID.
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.getURLWithContext(context.Background(), id)
+}
+
+func (s *Scraper) getURLWithContext(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -285,7 +289,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	candidateOrder := make([]string, 0, 8)
 	for _, endpoint := range searchEndpoints {
 		searchURL := s.applyLanguage(s.baseURL + endpoint)
-		html, status, err := s.fetchPageCtx(context.Background(), searchURL)
+		html, status, err := s.fetchPageCtx(ctx, searchURL)
 		if err != nil || status != 200 {
 			continue
 		}
@@ -311,7 +315,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 
 	for i := 0; i < maxInspect; i++ {
 		candidate := candidateOrder[i]
-		html, status, err := s.fetchPageCtx(context.Background(), candidate)
+		html, status, err := s.fetchPageCtx(ctx, candidate)
 		if err != nil || status != 200 {
 			continue
 		}
@@ -335,7 +339,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("AVEntertainment scraper is disabled")
 	}
 
-	detailURL, err := s.GetURL(id)
+	detailURL, err := s.getURLWithContext(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -895,7 +899,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 		return "", 0, err
 	}
 
-	resp, err := s.client.R().Get(targetURL)
+	resp, err := s.client.R().SetContext(ctx).Get(targetURL)
 	if err != nil {
 		return "", 0, err
 	}

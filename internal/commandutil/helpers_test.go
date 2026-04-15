@@ -386,7 +386,7 @@ func TestDownloadMediaFiles(t *testing.T) {
 		mockDownloader := NewMockDownloader(nil, nil)
 		org := organizer.NewOrganizer(afero.NewOsFs(), &config.OutputConfig{})
 
-		count, err := DownloadMediaFiles(movies, matches, mockDownloader, org, true, true, false, "", false, false)
+		count, err := DownloadMediaFiles(context.Background(), movies, matches, mockDownloader, org, true, true, false, "", false, false)
 
 		assert.NoError(t, err)
 		assert.Equal(t, 0, count, "Should return 0 for empty movies map")
@@ -401,7 +401,7 @@ func TestDownloadMediaFiles(t *testing.T) {
 		mockDownloader := NewMockDownloader(nil, nil)
 		org := organizer.NewOrganizer(afero.NewOsFs(), &config.OutputConfig{})
 
-		count, err := DownloadMediaFiles(movies, matches, mockDownloader, org, true, true, false, "", false, false)
+		count, err := DownloadMediaFiles(context.Background(), movies, matches, mockDownloader, org, true, true, false, "", false, false)
 
 		assert.NoError(t, err)
 		assert.Equal(t, 0, count, "Should skip movies with no matches")
@@ -441,7 +441,7 @@ func TestDownloadMediaFiles(t *testing.T) {
 		mockDownloader := NewMockDownloader(downloadResults, nil)
 		org := organizer.NewOrganizer(afero.NewOsFs(), &config.OutputConfig{})
 
-		count, err := DownloadMediaFiles(movies, matches, mockDownloader, org, true, true, false, "", false, false)
+		count, err := DownloadMediaFiles(context.Background(), movies, matches, mockDownloader, org, true, true, false, "", false, false)
 
 		assert.NoError(t, err)
 		assert.Equal(t, 3, count, "Should return total downloaded count")
@@ -475,7 +475,7 @@ func TestDownloadMediaFiles(t *testing.T) {
 		org := organizer.NewOrganizer(afero.NewOsFs(), &config.OutputConfig{})
 
 		// Dry run should show intent but return 0
-		count, err := DownloadMediaFiles(movies, matches, mockDownloader, org, true, true, false, "", false, true)
+		count, err := DownloadMediaFiles(context.Background(), movies, matches, mockDownloader, org, true, true, false, "", false, true)
 
 		assert.NoError(t, err)
 		assert.Equal(t, 0, count, "Dry run should return 0 count")
@@ -520,7 +520,7 @@ func TestDownloadMediaFiles(t *testing.T) {
 		mockDownloader := NewMockDownloaderWithTracking(downloadResults, nil)
 		org := organizer.NewOrganizer(afero.NewOsFs(), &config.OutputConfig{})
 
-		count, err := DownloadMediaFiles(movies, matches, mockDownloader, org, true, false, false, "", false, false)
+		count, err := DownloadMediaFiles(context.Background(), movies, matches, mockDownloader, org, true, false, false, "", false, false)
 
 		assert.NoError(t, err)
 		assert.Equal(t, 1, count, "Should download for multi-part movie")
@@ -566,7 +566,7 @@ func TestDownloadMediaFiles(t *testing.T) {
 		mockDownloader := NewMockDownloader(downloadResults, nil)
 		org := organizer.NewOrganizer(afero.NewOsFs(), &config.OutputConfig{})
 
-		count, err := DownloadMediaFiles(movies, matches, mockDownloader, org, true, true, false, "", false, false)
+		count, err := DownloadMediaFiles(context.Background(), movies, matches, mockDownloader, org, true, true, false, "", false, false)
 
 		assert.NoError(t, err)
 		// Count should only include downloaded files (not skipped or failed)
@@ -601,7 +601,7 @@ func TestDownloadMediaFiles(t *testing.T) {
 		org := organizer.NewOrganizer(afero.NewOsFs(), &config.OutputConfig{})
 
 		// moveToFolder=false should download to source dir
-		count, err := DownloadMediaFiles(movies, matches, mockDownloader, org, true, false, false, "", false, false)
+		count, err := DownloadMediaFiles(context.Background(), movies, matches, mockDownloader, org, true, false, false, "", false, false)
 
 		assert.NoError(t, err)
 		assert.Equal(t, 1, count, "Should download to source directory")

@@ -170,7 +170,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 
 	// Step 5: Download media
 	if downloadMedia {
-		_, err = commandutil.DownloadMediaFiles(movies, matches, mediaDownloader, fileOrganizer,
+		_, err = commandutil.DownloadMediaFiles(cmd.Context(), movies, matches, mediaDownloader, fileOrganizer,
 			deps.Config.Output.DownloadCover, deps.Config.Output.DownloadExtrafanart,
 			deps.Config.Output.MoveToFolder, destPath, forceUpdate, dryRun)
 		if err != nil {

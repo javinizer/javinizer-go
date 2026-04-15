@@ -431,7 +431,7 @@ func (s *Scraper) fetchMovieJSONCtx(ctx context.Context, targetURL string) (*mov
 		return nil, "", 0, err
 	}
 
-	resp, err := s.client.R().Get(targetURL)
+	resp, err := s.client.R().SetContext(ctx).Get(targetURL)
 	if err != nil {
 		return nil, "", 0, err
 	}

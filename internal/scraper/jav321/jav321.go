@@ -164,7 +164,7 @@ func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
-	resp, err := s.client.R().SetFormData(map[string]string{"sn": id}).Post(searchURL)
+	resp, err := s.client.R().SetContext(ctx).SetFormData(map[string]string{"sn": id}).Post(searchURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to search Jav321: %w", err)
 	}
@@ -616,7 +616,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 		return "", 0, err
 	}
 
-	resp, err := s.client.R().Get(targetURL)
+	resp, err := s.client.R().SetContext(ctx).Get(targetURL)
 	if err != nil {
 		return "", 0, err
 	}

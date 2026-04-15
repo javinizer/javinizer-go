@@ -270,7 +270,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 	}
 
 	// Try direct request first and only escalate to FlareSolverr on blocked/challenge responses.
-	resp, err := s.client.R().Get(url)
+	resp, err := s.client.R().SetContext(ctx).Get(url)
 	if err == nil && resp != nil && resp.StatusCode() == 200 {
 		html := string(resp.Body())
 		if !models.IsCloudflareChallengePage(html) {

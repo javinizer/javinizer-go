@@ -75,7 +75,7 @@ func isRunningInContainer() bool {
 }
 
 // FetchWithBrowser fetches a URL using Chrome browser automation with age verification cookies
-func FetchWithBrowser(url string, timeout int, proxyProfile *config.ProxyProfile) (string, error) {
+func FetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyProfile *config.ProxyProfile) (string, error) {
 	if timeout <= 0 {
 		timeout = 30 // Default timeout
 	}
@@ -127,7 +127,7 @@ func FetchWithBrowser(url string, timeout int, proxyProfile *config.ProxyProfile
 	}
 
 	// Create context with custom allocator
-	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	allocCtx, allocCancel := chromedp.NewExecAllocator(parentCtx, opts...)
 	defer allocCancel()
 
 	ctx, cancel := chromedp.NewContext(allocCtx)

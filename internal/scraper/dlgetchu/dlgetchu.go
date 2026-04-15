@@ -215,6 +215,10 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 }
 
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.getURLWithContext(context.Background(), id)
+}
+
+func (s *Scraper) getURLWithContext(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -225,7 +229,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 
 	if numericID := extractNumericID(id); numericID != "" {
 		candidate := fmt.Sprintf("%s/i/item%s", s.baseURL, numericID)
-		_, status, err := s.fetchPageCtx(context.Background(), candidate)
+		_, status, err := s.fetchPageCtx(ctx, candidate)
 		if err == nil && status == 200 {
 			return candidate, nil
 		}
@@ -236,7 +240,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 		fmt.Sprintf("%s/gcosin/?search_keyword=%s", s.baseURL, url.QueryEscape(id)),
 		fmt.Sprintf("%s/gcosl/?search_keyword=%s", s.baseURL, url.QueryEscape(id)),
 	} {
-		html, status, err := s.fetchPageCtx(context.Background(), searchURL)
+		html, status, err := s.fetchPageCtx(ctx, searchURL)
 		if err != nil || status != 200 {
 			continue
 		}
@@ -258,7 +262,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("DLgetchu scraper is disabled")
 	}
 
-	detailURL, err := s.GetURL(id)
+	detailURL, err := s.getURLWithContext(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +423,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 		return "", 0, err
 	}
 
-	resp, err := s.client.R().Get(targetURL)
+	resp, err := s.client.R().SetContext(ctx).Get(targetURL)
 	if err != nil {
 		return "", 0, err
 	}
