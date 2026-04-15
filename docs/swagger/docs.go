@@ -521,72 +521,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/batch/{id}/movies/{movieId}/rescrape": {
-            "post": {
-                "description": "Rescrape a movie with custom scrapers or manual search input, and regenerate temp poster",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "batch"
-                ],
-                "summary": "Rescrape a single movie within a batch job",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Batch Job ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Movie ID to rescrape",
-                        "name": "movieId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Rescrape options",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/batch.BatchRescrapeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/batch.BatchRescrapeResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/batch/{id}/organize": {
             "post": {
                 "description": "Organize files from a completed scrape job (move files, download artwork, create NFO)",
@@ -2267,6 +2201,9 @@ const docTemplate = `{
                 "operation_mode_override": {
                     "type": "string"
                 },
+                "persist_error": {
+                    "type": "string"
+                },
                 "progress": {
                     "type": "number"
                 },
@@ -2287,64 +2224,6 @@ const docTemplate = `{
                 },
                 "total_files": {
                     "type": "integer"
-                }
-            }
-        },
-        "batch.BatchRescrapeRequest": {
-            "type": "object",
-            "properties": {
-                "array_strategy": {
-                    "description": "For Update mode: merge, replace",
-                    "type": "string",
-                    "example": "merge"
-                },
-                "force": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "manual_search_input": {
-                    "type": "string",
-                    "example": "IPX-535"
-                },
-                "preset": {
-                    "description": "Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)",
-                    "type": "string",
-                    "example": "conservative"
-                },
-                "scalar_strategy": {
-                    "description": "For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only",
-                    "type": "string",
-                    "example": "prefer-nfo"
-                },
-                "selected_scrapers": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "r18dev",
-                        "dmm"
-                    ]
-                }
-            }
-        },
-        "batch.BatchRescrapeResponse": {
-            "type": "object",
-            "properties": {
-                "actress_sources": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "field_sources": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "movie": {
-                    "$ref": "#/definitions/models.Movie"
                 }
             }
         },
@@ -3238,6 +3117,14 @@ const docTemplate = `{
                 }
             }
         },
+        "config.RateLimitConfig": {
+            "type": "object",
+            "properties": {
+                "requests_per_minute": {
+                    "type": "integer"
+                }
+            }
+        },
         "config.ScrapersConfig": {
             "type": "object",
             "properties": {
@@ -3297,44 +3184,49 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "allow_unc": {
-                    "description": "Allow UNC paths (Windows only). UNC paths can leak NTLM credentials to remote servers.",
                     "type": "boolean"
                 },
                 "allowed_directories": {
-                    "description": "Allowed directories for scanning/browsing (empty = no allowlist restriction)",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "allowed_origins": {
-                    "description": "Allowed origins for CORS and WebSocket connections (empty = same-origin only, \"*\" = allow all)",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "allowed_unc_servers": {
-                    "description": "Allowed UNC servers (Windows only). Only used if AllowUNC is true.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "denied_directories": {
-                    "description": "Denied directories (in addition to built-in system directories)",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
+                "force_secure_cookies": {
+                    "type": "boolean"
+                },
                 "max_files_per_scan": {
-                    "description": "Maximum number of files to return in a scan",
                     "type": "integer"
                 },
+                "rate_limit": {
+                    "$ref": "#/definitions/config.RateLimitConfig"
+                },
                 "scan_timeout_seconds": {
-                    "description": "Timeout for scan operations in seconds",
                     "type": "integer"
+                },
+                "trusted_proxies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

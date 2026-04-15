@@ -15,7 +15,7 @@ import (
 func TestNewPreviewStrategy(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	delegate := NewOrganizeStrategy(fs, cfg)
+	delegate := NewOrganizeStrategy(fs, cfg, nil)
 	strategy := NewPreviewStrategy(delegate)
 	assert.NotNil(t, strategy)
 	assert.NotNil(t, strategy.delegate)
@@ -24,7 +24,7 @@ func TestNewPreviewStrategy(t *testing.T) {
 func TestPreviewStrategy_ImplementsInterface(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	delegate := NewOrganizeStrategy(fs, cfg)
+	delegate := NewOrganizeStrategy(fs, cfg, nil)
 	var _ OperationStrategy = NewPreviewStrategy(delegate)
 }
 
@@ -35,7 +35,7 @@ func TestPreviewStrategy_Plan_DelegatesToOrganizeStrategy(t *testing.T) {
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	delegate := NewOrganizeStrategy(fs, cfg)
+	delegate := NewOrganizeStrategy(fs, cfg, nil)
 	strategy := NewPreviewStrategy(delegate)
 
 	match := matcher.MatchResult{
@@ -64,7 +64,7 @@ func TestPreviewStrategy_Plan_DelegatesToInPlaceStrategy(t *testing.T) {
 		RenameFile:   true,
 	}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	delegate := NewInPlaceStrategy(fs, cfg, m)
+	delegate := NewInPlaceStrategy(fs, cfg, m, nil)
 	strategy := NewPreviewStrategy(delegate)
 
 	_ = fs.MkdirAll("/source/old-folder", 0777)
@@ -117,7 +117,7 @@ func TestPreviewStrategy_Plan_DelegatesToMetadataOnlyStrategy(t *testing.T) {
 func TestPreviewStrategy_Execute_NoFilesystemChanges(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	delegate := NewOrganizeStrategy(fs, cfg)
+	delegate := NewOrganizeStrategy(fs, cfg, nil)
 	strategy := NewPreviewStrategy(delegate)
 
 	_ = fs.MkdirAll("/source", 0777)
@@ -145,7 +145,7 @@ func TestPreviewStrategy_Execute_NoFilesystemChanges(t *testing.T) {
 func TestPreviewStrategy_Execute_ReturnsCorrectPaths(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	delegate := NewOrganizeStrategy(fs, cfg)
+	delegate := NewOrganizeStrategy(fs, cfg, nil)
 	strategy := NewPreviewStrategy(delegate)
 
 	plan := &OrganizePlan{
@@ -168,7 +168,7 @@ func TestPreviewStrategy_Execute_ReturnsCorrectPaths(t *testing.T) {
 func TestPreviewStrategy_Execute_NoMoveWhenWillMoveFalse(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	delegate := NewOrganizeStrategy(fs, cfg)
+	delegate := NewOrganizeStrategy(fs, cfg, nil)
 	strategy := NewPreviewStrategy(delegate)
 
 	plan := &OrganizePlan{

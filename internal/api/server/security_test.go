@@ -114,7 +114,7 @@ func TestCORS_OriginValidation(t *testing.T) {
 				MovieRepo:   newMockMovieRepo(),
 				ActressRepo: newMockActressRepo(),
 				Matcher:     mat,
-				JobQueue:    worker.NewJobQueue(nil, ""),
+				JobQueue:    worker.NewJobQueue(nil, "", nil),
 			}
 			// Initialize atomic config pointer
 			deps.SetConfig(cfg)
@@ -201,7 +201,7 @@ func TestCORS_PreflightRequest(t *testing.T) {
 				MovieRepo:   newMockMovieRepo(),
 				ActressRepo: newMockActressRepo(),
 				Matcher:     mat,
-				JobQueue:    worker.NewJobQueue(nil, ""),
+				JobQueue:    worker.NewJobQueue(nil, "", nil),
 			}
 			// Initialize atomic config pointer
 			deps.SetConfig(cfg)
@@ -393,7 +393,7 @@ func TestSecurity_InputValidation(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -613,7 +613,7 @@ func TestSecurity_ErrorMessageLeakage(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -680,7 +680,7 @@ func TestSecurity_RateLimitingHeaders(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -765,7 +765,7 @@ func TestSecurity_WebSocketOriginValidation(t *testing.T) {
 				MovieRepo:   newMockMovieRepo(),
 				ActressRepo: newMockActressRepo(),
 				Matcher:     mat,
-				JobQueue:    worker.NewJobQueue(nil, ""),
+				JobQueue:    worker.NewJobQueue(nil, "", nil),
 			}
 			// Initialize atomic config pointer
 			deps.SetConfig(cfg)

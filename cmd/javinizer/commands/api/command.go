@@ -19,6 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper"
+	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
@@ -115,6 +116,7 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 	// Initialize repositories
 	movieRepo := database.NewMovieRepository(db)
 	actressRepo := database.NewActressRepository(db)
+	genreReplacementRepo := database.NewGenreReplacementRepository(db)
 
 	// Initialize scrapers using centralized registry
 	registry, err := scraper.NewDefaultScraperRegistry(cfg, db)
@@ -137,7 +139,8 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 
 	// Initialize job repository and queue
 	jobRepo := database.NewJobRepository(db)
-	jobQueue := worker.NewJobQueue(jobRepo, cfg.System.TempDir)
+	sharedEngine := template.NewEngine()
+	jobQueue := worker.NewJobQueue(jobRepo, cfg.System.TempDir, sharedEngine)
 
 	// Initialize history repository
 	historyRepo := database.NewHistoryRepository(db)
@@ -152,22 +155,23 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 
 	// Create server dependencies
 	apiDeps := &apicore.ServerDependencies{
-		ConfigFile:      configFile,
-		Registry:        registry,
-		DB:              db,
-		Aggregator:      agg,
-		MovieRepo:       movieRepo,
-		ActressRepo:     actressRepo,
-		HistoryRepo:     historyRepo,
-		BatchFileOpRepo: batchFileOpRepo,
-		EventRepo:       eventRepo,
-		EventEmitter:    eventEmitter,
-		Reverter:        reverter,
-		Matcher:         mat,
-		JobRepo:         jobRepo,
-		JobQueue:        jobQueue,
-		Auth:            authManager,
-		TokenStore:      apicore.NewTokenStore(),
+		ConfigFile:           configFile,
+		Registry:             registry,
+		DB:                   db,
+		Aggregator:           agg,
+		MovieRepo:            movieRepo,
+		ActressRepo:          actressRepo,
+		HistoryRepo:          historyRepo,
+		BatchFileOpRepo:      batchFileOpRepo,
+		EventRepo:            eventRepo,
+		EventEmitter:         eventEmitter,
+		Reverter:             reverter,
+		Matcher:              mat,
+		JobRepo:              jobRepo,
+		JobQueue:             jobQueue,
+		Auth:                 authManager,
+		TokenStore:           apicore.NewTokenStore(),
+		GenreReplacementRepo: genreReplacementRepo,
 	}
 	// Initialize atomic config pointer
 	apiDeps.SetConfig(cfg)

@@ -81,33 +81,22 @@ func (m *scraperModule) Defaults() any {
 	}
 }
 func (m *scraperModule) Priority() int { return 80 }
-func (m *scraperModule) FlattenFunc() any {
-	return scraperutil.FlattenFunc(func(cfg any) any {
-		c, ok := cfg.(scraperutil.ScraperConfigInterface)
-		if !ok {
-			return nil
-		}
-		proxy := c.GetProxy()
-		downloadProxy := c.GetDownloadProxy()
-		var proxyVal, downloadProxyVal *config.ProxyConfig
-		if proxy != nil {
-			proxyVal = proxy.(*config.ProxyConfig)
-		}
-		if downloadProxy != nil {
-			downloadProxyVal = downloadProxy.(*config.ProxyConfig)
-		}
-		if jlCfg, ok := cfg.(*JavLibraryConfig); ok {
-			return &config.ScraperSettings{
-				Enabled:       c.IsEnabled(),
-				Language:      jlCfg.Language,
-				RateLimit:     c.GetRequestDelay(),
-				BaseURL:       jlCfg.BaseURL,
-				Cookies:       jlCfg.Cookies,
-				Proxy:         proxyVal,
-				DownloadProxy: downloadProxyVal,
-			}
-		}
+func proxyAsConfig(p any) *config.ProxyConfig {
+	if p == nil {
 		return nil
+	}
+	return p.(*config.ProxyConfig)
+}
+
+func (m *scraperModule) FlattenFunc() any {
+	return scraperutil.DefaultFlattenConfigWithRaw(scraperutil.FlattenOverrides{}, func(fc *scraperutil.FlattenedConfig, _ scraperutil.FlattenOverrides, raw any) any {
+		s := &config.ScraperSettings{Enabled: fc.Enabled, RateLimit: fc.RateLimit, Proxy: proxyAsConfig(fc.Proxy), DownloadProxy: proxyAsConfig(fc.DownloadProxy)}
+		if jlCfg, ok := raw.(*JavLibraryConfig); ok {
+			s.Language = jlCfg.Language
+			s.BaseURL = jlCfg.BaseURL
+			s.Cookies = jlCfg.Cookies
+		}
+		return s
 	})
 }
 

@@ -24,7 +24,7 @@ func TestNewOrganizeTask(t *testing.T) {
 		tracker := NewProgressTracker(progressChan)
 
 		cfg := &config.OutputConfig{}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		match := matcher.MatchResult{
 			ID: "IPX-123",
@@ -49,7 +49,7 @@ func TestNewOrganizeTask(t *testing.T) {
 		tracker := NewProgressTracker(progressChan)
 
 		cfg := &config.OutputConfig{}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		match := matcher.MatchResult{
 			ID: "IPX-123",
@@ -71,7 +71,7 @@ func TestNewOrganizeTask(t *testing.T) {
 		tracker := NewProgressTracker(progressChan)
 
 		cfg := &config.OutputConfig{}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		match := matcher.MatchResult{
 			ID: "IPX-123",
@@ -102,7 +102,7 @@ func TestOrganizeTask_Execute_DryRun(t *testing.T) {
 			FileFormat:      "<ID> - <TITLE>",
 			SubfolderFormat: []string{},
 		}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		// Create temporary source file in separate source directory
 		srcDir := t.TempDir()
@@ -165,7 +165,7 @@ func TestOrganizeTask_Execute_ContextCancellation(t *testing.T) {
 			FileFormat:      "<ID> - <TITLE>",
 			SubfolderFormat: []string{},
 		}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		tmpDir := t.TempDir()
 		srcPath := filepath.Join(tmpDir, "ipx-123.mp4")
@@ -210,7 +210,7 @@ func TestOrganizeTask_Execute_PlanningError(t *testing.T) {
 			FileFormat:      "<ID> - <TITLE>",
 			SubfolderFormat: []string{},
 		}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		// Non-existent source file will cause validation/planning error
 		match := matcher.MatchResult{
@@ -247,7 +247,7 @@ func TestOrganizeTask_Execute_ValidationError(t *testing.T) {
 			MoveToFolder:    true,
 			RenameFile:      true,
 		}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		tmpDir := t.TempDir()
 		srcPath := filepath.Join(tmpDir, "ipx-123.mp4")
@@ -292,7 +292,7 @@ func TestOrganizeTask_Execute_ProgressTracking(t *testing.T) {
 			FileFormat:      "<ID> - <TITLE>",
 			SubfolderFormat: []string{},
 		}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		match := matcher.MatchResult{
 			ID: "IPX-123",
@@ -369,7 +369,7 @@ func TestOrganizeTask_Execute_MoveVsCopy(t *testing.T) {
 			MoveToFolder:    true,
 			SubfolderFormat: []string{},
 		}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		match := matcher.MatchResult{
 			ID: "IPX-123",
@@ -420,7 +420,7 @@ func TestOrganizeTask_Execute_MoveVsCopy(t *testing.T) {
 			MoveToFolder:    true,
 			SubfolderFormat: []string{},
 		}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		match := matcher.MatchResult{
 			ID: "IPX-456",
@@ -452,7 +452,7 @@ func TestOrganizeTask_Interface(t *testing.T) {
 		tracker := NewProgressTracker(progressChan)
 
 		cfg := &config.OutputConfig{}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		match := matcher.MatchResult{
 			ID: "IPX-123",
@@ -481,7 +481,7 @@ func TestOrganizeTask_ForceUpdateFlag(t *testing.T) {
 		tracker := NewProgressTracker(progressChan)
 
 		cfg := &config.OutputConfig{}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		match := matcher.MatchResult{
 			ID: "IPX-789",
@@ -515,7 +515,7 @@ func TestOrganizeTask_ConcurrentExecution(t *testing.T) {
 			MoveToFolder:    true,
 			SubfolderFormat: []string{},
 		}
-		org := organizer.NewOrganizer(afero.NewOsFs(), cfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		// Create multiple organize tasks
 		for i := 0; i < 5; i++ {

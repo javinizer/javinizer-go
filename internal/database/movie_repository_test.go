@@ -345,7 +345,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 
 	t.Run("Upsert creates new movie", func(t *testing.T) {
 		movie := createTestMovie("IPX-060")
-		err := repo.Upsert(movie)
+		_, err := repo.Upsert(movie)
 		require.NoError(t, err)
 
 		found, err := repo.FindByID("IPX-060")
@@ -366,7 +366,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 		// Update via upsert
 		movie.Title = "Updated via Upsert"
 		movie.Runtime = 180
-		err = repo.Upsert(movie)
+		_, err = repo.Upsert(movie)
 		require.NoError(t, err)
 
 		// Verify update
@@ -390,7 +390,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 			{Name: "Drama"},
 			{Name: "Comedy"},
 		}
-		err = repo.Upsert(movie)
+		_, err = repo.Upsert(movie)
 		require.NoError(t, err)
 
 		// Verify genres replaced
@@ -411,7 +411,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 		movie.Actresses = []models.Actress{
 			{DMMID: 90002, JapaneseName: "Actress2", FirstName: "First2", LastName: "Last2"},
 		}
-		err = repo.Upsert(movie)
+		_, err = repo.Upsert(movie)
 		require.NoError(t, err)
 
 		// Verify actresses replaced
@@ -426,7 +426,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 		movie.Translations = []models.MovieTranslation{
 			{Language: "en", Title: "English Title"},
 		}
-		err := repo.Upsert(movie)
+		_, err := repo.Upsert(movie)
 		require.NoError(t, err)
 
 		// Verify translation
@@ -440,7 +440,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 			{Language: "en", Title: "Updated English Title"},
 			{Language: "zh", Title: "Chinese Title"},
 		}
-		err = repo.Upsert(movie)
+		_, err = repo.Upsert(movie)
 		require.NoError(t, err)
 
 		// Verify translations updated
@@ -456,7 +456,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 			Title:     "Test Derive ContentID",
 		}
 
-		err := repo.Upsert(movie)
+		_, err := repo.Upsert(movie)
 		require.NoError(t, err)
 
 		found, err := repo.FindByID("TEST-derive-001")
@@ -471,7 +471,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 		movie1.Actresses = []models.Actress{
 			{DMMID: 66666, JapaneseName: "Updated Actress"},
 		}
-		err := repo.Upsert(movie1)
+		_, err := repo.Upsert(movie1)
 		require.NoError(t, err)
 
 		// Second: Add more data to same actress
@@ -479,7 +479,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 		movie2.Actresses = []models.Actress{
 			{DMMID: 66666, JapaneseName: "Updated Actress", FirstName: "Updated", LastName: "Actress2"},
 		}
-		err = repo.Upsert(movie2)
+		_, err = repo.Upsert(movie2)
 		require.NoError(t, err)
 
 		// Verify actress data was updated
@@ -502,7 +502,7 @@ func TestMovieRepository_Upsert(t *testing.T) {
 		movie2 := createTestMovie("IPX-RACE-001")
 		movie2.ContentID = "race-condition-test"
 		movie2.Title = "Updated After Race"
-		err = repo.Upsert(movie2)
+		_, err = repo.Upsert(movie2)
 		require.NoError(t, err)
 
 		found, err := repo.FindByID("IPX-RACE-001")
@@ -534,14 +534,14 @@ func TestMovieRepository_EnsureGenresExist(t *testing.T) {
 		movie1.Genres = []models.Genre{
 			{Name: "SharedGenreTest"},
 		}
-		err := repo.Upsert(movie1)
+		_, err := repo.Upsert(movie1)
 		require.NoError(t, err)
 
 		movie2 := createTestMovie("IPX-071")
 		movie2.Genres = []models.Genre{
 			{Name: "SharedGenreTest"},
 		}
-		err = repo.Upsert(movie2)
+		_, err = repo.Upsert(movie2)
 		require.NoError(t, err)
 
 		// Verify both movies reference the same genre
@@ -577,7 +577,7 @@ func TestMovieRepository_EnsureGenresExist(t *testing.T) {
 		movie1.Actresses = []models.Actress{
 			{DMMID: 77777, JapaneseName: "Race Condition Actress", FirstName: "Race", LastName: "Condition"},
 		}
-		err := repo.Upsert(movie1)
+		_, err := repo.Upsert(movie1)
 		require.NoError(t, err)
 
 		// Verify the actress was created and is accessible
@@ -593,7 +593,7 @@ func TestMovieRepository_EnsureGenresExist(t *testing.T) {
 		movie.Actresses = []models.Actress{
 			{FirstName: "Fallback", LastName: "Test"},
 		}
-		err := repo.Upsert(movie)
+		_, err := repo.Upsert(movie)
 		require.NoError(t, err)
 
 		found, err := repo.FindByID("IPX-FALLBACK-001")
@@ -627,14 +627,14 @@ func TestMovieRepository_EnsureActressesExist(t *testing.T) {
 		movie1.Actresses = []models.Actress{
 			{DMMID: 12345, JapaneseName: "Test Actress", FirstName: "Test", LastName: "Actress"},
 		}
-		err := repo.Upsert(movie1)
+		_, err := repo.Upsert(movie1)
 		require.NoError(t, err)
 
 		movie2 := createTestMovie("IPX-081")
 		movie2.Actresses = []models.Actress{
 			{DMMID: 12345, JapaneseName: "Test Actress Updated", FirstName: "Updated", LastName: "Name"},
 		}
-		err = repo.Upsert(movie2)
+		_, err = repo.Upsert(movie2)
 		require.NoError(t, err)
 
 		// Verify both movies reference the same actress (by DMMID)
@@ -660,14 +660,14 @@ func TestMovieRepository_EnsureActressesExist(t *testing.T) {
 		movie1.Actresses = []models.Actress{
 			{JapaneseName: "山田太郎", FirstName: "Taro", LastName: "Yamada"},
 		}
-		err := repo.Upsert(movie1)
+		_, err := repo.Upsert(movie1)
 		require.NoError(t, err)
 
 		movie2 := createTestMovie("IPX-083")
 		movie2.Actresses = []models.Actress{
 			{JapaneseName: "山田太郎", FirstName: "Different", LastName: "Name"},
 		}
-		err = repo.Upsert(movie2)
+		_, err = repo.Upsert(movie2)
 		require.NoError(t, err)
 
 		// Verify actress exists in database
@@ -692,7 +692,7 @@ func TestMovieRepository_EnsureActressesExist(t *testing.T) {
 		movie.Actresses = []models.Actress{
 			{}, // No DMMID, JapaneseName, FirstName, or LastName
 		}
-		err := repo.Upsert(movie)
+		_, err := repo.Upsert(movie)
 		require.NoError(t, err)
 
 		// Verify actress was skipped (should have 0 actresses)
@@ -707,7 +707,7 @@ func TestMovieRepository_EnsureActressesExist(t *testing.T) {
 		movie1.Actresses = []models.Actress{
 			{DMMID: 55555, JapaneseName: "テスト女優"},
 		}
-		err := repo.Upsert(movie1)
+		_, err := repo.Upsert(movie1)
 		require.NoError(t, err)
 
 		// Second movie provides additional data for the same actress
@@ -715,7 +715,7 @@ func TestMovieRepository_EnsureActressesExist(t *testing.T) {
 		movie2.Actresses = []models.Actress{
 			{DMMID: 55555, JapaneseName: "テスト女優", ThumbURL: "http://example.com/thumb.jpg", FirstName: "Test", LastName: "Actress"},
 		}
-		err = repo.Upsert(movie2)
+		_, err = repo.Upsert(movie2)
 		require.NoError(t, err)
 
 		// Verify actress data was merged
@@ -761,7 +761,7 @@ func TestMovieRepository_Upsert_WithSettingsHash(t *testing.T) {
 			},
 		}
 
-		err := repo.Upsert(movie)
+		_, err := repo.Upsert(movie)
 		require.NoError(t, err)
 
 		found, err := repo.FindByID("IPX-HASH-001")
@@ -781,7 +781,7 @@ func TestMovieRepository_Upsert_WithSettingsHash(t *testing.T) {
 			},
 		}
 
-		err := repo.Upsert(movie)
+		_, err := repo.Upsert(movie)
 		require.NoError(t, err)
 
 		found, err := repo.FindByID("IPX-HASH-002")
@@ -800,7 +800,7 @@ func TestMovieRepository_Upsert_WithSettingsHash(t *testing.T) {
 				SourceName:   "translation-service",
 			},
 		}
-		err := repo.Upsert(movie)
+		_, err := repo.Upsert(movie)
 		require.NoError(t, err)
 
 		movie.Translations = []models.MovieTranslation{
@@ -812,7 +812,7 @@ func TestMovieRepository_Upsert_WithSettingsHash(t *testing.T) {
 			},
 		}
 
-		err = repo.Upsert(movie)
+		_, err = repo.Upsert(movie)
 		require.NoError(t, err)
 
 		found, err := repo.FindByID("IPX-HASH-003")

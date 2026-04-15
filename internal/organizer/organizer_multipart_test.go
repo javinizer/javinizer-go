@@ -23,7 +23,7 @@ func TestPlan_AppendsPartSuffix(t *testing.T) {
 		MaxTitleLength:  0,
 		MaxPathLength:   260,
 	}
-	o := NewOrganizer(afero.NewOsFs(), cfg)
+	o := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	movie := &models.Movie{
 		ID:          "IPX-535",
@@ -107,7 +107,7 @@ func TestOrganizeBatch_GroupsAndSortsParts(t *testing.T) {
 		MoveToFolder:    true,
 		SubfolderFormat: []string{},
 	}
-	o := NewOrganizer(afero.NewOsFs(), cfg)
+	o := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	movie := &models.Movie{
 		ID:    "IPX-535",

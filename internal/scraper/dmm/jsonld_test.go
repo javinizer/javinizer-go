@@ -278,54 +278,6 @@ func TestParseReleaseDateFromJSONLD(t *testing.T) {
 	}
 }
 
-// TestNormalizeJSONLDImageURL verifies image URL normalization
-func TestNormalizeJSONLDImageURL(t *testing.T) {
-	tests := []struct {
-		name        string
-		input       string
-		expected    string
-		description string
-	}{
-		{
-			name:        "awsimgsrc URL",
-			input:       "https://awsimgsrc.dmm.co.jp/pics_dig/video/ipx00535/ipx00535pl.jpg",
-			expected:    "https://pics.dmm.co.jp/video/ipx00535/ipx00535pl.jpg",
-			description: "Should convert awsimgsrc to pics.dmm.co.jp",
-		},
-		{
-			name:        "URL with query parameters",
-			input:       "https://pics.dmm.co.jp/image.jpg?v=123&ref=foo",
-			expected:    "https://pics.dmm.co.jp/image.jpg",
-			description: "Should remove query parameters",
-		},
-		{
-			name:        "awsimgsrc with query params",
-			input:       "https://awsimgsrc.dmm.co.jp/pics_dig/video/test.jpg?size=large",
-			expected:    "https://pics.dmm.co.jp/video/test.jpg",
-			description: "Should convert domain and remove query params",
-		},
-		{
-			name:        "already normalized",
-			input:       "https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535pl.jpg",
-			expected:    "https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535pl.jpg",
-			description: "Should not modify already normalized URLs",
-		},
-		{
-			name:        "empty string",
-			input:       "",
-			expected:    "",
-			description: "Should handle empty string",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := normalizeJSONLDImageURL(tt.input)
-			assert.Equal(t, tt.expected, result, tt.description)
-		})
-	}
-}
-
 // TestExtractMetadataFromJSONLD verifies complete metadata extraction
 func TestExtractMetadataFromJSONLD(t *testing.T) {
 	tests := []struct {

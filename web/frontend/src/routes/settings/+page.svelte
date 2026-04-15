@@ -22,6 +22,7 @@
 	import LoggingSettingsSection from '$lib/components/settings/sections/LoggingSettingsSection.svelte';
 	import MediaInfoSettingsSection from '$lib/components/settings/sections/MediaInfoSettingsSection.svelte';
 	import BrowserSettingsSection from '$lib/components/settings/sections/BrowserSettingsSection.svelte';
+	import GenreReplacementsSection from '$lib/components/settings/sections/GenreReplacementsSection.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
 	import {
 		getScraperProxyMode as getScraperProxyModePure,
@@ -1257,6 +1258,7 @@
 			<FileOperationsSettingsSection {config} />
 			<OutputSettingsSection {config} {inputClass} />
 			<DatabaseSettingsSection {config} {inputClass} />
+			<GenreReplacementsSection />
 			<TranslationSettingsSection
 				{config}
 				{inputClass}

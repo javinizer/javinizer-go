@@ -199,6 +199,27 @@ export interface Genre {
 	name: string;
 }
 
+export interface GenreReplacement {
+	id: number;
+	original: string;
+	replacement: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface GenreReplacementListResponse {
+	replacements: GenreReplacement[];
+	count: number;
+	total: number;
+	limit: number;
+	offset: number;
+}
+
+export interface GenreReplacementCreateRequest {
+	original: string;
+	replacement: string;
+}
+
 export interface Movie {
 	id: string;
 	content_id?: string;

@@ -32,10 +32,11 @@ func TestRescrapeMovie(t *testing.T) {
 			},
 			setupData: func(t *testing.T, deps *ServerDependencies) {
 				// Pre-populate with cached movie
-				require.NoError(t, deps.MovieRepo.Upsert(&models.Movie{
+				_, err := deps.MovieRepo.Upsert(&models.Movie{
 					ID:    "IPX-123",
 					Title: "Old Title",
-				}))
+				})
+				require.NoError(t, err)
 			},
 			setupScraper: func(registry *models.ScraperRegistry) {
 				registry.Register(&mockScraperWithResults{
@@ -65,10 +66,11 @@ func TestRescrapeMovie(t *testing.T) {
 				Force:            false,
 			},
 			setupData: func(t *testing.T, deps *ServerDependencies) {
-				require.NoError(t, deps.MovieRepo.Upsert(&models.Movie{
+				_, err := deps.MovieRepo.Upsert(&models.Movie{
 					ID:    "IPX-456",
 					Title: "Cached Title",
-				}))
+				})
+				require.NoError(t, err)
 			},
 			setupScraper: func(registry *models.ScraperRegistry) {
 				registry.Register(&mockScraperWithResults{

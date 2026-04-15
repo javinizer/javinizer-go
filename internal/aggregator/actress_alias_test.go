@@ -320,7 +320,10 @@ func TestSplitActressName(t *testing.T) {
 		{"Single", []string{"Single"}},
 		{"Three Part Name", []string{"Three", "Part", "Name"}},
 		{"  Extra  Spaces  ", []string{"Extra", "Spaces"}},
-		{"", nil}, // Empty string returns nil slice
+		{"", []string{}},
+		{"   ", []string{}},
+		{"\tTab\tSeparated\t", []string{"Tab", "Separated"}},
+		{"Multiple   Spaces", []string{"Multiple", "Spaces"}},
 	}
 
 	for _, tt := range tests {

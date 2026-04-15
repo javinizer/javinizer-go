@@ -96,7 +96,7 @@ func TestDownload_Success(t *testing.T) {
 			cfg := &config.OutputConfig{
 				DownloadTimeout: 60,
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 			// Execute
 			result, err := downloader.download(context.Background(), tt.url, tt.destPath, MediaTypePoster)
@@ -211,7 +211,7 @@ func TestDownload_ErrorHandling(t *testing.T) {
 			cfg := &config.OutputConfig{
 				DownloadTimeout: 60,
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 			// Execute
 			result, err := downloader.download(context.Background(), tt.url, tt.destPath, MediaTypePoster)
@@ -262,7 +262,7 @@ func TestDownload_DirectoryCreation(t *testing.T) {
 	cfg := &config.OutputConfig{
 		DownloadTimeout: 60,
 	}
-	downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+	downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 	// Execute
 	result, err := downloader.download(context.Background(), url, destPath, MediaTypePoster)
@@ -309,7 +309,7 @@ func TestDownload_UserAgent(t *testing.T) {
 	cfg := &config.OutputConfig{
 		DownloadTimeout: 60,
 	}
-	downloader := NewDownloader(mockHTTP, memFS, cfg, expectedUserAgent)
+	downloader := NewDownloader(mockHTTP, memFS, cfg, expectedUserAgent, nil)
 
 	// Execute
 	result, err := downloader.download(context.Background(), url, destPath, MediaTypePoster)
@@ -371,7 +371,7 @@ func TestDownload_RefererHeader(t *testing.T) {
 				Once()
 
 			cfg := &config.OutputConfig{DownloadTimeout: 60}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 			result, err := downloader.download(context.Background(), tt.url, destPath, MediaTypePoster)
 			assert.NoError(t, err)
@@ -411,7 +411,7 @@ func TestDownload_ContextUsage(t *testing.T) {
 	cfg := &config.OutputConfig{
 		DownloadTimeout: 60,
 	}
-	downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+	downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 	// Execute
 	result, err := downloader.download(context.Background(), url, destPath, MediaTypePoster)

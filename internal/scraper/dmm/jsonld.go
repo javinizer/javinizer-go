@@ -3,7 +3,6 @@ package dmm
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -126,20 +125,6 @@ func parseReleaseDateFromJSONLD(uploadDate string) *time.Time {
 	return &t
 }
 
-// normalizeJSONLDImageURL normalizes image URLs from JSON-LD
-// Converts awsimgsrc.dmm.co.jp to pics.dmm.co.jp
-func normalizeJSONLDImageURL(url string) string {
-	// Convert awsimgsrc to pics.dmm.co.jp
-	url = strings.Replace(url, "awsimgsrc.dmm.co.jp/pics_dig", "pics.dmm.co.jp", 1)
-
-	// Remove query parameters
-	if idx := strings.Index(url, "?"); idx != -1 {
-		url = url[:idx]
-	}
-
-	return url
-}
-
 // extractMetadataFromJSONLD is a helper function that extracts all available metadata
 // from JSON-LD and returns it in a structured way for easy use in parseHTML
 func extractMetadataFromJSONLD(doc *goquery.Document) map[string]interface{} {
@@ -176,14 +161,12 @@ func extractMetadataFromJSONLD(doc *goquery.Document) map[string]interface{} {
 		images := getImagesFromJSONLD(product.Image)
 		if len(images) > 0 {
 			// First image is usually the cover
-			metadata["cover_url"] = normalizeJSONLDImageURL(images[0])
+			// Images already normalized by getImagesFromJSONLD -> normalizeImageURL
+			metadata["cover_url"] = images[0]
 
 			// Rest are screenshots (skip first which is cover)
 			if len(images) > 1 {
-				screenshots := make([]string, 0, len(images)-1)
-				for _, img := range images[1:] {
-					screenshots = append(screenshots, normalizeJSONLDImageURL(img))
-				}
+				screenshots := append([]string{}, images[1:]...)
 				metadata["screenshots"] = screenshots
 				logging.Debugf("DMM JSON-LD: Extracted %d screenshots from image array", len(screenshots))
 			}

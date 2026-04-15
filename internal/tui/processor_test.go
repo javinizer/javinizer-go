@@ -729,7 +729,7 @@ func createMinimalCoordinator(mockP *mockPool) *ProcessingCoordinator {
 	mockClient := &http.Client{}
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent")
+	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent", nil)
 
 	return &ProcessingCoordinator{
 		pool:            mockP,
@@ -819,7 +819,7 @@ func TestProcessFiles_SubmitError_Propagates(t *testing.T) {
 	mockClient := &http.Client{}
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent")
+	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent", nil)
 
 	submitErr := errors.New("pool submit failed")
 	mockP := &mockPool{submitErr: submitErr}
@@ -861,7 +861,7 @@ func TestProcessFiles_ValidFiles_SubmitsTask(t *testing.T) {
 	mockClient := &http.Client{}
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent")
+	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent", nil)
 
 	mockP := &mockPool{submitErr: nil} // Success case
 
@@ -981,7 +981,7 @@ func TestProcessFiles_CustomScrapers_DefensiveCopy(t *testing.T) {
 	mockClient := &http.Client{}
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent")
+	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent", nil)
 
 	mockP := &mockPool{submitErr: nil}
 

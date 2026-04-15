@@ -36,6 +36,21 @@ api:
         max_files_per_scan: 10000
         # Timeout for scan operations (seconds)
         scan_timeout_seconds: 30
+
+        # Rate limiting for write endpoints (per IP, requests per minute)
+        # Set to 0 to disable. Default: 60
+        rate_limit:
+            requests_per_minute: 60
+
+        # Trusted reverse proxy IPs for X-Forwarded-Proto header validation.
+        # When configured, session cookies get the Secure flag if a request from
+        # a trusted proxy has X-Forwarded-Proto: https.
+        # Example: ["172.16.0.1"] for a Docker reverse proxy
+        trusted_proxies: []
+
+        # Force Secure flag on session cookies regardless of TLS detection.
+        # Use when TLS termination happens upstream and proxy IPs are dynamic.
+        force_secure_cookies: false
 system:
     # File creation mask (umask) for created files and directories
     # 002 = rwxrwxr-x (owner and group can write, others can read)

@@ -27,7 +27,7 @@ func TestOrganizer_Copy_ErrorPaths(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	t.Run("Copy with conflicts", func(t *testing.T) {
@@ -145,7 +145,7 @@ func TestOrganizer_Execute_InPlaceErrors(t *testing.T) {
 		RenameFolderInPlace: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	m, err := matcher.NewMatcher(&config.MatchingConfig{
 		RegexEnabled: true,
 		RegexPattern: `(?P<id>[A-Z]+-\d+)`,
@@ -253,7 +253,7 @@ func TestOrganizer_Execute_PermissionErrors(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	t.Run("Execute with read-only destination directory", func(t *testing.T) {
@@ -422,7 +422,7 @@ func TestOrganizer_Revert_Errors(t *testing.T) {
 		RenameFile:   true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	t.Run("Revert when not moved", func(t *testing.T) {
 		result := &OrganizeResult{
@@ -462,7 +462,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			SubfolderFormat: []string{"<STUDIO>"}, // Single subfolder for simplicity
 		}
 
-		org := NewOrganizer(afero.NewOsFs(), cfg)
+		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 		movie := createTestMovie()
 
 		match := matcher.MatchResult{
@@ -490,7 +490,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			MaxPathLength: 50, // Very short to trigger validation error
 		}
 
-		org := NewOrganizer(afero.NewOsFs(), cfg)
+		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 		movie := createTestMovie()
 
 		match := matcher.MatchResult{
@@ -518,7 +518,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			MaxTitleLength: 10, // Long enough to keep ID but truncate title
 		}
 
-		org := NewOrganizer(afero.NewOsFs(), cfg)
+		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 		movie := createTestMovie()
 
 		match := matcher.MatchResult{
@@ -549,7 +549,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			MoveToFolder: true,
 		}
 
-		org := NewOrganizer(afero.NewOsFs(), cfg)
+		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 		movie := createTestMovie()
 
 		match := matcher.MatchResult{
@@ -580,7 +580,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			MoveToFolder:    true,
 		}
 
-		org := NewOrganizer(afero.NewOsFs(), cfg)
+		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 		movie := createTestMovie()
 
 		match := matcher.MatchResult{
@@ -607,7 +607,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			RenameFile:   false, // Keep original filename
 		}
 
-		org := NewOrganizer(afero.NewOsFs(), cfg)
+		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 		movie := createTestMovie()
 
 		originalFilename := "my-original-name.mp4"
@@ -635,7 +635,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			MoveToFolder: true,
 		}
 
-		org := NewOrganizer(afero.NewOsFs(), cfg)
+		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 		movie := createTestMovie()
 
 		sourceFile := filepath.Join(tmpDir, "force-update.mp4")
@@ -680,7 +680,7 @@ func TestOrganizer_OrganizeBatch_EdgeCases(t *testing.T) {
 		RenameFile:   true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	t.Run("Batch with missing movie data", func(t *testing.T) {
 		sourceFile := filepath.Join(tmpDir, "missing-movie.mp4")
@@ -795,7 +795,7 @@ func TestOrganizer_OrganizeBatch_EdgeCases(t *testing.T) {
 func TestValidatePlan_EdgeCases(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.OutputConfig{}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	t.Run("Empty target directory", func(t *testing.T) {
 		plan := &OrganizePlan{
@@ -841,7 +841,7 @@ func TestValidatePlan_EdgeCases(t *testing.T) {
 func TestCleanEmptyDirectories_EdgeCases(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.OutputConfig{}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	t.Run("Stop at non-empty directory", func(t *testing.T) {
 		// Create nested directories with a file in middle level
@@ -917,7 +917,7 @@ func TestOrganizer_Organize_Integration(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	t.Run("Organize with max path length error", func(t *testing.T) {
@@ -928,7 +928,7 @@ func TestOrganizer_Organize_Integration(t *testing.T) {
 			RenameFile:    true,
 			MaxPathLength: 10, // Too short
 		}
-		badOrg := NewOrganizer(afero.NewOsFs(), badCfg)
+		badOrg := NewOrganizer(afero.NewOsFs(), badCfg, nil)
 
 		match := matcher.MatchResult{
 			File: scanner.FileInfo{

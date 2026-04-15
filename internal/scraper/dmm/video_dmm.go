@@ -26,46 +26,13 @@ import (
 
 // extractDescriptionNewSite extracts description from video.dmm.co.jp
 func (s *Scraper) extractDescriptionNewSite(doc *goquery.Document) string {
-	var jsonDesc string
-	doc.Find(`script[type="application/ld+json"]`).Each(func(i int, sel *goquery.Selection) {
-		jsonText := sel.Text()
-		if idx := strings.Index(jsonText, `"description":"`); idx != -1 {
-			start := idx + len(`"description":"`)
-			remaining := jsonText[start:]
-			var desc strings.Builder
-			escaped := false
-			for _, ch := range remaining {
-				if escaped {
-					desc.WriteRune(ch)
-					escaped = false
-					continue
-				}
-				if ch == '\\' {
-					escaped = true
-					continue
-				}
-				if ch == '"' {
-					break
-				}
-				desc.WriteRune(ch)
-			}
-			result := strings.TrimSpace(desc.String())
-			if len(result) > 30 {
-				jsonDesc = result
-			}
-		}
-	})
-	if jsonDesc != "" {
-		return scraperutil.CleanString(jsonDesc)
-	}
-
-	// 2. Try og:description meta tag as fallback
+	// Try og:description meta tag
 	desc, exists := doc.Find(`meta[property="og:description"]`).Attr("content")
 	if exists && desc != "" {
 		return scraperutil.CleanString(desc)
 	}
 
-	// 3. Try regular meta description as last resort
+	// Try regular meta description as fallback
 	desc, exists = doc.Find(`meta[name="description"]`).Attr("content")
 	if exists && desc != "" {
 		return scraperutil.CleanString(desc)
@@ -444,6 +411,9 @@ func extractBackgroundImageURL(style string) string {
 // Handles protocol-relative URLs (//pics.dmm.co.jp/...) and converts them to HTTPS
 // Ensures lowercase paths for amateur videos
 func normalizeImageURL(url string) string {
+	// Convert awsimgsrc CDN to canonical pics domain
+	url = strings.Replace(url, "awsimgsrc.dmm.co.jp/pics_dig", "pics.dmm.co.jp", 1)
+
 	// Handle protocol-relative URLs
 	if strings.HasPrefix(url, "//") {
 		url = "https:" + url

@@ -35,7 +35,7 @@ func TestOrganizerWithAfero_MoveFile(t *testing.T) {
 		MoveSubtitles: false,
 		MoveToFolder:  true,
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	// Use testutil builder for Movie
 	movie := testutil.NewMovieBuilder().
@@ -90,7 +90,7 @@ func TestOrganizerWithAfero_MoveWithDirectoryCreation(t *testing.T) {
 		MoveSubtitles:   false,
 		MoveToFolder:    true,
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	releaseDate := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
 	movie := testutil.NewMovieBuilder().
@@ -137,7 +137,7 @@ func TestOrganizerWithAfero_CopyPreservesOriginal(t *testing.T) {
 		MoveSubtitles: false,
 		MoveToFolder:  true,
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	movie := testutil.NewMovieBuilder().WithID("IPX-123").Build()
 	match := matcher.MatchResult{
@@ -196,7 +196,7 @@ func TestOrganizerWithAfero_MoveCollision(t *testing.T) {
 		MoveSubtitles: false,
 		MoveToFolder:  true,
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	movie := testutil.NewMovieBuilder().WithID("IPX-123").Build()
 	match := matcher.MatchResult{
@@ -239,7 +239,7 @@ func TestOrganizerWithAfero_ComplexTemplate(t *testing.T) {
 		MoveSubtitles: false,
 		MoveToFolder:  true,
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	releaseDate := time.Date(2023, 6, 15, 0, 0, 0, 0, time.UTC)
 	movie := testutil.NewMovieBuilder().
@@ -271,7 +271,7 @@ func TestOrganizerWithAfero_ComplexTemplate(t *testing.T) {
 func TestOrganizerWithAfero_ValidatePlan(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	t.Run("double slashes in path", func(t *testing.T) {
 		// Create source file so validation can proceed
@@ -349,7 +349,7 @@ func TestOrganizerWithAfero_DryRun(t *testing.T) {
 		MoveSubtitles: false,
 		MoveToFolder:  true,
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	movie := testutil.NewMovieBuilder().WithID("IPX-123").Build()
 	match := matcher.MatchResult{
@@ -400,7 +400,7 @@ func TestOrganizerWithAfero_CleanEmptyDirectories(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := &config.OutputConfig{}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	// CleanEmptyDirectories will fail with MemMapFs due to EvalSymlinks limitation
 	// This is expected behavior - the function is designed for real filesystem with symlink support
@@ -426,7 +426,7 @@ func TestOrganizerWithAfero_Revert(t *testing.T) {
 		MoveSubtitles: false,
 		MoveToFolder:  true,
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	movie := testutil.NewMovieBuilder().WithID("IPX-123").Build()
 	match := matcher.MatchResult{
@@ -476,7 +476,7 @@ func TestOrganizerWithAfero_PathLengthTruncation(t *testing.T) {
 		MoveSubtitles: false,
 		MaxPathLength: 50, // Very short limit
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	longTitle := "This is an extremely long movie title that will cause path length issues"
 	movie := testutil.NewMovieBuilder().
@@ -521,7 +521,7 @@ func TestOrganizerWithAfero_RenameFileDisabled(t *testing.T) {
 		MoveSubtitles: false,
 		MoveToFolder:  true,
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	movie := testutil.NewMovieBuilder().WithID("IPX-123").Build()
 	match := matcher.MatchResult{

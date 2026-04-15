@@ -2,16 +2,29 @@ package auth
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
 const sessionCookieName = "javinizer_session"
+
+func securityConfig(deps *ServerDependencies) *config.SecurityConfig {
+	if deps == nil {
+		return nil
+	}
+	cfg := deps.GetConfig()
+	if cfg == nil {
+		return nil
+	}
+	return &cfg.API.Security
+}
 
 func requireAuthenticated(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -43,7 +56,7 @@ func requireAuthenticated(deps *ServerDependencies) gin.HandlerFunc {
 				})
 				return
 			}
-			clearSessionCookie(c)
+			clearSessionCookie(c, securityConfig(deps))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, ErrorResponse{
 				Error: "authentication required",
 			})
@@ -85,7 +98,7 @@ func getAuthStatus(deps *ServerDependencies) gin.HandlerFunc {
 				resp.Authenticated = true
 				resp.Username = username
 			} else if errors.Is(authErr, ErrInvalidSession) {
-				clearSessionCookie(c)
+				clearSessionCookie(c, securityConfig(deps))
 			}
 		}
 
@@ -151,7 +164,7 @@ func setupAuth(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		setSessionCookie(c, sessionID, deps.Auth.SessionTTL(), true)
+		setSessionCookie(c, sessionID, deps.Auth.SessionTTL(), true, securityConfig(deps))
 		c.JSON(http.StatusOK, AuthStatusResponse{
 			Initialized:   true,
 			Authenticated: true,
@@ -188,7 +201,7 @@ func loginAuth(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		setSessionCookie(c, sessionID, deps.Auth.SessionTTL(), req.RememberMe)
+		setSessionCookie(c, sessionID, deps.Auth.SessionTTL(), req.RememberMe, securityConfig(deps))
 		c.JSON(http.StatusOK, AuthStatusResponse{
 			Initialized:   true,
 			Authenticated: true,
@@ -205,13 +218,13 @@ func logoutAuth(deps *ServerDependencies) gin.HandlerFunc {
 				deps.Auth.Logout(sessionID)
 			}
 		}
-		clearSessionCookie(c)
+		clearSessionCookie(c, securityConfig(deps))
 		c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 	}
 }
 
-func setSessionCookie(c *gin.Context, sessionID string, ttl time.Duration, persistent bool) {
-	secure := isSecureRequest(c.Request)
+func setSessionCookie(c *gin.Context, sessionID string, ttl time.Duration, persistent bool, cfg *config.SecurityConfig) {
+	secure := isSecureRequest(c.Request, cfg)
 	cookie := &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    sessionID,
@@ -227,8 +240,8 @@ func setSessionCookie(c *gin.Context, sessionID string, ttl time.Duration, persi
 	http.SetCookie(c.Writer, cookie)
 }
 
-func clearSessionCookie(c *gin.Context) {
-	secure := isSecureRequest(c.Request)
+func clearSessionCookie(c *gin.Context, cfg *config.SecurityConfig) {
+	secure := isSecureRequest(c.Request, cfg)
 	cookie := &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
@@ -242,9 +255,29 @@ func clearSessionCookie(c *gin.Context) {
 	http.SetCookie(c.Writer, cookie)
 }
 
-func isSecureRequest(r *http.Request) bool {
+func isSecureRequest(r *http.Request, cfg *config.SecurityConfig) bool {
 	if r == nil {
 		return false
 	}
-	return r.TLS != nil
+	if r.TLS != nil {
+		return true
+	}
+	if cfg != nil && cfg.ForceSecureCookies {
+		return true
+	}
+	if cfg != nil && len(cfg.TrustedProxies) > 0 {
+		forwarded := r.Header.Get("X-Forwarded-Proto")
+		if forwarded == "https" {
+			clientIP := r.RemoteAddr
+			if host, _, err := net.SplitHostPort(clientIP); err == nil {
+				clientIP = host
+			}
+			for _, trusted := range cfg.TrustedProxies {
+				if clientIP == trusted {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

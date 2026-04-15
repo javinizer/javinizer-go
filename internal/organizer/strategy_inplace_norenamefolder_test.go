@@ -16,7 +16,7 @@ func TestNewInPlaceNoRenameFolderStrategy(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m := &matcher.Matcher{}
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 	assert.NotNil(t, strategy)
 	assert.NotNil(t, strategy.fs)
 	assert.NotNil(t, strategy.config)
@@ -28,7 +28,7 @@ func TestInPlaceNoRenameFolderStrategy_ImplementsInterface(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m := &matcher.Matcher{}
-	var _ OperationStrategy = NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	var _ OperationStrategy = NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 }
 
 func TestInPlaceNoRenameFolderStrategy_Plan_FileRename(t *testing.T) {
@@ -39,7 +39,7 @@ func TestInPlaceNoRenameFolderStrategy_Plan_FileRename(t *testing.T) {
 	}
 	m, err := matcher.NewMatcher(&config.MatchingConfig{})
 	require.NoError(t, err)
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/some-folder", 0777)
 	_ = afero.WriteFile(fs, "/source/some-folder/old-name.mp4", []byte("video"), 0644)
@@ -76,7 +76,7 @@ func TestInPlaceNoRenameFolderStrategy_Plan_NoRenameNeeded(t *testing.T) {
 	}
 	m, err := matcher.NewMatcher(&config.MatchingConfig{})
 	require.NoError(t, err)
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/some-folder", 0777)
 	_ = afero.WriteFile(fs, "/source/some-folder/ABC-123.mp4", []byte("video"), 0644)
@@ -107,7 +107,7 @@ func TestInPlaceNoRenameFolderStrategy_Plan_RenameFileOff(t *testing.T) {
 	}
 	m, err := matcher.NewMatcher(&config.MatchingConfig{})
 	require.NoError(t, err)
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/some-folder", 0777)
 	_ = afero.WriteFile(fs, "/source/some-folder/old-name.mp4", []byte("video"), 0644)
@@ -135,7 +135,7 @@ func TestInPlaceNoRenameFolderStrategy_Execute_FileRename(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/folder", 0777)
 	_ = afero.WriteFile(fs, "/source/folder/old-name.mp4", []byte("video"), 0644)
@@ -178,7 +178,7 @@ func TestInPlaceNoRenameFolderStrategy_Execute_Subtitles(t *testing.T) {
 		SubtitleExtensions: []string{".srt", ".ass"},
 	}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/folder", 0777)
 	_ = afero.WriteFile(fs, "/source/folder/ABC-123.mp4", []byte("video"), 0644)
@@ -220,7 +220,7 @@ func TestInPlaceNoRenameFolderStrategy_Execute_NoDirRename(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/original-folder", 0777)
 	_ = afero.WriteFile(fs, "/source/original-folder/video.mp4", []byte("video"), 0644)
@@ -254,7 +254,7 @@ func TestInPlaceNoRenameFolderStrategy_Execute_Conflict(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: "/source/folder/ABC-123.mp4",
@@ -274,7 +274,7 @@ func TestInPlaceNoRenameFolderStrategy_Execute_NoMoveNeeded(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: "/source/folder/ABC-123.mp4",
@@ -298,7 +298,7 @@ func TestInPlaceNoRenameFolderStrategy_Plan_MaxPathLength(t *testing.T) {
 		MaxPathLength: 50,
 	}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/some-folder", 0777)
 	_ = afero.WriteFile(fs, "/source/some-folder/ABC-123.mp4", []byte("video"), 0644)
@@ -330,7 +330,7 @@ func TestInPlaceNoRenameFolderStrategy_Plan_StaysInSourceDirectory(t *testing.T)
 	}
 	m, err := matcher.NewMatcher(&config.MatchingConfig{})
 	require.NoError(t, err)
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m)
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/videos/JAV", 0777)
 	_ = afero.WriteFile(fs, "/videos/JAV/ABC-123.mp4", []byte("video"), 0644)

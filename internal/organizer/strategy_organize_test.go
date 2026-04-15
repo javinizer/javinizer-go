@@ -15,7 +15,7 @@ import (
 func TestNewOrganizeStrategy(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 	assert.NotNil(t, strategy)
 	assert.NotNil(t, strategy.fs)
 	assert.NotNil(t, strategy.config)
@@ -26,7 +26,7 @@ func TestNewOrganizeStrategy(t *testing.T) {
 func TestOrganizeStrategy_ImplementsInterface(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	var _ OperationStrategy = NewOrganizeStrategy(fs, cfg)
+	var _ OperationStrategy = NewOrganizeStrategy(fs, cfg, nil)
 }
 
 func TestOrganizeStrategy_Plan(t *testing.T) {
@@ -36,7 +36,7 @@ func TestOrganizeStrategy_Plan(t *testing.T) {
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -70,7 +70,7 @@ func TestOrganizeStrategy_Plan_WithSubfolders(t *testing.T) {
 		RenameFile:      true,
 		SubfolderFormat: []string{"<LABEL>"},
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -96,7 +96,7 @@ func TestOrganizeStrategy_Plan_NoRename(t *testing.T) {
 		FolderFormat: "<ID>",
 		RenameFile:   false,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -124,7 +124,7 @@ func TestOrganizeStrategy_Plan_TitleTruncation(t *testing.T) {
 		RenameFile:     true,
 		MaxTitleLength: 20,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -154,7 +154,7 @@ func TestOrganizeStrategy_Plan_ConflictDetection(t *testing.T) {
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	// Create existing target file
 	_ = fs.MkdirAll("/dest/ABC-123", 0777)
@@ -183,7 +183,7 @@ func TestOrganizeStrategy_Execute(t *testing.T) {
 	cfg := &config.OutputConfig{
 		MoveSubtitles: false,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	// Create source file
 	_ = fs.MkdirAll("/source", 0777)
@@ -214,7 +214,7 @@ func TestOrganizeStrategy_Execute(t *testing.T) {
 func TestOrganizeStrategy_Execute_NoMove(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: "/source/ABC-123.mp4",
@@ -233,7 +233,7 @@ func TestOrganizeStrategy_Execute_NoMove(t *testing.T) {
 func TestOrganizeStrategy_Execute_Conflict(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: "/source/ABC-123.mp4",
@@ -257,7 +257,7 @@ func TestOrganizeStrategy_Plan_ForceUpdate(t *testing.T) {
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	_ = fs.MkdirAll("/dest/ABC-123", 0777)
 	_ = afero.WriteFile(fs, "/dest/ABC-123/ABC-123.mp4", []byte("existing"), 0644)
@@ -287,7 +287,7 @@ func TestOrganizeStrategy_Plan_MaxPathLength(t *testing.T) {
 		RenameFile:    true,
 		MaxPathLength: 40,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -315,7 +315,7 @@ func TestOrganizeStrategy_Plan_MaxPathLengthTooShort(t *testing.T) {
 		RenameFile:    true,
 		MaxPathLength: 10,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -343,7 +343,7 @@ func TestOrganizeStrategy_Plan_SubfolderEmpty(t *testing.T) {
 		RenameFile:      true,
 		SubfolderFormat: []string{""},
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -365,7 +365,7 @@ func TestOrganizeStrategy_Plan_SubfolderEmpty(t *testing.T) {
 func TestOrganizeStrategy_Execute_MkdirError(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	fs = afero.NewReadOnlyFs(fs)
 	strategy.fs = fs
@@ -388,7 +388,7 @@ func TestOrganizeStrategy_Execute_MkdirError(t *testing.T) {
 func TestOrganizeStrategy_Execute_RenameError(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: "/source/nonexistent.mp4",
@@ -411,7 +411,7 @@ func TestOrganizeStrategy_Execute_WithSubtitles(t *testing.T) {
 		MoveSubtitles:      true,
 		SubtitleExtensions: []string{".srt", ".ass", ".ssa"},
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	// Create source files
 	_ = fs.MkdirAll("/source", 0777)
@@ -448,7 +448,7 @@ func TestOrganizeStrategy_Plan_MultiPart(t *testing.T) {
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -477,7 +477,7 @@ func TestOrganizeStrategy_Plan_SameFileNoConflict(t *testing.T) {
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -505,7 +505,7 @@ func TestOrganizeStrategy_Plan_SubfolderWithMultiple(t *testing.T) {
 		RenameFile:      true,
 		SubfolderFormat: []string{"<LABEL>", "<ID>"},
 	}
-	strategy := NewOrganizeStrategy(fs, cfg)
+	strategy := NewOrganizeStrategy(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",

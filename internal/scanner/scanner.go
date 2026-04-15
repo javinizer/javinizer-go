@@ -27,13 +27,18 @@ const (
 type Scanner struct {
 	fs     afero.Fs
 	config *config.MatchingConfig
+	extSet map[string]struct{}
 }
 
-// NewScanner creates a new file scanner
 func NewScanner(fs afero.Fs, cfg *config.MatchingConfig) *Scanner {
+	extSet := make(map[string]struct{}, len(cfg.Extensions))
+	for _, ext := range cfg.Extensions {
+		extSet[strings.ToLower(ext)] = struct{}{}
+	}
 	return &Scanner{
 		fs:     fs,
 		config: cfg,
+		extSet: extSet,
 	}
 }
 
@@ -377,13 +382,7 @@ func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*Sca
 func (s *Scanner) shouldIncludeFile(path string, entry os.DirEntry) bool {
 	// Check extension
 	ext := strings.ToLower(filepath.Ext(path))
-	hasValidExt := false
-	for _, validExt := range s.config.Extensions {
-		if ext == strings.ToLower(validExt) {
-			hasValidExt = true
-			break
-		}
-	}
+	_, hasValidExt := s.extSet[ext]
 	if !hasValidExt {
 		return false
 	}

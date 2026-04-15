@@ -248,6 +248,22 @@ type BatchFileResult struct {
 	PartSuffix     string            `json:"part_suffix,omitempty"`
 }
 
+// BatchFileResultSlim is a lightweight BatchFileResult without the Data field
+// for efficient status polling.
+type BatchFileResultSlim struct {
+	FilePath       string            `json:"file_path"`
+	MovieID        string            `json:"movie_id"`
+	Status         string            `json:"status"`
+	Error          string            `json:"error,omitempty"`
+	FieldSources   map[string]string `json:"field_sources,omitempty"`
+	ActressSources map[string]string `json:"actress_sources,omitempty"`
+	StartedAt      string            `json:"started_at"`
+	EndedAt        *string           `json:"ended_at,omitempty"`
+	IsMultiPart    bool              `json:"is_multi_part,omitempty"`
+	PartNumber     int               `json:"part_number,omitempty"`
+	PartSuffix     string            `json:"part_suffix,omitempty"`
+}
+
 // BatchJobResponse represents a batch job status
 type BatchJobResponse struct {
 	ID                    string                      `json:"id"`
@@ -264,6 +280,24 @@ type BatchJobResponse struct {
 	StartedAt             string                      `json:"started_at"`
 	CompletedAt           *string                     `json:"completed_at,omitempty"`
 	OperationModeOverride string                      `json:"operation_mode_override,omitempty"`
+	PersistError          string                      `json:"persist_error,omitempty"`
+}
+
+// BatchJobResponseSlim is a lightweight batch job status response without movie Data.
+type BatchJobResponseSlim struct {
+	ID                    string                          `json:"id"`
+	Status                string                          `json:"status"`
+	TotalFiles            int                             `json:"total_files"`
+	Completed             int                             `json:"completed"`
+	Failed                int                             `json:"failed"`
+	Excluded              map[string]bool                 `json:"excluded"`
+	Progress              float64                         `json:"progress"`
+	Destination           string                          `json:"destination"`
+	Results               map[string]*BatchFileResultSlim `json:"results"`
+	StartedAt             string                          `json:"started_at"`
+	CompletedAt           *string                         `json:"completed_at,omitempty"`
+	OperationModeOverride string                          `json:"operation_mode_override,omitempty"`
+	PersistError          string                          `json:"persist_error,omitempty"`
 }
 
 type BatchJobListResponse struct {

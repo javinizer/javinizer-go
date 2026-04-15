@@ -44,7 +44,7 @@ func TestNewServer(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -109,6 +109,8 @@ func TestNewServer(t *testing.T) {
 		"/api/v1/history",
 		"/api/v1/history/stats",
 		"/api/v1/history/:id",
+		"/api/v1/genres/replacements",
+		"/api/v1/genres/replacements/:original",
 		"/api/v1/temp/posters/:jobId/:filename",
 		"/api/v1/temp/image",
 		"/api/v1/posters/:filename",
@@ -140,7 +142,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	deps.SetConfig(cfg)
 
@@ -156,6 +158,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"DELETE /api/v1/actresses/:id",
 		"DELETE /api/v1/batch/:id",
 		"DELETE /api/v1/events",
+		"DELETE /api/v1/genres/replacements/:original",
 		"DELETE /api/v1/history",
 		"DELETE /api/v1/history/:id",
 		"GET /api/v1/actresses",
@@ -168,6 +171,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"GET /api/v1/cwd",
 		"GET /api/v1/events",
 		"GET /api/v1/events/stats",
+		"GET /api/v1/genres/replacements",
 		"GET /api/v1/history",
 		"GET /api/v1/history/stats",
 		"GET /api/v1/jobs",
@@ -203,6 +207,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"POST /api/v1/batch/:id/update",
 		"POST /api/v1/batch/scrape",
 		"POST /api/v1/browse",
+		"POST /api/v1/genres/replacements",
 		"POST /api/v1/jobs/:id/operations/:movieId/revert",
 		"POST /api/v1/jobs/:id/revert",
 		"POST /api/v1/browse/autocomplete",
@@ -290,7 +295,7 @@ func TestNewServer_CORSHeaders(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -334,7 +339,7 @@ func TestNewServer_StaticFiles(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -374,7 +379,7 @@ func TestServeScalarDocs(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -452,7 +457,7 @@ func TestNewServer_GinMode(t *testing.T) {
 				MovieRepo:   newMockMovieRepo(),
 				ActressRepo: newMockActressRepo(),
 				Matcher:     mat,
-				JobQueue:    worker.NewJobQueue(nil, ""),
+				JobQueue:    worker.NewJobQueue(nil, "", nil),
 			}
 			// Initialize atomic config pointer
 			deps.SetConfig(cfg)
@@ -507,7 +512,7 @@ func TestNewServer_AllEndpointsAccessible(t *testing.T) {
 		MovieRepo:   database.NewMovieRepository(db),
 		ActressRepo: database.NewActressRepository(db),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -565,7 +570,7 @@ func TestNewServer_SecurityHeaders(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -619,7 +624,7 @@ func TestNewServer_InvalidRoutes(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	// Initialize atomic config pointer
 	deps.SetConfig(cfg)
@@ -668,7 +673,7 @@ func TestNewServer_SPARouteFallbackForHTML(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	deps.SetConfig(cfg)
 
@@ -719,7 +724,7 @@ func TestNewServer_RobotsTxtServed(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	deps.SetConfig(cfg)
 
@@ -756,7 +761,7 @@ func TestServerDependencies_Shutdown(t *testing.T) {
 		MovieRepo:   newMockMovieRepo(),
 		ActressRepo: newMockActressRepo(),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 	deps.SetConfig(cfg)
 

@@ -37,7 +37,7 @@ func TestOrganizer_Plan(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -94,7 +94,7 @@ func TestOrganizer_Execute_DryRun(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -152,7 +152,7 @@ func TestOrganizer_Execute_ActualMove(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -217,7 +217,7 @@ func TestOrganizer_Execute_Conflict(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -283,7 +283,7 @@ func TestOrganizer_Copy(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -342,7 +342,7 @@ func TestOrganizer_CopyWithLinkMode_HardLink(t *testing.T) {
 		RenameFile:   true,
 		MoveToFolder: true,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -395,7 +395,7 @@ func TestOrganizer_CopyWithLinkMode_SoftLink(t *testing.T) {
 		RenameFile:   true,
 		MoveToFolder: true,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -455,7 +455,7 @@ func TestOrganizer_CopyWithLinkMode_Copy(t *testing.T) {
 		RenameFile:   true,
 		MoveToFolder: true,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -519,7 +519,7 @@ func TestOrganizer_CopyWithLinkMode_DryRun(t *testing.T) {
 		RenameFile:   true,
 		MoveToFolder: true,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -564,7 +564,7 @@ func TestOrganizer_CopyWithLinkMode_Conflicts(t *testing.T) {
 		RenameFile:   true,
 		MoveToFolder: true,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: sourceFile,
@@ -593,7 +593,7 @@ func TestOrganizer_CopyWithLinkMode_NoMove(t *testing.T) {
 		RenameFile:   true,
 		MoveToFolder: true,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: filepath.Join(tmpDir, "source", "ipx-535.mp4"),
@@ -629,7 +629,7 @@ func TestOrganizer_CopyWithLinkMode_InvalidLinkMode(t *testing.T) {
 		RenameFile:   true,
 		MoveToFolder: true,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: sourceFile,
@@ -657,7 +657,7 @@ func TestOrganizer_CopyWithLinkMode_SourceNotFound(t *testing.T) {
 		RenameFile:   true,
 		MoveToFolder: true,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: filepath.Join(tmpDir, "nonexistent", "source.mp4"),
@@ -722,7 +722,7 @@ func TestOrganizer_Revert(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -765,7 +765,7 @@ func TestOrganizer_Revert(t *testing.T) {
 func TestValidatePlan(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.OutputConfig{}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	// Create a valid source file
 	sourceFile := filepath.Join(tmpDir, "source.mp4")
@@ -894,7 +894,7 @@ func TestOrganizer_OrganizeBatch(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	// Create matches
 	matches := []matcher.MatchResult{
@@ -949,7 +949,7 @@ func TestOrganizer_OrganizeBatch(t *testing.T) {
 func TestCleanEmptyDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.OutputConfig{}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	// Create nested empty directories with a file
 	deepDir := filepath.Join(tmpDir, "a", "b", "c", "d")
@@ -982,7 +982,7 @@ func TestCleanEmptyDirectories(t *testing.T) {
 func TestCleanEmptyDirectories_WithHiddenFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.OutputConfig{}
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	// Create nested directories
 	deepDir := filepath.Join(tmpDir, "a", "b", "c")
@@ -1022,7 +1022,7 @@ func TestOrganizer_Copy_SourceDoesNotExist(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	// Create plan with nonexistent source
@@ -1057,7 +1057,7 @@ func TestOrganizer_Plan_WithSubfolderFormat(t *testing.T) {
 		SubfolderFormat: []string{"<STUDIO>", "<YEAR>"},
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	sourceFile := filepath.Join(tmpDir, "ipx-535.mp4")
@@ -1113,7 +1113,7 @@ func TestOrganizer_Execute_InPlaceRename_DirectoryAlreadyExists(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	// Create plan with in-place rename
@@ -1164,7 +1164,7 @@ func TestOrganizer_OrganizeBatch_PartialFailure(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	matches := []matcher.MatchResult{
 		{
@@ -1230,7 +1230,7 @@ func TestOrganizer_OrganizeBatch_MissingMovieData(t *testing.T) {
 		MoveToFolder: true,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	matches := []matcher.MatchResult{
 		{
@@ -1284,7 +1284,7 @@ func TestOrganizer_Plan_RenameFolderInPlace_Priority(t *testing.T) {
 		MoveToFolder:        false,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	fileMatcher, err := matcher.NewMatcher(&config.MatchingConfig{})
 	if err != nil {
@@ -1347,7 +1347,7 @@ func TestOrganizer_Plan_BothConfigsTrue_RenamePriority(t *testing.T) {
 		MoveToFolder:        true, // Both configs true - rename should take priority
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	fileMatcher, err := matcher.NewMatcher(&config.MatchingConfig{})
 	if err != nil {
@@ -1405,7 +1405,7 @@ func TestOrganizer_Plan_BothConfigsFalse_NoFolderChanges(t *testing.T) {
 		MoveToFolder:        false,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	fileMatcher, err := matcher.NewMatcher(&config.MatchingConfig{})
 	if err != nil {
@@ -1462,7 +1462,7 @@ func TestOrganizer_Plan_NoOpHasEmptyConflicts(t *testing.T) {
 		MoveToFolder:        false,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	match := matcher.MatchResult{
@@ -1512,7 +1512,7 @@ func TestOrganizer_Plan_TruncationPreservesInPlaceSkip(t *testing.T) {
 		MoveToFolder:        false,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	fileMatcher, err := matcher.NewMatcher(&config.MatchingConfig{})
 	if err != nil {
@@ -1582,7 +1582,7 @@ func TestOrganizer_Plan_TruncationPreservesMixedIdSkip(t *testing.T) {
 		MoveToFolder:        false,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	fileMatcher, err := matcher.NewMatcher(&config.MatchingConfig{})
 	if err != nil {

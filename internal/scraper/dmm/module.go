@@ -69,26 +69,23 @@ func (m *scraperModule) Defaults() any {
 	}
 }
 func (m *scraperModule) Priority() int { return 90 }
+func proxyAsConfig(p any) *config.ProxyConfig {
+	if p == nil {
+		return nil
+	}
+	return p.(*config.ProxyConfig)
+}
+
 func (m *scraperModule) FlattenFunc() any {
-	return scraperutil.FlattenFunc(func(cfg any) any {
-		dmmCfg, ok := cfg.(*DMMConfig)
-		if !ok {
-			return nil
+	return scraperutil.DefaultFlattenConfigWithRaw(scraperutil.FlattenOverrides{}, func(fc *scraperutil.FlattenedConfig, _ scraperutil.FlattenOverrides, raw any) any {
+		s := &config.ScraperSettings{Enabled: fc.Enabled, RateLimit: fc.RateLimit, Proxy: proxyAsConfig(fc.Proxy), DownloadProxy: proxyAsConfig(fc.DownloadProxy)}
+		if dmmCfg, ok := raw.(*DMMConfig); ok {
+			s.UseBrowser = dmmCfg.UseBrowser
+			if dmmCfg.ScrapeActress {
+				s.ScrapeActress = &dmmCfg.ScrapeActress
+			}
 		}
-
-		settings := &config.ScraperSettings{
-			Enabled:       dmmCfg.IsEnabled(),
-			RateLimit:     dmmCfg.GetRequestDelay(),
-			Proxy:         dmmCfg.Proxy,
-			DownloadProxy: dmmCfg.DownloadProxy,
-			UseBrowser:    dmmCfg.UseBrowser,
-		}
-
-		if dmmCfg.ScrapeActress {
-			settings.ScrapeActress = &dmmCfg.ScrapeActress
-		}
-
-		return settings
+		return s
 	})
 }
 

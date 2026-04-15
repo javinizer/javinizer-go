@@ -17,11 +17,6 @@ func TestExtractDescriptionNewSite(t *testing.T) {
 		shouldEmpty bool
 	}{
 		{
-			name:     "from JSON-LD",
-			html:     `<html><head><script type="application/ld+json">{"description":"This is the JSON-LD description text."}</script></head><body></body></html>`,
-			expected: "This is the JSON-LD description text.",
-		},
-		{
 			name:     "from og:description",
 			html:     `<html><head><meta property="og:description" content="This is the OG description."></head><body></body></html>`,
 			expected: "This is the OG description.",
@@ -37,9 +32,14 @@ func TestExtractDescriptionNewSite(t *testing.T) {
 			shouldEmpty: true,
 		},
 		{
-			name:     "JSON-LD with escaped characters",
-			html:     `<html><head><script type="application/ld+json">{"description":"Description with \"quotes\" and newlines."}</script></head><body></body></html>`,
-			expected: "Description with \"quotes\" and newlines.",
+			name:        "JSON-LD only (not extracted by this function, handled by extractMetadataFromJSONLD)",
+			html:        `<html><head><script type="application/ld+json">{"description":"This is the JSON-LD description text."}</script></head><body></body></html>`,
+			shouldEmpty: true,
+		},
+		{
+			name:     "og:description preferred over meta description",
+			html:     `<html><head><meta property="og:description" content="OG description"><meta name="description" content="Meta description"></head><body></body></html>`,
+			expected: "OG description",
 		},
 	}
 
@@ -416,6 +416,16 @@ func TestNormalizeImageURL(t *testing.T) {
 			name:     "non-amateur video (no lowercase normalization)",
 			url:      "https://pics.dmm.co.jp/digital/video/IPX535/IPX535pl.jpg",
 			expected: "https://pics.dmm.co.jp/digital/video/IPX535/IPX535pl.jpg",
+		},
+		{
+			name:     "awsimgsrc CDN URL converts to pics.dmm.co.jp",
+			url:      "https://awsimgsrc.dmm.co.jp/pics_dig/video/ipx00535/ipx00535pl.jpg",
+			expected: "https://pics.dmm.co.jp/video/ipx00535/ipx00535pl.jpg",
+		},
+		{
+			name:     "awsimgsrc with query parameters",
+			url:      "https://awsimgsrc.dmm.co.jp/pics_dig/video/test.jpg?size=large",
+			expected: "https://pics.dmm.co.jp/video/test.jpg",
 		},
 	}
 

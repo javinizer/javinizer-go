@@ -87,7 +87,13 @@ func (t *ScrapeTask) Execute(ctx context.Context) (*models.Movie, error) {
 		}
 	} else if !skipCache {
 		logging.Debugf("[%s] Checking cache for existing metadata", t.javID)
-		if cached, err := t.movieRepo.FindByID(t.javID); err == nil {
+		cached, err := t.movieRepo.FindByID(t.javID)
+		if err != nil {
+			if !database.IsNotFound(err) {
+				return nil, fmt.Errorf("cache lookup failed: %w", err)
+			}
+			logging.Debugf("[%s] Not found in cache, will scrape from sources", t.javID)
+		} else {
 			logging.Debugf("[%s] Found in cache: Title=%s, Maker=%s, Actresses=%d",
 				t.javID, cached.Title, cached.Maker, len(cached.Actresses))
 			msg := "Found in cache"
@@ -97,7 +103,6 @@ func (t *ScrapeTask) Execute(ctx context.Context) (*models.Movie, error) {
 			t.progressTracker.Update(t.id, 1.0, msg, 0)
 			return cached, nil
 		}
-		logging.Debugf("[%s] Not found in cache, will scrape from sources", t.javID)
 	} else if len(t.customScraperPriority) > 0 {
 		logging.Debugf("[%s] Custom scrapers specified, bypassing cache", t.javID)
 	}
@@ -199,7 +204,7 @@ func (t *ScrapeTask) Execute(ctx context.Context) (*models.Movie, error) {
 	t.progressTracker.Update(t.id, 0.9, "Saving to database...", 0)
 	logging.Debugf("[%s] Saving metadata to database", t.javID)
 
-	if err := t.movieRepo.Upsert(movie); err != nil {
+	if _, err := t.movieRepo.Upsert(movie); err != nil {
 		logging.Debugf("[%s] Database save failed: %v", t.javID, err)
 		return nil, fmt.Errorf("failed to save movie to database: %w", err)
 	}
@@ -303,7 +308,7 @@ func (t *DownloadTask) Execute(ctx context.Context) error {
 			logging.Debugf("[%s] Downloaded %s: %s (%d bytes in %v)", t.movie.ID, r.Type, r.LocalPath, r.Size, r.Duration)
 		} else if r.Error != nil {
 			failed++
-			logging.Debugf("[%s] Failed to download %s: %v", t.movie.ID, r.Type, r.Error)
+			logging.Warnf("[%s] Failed to download %s: %v", t.movie.ID, r.Type, r.Error)
 		} else {
 			skipped++
 			logging.Debugf("[%s] Skipped %s (already exists): %s", t.movie.ID, r.Type, r.LocalPath)
@@ -655,6 +660,7 @@ type ProcessFileOptions struct {
 	ScalarStrategy string
 	ArrayStrategy  string
 	Config         *config.Config
+	TemplateEngine *template.Engine
 }
 
 // ProcessFileOption configures optional behavior for a process file task.
@@ -693,6 +699,12 @@ func WithUpdateMerge(enabled bool, scalarStrategy, arrayStrategy string, cfg *co
 	}
 }
 
+func WithTemplateEngine(engine *template.Engine) ProcessFileOption {
+	return func(opts *ProcessFileOptions) {
+		opts.TemplateEngine = engine
+	}
+}
+
 // NewProcessFileTask creates a new composite task for processing a file
 func NewProcessFileTask(
 	match matcher.MatchResult,
@@ -726,7 +738,7 @@ func NewProcessFileTask(
 		}
 	}
 
-	return &ProcessFileTask{
+	t := &ProcessFileTask{
 		BaseTask: BaseTask{
 			id:          fmt.Sprintf("process-%s", match.ID),
 			taskType:    "process",
@@ -755,8 +767,14 @@ func NewProcessFileTask(
 		arrayStrategy:         opts.ArrayStrategy,
 		cfg:                   opts.Config,
 		customScraperPriority: customScraperPriority,
-		templateEngine:        template.NewEngine(),
+		templateEngine:        opts.TemplateEngine,
 	}
+
+	if t.templateEngine == nil {
+		t.templateEngine = template.NewEngine()
+	}
+
+	return t
 }
 
 func (t *ProcessFileTask) Execute(ctx context.Context) error {

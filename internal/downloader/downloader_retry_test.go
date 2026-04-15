@@ -106,7 +106,7 @@ func TestDownloadWithRetry_TransientErrors(t *testing.T) {
 			cfg := &config.OutputConfig{
 				DownloadTimeout: 60,
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 			// Execute with timing measurement if backoff validation requested
 			start := time.Now()
@@ -193,7 +193,7 @@ func TestDownloadWithRetry_RetryExhaustion(t *testing.T) {
 			cfg := &config.OutputConfig{
 				DownloadTimeout: 60,
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 			// Execute
 			ctx := context.Background()
@@ -262,7 +262,7 @@ func TestDownloadWithRetry_NonRetryableErrors(t *testing.T) {
 			cfg := &config.OutputConfig{
 				DownloadTimeout: 60,
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 			// Execute
 			ctx := context.Background()
@@ -322,7 +322,7 @@ func TestDownloadWithRetry_ContextCancellation(t *testing.T) {
 			cfg := &config.OutputConfig{
 				DownloadTimeout: 60,
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 			// Create cancellable context
 			ctx, cancel := context.WithCancel(context.Background())
@@ -376,7 +376,7 @@ func TestDownloadWithRetry_ExponentialBackoff(t *testing.T) {
 		}, nil).Once()
 
 		cfg := &config.OutputConfig{DownloadTimeout: 60}
-		downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+		downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 		// Execute with timing measurement
 		start := time.Now()
@@ -407,7 +407,7 @@ func TestDownloadWithRetry_ExponentialBackoff(t *testing.T) {
 		}
 
 		cfg := &config.OutputConfig{DownloadTimeout: 60}
-		downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+		downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 		// Execute with timing measurement
 		start := time.Now()
@@ -477,7 +477,7 @@ func TestDownloadWithRetry_RedirectHandling(t *testing.T) {
 				Once()
 
 			cfg := &config.OutputConfig{DownloadTimeout: 60}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 			// Execute
 			ctx := context.Background()
@@ -529,7 +529,7 @@ func TestDownloadWithRetry_NetworkErrors(t *testing.T) {
 			Once()
 
 		cfg := &config.OutputConfig{DownloadTimeout: 60}
-		downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+		downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 		// Execute
 		ctx := context.Background()
@@ -608,7 +608,7 @@ func TestDownloadWithRetry_MaxRetriesBoundary(t *testing.T) {
 			}
 
 			cfg := &config.OutputConfig{DownloadTimeout: 60}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 			// Execute
 			ctx := context.Background()
@@ -682,7 +682,7 @@ func TestDownloadWithRetry_InvalidURLScheme(t *testing.T) {
 			}
 
 			cfg := &config.OutputConfig{DownloadTimeout: 60}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent")
+			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
 
 			// Execute
 			ctx := context.Background()

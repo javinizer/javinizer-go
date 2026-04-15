@@ -31,7 +31,7 @@ interface OrganizeControllerDeps {
 	toastInfo: (message: string, duration?: number) => void;
 	navigateBrowse: () => void;
 	api: {
-		getBatchJob: (jobId: string) => Promise<BatchJobResponse>;
+		getBatchJob: (jobId: string, includeData?: boolean) => Promise<BatchJobResponse>;
 		organizeBatchJob: (
 			jobId: string,
 			request: { destination: string; copy_only: boolean; link_mode?: 'hard' | 'soft' }
@@ -149,7 +149,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			}
 
 			try {
-				const latestJob = await deps.api.getBatchJob(deps.getJobId());
+				const latestJob = await deps.api.getBatchJob(deps.getJobId(), true);
 				deps.setJob(latestJob);
 
 				if (latestJob.status === 'completed') {

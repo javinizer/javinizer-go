@@ -225,7 +225,13 @@ func RunBatchScrapeOnce(
 
 	if !skipCache {
 		logging.Debugf("[Batch %s] File %d: Checking cache for %s", job.ID, fileIndex, movieID)
-		if cached, err := movieRepo.FindByID(movieID); err == nil {
+		cached, err := movieRepo.FindByID(movieID)
+		if err != nil {
+			if !database.IsNotFound(err) {
+				return nil, nil, fmt.Errorf("cache lookup failed for %s: %w", movieID, err)
+			}
+			logging.Debugf("[Batch %s] File %d: %s not found in cache, will scrape", job.ID, fileIndex, movieID)
+		} else {
 			logging.Debugf("[Batch %s] File %d: Found %s in cache (Title=%s, Maker=%s)",
 				job.ID, fileIndex, movieID, cached.Title, cached.Maker)
 
@@ -417,7 +423,6 @@ func RunBatchScrapeOnce(
 
 			return movieToReturn, fileResult, nil
 		}
-		logging.Debugf("[Batch %s] File %d: %s not found in cache, will scrape", job.ID, fileIndex, movieID)
 	} else if force {
 		// Clear cache if force refresh
 		logging.Debugf("[Batch %s] File %d: Force refresh enabled, clearing cache for %s", job.ID, fileIndex, movieID)
@@ -861,6 +866,7 @@ func RunBatchScrapeOnce(
 
 	// Step 8: Save to database (KEEP THIS - Option A: maintain consistency with batch scraping)
 	// We save immediately even though organize hasn't happened yet
+	var finalMovie *models.Movie
 	if !usingCustomScrapers {
 		logging.Debugf("[Batch %s] File %d: Saving metadata to database", job.ID, fileIndex)
 
@@ -870,35 +876,36 @@ func RunBatchScrapeOnce(
 		tempPosterURL := movie.CroppedPosterURL
 		movie.CroppedPosterURL = "" // Clear temp URL before saving
 
-		if err := movieRepo.Upsert(movie); err != nil {
+		savedMovie, err := movieRepo.Upsert(movie)
+		if err != nil {
 			logging.Errorf("[Batch %s] File %d: Database save failed: %v", job.ID, fileIndex, err)
-			// Continue anyway - we have the data
 		} else {
 			logging.Debugf("[Batch %s] File %d: Successfully saved to database", job.ID, fileIndex)
 		}
 
 		// Restore temp URL for the FileResult (needed for review page display)
 		movie.CroppedPosterURL = tempPosterURL
-	} else {
-		logging.Debugf("[Batch %s] File %d: Skipping database save (custom scrapers used)", job.ID, fileIndex)
-	}
 
-	// Step 9: Reload from database to get associations (only if saved)
-	var finalMovie *models.Movie
-	if !usingCustomScrapers {
-		reloadedMovie, err := movieRepo.FindByID(movie.ID)
-		if err != nil {
-			logging.Debugf("[Batch %s] File %d: Failed to reload movie from database: %v", job.ID, fileIndex, err)
-			finalMovie = movie // Fallback to aggregated movie
-		} else {
-			finalMovie = reloadedMovie
-			// Preserve DisplayTitle from aggregated movie (DB may have stale/empty value)
+		// Step 9: Use the saved movie from Upsert (already has associations loaded)
+		if savedMovie != nil {
+			finalMovie = savedMovie
 			if movie.DisplayTitle != "" {
 				finalMovie.DisplayTitle = movie.DisplayTitle
 			}
-			// Preserve temp poster URL from Step 7 (DB should never have temp URLs)
 			finalMovie.CroppedPosterURL = movie.CroppedPosterURL
-			logging.Debugf("[Batch %s] File %d: Reloaded movie from database with associations", job.ID, fileIndex)
+			logging.Debugf("[Batch %s] File %d: Using saved movie from Upsert with associations", job.ID, fileIndex)
+		} else {
+			reloadedMovie, reloadErr := movieRepo.FindByID(movie.ID)
+			if reloadErr == nil {
+				finalMovie = reloadedMovie
+				if movie.DisplayTitle != "" {
+					finalMovie.DisplayTitle = movie.DisplayTitle
+				}
+				finalMovie.CroppedPosterURL = movie.CroppedPosterURL
+			} else {
+				logging.Debugf("[Batch %s] File %d: Failed to reload movie from database: %v", job.ID, fileIndex, reloadErr)
+				finalMovie = movie
+			}
 		}
 	} else {
 		// Custom scraper mode: Use aggregated movie directly without database reload.

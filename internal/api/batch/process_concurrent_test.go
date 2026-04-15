@@ -222,27 +222,18 @@ func TestProcessBatchJobConcurrent(t *testing.T) {
 	// Process batch job in goroutine
 	done := make(chan struct{})
 	go func() {
-		processBatchJob(
-			job,
-			deps.JobQueue,
-			deps.Registry,
-			deps.Aggregator,
-			deps.MovieRepo,
-			deps.Matcher,
-			false, // strict
-			false, // force
-			false, // updateMode
-			"",    // destination
-			cfg,
-			nil,              // selectedScrapers
-			"prefer-scraper", // scalarStrategy
-			"merge",          // arrayStrategy
-			deps.DB,          // db
-			nil,              // moveToFolderOverride
-			nil,              // renameFolderInPlaceOverride
-			"",               // operationModeOverride
-			nil,              // emitter
-		)
+		processBatchJob(&BatchProcessOptions{
+			Job:            job,
+			JobQueue:       deps.JobQueue,
+			Registry:       deps.Registry,
+			Aggregator:     deps.Aggregator,
+			MovieRepo:      deps.MovieRepo,
+			Matcher:        deps.Matcher,
+			Cfg:            cfg,
+			ScalarStrategy: "prefer-scraper",
+			ArrayStrategy:  "merge",
+			DB:             deps.DB,
+		})
 		close(done)
 	}()
 
@@ -309,27 +300,18 @@ func TestProcessBatchJobCancellation(t *testing.T) {
 	// Start processing in goroutine
 	done := make(chan struct{})
 	go func() {
-		processBatchJob(
-			job,
-			deps.JobQueue,
-			deps.Registry,
-			deps.Aggregator,
-			deps.MovieRepo,
-			deps.Matcher,
-			false,
-			false,
-			false, // updateMode
-			"",
-			cfg,
-			nil,              // selectedScrapers
-			"prefer-scraper", // scalarStrategy
-			"merge",          // arrayStrategy
-			deps.DB,          // db
-			nil,              // moveToFolderOverride
-			nil,              // renameFolderInPlaceOverride
-			"",               // operationModeOverride
-			nil,              // emitter
-		)
+		processBatchJob(&BatchProcessOptions{
+			Job:            job,
+			JobQueue:       deps.JobQueue,
+			Registry:       deps.Registry,
+			Aggregator:     deps.Aggregator,
+			MovieRepo:      deps.MovieRepo,
+			Matcher:        deps.Matcher,
+			Cfg:            cfg,
+			ScalarStrategy: "prefer-scraper",
+			ArrayStrategy:  "merge",
+			DB:             deps.DB,
+		})
 		close(done)
 	}()
 
@@ -393,27 +375,18 @@ func TestProcessBatchJobRaceConditions(t *testing.T) {
 	// Start processing in goroutine
 	done := make(chan struct{})
 	go func() {
-		processBatchJob(
-			job,
-			deps.JobQueue,
-			deps.Registry,
-			deps.Aggregator,
-			deps.MovieRepo,
-			deps.Matcher,
-			false,
-			false,
-			false, // updateMode
-			"",
-			cfg,
-			nil,              // selectedScrapers
-			"prefer-scraper", // scalarStrategy
-			"merge",          // arrayStrategy
-			deps.DB,          // db
-			nil,              // moveToFolderOverride
-			nil,              // renameFolderInPlaceOverride
-			"",               // operationModeOverride
-			nil,              // emitter
-		)
+		processBatchJob(&BatchProcessOptions{
+			Job:            job,
+			JobQueue:       deps.JobQueue,
+			Registry:       deps.Registry,
+			Aggregator:     deps.Aggregator,
+			MovieRepo:      deps.MovieRepo,
+			Matcher:        deps.Matcher,
+			Cfg:            cfg,
+			ScalarStrategy: "prefer-scraper",
+			ArrayStrategy:  "merge",
+			DB:             deps.DB,
+		})
 		close(done)
 	}()
 
@@ -467,7 +440,7 @@ func TestProgressAdapterWebSocketOrdering(t *testing.T) {
 
 	// Create test job
 	files := []string{"/test/file1.mp4", "/test/file2.mp4", "/test/file3.mp4"}
-	jobQueue := worker.NewJobQueue(nil, "")
+	jobQueue := worker.NewJobQueue(nil, "", nil)
 	job := jobQueue.CreateJob(files)
 
 	// Create progress adapter with mock hub
@@ -596,27 +569,18 @@ func TestBatchScrapeTaskDatabaseSafety(t *testing.T) {
 	// Process job
 	done := make(chan struct{})
 	go func() {
-		processBatchJob(
-			job,
-			deps.JobQueue,
-			deps.Registry,
-			deps.Aggregator,
-			deps.MovieRepo,
-			deps.Matcher,
-			false,
-			false,
-			false, // updateMode
-			"",
-			cfg,
-			nil,              // selectedScrapers
-			"prefer-scraper", // scalarStrategy
-			"merge",          // arrayStrategy
-			deps.DB,          // db
-			nil,              // moveToFolderOverride
-			nil,              // renameFolderInPlaceOverride
-			"",               // operationModeOverride
-			nil,              // emitter
-		)
+		processBatchJob(&BatchProcessOptions{
+			Job:            job,
+			JobQueue:       deps.JobQueue,
+			Registry:       deps.Registry,
+			Aggregator:     deps.Aggregator,
+			MovieRepo:      deps.MovieRepo,
+			Matcher:        deps.Matcher,
+			Cfg:            cfg,
+			ScalarStrategy: "prefer-scraper",
+			ArrayStrategy:  "merge",
+			DB:             deps.DB,
+		})
 		close(done)
 	}()
 
@@ -696,27 +660,18 @@ func TestWorkerPoolErrorHandling(t *testing.T) {
 	// Process job
 	done := make(chan struct{})
 	go func() {
-		processBatchJob(
-			job,
-			deps.JobQueue,
-			deps.Registry,
-			deps.Aggregator,
-			deps.MovieRepo,
-			deps.Matcher,
-			false,
-			false,
-			false, // updateMode
-			"",
-			cfg,
-			nil,              // selectedScrapers
-			"prefer-scraper", // scalarStrategy
-			"merge",          // arrayStrategy
-			deps.DB,          // db
-			nil,              // moveToFolderOverride
-			nil,              // renameFolderInPlaceOverride
-			"",               // operationModeOverride
-			nil,              // emitter
-		)
+		processBatchJob(&BatchProcessOptions{
+			Job:            job,
+			JobQueue:       deps.JobQueue,
+			Registry:       deps.Registry,
+			Aggregator:     deps.Aggregator,
+			MovieRepo:      deps.MovieRepo,
+			Matcher:        deps.Matcher,
+			Cfg:            cfg,
+			ScalarStrategy: "prefer-scraper",
+			ArrayStrategy:  "merge",
+			DB:             deps.DB,
+		})
 		close(done)
 	}()
 
@@ -831,7 +786,7 @@ func TestBatchJobResultConsistency(t *testing.T) {
 		files[i] = fmt.Sprintf("/test/file-%d.mp4", i)
 	}
 
-	jobQueue := worker.NewJobQueue(nil, "")
+	jobQueue := worker.NewJobQueue(nil, "", nil)
 	job := jobQueue.CreateJob(files)
 
 	// Concurrently update file results
@@ -919,7 +874,7 @@ func TestProgressAdapterRegistrationConcurrency(t *testing.T) {
 		files[i] = fmt.Sprintf("/test/file-%d.mp4", i)
 	}
 
-	jobQueue := worker.NewJobQueue(nil, "")
+	jobQueue := worker.NewJobQueue(nil, "", nil)
 	job := jobQueue.CreateJob(files)
 
 	adapter := realtime.NewProgressAdapter(job.ID, job, mockHub)

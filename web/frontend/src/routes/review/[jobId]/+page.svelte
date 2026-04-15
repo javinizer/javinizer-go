@@ -214,7 +214,7 @@
 
 	async function fetchJob() {
 		try {
-			job = await apiClient.getBatchJob(jobId);
+			job = await apiClient.getBatchJob(jobId, true);
 			if (job && job.destination && !destinationPath) {
 				destinationPath = job.destination;
 			}
@@ -276,9 +276,9 @@
 	$effect(() => {
 		const operationMode = job?.operation_mode_override || config?.output?.operation_mode;
 		const needsDestination = !operationMode || operationMode === 'organize';
-		if (currentMovie && (needsDestination ? destinationPath : true)) {
+		if (organizeStatus !== 'organizing' && currentMovie && (needsDestination ? destinationPath : true)) {
 			fetchPreview();
-		} else {
+		} else if (organizeStatus !== 'organizing') {
 			preview = null;
 		}
 	});
@@ -375,7 +375,7 @@
 			void goto('/browse');
 		},
 		api: {
-			getBatchJob: (nextJobId) => apiClient.getBatchJob(nextJobId),
+			getBatchJob: (nextJobId) => apiClient.getBatchJob(nextJobId, true),
 			organizeBatchJob: (nextJobId, request) => apiClient.organizeBatchJob(nextJobId, request),
 			updateBatchJob: (nextJobId) => apiClient.updateBatchJob(nextJobId)
 		}

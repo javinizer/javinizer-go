@@ -60,15 +60,18 @@ func DefaultConfig() *Config {
 		},
 		API: APIConfig{
 			Security: SecurityConfig{
-				AllowedDirectories: []string{}, // Empty = no allowlist restriction
-				DeniedDirectories:  []string{}, // Additional denied dirs beyond built-in
-				MaxFilesPerScan:    10000,      // Reasonable limit for large directories
-				ScanTimeoutSeconds: 30,         // 30 seconds timeout for scans
+				AllowedDirectories: []string{},
+				DeniedDirectories:  []string{},
+				MaxFilesPerScan:    10000,
+				ScanTimeoutSeconds: 30,
 				AllowedOrigins: []string{
 					"http://localhost:8080",
 					"http://localhost:5173",
 					"http://127.0.0.1:8080",
 					"http://127.0.0.1:5173",
+				},
+				RateLimit: RateLimitConfig{
+					RequestsPerMinute: 60,
 				},
 			},
 		},

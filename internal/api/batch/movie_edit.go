@@ -74,7 +74,7 @@ func updateBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 
 		// Update database first (before updating job state) to complete any mutations
 		// before exposing the pointer to concurrent readers
-		if err := deps.MovieRepo.Upsert(req.Movie); err != nil {
+		if _, err := deps.MovieRepo.Upsert(req.Movie); err != nil {
 			logging.Errorf("Failed to update movie in database: %v", err)
 			// Don't fail the request if DB update fails
 		}

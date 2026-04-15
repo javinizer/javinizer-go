@@ -88,7 +88,7 @@ func GenerateTempPoster(
 	if err != nil {
 		return "", fmt.Errorf("failed to download poster: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = httpclientiface.DrainAndClose(resp.Body) }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("poster download failed with status %d", resp.StatusCode)
@@ -206,7 +206,7 @@ func GenerateCroppedPoster(
 	if err != nil {
 		return "", fmt.Errorf("failed to download poster: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = httpclientiface.DrainAndClose(resp.Body) }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("poster download failed with status %d", resp.StatusCode)

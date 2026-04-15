@@ -22,6 +22,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/scraper"
+	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/javinizer/javinizer-go/internal/tui"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/spf13/afero"
@@ -236,10 +237,11 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize downloader
-	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
+	sharedEngine := template.NewEngine()
+	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder, sharedEngine)
 
 	// Initialize organizer
-	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)
+	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output, sharedEngine)
 	org.SetMatcher(fileMatcher)
 
 	// Initialize NFO generator
@@ -268,8 +270,9 @@ func run(cmd *cobra.Command, args []string) error {
 		moveFiles,
 	)
 	processor.SetConfig(cfg)
-	processor.SetOptionsFromConfig(cfg) // Apply metadata.nfo.enabled from config
+	processor.SetOptionsFromConfig(cfg)
 	processor.SetLinkMode(linkMode)
+	processor.SetTemplateEngine(sharedEngine)
 	processor.SetUpdateMode(updateMode)
 	processor.SetMergeStrategies(scalarStrategy, arrayStrategy)
 

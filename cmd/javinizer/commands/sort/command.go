@@ -15,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 )
@@ -112,7 +113,8 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create matcher: %w", err)
 	}
-	fileOrganizer := organizer.NewOrganizer(afero.NewOsFs(), &deps.Config.Output)
+	sharedEngine := template.NewEngine()
+	fileOrganizer := organizer.NewOrganizer(afero.NewOsFs(), &deps.Config.Output, sharedEngine)
 	fileOrganizer.SetMatcher(fileMatcher)
 	nfoGenerator := nfo.NewGenerator(afero.NewOsFs(), nfo.ConfigFromAppConfig(&deps.Config.Metadata.NFO, &deps.Config.Output, &deps.Config.Metadata, deps.DB))
 
@@ -121,7 +123,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP client: %w", err)
 	}
-	mediaDownloader := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &deps.Config.Output, deps.Config.Scrapers.UserAgent, deps.Config.Metadata.NFO.ActressLanguageJA, deps.Config.Metadata.NFO.FirstNameOrder)
+	mediaDownloader := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &deps.Config.Output, deps.Config.Scrapers.UserAgent, deps.Config.Metadata.NFO.ActressLanguageJA, deps.Config.Metadata.NFO.FirstNameOrder, sharedEngine)
 
 	// Print configuration
 	fmt.Println("=== Javinizer Sort ===")

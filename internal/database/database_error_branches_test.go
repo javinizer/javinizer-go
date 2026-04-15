@@ -13,7 +13,7 @@ func TestMovieRepositoryUpsert_MoviesTableMissingReturnsError(t *testing.T) {
 	repo := NewMovieRepository(db)
 
 	require.NoError(t, db.DB.Exec("DROP TABLE movies").Error)
-	err := repo.Upsert(createTestMovie("IPX-ERR-MOVIES"))
+	_, err := repo.Upsert(createTestMovie("IPX-ERR-MOVIES"))
 	require.Error(t, err)
 }
 
@@ -26,7 +26,7 @@ func TestMovieRepositoryUpsert_CreatePathAssociationErrors(t *testing.T) {
 		movie := createTestMovie("IPX-ERR-GENRE")
 		movie.Genres = []models.Genre{{Name: "Drama"}}
 
-		err := repo.Upsert(movie)
+		_, err := repo.Upsert(movie)
 		require.Error(t, err)
 	})
 
@@ -38,7 +38,7 @@ func TestMovieRepositoryUpsert_CreatePathAssociationErrors(t *testing.T) {
 		movie := createTestMovie("IPX-ERR-ACTRESS")
 		movie.Actresses = []models.Actress{{DMMID: 91001, JapaneseName: "Branch Actress"}}
 
-		err := repo.Upsert(movie)
+		_, err := repo.Upsert(movie)
 		require.Error(t, err)
 	})
 }
@@ -48,7 +48,8 @@ func TestMovieRepositoryUpsert_UpdatePathTranslationError(t *testing.T) {
 	repo := NewMovieRepository(db)
 
 	movie := createTestMovie("IPX-ERR-TRANS-UPD")
-	require.NoError(t, repo.Upsert(movie))
+	_, err := repo.Upsert(movie)
+	require.NoError(t, err)
 
 	require.NoError(t, db.DB.Exec("DROP TABLE movie_translations").Error)
 
@@ -56,7 +57,7 @@ func TestMovieRepositoryUpsert_UpdatePathTranslationError(t *testing.T) {
 	movie.Translations = []models.MovieTranslation{
 		{Language: "en", Title: "English"},
 	}
-	err := repo.Upsert(movie)
+	_, err = repo.Upsert(movie)
 	require.Error(t, err)
 }
 
@@ -66,10 +67,11 @@ func TestMovieRepositoryDelete_ErrorBranches(t *testing.T) {
 		repo := NewMovieRepository(db)
 
 		movie := createTestMovie("IPX-DEL-ERR-1")
-		require.NoError(t, repo.Upsert(movie))
+		_, err := repo.Upsert(movie)
+		require.NoError(t, err)
 		require.NoError(t, db.DB.Exec("DROP TABLE movie_actresses").Error)
 
-		err := repo.Delete(movie.ID)
+		err = repo.Delete(movie.ID)
 		require.Error(t, err)
 	})
 
@@ -78,10 +80,11 @@ func TestMovieRepositoryDelete_ErrorBranches(t *testing.T) {
 		repo := NewMovieRepository(db)
 
 		movie := createTestMovie("IPX-DEL-ERR-2")
-		require.NoError(t, repo.Upsert(movie))
+		_, err := repo.Upsert(movie)
+		require.NoError(t, err)
 		require.NoError(t, db.DB.Exec("DROP TABLE movie_translations").Error)
 
-		err := repo.Delete(movie.ID)
+		err = repo.Delete(movie.ID)
 		require.Error(t, err)
 	})
 
@@ -90,10 +93,11 @@ func TestMovieRepositoryDelete_ErrorBranches(t *testing.T) {
 		repo := NewMovieRepository(db)
 
 		movie := createTestMovie("IPX-DEL-ERR-3")
-		require.NoError(t, repo.Upsert(movie))
+		_, err := repo.Upsert(movie)
+		require.NoError(t, err)
 		require.NoError(t, db.DB.Exec("DROP TABLE movie_tags").Error)
 
-		err := repo.Delete(movie.ID)
+		err = repo.Delete(movie.ID)
 		require.Error(t, err)
 	})
 

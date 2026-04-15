@@ -98,6 +98,74 @@ func (_c *MockAggregatorInterface_Aggregate_Call) RunAndReturn(run func(results 
 	return _c
 }
 
+// AggregateWithPriority provides a mock function for the type MockAggregatorInterface
+func (_mock *MockAggregatorInterface) AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, error) {
+	ret := _mock.Called(results, customPriority)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AggregateWithPriority")
+	}
+
+	var r0 *models.Movie
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func([]*models.ScraperResult, []string) (*models.Movie, error)); ok {
+		return returnFunc(results, customPriority)
+	}
+	if returnFunc, ok := ret.Get(0).(func([]*models.ScraperResult, []string) *models.Movie); ok {
+		r0 = returnFunc(results, customPriority)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*models.Movie)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func([]*models.ScraperResult, []string) error); ok {
+		r1 = returnFunc(results, customPriority)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockAggregatorInterface_AggregateWithPriority_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AggregateWithPriority'
+type MockAggregatorInterface_AggregateWithPriority_Call struct {
+	*mock.Call
+}
+
+// AggregateWithPriority is a helper method to define mock.On call
+//   - results []*models.ScraperResult
+//   - customPriority []string
+func (_e *MockAggregatorInterface_Expecter) AggregateWithPriority(results interface{}, customPriority interface{}) *MockAggregatorInterface_AggregateWithPriority_Call {
+	return &MockAggregatorInterface_AggregateWithPriority_Call{Call: _e.mock.On("AggregateWithPriority", results, customPriority)}
+}
+
+func (_c *MockAggregatorInterface_AggregateWithPriority_Call) Run(run func(results []*models.ScraperResult, customPriority []string)) *MockAggregatorInterface_AggregateWithPriority_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 []*models.ScraperResult
+		if args[0] != nil {
+			arg0 = args[0].([]*models.ScraperResult)
+		}
+		var arg1 []string
+		if args[1] != nil {
+			arg1 = args[1].([]string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAggregatorInterface_AggregateWithPriority_Call) Return(movie *models.Movie, err error) *MockAggregatorInterface_AggregateWithPriority_Call {
+	_c.Call.Return(movie, err)
+	return _c
+}
+
+func (_c *MockAggregatorInterface_AggregateWithPriority_Call) RunAndReturn(run func(results []*models.ScraperResult, customPriority []string) (*models.Movie, error)) *MockAggregatorInterface_AggregateWithPriority_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetResolvedPriorities provides a mock function for the type MockAggregatorInterface
 func (_mock *MockAggregatorInterface) GetResolvedPriorities() map[string][]string {
 	ret := _mock.Called()

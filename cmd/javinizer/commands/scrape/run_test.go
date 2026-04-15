@@ -154,7 +154,8 @@ func TestRun_CacheHit(t *testing.T) {
 	// Pre-populate database with test movie
 	movieRepo := database.NewMovieRepository(db)
 	cachedMovie := createTestMovie("IPX-123", "Cached Movie")
-	require.NoError(t, movieRepo.Upsert(cachedMovie))
+	_, err := movieRepo.Upsert(cachedMovie)
+	require.NoError(t, err)
 
 	// Create command
 	cmd := scrape.NewCommand()
@@ -195,7 +196,8 @@ func TestRun_ForceRefresh(t *testing.T) {
 	// Pre-populate database with test movie
 	movieRepo := database.NewMovieRepository(db)
 	cachedMovie := createTestMovie("IPX-123", "Old Cached Movie")
-	require.NoError(t, movieRepo.Upsert(cachedMovie))
+	_, err := movieRepo.Upsert(cachedMovie)
+	require.NoError(t, err)
 
 	// Create command with force flag
 	cmd := scrape.NewCommand()

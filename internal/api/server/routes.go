@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/actress"
@@ -12,8 +13,10 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/api/events"
 	"github.com/javinizer/javinizer-go/internal/api/file"
+	"github.com/javinizer/javinizer-go/internal/api/genre"
 	"github.com/javinizer/javinizer-go/internal/api/history"
 	"github.com/javinizer/javinizer-go/internal/api/jobs"
+	"github.com/javinizer/javinizer-go/internal/api/middleware"
 	"github.com/javinizer/javinizer-go/internal/api/movie"
 	"github.com/javinizer/javinizer-go/internal/api/realtime"
 	"github.com/javinizer/javinizer-go/internal/api/system"
@@ -23,6 +26,7 @@ import (
 	webui "github.com/javinizer/javinizer-go/web"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	"golang.org/x/time/rate"
 )
 
 type webUIAssets struct {
@@ -107,12 +111,21 @@ func registerAPIV1Routes(router *gin.Engine, deps *core.ServerDependencies) {
 	protected := v1.Group("")
 	protected.Use(auth.RequireAuthenticated(deps))
 
-	movie.RegisterRoutes(protected, deps)
+	var rateLimiter *middleware.IPRateLimiter
+	if rpm := deps.GetConfig().API.Security.RateLimit.RequestsPerMinute; rpm > 0 {
+		rateLimiter = middleware.NewIPRateLimiter(rate.Every(time.Minute/time.Duration(rpm)), rpm)
+	}
+
+	writeProtected := protected.Group("")
+	writeProtected.Use(middleware.RateLimitMiddleware(rateLimiter))
+
+	movie.RegisterRoutes(writeProtected, deps)
 	actress.RegisterRoutes(protected, deps)
+	genre.RegisterRoutes(writeProtected, deps)
 	system.RegisterRoutes(protected, deps)
 	apiversion.RegisterRoutes(protected, deps)
-	file.RegisterRoutes(protected, deps)
-	batch.RegisterRoutes(protected, deps)
+	file.RegisterRoutes(writeProtected, deps)
+	batch.RegisterRoutes(writeProtected, deps)
 	history.RegisterRoutes(protected, deps)
 	jobs.RegisterRoutes(protected, deps)
 	events.RegisterRoutes(protected, deps)

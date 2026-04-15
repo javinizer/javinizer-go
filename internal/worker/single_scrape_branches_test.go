@@ -73,7 +73,7 @@ func TestRunBatchScrapeOnce_QueryOverrideUsesManualQuery(t *testing.T) {
 
 func TestRunBatchScrapeOnce_ReturnsCachedMovieWithoutScraping(t *testing.T) {
 	cfg, movieRepo, agg, fileMatcher := newRunBatchFallbackEnv(t)
-	if err := movieRepo.Upsert(&models.Movie{
+	if _, err := movieRepo.Upsert(&models.Movie{
 		ID:        "IPX-111",
 		ContentID: "ipx111",
 		Title:     "Cached Winner",

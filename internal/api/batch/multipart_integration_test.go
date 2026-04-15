@@ -201,27 +201,20 @@ func TestMultipartPreviewLetterPatternDiscoveryFlow(t *testing.T) {
 	processedMovieIDs := make(map[string]bool)
 
 	for i, filePath := range files {
-		task := worker.NewBatchScrapeTask(
-			fmt.Sprintf("task-%d", i),
-			filePath,
-			i,
-			job,
-			deps.Registry,
-			deps.Aggregator,
-			deps.MovieRepo,
-			deps.GetMatcher(),
-			progressTracker,
-			false,            // force
-			false,            // updateMode
-			[]string{"mock"}, // selectedScrapers - use mock
-			nil,              // httpClient (mock doesn't need it)
-			"",               // userAgent
-			"",               // referer
-			processedMovieIDs,
-			cfg,
-			"", // scalarStrategy
-			"", // arrayStrategy
-		)
+		task := worker.NewBatchScrapeTask(&worker.BatchScrapeOptions{
+			TaskID:            fmt.Sprintf("task-%d", i),
+			FilePath:          filePath,
+			FileIndex:         i,
+			Job:               job,
+			Registry:          deps.Registry,
+			Aggregator:        deps.Aggregator,
+			MovieRepo:         deps.MovieRepo,
+			Matcher:           deps.GetMatcher(),
+			ProgressTracker:   progressTracker,
+			SelectedScrapers:  []string{"mock"},
+			ProcessedMovieIDs: processedMovieIDs,
+			Cfg:               cfg,
+		})
 
 		// Execute the task - this applies multipart metadata from FileMatchInfo
 		err := task.Execute(context.Background())

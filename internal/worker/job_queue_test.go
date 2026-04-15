@@ -14,7 +14,7 @@ import (
 
 func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 	t.Run("Create and get job", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi"}
 
 		job := jq.CreateJob(files)
@@ -40,7 +40,7 @@ func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 	})
 
 	t.Run("Get non-existent job", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 
 		retrieved, ok := jq.GetJob("non-existent-id")
 		assert.False(t, ok, "Job should not exist")
@@ -48,7 +48,7 @@ func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 	})
 
 	t.Run("Delete job", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4"}
 
 		job := jq.CreateJob(files)
@@ -67,7 +67,7 @@ func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 	})
 
 	t.Run("List jobs", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 
 		// Initially empty
 		jobs := jq.ListJobs()
@@ -100,7 +100,7 @@ func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 	})
 
 	t.Run("Empty files list", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{})
 
 		assert.Equal(t, 0, job.TotalFiles)
@@ -110,7 +110,7 @@ func TestJobQueue_CreateGetDeleteList(t *testing.T) {
 
 func TestBatchJob_UpdateFileResult(t *testing.T) {
 	t.Run("Update single file result", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi"}
 		job := jq.CreateJob(files)
 
@@ -136,7 +136,7 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 	})
 
 	t.Run("Update multiple file results with mixed status", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi", "file4.mp4"}
 		job := jq.CreateJob(files)
 
@@ -185,7 +185,7 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 	})
 
 	t.Run("Update same file result multiple times", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4"}
 		job := jq.CreateJob(files)
 
@@ -217,7 +217,7 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 	})
 
 	t.Run("Progress calculation with pending files", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi"}
 		job := jq.CreateJob(files)
 
@@ -239,7 +239,7 @@ func TestBatchJob_UpdateFileResult(t *testing.T) {
 
 func TestBatchJob_StatusTransitions(t *testing.T) {
 	t.Run("MarkStarted", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		assert.Equal(t, JobStatusPending, job.Status)
@@ -255,7 +255,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	})
 
 	t.Run("MarkCompleted", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 		job.MarkStarted()
 
@@ -271,7 +271,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	})
 
 	t.Run("MarkFailed", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 		job.MarkStarted()
 
@@ -286,7 +286,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	})
 
 	t.Run("MarkCancelled", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 		job.MarkStarted()
 
@@ -301,7 +301,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	})
 
 	t.Run("MarkReverted", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 		job.MarkStarted()
 		job.MarkCompleted()
@@ -318,7 +318,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	})
 
 	t.Run("Full workflow: pending -> running -> completed", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 
@@ -351,7 +351,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 	})
 
 	t.Run("Revert workflow: organized -> reverted", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 		job.MarkStarted()
 		job.MarkCompleted()
@@ -374,7 +374,7 @@ func TestBatchJob_StatusTransitions(t *testing.T) {
 
 func TestBatchJob_GetStatus(t *testing.T) {
 	t.Run("Returns copy with all fields", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 		job.MarkStarted()
@@ -401,7 +401,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 	})
 
 	t.Run("Deep copy of FileResults - map and FileResults are independent", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 
@@ -444,7 +444,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 	})
 
 	t.Run("Copies CompletedAt correctly when nil", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		status := job.GetStatus()
@@ -454,7 +454,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 	})
 
 	t.Run("Copies CompletedAt correctly when set", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 		job.MarkCompleted()
 
@@ -469,7 +469,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 	})
 
 	t.Run("Empty results map is copied correctly", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		status := job.GetStatus()
@@ -482,7 +482,7 @@ func TestBatchJob_GetStatus(t *testing.T) {
 // TestConcurrent_GetStatusAndUpdateFileResult validates thread-safe snapshot access
 // This test catches race conditions where handlers read job state while workers update it
 func TestConcurrent_GetStatusAndUpdateFileResult(t *testing.T) {
-	jq := NewJobQueue(nil, "")
+	jq := NewJobQueue(nil, "", nil)
 	job := jq.CreateJob([]string{"file1.mp4", "file2.mkv", "file3.avi"})
 
 	now := time.Now()
@@ -539,7 +539,7 @@ func TestConcurrent_GetStatusAndUpdateFileResult(t *testing.T) {
 func TestConcurrent_DirectMapAccessIsUnsafe(t *testing.T) {
 	t.Skip("This test demonstrates unsafe pattern - skip to avoid race detector failures")
 
-	jq := NewJobQueue(nil, "")
+	jq := NewJobQueue(nil, "", nil)
 	job := jq.CreateJob([]string{"file1.mp4"})
 
 	now := time.Now()
@@ -577,7 +577,7 @@ func TestConcurrent_DirectMapAccessIsUnsafe(t *testing.T) {
 // TestBatchJob_PointerFieldIndependence validates that pointer fields are deep copied
 // This ensures modifying pointer fields in the snapshot doesn't affect the live job
 func TestBatchJob_PointerFieldIndependence(t *testing.T) {
-	jq := NewJobQueue(nil, "")
+	jq := NewJobQueue(nil, "", nil)
 	job := jq.CreateJob([]string{"file1.mp4"})
 
 	// Create FileResult with pointer fields
@@ -626,7 +626,7 @@ func TestBatchJob_PointerFieldIndependence(t *testing.T) {
 // TestJobQueue_GetJobPointer tests the GetJobPointer method
 func TestJobQueue_GetJobPointer(t *testing.T) {
 	t.Run("get existing job pointer", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 
@@ -645,7 +645,7 @@ func TestJobQueue_GetJobPointer(t *testing.T) {
 	})
 
 	t.Run("get non-existent job pointer", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 
 		jobPtr, ok := jq.GetJobPointer("non-existent-id")
 		assert.False(t, ok, "Should not find non-existent job")
@@ -656,7 +656,7 @@ func TestJobQueue_GetJobPointer(t *testing.T) {
 // TestBatchJob_AtomicUpdateFileResult tests atomic file result updates
 func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 	t.Run("atomic update with update function", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		now := time.Now()
@@ -683,7 +683,7 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 	})
 
 	t.Run("atomic update with error", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		now := time.Now()
@@ -707,7 +707,7 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 	})
 
 	t.Run("atomic update on non-existent file", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		// Try to update without initial result
@@ -725,7 +725,7 @@ func TestBatchJob_AtomicUpdateFileResult(t *testing.T) {
 // TestBatchJob_SetCancelFunc tests setting cancellation function
 func TestBatchJob_SetCancelFunc(t *testing.T) {
 	t.Run("set and trigger cancel func", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		cancelled := false
@@ -745,7 +745,7 @@ func TestBatchJob_SetCancelFunc(t *testing.T) {
 	})
 
 	t.Run("cancel without cancel func", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		// Don't set cancel func, just call Cancel
@@ -759,7 +759,7 @@ func TestBatchJob_SetCancelFunc(t *testing.T) {
 // TestBatchJob_GetProgress tests progress retrieval
 func TestBatchJob_GetProgress(t *testing.T) {
 	t.Run("get progress at different stages", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi", "file4.mp4"}
 		job := jq.CreateJob(files)
 
@@ -805,7 +805,7 @@ func TestBatchJob_GetProgress(t *testing.T) {
 // TestBatchJob_ExcludeFile tests file exclusion
 func TestBatchJob_ExcludeFile(t *testing.T) {
 	t.Run("exclude single file", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi"}
 		job := jq.CreateJob(files)
 
@@ -819,7 +819,7 @@ func TestBatchJob_ExcludeFile(t *testing.T) {
 	})
 
 	t.Run("exclude multiple files", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv", "file3.avi"}
 		job := jq.CreateJob(files)
 
@@ -834,7 +834,7 @@ func TestBatchJob_ExcludeFile(t *testing.T) {
 	})
 
 	t.Run("exclude same file multiple times", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4"}
 		job := jq.CreateJob(files)
 
@@ -851,7 +851,7 @@ func TestBatchJob_ExcludeFile(t *testing.T) {
 // TestBatchJob_IsExcluded tests exclusion checking
 func TestBatchJob_IsExcluded(t *testing.T) {
 	t.Run("check non-excluded file", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 
@@ -861,7 +861,7 @@ func TestBatchJob_IsExcluded(t *testing.T) {
 	})
 
 	t.Run("check excluded file", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4", "file2.mkv"}
 		job := jq.CreateJob(files)
 
@@ -872,7 +872,7 @@ func TestBatchJob_IsExcluded(t *testing.T) {
 	})
 
 	t.Run("check non-existent file", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		files := []string{"file1.mp4"}
 		job := jq.CreateJob(files)
 
@@ -883,7 +883,7 @@ func TestBatchJob_IsExcluded(t *testing.T) {
 
 // TestMarkReverted_StatusAndTimestamp verifies MarkReverted sets status and timestamp
 func TestMarkReverted_StatusAndTimestamp(t *testing.T) {
-	jq := NewJobQueue(nil, "")
+	jq := NewJobQueue(nil, "", nil)
 	job := jq.CreateJob([]string{"file1.mp4"})
 	job.MarkStarted()
 	job.MarkCompleted()
@@ -899,7 +899,7 @@ func TestMarkReverted_StatusAndTimestamp(t *testing.T) {
 
 // TestMarkReverted_DoneChannelClosed verifies Done channel is closed after MarkReverted
 func TestMarkReverted_DoneChannelClosed(t *testing.T) {
-	jq := NewJobQueue(nil, "")
+	jq := NewJobQueue(nil, "", nil)
 	job := jq.CreateJob([]string{"file1.mp4"})
 	job.MarkStarted()
 	job.MarkCompleted()
@@ -932,7 +932,7 @@ func TestCleanupOldOrganizedJobs_DoesNotDeleteReverted(t *testing.T) {
 	// NewJobQueue calls loadFromDatabase → List()
 	mockRepo.On("List").Return([]models.Job{}, nil)
 
-	jq := NewJobQueue(mockRepo, "")
+	jq := NewJobQueue(mockRepo, "", nil)
 	jq.cleanupOldOrganizedJobs()
 
 	// Verify that DeleteOrganizedOlderThan was NOT called (cleanup is disabled)
@@ -940,9 +940,147 @@ func TestCleanupOldOrganizedJobs_DoesNotDeleteReverted(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 }
 
+// TestBatchJob_PersistError tests PersistError field getter/setter and GetStatus
+func TestBatchJob_PersistError(t *testing.T) {
+	t.Run("GetPersistError and SetPersistError", func(t *testing.T) {
+		jq := NewJobQueue(nil, "", nil)
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		assert.Empty(t, job.GetPersistError())
+
+		job.SetPersistError("create failed: disk full")
+		assert.Equal(t, "create failed: disk full", job.GetPersistError())
+
+		job.SetPersistError("")
+		assert.Empty(t, job.GetPersistError())
+	})
+
+	t.Run("GetStatus snapshot includes PersistError", func(t *testing.T) {
+		jq := NewJobQueue(nil, "", nil)
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		job.SetPersistError("update failed: connection refused")
+		snapshot := job.GetStatus()
+
+		assert.Equal(t, "update failed: connection refused", snapshot.PersistError)
+	})
+
+	t.Run("PersistError in snapshot is independent copy", func(t *testing.T) {
+		jq := NewJobQueue(nil, "", nil)
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		job.SetPersistError("some error")
+		snapshot := job.GetStatus()
+
+		job.SetPersistError("different error")
+		assert.Equal(t, "some error", snapshot.PersistError, "snapshot should not be affected by later mutation")
+	})
+
+	t.Run("concurrent read/write PersistError", func(t *testing.T) {
+		jq := NewJobQueue(nil, "", nil)
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i := 0; i < 100; i++ {
+				job.SetPersistError(fmt.Sprintf("error %d", i))
+			}
+		}()
+
+		for i := 0; i < 100; i++ {
+			_ = job.GetPersistError()
+		}
+
+		<-done
+	})
+}
+
+// TestJobQueue_PersistToDatabase_SetsPersistError tests that persistToDatabase stores errors
+func TestJobQueue_PersistToDatabase_SetsPersistError(t *testing.T) {
+	t.Run("create failure sets PersistError", func(t *testing.T) {
+		mockRepo := mocks.NewMockJobRepositoryInterface(t)
+		mockRepo.On("List").Return([]models.Job{}, nil).Once()
+		mockRepo.On("FindByID", "test-job-1").Return(nil, fmt.Errorf("not found")).Once()
+		mockRepo.On("Create", mock.AnythingOfType("*models.Job")).Return(fmt.Errorf("disk full")).Once()
+
+		jq := NewJobQueue(mockRepo, "", nil)
+		job := &BatchJob{
+			ID:            "test-job-1",
+			Status:        JobStatusPending,
+			TotalFiles:    1,
+			Files:         []string{"file1.mp4"},
+			Results:       make(map[string]*FileResult),
+			Excluded:      make(map[string]bool),
+			FileMatchInfo: make(map[string]FileMatchInfo),
+		}
+		jq.mu.Lock()
+		jq.jobs["test-job-1"] = job
+		jq.mu.Unlock()
+
+		jq.persistToDatabase(job)
+		assert.Contains(t, job.GetPersistError(), "create failed")
+
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("update failure sets PersistError", func(t *testing.T) {
+		mockRepo := mocks.NewMockJobRepositoryInterface(t)
+		mockRepo.On("List").Return([]models.Job{}, nil).Once()
+		mockRepo.On("FindByID", "test-job-2").Return(&models.Job{ID: "test-job-2"}, nil).Once()
+		mockRepo.On("Update", mock.AnythingOfType("*models.Job")).Return(fmt.Errorf("connection refused")).Once()
+
+		jq := NewJobQueue(mockRepo, "", nil)
+		job := &BatchJob{
+			ID:            "test-job-2",
+			Status:        JobStatusRunning,
+			TotalFiles:    1,
+			Files:         []string{"file1.mp4"},
+			Results:       make(map[string]*FileResult),
+			Excluded:      make(map[string]bool),
+			FileMatchInfo: make(map[string]FileMatchInfo),
+		}
+		jq.mu.Lock()
+		jq.jobs["test-job-2"] = job
+		jq.mu.Unlock()
+
+		jq.persistToDatabase(job)
+		assert.Contains(t, job.GetPersistError(), "update failed")
+
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("success clears PersistError", func(t *testing.T) {
+		mockRepo := mocks.NewMockJobRepositoryInterface(t)
+		mockRepo.On("List").Return([]models.Job{}, nil).Once()
+		mockRepo.On("FindByID", "test-job-3").Return(&models.Job{ID: "test-job-3"}, nil).Once()
+		mockRepo.On("Update", mock.AnythingOfType("*models.Job")).Return(nil).Once()
+
+		jq := NewJobQueue(mockRepo, "", nil)
+		job := &BatchJob{
+			ID:            "test-job-3",
+			Status:        JobStatusRunning,
+			TotalFiles:    1,
+			Files:         []string{"file1.mp4"},
+			Results:       make(map[string]*FileResult),
+			Excluded:      make(map[string]bool),
+			FileMatchInfo: make(map[string]FileMatchInfo),
+		}
+		jq.mu.Lock()
+		jq.jobs["test-job-3"] = job
+		jq.mu.Unlock()
+
+		job.SetPersistError("previous error")
+		jq.persistToDatabase(job)
+		assert.Empty(t, job.GetPersistError())
+
+		mockRepo.AssertExpectations(t)
+	})
+}
+
 func TestBatchJob_GettersSetters(t *testing.T) {
 	t.Run("GetOperationModeOverride and SetOperationModeOverride", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		assert.Empty(t, job.GetOperationModeOverride())
@@ -955,7 +1093,7 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 	})
 
 	t.Run("GetMoveToFolderOverride and SetMoveToFolderOverride", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		assert.Nil(t, job.GetMoveToFolderOverride())
@@ -977,7 +1115,7 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 	})
 
 	t.Run("GetRenameFolderInPlaceOverride and SetRenameFolderInPlaceOverride", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		assert.Nil(t, job.GetRenameFolderInPlaceOverride())
@@ -993,7 +1131,7 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 	})
 
 	t.Run("GetDestination and SetDestination", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		assert.Empty(t, job.GetDestination())
@@ -1003,7 +1141,7 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 	})
 
 	t.Run("GetFiles returns a copy", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4", "file2.mkv"})
 
 		files := job.GetFiles()
@@ -1015,7 +1153,7 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 	})
 
 	t.Run("GetCompleted, GetFailed, GetTotalFiles", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4", "file2.mkv", "file3.avi"})
 
 		assert.Equal(t, 0, job.GetCompleted())
@@ -1041,7 +1179,7 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 	})
 
 	t.Run("concurrent access without race", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4", "file2.mkv", "file3.avi"})
 
 		done := make(chan struct{})
@@ -1080,7 +1218,7 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 	})
 
 	t.Run("SetFileMatchInfo and GetFileMatchInfo", func(t *testing.T) {
-		jq := NewJobQueue(nil, "")
+		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
 
 		info := FileMatchInfo{MovieID: "ABC-123", IsMultiPart: true, PartNumber: 1}
@@ -1093,5 +1231,80 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 
 		_, ok = job.GetFileMatchInfo("nonexistent.mp4")
 		assert.False(t, ok)
+	})
+}
+
+func TestBatchJob_GetStatusSlim(t *testing.T) {
+	t.Run("slim snapshot has correct status fields", func(t *testing.T) {
+		jq := NewJobQueue(nil, "", nil)
+		job := jq.CreateJob([]string{"file1.mp4", "file2.mkv"})
+
+		now := time.Now()
+		job.UpdateFileResult("file1.mp4", &FileResult{
+			FilePath:  "file1.mp4",
+			MovieID:   "ABC-123",
+			Status:    JobStatusCompleted,
+			Data:      &models.Movie{ID: "ABC-123", Title: "Test Movie"},
+			StartedAt: now,
+		})
+
+		slim := job.GetStatusSlim()
+
+		assert.Equal(t, job.ID, slim.ID)
+		assert.Equal(t, JobStatusPending, slim.Status)
+		assert.Equal(t, 2, slim.TotalFiles)
+		assert.Equal(t, 1, slim.Completed)
+		assert.Equal(t, 0, slim.Failed)
+		assert.InDelta(t, 50.0, slim.Progress, 0.01)
+	})
+
+	t.Run("slim snapshot excludes Data", func(t *testing.T) {
+		jq := NewJobQueue(nil, "", nil)
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		now := time.Now()
+		job.UpdateFileResult("file1.mp4", &FileResult{
+			FilePath:  "file1.mp4",
+			MovieID:   "ABC-123",
+			Status:    JobStatusCompleted,
+			Data:      &models.Movie{ID: "ABC-123", Title: "Test Movie"},
+			StartedAt: now,
+		})
+
+		slim := job.GetStatusSlim()
+
+		result, ok := slim.Results["file1.mp4"]
+		require.True(t, ok)
+		assert.Equal(t, "ABC-123", result.MovieID)
+		assert.Equal(t, JobStatusCompleted, result.Status)
+		// FileResultSlim does not have a Data field — this is the key difference from GetStatus()
+		// Verify that the slim type doesn't carry movie data by checking it's a FileResultSlim
+		_, isSlim := interface{}(result).(*FileResultSlim)
+		assert.True(t, isSlim, "Result should be FileResultSlim without Data")
+	})
+
+	t.Run("GetStatus still includes Data", func(t *testing.T) {
+		jq := NewJobQueue(nil, "", nil)
+		job := jq.CreateJob([]string{"file1.mp4"})
+
+		now := time.Now()
+		job.UpdateFileResult("file1.mp4", &FileResult{
+			FilePath:  "file1.mp4",
+			MovieID:   "ABC-123",
+			Status:    JobStatusCompleted,
+			Data:      &models.Movie{ID: "ABC-123", Title: "Test Movie"},
+			StartedAt: now,
+		})
+
+		full := job.GetStatus()
+
+		result, ok := full.Results["file1.mp4"]
+		require.True(t, ok)
+		assert.Equal(t, "ABC-123", result.MovieID)
+		assert.NotNil(t, result.Data, "Full result should contain Data")
+		movie, ok := result.Data.(*models.Movie)
+		require.True(t, ok)
+		assert.Equal(t, "ABC-123", movie.ID)
+		assert.Equal(t, "Test Movie", movie.Title)
 	})
 }

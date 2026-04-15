@@ -42,7 +42,7 @@ func setupJobsTestDeps(t *testing.T) (*ServerDependencies, *database.DB) {
 	batchFileOpRepo := database.NewBatchFileOperationRepository(db)
 
 	// JobQueue is needed by revert handlers (GetJobPointer call)
-	jobQueue := worker.NewJobQueue(jobRepo, "data/temp")
+	jobQueue := worker.NewJobQueue(jobRepo, "data/temp", nil)
 
 	deps := &ServerDependencies{
 		DB:              db,

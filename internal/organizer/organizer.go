@@ -63,11 +63,14 @@ func (m LinkMode) IsValid() bool {
 }
 
 // NewOrganizer creates a new file organizer
-func NewOrganizer(fs afero.Fs, cfg *config.OutputConfig) *Organizer {
+func NewOrganizer(fs afero.Fs, cfg *config.OutputConfig, engine *template.Engine) *Organizer {
+	if engine == nil {
+		engine = template.NewEngine()
+	}
 	return &Organizer{
 		fs:              fs,
 		config:          cfg,
-		templateEngine:  template.NewEngine(),
+		templateEngine:  engine,
 		subtitleHandler: NewSubtitleHandler(fs, cfg),
 		matcher:         nil, // Set via SetMatcher if needed
 	}

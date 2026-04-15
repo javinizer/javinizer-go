@@ -161,7 +161,7 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.S
 	}
 
 	// Initialize job queue with jobRepo for persistence
-	jobQueue := worker.NewJobQueue(jobRepo, "")
+	jobQueue := worker.NewJobQueue(jobRepo, "", nil)
 
 	deps := &core.ServerDependencies{
 		ConfigFile:      configFile,

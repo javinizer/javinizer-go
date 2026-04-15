@@ -22,11 +22,14 @@ type InPlaceNoRenameFolderStrategy struct {
 
 var _ OperationStrategy = (*InPlaceNoRenameFolderStrategy)(nil)
 
-func NewInPlaceNoRenameFolderStrategy(fs afero.Fs, cfg *config.OutputConfig, m *matcher.Matcher) *InPlaceNoRenameFolderStrategy {
+func NewInPlaceNoRenameFolderStrategy(fs afero.Fs, cfg *config.OutputConfig, m *matcher.Matcher, engine *template.Engine) *InPlaceNoRenameFolderStrategy {
+	if engine == nil {
+		engine = template.NewEngine()
+	}
 	return &InPlaceNoRenameFolderStrategy{
 		fs:              fs,
 		config:          cfg,
-		templateEngine:  template.NewEngine(),
+		templateEngine:  engine,
 		subtitleHandler: NewSubtitleHandler(fs, cfg),
 		matcher:         m,
 	}

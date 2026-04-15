@@ -23,11 +23,14 @@ type InPlaceStrategy struct {
 
 var _ OperationStrategy = (*InPlaceStrategy)(nil)
 
-func NewInPlaceStrategy(fs afero.Fs, cfg *config.OutputConfig, m *matcher.Matcher) *InPlaceStrategy {
+func NewInPlaceStrategy(fs afero.Fs, cfg *config.OutputConfig, m *matcher.Matcher, engine *template.Engine) *InPlaceStrategy {
+	if engine == nil {
+		engine = template.NewEngine()
+	}
 	return &InPlaceStrategy{
 		fs:              fs,
 		config:          cfg,
-		templateEngine:  template.NewEngine(),
+		templateEngine:  engine,
 		subtitleHandler: NewSubtitleHandler(fs, cfg),
 		matcher:         m,
 	}

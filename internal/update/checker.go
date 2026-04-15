@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"golang.org/x/mod/semver"
 )
@@ -82,7 +83,7 @@ func (c *GitHubChecker) CheckLatestVersion(ctx context.Context) (*VersionInfo, e
 		return nil, fmt.Errorf("failed to fetch releases: %w", err)
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		_ = httpclient.DrainAndClose(resp.Body)
 	}()
 
 	// Handle rate limiting
@@ -335,7 +336,7 @@ func (c *GitHubChecker) getRecentReleases(ctx context.Context, limit int) ([]str
 		return nil, fmt.Errorf("failed to fetch releases: %w", err)
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		_ = httpclient.DrainAndClose(resp.Body)
 	}()
 
 	if resp.StatusCode != http.StatusOK {

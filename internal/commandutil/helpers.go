@@ -183,7 +183,7 @@ func ScrapeMetadata(
 		logging.Debugf("[%s]   Cover URL: %s", id, movie.CoverURL)
 		logging.Debugf("[%s]   Trailer URL: %s", id, movie.TrailerURL)
 
-		if err := movieRepo.Upsert(movie); err != nil {
+		if _, err := movieRepo.Upsert(movie); err != nil {
 			logging.Infof("Warning: Failed to save %s to database: %v", id, err)
 		}
 

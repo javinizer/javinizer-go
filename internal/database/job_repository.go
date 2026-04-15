@@ -1,10 +1,12 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"gorm.io/gorm"
 )
 
 type JobRepository struct {
@@ -33,6 +35,9 @@ func (r *JobRepository) FindByID(id string) (*models.Job, error) {
 	var job models.Job
 	err := r.db.First(&job, "id = ?", id).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("find job %s: %w", id, ErrNotFound)
+		}
 		return nil, wrapDBErr("find", fmt.Sprintf("job %s", id), err)
 	}
 	return &job, nil

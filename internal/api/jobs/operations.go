@@ -1,13 +1,12 @@
 package jobs
 
 import (
-	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
-	"gorm.io/gorm"
 )
 
 // listOperations godoc
@@ -27,7 +26,7 @@ func listOperations(deps *ServerDependencies) gin.HandlerFunc {
 		// Validate job exists
 		job, err := deps.JobRepo.FindByID(jobID)
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			if database.IsNotFound(err) {
 				c.JSON(http.StatusNotFound, ErrorResponse{Error: "Job not found"})
 				return
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,9 @@ import (
 type AggregatorInterface interface {
 	// Aggregate merges multiple scraper results into a single Movie based on field-level priorities
 	Aggregate(results []*models.ScraperResult) (*models.Movie, error)
+
+	// AggregateWithPriority aggregates results using a custom scraper priority order
+	AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, error)
 
 	// GetResolvedPriorities returns the cached field-level priority map (for debugging)
 	GetResolvedPriorities() map[string][]string
@@ -259,23 +263,7 @@ func (a *Aggregator) applyActressAlias(actress *models.Actress) {
 
 // splitActressName splits a full name into parts (e.g., "Yui Hatano" -> ["Yui", "Hatano"])
 func splitActressName(fullName string) []string {
-	// Simple split by space - could be enhanced for more complex names
-	var parts []string
-	currentPart := ""
-	for _, char := range fullName {
-		if char == ' ' {
-			if currentPart != "" {
-				parts = append(parts, currentPart)
-				currentPart = ""
-			}
-		} else {
-			currentPart += string(char)
-		}
-	}
-	if currentPart != "" {
-		parts = append(parts, currentPart)
-	}
-	return parts
+	return strings.Fields(fullName)
 }
 
 // compileGenreRegexes compiles regex patterns from ignore_genres config

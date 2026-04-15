@@ -570,7 +570,7 @@ func insertTestMovie(t *testing.T, db *gorm.DB, id, title string) string {
 	dbWrapper := &database.DB{DB: db}
 	repo := database.NewMovieRepository(dbWrapper)
 
-	err := repo.Upsert(movie)
+	_, err := repo.Upsert(movie)
 	require.NoError(t, err, "Failed to insert test movie")
 
 	return movie.ID

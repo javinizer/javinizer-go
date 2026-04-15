@@ -235,7 +235,7 @@ func TestDownloadTask_Execute(t *testing.T) {
 				DownloadCover:  true,
 				DownloadPoster: true,
 			}
-			dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent")
+			dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent", nil)
 
 			// Create task
 			task := NewDownloadTask(tt.movie, tmpDir, dl, tracker, tt.dryRun, tt.multipart)
@@ -283,7 +283,7 @@ func TestDownloadTask_Execute_Cancellation(t *testing.T) {
 		DownloadCover:  true,
 		DownloadPoster: true,
 	}
-	dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent")
+	dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent", nil)
 
 	movie := &models.Movie{
 		ID:       "IPX-999",
@@ -390,7 +390,7 @@ func TestOrganizeTask_Execute(t *testing.T) {
 				RenameFile:   true,
 				MoveToFolder: true,
 			}
-			org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg)
+			org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg, nil)
 
 			// Create task
 			task := NewOrganizeTask(
@@ -484,7 +484,7 @@ func TestOrganizeTask_Execute_Cancellation(t *testing.T) {
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg)
+	org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg, nil)
 
 	task := NewOrganizeTask(match, movie, tmpDestDir, true, false, org, tracker, false)
 
@@ -546,7 +546,7 @@ func TestScrapeTask_Execute_DryRun(t *testing.T) {
 
 	// Should error because no scrapers available
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Movie lookup failed")
+	assert.Contains(t, err.Error(), "cache lookup failed")
 
 	// Verify nothing was saved to database (dry-run mode)
 	_, err = movieRepo.FindByID("IPX-001")
@@ -584,7 +584,7 @@ func TestScrapeTask_Execute_ForceRefresh(t *testing.T) {
 		ID:    "IPX-001",
 		Title: "Cached Title",
 	}
-	err = movieRepo.Upsert(cachedMovie)
+	_, err = movieRepo.Upsert(cachedMovie)
 	require.NoError(t, err)
 
 	// Create aggregator
@@ -653,7 +653,7 @@ func TestScrapeTask_Execute_Cache(t *testing.T) {
 		Title: "Cached Title",
 		Maker: "Test Studio",
 	}
-	err = movieRepo.Upsert(cachedMovie)
+	_, err = movieRepo.Upsert(cachedMovie)
 	require.NoError(t, err)
 
 	// Create aggregator
@@ -811,8 +811,8 @@ func TestProcessFileTask_Execute_DisabledSteps(t *testing.T) {
 				},
 			}
 
-			dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), &cfg.Output, "test-agent")
-			org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)
+			dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), &cfg.Output, "test-agent", nil)
+			org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output, nil)
 			nfoCfg := &nfo.Config{}
 			nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfoCfg)
 
@@ -890,7 +890,7 @@ func TestNewTaskConstructors(t *testing.T) {
 
 	t.Run("NewDownloadTask", func(t *testing.T) {
 		outputCfg := &config.OutputConfig{}
-		dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent")
+		dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent", nil)
 		movie := &models.Movie{ID: "IPX-001"}
 
 		task := NewDownloadTask(movie, "/tmp", dl, tracker, false, nil)
@@ -904,7 +904,7 @@ func TestNewTaskConstructors(t *testing.T) {
 			FolderFormat: "<ID>",
 			FileFormat:   "<ID>",
 		}
-		org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg)
+		org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg, nil)
 		match := matcher.MatchResult{
 			ID:   "IPX-001",
 			File: scanner.FileInfo{Name: "IPX-001.mp4"},
@@ -938,8 +938,8 @@ func TestNewTaskConstructors(t *testing.T) {
 		movieRepo := database.NewMovieRepository(db)
 		agg := aggregator.New(cfg)
 		outputCfg := &config.OutputConfig{}
-		dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent")
-		org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg)
+		dl := downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), outputCfg, "test-agent", nil)
+		org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg, nil)
 		nfoCfg := &nfo.Config{}
 		gen := nfo.NewGenerator(afero.NewOsFs(), nfoCfg)
 
