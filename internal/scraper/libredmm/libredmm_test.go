@@ -3,6 +3,7 @@
 package libredmm
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -900,7 +901,7 @@ func TestSearchProcessingTimeout(t *testing.T) {
 	scraper.maxPollAttempts = 2
 	scraper.pollInterval = 1 * time.Millisecond
 
-	result, err := scraper.Search("ZZZ-99999")
+	result, err := scraper.Search(context.Background(), "ZZZ-99999")
 	require.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "still processing")

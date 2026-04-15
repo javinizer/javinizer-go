@@ -442,7 +442,7 @@ func (o *Organizer) Execute(plan *OrganizePlan, dryRun bool) (*OrganizeResult, e
 	} else {
 		// Normal move: create target directory and move file
 		// Create target directory
-		if err := o.fs.MkdirAll(plan.TargetDir, 0777); err != nil {
+		if err := o.fs.MkdirAll(plan.TargetDir, 0755); err != nil {
 			result.Error = fmt.Errorf("failed to create directory: %w", err)
 			return result, result.Error
 		}
@@ -650,7 +650,7 @@ func (o *Organizer) CopyWithLinkMode(plan *OrganizePlan, dryRun bool, linkMode L
 	}
 
 	// Create target directory
-	if err := o.fs.MkdirAll(plan.TargetDir, 0777); err != nil {
+	if err := o.fs.MkdirAll(plan.TargetDir, 0755); err != nil {
 		result.Error = fmt.Errorf("failed to create directory: %w", err)
 		return result, result.Error
 	}

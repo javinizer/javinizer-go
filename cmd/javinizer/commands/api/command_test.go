@@ -51,7 +51,7 @@ func (m *MockScraper) Name() string {
 	return m.name
 }
 
-func (m *MockScraper) Search(id string) (*models.ScraperResult, error) {
+func (m *MockScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	return &models.ScraperResult{
 		ID:    id,
 		Title: "Test Movie",

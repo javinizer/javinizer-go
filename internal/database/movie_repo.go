@@ -117,26 +117,43 @@ func (r *MovieRepository) saveMovieWithAssociations(tx *gorm.DB, movie *models.M
 }
 
 func (r *MovieRepository) ensureGenresExistTx(tx *gorm.DB, genres []models.Genre) error {
+	if len(genres) == 0 {
+		return nil
+	}
+
+	names := make([]string, len(genres))
+	for i, g := range genres {
+		names[i] = g.Name
+	}
+
+	var existingGenres []models.Genre
+	if err := tx.Where("name IN ?", names).Find(&existingGenres).Error; err != nil {
+		return err
+	}
+
+	existingByName := make(map[string]models.Genre, len(existingGenres))
+	for _, g := range existingGenres {
+		existingByName[g.Name] = g
+	}
+
 	for i := range genres {
-		var existing models.Genre
-		err := tx.Where("name = ?", genres[i].Name).First(&existing).Error
-		if err == nil {
-			genres[i] = existing
-		} else if errors.Is(err, gorm.ErrRecordNotFound) {
-			if err := raceRetryCreate(tx, &genres[i], func(tx *gorm.DB) error {
-				var found models.Genre
-				if err := tx.Where("name = ?", genres[i].Name).First(&found).Error; err != nil {
-					return err
-				}
-				genres[i] = found
-				return nil
-			}); err != nil {
+		if found, ok := existingByName[genres[i].Name]; ok {
+			genres[i] = found
+			continue
+		}
+
+		if err := raceRetryCreate(tx, &genres[i], func(tx *gorm.DB) error {
+			var found models.Genre
+			if err := tx.Where("name = ?", genres[i].Name).First(&found).Error; err != nil {
 				return err
 			}
-		} else {
+			genres[i] = found
+			return nil
+		}); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -161,57 +178,156 @@ func (r *MovieRepository) mergeActressData(existing *models.Actress, new models.
 }
 
 func (r *MovieRepository) ensureActressesExistTx(tx *gorm.DB, actresses []models.Actress) error {
+	if len(actresses) == 0 {
+		return nil
+	}
+
+	type actressGroup struct {
+		index int
+		act   *models.Actress
+	}
+
+	var dmmGroup []actressGroup
+	var jpGroup []actressGroup
+	var nameGroup []actressGroup
+
 	for i := range actresses {
+		a := &actresses[i]
+		if a.DMMID != 0 {
+			dmmGroup = append(dmmGroup, actressGroup{index: i, act: a})
+		} else if a.JapaneseName != "" {
+			jpGroup = append(jpGroup, actressGroup{index: i, act: a})
+		} else if a.FirstName != "" || a.LastName != "" {
+			nameGroup = append(nameGroup, actressGroup{index: i, act: a})
+		}
+	}
+
+	if len(dmmGroup) > 0 {
+		dmmIDs := make([]int, len(dmmGroup))
+		for i, g := range dmmGroup {
+			dmmIDs[i] = g.act.DMMID
+		}
+		var found []models.Actress
+		if err := tx.Where("dmm_id IN ?", dmmIDs).Find(&found).Error; err != nil {
+			return err
+		}
+		byDMMID := make(map[int]models.Actress, len(found))
+		for _, a := range found {
+			byDMMID[a.DMMID] = a
+		}
+		for _, g := range dmmGroup {
+			if existing, ok := byDMMID[g.act.DMMID]; ok {
+				if r.mergeActressData(&existing, *g.act) {
+					if err := tx.Save(&existing).Error; err != nil {
+						return err
+					}
+				}
+				actresses[g.index] = existing
+			} else {
+				if err := raceRetryCreate(tx, g.act, func(tx *gorm.DB) error {
+					var found models.Actress
+					if err := tx.Where("dmm_id = ?", g.act.DMMID).First(&found).Error; err != nil {
+						return err
+					}
+					if r.mergeActressData(&found, *g.act) {
+						if err := tx.Save(&found).Error; err != nil {
+							return err
+						}
+					}
+					actresses[g.index] = found
+					return nil
+				}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	if len(jpGroup) > 0 {
+		jpNames := make([]string, len(jpGroup))
+		for i, g := range jpGroup {
+			jpNames[i] = g.act.JapaneseName
+		}
+		var found []models.Actress
+		if err := tx.Where("japanese_name IN ?", jpNames).Find(&found).Error; err != nil {
+			return err
+		}
+		byJPName := make(map[string]models.Actress, len(found))
+		for _, a := range found {
+			byJPName[a.JapaneseName] = a
+		}
+		for _, g := range jpGroup {
+			if existing, ok := byJPName[g.act.JapaneseName]; ok {
+				if r.mergeActressData(&existing, *g.act) {
+					if err := tx.Save(&existing).Error; err != nil {
+						return err
+					}
+				}
+				actresses[g.index] = existing
+			} else {
+				if err := raceRetryCreate(tx, g.act, func(tx *gorm.DB) error {
+					var found models.Actress
+					if err := tx.Where("japanese_name = ?", g.act.JapaneseName).First(&found).Error; err != nil {
+						return err
+					}
+					if r.mergeActressData(&found, *g.act) {
+						if err := tx.Save(&found).Error; err != nil {
+							return err
+						}
+					}
+					actresses[g.index] = found
+					return nil
+				}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	for _, g := range nameGroup {
+		a := g.act
 		var existing models.Actress
 		var err error
 
-		if actresses[i].DMMID != 0 {
-			err = tx.Where("dmm_id = ?", actresses[i].DMMID).First(&existing).Error
-		} else if actresses[i].JapaneseName != "" {
-			err = tx.Where("japanese_name = ?", actresses[i].JapaneseName).First(&existing).Error
-		} else if actresses[i].FirstName != "" || actresses[i].LastName != "" {
-			if actresses[i].FirstName != "" && actresses[i].LastName != "" {
-				err = tx.Where("first_name = ? AND last_name = ?", actresses[i].FirstName, actresses[i].LastName).First(&existing).Error
-			} else if actresses[i].FirstName != "" {
-				err = tx.Where("first_name = ?", actresses[i].FirstName).First(&existing).Error
-			} else {
-				err = tx.Where("last_name = ?", actresses[i].LastName).First(&existing).Error
-			}
+		if a.FirstName != "" && a.LastName != "" {
+			err = tx.Where("first_name = ? AND last_name = ?", a.FirstName, a.LastName).First(&existing).Error
+		} else if a.FirstName != "" {
+			err = tx.Where("first_name = ?", a.FirstName).First(&existing).Error
 		} else {
-			continue
+			err = tx.Where("last_name = ?", a.LastName).First(&existing).Error
 		}
 
 		if err == nil {
-			if r.mergeActressData(&existing, actresses[i]) {
+			if r.mergeActressData(&existing, *a) {
 				if err := tx.Save(&existing).Error; err != nil {
 					return err
 				}
 			}
-			actresses[i] = existing
+			actresses[g.index] = existing
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
-			if err := raceRetryCreate(tx, &actresses[i], func(tx *gorm.DB) error {
+			if err := raceRetryCreate(tx, a, func(tx *gorm.DB) error {
 				var found models.Actress
 				var findErr error
-				if actresses[i].DMMID != 0 {
-					findErr = tx.Where("dmm_id = ?", actresses[i].DMMID).First(&found).Error
-				} else if actresses[i].JapaneseName != "" {
-					findErr = tx.Where("japanese_name = ?", actresses[i].JapaneseName).First(&found).Error
-				} else if actresses[i].FirstName != "" && actresses[i].LastName != "" {
-					findErr = tx.Where("first_name = ? AND last_name = ?", actresses[i].FirstName, actresses[i].LastName).First(&found).Error
-				} else if actresses[i].FirstName != "" {
-					findErr = tx.Where("first_name = ?", actresses[i].FirstName).First(&found).Error
+				if a.DMMID != 0 {
+					findErr = tx.Where("dmm_id = ?", a.DMMID).First(&found).Error
+				} else if a.JapaneseName != "" {
+					findErr = tx.Where("japanese_name = ?", a.JapaneseName).First(&found).Error
+				} else if a.FirstName != "" && a.LastName != "" {
+					findErr = tx.Where("first_name = ? AND last_name = ?", a.FirstName, a.LastName).First(&found).Error
+				} else if a.FirstName != "" {
+					findErr = tx.Where("first_name = ?", a.FirstName).First(&found).Error
 				} else {
-					findErr = tx.Where("last_name = ?", actresses[i].LastName).First(&found).Error
+					findErr = tx.Where("last_name = ?", a.LastName).First(&found).Error
 				}
 				if findErr != nil {
 					return findErr
 				}
-				if r.mergeActressData(&found, actresses[i]) {
+				if r.mergeActressData(&found, *a) {
 					if saveErr := tx.Save(&found).Error; saveErr != nil {
 						return saveErr
 					}
 				}
-				actresses[i] = found
+				actresses[g.index] = found
 				return nil
 			}); err != nil {
 				return err
@@ -220,6 +336,7 @@ func (r *MovieRepository) ensureActressesExistTx(tx *gorm.DB, actresses []models
 			return err
 		}
 	}
+
 	return nil
 }
 

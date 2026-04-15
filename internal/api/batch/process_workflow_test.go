@@ -191,7 +191,7 @@ func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 		},
 	})
 
-	processOrganizeJob(job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry, nil)
+	processOrganizeJob(context.Background(), job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry, nil)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusOrganized {
@@ -204,5 +204,46 @@ func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(targetFolder, "IPX-777.nfo")); err != nil {
 		t.Fatalf("generated NFO missing: %v", err)
+	}
+}
+
+func TestProcessOrganizeJob_CancelledContext(t *testing.T) {
+	initTestWebSocket(t)
+
+	cfg := config.DefaultConfig()
+	cfg.Output.DownloadCover = false
+	cfg.Output.DownloadPoster = false
+	cfg.Output.DownloadExtrafanart = false
+	cfg.Output.DownloadTrailer = false
+	cfg.Output.DownloadActress = false
+	cfg.Metadata.NFO.Enabled = false
+
+	deps := createTestDeps(t, cfg, "")
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "IPX-999.mp4")
+	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	job := deps.JobQueue.CreateJob([]string{filePath})
+	job.UpdateFileResult(filePath, &worker.FileResult{
+		FilePath: filePath,
+		MovieID:  "IPX-999",
+		Status:   worker.JobStatusCompleted,
+		Data: &models.Movie{
+			ID:        "IPX-999",
+			ContentID: "ipx999",
+			Title:     "Test Movie",
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	processOrganizeJob(ctx, job, deps.JobQueue, t.TempDir(), false, "", deps.DB, cfg, deps.Registry, nil)
+
+	status := job.GetStatus()
+	if status.Status != worker.JobStatusCancelled {
+		t.Fatalf("job status = %q, want cancelled", status.Status)
 	}
 }

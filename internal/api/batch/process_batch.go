@@ -28,6 +28,22 @@ import (
 // moveToFolderOverride and renameFolderInPlaceOverride allow per-job folder mode overrides.
 // operationModeOverride allows per-job operation mode override (organize, in-place, metadata-only, preview).
 func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *models.ScraperRegistry, agg *aggregator.Aggregator, movieRepo *database.MovieRepository, mat *matcher.Matcher, strict, force, updateMode bool, destination string, cfg *config.Config, selectedScrapers []string, scalarStrategy string, arrayStrategy string, db *database.DB, moveToFolderOverride *bool, renameFolderInPlaceOverride *bool, operationModeOverride string, emitter eventlog.EventEmitter) {
+	defer func() {
+		if r := recover(); r != nil {
+			logging.Errorf("Batch job %s panicked: %v", job.ID, r)
+			job.MarkFailed()
+			if jobQueue != nil {
+				jobQueue.PersistJob(job)
+			}
+			broadcastProgress(&ws.ProgressMessage{
+				JobID:    job.ID,
+				Status:   "error",
+				Progress: 0,
+				Message:  fmt.Sprintf("Batch job panicked: %v", r),
+			})
+		}
+	}()
+
 	// Setup context for cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	job.SetCancelFunc(cancel)
@@ -40,7 +56,7 @@ func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *
 
 	// Emit system event for batch job started
 	if emitter != nil {
-		if err := emitter.EmitSystemEvent("batch", fmt.Sprintf("Batch scrape job %s started", job.ID), models.SeverityInfo, map[string]interface{}{"job_id": job.ID, "file_count": len(job.Files)}); err != nil {
+		if err := emitter.EmitSystemEvent("batch", fmt.Sprintf("Batch scrape job %s started", job.ID), models.SeverityInfo, map[string]interface{}{"job_id": job.ID, "file_count": len(job.GetFiles())}); err != nil {
 			logging.Warnf("Failed to emit batch start event: %v", err)
 		}
 	}
@@ -93,7 +109,7 @@ func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *
 	submitFailedFiles := make(map[string]bool)
 
 	// Submit tasks to pool
-	for i, filePath := range job.Files {
+	for i, filePath := range job.GetFiles() {
 		// Check if context is cancelled
 		select {
 		case <-ctx.Done():
@@ -189,12 +205,12 @@ func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *
 	// Emit system event for batch job completed
 	if emitter != nil {
 		sev := models.SeverityInfo
-		if job.Failed > 0 && job.Completed > 0 {
+		if job.GetFailed() > 0 && job.GetCompleted() > 0 {
 			sev = models.SeverityWarn
-		} else if job.Failed > 0 && job.Completed == 0 {
+		} else if job.GetFailed() > 0 && job.GetCompleted() == 0 {
 			sev = models.SeverityError
 		}
-		if err := emitter.EmitSystemEvent("batch", fmt.Sprintf("Batch scrape job %s completed", job.ID), sev, map[string]interface{}{"job_id": job.ID, "completed": job.Completed, "failed": job.Failed}); err != nil {
+		if err := emitter.EmitSystemEvent("batch", fmt.Sprintf("Batch scrape job %s completed", job.ID), sev, map[string]interface{}{"job_id": job.ID, "completed": job.GetCompleted(), "failed": job.GetFailed()}); err != nil {
 			logging.Warnf("Failed to emit batch complete event: %v", err)
 		}
 	}
@@ -239,6 +255,6 @@ func processBatchJob(job *worker.BatchJob, jobQueue *worker.JobQueue, registry *
 		JobID:    job.ID,
 		Status:   "completed",
 		Progress: 100,
-		Message:  fmt.Sprintf("Completed %d of %d files", job.Completed, job.TotalFiles),
+		Message:  fmt.Sprintf("Completed %d of %d files", job.GetCompleted(), job.GetTotalFiles()),
 	})
 }

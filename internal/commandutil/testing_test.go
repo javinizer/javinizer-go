@@ -2,6 +2,7 @@ package commandutil
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/url"
@@ -111,7 +112,7 @@ func (m *mockScraper) Name() string {
 }
 
 // Search returns the pre-configured result or error.
-func (m *mockScraper) Search(id string) (*models.ScraperResult, error) {
+func (m *mockScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -795,18 +796,15 @@ func (m *MockScraper) IsEnabled() bool {
 }
 
 // Search attempts to find and scrape metadata for the given movie ID
-func (m *MockScraper) Search(id string) (*models.ScraperResult, error) {
-	// Check if we have a predefined error for this ID
+func (m *MockScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	if err, ok := m.searchErrors[id]; ok {
 		return nil, err
 	}
 
-	// Check if we have a predefined result for this ID
 	if result, ok := m.results[id]; ok {
 		return result, nil
 	}
 
-	// No result found
 	return nil, fmt.Errorf("mock scraper %s: no result for %s", m.name, id)
 }
 
@@ -878,6 +876,6 @@ func NewMockDownloader(results []downloader.DownloadResult, err error) *MockDown
 }
 
 // DownloadAll implements MediaDownloader interface
-func (m *MockDownloader) DownloadAll(movie *models.Movie, destDir string, multipart *downloader.MultipartInfo) ([]downloader.DownloadResult, error) {
+func (m *MockDownloader) DownloadAll(ctx context.Context, movie *models.Movie, destDir string, multipart *downloader.MultipartInfo) ([]downloader.DownloadResult, error) {
 	return m.results, m.err
 }

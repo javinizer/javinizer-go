@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -393,6 +395,11 @@ func TestGetTranslationModels_AdditionalErrors(t *testing.T) {
 }
 
 func TestTestProxy_AdditionalBranches(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	})
+	t.Cleanup(cleanup)
+
 	t.Run("invalid request body", func(t *testing.T) {
 		deps := &ServerDependencies{}
 		deps.SetConfig(config.DefaultConfig())

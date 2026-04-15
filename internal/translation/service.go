@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -27,6 +28,8 @@ const (
 	providerDeepL            = "deepl"
 	providerGoogle           = "google"
 	providerAnthropic        = "anthropic"
+
+	maxTranslationResponseSize = 10 * 1024 * 1024 // 10MB
 )
 
 // Service translates aggregated movie metadata using a configured provider.
@@ -234,9 +237,12 @@ func (s *Service) translateTexts(ctx context.Context, sourceLang, targetLang str
 
 		if err == nil {
 			if result == nil {
-				err = fmt.Errorf("translation provider returned no result")
+				err = &TranslationError{Kind: TranslationErrorProvider, Message: "translation provider returned no result"}
 			} else if len(result.texts) != expectedCount {
-				err = fmt.Errorf("translation provider returned %d items for %d inputs", len(result.texts), expectedCount)
+				err = &TranslationError{
+					Kind:    TranslationErrorCountMismatch,
+					Message: fmt.Sprintf("translation provider returned %d items for %d inputs", len(result.texts), expectedCount),
+				}
 			}
 		}
 
@@ -272,11 +278,18 @@ func isRetryableError(err error, result *translationResult) bool {
 	if err == nil {
 		return result != nil && len(result.texts) == 0 && result.rawLLM != ""
 	}
-	if strings.Contains(err.Error(), "translation provider returned") {
-		return result != nil && result.rawLLM != ""
+
+	var te *TranslationError
+	if errors.As(err, &te) {
+		switch te.Kind {
+		case TranslationErrorCountMismatch, TranslationErrorParse:
+			return result != nil && result.rawLLM != ""
+		default:
+			return false
+		}
 	}
-	return strings.Contains(err.Error(), "failed to parse") ||
-		strings.Contains(err.Error(), "no valid JSON arrays found")
+
+	return false
 }
 
 type openAIChatRequest struct {
@@ -457,14 +470,20 @@ func isRetryableThinkingStrategyError(err error) bool {
 		return false
 	}
 
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "status 400") || strings.Contains(msg, "status 422")
+	var te *TranslationError
+	if errors.As(err, &te) && te.Kind == TranslationErrorHTTPStatus {
+		return te.StatusCode == 400 || te.StatusCode == 422
+	}
+	return false
 }
 
 func buildLLMTranslationResult(content string, textCount int) (*translationResult, error) {
 	parsed, err := parseLLMTranslationPayload(content, textCount)
 	if err != nil {
-		return &translationResult{rawLLM: content}, err
+		return &translationResult{rawLLM: content}, &TranslationError{
+			Kind:    TranslationErrorParse,
+			Message: err.Error(),
+		}
 	}
 	return &translationResult{texts: parsed, rawLLM: content}, nil
 }
@@ -521,12 +540,16 @@ func (s *Service) executeOpenAIChatTranslation(ctx context.Context, opts openAIC
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationResponseSize))
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s translation failed with status %d: %s", opts.provider, resp.StatusCode, string(respBody))
+		return nil, &TranslationError{
+			Kind:       TranslationErrorHTTPStatus,
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("%s translation failed with status %d: %s", opts.provider, resp.StatusCode, string(respBody)),
+		}
 	}
 
 	logging.Debugf("Translation (%s): response: %s", opts.provider, string(respBody))
@@ -703,7 +726,7 @@ func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, target
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationResponseSize))
 	if err != nil {
 		return nil, err
 	}
@@ -787,7 +810,7 @@ func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationResponseSize))
 	if err != nil {
 		return nil, err
 	}
@@ -873,7 +896,7 @@ func (s *Service) translateWithGooglePaid(ctx context.Context, sourceLang, targe
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationResponseSize))
 	if err != nil {
 		return nil, err
 	}
@@ -1014,7 +1037,7 @@ func (s *Service) performGoogleFreeTranslation(ctx context.Context, baseURL, sou
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, readErr := io.ReadAll(resp.Body)
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxTranslationResponseSize))
 	if readErr != nil {
 		return googleFreeResult{err: readErr}
 	}

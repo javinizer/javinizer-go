@@ -1,6 +1,7 @@
 package dlgetchu
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +56,7 @@ func TestSearch(t *testing.T) {
 	defer server.Close()
 
 	s := New(testSettings(server.URL), nil, config.FlareSolverrConfig{})
-	result, err := s.Search("ABC-123")
+	result, err := s.Search(context.Background(), "ABC-123")
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
@@ -280,7 +281,7 @@ func TestFetchPage(t *testing.T) {
 			settings := testSettings(server.URL)
 			s := New(settings, nil, config.FlareSolverrConfig{})
 
-			result, status, err := s.fetchPage(server.URL)
+			result, status, err := s.fetchPageCtx(context.Background(), server.URL)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -836,7 +837,7 @@ func TestSearchDisabled(t *testing.T) {
 	settings.Enabled = false
 	s := New(settings, nil, config.FlareSolverrConfig{})
 
-	result, err := s.Search("12345")
+	result, err := s.Search(context.Background(), "12345")
 
 	assert.Nil(t, result)
 	assert.Error(t, err)
@@ -854,7 +855,7 @@ func TestSearchWithHTTPError(t *testing.T) {
 	settings := testSettings(server.URL)
 	s := New(settings, nil, config.FlareSolverrConfig{})
 
-	result, err := s.Search("12345")
+	result, err := s.Search(context.Background(), "12345")
 
 	assert.Nil(t, result)
 	assert.Error(t, err)

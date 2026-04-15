@@ -105,12 +105,12 @@ func TestFindDetailURL_Fallbacks(t *testing.T) {
 			settings:    config.ScraperSettings{Enabled: true},
 		}
 
-		got, err := scraper.findDetailURL("XYZ-999")
+		got, err := scraper.findDetailURLCtx(context.Background(), "XYZ-999")
 		if err != nil {
-			t.Fatalf("findDetailURL() error = %v", err)
+			t.Fatalf("findDetailURLCtx() error = %v", err)
 		}
 		if got != "https://javdb.test/v/fallback" {
-			t.Fatalf("findDetailURL() = %q", got)
+			t.Fatalf("findDetailURLCtx() = %q", got)
 		}
 	})
 
@@ -130,9 +130,9 @@ func TestFindDetailURL_Fallbacks(t *testing.T) {
 			settings:    config.ScraperSettings{Enabled: true},
 		}
 
-		_, err := scraper.findDetailURL("XYZ-999")
+		_, err := scraper.findDetailURLCtx(context.Background(), "XYZ-999")
 		if err == nil {
-			t.Fatal("expected findDetailURL to fail")
+			t.Fatal("expected findDetailURLCtx to fail")
 		}
 		scraperErr, ok := models.AsScraperError(err)
 		if !ok || scraperErr.Kind != models.ScraperErrorKindNotFound {
@@ -225,7 +225,7 @@ func TestFetchPage(t *testing.T) {
 			settings:    config.ScraperSettings{Enabled: true},
 		}
 
-		html, err := scraper.fetchPage(server.URL)
+		html, err := scraper.fetchPageCtx(context.Background(), server.URL)
 		if err != nil {
 			t.Fatalf("fetchPage() error = %v", err)
 		}
@@ -246,7 +246,7 @@ func TestFetchPage(t *testing.T) {
 			settings:    config.ScraperSettings{Enabled: true},
 		}
 
-		_, err := scraper.fetchPage("https://javdb.test/page")
+		_, err := scraper.fetchPageCtx(context.Background(), "https://javdb.test/page")
 		if err == nil || !strings.Contains(err.Error(), "boom") {
 			t.Fatalf("expected propagated request error, got %v", err)
 		}

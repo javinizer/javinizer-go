@@ -3,14 +3,10 @@ package worker
 import (
 	"errors"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
-
-var scraperHTTPStatusRegex = regexp.MustCompile(`(?i)\b(?:status(?:\s+code)?|http)\s*[:=]?\s*(\d{3})\b`)
 
 type scraperErrorKind int
 
@@ -133,10 +129,10 @@ func classifyScraperError(err error) (scraperErrorKind, int, string) {
 		}
 	}
 
-	raw := strings.TrimSpace(err.Error())
-	lower := strings.ToLower(raw)
-
-	if statusCode, ok := extractHTTPStatusCode(raw); ok {
+	var httpErr *models.ScraperHTTPError
+	if errors.As(err, &httpErr) && httpErr != nil {
+		statusCode := httpErr.StatusCode
+		raw := httpErr.Error()
 		switch {
 		case statusCode == 404:
 			return scraperErrorNotFound, statusCode, raw
@@ -146,25 +142,11 @@ func classifyScraperError(err error) (scraperErrorKind, int, string) {
 			return scraperErrorBlocked, statusCode, raw
 		case statusCode >= 500 && statusCode <= 599:
 			return scraperErrorUnavailable, statusCode, raw
+		default:
+			return scraperErrorOther, statusCode, raw
 		}
 	}
 
-	switch {
-	case strings.Contains(lower, "not found"):
-		return scraperErrorNotFound, 0, raw
-	default:
-		return scraperErrorOther, 0, raw
-	}
-}
-
-func extractHTTPStatusCode(raw string) (int, bool) {
-	matches := scraperHTTPStatusRegex.FindStringSubmatch(raw)
-	if len(matches) < 2 {
-		return 0, false
-	}
-	code, err := strconv.Atoi(matches[1])
-	if err != nil {
-		return 0, false
-	}
-	return code, true
+	raw := strings.TrimSpace(err.Error())
+	return scraperErrorOther, 0, raw
 }

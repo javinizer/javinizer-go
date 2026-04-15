@@ -268,8 +268,7 @@ func (m *mockScraperForPosterTest) Name() string {
 	return "mock-poster-test"
 }
 
-func (m *mockScraperForPosterTest) Search(id string) (*models.ScraperResult, error) {
-	// Accept both "TEST-001" and "TEST-1" and "TEST" (for different matching patterns)
+func (m *mockScraperForPosterTest) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	if id != "TEST-001" && id != "TEST-1" && id != "TEST-0001" && id != "TEST" {
 		return nil, fmt.Errorf("movie not found: %s", id)
 	}

@@ -1,7 +1,7 @@
 package models
 
 import (
-	"fmt"
+	"context"
 	"net/url"
 	"path"
 	"sort"
@@ -121,8 +121,9 @@ type Scraper interface {
 	// Name returns the scraper's identifier (e.g., "r18dev", "dmm")
 	Name() string
 
-	// Search attempts to find and scrape metadata for the given movie ID
-	Search(id string) (*ScraperResult, error)
+	// Search attempts to find and scrape metadata for the given movie ID.
+	// Context enables cancellation and timeout propagation through rate limiters and HTTP requests.
+	Search(ctx context.Context, id string) (*ScraperResult, error)
 
 	// GetURL attempts to find the URL for a given movie ID
 	GetURL(id string) (string, error)
@@ -137,36 +138,6 @@ type Scraper interface {
 	// Returns nil if no cleanup is needed
 	Close() error
 }
-
-// Compile-time verification that nil Closer satisfies Scraper interface
-var _ Scraper = (*Closer)(nil)
-
-// Closer provides a no-op implementation for scrapers without cleanup.
-// Scrapers that don't hold external resources can embed Closer to satisfy
-// the Scraper interface without implementing Close().
-type Closer struct{}
-
-// Name returns "cloner" as the identifier for the Closer no-op scraper
-func (c *Closer) Name() string { return "cloner" }
-
-// Search returns an error indicating this is a no-op implementation
-func (c *Closer) Search(_ string) (*ScraperResult, error) {
-	return nil, fmt.Errorf("cloner: no-op scraper cannot search")
-}
-
-// GetURL returns an error indicating this is a no-op implementation
-func (c *Closer) GetURL(_ string) (string, error) {
-	return "", fmt.Errorf("cloner: no-op scraper cannot get url")
-}
-
-// IsEnabled returns false as this is a no-op implementation
-func (c *Closer) IsEnabled() bool { return false }
-
-// Config returns nil as this is a no-op implementation
-func (c *Closer) Config() *config.ScraperSettings { return nil }
-
-// Close is a no-op implementation for scrapers that don't require resource cleanup
-func (c *Closer) Close() error { return nil }
 
 // ScraperQueryResolver is an optional hook for scrapers to declare and normalize
 // identifier formats they can handle (e.g., non-standard filename IDs).
@@ -208,7 +179,8 @@ type DirectURLScraper interface {
 	// ScrapeURL directly scrapes metadata from a URL.
 	// Returns ScraperResult on success, or error with typed ScraperError on failure.
 	// Implementations should return ScraperErrorKindNotFound for non-existent pages.
-	ScrapeURL(url string) (*ScraperResult, error)
+	// Context enables cancellation and timeout propagation through rate limiters and HTTP requests.
+	ScrapeURL(ctx context.Context, url string) (*ScraperResult, error)
 }
 
 // ContentIDResolver is an optional interface for scrapers that can resolve

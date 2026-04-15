@@ -121,3 +121,33 @@ func classifyScraperStatus(statusCode int) (ScraperErrorKind, bool, bool) {
 		return ScraperErrorKindUnknown, false, false
 	}
 }
+
+type ScraperHTTPError struct {
+	Scraper    string
+	StatusCode int
+	Message    string
+}
+
+func (e *ScraperHTTPError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	if e.StatusCode > 0 {
+		if e.Scraper != "" {
+			return fmt.Sprintf("%s returned HTTP %d", e.Scraper, e.StatusCode)
+		}
+		return fmt.Sprintf("HTTP %d", e.StatusCode)
+	}
+	return "scraper HTTP error"
+}
+
+func NewScraperHTTPError(scraper string, statusCode int, message string) *ScraperHTTPError {
+	return &ScraperHTTPError{
+		Scraper:    scraper,
+		StatusCode: statusCode,
+		Message:    strings.TrimSpace(message),
+	}
+}

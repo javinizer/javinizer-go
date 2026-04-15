@@ -197,7 +197,7 @@ func TestScraper_Search_Success(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "ipx535_full_response.json"), &data)
 	require.NoError(t, err)
 
-	result, err := scraper.parseResponse(&data, "https://r18.dev/test")
+	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -267,7 +267,7 @@ func TestScraper_Search_LegacyFormat(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "legacy_format_response.json"), &data)
 	require.NoError(t, err)
 
-	result, err := scraper.parseResponse(&data, "https://r18.dev/test")
+	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -299,7 +299,7 @@ func TestScraper_Search_MinimalData(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "minimal_response.json"), &data)
 	require.NoError(t, err)
 
-	result, err := scraper.parseResponse(&data, "https://r18.dev/test")
+	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -328,7 +328,7 @@ func TestScraper_Search_EmptyArrays(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "empty_arrays_response.json"), &data)
 	require.NoError(t, err)
 
-	result, err := scraper.parseResponse(&data, "https://r18.dev/test")
+	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -647,7 +647,7 @@ func TestActressThumbURLGeneration(t *testing.T) {
 				},
 			}
 
-			result, err := scraper.parseResponse(data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 			require.Len(t, result.Actresses, 1)
 
@@ -667,7 +667,7 @@ func TestInvalidDateParsing(t *testing.T) {
 		ReleaseDate: "invalid-date-format",
 	}
 
-	result, err := scraper.parseResponse(data, "https://r18.dev/test")
+	result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 	require.NoError(t, err)
 
 	// Invalid date should result in nil ReleaseDate, not an error
@@ -741,7 +741,7 @@ func TestFallbackBehavior(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := scraper.parseResponse(tt.data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 
 			switch tt.checkField {
@@ -842,7 +842,7 @@ func TestImageURLFallbacks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := scraper.parseResponse(tt.data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 
 			if tt.expectCover {
@@ -921,7 +921,7 @@ func TestScreenshotURLFallbacks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := scraper.parseResponse(tt.data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 			assert.Len(t, result.ScreenshotURL, tt.expectedCount, tt.description)
 		})
@@ -996,7 +996,7 @@ func TestTrailerURLFallbacks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := scraper.parseResponse(tt.data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 
 			if tt.expectURL {
@@ -1058,7 +1058,7 @@ func TestSeriesFallbackPriority(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := scraper.parseResponse(tt.data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result.Series)
 		})
@@ -1157,7 +1157,7 @@ func TestActressNameParsing(t *testing.T) {
 				},
 			}
 
-			result, err := scraper.parseResponse(data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 			require.Len(t, result.Actresses, 1)
 
@@ -1211,7 +1211,7 @@ func TestIDResolution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := scraper.parseResponse(tt.data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 			assert.Equal(t, tt.expectedID, result.ID, tt.description)
 		})
@@ -1232,7 +1232,7 @@ func TestParseResponse_LanguageHandling(t *testing.T) {
 		cfg.Language = "en"
 		scraper := New(cfg, testGlobalProxy, testGlobalFlareSolverr)
 
-		result, err := scraper.parseResponse(data, "https://r18.dev/test")
+		result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 		require.NoError(t, err)
 
 		assert.Equal(t, "en", result.Language)
@@ -1245,7 +1245,7 @@ func TestParseResponse_LanguageHandling(t *testing.T) {
 		cfg.Language = "ja"
 		scraper := New(cfg, testGlobalProxy, testGlobalFlareSolverr)
 
-		result, err := scraper.parseResponse(data, "https://r18.dev/test")
+		result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 		require.NoError(t, err)
 
 		assert.Equal(t, "ja", result.Language)
@@ -1316,7 +1316,7 @@ func TestParseResponse_TitleFallback(t *testing.T) {
 				TitleJA:   tt.title,
 			}
 
-			result, err := scraper.parseResponse(data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.expectedTitle, result.Title)
@@ -1366,7 +1366,7 @@ func TestParseResponse_DescriptionFallback(t *testing.T) {
 				Description:   tt.desc,
 			}
 
-			result, err := scraper.parseResponse(data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.expectedVal, result.Description)
@@ -1417,7 +1417,7 @@ func TestParseResponse_ReleaseDateVariants(t *testing.T) {
 				ReleaseDate: tt.releaseDate,
 			}
 
-			result, err := scraper.parseResponse(data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 
 			if tt.expectNil {
@@ -1471,7 +1471,7 @@ func TestParseResponse_RuntimeVariants(t *testing.T) {
 				Runtime:   tt.runtime,
 			}
 
-			result, err := scraper.parseResponse(data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.expected, result.Runtime)
@@ -1492,7 +1492,7 @@ func TestParseResponse_EmptyFields(t *testing.T) {
 		// All optional fields left empty
 	}
 
-	result, err := scraper.parseResponse(data, "https://r18.dev/test")
+	result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 	require.NoError(t, err)
 
 	// Verify required fields
@@ -1586,7 +1586,7 @@ func TestActressThumbURLFallback(t *testing.T) {
 				},
 			}
 
-			result, err := scraper.parseResponse(data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 			require.Len(t, result.Actresses, 1, tt.description)
 
@@ -1685,7 +1685,7 @@ func TestCategoryParsing(t *testing.T) {
 				Categories: tt.categories,
 			}
 
-			result, err := scraper.parseResponse(data, "https://r18.dev/test")
+			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 
 			assert.Len(t, result.Genres, tt.expectedCount)
@@ -1765,7 +1765,7 @@ func TestSearch_Success(t *testing.T) {
 
 	// The search will hit the real API since baseURL is a const
 	// This is a design limitation - for full testing we'd need DI
-	_, err := scraper.Search("ipx-535")
+	_, err := scraper.Search(context.Background(), "ipx-535")
 
 	// Test will fail with real API, but exercises the code paths
 	if err != nil {
@@ -1777,7 +1777,7 @@ func TestSearch_NotFound(t *testing.T) {
 	cfg := createTestSettings(true)
 	scraper := New(cfg, testGlobalProxy, testGlobalFlareSolverr)
 
-	result, err := scraper.Search("nonexistent-12345")
+	result, err := scraper.Search(context.Background(), "nonexistent-12345")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -1862,7 +1862,7 @@ func TestScraper_Search_ROYD191(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "royd191_response.json"), &data)
 	require.NoError(t, err)
 
-	result, err := scraper.parseResponse(&data, "https://r18.dev/test")
+	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -1897,7 +1897,7 @@ func TestScraper_Search_ROYD191_Japanese(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "royd191_response.json"), &data)
 	require.NoError(t, err)
 
-	result, err := scraper.parseResponse(&data, "https://r18.dev/test")
+	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -1923,7 +1923,7 @@ func TestScraper_TranslationsPopulated(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "royd191_response.json"), &data)
 	require.NoError(t, err)
 
-	result, err := scraper.parseResponse(&data, "https://r18.dev/test")
+	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 

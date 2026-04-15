@@ -1,6 +1,7 @@
 package r18dev
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -88,7 +89,7 @@ func TestErrorMessages_ContainScraperName(t *testing.T) {
 			setupFunc: func() (*Scraper, error) {
 				settings := config.ScraperSettings{Enabled: true}
 				scraper := New(settings, nil, config.FlareSolverrConfig{})
-				_, err := scraper.Search("")
+				_, err := scraper.Search(context.Background(), "")
 				return scraper, err
 			},
 			wantPrefix: "R18dev",
@@ -139,7 +140,7 @@ func TestErrorMessages_NoSensitiveData(t *testing.T) {
 		{
 			name: "Search with empty ID",
 			action: func() error {
-				_, err := scraper.Search("")
+				_, err := scraper.Search(context.Background(), "")
 				return err
 			},
 		},

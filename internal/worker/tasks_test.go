@@ -542,7 +542,7 @@ func TestScrapeTask_Execute_DryRun(t *testing.T) {
 
 	// Execute - will fail because no scrapers registered, but we test dry-run behavior
 	ctx := context.Background()
-	err = task.Execute(ctx)
+	_, err = task.Execute(ctx)
 
 	// Should error because no scrapers available
 	assert.Error(t, err)
@@ -611,7 +611,7 @@ func TestScrapeTask_Execute_ForceRefresh(t *testing.T) {
 
 	// Execute - will fail because no scrapers, but we test force refresh behavior
 	ctx := context.Background()
-	err = task.Execute(ctx)
+	_, err = task.Execute(ctx)
 
 	// Should error because no scrapers available
 	assert.Error(t, err)
@@ -683,7 +683,7 @@ func TestScrapeTask_Execute_Cache(t *testing.T) {
 
 	// Execute - should use cache
 	ctx := context.Background()
-	err = task.Execute(ctx)
+	_, err = task.Execute(ctx)
 
 	// Should succeed using cached data
 	require.NoError(t, err)
@@ -732,7 +732,7 @@ func TestScrapeTask_Execute_Cancellation(t *testing.T) {
 	cancel()
 
 	// Execute with canceled context
-	err = task.Execute(ctx)
+	_, err = task.Execute(ctx)
 
 	// May error with context canceled or "no results found" depending on timing
 	assert.Error(t, err)

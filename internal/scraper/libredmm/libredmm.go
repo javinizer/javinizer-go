@@ -196,7 +196,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from LibreDMM URL")
 }
 
-func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(urlStr) {
 		return nil, models.NewScraperNotFoundError("LibreDMM", "URL not handled by LibreDMM scraper")
 	}
@@ -226,7 +226,7 @@ func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
 	}
 
 	for attempt := 1; attempt <= attempts; attempt++ {
-		payload, finalURL, status, err := s.fetchMovieJSON(targetURL)
+		payload, finalURL, status, err := s.fetchMovieJSONCtx(ctx, targetURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to query LibreDMM: %w", err)
 		}
@@ -240,7 +240,7 @@ func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
 				return nil, fmt.Errorf("LibreDMM returned error: %s", msg)
 			}
 			result := payloadToResult(payload, targetURL, id, s.client.GetClient())
-			s.filterPlaceholderScreenshots(result)
+			s.filterPlaceholderScreenshotsCtx(ctx, result)
 			return result, nil
 		case 202:
 			msg := scraperutil.CleanString(payload.Err)
@@ -350,7 +350,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 }
 
 // Search scrapes metadata from LibreDMM JSON endpoints.
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("LibreDMM scraper is disabled")
 	}
@@ -366,7 +366,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	}
 
 	for attempt := 1; attempt <= attempts; attempt++ {
-		payload, finalURL, status, err := s.fetchMovieJSON(targetURL)
+		payload, finalURL, status, err := s.fetchMovieJSONCtx(ctx, targetURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to query LibreDMM: %w", err)
 		}
@@ -380,7 +380,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 				return nil, fmt.Errorf("LibreDMM returned error: %s", msg)
 			}
 			result := payloadToResult(payload, targetURL, id, s.client.GetClient())
-			s.filterPlaceholderScreenshots(result)
+			s.filterPlaceholderScreenshotsCtx(ctx, result)
 			return result, nil
 		case 202:
 			msg := scraperutil.CleanString(payload.Err)
@@ -426,8 +426,8 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 	return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
 }
 
-func (s *Scraper) fetchMovieJSON(targetURL string) (*moviePayload, string, int, error) {
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+func (s *Scraper) fetchMovieJSONCtx(ctx context.Context, targetURL string) (*moviePayload, string, int, error) {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return nil, "", 0, err
 	}
 
@@ -862,7 +862,7 @@ func isHTTPURL(v string) bool {
 	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
-func (s *Scraper) filterPlaceholderScreenshots(result *models.ScraperResult) {
+func (s *Scraper) filterPlaceholderScreenshotsCtx(ctx context.Context, result *models.ScraperResult) {
 	if len(result.ScreenshotURL) == 0 {
 		return
 	}
@@ -872,7 +872,7 @@ func (s *Scraper) filterPlaceholderScreenshots(result *models.ScraperResult) {
 		return
 	}
 
-	filtered, count, err := placeholder.FilterURLs(context.Background(), s.client, result.ScreenshotURL, cfg)
+	filtered, count, err := placeholder.FilterURLs(ctx, s.client, result.ScreenshotURL, cfg)
 	if err != nil {
 		logging.Warnf("libredmm: placeholder filter error: %v", err)
 		return

@@ -543,6 +543,17 @@ func (m *Model) StartProcessing(ctx context.Context) error {
 
 	// Start processing in background
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err := fmt.Sprintf("Processing panicked: %v", r)
+				m.AddLog("error", err)
+				logging.Errorf("TUI processing panicked: %v", r)
+			}
+			m.isProcessing = false
+			m.processingComplete = true
+			m.completionTime = time.Now()
+		}()
+
 		if err := m.processor.ProcessFiles(ctx, selectedItems, m.matchResults); err != nil {
 			m.AddLog("error", "Processing error: "+err.Error())
 		} else {
@@ -555,12 +566,6 @@ func (m *Model) StartProcessing(ctx context.Context) error {
 		} else {
 			m.AddLog("info", "All tasks completed successfully")
 		}
-
-		m.isProcessing = false
-		m.processingComplete = true
-		m.completionTime = time.Now()
-		// Stay on dashboard to allow user to review results
-		// User can press '1' or 'b' to return to browser when ready
 	}()
 
 	return nil

@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,7 +36,7 @@ func (s *stubScraper) Name() string {
 	return s.name
 }
 
-func (s *stubScraper) Search(id string) (*models.ScraperResult, error) {
+func (s *stubScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	// Only return results for valid JAV ID patterns (like "IPX-001", "SSIS-100", etc.)
 	// This simulates real scrapers that only work with proper JAV IDs
 	// Valid pattern: letters followed by hyphen followed by digits

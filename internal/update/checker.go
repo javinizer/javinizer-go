@@ -15,6 +15,8 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+const maxUpdateResponseSize = 1024 * 1024 // 1MB
+
 // VersionInfo represents information about a GitHub release.
 type VersionInfo struct {
 	Version     string `json:"version"`      // Human-readable version (e.g., "v1.6.0")
@@ -92,7 +94,7 @@ func (c *GitHubChecker) CheckLatestVersion(ctx context.Context) (*VersionInfo, e
 		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpdateResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -340,7 +342,7 @@ func (c *GitHubChecker) getRecentReleases(ctx context.Context, limit int) ([]str
 		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpdateResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}

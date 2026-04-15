@@ -1,6 +1,7 @@
 package dmm
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -68,7 +69,6 @@ func newDMMTestRepo(t *testing.T) *database.ContentIDMappingRepository {
 }
 
 func TestGetURLAndSearch_SuccessWithCachedContentID(t *testing.T) {
-	t.Skip("Skipping: DMM Extra field migration in progress")
 	repo := newDMMTestRepo(t)
 	require.NoError(t, repo.Create(&models.ContentIDMapping{
 		SearchID:  "IPX-535",
@@ -77,11 +77,11 @@ func TestGetURLAndSearch_SuccessWithCachedContentID(t *testing.T) {
 	}))
 
 	settings := config.ScraperSettings{
-		Enabled: true,
-		// Note: scrape_actress was previously in Extra, now in DMMConfig
+		Enabled:       true,
+		ScrapeActress: ptrBool(true),
 	}
 
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), repo)
+	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), repo)
 
 	searchPage := `<html><body>
 		<a href="/digital/videoa/-/detail/=/cid=ipx00535/">IPX-535 result</a>
@@ -130,7 +130,7 @@ func TestGetURLAndSearch_SuccessWithCachedContentID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, digitalURLFor("ipx00535"), foundURL)
 
-	result, err := scraper.Search("IPX-535")
+	result, err := scraper.Search(context.Background(), "IPX-535")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -182,7 +182,7 @@ func TestSearch_ReturnsStatusErrorForDetailPage(t *testing.T) {
 	}
 	scraper.client.SetTransport(transport)
 
-	result, err := scraper.Search("IPX-777")
+	result, err := scraper.Search(context.Background(), "IPX-777")
 	require.Error(t, err)
 	assert.Nil(t, result)
 
@@ -245,7 +245,7 @@ func TestGetURL_PrefersWorkingDirectURLOverLowPrioritySearchResult(t *testing.T)
 	require.NoError(t, err)
 	assert.Equal(t, physicalURLFor("mdb087"), foundURL)
 
-	result, err := scraper.Search("MDB-087")
+	result, err := scraper.Search(context.Background(), "MDB-087")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "MDB-087 Direct URL Winner", result.Title)

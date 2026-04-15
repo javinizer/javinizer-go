@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func copyTempCroppedPoster(job *worker.BatchJob, movie *models.Movie, destDir st
 		ctx.PartNumber = multipart.PartNumber
 		ctx.PartSuffix = multipart.PartSuffix
 	}
-	engine := template.NewEngine()
+	engine := job.TemplateEngine()
 	posterFilename, err := engine.Execute(cfg.Output.PosterFormat, ctx)
 	if err != nil {
 		posterFilename = fmt.Sprintf("%s-poster.jpg", movie.ID)
@@ -72,8 +73,8 @@ func copyTempCroppedPoster(job *worker.BatchJob, movie *models.Movie, destDir st
 
 // downloadMediaFilesWithHistory downloads all configured media files and logs to history
 // multipart can be nil for single-file operations
-func downloadMediaFilesWithHistory(dl *downloader.Downloader, movie *models.Movie, destDir string, cfg *config.Config, historyLogger *history.Logger, multipart *downloader.MultipartInfo) []string {
-	results, err := dl.DownloadAll(movie, destDir, multipart)
+func downloadMediaFilesWithHistory(ctx context.Context, dl *downloader.Downloader, movie *models.Movie, destDir string, cfg *config.Config, historyLogger *history.Logger, multipart *downloader.MultipartInfo) []string {
+	results, err := dl.DownloadAll(ctx, movie, destDir, multipart)
 	if err != nil {
 		logging.Errorf("Failed to download media for %s: %v", movie.ID, err)
 		return nil

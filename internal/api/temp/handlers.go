@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 )
 
 // serveTempPoster serves temporarily cropped posters from the configured temp directory.
@@ -152,6 +153,11 @@ func serveTempImage(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
+		if err := ssrf.CheckURL(rawURL); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+
 		httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(cfg, deps.GetRegistry())
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create http client"})
@@ -196,7 +202,8 @@ func serveTempImage(deps *ServerDependencies) gin.HandlerFunc {
 		c.Header("Content-Type", contentType)
 		c.Header("Cache-Control", "private, max-age=300")
 
-		if _, err := io.Copy(c.Writer, resp.Body); err != nil {
+		const maxImageProxyResponseSize = 50 * 1024 * 1024 // 50MB
+		if _, err := io.Copy(c.Writer, io.LimitReader(resp.Body, maxImageProxyResponseSize)); err != nil {
 			c.AbortWithStatus(http.StatusBadGateway)
 			return
 		}

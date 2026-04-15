@@ -2,6 +2,7 @@ package batch
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"image"
 	"image/color"
@@ -25,7 +26,7 @@ type noPosterStubScraper struct{}
 
 func (s *noPosterStubScraper) Name() string { return "stub-no-poster" }
 
-func (s *noPosterStubScraper) Search(id string) (*models.ScraperResult, error) {
+func (s *noPosterStubScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	releaseDate, _ := time.Parse("2006-01-02", "2024-01-15")
 	return &models.ScraperResult{
 		Source:        s.Name(),

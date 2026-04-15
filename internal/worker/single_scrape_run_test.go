@@ -29,7 +29,7 @@ type runBatchTestScraper struct {
 
 func (s *runBatchTestScraper) Name() string { return s.name }
 
-func (s *runBatchTestScraper) Search(id string) (*models.ScraperResult, error) {
+func (s *runBatchTestScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	s.calls = append(s.calls, id)
 	if err := s.errors[id]; err != nil {
 		return nil, err

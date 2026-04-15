@@ -19,8 +19,8 @@ type mockDirectURLScraper struct {
 }
 
 func (m *mockDirectURLScraper) Name() string { return m.name }
-func (m *mockDirectURLScraper) Search(id string) (*models.ScraperResult, error) {
-	return nil, errors.New("not implemented")
+func (m *mockDirectURLScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
+	return nil, nil
 }
 func (m *mockDirectURLScraper) GetURL(id string) (string, error) {
 	return "", errors.New("not implemented")
@@ -30,7 +30,7 @@ func (m *mockDirectURLScraper) Config() *config.ScraperSettings             { re
 func (m *mockDirectURLScraper) Close() error                                { return nil }
 func (m *mockDirectURLScraper) CanHandleURL(url string) bool                { return m.canHandleURL }
 func (m *mockDirectURLScraper) ExtractIDFromURL(url string) (string, error) { return "test-id", nil }
-func (m *mockDirectURLScraper) ScrapeURL(url string) (*models.ScraperResult, error) {
+func (m *mockDirectURLScraper) ScrapeURL(_ context.Context, url string) (*models.ScraperResult, error) {
 	return m.scrapeResult, m.scrapeError
 }
 
@@ -49,7 +49,7 @@ func TestScraperSearchWithURL_Success(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := scraperSearchWithURL(ctx, scraper, "https://example.com/test")
+	result, err := safeScrapeURL(ctx, scraper, "https://example.com/test")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -73,7 +73,7 @@ func TestScraperSearchWithURL_Error(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := scraperSearchWithURL(ctx, scraper, "https://example.com/test")
+	result, err := safeScrapeURL(ctx, scraper, "https://example.com/test")
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -107,7 +107,7 @@ func TestScraperSearchWithURL_NormalizeMediaURLs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	gotResult, err := scraperSearchWithURL(ctx, scraper, "https://example.com/test")
+	gotResult, err := safeScrapeURL(ctx, scraper, "https://example.com/test")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -129,7 +129,7 @@ func TestScraperSearchWithURL_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := scraperSearchWithURL(ctx, scraper, "https://example.com/test")
+	result, err := safeScrapeURL(ctx, scraper, "https://example.com/test")
 
 	if result != nil {
 		t.Errorf("expected nil result, got %+v", result)
@@ -143,7 +143,7 @@ func TestScraperSearchWithURL_PanicRecovery(t *testing.T) {
 	panicScraper := &mockPanicScraper{}
 
 	ctx := context.Background()
-	result, err := scraperSearchWithURL(ctx, panicScraper, "https://example.com/test")
+	result, err := safeScrapeURL(ctx, panicScraper, "https://example.com/test")
 
 	if result != nil {
 		t.Errorf("expected nil result, got %+v", result)
@@ -160,6 +160,6 @@ type mockPanicScraper struct {
 	mockDirectURLScraper
 }
 
-func (m *mockPanicScraper) ScrapeURL(url string) (*models.ScraperResult, error) {
+func (m *mockPanicScraper) ScrapeURL(_ context.Context, _ string) (*models.ScraperResult, error) {
 	panic("intentional test panic")
 }

@@ -196,7 +196,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from AVEntertainment URL")
 }
 
-func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("AVEntertainment", "URL not handled by AVEntertainment scraper")
 	}
@@ -208,7 +208,7 @@ func (s *Scraper) ScrapeURL(rawURL string) (*models.ScraperResult, error) {
 	}
 
 	detailURL := s.applyLanguage(rawURL)
-	html, status, err := s.fetchPage(detailURL)
+	html, status, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch AVEntertainment detail page: %w", err)
 	}
@@ -285,7 +285,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 	candidateOrder := make([]string, 0, 8)
 	for _, endpoint := range searchEndpoints {
 		searchURL := s.applyLanguage(s.baseURL + endpoint)
-		html, status, err := s.fetchPage(searchURL)
+		html, status, err := s.fetchPageCtx(context.Background(), searchURL)
 		if err != nil || status != 200 {
 			continue
 		}
@@ -311,7 +311,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 
 	for i := 0; i < maxInspect; i++ {
 		candidate := candidateOrder[i]
-		html, status, err := s.fetchPage(candidate)
+		html, status, err := s.fetchPageCtx(context.Background(), candidate)
 		if err != nil || status != 200 {
 			continue
 		}
@@ -330,7 +330,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 }
 
 // Search scrapes metadata for an ID.
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("AVEntertainment scraper is disabled")
 	}
@@ -340,7 +340,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, err
 	}
 
-	html, status, err := s.fetchPage(detailURL)
+	html, status, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch AVEntertainment detail page: %w", err)
 	}
@@ -890,8 +890,8 @@ func (s *Scraper) applyLanguage(rawURL string) string {
 	return u.String()
 }
 
-func (s *Scraper) fetchPage(targetURL string) (string, int, error) {
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/template"
 )
 
 // JobStatus represents the status of a job
@@ -141,6 +142,7 @@ type BatchJob struct {
 	Done                        chan struct{}            `json:"-"`
 	mu                          sync.RWMutex             `json:"-"`
 	deleted                     bool                     `json:"-"` // Tombstone flag - prevents persist after deletion
+	templateEngine              *template.Engine         `json:"-"` // Shared template engine (safe for concurrent use)
 }
 
 // Lock acquires the job's write lock for exclusive access
@@ -396,16 +398,17 @@ func (jq *JobQueue) persistToDatabase(job *BatchJob) {
 // CreateJob creates a new batch job
 func (jq *JobQueue) CreateJob(files []string) *BatchJob {
 	job := &BatchJob{
-		ID:            uuid.New().String(),
-		Status:        JobStatusPending,
-		TotalFiles:    len(files),
-		Files:         files,
-		Results:       make(map[string]*FileResult),
-		FileMatchInfo: make(map[string]FileMatchInfo),
-		Excluded:      make(map[string]bool),
-		Done:          make(chan struct{}),
-		StartedAt:     time.Now(),
-		TempDir:       jq.tempDir,
+		ID:             uuid.New().String(),
+		Status:         JobStatusPending,
+		TotalFiles:     len(files),
+		Files:          files,
+		Results:        make(map[string]*FileResult),
+		FileMatchInfo:  make(map[string]FileMatchInfo),
+		Excluded:       make(map[string]bool),
+		Done:           make(chan struct{}),
+		StartedAt:      time.Now(),
+		TempDir:        jq.tempDir,
+		templateEngine: template.NewEngine(),
 	}
 
 	jq.mu.Lock()
@@ -524,8 +527,16 @@ func (job *BatchJob) UpdateFileResult(filePath string, result *FileResult) {
 	job.mu.Lock()
 	defer job.mu.Unlock()
 
-	// Increment Revision for CAS - use existing revision + 1, or 1 for new results
 	existing := job.Results[filePath]
+	if existing != nil {
+		switch existing.Status {
+		case JobStatusCompleted:
+			job.Completed--
+		case JobStatusFailed:
+			job.Failed--
+		}
+	}
+
 	if existing != nil {
 		result.Revision = existing.Revision + 1
 	} else {
@@ -534,28 +545,17 @@ func (job *BatchJob) UpdateFileResult(filePath string, result *FileResult) {
 
 	job.Results[filePath] = result
 
-	// Update counters
-	completed := 0
-	failed := 0
-	for _, r := range job.Results {
-		if r == nil {
-			continue
-		}
-		switch r.Status {
-		case JobStatusCompleted:
-			completed++
-		case JobStatusFailed:
-			failed++
-		}
+	switch result.Status {
+	case JobStatusCompleted:
+		job.Completed++
+	case JobStatusFailed:
+		job.Failed++
 	}
-	job.Completed = completed
-	job.Failed = failed
 
-	// Guard against division by zero
 	if job.TotalFiles == 0 {
-		job.Progress = 100 // Empty job is considered complete
+		job.Progress = 100
 	} else {
-		job.Progress = float64(completed+failed) / float64(job.TotalFiles) * 100
+		job.Progress = float64(job.Completed+job.Failed) / float64(job.TotalFiles) * 100
 	}
 }
 
@@ -603,30 +603,29 @@ func (job *BatchJob) AtomicUpdateFileResult(filePath string, updateFn func(*File
 	// Increment Revision for CAS
 	updated.Revision = current.Revision + 1
 
+	// Adjust counters: decrement old status
+	switch current.Status {
+	case JobStatusCompleted:
+		job.Completed--
+	case JobStatusFailed:
+		job.Failed--
+	}
+
 	// Write back the updated result
 	job.Results[filePath] = updated
 
-	// Recalculate counters (same logic as UpdateFileResult)
-	completed := 0
-	failed := 0
-	for _, r := range job.Results {
-		if r == nil {
-			continue
-		}
-		switch r.Status {
-		case JobStatusCompleted:
-			completed++
-		case JobStatusFailed:
-			failed++
-		}
+	// Adjust counters: increment new status
+	switch updated.Status {
+	case JobStatusCompleted:
+		job.Completed++
+	case JobStatusFailed:
+		job.Failed++
 	}
-	job.Completed = completed
-	job.Failed = failed
 
 	if job.TotalFiles == 0 {
 		job.Progress = 100
 	} else {
-		job.Progress = float64(completed+failed) / float64(job.TotalFiles) * 100
+		job.Progress = float64(job.Completed+job.Failed) / float64(job.TotalFiles) * 100
 	}
 
 	return nil
@@ -639,6 +638,13 @@ func (job *BatchJob) GetFileMatchInfo(filePath string) (FileMatchInfo, bool) {
 	defer job.mu.RUnlock()
 	info, ok := job.FileMatchInfo[filePath]
 	return info, ok
+}
+
+// SetFileMatchInfo stores the FileMatchInfo for a file path (thread-safe)
+func (job *BatchJob) SetFileMatchInfo(filePath string, info FileMatchInfo) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.FileMatchInfo[filePath] = info
 }
 
 // MarkStarted marks the job as started
@@ -903,4 +909,115 @@ func (job *BatchJob) GetTempDir() string {
 	job.mu.RLock()
 	defer job.mu.RUnlock()
 	return job.TempDir
+}
+
+// GetOperationModeOverride returns the operation mode override (thread-safe)
+func (job *BatchJob) GetOperationModeOverride() string {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return job.OperationModeOverride
+}
+
+// SetOperationModeOverride sets the operation mode override (thread-safe)
+func (job *BatchJob) SetOperationModeOverride(mode string) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.OperationModeOverride = mode
+}
+
+// GetMoveToFolderOverride returns the move-to-folder override (thread-safe)
+func (job *BatchJob) GetMoveToFolderOverride() *bool {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	if job.MoveToFolderOverride == nil {
+		return nil
+	}
+	v := *job.MoveToFolderOverride
+	return &v
+}
+
+// SetMoveToFolderOverride sets the move-to-folder override (thread-safe)
+func (job *BatchJob) SetMoveToFolderOverride(val *bool) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.MoveToFolderOverride = val
+}
+
+// GetRenameFolderInPlaceOverride returns the rename-in-place override (thread-safe)
+func (job *BatchJob) GetRenameFolderInPlaceOverride() *bool {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	if job.RenameFolderInPlaceOverride == nil {
+		return nil
+	}
+	v := *job.RenameFolderInPlaceOverride
+	return &v
+}
+
+// SetRenameFolderInPlaceOverride sets the rename-in-place override (thread-safe)
+func (job *BatchJob) SetRenameFolderInPlaceOverride(val *bool) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.RenameFolderInPlaceOverride = val
+}
+
+// GetDestination returns the destination path (thread-safe)
+func (job *BatchJob) GetDestination() string {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return job.Destination
+}
+
+// SetDestination sets the destination path (thread-safe)
+func (job *BatchJob) SetDestination(dest string) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.Destination = dest
+}
+
+// GetFiles returns a copy of the files list (thread-safe)
+func (job *BatchJob) GetFiles() []string {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	files := make([]string, len(job.Files))
+	copy(files, job.Files)
+	return files
+}
+
+// GetCompleted returns the completed count (thread-safe)
+func (job *BatchJob) GetCompleted() int {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return job.Completed
+}
+
+// GetFailed returns the failed count (thread-safe)
+func (job *BatchJob) GetFailed() int {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return job.Failed
+}
+
+// GetTotalFiles returns the total files count (thread-safe)
+func (job *BatchJob) GetTotalFiles() int {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return job.TotalFiles
+}
+
+// TemplateEngine returns the shared template engine (thread-safe, read-only after construction)
+// Lazily initializes if nil (for tests that create BatchJob directly)
+func (job *BatchJob) TemplateEngine() *template.Engine {
+	job.mu.RLock()
+	eng := job.templateEngine
+	job.mu.RUnlock()
+	if eng != nil {
+		return eng
+	}
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	if job.templateEngine == nil {
+		job.templateEngine = template.NewEngine()
+	}
+	return job.templateEngine
 }

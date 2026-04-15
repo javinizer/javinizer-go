@@ -1,11 +1,13 @@
 package mocks_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 // TestMockMovieRepositoryExample demonstrates using generated mocks with expecter pattern
@@ -53,7 +55,7 @@ func TestMockScraperExample(t *testing.T) {
 
 	// Set up expectation with EXPECT() pattern
 	mockScraper.EXPECT().
-		Search("IPX-123").
+		Search(mock.Anything, "IPX-123").
 		Return(expectedResult, nil).
 		Once()
 
@@ -63,7 +65,7 @@ func TestMockScraperExample(t *testing.T) {
 		Maybe() // This expectation is optional
 
 	// Use the mock
-	result, err := mockScraper.Search("IPX-123")
+	result, err := mockScraper.Search(context.Background(), "IPX-123")
 
 	// Verify
 	assert.NoError(t, err)

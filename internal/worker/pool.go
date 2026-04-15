@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -68,11 +69,22 @@ func (p *Pool) Submit(task Task) error {
 
 // executeTask executes a single task
 func (p *Pool) executeTask(task Task) {
-	defer p.wg.Done()
-	defer p.sem.Release(1)
-
 	taskID := task.ID()
 	taskType := task.Type()
+
+	defer func() {
+		if r := recover(); r != nil {
+			logging.Errorf("Worker pool task %s panicked: %v", taskID, r)
+			if p.progress != nil {
+				p.progress.Fail(taskID, fmt.Errorf("panic: %v", r))
+			}
+			p.mu.Lock()
+			p.errors = append(p.errors, fmt.Errorf("task %s panicked: %v", taskID, r))
+			p.mu.Unlock()
+			p.sem.Release(1)
+			p.wg.Done()
+		}
+	}()
 
 	// Start tracking
 	if p.progress != nil {
@@ -107,6 +119,9 @@ func (p *Pool) executeTask(task Task) {
 		p.errors = append(p.errors, fmt.Errorf("task %s failed: %w", taskID, err))
 		p.mu.Unlock()
 	}
+
+	p.sem.Release(1)
+	p.wg.Done()
 }
 
 // Wait waits for all tasks to complete

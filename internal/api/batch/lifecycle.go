@@ -66,19 +66,19 @@ func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
 
 		// Set destination for the job
 		if req.Destination != "" {
-			job.Destination = req.Destination
+			job.SetDestination(req.Destination)
 		}
 
 		// Set folder mode overrides for the job (used during organization)
-		job.MoveToFolderOverride = req.MoveToFolder
-		job.RenameFolderInPlaceOverride = req.RenameFolderInPlace
+		job.SetMoveToFolderOverride(req.MoveToFolder)
+		job.SetRenameFolderInPlaceOverride(req.RenameFolderInPlace)
 		if req.OperationMode != "" {
-			job.OperationModeOverride = req.OperationMode
+			job.SetOperationModeOverride(req.OperationMode)
 		}
 
 		// Populate file match metadata (multipart info from discovery)
 		for path, info := range fileMatchInfo {
-			job.FileMatchInfo[path] = info
+			job.SetFileMatchInfo(path, info)
 		}
 
 		// Start processing in background - use getters for thread-safe access
@@ -207,7 +207,7 @@ func deleteBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		if job.Status == worker.JobStatusRunning {
+		if job.GetStatus().Status == worker.JobStatusRunning {
 			c.JSON(400, ErrorResponse{Error: "Cannot delete running job. Cancel it first."})
 			return
 		}

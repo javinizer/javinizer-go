@@ -233,9 +233,13 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 	return nil, nil, false
 }
 
-// ResolveContentID attempts to resolve the display ID to an actual DMM content ID
-// by first checking the cache, then scraping DMM search if needed
 func (s *Scraper) ResolveContentID(id string) (string, error) {
+	return s.ResolveContentIDCtx(context.Background(), id)
+}
+
+// ResolveContentIDCtx attempts to resolve the display ID to an actual DMM content ID
+// by first checking the cache, then scraping DMM search if needed
+func (s *Scraper) ResolveContentIDCtx(ctx context.Context, id string) (string, error) {
 	// If no repository available, skip resolution
 	if s.contentIDRepo == nil {
 		return "", fmt.Errorf("content ID repository not available")
@@ -266,7 +270,7 @@ func (s *Scraper) ResolveContentID(id string) (string, error) {
 		logging.Debugf("DMM: Resolving content-id using search query variation: %s", query)
 
 		// Rate limit before fetching
-		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
 			return "", fmt.Errorf("DMM: rate limit wait failed: %w", err)
 		}
 
@@ -342,8 +346,13 @@ func (s *Scraper) ResolveContentID(id string) (string, error) {
 
 // GetURL attempts to find the URL for a given movie ID using DMM search
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.GetURLCtx(context.Background(), id)
+}
+
+// GetURLCtx attempts to find the URL for a given movie ID using DMM search with context support
+func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
 	// Use ResolveContentID which now also captures the URL from search results
-	contentID, err := s.ResolveContentID(id)
+	contentID, err := s.ResolveContentIDCtx(ctx, id)
 
 	if err != nil {
 		logging.Debugf("DMM: Content-ID resolution failed for %s: %v", id, err)
@@ -383,7 +392,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 		logging.Debugf("DMM: HTTP client transport proxy setting: %v", s.client.GetClient().Transport != nil)
 
 		// Rate limit before fetching
-		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
 			logging.Debugf("DMM: Rate limit wait failed for query '%s': %v", searchQuery, err)
 			continue
 		}
@@ -454,7 +463,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 
 		for _, directURL := range directURLs {
 			// Rate limit before fetching
-			if err := s.rateLimiter.Wait(context.Background()); err != nil {
+			if err := s.rateLimiter.Wait(ctx); err != nil {
 				logging.Debugf("DMM: Rate limit wait failed for direct URL: %v", err)
 				continue
 			}
@@ -504,8 +513,8 @@ func (s *Scraper) GetURL(id string) (string, error) {
 }
 
 // Search searches for and scrapes metadata for a given movie ID
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
-	url, err := s.GetURL(id)
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+	url, err := s.GetURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +538,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		}
 	} else {
 		// Rate limit before fetching
-		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
 			return nil, fmt.Errorf("DMM: rate limit wait failed: %w", err)
 		}
 
@@ -553,12 +562,12 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		}
 	}
 
-	return s.parseHTML(doc, url)
+	return s.parseHTML(ctx, doc, url)
 }
 
 // ScrapeURL directly scrapes metadata from a DMM URL.
 // This provides more accurate results than ID-based search when the exact URL is known.
-func (s *Scraper) ScrapeURL(url string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(url) {
 		return nil, models.NewScraperNotFoundError("DMM", "URL not handled by DMM scraper")
 	}
@@ -579,7 +588,7 @@ func (s *Scraper) ScrapeURL(url string) (*models.ScraperResult, error) {
 		}
 	} else {
 		// Rate limit before fetching
-		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("rate limit wait failed: %v", err))
 		}
 
@@ -617,11 +626,11 @@ func (s *Scraper) ScrapeURL(url string) (*models.ScraperResult, error) {
 		}
 	}
 
-	return s.parseHTML(doc, url)
+	return s.parseHTML(ctx, doc, url)
 }
 
 // parseHTML extracts metadata from DMM HTML
-func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
@@ -799,7 +808,7 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 		screenshots = s.extractScreenshots(doc, isNewSite)
 	}
 	// Filter placeholder screenshots
-	result.ScreenshotURL = s.filterPlaceholderScreenshots(context.Background(), screenshots)
+	result.ScreenshotURL = s.filterPlaceholderScreenshots(ctx, screenshots)
 
 	// Extract trailer URL - prioritize JSON-LD for new site
 	if isNewSite {
@@ -1409,10 +1418,14 @@ func (s *Scraper) tryActressThumbURLs(firstName, lastName string, dmmID int) str
 // extractRomajiVariantsFromActressPage fetches the actress profile page and returns multiple romaji variants
 // Returns variants with different split points for lastname_firstname format
 func (s *Scraper) extractRomajiVariantsFromActressPage(dmmID int) []string {
+	return s.extractRomajiVariantsFromActressPageCtx(context.Background(), dmmID)
+}
+
+func (s *Scraper) extractRomajiVariantsFromActressPageCtx(ctx context.Context, dmmID int) []string {
 	url := fmt.Sprintf("https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=%d/", dmmID)
 
 	// Rate limit before fetching
-	if err := s.rateLimiter.Wait(context.Background()); err != nil {
+	if err := s.rateLimiter.Wait(ctx); err != nil {
 		logging.Debugf("DMM: Rate limit wait failed for actress page: %v", err)
 		return nil
 	}

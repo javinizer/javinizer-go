@@ -1,6 +1,7 @@
 package javdb
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,7 +65,7 @@ func TestSearch_RetriesSparseDetailWithDirectSuccess(t *testing.T) {
 		settings:    config.ScraperSettings{Enabled: true},
 	}
 
-	result, err := scraper.Search("IPX-123")
+	result, err := scraper.Search(context.Background(), "IPX-123")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -109,7 +110,7 @@ func TestSearch_FailsWhenDirectRetryStillSparse(t *testing.T) {
 		settings:    config.ScraperSettings{Enabled: true},
 	}
 
-	result, err := scraper.Search("IPX-123")
+	result, err := scraper.Search(context.Background(), "IPX-123")
 	require.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "non-detail content")

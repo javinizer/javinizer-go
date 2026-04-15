@@ -27,65 +27,40 @@ import (
 // processedMovieIDsMutex protects concurrent access to processedMovieIDs map
 var processedMovieIDsMutex sync.Mutex
 
-// scraperSearchWithContext wraps a scraper.Search() call with context cancellation support.
-// Since the Scraper interface doesn't accept context, we run the search in a goroutine
-// and cancel it if the context is cancelled.
-func scraperSearchWithContext(ctx context.Context, scraper models.Scraper, id string) (*models.ScraperResult, error) {
-	type result struct {
-		scraperResult *models.ScraperResult
-		err           error
-	}
-
-	resultCh := make(chan result, 1)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				resultCh <- result{nil, fmt.Errorf("scraper panic: %v", r)}
-			}
-		}()
-		scraperResult, err := scraper.Search(id)
-		resultCh <- result{scraperResult, err}
+func safeSearch(ctx context.Context, scraper models.Scraper, id string) (result *models.ScraperResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("scraper panic: %v", r)
+		}
 	}()
-
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case res := <-resultCh:
-		if res.scraperResult != nil {
-			res.scraperResult.NormalizeMediaURLs()
-		}
-		return res.scraperResult, res.err
+	default:
 	}
+	result, err = scraper.Search(ctx, id)
+	if result != nil {
+		result.NormalizeMediaURLs()
+	}
+	return result, err
 }
 
-func scraperSearchWithURL(ctx context.Context, scraper models.DirectURLScraper, url string) (*models.ScraperResult, error) {
-	type result struct {
-		res *models.ScraperResult
-		err error
-	}
-
-	resultCh := make(chan result, 1)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				resultCh <- result{nil, fmt.Errorf("scraper panic: %v", r)}
-			}
-		}()
-		res, err := scraper.ScrapeURL(url)
-		resultCh <- result{res: res, err: err}
+func safeScrapeURL(ctx context.Context, scraper models.DirectURLScraper, url string) (result *models.ScraperResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("scraper panic: %v", r)
+		}
 	}()
-
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case r := <-resultCh:
-		if r.res != nil {
-			r.res.NormalizeMediaURLs()
-		}
-		return r.res, r.err
+	default:
 	}
+	result, err = scraper.ScrapeURL(ctx, url)
+	if result != nil {
+		result.NormalizeMediaURLs()
+	}
+	return result, err
 }
 
 func scraperListContains(scrapers []string, target string) bool {
@@ -319,7 +294,7 @@ func RunBatchScrapeOnce(
 				}
 
 				// Generate expected NFO filename using template
-				templateEngine := template.NewEngine()
+				templateEngine := job.TemplateEngine()
 				nfoFilename, err := templateEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
 				if err != nil {
 					logging.Warnf("[Batch %s] File %d: Failed to execute NFO filename template: %v, using default", job.ID, fileIndex, err)
@@ -403,7 +378,7 @@ func RunBatchScrapeOnce(
 							if titleLooksTemplated {
 								movieToReturn.DisplayTitle = movieToReturn.Title
 							} else if cfg != nil && cfg.Metadata.NFO.DisplayTitle != "" {
-								displayTmplEngine := template.NewEngine()
+								displayTmplEngine := job.TemplateEngine()
 								displayCtx := template.NewContextFromMovie(movieToReturn)
 								if displayName, err := displayTmplEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, displayCtx); err == nil {
 									movieToReturn.DisplayTitle = displayName
@@ -577,7 +552,7 @@ func RunBatchScrapeOnce(
 					logging.Debugf("[Batch %s] File %d: Trying direct URL scrape for %s",
 						job.ID, fileIndex, scraper.Name())
 
-					scraperResult, err := scraperSearchWithURL(ctx, directScraper, queryOverride)
+					scraperResult, err := safeScrapeURL(ctx, directScraper, queryOverride)
 					if err == nil {
 						// Success - use direct scrape result
 						logging.Debugf("[Batch %s] File %d: Direct URL scrape succeeded for %s",
@@ -609,7 +584,7 @@ func RunBatchScrapeOnce(
 		}
 
 		logging.Debugf("[Batch %s] File %d: Querying scraper %s for %s", job.ID, fileIndex, scraper.Name(), scraperQuery)
-		scraperResult, err := scraperSearchWithContext(ctx, scraper, scraperQuery)
+		scraperResult, err := safeSearch(ctx, scraper, scraperQuery)
 		if err != nil {
 			// Check if error is due to context cancellation
 			if err == ctx.Err() {
@@ -632,7 +607,7 @@ func RunBatchScrapeOnce(
 			if scraperQuery != movieID && queryOverride == "" {
 				logging.Debugf("[Batch %s] File %d: Retrying scraper %s with original ID: %s",
 					job.ID, fileIndex, scraper.Name(), movieID)
-				scraperResult, err = scraperSearchWithContext(ctx, scraper, movieID)
+				scraperResult, err = safeSearch(ctx, scraper, movieID)
 				if err != nil {
 					// Check if error is due to context cancellation
 					if err == ctx.Err() {
@@ -746,7 +721,7 @@ func RunBatchScrapeOnce(
 		}
 
 		// Generate expected NFO filename using template
-		templateEngine := template.NewEngine()
+		templateEngine := job.TemplateEngine()
 		nfoFilename, err := templateEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.FilenameTemplate, tmplCtx)
 		if err != nil {
 			// Fall back to default naming
@@ -830,7 +805,7 @@ func RunBatchScrapeOnce(
 					if titleLooksTemplated {
 						movie.DisplayTitle = movie.Title
 					} else if cfg != nil && cfg.Metadata.NFO.DisplayTitle != "" {
-						displayTmplEngine := template.NewEngine()
+						displayTmplEngine := job.TemplateEngine()
 						displayCtx := template.NewContextFromMovie(movie)
 						if displayName, err := displayTmplEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, displayCtx); err == nil {
 							movie.DisplayTitle = displayName

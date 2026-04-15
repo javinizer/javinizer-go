@@ -93,11 +93,12 @@ func compareNFO(deps *ServerDependencies) gin.HandlerFunc {
 		// Scrape from sources
 		results := []*models.ScraperResult{}
 		for _, scraper := range deps.GetRegistry().GetByPriority(scrapersToUse) {
-			result, err := scraper.Search(parsed.ID)
+			result, err := scraper.Search(c.Request.Context(), parsed.ID)
 			if err != nil {
 				logging.Warnf("NFO comparison: %s failed: %v", scraper.Name(), err)
 				continue
 			}
+			result.NormalizeMediaURLs()
 			results = append(results, result)
 		}
 

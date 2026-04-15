@@ -142,7 +142,7 @@ func (sh *SubtitleHandler) MoveSubtitles(subtitles []SubtitleMatch, targetDir, v
 
 	// Create target directory if it doesn't exist
 	if !dryRun {
-		if err := sh.fs.MkdirAll(targetDir, 0777); err != nil {
+		if err := sh.fs.MkdirAll(targetDir, 0755); err != nil {
 			return fmt.Errorf("failed to create target directory: %w", err)
 		}
 	}

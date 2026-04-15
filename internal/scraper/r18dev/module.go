@@ -54,8 +54,8 @@ func (m *scraperModule) Options() any {
 			Description: "File size threshold in KB for detecting placeholder screenshots. Files smaller than this are checked against known placeholder hashes.",
 			Type:        "number",
 			Default:     10,
-			Min:         intPtr(1),
-			Max:         intPtr(1000),
+			Min:         scraperutil.IntPtr(1),
+			Max:         scraperutil.IntPtr(1000),
 			Unit:        "KB",
 		},
 		contracts.ScraperOption{
@@ -72,8 +72,6 @@ func (m *scraperModule) Defaults() any {
 		Language: "en",
 	}
 }
-
-func intPtr(i int) *int { return &i }
 
 func (m *scraperModule) Priority() int { return 100 }
 func (m *scraperModule) FlattenFunc() any {

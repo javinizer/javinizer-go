@@ -17,7 +17,6 @@ import (
 // generatePreview generates an organize preview response for a movie
 // fileResults contains all file results for this movie (to support multi-part files)
 func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, destination string, cfg *config.Config, operationMode organizer.OperationMode) OrganizePreviewResponse {
-	// Create template context from movie
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = cfg.Output.GroupActress
 	templateEngine := template.NewEngine()

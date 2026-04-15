@@ -1,6 +1,7 @@
 package commandutil
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,13 +41,13 @@ func NewMockDownloaderWithTracking(results []downloader.DownloadResult, err erro
 	}
 }
 
-func (m *MockDownloaderWithTracking) DownloadAll(movie *models.Movie, destDir string, multipart *downloader.MultipartInfo) ([]downloader.DownloadResult, error) {
+func (m *MockDownloaderWithTracking) DownloadAll(ctx context.Context, movie *models.Movie, destDir string, multipart *downloader.MultipartInfo) ([]downloader.DownloadResult, error) {
 	m.Calls = append(m.Calls, struct {
 		Movie     *models.Movie
 		DestDir   string
 		Multipart *downloader.MultipartInfo
 	}{movie, destDir, multipart})
-	return m.MockDownloader.DownloadAll(movie, destDir, multipart)
+	return m.MockDownloader.DownloadAll(ctx, movie, destDir, multipart)
 }
 
 // TestGenerateNFOs tests the NFO generation helper function

@@ -147,7 +147,7 @@ func (s *OrganizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		return result, nil
 	}
 
-	if err := s.fs.MkdirAll(plan.TargetDir, 0777); err != nil {
+	if err := s.fs.MkdirAll(plan.TargetDir, 0755); err != nil {
 		result.Error = fmt.Errorf("failed to create directory: %w", err)
 		return result, result.Error
 	}

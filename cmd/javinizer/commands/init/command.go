@@ -34,7 +34,7 @@ func run(cmd *cobra.Command, configFile string) error {
 
 	// Create data directory
 	dataDir := filepath.Dir(cfg.Database.DSN)
-	if err := os.MkdirAll(dataDir, 0777); err != nil {
+	if err := os.MkdirAll(dataDir, config.DirPermConfig); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 	fmt.Printf("✅ Created data directory: %s\n", dataDir)

@@ -1,12 +1,15 @@
 package batch
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/types"
+	ws "github.com/javinizer/javinizer-go/internal/websocket"
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
@@ -82,11 +85,30 @@ func organizeJob(deps *ServerDependencies) gin.HandlerFunc {
 
 		// Set operation mode override on the job for processOrganizeJob
 		if req.OperationMode != "" {
-			job.OperationModeOverride = req.OperationMode
+			job.SetOperationModeOverride(req.OperationMode)
 		}
 
-		// Start organization in background - use getter for thread-safe access
-		go processOrganizeJob(job, deps.JobQueue, req.Destination, req.CopyOnly, req.LinkMode, deps.DB, cfg, deps.GetRegistry(), deps.EventEmitter)
+		// Start organization in background with panic recovery
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logging.Errorf("Organize job %s panicked: %v", jobID, r)
+					job.MarkFailed()
+					if deps.JobQueue != nil {
+						deps.JobQueue.PersistJob(job)
+					}
+					broadcastProgress(&ws.ProgressMessage{
+						JobID:   jobID,
+						Status:  "error",
+						Message: fmt.Sprintf("Organize job panicked: %v", r),
+					})
+				}
+			}()
+			ctx, cancel := context.WithCancel(c.Request.Context())
+			job.SetCancelFunc(cancel)
+			defer cancel()
+			processOrganizeJob(ctx, job, deps.JobQueue, req.Destination, req.CopyOnly, req.LinkMode, deps.DB, cfg, deps.GetRegistry(), deps.EventEmitter)
+		}()
 
 		c.JSON(200, gin.H{"message": "Organization started"})
 	}
@@ -123,8 +145,24 @@ func updateBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 		// Reuse the batch job lifecycle for update progress polling.
 		job.MarkStarted()
 
-		// Start update in background - use getter for thread-safe access
-		go processUpdateJob(job, deps.GetConfig(), deps.DB, deps.GetRegistry(), deps.EventEmitter)
+		// Start update in background with panic recovery
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logging.Errorf("Update job %s panicked: %v", jobID, r)
+					job.MarkFailed()
+					if deps.JobQueue != nil {
+						deps.JobQueue.PersistJob(job)
+					}
+					broadcastProgress(&ws.ProgressMessage{
+						JobID:   jobID,
+						Status:  "error",
+						Message: fmt.Sprintf("Update job panicked: %v", r),
+					})
+				}
+			}()
+			processUpdateJob(job, deps.GetConfig(), deps.DB, deps.GetRegistry(), deps.EventEmitter)
+		}()
 
 		c.JSON(200, gin.H{"message": "Update started"})
 	}

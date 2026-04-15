@@ -51,6 +51,8 @@ var testGlobalProxy = &config.ProxyConfig{}
 // testGlobalFlareSolverr is a zero-value FlareSolverr config for testing
 var testGlobalFlareSolverr = config.FlareSolverrConfig{}
 
+func ptrBool(b bool) *bool { return &b }
+
 // TestNew verifies the scraper constructor
 func TestNew(t *testing.T) {
 	tests := []struct {
@@ -343,7 +345,7 @@ func TestSearch_NetworkErrors(t *testing.T) {
 		settings := createTestSettings(true, nil)
 		scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil) // nil repository
 
-		_, err := scraper.Search("IPX-535")
+		_, err := scraper.Search(context.Background(), "IPX-535")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not available")
 	})
@@ -351,7 +353,6 @@ func TestSearch_NetworkErrors(t *testing.T) {
 
 // TestParseHTML_OldSite verifies parsing of www.dmm.co.jp HTML
 func TestParseHTML_OldSite(t *testing.T) {
-	t.Skip("Skipping: DMM Extra field migration in progress")
 	htmlContent := `
 <!DOCTYPE html>
 <html>
@@ -415,14 +416,13 @@ func TestParseHTML_OldSite(t *testing.T) {
 </html>
 `
 
-	settings := createTestSettings(true, map[string]any{"scrape_actress": true})
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
-
-	// Parse HTML directly
+	settings := createTestSettings(true, nil)
+	settings.ScrapeActress = ptrBool(true)
+	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, true, false), nil)
 	doc, err := parseHTMLString(htmlContent)
 	require.NoError(t, err)
 
-	result, err := scraper.parseHTML(doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/")
+	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/")
 	require.NoError(t, err)
 
 	// Verify extracted data
@@ -496,13 +496,14 @@ func TestParseHTML_NewSite(t *testing.T) {
 </html>
 `
 
-	settings := createTestSettings(true, map[string]any{"scrape_actress": true})
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+	settings := createTestSettings(true, nil)
+	settings.ScrapeActress = ptrBool(true)
+	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, true, false), nil)
 
 	doc, err := parseHTMLString(htmlContent)
 	require.NoError(t, err)
 
-	result, err := scraper.parseHTML(doc, "https://video.dmm.co.jp/av/content/?id=ipx00535")
+	result, err := scraper.parseHTML(context.Background(), doc, "https://video.dmm.co.jp/av/content/?id=ipx00535")
 	require.NoError(t, err)
 
 	// Verify extracted data
@@ -579,7 +580,7 @@ func TestExtractActresses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := createTestSettings(true, map[string]any{"scrape_actress": true})
+			settings := createTestSettings(true, nil)
 			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
@@ -604,7 +605,7 @@ func TestExtractActresses(t *testing.T) {
 }
 
 func TestExtractActressesFromStreamingPage_CastSectionPriority(t *testing.T) {
-	settings := createTestSettings(true, map[string]any{"scrape_actress": true})
+	settings := createTestSettings(true, nil)
 	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
 
 	html := `<html><body>
@@ -639,7 +640,7 @@ func TestExtractActressesFromStreamingPage_CastSectionPriority(t *testing.T) {
 }
 
 func TestExtractActressesFromStreamingPage_HeadingFallback(t *testing.T) {
-	settings := createTestSettings(true, map[string]any{"scrape_actress": true})
+	settings := createTestSettings(true, nil)
 	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
 
 	html := `<html><body>
@@ -670,7 +671,7 @@ func TestExtractActressesFromStreamingPage_HeadingFallback(t *testing.T) {
 }
 
 func TestExtractActressesFromStreamingPage_SkipsRecommendationOnlyLinks(t *testing.T) {
-	settings := createTestSettings(true, map[string]any{"scrape_actress": true})
+	settings := createTestSettings(true, nil)
 	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
 
 	html := `<html><body>
@@ -1230,7 +1231,6 @@ func TestExtractScreenshots_EdgeCases(t *testing.T) {
 
 // TestParseHTML_ScrapeActressFlag verifies actress extraction respects scrape_actress flag
 func TestParseHTML_ScrapeActressFlag(t *testing.T) {
-	t.Skip("Skipping: DMM Extra field migration in progress")
 	htmlContent := `
 <!DOCTYPE html>
 <html>
@@ -1267,13 +1267,14 @@ func TestParseHTML_ScrapeActressFlag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := createTestSettings(true, map[string]any{"scrape_actress": tt.scrapeActress})
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			settings := createTestSettings(true, nil)
+			settings.ScrapeActress = ptrBool(tt.scrapeActress)
+			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, tt.scrapeActress, false), nil)
 
 			doc, err := parseHTMLString(htmlContent)
 			require.NoError(t, err)
 
-			result, err := scraper.parseHTML(doc, "https://www.dmm.co.jp/test")
+			result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/test")
 			require.NoError(t, err)
 
 			assert.Len(t, result.Actresses, tt.expectedActressLen)
@@ -1379,7 +1380,6 @@ func TestNormalizeID_MalformedInputs(t *testing.T) {
 
 // TestExtractCandidateURLs_Priorities verifies URL priority assignment
 func TestExtractCandidateURLs_Priorities(t *testing.T) {
-	t.Skip("Skipping: DMM Extra field migration in progress")
 	tests := []struct {
 		name             string
 		html             string
@@ -1446,8 +1446,9 @@ func TestExtractCandidateURLs_Priorities(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := createTestSettings(true, map[string]any{"enable_browser": true})
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			settings := createTestSettings(true, nil)
+			settings.UseBrowser = true
+			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, true), nil)
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -1537,7 +1538,6 @@ func TestExtractCandidateURLs_BaseIDMatching(t *testing.T) {
 
 // TestExtractCandidateURLs_ExcludePatterns verifies excluded URL patterns
 func TestExtractCandidateURLs_ExcludePatterns(t *testing.T) {
-	t.Skip("Skipping: DMM Extra field migration in progress")
 	tests := []struct {
 		name             string
 		html             string
@@ -1590,8 +1590,9 @@ func TestExtractCandidateURLs_ExcludePatterns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := createTestSettings(true, map[string]any{"enable_browser": tt.enableBrowser})
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			settings := createTestSettings(true, nil)
+			settings.UseBrowser = tt.enableBrowser
+			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, tt.enableBrowser), nil)
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -1609,7 +1610,6 @@ func TestExtractCandidateURLs_ExcludePatterns(t *testing.T) {
 
 // TestExtractCandidateURLs_PriorityOrder verifies correct priority ordering
 func TestExtractCandidateURLs_PriorityOrder(t *testing.T) {
-	t.Skip("Skipping: DMM Extra field migration in progress")
 	html := `
 		<a href="https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=mdb087/">Physical DVD (Priority 6 - full metadata)</a>
 		<a href="https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=mdb087/">Digital Video (Priority 5 - full metadata)</a>
@@ -1618,8 +1618,9 @@ func TestExtractCandidateURLs_PriorityOrder(t *testing.T) {
 		<a href="https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/">Monthly Standard (Priority 1 - limited metadata)</a>
 	`
 
-	settings := createTestSettings(true, map[string]any{"enable_browser": true})
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+	settings := createTestSettings(true, nil)
+	settings.UseBrowser = true
+	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, true), nil)
 
 	doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", html))
 	require.NoError(t, err)

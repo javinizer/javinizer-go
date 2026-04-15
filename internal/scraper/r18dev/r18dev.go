@@ -157,7 +157,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from R18.dev URL")
 }
 
-func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
+func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(urlStr) {
 		return nil, models.NewScraperNotFoundError("R18.dev", "URL not handled by R18.dev scraper")
 	}
@@ -173,7 +173,7 @@ func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
 
 	logging.Debugf("R18.dev ScrapeURL: Extracted ID %s from URL %s", id, urlStr)
 
-	resp, err := s.doRequestWithRetry(urlStr)
+	resp, err := s.doRequestWithRetryCtx(ctx, urlStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from R18.dev: %w", err)
 	}
@@ -200,7 +200,7 @@ func (s *Scraper) ScrapeURL(urlStr string) (*models.ScraperResult, error) {
 		return nil, fmt.Errorf("failed to parse R18.dev response (preview: %s): %w", bodyPreview, err)
 	}
 
-	return s.parseResponse(&data, urlStr)
+	return s.parseResponse(ctx, &data, urlStr)
 }
 
 // ValidateConfig validates the scraper configuration.
@@ -256,12 +256,13 @@ func (s *Scraper) GetURL(id string) (string, error) {
 }
 
 // doRequestWithRetry performs an HTTP request with retry logic for rate limiting
-func (s *Scraper) doRequestWithRetry(url string) (*resty.Response, error) {
+// doRequestWithRetryCtx performs an HTTP request with retry logic for rate limiting and context support
+func (s *Scraper) doRequestWithRetryCtx(ctx context.Context, url string) (*resty.Response, error) {
 	var resp *resty.Response
 	var err error
 
 	for attempt := 0; attempt <= s.maxRetries; attempt++ {
-		if err := s.rateLimiter.Wait(context.Background()); err != nil {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
 			return nil, err
 		}
 
@@ -295,7 +296,7 @@ func (s *Scraper) doRequestWithRetry(url string) (*resty.Response, error) {
 			}
 
 			// Max retries exceeded
-			return nil, fmt.Errorf("rate limited after %d retries (HTTP %d)", s.maxRetries, resp.StatusCode())
+			return nil, models.NewScraperHTTPError("R18", resp.StatusCode(), fmt.Sprintf("rate limited after %d retries", s.maxRetries))
 		}
 
 		// Request successful or non-rate-limit error
@@ -306,7 +307,8 @@ func (s *Scraper) doRequestWithRetry(url string) (*resty.Response, error) {
 }
 
 // Search searches for and scrapes metadata for a given movie ID
-func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
+// Search searches for and scrapes metadata for a given movie ID with context support
+func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	// Step 1: Try to lookup content_id using dvd_id with multiple ID variations
 	// R18.dev uses dvd_id to find the content_id, then uses content_id for the full data
 
@@ -334,7 +336,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		dvdIDURL := fmt.Sprintf("%s/videos/vod/movies/detail/-/dvd_id=%s/json", baseURL, idVariation)
 		logging.Debugf("R18: Trying dvd_id lookup: %s", idVariation)
 
-		resp, err := s.doRequestWithRetry(dvdIDURL)
+		resp, err := s.doRequestWithRetryCtx(ctx, dvdIDURL)
 		if err != nil {
 			logging.Debugf("R18: Failed to lookup with %s: %v", idVariation, err)
 			continue
@@ -388,7 +390,7 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		logging.Debugf("R18: Using normalized ID URL (no content-id found): %s", finalURL)
 	}
 
-	resp, err := s.doRequestWithRetry(finalURL)
+	resp, err := s.doRequestWithRetryCtx(ctx, finalURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from R18.dev: %w", err)
 	}
@@ -417,11 +419,11 @@ func (s *Scraper) Search(id string) (*models.ScraperResult, error) {
 		return nil, fmt.Errorf("failed to parse R18.dev response (preview: %s): %w", bodyPreview, err)
 	}
 
-	return s.parseResponse(&data, finalURL)
+	return s.parseResponse(ctx, &data, finalURL)
 }
 
 // parseResponse converts R18 API response to ScraperResult
-func (s *Scraper) parseResponse(data *R18Response, sourceURL string) (*models.ScraperResult, error) {
+func (s *Scraper) parseResponse(ctx context.Context, data *R18Response, sourceURL string) (*models.ScraperResult, error) {
 	// Use DVDID if available, otherwise convert ContentID to ID format
 	movieID := data.DVDID
 	if movieID == "" && data.ContentID != "" {
@@ -601,7 +603,7 @@ func (s *Scraper) parseResponse(data *R18Response, sourceURL string) (*models.Sc
 	if len(result.ScreenshotURL) > 0 {
 		cfg := placeholder.ConfigFromSettings(&s.settings, placeholder.DefaultDMMPlaceholderHashes)
 		if cfg.Enabled {
-			filtered, count, err := placeholder.FilterURLs(context.Background(), s.client, result.ScreenshotURL, cfg)
+			filtered, count, err := placeholder.FilterURLs(ctx, s.client, result.ScreenshotURL, cfg)
 			if err != nil {
 				logging.Warnf("r18dev: placeholder filter error: %v", err)
 			} else if count > 0 {

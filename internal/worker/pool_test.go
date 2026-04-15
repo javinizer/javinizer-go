@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -277,6 +278,131 @@ func TestPool_RaceConditions(t *testing.T) {
 	if stats.TotalTasks != expectedTotal {
 		t.Errorf("Expected %d total tasks, got %d", expectedTotal, stats.TotalTasks)
 	}
+}
+
+// panicTask is a task that panics when executed
+type panicTask struct {
+	BaseTask
+	panicValue interface{}
+	executed   *atomic.Int32
+}
+
+func newPanicTask(id string, panicValue interface{}) *panicTask {
+	return &panicTask{
+		BaseTask: BaseTask{
+			id:          id,
+			taskType:    TaskTypeScrape,
+			description: "Panic task",
+		},
+		panicValue: panicValue,
+		executed:   &atomic.Int32{},
+	}
+}
+
+func (t *panicTask) Execute(ctx context.Context) error {
+	t.executed.Add(1)
+	panic(t.panicValue)
+}
+
+func TestPool_PanicRecovery(t *testing.T) {
+	testCases := []struct {
+		name        string
+		panicValue  interface{}
+		wantMessage string
+	}{
+		{"string panic", "something went wrong", "something went wrong"},
+		{"error panic", errors.New("internal error"), "internal error"},
+		{"int panic", 42, "42"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			progressChan := make(chan ProgressUpdate, 100)
+			tracker := NewProgressTracker(progressChan)
+
+			pool := NewPool(2, 10*time.Second, tracker)
+			defer pool.Stop()
+
+			task := newPanicTask("panic-task-1", tc.panicValue)
+			if err := pool.Submit(task); err != nil {
+				t.Fatalf("Failed to submit task: %v", err)
+			}
+
+			err := pool.Wait()
+			if err == nil {
+				t.Fatal("Expected error from Wait due to panicked task")
+			}
+
+			if !strings.Contains(err.Error(), "panicked") {
+				t.Errorf("Expected error to contain 'panicked', got: %v", err)
+			}
+
+			if !strings.Contains(err.Error(), tc.wantMessage) {
+				t.Errorf("Expected error to contain %q, got: %v", tc.wantMessage, err)
+			}
+		})
+	}
+
+	t.Run("pool continues after panic", func(t *testing.T) {
+		progressChan := make(chan ProgressUpdate, 100)
+		tracker := NewProgressTracker(progressChan)
+
+		pool := NewPool(2, 10*time.Second, tracker)
+		defer pool.Stop()
+
+		panicT := newPanicTask("panic-task", "boom")
+		normalT := newMockTask("normal-task", 10*time.Millisecond, false)
+
+		if err := pool.Submit(panicT); err != nil {
+			t.Fatalf("Failed to submit panic task: %v", err)
+		}
+		if err := pool.Submit(normalT); err != nil {
+			t.Fatalf("Failed to submit normal task: %v", err)
+		}
+
+		err := pool.Wait()
+		if err == nil {
+			t.Fatal("Expected error from Wait due to panicked task")
+		}
+
+		if normalT.executed.Load() != 1 {
+			t.Errorf("Normal task should have been executed, got %d executions", normalT.executed.Load())
+		}
+	})
+
+	t.Run("progress tracker receives fail on panic", func(t *testing.T) {
+		progressChan := make(chan ProgressUpdate, 100)
+		tracker := NewProgressTracker(progressChan)
+
+		pool := NewPool(2, 10*time.Second, tracker)
+		defer pool.Stop()
+
+		task := newPanicTask("panic-task-progress", "progress-test")
+		if err := pool.Submit(task); err != nil {
+			t.Fatalf("Failed to submit task: %v", err)
+		}
+
+		if err := pool.Wait(); err == nil {
+			t.Fatal("Expected error from Wait")
+		}
+
+		progress, ok := tracker.Get("panic-task-progress")
+		if !ok {
+			t.Fatal("Expected progress entry for panicked task")
+		}
+
+		if progress.Status != TaskStatusFailed {
+			t.Errorf("Expected task status to be failed, got %s", progress.Status)
+		}
+
+		if progress.Error == nil {
+			t.Fatal("Expected progress error to be set")
+		}
+
+		if !strings.Contains(progress.Error.Error(), "panic") {
+			t.Errorf("Expected progress error to contain 'panic', got: %v", progress.Error)
+		}
+	})
 }
 
 func TestPool_ActiveWorkers(t *testing.T) {

@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -23,13 +24,13 @@ import (
 )
 
 // processOrganizeJob processes file organization for a completed scrape job
-func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destination string, copyOnly bool, linkModeRaw string, db *database.DB, cfg *config.Config, registry *models.ScraperRegistry, emitter eventlog.EventEmitter) {
+func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *worker.JobQueue, destination string, copyOnly bool, linkModeRaw string, db *database.DB, cfg *config.Config, registry *models.ScraperRegistry, emitter eventlog.EventEmitter) {
 	// Determine effective operation mode and apply overrides
 	outputConfig := cfg.Output
-	if job.OperationModeOverride != "" {
-		parsed, err := types.ParseOperationMode(job.OperationModeOverride)
+	if job.GetOperationModeOverride() != "" {
+		parsed, err := types.ParseOperationMode(job.GetOperationModeOverride())
 		if err != nil {
-			logging.Warnf("Invalid operation mode override %q: %v, using config default", job.OperationModeOverride, err)
+			logging.Warnf("Invalid operation mode override %q: %v, using config default", job.GetOperationModeOverride(), err)
 		} else {
 			outputConfig.OperationMode = parsed
 			outputConfig.MoveToFolder = parsed == types.OperationModeOrganize
@@ -37,11 +38,11 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 		}
 	} else {
 		// Apply legacy boolean overrides only when no explicit mode override
-		if job.MoveToFolderOverride != nil {
-			outputConfig.MoveToFolder = *job.MoveToFolderOverride
+		if moveToFolder := job.GetMoveToFolderOverride(); moveToFolder != nil {
+			outputConfig.MoveToFolder = *moveToFolder
 		}
-		if job.RenameFolderInPlaceOverride != nil {
-			outputConfig.RenameFolderInPlace = *job.RenameFolderInPlaceOverride
+		if renameFolderInPlace := job.GetRenameFolderInPlaceOverride(); renameFolderInPlace != nil {
+			outputConfig.RenameFolderInPlace = *renameFolderInPlace
 		}
 		effectiveMode := outputConfig.GetOperationMode()
 		outputConfig.OperationMode = effectiveMode
@@ -155,6 +156,27 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 	failed := 0
 
 	for filePath, fileResult := range status.Results {
+		select {
+		case <-ctx.Done():
+			broadcastProgress(&ws.ProgressMessage{
+				JobID:    job.ID,
+				Status:   "cancelled",
+				Progress: float64(organized+failed) / float64(len(status.Results)) * 100,
+				Message:  fmt.Sprintf("Organize cancelled (%d/%d files processed)", organized, len(status.Results)),
+			})
+			if emitter != nil {
+				if err := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("Organize job %s cancelled", job.ID), models.SeverityWarn, map[string]interface{}{"job_id": job.ID, "organized": organized, "failed": failed}); err != nil {
+					logging.Warnf("Failed to emit organize cancel event: %v", err)
+				}
+			}
+			job.MarkCancelled()
+			if jobQueue != nil {
+				jobQueue.PersistJob(job)
+			}
+			return
+		default:
+		}
+
 		// Skip files that failed during scraping
 		if fileResult.Status != worker.JobStatusCompleted || fileResult.Data == nil {
 			continue
@@ -297,7 +319,7 @@ func processOrganizeJob(job *worker.BatchJob, jobQueue *worker.JobQueue, destina
 				downloadPaths = append(downloadPaths, posterPath)
 			}
 
-			dlPaths := downloadMediaFilesWithHistory(dl, movie, result.FolderPath, cfg, historyLogger, multipart)
+			dlPaths := downloadMediaFilesWithHistory(ctx, dl, movie, result.FolderPath, cfg, historyLogger, multipart)
 			downloadPaths = append(downloadPaths, dlPaths...)
 		}
 
