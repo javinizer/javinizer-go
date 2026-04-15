@@ -70,20 +70,20 @@ type APIConfig struct {
 
 // SecurityConfig holds API security settings for path validation and resource limits
 type SecurityConfig struct {
-	// Allowed directories for scanning/browsing (empty = no allowlist restriction)
-	AllowedDirectories []string `yaml:"allowed_directories" json:"allowed_directories"`
-	// Denied directories (in addition to built-in system directories)
-	DeniedDirectories []string `yaml:"denied_directories" json:"denied_directories"`
-	// Maximum number of files to return in a scan
-	MaxFilesPerScan int `yaml:"max_files_per_scan" json:"max_files_per_scan"`
-	// Timeout for scan operations in seconds
-	ScanTimeoutSeconds int `yaml:"scan_timeout_seconds" json:"scan_timeout_seconds"`
-	// Allowed origins for CORS and WebSocket connections (empty = same-origin only, "*" = allow all)
-	AllowedOrigins []string `yaml:"allowed_origins" json:"allowed_origins"`
-	// Allow UNC paths (Windows only). UNC paths can leak NTLM credentials to remote servers.
-	AllowUNC bool `yaml:"allow_unc" json:"allow_unc"`
-	// Allowed UNC servers (Windows only). Only used if AllowUNC is true.
-	AllowedUNCServers []string `yaml:"allowed_unc_servers" json:"allowed_unc_servers"`
+	AllowedDirectories []string        `yaml:"allowed_directories" json:"allowed_directories"`
+	DeniedDirectories  []string        `yaml:"denied_directories" json:"denied_directories"`
+	MaxFilesPerScan    int             `yaml:"max_files_per_scan" json:"max_files_per_scan"`
+	ScanTimeoutSeconds int             `yaml:"scan_timeout_seconds" json:"scan_timeout_seconds"`
+	AllowedOrigins     []string        `yaml:"allowed_origins" json:"allowed_origins"`
+	AllowUNC           bool            `yaml:"allow_unc" json:"allow_unc"`
+	AllowedUNCServers  []string        `yaml:"allowed_unc_servers" json:"allowed_unc_servers"`
+	RateLimit          RateLimitConfig `yaml:"rate_limit" json:"rate_limit"`
+	TrustedProxies     []string        `yaml:"trusted_proxies" json:"trusted_proxies"`
+	ForceSecureCookies bool            `yaml:"force_secure_cookies" json:"force_secure_cookies"`
+}
+
+type RateLimitConfig struct {
+	RequestsPerMinute int `yaml:"requests_per_minute" json:"requests_per_minute"`
 }
 
 // SystemConfig holds system-level settings

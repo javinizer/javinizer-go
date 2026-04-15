@@ -79,40 +79,22 @@ func (m *scraperModule) Defaults() any {
 	}
 }
 func (m *scraperModule) Priority() int { return 45 }
+func proxyAsConfig(p any) *config.ProxyConfig {
+	if p == nil {
+		return nil
+	}
+	return p.(*config.ProxyConfig)
+}
+
 func (m *scraperModule) FlattenFunc() any {
-	return scraperutil.FlattenFunc(func(cfg any) any {
-		c, ok := cfg.(scraperutil.ScraperConfigInterface)
-		if !ok {
-			return nil
+	return scraperutil.DefaultFlattenConfigWithRaw(scraperutil.FlattenOverrides{}, func(fc *scraperutil.FlattenedConfig, _ scraperutil.FlattenOverrides, raw any) any {
+		s := &config.ScraperSettings{Enabled: fc.Enabled, Language: "", RateLimit: fc.RateLimit, BaseURL: "https://www.aventertainments.com", Proxy: proxyAsConfig(fc.Proxy), DownloadProxy: proxyAsConfig(fc.DownloadProxy)}
+		if aventCfg, ok := raw.(*AVEntertainmentConfig); ok {
+			if aventCfg.ScrapeBonusScreens {
+				s.Extra = map[string]any{"scrape_bonus_screens": aventCfg.ScrapeBonusScreens}
+			}
 		}
-		proxy := c.GetProxy()
-		downloadProxy := c.GetDownloadProxy()
-		var proxyVal, downloadProxyVal *config.ProxyConfig
-		if proxy != nil {
-			proxyVal = proxy.(*config.ProxyConfig)
-		}
-		if downloadProxy != nil {
-			downloadProxyVal = downloadProxy.(*config.ProxyConfig)
-		}
-		aventCfg, ok := cfg.(*AVEntertainmentConfig)
-		if !ok {
-			return nil
-		}
-
-		extra := make(map[string]any)
-		if aventCfg.ScrapeBonusScreens {
-			extra["scrape_bonus_screens"] = aventCfg.ScrapeBonusScreens
-		}
-
-		return &config.ScraperSettings{
-			Enabled:       c.IsEnabled(),
-			Language:      "",
-			RateLimit:     c.GetRequestDelay(),
-			BaseURL:       "https://www.aventertainments.com",
-			Proxy:         proxyVal,
-			DownloadProxy: downloadProxyVal,
-			Extra:         extra,
-		}
+		return s
 	})
 }
 

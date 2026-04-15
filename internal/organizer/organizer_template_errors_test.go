@@ -81,7 +81,7 @@ func TestOrganizerTemplate_ErrorHandling(t *testing.T) {
 				MoveSubtitles:  false,
 				MaxTitleLength: 0,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			var movie *testutil.MovieBuilder
 			if tt.movieSetup != nil {
@@ -133,7 +133,7 @@ func TestOrganizerTemplate_NilContext(t *testing.T) {
 		MoveSubtitles:  false,
 		MaxTitleLength: 0,
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	match := matcher.MatchResult{
 		File: scanner.FileInfo{
@@ -211,7 +211,7 @@ func TestOrganizerTemplate_ConditionalErrors(t *testing.T) {
 				MoveSubtitles:  false,
 				MaxTitleLength: 0,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			var movie *testutil.MovieBuilder
 			if tt.movieSetup != nil {

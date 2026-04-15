@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/httpclient"
 )
 
 const maxTranslationAPIResponseSize = 10 * 1024 * 1024 // 10MB
@@ -106,7 +107,7 @@ func fetchOpenAICompatibleModels(ctx context.Context, baseURL, apiKey string) ([
 		return nil, err
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		_ = httpclient.DrainAndClose(resp.Body)
 	}()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationAPIResponseSize))
@@ -164,7 +165,7 @@ func fetchAnthropicModels(ctx context.Context, baseURL, apiKey string) ([]string
 		return nil, err
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		_ = httpclient.DrainAndClose(resp.Body)
 	}()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationAPIResponseSize))
@@ -274,7 +275,7 @@ func fetchDeepLUsage(ctx context.Context, baseURL, apiKey string) (*DeepLUsageRe
 		return nil, err
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		_ = httpclient.DrainAndClose(resp.Body)
 	}()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationAPIResponseSize))

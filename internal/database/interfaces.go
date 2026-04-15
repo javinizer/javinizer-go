@@ -11,7 +11,7 @@ import (
 type MovieRepositoryInterface interface {
 	Create(movie *models.Movie) error
 	Update(movie *models.Movie) error
-	Upsert(movie *models.Movie) error
+	Upsert(movie *models.Movie) (*models.Movie, error)
 	FindByID(id string) (*models.Movie, error)
 	FindByContentID(contentID string) (*models.Movie, error)
 	Delete(id string) error

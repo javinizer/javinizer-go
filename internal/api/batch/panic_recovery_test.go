@@ -27,13 +27,16 @@ func TestBatchJob_PanicRecovery(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			processBatchJob(
-				job, deps.JobQueue, deps.Registry, deps.Aggregator,
-				deps.MovieRepo, deps.Matcher,
-				false, false, false, "", cfg,
-				nil, "", "", deps.DB,
-				nil, nil, "", nil,
-			)
+			processBatchJob(&BatchProcessOptions{
+				Job:        job,
+				JobQueue:   deps.JobQueue,
+				Registry:   deps.Registry,
+				Aggregator: deps.Aggregator,
+				MovieRepo:  deps.MovieRepo,
+				Matcher:    deps.Matcher,
+				Cfg:        cfg,
+				DB:         deps.DB,
+			})
 		}()
 
 		select {
@@ -97,13 +100,16 @@ func TestBatchJob_PanicRecovery(t *testing.T) {
 					close(panicked)
 				}
 			}()
-			processBatchJob(
-				job, deps.JobQueue, deps.Registry, deps.Aggregator,
-				deps.MovieRepo, deps.Matcher,
-				false, false, false, "", cfg,
-				nil, "", "", deps.DB,
-				nil, nil, "", nil,
-			)
+			processBatchJob(&BatchProcessOptions{
+				Job:        job,
+				JobQueue:   deps.JobQueue,
+				Registry:   deps.Registry,
+				Aggregator: deps.Aggregator,
+				MovieRepo:  deps.MovieRepo,
+				Matcher:    deps.Matcher,
+				Cfg:        cfg,
+				DB:         deps.DB,
+			})
 		}()
 
 		select {

@@ -80,7 +80,7 @@ func rescrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 		movie.OriginalFileName = movieID
 
 		// Save to DB
-		if err := deps.MovieRepo.Upsert(movie); err != nil {
+		if _, err := deps.MovieRepo.Upsert(movie); err != nil {
 			logging.Warnf("Failed to save movie to DB: %v", err)
 		}
 

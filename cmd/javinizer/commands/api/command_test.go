@@ -173,7 +173,7 @@ func createTestAPIServer(t *testing.T) *apicore.ServerDependencies {
 	require.NoError(t, err)
 
 	// Initialize job queue
-	jobQueue := worker.NewJobQueue(nil, "")
+	jobQueue := worker.NewJobQueue(nil, "", nil)
 
 	// Create server dependencies
 	deps := &apicore.ServerDependencies{
@@ -218,7 +218,7 @@ func TestAPIServer_ListMovies(t *testing.T) {
 
 	// Insert test movie
 	movie := createTestMovie("IPX-123", "Test Movie")
-	err := deps.MovieRepo.Upsert(movie)
+	_, err := deps.MovieRepo.Upsert(movie)
 	require.NoError(t, err)
 
 	router := apiserver.NewServer(deps)
@@ -245,7 +245,7 @@ func TestAPIServer_GetMovie(t *testing.T) {
 
 	// Insert test movie
 	movie := createTestMovie("IPX-123", "Test Movie")
-	err := deps.MovieRepo.Upsert(movie)
+	_, err := deps.MovieRepo.Upsert(movie)
 	require.NoError(t, err)
 
 	router := apiserver.NewServer(deps)

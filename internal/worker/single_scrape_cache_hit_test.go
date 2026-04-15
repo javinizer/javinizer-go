@@ -39,7 +39,7 @@ func TestRunBatchScrapeOnce_CacheHitReusesPosterAndLegacyPerFileNFO(t *testing.T
 		Title:     "Cached Title",
 		Maker:     "Cached Maker",
 	}
-	if err := movieRepo.Upsert(cachedMovie); err != nil {
+	if _, err := movieRepo.Upsert(cachedMovie); err != nil {
 		t.Fatalf("Upsert() error = %v", err)
 	}
 
@@ -140,7 +140,7 @@ func TestRunBatchScrapeOnce_CacheHitRegeneratesPosterAndAppliesDisplayTitle(t *t
 		Title:     "Cached Title",
 		CoverURL:  posterServer.URL + "/poster.jpg",
 	}
-	if err := movieRepo.Upsert(cachedMovie); err != nil {
+	if _, err := movieRepo.Upsert(cachedMovie); err != nil {
 		t.Fatalf("Upsert() error = %v", err)
 	}
 

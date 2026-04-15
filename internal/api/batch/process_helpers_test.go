@@ -33,7 +33,7 @@ func TestCopyTempCroppedPoster(t *testing.T) {
 		cfg := config.DefaultConfig()
 		cfg.Output.DownloadPoster = false
 
-		job := worker.NewJobQueue(nil, "").CreateJob(nil)
+		job := worker.NewJobQueue(nil, "", nil).CreateJob(nil)
 		t.Cleanup(func() {
 			_ = os.RemoveAll(filepath.Join("data", "temp", "posters", job.ID))
 		})
@@ -59,7 +59,7 @@ func TestCopyTempCroppedPoster(t *testing.T) {
 		cfg.Output.DownloadPoster = true
 		cfg.Output.PosterFormat = "<INVALID-TEMPLATE"
 
-		job := worker.NewJobQueue(nil, "").CreateJob(nil)
+		job := worker.NewJobQueue(nil, "", nil).CreateJob(nil)
 		t.Cleanup(func() {
 			_ = os.RemoveAll(filepath.Join("data", "temp", "posters", job.ID))
 		})
@@ -109,7 +109,7 @@ func TestDownloadMediaFilesWithHistory(t *testing.T) {
 
 		deps := createTestDeps(t, cfg, "")
 		historyLogger := history.NewLogger(deps.DB)
-		dl := downloader.NewDownloaderWithNFOConfig(server.Client(), afero.NewOsFs(), &cfg.Output, "test-agent", false, true)
+		dl := downloader.NewDownloaderWithNFOConfig(server.Client(), afero.NewOsFs(), &cfg.Output, "test-agent", false, true, nil)
 
 		movie := &models.Movie{
 			ID:       "IPX-900",
@@ -144,7 +144,7 @@ func TestDownloadMediaFilesWithHistory(t *testing.T) {
 
 		deps := createTestDeps(t, cfg, "")
 		historyLogger := history.NewLogger(deps.DB)
-		dl := downloader.NewDownloaderWithNFOConfig(http.DefaultClient, afero.NewOsFs(), &cfg.Output, "test-agent", false, true)
+		dl := downloader.NewDownloaderWithNFOConfig(http.DefaultClient, afero.NewOsFs(), &cfg.Output, "test-agent", false, true, nil)
 
 		movie := &models.Movie{ID: "IPX-901"}
 		downloadMediaFilesWithHistory(context.Background(), dl, movie, t.TempDir(), cfg, historyLogger, nil)

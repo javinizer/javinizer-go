@@ -1,13 +1,11 @@
 package database
 
 import (
+	"fmt"
 	"strings"
 )
 
-// normalizeActressSort normalizes sort parameters for actress queries.
-// Converts sortBy and sortOrder to canonical forms with validation.
-// Returns validated sortBy and sortOrder (defaults: "name", "asc").
-func normalizeActressSort(sortBy, sortOrder string) (string, string) {
+func normalizeActressSort(sortBy, sortOrder string) (string, string, error) {
 	sortBy = strings.TrimSpace(strings.ToLower(sortBy))
 	sortOrder = strings.TrimSpace(strings.ToLower(sortOrder))
 
@@ -17,11 +15,11 @@ func normalizeActressSort(sortBy, sortOrder string) (string, string) {
 
 	switch sortBy {
 	case "id", "dmm_id", "japanese_name", "first_name", "last_name", "created_at", "updated_at":
-		return sortBy, sortOrder
-	case "name":
-		return "name", sortOrder
+		return sortBy, sortOrder, nil
+	case "name", "":
+		return "name", sortOrder, nil
 	default:
-		return "name", "asc"
+		return "", "", fmt.Errorf("invalid sort_by value: %q", sortBy)
 	}
 }
 

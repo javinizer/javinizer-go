@@ -448,7 +448,7 @@ func TestRunBatchScrapeOnce_UpdateModeMergesExistingNFO(t *testing.T) {
 func TestRunBatchScrapeOnce_ForceRefreshReplacesCachedMovie(t *testing.T) {
 	cfg, _, movieRepo, agg, fileMatcher := newRunBatchTestEnv(t, "resolver")
 
-	if err := movieRepo.Upsert(&models.Movie{
+	if _, err := movieRepo.Upsert(&models.Movie{
 		ID:        "IPX-777",
 		ContentID: "ipx777",
 		Title:     "Cached Title",

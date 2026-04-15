@@ -58,7 +58,7 @@ func TestScrapeMetadata_CacheHit(t *testing.T) {
 	// Pre-populate cache
 	movieRepo := database.NewMovieRepository(deps.DB)
 	cachedMovie := createTestMovie("IPX-123", "Cached Movie")
-	err := movieRepo.Upsert(cachedMovie)
+	_, err := movieRepo.Upsert(cachedMovie)
 	require.NoError(t, err)
 
 	// Create test matches
@@ -89,7 +89,7 @@ func TestScrapeMetadata_ForceRefresh(t *testing.T) {
 	// Pre-populate cache
 	movieRepo := database.NewMovieRepository(deps.DB)
 	cachedMovie := createTestMovie("IPX-123", "Cached Movie")
-	err := movieRepo.Upsert(cachedMovie)
+	_, err := movieRepo.Upsert(cachedMovie)
 	require.NoError(t, err)
 
 	// Create test matches
@@ -229,7 +229,7 @@ func TestScrapeMetadata_MixedCacheAndScrape(t *testing.T) {
 	// Pre-populate cache with one movie
 	movieRepo := database.NewMovieRepository(deps.DB)
 	cachedMovie := createTestMovie("IPX-123", "Cached Movie")
-	err := movieRepo.Upsert(cachedMovie)
+	_, err := movieRepo.Upsert(cachedMovie)
 	require.NoError(t, err)
 
 	// Create test matches for multiple IDs

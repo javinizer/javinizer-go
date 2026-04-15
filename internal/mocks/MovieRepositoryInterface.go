@@ -382,20 +382,31 @@ func (_c *MockMovieRepositoryInterface_Update_Call) RunAndReturn(run func(movie 
 }
 
 // Upsert provides a mock function for the type MockMovieRepositoryInterface
-func (_mock *MockMovieRepositoryInterface) Upsert(movie *models.Movie) error {
+func (_mock *MockMovieRepositoryInterface) Upsert(movie *models.Movie) (*models.Movie, error) {
 	ret := _mock.Called(movie)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
 	}
 
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.Movie) error); ok {
+	var r0 *models.Movie
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(*models.Movie) (*models.Movie, error)); ok {
+		return returnFunc(movie)
+	}
+	if returnFunc, ok := ret.Get(0).(func(*models.Movie) *models.Movie); ok {
 		r0 = returnFunc(movie)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*models.Movie)
+		}
 	}
-	return r0
+	if returnFunc, ok := ret.Get(1).(func(*models.Movie) error); ok {
+		r1 = returnFunc(movie)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
 }
 
 // MockMovieRepositoryInterface_Upsert_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Upsert'
@@ -422,12 +433,12 @@ func (_c *MockMovieRepositoryInterface_Upsert_Call) Run(run func(movie *models.M
 	return _c
 }
 
-func (_c *MockMovieRepositoryInterface_Upsert_Call) Return(err error) *MockMovieRepositoryInterface_Upsert_Call {
-	_c.Call.Return(err)
+func (_c *MockMovieRepositoryInterface_Upsert_Call) Return(movie1 *models.Movie, err error) *MockMovieRepositoryInterface_Upsert_Call {
+	_c.Call.Return(movie1, err)
 	return _c
 }
 
-func (_c *MockMovieRepositoryInterface_Upsert_Call) RunAndReturn(run func(movie *models.Movie) error) *MockMovieRepositoryInterface_Upsert_Call {
+func (_c *MockMovieRepositoryInterface_Upsert_Call) RunAndReturn(run func(movie *models.Movie) (*models.Movie, error)) *MockMovieRepositoryInterface_Upsert_Call {
 	_c.Call.Return(run)
 	return _c
 }

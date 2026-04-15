@@ -224,7 +224,7 @@ func scrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 		movie.OriginalFileName = parsed.ID
 
 		// Save to database (upsert: create or update)
-		if err := deps.MovieRepo.Upsert(movie); err != nil {
+		if _, err := deps.MovieRepo.Upsert(movie); err != nil {
 			logging.Errorf("Failed to save movie to database: %v", err)
 		}
 

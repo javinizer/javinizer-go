@@ -85,6 +85,50 @@ const (
 	DataTypeMovie = "movie"
 )
 
+// FileResultSlim is a lightweight FileResult that omits the Data field
+// for efficient status polling without deep-copying movie objects.
+type FileResultSlim struct {
+	FilePath       string            `json:"file_path"`
+	MovieID        string            `json:"movie_id"`
+	Revision       uint64            `json:"revision"`
+	Status         JobStatus         `json:"status"`
+	Error          string            `json:"error,omitempty"`
+	PosterError    *string           `json:"poster_error,omitempty"`
+	FieldSources   map[string]string `json:"field_sources,omitempty"`
+	ActressSources map[string]string `json:"actress_sources,omitempty"`
+	DataType       string            `json:"data_type,omitempty"`
+	StartedAt      time.Time         `json:"started_at"`
+	EndedAt        *time.Time        `json:"ended_at,omitempty"`
+	IsMultiPart    bool              `json:"is_multi_part,omitempty"`
+	PartNumber     int               `json:"part_number,omitempty"`
+	PartSuffix     string            `json:"part_suffix,omitempty"`
+}
+
+// BatchJobSlim is a lightweight BatchJob snapshot that uses FileResultSlim
+// to avoid deep-copying movie Data on every poll.
+type BatchJobSlim struct {
+	ID                          string                     `json:"id"`
+	Status                      JobStatus                  `json:"status"`
+	TotalFiles                  int                        `json:"total_files"`
+	Completed                   int                        `json:"completed"`
+	Failed                      int                        `json:"failed"`
+	Excluded                    map[string]bool            `json:"excluded"`
+	Files                       []string                   `json:"files"`
+	Results                     map[string]*FileResultSlim `json:"results"`
+	FileMatchInfo               map[string]FileMatchInfo   `json:"file_match_info,omitempty"`
+	Progress                    float64                    `json:"progress"`
+	Destination                 string                     `json:"destination"`
+	TempDir                     string                     `json:"temp_dir"`
+	StartedAt                   time.Time                  `json:"started_at"`
+	CompletedAt                 *time.Time                 `json:"completed_at,omitempty"`
+	OrganizedAt                 *time.Time                 `json:"organized_at,omitempty"`
+	RevertedAt                  *time.Time                 `json:"reverted_at,omitempty"`
+	MoveToFolderOverride        *bool                      `json:"move_to_folder_override,omitempty"`
+	RenameFolderInPlaceOverride *bool                      `json:"rename_folder_in_place_override,omitempty"`
+	OperationModeOverride       string                     `json:"operation_mode_override,omitempty"`
+	PersistError                string                     `json:"persist_error,omitempty"`
+}
+
 type fileResultAlias FileResult
 
 func (fr *FileResult) MarshalJSON() ([]byte, error) {
@@ -138,6 +182,7 @@ type BatchJob struct {
 	MoveToFolderOverride        *bool                    `json:"move_to_folder_override,omitempty"`
 	RenameFolderInPlaceOverride *bool                    `json:"rename_folder_in_place_override,omitempty"`
 	OperationModeOverride       string                   `json:"operation_mode_override,omitempty"`
+	PersistError                string                   `json:"persist_error,omitempty"`
 	CancelFunc                  context.CancelFunc       `json:"-"`
 	Done                        chan struct{}            `json:"-"`
 	mu                          sync.RWMutex             `json:"-"`
@@ -182,18 +227,24 @@ type FileMatchInfo struct {
 
 // JobQueue manages batch jobs
 type JobQueue struct {
-	jobs    map[string]*BatchJob
-	jobRepo database.JobRepositoryInterface
-	tempDir string
-	mu      sync.RWMutex
+	jobs           map[string]*BatchJob
+	jobRepo        database.JobRepositoryInterface
+	tempDir        string
+	templateEngine *template.Engine
+	mu             sync.RWMutex
+	stopCleanup    chan struct{}
 }
 
-// NewJobQueue creates a new job queue
-func NewJobQueue(jobRepo database.JobRepositoryInterface, tempDir string) *JobQueue {
+func NewJobQueue(jobRepo database.JobRepositoryInterface, tempDir string, engine *template.Engine) *JobQueue {
+	if engine == nil {
+		engine = template.NewEngine()
+	}
 	jq := &JobQueue{
-		jobs:    make(map[string]*BatchJob),
-		jobRepo: jobRepo,
-		tempDir: tempDir,
+		jobs:           make(map[string]*BatchJob),
+		jobRepo:        jobRepo,
+		tempDir:        tempDir,
+		templateEngine: engine,
+		stopCleanup:    make(chan struct{}),
 	}
 
 	jq.loadFromDatabase()
@@ -208,10 +259,19 @@ func (jq *JobQueue) StartCleanup() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			jq.cleanupOldOrganizedJobs()
+		for {
+			select {
+			case <-ticker.C:
+				jq.cleanupOldOrganizedJobs()
+			case <-jq.stopCleanup:
+				return
+			}
 		}
 	}()
+}
+
+func (jq *JobQueue) StopCleanup() {
+	close(jq.stopCleanup)
 }
 
 // cleanupOldOrganizedJobs is disabled per D-05/HIST-11:
@@ -333,29 +393,32 @@ func (jq *JobQueue) persistToDatabase(job *BatchJob) {
 		logging.Debugf("[Job %s] Skipping persist - job marked as deleted", job.ID)
 		return
 	}
-	defer job.mu.RUnlock()
 
 	// Marshal fields to JSON
 	filesJSON, err := json.Marshal(job.Files)
 	if err != nil {
+		job.mu.RUnlock()
 		logging.Warnf("Failed to marshal files for job %s: %v", job.ID, err)
 		return
 	}
 
 	resultsJSON, err := json.Marshal(job.Results)
 	if err != nil {
+		job.mu.RUnlock()
 		logging.Warnf("Failed to marshal results for job %s: %v", job.ID, err)
 		return
 	}
 
 	excludedJSON, err := json.Marshal(job.Excluded)
 	if err != nil {
+		job.mu.RUnlock()
 		logging.Warnf("Failed to marshal excluded for job %s: %v", job.ID, err)
 		return
 	}
 
 	fileMatchInfoJSON, err := json.Marshal(job.FileMatchInfo)
 	if err != nil {
+		job.mu.RUnlock()
 		logging.Warnf("Failed to marshal file match info for job %s: %v", job.ID, err)
 		return
 	}
@@ -387,12 +450,22 @@ func (jq *JobQueue) persistToDatabase(job *BatchJob) {
 	if err != nil || existing == nil {
 		if err := jq.jobRepo.Create(dbJob); err != nil {
 			logging.Warnf("Failed to create job %s in database: %v", job.ID, err)
+			job.mu.RUnlock()
+			job.SetPersistError(fmt.Sprintf("create failed: %v", err))
+			return
 		}
-	} else {
-		if err := jq.jobRepo.Update(dbJob); err != nil {
-			logging.Warnf("Failed to update job %s in database: %v", job.ID, err)
-		}
+		job.mu.RUnlock()
+		job.SetPersistError("")
+		return
 	}
+	if err := jq.jobRepo.Update(dbJob); err != nil {
+		logging.Warnf("Failed to update job %s in database: %v", job.ID, err)
+		job.mu.RUnlock()
+		job.SetPersistError(fmt.Sprintf("update failed: %v", err))
+		return
+	}
+	job.mu.RUnlock()
+	job.SetPersistError("")
 }
 
 // CreateJob creates a new batch job
@@ -408,7 +481,7 @@ func (jq *JobQueue) CreateJob(files []string) *BatchJob {
 		Done:           make(chan struct{}),
 		StartedAt:      time.Now(),
 		TempDir:        jq.tempDir,
-		templateEngine: template.NewEngine(),
+		templateEngine: jq.templateEngine,
 	}
 
 	jq.mu.Lock()
@@ -900,6 +973,108 @@ func (job *BatchJob) GetStatus() *BatchJob {
 		MoveToFolderOverride:        job.MoveToFolderOverride,
 		RenameFolderInPlaceOverride: job.RenameFolderInPlaceOverride,
 		OperationModeOverride:       job.OperationModeOverride,
+		PersistError:                job.PersistError,
+	}
+}
+
+// GetStatusSlim returns a lightweight snapshot of the job status without movie Data.
+// This is the recommended method for polling endpoints that only need status/progress.
+func (job *BatchJob) GetStatusSlim() *BatchJobSlim {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+
+	results := make(map[string]*FileResultSlim, len(job.Results))
+	for k, v := range job.Results {
+		if v == nil {
+			continue
+		}
+		slim := &FileResultSlim{
+			FilePath:    v.FilePath,
+			MovieID:     v.MovieID,
+			Revision:    v.Revision,
+			Status:      v.Status,
+			Error:       v.Error,
+			DataType:    v.DataType,
+			StartedAt:   v.StartedAt,
+			IsMultiPart: v.IsMultiPart,
+			PartNumber:  v.PartNumber,
+			PartSuffix:  v.PartSuffix,
+		}
+		if v.FieldSources != nil {
+			slim.FieldSources = make(map[string]string, len(v.FieldSources))
+			for fk, fv := range v.FieldSources {
+				slim.FieldSources[fk] = fv
+			}
+		}
+		if v.ActressSources != nil {
+			slim.ActressSources = make(map[string]string, len(v.ActressSources))
+			for ak, av := range v.ActressSources {
+				slim.ActressSources[ak] = av
+			}
+		}
+		if v.PosterError != nil {
+			s := *v.PosterError
+			slim.PosterError = &s
+		}
+		if v.EndedAt != nil {
+			t := *v.EndedAt
+			slim.EndedAt = &t
+		}
+		results[k] = slim
+	}
+
+	files := make([]string, len(job.Files))
+	copy(files, job.Files)
+
+	excluded := make(map[string]bool, len(job.Excluded))
+	for k, v := range job.Excluded {
+		excluded[k] = v
+	}
+
+	fileMatchInfo := make(map[string]FileMatchInfo, len(job.FileMatchInfo))
+	for k, v := range job.FileMatchInfo {
+		fileMatchInfo[k] = v
+	}
+
+	completedAt := job.CompletedAt
+	if completedAt != nil {
+		t := *completedAt
+		completedAt = &t
+	}
+
+	organizedAt := job.OrganizedAt
+	if organizedAt != nil {
+		t := *organizedAt
+		organizedAt = &t
+	}
+
+	revertedAt := job.RevertedAt
+	if revertedAt != nil {
+		t := *revertedAt
+		revertedAt = &t
+	}
+
+	return &BatchJobSlim{
+		ID:                          job.ID,
+		Status:                      job.Status,
+		TotalFiles:                  job.TotalFiles,
+		Completed:                   job.Completed,
+		Failed:                      job.Failed,
+		Excluded:                    excluded,
+		Files:                       files,
+		Results:                     results,
+		FileMatchInfo:               fileMatchInfo,
+		Progress:                    job.Progress,
+		Destination:                 job.Destination,
+		TempDir:                     job.TempDir,
+		StartedAt:                   job.StartedAt,
+		CompletedAt:                 completedAt,
+		OrganizedAt:                 organizedAt,
+		RevertedAt:                  revertedAt,
+		MoveToFolderOverride:        job.MoveToFolderOverride,
+		RenameFolderInPlaceOverride: job.RenameFolderInPlaceOverride,
+		OperationModeOverride:       job.OperationModeOverride,
+		PersistError:                job.PersistError,
 	}
 }
 
@@ -1003,6 +1178,30 @@ func (job *BatchJob) GetTotalFiles() int {
 	job.mu.RLock()
 	defer job.mu.RUnlock()
 	return job.TotalFiles
+}
+
+func (job *BatchJob) GetID() string {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return job.ID
+}
+
+func (job *BatchJob) GetPersistError() string {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return job.PersistError
+}
+
+func (job *BatchJob) SetPersistError(msg string) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.PersistError = msg
+}
+
+func (job *BatchJob) GetJobStatus() JobStatus {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return job.Status
 }
 
 // TemplateEngine returns the shared template engine (thread-safe, read-only after construction)

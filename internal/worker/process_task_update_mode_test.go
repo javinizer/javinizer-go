@@ -242,8 +242,8 @@ func TestProcessFileTask_Execute_UpdateModeUsesNFOInPreview(t *testing.T) {
 
 	progressChan := make(chan ProgressUpdate, 200)
 	tracker := NewProgressTracker(progressChan)
-	dl := downloader.NewDownloader(nil, afero.NewOsFs(), &cfg.Output, "test-agent")
-	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)
+	dl := downloader.NewDownloader(nil, afero.NewOsFs(), &cfg.Output, "test-agent", nil)
+	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output, nil)
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), &nfo.Config{
 		NFOFilenameTemplate: cfg.Metadata.NFO.FilenameTemplate,
 	})
@@ -307,8 +307,8 @@ func TestProcessFileTask_Execute_NonDryRunScrapeOnlyCompletes(t *testing.T) {
 
 	progressChan := make(chan ProgressUpdate, 100)
 	tracker := NewProgressTracker(progressChan)
-	dl := downloader.NewDownloader(nil, afero.NewOsFs(), &cfg.Output, "test-agent")
-	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)
+	dl := downloader.NewDownloader(nil, afero.NewOsFs(), &cfg.Output, "test-agent", nil)
+	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output, nil)
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), &nfo.Config{
 		NFOFilenameTemplate: cfg.Metadata.NFO.FilenameTemplate,
 	})
@@ -377,8 +377,8 @@ func TestProcessFileTask_Execute_DryRunAllStepsEnabled(t *testing.T) {
 
 	progressChan := make(chan ProgressUpdate, 200)
 	tracker := NewProgressTracker(progressChan)
-	dl := downloader.NewDownloader(nil, afero.NewOsFs(), &cfg.Output, "test-agent")
-	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)
+	dl := downloader.NewDownloader(nil, afero.NewOsFs(), &cfg.Output, "test-agent", nil)
+	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output, nil)
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), &nfo.Config{
 		NFOFilenameTemplate: cfg.Metadata.NFO.FilenameTemplate,
 	})
@@ -443,8 +443,8 @@ func TestProcessFileTask_Execute_OrganizeFailureReturnsError(t *testing.T) {
 
 	progressChan := make(chan ProgressUpdate, 100)
 	tracker := NewProgressTracker(progressChan)
-	dl := downloader.NewDownloader(nil, afero.NewOsFs(), &cfg.Output, "test-agent")
-	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output)
+	dl := downloader.NewDownloader(nil, afero.NewOsFs(), &cfg.Output, "test-agent", nil)
+	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output, nil)
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), &nfo.Config{
 		NFOFilenameTemplate: cfg.Metadata.NFO.FilenameTemplate,
 	})

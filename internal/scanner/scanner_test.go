@@ -1491,3 +1491,45 @@ func TestScanner_MixedContentDirectory(t *testing.T) {
 		t.Errorf("Expected at least 10 skipped files, got %d", result.SkippedCount)
 	}
 }
+
+func TestScanner_ExtensionMapLookup(t *testing.T) {
+	fs := afero.NewMemMapFs()
+
+	tests := []struct {
+		name       string
+		extensions []string
+		fileName   string
+		wantMatch  bool
+	}{
+		{"mixed case config uppercase", []string{".MP4"}, "test.mp4", true},
+		{"mixed case file uppercase", []string{".mp4"}, "TEST.MP4", true},
+		{"mixed case both different", []string{".Mp4"}, "test.Mp4", true},
+		{"no match", []string{".mkv"}, "test.mp4", false},
+		{"multiple extensions", []string{".mp4", ".MKV", ".Avi"}, "test.avi", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.MatchingConfig{Extensions: tt.extensions}
+			scanner := NewScanner(fs, cfg)
+
+			path := filepath.Join("/test", tt.fileName)
+			got := scanner.shouldIncludeFile(path, nil)
+			if got != tt.wantMatch {
+				t.Errorf("shouldIncludeFile(%q) = %v, want %v", path, got, tt.wantMatch)
+			}
+		})
+	}
+}
+
+func TestScanner_EmptyExtensionSet(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &config.MatchingConfig{Extensions: []string{}}
+	scanner := NewScanner(fs, cfg)
+
+	path := filepath.Join("/test", "video.mp4")
+	got := scanner.shouldIncludeFile(path, nil)
+	if got {
+		t.Errorf("shouldIncludeFile with empty extension set should return false, got %v", got)
+	}
+}

@@ -88,7 +88,7 @@ var _ database.JobRepositoryInterface = (*mockJobRepo)(nil)
 func TestDeleteJob_ReturnsErrorWhenDatabaseFails(t *testing.T) {
 	mockRepo := &mockJobRepo{deleteErr: errors.New("database connection lost")}
 
-	jq := worker.NewJobQueue(mockRepo, "")
+	jq := worker.NewJobQueue(mockRepo, "", nil)
 
 	job := jq.CreateJob([]string{"/path/to/test.mp4"})
 	job.MarkCompleted()
@@ -103,7 +103,7 @@ func TestDeleteJob_ReturnsErrorWhenDatabaseFails(t *testing.T) {
 }
 
 func TestDeleteJob_ReturnsErrorWhenJobNotFound(t *testing.T) {
-	jq := worker.NewJobQueue(nil, "")
+	jq := worker.NewJobQueue(nil, "", nil)
 
 	tmpDir := t.TempDir()
 
@@ -115,7 +115,7 @@ func TestDeleteJob_ReturnsErrorWhenJobNotFound(t *testing.T) {
 }
 
 func TestDeleteJob_ReturnsErrorWhenJobRunning(t *testing.T) {
-	jq := worker.NewJobQueue(nil, "")
+	jq := worker.NewJobQueue(nil, "", nil)
 
 	job := jq.CreateJob([]string{"/path/to/test.mp4"})
 	job.MarkStarted()

@@ -37,15 +37,17 @@ func TestNormalizeActressSortAndOrderClauses(t *testing.T) {
 		sortOrder   string
 		wantSortBy  string
 		wantOrder   string
+		wantErr     bool
 		wantClauses []string
 	}{
 		{
-			name:        "defaults to name asc",
+			name:        "invalid sort returns error",
 			sortBy:      "unknown",
 			sortOrder:   "desc",
-			wantSortBy:  "name",
-			wantOrder:   "asc",
-			wantClauses: []string{"last_name asc", "first_name asc", "japanese_name asc", "id asc"},
+			wantSortBy:  "",
+			wantOrder:   "",
+			wantErr:     true,
+			wantClauses: nil,
 		},
 		{
 			name:        "id sort",
@@ -111,11 +113,24 @@ func TestNormalizeActressSortAndOrderClauses(t *testing.T) {
 			wantOrder:   "asc",
 			wantClauses: []string{"last_name asc", "first_name asc", "japanese_name asc", "id asc"},
 		},
+		{
+			name:        "empty sort defaults to name asc",
+			sortBy:      "",
+			sortOrder:   "",
+			wantSortBy:  "name",
+			wantOrder:   "asc",
+			wantClauses: []string{"last_name asc", "first_name asc", "japanese_name asc", "id asc"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotSortBy, gotOrder := normalizeActressSort(tt.sortBy, tt.sortOrder)
+			gotSortBy, gotOrder, err := normalizeActressSort(tt.sortBy, tt.sortOrder)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
 			assert.Equal(t, tt.wantSortBy, gotSortBy)
 			assert.Equal(t, tt.wantOrder, gotOrder)
 			assert.Equal(t, tt.wantClauses, actressOrderClauses(gotSortBy, gotOrder))
@@ -293,15 +308,15 @@ func TestMoveMovieAssociations(t *testing.T) {
 
 	movie1 := createTestMovie("MV-ASSOC-001")
 	movie1.Actresses = []models.Actress{*source}
-	require.NoError(t, movieRepo.Upsert(movie1))
+	_, err := movieRepo.Upsert(movie1)
 
 	movie2 := createTestMovie("MV-ASSOC-002")
 	movie2.Actresses = []models.Actress{*source, *target}
-	require.NoError(t, movieRepo.Upsert(movie2))
+	_, err = movieRepo.Upsert(movie2)
 
 	movie3 := createTestMovie("MV-ASSOC-003")
 	movie3.Actresses = []models.Actress{*other}
-	require.NoError(t, movieRepo.Upsert(movie3))
+	_, err = movieRepo.Upsert(movie3)
 
 	updated, err := moveMovieAssociations(db.DB, source.ID, target.ID)
 	require.NoError(t, err)

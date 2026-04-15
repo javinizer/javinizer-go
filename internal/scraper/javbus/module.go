@@ -80,29 +80,16 @@ func (m *scraperModule) Defaults() any {
 	}
 }
 func (m *scraperModule) Priority() int { return 70 }
+func proxyAsConfig(p any) *config.ProxyConfig {
+	if p == nil {
+		return nil
+	}
+	return p.(*config.ProxyConfig)
+}
+
 func (m *scraperModule) FlattenFunc() any {
-	return scraperutil.FlattenFunc(func(cfg any) any {
-		c, ok := cfg.(scraperutil.ScraperConfigInterface)
-		if !ok {
-			return nil
-		}
-		proxy := c.GetProxy()
-		downloadProxy := c.GetDownloadProxy()
-		var proxyVal, downloadProxyVal *config.ProxyConfig
-		if proxy != nil {
-			proxyVal = proxy.(*config.ProxyConfig)
-		}
-		if downloadProxy != nil {
-			downloadProxyVal = downloadProxy.(*config.ProxyConfig)
-		}
-		return &config.ScraperSettings{
-			Enabled:       c.IsEnabled(),
-			Language:      "",
-			RateLimit:     c.GetRequestDelay(),
-			BaseURL:       "https://www.javbus.com",
-			Proxy:         proxyVal,
-			DownloadProxy: downloadProxyVal,
-		}
+	return scraperutil.DefaultFlattenConfig(scraperutil.FlattenOverrides{}, func(fc *scraperutil.FlattenedConfig, _ scraperutil.FlattenOverrides) any {
+		return &config.ScraperSettings{Enabled: fc.Enabled, Language: "", RateLimit: fc.RateLimit, BaseURL: "https://www.javbus.com", Proxy: proxyAsConfig(fc.Proxy), DownloadProxy: proxyAsConfig(fc.DownloadProxy)}
 	})
 }
 

@@ -21,11 +21,14 @@ type OrganizeStrategy struct {
 
 var _ OperationStrategy = (*OrganizeStrategy)(nil)
 
-func NewOrganizeStrategy(fs afero.Fs, cfg *config.OutputConfig) *OrganizeStrategy {
+func NewOrganizeStrategy(fs afero.Fs, cfg *config.OutputConfig, engine *template.Engine) *OrganizeStrategy {
+	if engine == nil {
+		engine = template.NewEngine()
+	}
 	return &OrganizeStrategy{
 		fs:              fs,
 		config:          cfg,
-		templateEngine:  template.NewEngine(),
+		templateEngine:  engine,
 		subtitleHandler: NewSubtitleHandler(fs, cfg),
 	}
 }

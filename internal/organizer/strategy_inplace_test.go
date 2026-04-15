@@ -17,7 +17,7 @@ func TestNewInPlaceStrategy(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m := &matcher.Matcher{}
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 	assert.NotNil(t, strategy)
 	assert.NotNil(t, strategy.fs)
 	assert.NotNil(t, strategy.config)
@@ -29,7 +29,7 @@ func TestInPlaceStrategy_ImplementsInterface(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m := &matcher.Matcher{}
-	var _ OperationStrategy = NewInPlaceStrategy(fs, cfg, m)
+	var _ OperationStrategy = NewInPlaceStrategy(fs, cfg, m, nil)
 }
 
 func TestInPlaceStrategy_isDedicatedFolder(t *testing.T) {
@@ -39,7 +39,7 @@ func TestInPlaceStrategy_isDedicatedFolder(t *testing.T) {
 	}
 	m, err := matcher.NewMatcher(&config.MatchingConfig{})
 	require.NoError(t, err)
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/ABC-123", 0777)
 	_ = afero.WriteFile(fs, "/source/ABC-123/ABC-123.mp4", []byte("video1"), 0644)
@@ -54,7 +54,7 @@ func TestInPlaceStrategy_isDedicatedFolder_MixedIDs(t *testing.T) {
 	cfg := &config.OutputConfig{}
 	m, err := matcher.NewMatcher(&config.MatchingConfig{})
 	require.NoError(t, err)
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/mixed", 0777)
 	_ = afero.WriteFile(fs, "/source/mixed/ABC-123.mp4", []byte("video1"), 0644)
@@ -69,7 +69,7 @@ func TestInPlaceStrategy_isDedicatedFolder_NoVideos(t *testing.T) {
 	cfg := &config.OutputConfig{}
 	m, err := matcher.NewMatcher(&config.MatchingConfig{})
 	require.NoError(t, err)
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/empty", 0777)
 	_ = afero.WriteFile(fs, "/source/empty/readme.txt", []byte("text"), 0644)
@@ -87,7 +87,7 @@ func TestInPlaceStrategy_Plan_DedicatedFolder(t *testing.T) {
 	}
 	m, err := matcher.NewMatcher(&config.MatchingConfig{})
 	require.NoError(t, err)
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/old-name", 0777)
 	_ = afero.WriteFile(fs, "/source/old-name/ABC-123.mp4", []byte("video"), 0644)
@@ -123,7 +123,7 @@ func TestInPlaceStrategy_Plan_FolderAlreadyCorrect(t *testing.T) {
 	}
 	m, err := matcher.NewMatcher(&config.MatchingConfig{})
 	require.NoError(t, err)
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/ABC-123", 0777)
 	_ = afero.WriteFile(fs, "/source/ABC-123/ABC-123.mp4", []byte("video"), 0644)
@@ -155,7 +155,7 @@ func TestInPlaceStrategy_Plan_NotDedicated(t *testing.T) {
 	}
 	m, err := matcher.NewMatcher(&config.MatchingConfig{})
 	require.NoError(t, err)
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/mixed", 0777)
 	_ = afero.WriteFile(fs, "/source/mixed/ABC-123.mp4", []byte("video1"), 0644)
@@ -183,7 +183,7 @@ func TestInPlaceStrategy_Execute(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/old-folder", 0777)
 	_ = afero.WriteFile(fs, "/source/old-folder/ABC-123.mp4", []byte("video"), 0644)
@@ -216,7 +216,7 @@ func TestInPlaceStrategy_Execute_RenameFile(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/old-folder", 0777)
 	_ = afero.WriteFile(fs, "/source/old-folder/old-name.mp4", []byte("video"), 0644)
@@ -244,7 +244,7 @@ func TestInPlaceStrategy_Execute_NoRenameNeeded(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/old-folder", 0777)
 	_ = afero.WriteFile(fs, "/source/old-folder/ABC-123.mp4", []byte("video"), 0644)
@@ -275,7 +275,7 @@ func TestInPlaceStrategy_Plan_MaxPathLength(t *testing.T) {
 		MaxPathLength: 50,
 	}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/ABC-123", 0777)
 	_ = afero.WriteFile(fs, "/source/ABC-123/ABC-123.mp4", []byte("video"), 0644)
@@ -305,7 +305,7 @@ func TestInPlaceStrategy_Plan_MatcherNotSet(t *testing.T) {
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewInPlaceStrategy(fs, cfg, nil)
+	strategy := NewInPlaceStrategy(fs, cfg, nil, nil)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -332,7 +332,7 @@ func TestInPlaceStrategy_Plan_ForceUpdate(t *testing.T) {
 		RenameFile:   true,
 	}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/ABC-123", 0777)
 	_ = afero.WriteFile(fs, "/source/ABC-123/ABC-123.mp4", []byte("video"), 0644)
@@ -358,7 +358,7 @@ func TestInPlaceStrategy_Execute_Conflict(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: "/source/old-folder/ABC-123.mp4",
@@ -380,7 +380,7 @@ func TestInPlaceStrategy_Execute_NoInPlace(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: "/source/ABC-123.mp4",
@@ -402,7 +402,7 @@ func TestInPlaceStrategy_Execute_DirRenameError(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: "/source/nonexistent-dir/ABC-123.mp4",
@@ -425,7 +425,7 @@ func TestInPlaceStrategy_Execute_FileRenameAfterDirRename(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceStrategy(fs, cfg, m)
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/old-folder", 0777)
 	_ = afero.WriteFile(fs, "/source/old-folder/old-name.mp4", []byte("video"), 0644)

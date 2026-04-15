@@ -95,6 +95,8 @@ definitions:
         type: integer
       operation_mode_override:
         type: string
+      persist_error:
+        type: string
       progress:
         type: number
       results:
@@ -109,49 +111,6 @@ definitions:
         type: string
       total_files:
         type: integer
-    type: object
-  batch.BatchRescrapeRequest:
-    properties:
-      array_strategy:
-        description: 'For Update mode: merge, replace'
-        example: merge
-        type: string
-      force:
-        example: false
-        type: boolean
-      manual_search_input:
-        example: IPX-535
-        type: string
-      preset:
-        description: 'Merge strategy preset: conservative, gap-fill, aggressive (overrides
-          scalar/array strategies)'
-        example: conservative
-        type: string
-      scalar_strategy:
-        description: 'For Update mode: prefer-nfo, prefer-scraper, preserve-existing,
-          fill-missing-only'
-        example: prefer-nfo
-        type: string
-      selected_scrapers:
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-    type: object
-  batch.BatchRescrapeResponse:
-    properties:
-      actress_sources:
-        additionalProperties:
-          type: string
-        type: object
-      field_sources:
-        additionalProperties:
-          type: string
-        type: object
-      movie:
-        $ref: '#/definitions/models.Movie'
     type: object
   batch.BatchScrapeRequest:
     properties:
@@ -778,6 +737,11 @@ definitions:
       username:
         type: string
     type: object
+  config.RateLimitConfig:
+    properties:
+      requests_per_minute:
+        type: integer
+    type: object
   config.ScrapersConfig:
     properties:
       browser:
@@ -816,38 +780,35 @@ definitions:
   config.SecurityConfig:
     properties:
       allow_unc:
-        description: Allow UNC paths (Windows only). UNC paths can leak NTLM credentials
-          to remote servers.
         type: boolean
       allowed_directories:
-        description: Allowed directories for scanning/browsing (empty = no allowlist
-          restriction)
         items:
           type: string
         type: array
       allowed_origins:
-        description: Allowed origins for CORS and WebSocket connections (empty = same-origin
-          only, "*" = allow all)
         items:
           type: string
         type: array
       allowed_unc_servers:
-        description: Allowed UNC servers (Windows only). Only used if AllowUNC is
-          true.
         items:
           type: string
         type: array
       denied_directories:
-        description: Denied directories (in addition to built-in system directories)
         items:
           type: string
         type: array
+      force_secure_cookies:
+        type: boolean
       max_files_per_scan:
-        description: Maximum number of files to return in a scan
         type: integer
+      rate_limit:
+        $ref: '#/definitions/config.RateLimitConfig'
       scan_timeout_seconds:
-        description: Timeout for scan operations in seconds
         type: integer
+      trusted_proxies:
+        items:
+          type: string
+        type: array
     type: object
   config.ServerConfig:
     properties:
@@ -2415,51 +2376,6 @@ paths:
       summary: Preview organize output
       tags:
       - web
-  /api/v1/batch/{id}/movies/{movieId}/rescrape:
-    post:
-      consumes:
-      - application/json
-      description: Rescrape a movie with custom scrapers or manual search input, and
-        regenerate temp poster
-      parameters:
-      - description: Batch Job ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Movie ID to rescrape
-        in: path
-        name: movieId
-        required: true
-        type: string
-      - description: Rescrape options
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/batch.BatchRescrapeRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/batch.BatchRescrapeResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/batch.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/batch.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/batch.ErrorResponse'
-      summary: Rescrape a single movie within a batch job
-      tags:
-      - batch
   /api/v1/batch/{id}/organize:
     post:
       consumes:

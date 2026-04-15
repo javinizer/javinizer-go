@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
 )
 
@@ -183,7 +184,7 @@ func serveTempImage(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 		defer func() {
-			_ = resp.Body.Close()
+			_ = httpclient.DrainAndClose(resp.Body)
 		}()
 
 		if resp.StatusCode != http.StatusOK {

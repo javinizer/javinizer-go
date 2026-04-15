@@ -27,7 +27,7 @@ func TestIsDedicatedFolder(t *testing.T) {
 	}
 
 	orgCfg := &config.OutputConfig{}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 
 	tests := []struct {
 		name           string
@@ -188,7 +188,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 				FolderFormat:        "<ID> [<STUDIO>] - <TITLE>",
 				FileFormat:          "<ID>",
 			}
-			o := NewOrganizer(afero.NewOsFs(), orgCfg)
+			o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 			o.SetMatcher(m)
 
 			sourceDir := filepath.Join(tmpDir, tt.sourceFolder)
@@ -271,7 +271,7 @@ func TestExecute_InPlaceRename(t *testing.T) {
 		FolderFormat:        "<ID> [<STUDIO>] - <TITLE>",
 		FileFormat:          "<ID>",
 	}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 	o.SetMatcher(m)
 
 	// Create source directory and file
@@ -369,7 +369,7 @@ func TestExecute_InPlaceMultiPart(t *testing.T) {
 		FolderFormat:        "<ID>",
 		FileFormat:          "<ID>",
 	}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 	o.SetMatcher(m)
 
 	// Create source directory with multi-part files
@@ -505,7 +505,7 @@ func TestExecute_InPlaceWithSubtitles(t *testing.T) {
 		MoveSubtitles:       true,
 		SubtitleExtensions:  []string{".srt", ".ass"},
 	}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 	o.SetMatcher(m)
 
 	// Create source directory with video and subtitle files
@@ -612,7 +612,7 @@ func TestExecute_InPlaceDryRun(t *testing.T) {
 		FolderFormat:        "<ID>",
 		FileFormat:          "<ID>",
 	}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 	o.SetMatcher(m)
 
 	// Create source directory and file
@@ -701,7 +701,7 @@ func TestPlan_InPlaceTruncation_UsesSourceParent(t *testing.T) {
 		FileFormat:          "<ID>",
 		MaxPathLength:       maxPathLen,
 	}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 	o.SetMatcher(m)
 
 	match := matcher.MatchResult{
@@ -796,7 +796,7 @@ func TestExecute_CaseOnlyDirectoryRename(t *testing.T) {
 		FileFormat:          "<ID>",
 		RenameFile:          true,
 	}
-	o := NewOrganizer(afero.NewOsFs(), cfg)
+	o := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	o.SetMatcher(m)
 
 	match := matcher.MatchResult{

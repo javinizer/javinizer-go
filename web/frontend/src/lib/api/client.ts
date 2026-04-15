@@ -49,6 +49,9 @@ import type {
 	ActressMergePreviewResponse,
 	ActressMergeRequest,
 	ActressMergeResponse,
+	GenreReplacement,
+	GenreReplacementListResponse,
+	GenreReplacementCreateRequest,
 	AuthCredentialsRequest,
 	AuthStatusResponse,
 	EventListResponse,
@@ -175,8 +178,9 @@ class APIClient {
 	}
 
 	// Get batch job status
-	async getBatchJob(jobId: string): Promise<BatchJobResponse> {
-		return this.request<BatchJobResponse>(`/api/v1/batch/${jobId}`);
+	async getBatchJob(jobId: string, includeData = false): Promise<BatchJobResponse> {
+		const params = includeData ? '?include_data=true' : '';
+		return this.request<BatchJobResponse>(`/api/v1/batch/${jobId}${params}`);
 	}
 
 	// Cancel batch job
@@ -384,6 +388,31 @@ class APIClient {
 			method: 'POST',
 			body: JSON.stringify(request)
 		});
+	}
+
+	// List genre replacements with pagination
+	async listGenreReplacements(params?: { limit?: number; offset?: number }): Promise<GenreReplacementListResponse> {
+		const queryParams = new URLSearchParams();
+		if (params?.limit) queryParams.set('limit', params.limit.toString());
+		if (params?.offset) queryParams.set('offset', params.offset.toString());
+		const query = queryParams.toString() ? `?${queryParams}` : '';
+		return this.request<GenreReplacementListResponse>(`/api/v1/genres/replacements${query}`);
+	}
+
+	// Create a genre replacement (idempotent — returns existing if original already exists)
+	async createGenreReplacement(request: GenreReplacementCreateRequest): Promise<GenreReplacement> {
+		return this.request<GenreReplacement>('/api/v1/genres/replacements', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		});
+	}
+
+	// Delete a genre replacement by original genre name
+	async deleteGenreReplacement(original: string): Promise<{ message: string; original: string }> {
+		await this.request(`/api/v1/genres/replacements/${encodeURIComponent(original)}`, {
+			method: 'DELETE'
+		});
+		return { message: 'deleted', original };
 	}
 
 	// Get history records with optional filtering

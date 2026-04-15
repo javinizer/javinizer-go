@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/javinizer/javinizer-go/internal/types"
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -51,8 +52,11 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 	}
 	effectiveMode := outputConfig.GetOperationMode()
 
+	// Create a single shared template engine for all strategies and components
+	sharedEngine := template.NewEngine()
+
 	// Initialize organizer, downloader, NFO generator, and history logger
-	org := organizer.NewOrganizer(afero.NewOsFs(), &outputConfig)
+	org := organizer.NewOrganizer(afero.NewOsFs(), &outputConfig, sharedEngine)
 	fileMatcher, err := matcher.NewMatcher(&cfg.Matching)
 	if err != nil {
 		logging.Warnf("Failed to create matcher: %v (in-place rename disabled for this job)", err)
@@ -65,30 +69,28 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 	fs := afero.NewOsFs()
 	switch effectiveMode {
 	case types.OperationModeOrganize:
-		strategy = organizer.NewOrganizeStrategy(fs, &outputConfig)
+		strategy = organizer.NewOrganizeStrategy(fs, &outputConfig, sharedEngine)
 	case types.OperationModeInPlace:
 		if fileMatcher != nil {
-			strategy = organizer.NewInPlaceStrategy(fs, &outputConfig, fileMatcher)
+			strategy = organizer.NewInPlaceStrategy(fs, &outputConfig, fileMatcher, sharedEngine)
 		} else {
 			logging.Warnf("No matcher available for in-place mode, falling back to organize")
-			strategy = organizer.NewOrganizeStrategy(fs, &outputConfig)
+			strategy = organizer.NewOrganizeStrategy(fs, &outputConfig, sharedEngine)
 		}
 	case types.OperationModeInPlaceNoRenameFolder:
 		if fileMatcher != nil {
-			strategy = organizer.NewInPlaceNoRenameFolderStrategy(fs, &outputConfig, fileMatcher)
+			strategy = organizer.NewInPlaceNoRenameFolderStrategy(fs, &outputConfig, fileMatcher, sharedEngine)
 		} else {
 			logging.Warnf("No matcher available for in-place-norenamefolder mode, falling back to organize")
-			strategy = organizer.NewOrganizeStrategy(fs, &outputConfig)
+			strategy = organizer.NewOrganizeStrategy(fs, &outputConfig, sharedEngine)
 		}
 	case types.OperationModeMetadataOnly:
 		strategy = organizer.NewMetadataOnlyStrategy(fs, &outputConfig)
 	case types.OperationModePreview:
-		// Preview mode wraps organize strategy — shouldn't reach here in organize job
-		// but handle gracefully by falling back to organize
 		logging.Warnf("Preview mode reached in organize job, falling back to organize")
-		strategy = organizer.NewOrganizeStrategy(fs, &outputConfig)
+		strategy = organizer.NewOrganizeStrategy(fs, &outputConfig, sharedEngine)
 	default:
-		strategy = organizer.NewOrganizeStrategy(fs, &outputConfig)
+		strategy = organizer.NewOrganizeStrategy(fs, &outputConfig, sharedEngine)
 	}
 
 	historyLogger := history.NewLogger(db)
@@ -133,7 +135,7 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 		}
 		return
 	}
-	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, "Javinizer/1.0", cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
+	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, "Javinizer/1.0", cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder, sharedEngine)
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfo.ConfigFromAppConfig(&cfg.Metadata.NFO, &cfg.Output, &cfg.Metadata, db))
 
 	// Broadcast organization started

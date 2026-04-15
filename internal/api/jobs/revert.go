@@ -8,10 +8,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"gorm.io/gorm"
 )
 
 // revertBatch godoc
@@ -40,7 +40,7 @@ func revertBatch(deps *ServerDependencies) gin.HandlerFunc {
 		// Load job from DB — 404 if not found
 		job, err := deps.JobRepo.FindByID(jobID)
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			if database.IsNotFound(err) {
 				c.JSON(http.StatusNotFound, ErrorResponse{Error: "Job not found"})
 				return
 			}
@@ -155,7 +155,7 @@ func revertOperation(deps *ServerDependencies) gin.HandlerFunc {
 		// Load job from DB — 404 if not found
 		job, err := deps.JobRepo.FindByID(jobID)
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			if database.IsNotFound(err) {
 				c.JSON(http.StatusNotFound, ErrorResponse{Error: "Job not found"})
 				return
 			}

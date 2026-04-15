@@ -62,7 +62,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		job.MarkFailed()
 		return
 	}
-	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder)
+	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder, nil)
 
 	// Broadcast update started
 	broadcastProgress(&ws.ProgressMessage{
@@ -130,6 +130,19 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 			return
 		default:
 		}
+
+		fileTimeout := 120 * time.Second
+		if cfg.Performance.WorkerTimeout > 0 && len(status.Results) > 0 {
+			fileTimeout = time.Duration(cfg.Performance.WorkerTimeout/len(status.Results)+1) * time.Second
+			if fileTimeout < 30*time.Second {
+				fileTimeout = 30 * time.Second
+			}
+			if fileTimeout > 600*time.Second {
+				fileTimeout = 600 * time.Second
+			}
+		}
+		fileCtx, fileCancel := context.WithTimeout(ctx, fileTimeout)
+		defer fileCancel()
 
 		// Skip files that failed during scraping
 		if fileResult.Status != worker.JobStatusCompleted || fileResult.Data == nil {
@@ -234,7 +247,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 					} else if cfg.Metadata.NFO.DisplayTitle != "" {
 						displayTmplCtx := template.NewContextFromMovie(movieToWrite)
 						displayEngine := template.NewEngine()
-						if displayName, err := displayEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, displayTmplCtx); err == nil {
+						if displayName, err := displayEngine.ExecuteWithContext(fileCtx, cfg.Metadata.NFO.DisplayTitle, displayTmplCtx); err == nil {
 							movieToWrite.DisplayTitle = displayName
 						} else {
 							movieToWrite.DisplayTitle = movieToWrite.Title
@@ -323,7 +336,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		// Download all media files to source directory
 		// Use movieToWrite (merged) to include NFO data in downloads
 		// Reuse multipart info created earlier for template rendering
-		results, err := dl.DownloadAll(ctx, movieToWrite, sourceDir, multipart)
+		results, err := dl.DownloadAll(fileCtx, movieToWrite, sourceDir, multipart)
 		if err != nil {
 			logging.Warnf("Failed to download media for %s: %v", movie.ID, err)
 			hasErrors = true
@@ -390,6 +403,15 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		// Broadcast progress with error status if errors occurred
 		if hasErrors {
 			failedFiles++
+			_ = job.AtomicUpdateFileResult(filePath, func(fr *worker.FileResult) (*worker.FileResult, error) {
+				fr.Status = worker.JobStatusCompleted
+				if fr.Error == "" {
+					fr.Error = errorMsg
+				} else {
+					fr.Error = fr.Error + "; " + errorMsg
+				}
+				return fr, nil
+			})
 			broadcastProgress(&ws.ProgressMessage{
 				JobID:    job.ID,
 				FilePath: filePath,

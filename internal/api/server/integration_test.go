@@ -147,7 +147,7 @@ func setupTestServer(t *testing.T) (*gin.Engine, *ServerDependencies) {
 		MovieRepo:   database.NewMovieRepository(db),
 		ActressRepo: database.NewActressRepository(db),
 		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, ""),
+		JobQueue:    worker.NewJobQueue(nil, "", nil),
 	}
 
 	// Initialize atomic config pointer

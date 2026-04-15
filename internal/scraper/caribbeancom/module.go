@@ -74,28 +74,16 @@ func (m *scraperModule) Defaults() any {
 	}
 }
 func (m *scraperModule) Priority() int { return 40 }
+func proxyAsConfig(p any) *config.ProxyConfig {
+	if p == nil {
+		return nil
+	}
+	return p.(*config.ProxyConfig)
+}
+
 func (m *scraperModule) FlattenFunc() any {
-	return scraperutil.FlattenFunc(func(cfg any) any {
-		c, ok := cfg.(scraperutil.ScraperConfigInterface)
-		if !ok {
-			return nil
-		}
-		proxy := c.GetProxy()
-		downloadProxy := c.GetDownloadProxy()
-		var proxyVal, downloadProxyVal *config.ProxyConfig
-		if proxy != nil {
-			proxyVal = proxy.(*config.ProxyConfig)
-		}
-		if downloadProxy != nil {
-			downloadProxyVal = downloadProxy.(*config.ProxyConfig)
-		}
-		return &config.ScraperSettings{
-			Enabled:       c.IsEnabled(),
-			RateLimit:     c.GetRequestDelay(),
-			BaseURL:       "https://www.caribbeancom.com",
-			Proxy:         proxyVal,
-			DownloadProxy: downloadProxyVal,
-		}
+	return scraperutil.DefaultFlattenConfig(scraperutil.FlattenOverrides{BaseURL: "https://www.caribbeancom.com"}, func(fc *scraperutil.FlattenedConfig, o scraperutil.FlattenOverrides) any {
+		return &config.ScraperSettings{Enabled: fc.Enabled, RateLimit: fc.RateLimit, BaseURL: o.BaseURL, Proxy: proxyAsConfig(fc.Proxy), DownloadProxy: proxyAsConfig(fc.DownloadProxy)}
 	})
 }
 

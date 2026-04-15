@@ -3,13 +3,14 @@ package imageutil
 import (
 	"fmt"
 	"image"
-	_ "image/jpeg" // Register JPEG decoder
-	_ "image/png"  // Register PNG decoder
+	_ "image/jpeg"
+	_ "image/png"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
@@ -124,7 +125,7 @@ func getImageDimensions(url string, client *http.Client) (width, height int, err
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to fetch image: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = httpclient.DrainAndClose(resp.Body) }()
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, 0, fmt.Errorf("image not found (status %d)", resp.StatusCode)

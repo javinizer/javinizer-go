@@ -16,6 +16,29 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scanner"
 )
 
+// BatchScrapeOptions encapsulates all parameters for creating a BatchScrapeTask.
+type BatchScrapeOptions struct {
+	TaskID            string
+	FilePath          string
+	FileIndex         int
+	Job               *BatchJob
+	Registry          *models.ScraperRegistry
+	Aggregator        *aggregator.Aggregator
+	MovieRepo         *database.MovieRepository
+	Matcher           *matcher.Matcher
+	ProgressTracker   *ProgressTracker
+	Force             bool
+	UpdateMode        bool
+	SelectedScrapers  []string
+	HTTPClient        httpclientiface.HTTPClient
+	UserAgent         string
+	Referer           string
+	ProcessedMovieIDs map[string]bool
+	Cfg               *config.Config
+	ScalarStrategy    string
+	ArrayStrategy     string
+}
+
 // BatchScrapeTask represents a task for scraping metadata for a single file in a batch operation
 type BatchScrapeTask struct {
 	BaseTask
@@ -28,65 +51,45 @@ type BatchScrapeTask struct {
 	matcher           *matcher.Matcher
 	progressTracker   *ProgressTracker
 	force             bool
-	updateMode        bool     // If true, merge with existing NFO data
-	selectedScrapers  []string // empty = use default
+	updateMode        bool
+	selectedScrapers  []string
 	httpClient        httpclientiface.HTTPClient
 	userAgent         string
 	referer           string
-	processedMovieIDs map[string]bool // Thread-safe tracking of processed movie IDs for poster deduplication
-	cfg               *config.Config  // Config for NFO path construction
-	scalarStrategy    string          // Scalar field strategy for updateMode: prefer-nfo, prefer-scraper
-	arrayStrategy     string          // Array field strategy for updateMode: merge, replace
+	processedMovieIDs map[string]bool
+	cfg               *config.Config
+	scalarStrategy    string
+	arrayStrategy     string
 }
 
 // NewBatchScrapeTask creates a new batch scrape task
-func NewBatchScrapeTask(
-	taskID string,
-	filePath string,
-	fileIndex int,
-	job *BatchJob,
-	registry *models.ScraperRegistry,
-	agg *aggregator.Aggregator,
-	movieRepo *database.MovieRepository,
-	mat *matcher.Matcher,
-	progressTracker *ProgressTracker,
-	force bool,
-	updateMode bool,
-	selectedScrapers []string,
-	httpClient httpclientiface.HTTPClient,
-	userAgent string,
-	referer string,
-	processedMovieIDs map[string]bool,
-	cfg *config.Config,
-	scalarStrategy string,
-	arrayStrategy string,
-) *BatchScrapeTask {
-	desc := fmt.Sprintf("Scraping metadata for %s", filepath.Base(filePath))
+func NewBatchScrapeTask(opts *BatchScrapeOptions) *BatchScrapeTask {
+	desc := fmt.Sprintf("Scraping metadata for %s", filepath.Base(opts.FilePath))
 
 	return &BatchScrapeTask{
 		BaseTask: BaseTask{
-			id:          taskID,
+			id:          opts.TaskID,
 			taskType:    TaskTypeBatchScrape,
 			description: desc,
 		},
-		filePath:          filePath,
-		fileIndex:         fileIndex,
-		job:               job,
-		registry:          registry,
-		aggregator:        agg,
-		movieRepo:         movieRepo,
-		matcher:           mat,
-		progressTracker:   progressTracker,
-		force:             force,
-		updateMode:        updateMode,
-		selectedScrapers:  selectedScrapers,
-		httpClient:        httpClient,
-		userAgent:         userAgent,
-		referer:           referer,
-		processedMovieIDs: processedMovieIDs,
-		cfg:               cfg,
-		scalarStrategy:    scalarStrategy,
-		arrayStrategy:     arrayStrategy,
+		filePath:          opts.FilePath,
+		fileIndex:         opts.FileIndex,
+		job:               opts.Job,
+		registry:          opts.Registry,
+		aggregator:        opts.Aggregator,
+		movieRepo:         opts.MovieRepo,
+		matcher:           opts.Matcher,
+		progressTracker:   opts.ProgressTracker,
+		force:             opts.Force,
+		updateMode:        opts.UpdateMode,
+		selectedScrapers:  opts.SelectedScrapers,
+		httpClient:        opts.HTTPClient,
+		userAgent:         opts.UserAgent,
+		referer:           opts.Referer,
+		processedMovieIDs: opts.ProcessedMovieIDs,
+		cfg:               opts.Cfg,
+		scalarStrategy:    opts.ScalarStrategy,
+		arrayStrategy:     opts.ArrayStrategy,
 	}
 }
 

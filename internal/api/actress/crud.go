@@ -2,6 +2,7 @@ package actress
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -68,7 +69,7 @@ func parsePagination(c *gin.Context) (int, int) {
 	return limit, offset
 }
 
-func parseSort(c *gin.Context) (string, string) {
+func parseSort(c *gin.Context) (string, string, error) {
 	sortBy := strings.TrimSpace(strings.ToLower(c.Query("sort_by")))
 	sortOrder := strings.TrimSpace(strings.ToLower(c.Query("sort_order")))
 
@@ -78,7 +79,19 @@ func parseSort(c *gin.Context) (string, string) {
 	if sortOrder == "" {
 		sortOrder = "asc"
 	}
-	return sortBy, sortOrder
+
+	validSortColumns := map[string]bool{
+		"id": true, "dmm_id": true, "japanese_name": true,
+		"first_name": true, "last_name": true,
+		"created_at": true, "updated_at": true, "name": true,
+	}
+	if !validSortColumns[sortBy] {
+		return "", "", fmt.Errorf("invalid sort_by value: %q", sortBy)
+	}
+	if sortOrder != "asc" && sortOrder != "desc" {
+		return "", "", fmt.Errorf("invalid sort_order value: %q", sortOrder)
+	}
+	return sortBy, sortOrder, nil
 }
 
 func parseActressID(c *gin.Context) (uint, bool) {
@@ -95,11 +108,14 @@ func listActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit, offset := parsePagination(c)
 		query := strings.TrimSpace(c.Query("q"))
-		sortBy, sortOrder := parseSort(c)
+		sortBy, sortOrder, err := parseSort(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			return
+		}
 
 		var actresses []models.Actress
 		var total int64
-		var err error
 
 		if query == "" {
 			total, err = actressRepo.Count()

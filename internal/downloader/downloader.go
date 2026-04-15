@@ -262,21 +262,24 @@ func (c *adaptiveDownloaderHTTPClient) getOrCreateProxyClient(proxyProfile *conf
 }
 
 // NewDownloader creates a new media downloader
-func NewDownloader(client httpclient.HTTPClient, fs afero.Fs, cfg *config.OutputConfig, userAgent string) *Downloader {
+func NewDownloader(client httpclient.HTTPClient, fs afero.Fs, cfg *config.OutputConfig, userAgent string, engine *template.Engine) *Downloader {
+	if engine == nil {
+		engine = template.NewEngine()
+	}
 	return &Downloader{
 		fs:                  fs,
 		config:              cfg,
 		httpClient:          client,
 		userAgent:           userAgent,
-		actorJapaneseNames:  false, // Default: use English names
-		actorFirstNameOrder: true,  // Default: FirstName LastName
-		templateEngine:      template.NewEngine(),
+		actorJapaneseNames:  false,
+		actorFirstNameOrder: true,
+		templateEngine:      engine,
 	}
 }
 
 // NewDownloaderWithNFOConfig creates a new media downloader with NFO config for actress name formatting
-func NewDownloaderWithNFOConfig(client httpclient.HTTPClient, fs afero.Fs, cfg *config.OutputConfig, userAgent string, actorJapaneseNames, actorFirstNameOrder bool) *Downloader {
-	d := NewDownloader(client, fs, cfg, userAgent)
+func NewDownloaderWithNFOConfig(client httpclient.HTTPClient, fs afero.Fs, cfg *config.OutputConfig, userAgent string, actorJapaneseNames, actorFirstNameOrder bool, engine *template.Engine) *Downloader {
+	d := NewDownloader(client, fs, cfg, userAgent, engine)
 	d.actorJapaneseNames = actorJapaneseNames
 	d.actorFirstNameOrder = actorFirstNameOrder
 	return d
@@ -579,21 +582,34 @@ func (d *Downloader) DownloadAll(ctx context.Context, movie *models.Movie, destD
 	// the same filename for different parts, the file won't be re-downloaded.
 	// If templates use <IF:MULTIPART> or <PART>, each part gets its own file.
 	if coverResult, _ := d.DownloadCover(ctx, movie, destDir, multipart); coverResult != nil {
+		if coverResult.Error != nil {
+			logging.Warnf("DownloadAll: cover download failed for %s: %v", movie.ID, coverResult.Error)
+		}
 		results = append(results, *coverResult)
 	}
 
 	// Download poster
 	if posterResult, _ := d.DownloadPoster(ctx, movie, destDir, multipart); posterResult != nil {
+		if posterResult.Error != nil {
+			logging.Warnf("DownloadAll: poster download failed for %s: %v", movie.ID, posterResult.Error)
+		}
 		results = append(results, *posterResult)
 	}
 
 	// Download extrafanart (screenshots)
-	if extrafanart, err := d.DownloadExtrafanart(ctx, movie, destDir, multipart); err == nil {
-		results = append(results, extrafanart...)
+	extrafanart, _ := d.DownloadExtrafanart(ctx, movie, destDir, multipart)
+	for i := range extrafanart {
+		if extrafanart[i].Error != nil {
+			logging.Warnf("DownloadAll: extrafanart[%d] download failed for %s: %v", i, movie.ID, extrafanart[i].Error)
+		}
 	}
+	results = append(results, extrafanart...)
 
 	// Download trailer
 	if trailerResult, _ := d.DownloadTrailer(ctx, movie, destDir, multipart); trailerResult != nil {
+		if trailerResult.Error != nil {
+			logging.Warnf("DownloadAll: trailer download failed for %s: %v", movie.ID, trailerResult.Error)
+		}
 		results = append(results, *trailerResult)
 	}
 
@@ -604,9 +620,13 @@ func (d *Downloader) DownloadAll(ctx context.Context, movie *models.Movie, destD
 		partNumber = multipart.PartNumber
 	}
 	if partNumber == 0 || partNumber == 1 {
-		if actresses, err := d.DownloadActressImages(ctx, movie, destDir); err == nil {
-			results = append(results, actresses...)
+		actresses, _ := d.DownloadActressImages(ctx, movie, destDir)
+		for i := range actresses {
+			if actresses[i].Error != nil {
+				logging.Warnf("DownloadAll: actress image download failed for %s: %v", movie.ID, actresses[i].Error)
+			}
 		}
+		results = append(results, actresses...)
 	}
 
 	return results, nil
@@ -672,7 +692,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		_ = httpclient.DrainAndClose(resp.Body)
 	}()
 
 	// Check status code
@@ -830,7 +850,7 @@ func (d *Downloader) downloadSimple(ctx context.Context, url, destPath string) e
 		return fmt.Errorf("failed to download: %w", err)
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		_ = httpclient.DrainAndClose(resp.Body)
 	}()
 
 	// Check status code and return status error

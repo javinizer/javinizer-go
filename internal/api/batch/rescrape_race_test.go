@@ -54,6 +54,7 @@ func setJobDeleted(job *worker.BatchJob, deleted bool) {
 		MoveToFolderOverride        *bool
 		RenameFolderInPlaceOverride *bool
 		OperationModeOverride       string
+		PersistError                string
 		CancelFunc                  context.CancelFunc
 		Done                        chan struct{}
 		Mu                          sync.RWMutex

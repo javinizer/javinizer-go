@@ -58,10 +58,11 @@ func TestScrapeMovie(t *testing.T) {
 				ID: "IPX-535",
 			},
 			setupData: func(t *testing.T, repo *database.MovieRepository) {
-				require.NoError(t, repo.Upsert(&models.Movie{
+				_, err := repo.Upsert(&models.Movie{
 					ID:    "IPX-535",
 					Title: "Cached Movie",
-				}))
+				})
+				require.NoError(t, err)
 			},
 			setupScraper:   func(registry *models.ScraperRegistry) {},
 			expectedStatus: 200,
@@ -150,10 +151,11 @@ func TestGetMovie(t *testing.T) {
 			name:    "get existing movie",
 			movieID: "IPX-535",
 			setupData: func(t *testing.T, repo *database.MovieRepository) {
-				require.NoError(t, repo.Upsert(&models.Movie{
+				_, err := repo.Upsert(&models.Movie{
 					ID:    "IPX-535",
 					Title: "Test Movie",
-				}))
+				})
+				require.NoError(t, err)
 			},
 			expectedStatus: 200,
 			validateFn: func(t *testing.T, resp *MovieResponse) {
@@ -205,8 +207,10 @@ func TestListMovies(t *testing.T) {
 		{
 			name: "list multiple movies",
 			setupData: func(t *testing.T, repo *database.MovieRepository) {
-				require.NoError(t, repo.Upsert(&models.Movie{ContentID: "ipx535", ID: "IPX-535", Title: "Movie 1"}))
-				require.NoError(t, repo.Upsert(&models.Movie{ContentID: "abc123", ID: "ABC-123", Title: "Movie 2"}))
+				_, err := repo.Upsert(&models.Movie{ContentID: "ipx535", ID: "IPX-535", Title: "Movie 1"})
+				require.NoError(t, err)
+				_, err = repo.Upsert(&models.Movie{ContentID: "abc123", ID: "ABC-123", Title: "Movie 2"})
+				require.NoError(t, err)
 			},
 			expectedStatus: 200,
 			validateFn: func(t *testing.T, resp *MoviesResponse) {

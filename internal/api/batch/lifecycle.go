@@ -82,7 +82,27 @@ func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		// Start processing in background - use getters for thread-safe access
-		go processBatchJob(job, deps.JobQueue, deps.GetRegistry(), deps.GetAggregator(), deps.MovieRepo, deps.GetMatcher(), req.Strict, req.Force, req.Update, req.Destination, deps.GetConfig(), req.SelectedScrapers, req.ScalarStrategy, req.ArrayStrategy, deps.DB, req.MoveToFolder, req.RenameFolderInPlace, req.OperationMode, deps.EventEmitter)
+		go processBatchJob(&BatchProcessOptions{
+			Job:                         job,
+			JobQueue:                    deps.JobQueue,
+			Registry:                    deps.GetRegistry(),
+			Aggregator:                  deps.GetAggregator(),
+			MovieRepo:                   deps.MovieRepo,
+			Matcher:                     deps.GetMatcher(),
+			Strict:                      req.Strict,
+			Force:                       req.Force,
+			UpdateMode:                  req.Update,
+			Destination:                 req.Destination,
+			Cfg:                         deps.GetConfig(),
+			SelectedScrapers:            req.SelectedScrapers,
+			ScalarStrategy:              req.ScalarStrategy,
+			ArrayStrategy:               req.ArrayStrategy,
+			DB:                          deps.DB,
+			MoveToFolderOverride:        req.MoveToFolder,
+			RenameFolderInPlaceOverride: req.RenameFolderInPlace,
+			OperationModeOverride:       req.OperationMode,
+			Emitter:                     deps.EventEmitter,
+		})
 
 		c.JSON(200, BatchScrapeResponse{
 			JobID: job.ID,
@@ -102,65 +122,129 @@ func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
 func getBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jobID := c.Param("id")
+		includeData := c.Query("include_data") == "true"
 
-		// GetJob() now returns a snapshot (result of GetStatus()), not a pointer
-		// So we don't need to call GetStatus() again
-		job, ok := deps.JobQueue.GetJob(jobID)
-		if !ok {
-			c.JSON(404, ErrorResponse{Error: "Job not found"})
-			return
+		if includeData {
+			getBatchJobFull(deps, c, jobID)
+		} else {
+			getBatchJobSlim(deps, c, jobID)
 		}
-
-		// Debug logging to trace the state
-		logging.Debugf("[GET /batch/%s] Returning job with %d results, completed=%d, failed=%d",
-			jobID, len(job.Results), job.Completed, job.Failed)
-
-		var completedAt *string
-		if job.CompletedAt != nil {
-			str := job.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
-			completedAt = &str
-		}
-
-		// Transform results from worker.FileResult to BatchFileResult
-		results := make(map[string]*BatchFileResult)
-		for filePath, fileResult := range job.Results {
-			var endedAt *string
-			if fileResult.EndedAt != nil {
-				str := fileResult.EndedAt.Format("2006-01-02T15:04:05Z07:00")
-				endedAt = &str
-			}
-
-			results[filePath] = &BatchFileResult{
-				FilePath:       fileResult.FilePath,
-				MovieID:        fileResult.MovieID,
-				Status:         string(fileResult.Status),
-				Error:          fileResult.Error,
-				FieldSources:   fileResult.FieldSources,
-				ActressSources: fileResult.ActressSources,
-				Data:           fileResult.Data,
-				StartedAt:      fileResult.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-				EndedAt:        endedAt,
-				IsMultiPart:    fileResult.IsMultiPart,
-				PartNumber:     fileResult.PartNumber,
-				PartSuffix:     fileResult.PartSuffix,
-			}
-		}
-
-		c.JSON(200, BatchJobResponse{
-			ID:                    job.ID,
-			Status:                string(job.Status),
-			TotalFiles:            job.TotalFiles,
-			Completed:             job.Completed,
-			Failed:                job.Failed,
-			Excluded:              job.Excluded,
-			Progress:              job.Progress,
-			Destination:           job.Destination,
-			Results:               results,
-			StartedAt:             job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-			CompletedAt:           completedAt,
-			OperationModeOverride: job.OperationModeOverride,
-		})
 	}
+}
+
+func getBatchJobFull(deps *ServerDependencies, c *gin.Context, jobID string) {
+	job, ok := deps.JobQueue.GetJob(jobID)
+	if !ok {
+		c.JSON(404, ErrorResponse{Error: "Job not found"})
+		return
+	}
+
+	logging.Debugf("[GET /batch/%s] Returning full job with %d results, completed=%d, failed=%d",
+		jobID, len(job.Results), job.Completed, job.Failed)
+
+	var completedAt *string
+	if job.CompletedAt != nil {
+		str := job.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
+		completedAt = &str
+	}
+
+	results := make(map[string]*BatchFileResult)
+	for filePath, fileResult := range job.Results {
+		var endedAt *string
+		if fileResult.EndedAt != nil {
+			str := fileResult.EndedAt.Format("2006-01-02T15:04:05Z07:00")
+			endedAt = &str
+		}
+
+		results[filePath] = &BatchFileResult{
+			FilePath:       fileResult.FilePath,
+			MovieID:        fileResult.MovieID,
+			Status:         string(fileResult.Status),
+			Error:          fileResult.Error,
+			FieldSources:   fileResult.FieldSources,
+			ActressSources: fileResult.ActressSources,
+			Data:           fileResult.Data,
+			StartedAt:      fileResult.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+			EndedAt:        endedAt,
+			IsMultiPart:    fileResult.IsMultiPart,
+			PartNumber:     fileResult.PartNumber,
+			PartSuffix:     fileResult.PartSuffix,
+		}
+	}
+
+	c.JSON(200, BatchJobResponse{
+		ID:                    job.ID,
+		Status:                string(job.Status),
+		TotalFiles:            job.TotalFiles,
+		Completed:             job.Completed,
+		Failed:                job.Failed,
+		Excluded:              job.Excluded,
+		Progress:              job.Progress,
+		Destination:           job.Destination,
+		Results:               results,
+		StartedAt:             job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CompletedAt:           completedAt,
+		OperationModeOverride: job.OperationModeOverride,
+		PersistError:          job.PersistError,
+	})
+}
+
+func getBatchJobSlim(deps *ServerDependencies, c *gin.Context, jobID string) {
+	jobPtr, ok := deps.JobQueue.GetJobPointer(jobID)
+	if !ok {
+		c.JSON(404, ErrorResponse{Error: "Job not found"})
+		return
+	}
+
+	slim := jobPtr.GetStatusSlim()
+
+	logging.Debugf("[GET /batch/%s] Returning slim job with %d results, completed=%d, failed=%d",
+		jobID, len(slim.Results), slim.Completed, slim.Failed)
+
+	var completedAt *string
+	if slim.CompletedAt != nil {
+		str := slim.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
+		completedAt = &str
+	}
+
+	results := make(map[string]*contracts.BatchFileResultSlim)
+	for filePath, fileResult := range slim.Results {
+		var endedAt *string
+		if fileResult.EndedAt != nil {
+			str := fileResult.EndedAt.Format("2006-01-02T15:04:05Z07:00")
+			endedAt = &str
+		}
+
+		results[filePath] = &contracts.BatchFileResultSlim{
+			FilePath:       fileResult.FilePath,
+			MovieID:        fileResult.MovieID,
+			Status:         string(fileResult.Status),
+			Error:          fileResult.Error,
+			FieldSources:   fileResult.FieldSources,
+			ActressSources: fileResult.ActressSources,
+			StartedAt:      fileResult.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+			EndedAt:        endedAt,
+			IsMultiPart:    fileResult.IsMultiPart,
+			PartNumber:     fileResult.PartNumber,
+			PartSuffix:     fileResult.PartSuffix,
+		}
+	}
+
+	c.JSON(200, contracts.BatchJobResponseSlim{
+		ID:                    slim.ID,
+		Status:                string(slim.Status),
+		TotalFiles:            slim.TotalFiles,
+		Completed:             slim.Completed,
+		Failed:                slim.Failed,
+		Excluded:              slim.Excluded,
+		Progress:              slim.Progress,
+		Destination:           slim.Destination,
+		Results:               results,
+		StartedAt:             slim.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CompletedAt:           completedAt,
+		OperationModeOverride: slim.OperationModeOverride,
+		PersistError:          slim.PersistError,
+	})
 }
 
 // cancelBatchJob godoc

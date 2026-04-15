@@ -59,7 +59,7 @@ func TestMovieRepositoryUpsert_MissingIdentifiers(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewMovieRepository(db)
 
-	err := repo.Upsert(&models.Movie{Title: "No IDs"})
+	_, err := repo.Upsert(&models.Movie{Title: "No IDs"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "content_id is required")
 }
@@ -78,7 +78,7 @@ func TestMovieRepositoryUpsert_FallbackByDisplayID(t *testing.T) {
 		ContentID: "",
 		Title:     "Updated via ID fallback",
 	}
-	require.NoError(t, repo.Upsert(incoming))
+	_, err := repo.Upsert(incoming)
 
 	loaded, err := repo.FindByContentID("legacy_content")
 	require.NoError(t, err)
@@ -272,7 +272,8 @@ func TestMovieRepositoryUpsert_DuplicateCreateRaceFallbackUpdatePath(t *testing.
 			{Language: "en", Title: "Race Title EN"},
 		},
 	}
-	require.NoError(t, repo.Upsert(movie))
+	_, err := repo.Upsert(movie)
+	require.NoError(t, err)
 
 	found, err := repo.FindByContentID(movie.ContentID)
 	require.NoError(t, err)

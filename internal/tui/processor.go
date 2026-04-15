@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
+	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
@@ -40,7 +41,8 @@ type ProcessingCoordinator struct {
 	scalarStrategy        string
 	arrayStrategy         string
 	cfg                   *config.Config
-	customScraperPriority []string // Optional custom scraper priority (nil = use default)
+	customScraperPriority []string
+	templateEngine        *template.Engine
 }
 
 // NewProcessingCoordinator creates a new processing coordinator
@@ -159,10 +161,11 @@ func (pc *ProcessingCoordinator) SetForceRefresh(forceRefresh bool) {
 // SetLinkMode sets how copy operations materialize files (copy/hardlink/softlink).
 // Link mode is ignored when move mode is enabled.
 func (pc *ProcessingCoordinator) SetLinkMode(mode organizer.LinkMode) {
-	if !mode.IsValid() {
-		mode = organizer.LinkModeNone
-	}
 	pc.linkMode = mode
+}
+
+func (pc *ProcessingCoordinator) SetTemplateEngine(engine *template.Engine) {
+	pc.templateEngine = engine
 }
 
 // SetUpdateMode sets whether update-mode merge behavior is enabled.
@@ -265,6 +268,7 @@ func (pc *ProcessingCoordinator) ProcessFiles(
 		taskOpts := []worker.ProcessFileOption{
 			worker.WithLinkMode(pc.linkMode),
 			worker.WithUpdateMerge(pc.updateMode, pc.scalarStrategy, pc.arrayStrategy, pc.cfg),
+			worker.WithTemplateEngine(pc.templateEngine),
 		}
 
 		processTask := worker.NewProcessFileTask(

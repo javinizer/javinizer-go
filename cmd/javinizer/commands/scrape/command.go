@@ -179,7 +179,7 @@ func Run(cmd *cobra.Command, args []string, configFile string, deps *commandutil
 					agg.ApplyConfiguredTranslation(movie)
 
 					// Save updated movie with new translation
-					if err := movieRepo.Upsert(movie); err != nil {
+					if _, err := movieRepo.Upsert(movie); err != nil {
 						logging.Warnf("Failed to save re-translated movie: %v", err)
 					} else {
 						logging.Info("💾 Updated translation in database")
@@ -265,7 +265,7 @@ func Run(cmd *cobra.Command, args []string, configFile string, deps *commandutil
 	movie.OriginalFileName = id
 
 	// Save to database (upsert: create or update)
-	if err := movieRepo.Upsert(movie); err != nil {
+	if _, err := movieRepo.Upsert(movie); err != nil {
 		logging.Warnf("Failed to save to database: %v", err)
 	} else {
 		fmt.Println("💾 Saved to database")

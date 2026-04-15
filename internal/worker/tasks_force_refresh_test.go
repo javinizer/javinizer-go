@@ -101,7 +101,7 @@ func TestScrapeTask_ForceRefresh(t *testing.T) {
 		Maker:       "Old English Maker",
 		Description: "Old English Description",
 	}
-	err = movieRepo.Upsert(oldMovie)
+	_, err = movieRepo.Upsert(oldMovie)
 	require.NoError(t, err)
 
 	// Verify old data is in cache
@@ -192,7 +192,7 @@ func TestMovieRepository_DeleteWithTranslations(t *testing.T) {
 		},
 	}
 
-	err = movieRepo.Upsert(movie)
+	_, err = movieRepo.Upsert(movie)
 	require.NoError(t, err)
 
 	// Verify movie and translations exist

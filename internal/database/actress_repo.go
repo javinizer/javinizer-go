@@ -121,13 +121,16 @@ func (r *ActressRepository) List(limit, offset int) ([]models.Actress, error) {
 func (r *ActressRepository) ListSorted(limit, offset int, sortBy, sortOrder string) ([]models.Actress, error) {
 	var actresses []models.Actress
 
-	sortBy, sortOrder = normalizeActressSort(sortBy, sortOrder)
+	sortBy, sortOrder, err := normalizeActressSort(sortBy, sortOrder)
+	if err != nil {
+		return nil, err
+	}
 	dbq := r.db.DB
 	for _, clause := range actressOrderClauses(sortBy, sortOrder) {
 		dbq = dbq.Order(clause)
 	}
 
-	err := dbq.Limit(limit).Offset(offset).Find(&actresses).Error
+	err = dbq.Limit(limit).Offset(offset).Find(&actresses).Error
 	if err != nil {
 		return nil, wrapDBErr("find", "actresses", err)
 	}
@@ -153,7 +156,10 @@ func (r *ActressRepository) SearchPaged(query string, limit, offset int) ([]mode
 func (r *ActressRepository) SearchPagedSorted(query string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error) {
 	var actresses []models.Actress
 
-	sortBy, sortOrder = normalizeActressSort(sortBy, sortOrder)
+	sortBy, sortOrder, err := normalizeActressSort(sortBy, sortOrder)
+	if err != nil {
+		return nil, err
+	}
 	searchPattern := "%" + query + "%"
 
 	dbq := r.db.Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
@@ -162,7 +168,7 @@ func (r *ActressRepository) SearchPagedSorted(query string, limit, offset int, s
 		dbq = dbq.Order(clause)
 	}
 
-	err := dbq.Limit(limit).Offset(offset).Find(&actresses).Error
+	err = dbq.Limit(limit).Offset(offset).Find(&actresses).Error
 	if err != nil {
 		return nil, wrapDBErr("search", "actresses", err)
 	}

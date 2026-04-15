@@ -81,7 +81,7 @@ func TestOrganizerTemplate_SimplePatterns(t *testing.T) {
 				MoveToFolder:  true,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := tt.movieSetup()
 			match := matcher.MatchResult{
@@ -178,7 +178,7 @@ func TestOrganizerTemplate_ComplexPatterns(t *testing.T) {
 				MoveToFolder:  true,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := tt.movieSetup()
 			match := matcher.MatchResult{
@@ -267,7 +267,7 @@ func TestOrganizerTemplate_ConditionalLogic(t *testing.T) {
 				MoveToFolder:  true,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := tt.movieSetup()
 			match := matcher.MatchResult{
@@ -355,7 +355,7 @@ func TestOrganizerTemplate_MissingFields(t *testing.T) {
 				MoveToFolder:  true,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := tt.movieSetup()
 			match := matcher.MatchResult{
@@ -455,7 +455,7 @@ func TestOrganizerTemplate_SpecialCharacters(t *testing.T) {
 				MoveToFolder:  true,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := testutil.NewMovieBuilder().
 				WithID("IPX-123").
@@ -541,7 +541,7 @@ func TestOrganizerTemplate_UnicodeHandling(t *testing.T) {
 				MoveToFolder:  true,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := testutil.NewMovieBuilder().
 				WithID("IPX-123").

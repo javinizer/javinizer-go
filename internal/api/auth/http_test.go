@@ -390,7 +390,7 @@ func TestAuth_StatusWithInvalidCookieClearsSession(t *testing.T) {
 	assert.Equal(t, -1, clearCookie.MaxAge)
 }
 
-func TestAuth_SessionCookieIgnoresForwardedHTTPSHeaders(t *testing.T) {
+func TestAuth_SessionCookieIgnoresForwardedHTTPSWithoutTrustedProxies(t *testing.T) {
 	router, _ := setupAuthenticatedTestServer(t)
 
 	setupReq := newJSONRequest(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
@@ -399,6 +399,100 @@ func TestAuth_SessionCookieIgnoresForwardedHTTPSHeaders(t *testing.T) {
 	}, nil)
 	setupReq.Header.Set("X-Forwarded-Proto", "https")
 	setupReq.Header.Set("Forwarded", `for=1.2.3.4;proto=https`)
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	require.Equal(t, http.StatusOK, setupW.Code)
+
+	sessionCookie := extractSessionCookie(t, setupW)
+	assert.False(t, sessionCookie.Secure)
+}
+
+func TestAuth_SessionCookieSecureWithTrustedProxyAndForwardedProto(t *testing.T) {
+	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
+
+	cfg := config.DefaultConfig()
+	cfg.API.Security.TrustedProxies = []string{"127.0.0.1"}
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	deps := createTestDeps(t, cfg, configFile)
+
+	manager, err := NewAuthManager(configFile, time.Hour)
+	require.NoError(t, err)
+	deps.Auth = manager
+
+	router := NewServer(deps)
+	t.Cleanup(func() {
+		cleanupServerHub(t, deps)
+		_ = deps.DB.Close()
+	})
+
+	setupReq := newJSONRequest(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
+		"username": "admin",
+		"password": "password123",
+	}, nil)
+	setupReq.Header.Set("X-Forwarded-Proto", "https")
+	setupReq.RemoteAddr = "127.0.0.1:12345"
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	require.Equal(t, http.StatusOK, setupW.Code)
+
+	sessionCookie := extractSessionCookie(t, setupW)
+	assert.True(t, sessionCookie.Secure)
+}
+
+func TestAuth_SessionCookieSecureWithForceSecureCookies(t *testing.T) {
+	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
+
+	cfg := config.DefaultConfig()
+	cfg.API.Security.ForceSecureCookies = true
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	deps := createTestDeps(t, cfg, configFile)
+
+	manager, err := NewAuthManager(configFile, time.Hour)
+	require.NoError(t, err)
+	deps.Auth = manager
+
+	router := NewServer(deps)
+	t.Cleanup(func() {
+		cleanupServerHub(t, deps)
+		_ = deps.DB.Close()
+	})
+
+	setupReq := newJSONRequest(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
+		"username": "admin",
+		"password": "password123",
+	}, nil)
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	require.Equal(t, http.StatusOK, setupW.Code)
+
+	sessionCookie := extractSessionCookie(t, setupW)
+	assert.True(t, sessionCookie.Secure)
+}
+
+func TestAuth_SessionCookieNotSecureFromUntrustedProxy(t *testing.T) {
+	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
+
+	cfg := config.DefaultConfig()
+	cfg.API.Security.TrustedProxies = []string{"10.0.0.1"}
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	deps := createTestDeps(t, cfg, configFile)
+
+	manager, err := NewAuthManager(configFile, time.Hour)
+	require.NoError(t, err)
+	deps.Auth = manager
+
+	router := NewServer(deps)
+	t.Cleanup(func() {
+		cleanupServerHub(t, deps)
+		_ = deps.DB.Close()
+	})
+
+	setupReq := newJSONRequest(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
+		"username": "admin",
+		"password": "password123",
+	}, nil)
+	setupReq.Header.Set("X-Forwarded-Proto", "https")
+	setupReq.RemoteAddr = "192.168.1.1:12345"
 	setupW := httptest.NewRecorder()
 	router.ServeHTTP(setupW, setupReq)
 	require.Equal(t, http.StatusOK, setupW.Code)

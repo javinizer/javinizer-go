@@ -72,7 +72,7 @@ func TestOrganizerTemplate_LongTitles(t *testing.T) {
 				MoveSubtitles:  false,
 				MaxTitleLength: tt.maxTitleLength,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := testutil.NewMovieBuilder().
 				WithID("IPX-123").
@@ -213,7 +213,7 @@ func TestOrganizerTemplate_CustomFunctions(t *testing.T) {
 				MoveToFolder:  true,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := tt.movieSetup().Build()
 			match := matcher.MatchResult{
@@ -289,7 +289,7 @@ func TestOrganizerTemplate_MultipleActresses(t *testing.T) {
 				MoveToFolder:  true,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := testutil.NewMovieBuilder().
 				WithID("TEST-001").
@@ -374,7 +374,7 @@ func TestOrganizerTemplate_FilenameTemplates(t *testing.T) {
 				MoveToFolder:  true,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := tt.movieSetup().Build()
 			match := matcher.MatchResult{
@@ -414,7 +414,7 @@ func TestOrganizerTemplate_PathLengthValidation(t *testing.T) {
 		MoveSubtitles: false,
 		MaxPathLength: 200, // Set path limit
 	}
-	org := NewOrganizer(fs, cfg)
+	org := NewOrganizer(fs, cfg, nil)
 
 	movie := testutil.NewMovieBuilder().
 		WithID("IPX-123").
@@ -500,7 +500,7 @@ func TestOrganizerTemplate_EdgeCases(t *testing.T) {
 				MoveToFolder:  true,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg)
+			org := NewOrganizer(fs, cfg, nil)
 
 			movie := tt.movieSetup().Build()
 			match := matcher.MatchResult{
