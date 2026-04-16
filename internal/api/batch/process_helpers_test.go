@@ -167,7 +167,7 @@ func TestProcessUpdateMode_NoCompletedResults(t *testing.T) {
 		Error:    "scrape failed",
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusCompleted, status.Status)
@@ -181,7 +181,7 @@ func TestProcessOrganizeJob_InvalidLinkModeMarksFailed(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 	job := deps.JobQueue.CreateJob(nil)
 
-	processOrganizeJob(context.Background(), job, deps.JobQueue, t.TempDir(), false, "not-a-valid-link-mode", deps.DB, cfg, deps.Registry, nil)
+	processOrganizeJob(context.Background(), job, deps.JobQueue, t.TempDir(), false, "not-a-valid-link-mode", false, false, deps.DB, cfg, deps.Registry, nil)
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusFailed, status.Status)
@@ -209,7 +209,7 @@ func TestProcessUpdateMode_SuccessfulResults(t *testing.T) {
 	cfg.Output.DownloadCover = false
 	cfg.Output.DownloadPoster = false
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusCompleted, status.Status)
@@ -245,7 +245,7 @@ func TestProcessUpdateMode_MixedResults(t *testing.T) {
 	cfg.Output.DownloadCover = false
 	cfg.Output.DownloadPoster = false
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusCompleted, status.Status)

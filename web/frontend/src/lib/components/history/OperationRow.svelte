@@ -13,21 +13,21 @@
 
 	let { operation, onRevert, reverting = false, revertible = true }: Props = $props();
 
-	// Determine display state based on revert_status
-	const state = $derived.by(() => {
+	let expandedPaths = $state({ from: false, to: false });
+
+	const opState = $derived.by(() => {
 		const rs = operation.revert_status.toLowerCase();
 		if (rs === 'reverted') return 'reverted';
 		if (rs === 'failed') return 'failed';
-		return 'success'; // 'pending' treated as success (can be reverted)
-	});
-
-	const statusBadge = $derived.by<'success' | 'failed' | 'reverted'>(() => {
-		if (state === 'reverted') return 'reverted';
-		if (state === 'failed') return 'failed';
 		return 'success';
 	});
 
-	// Path display helpers
+	const statusBadge = $derived.by<'success' | 'failed' | 'reverted'>(() => {
+		if (opState === 'reverted') return 'reverted';
+		if (opState === 'failed') return 'failed';
+		return 'success';
+	});
+
 	function getFilename(path: string): string {
 		if (!path) return '';
 		const parts = path.split('/');
@@ -41,20 +41,25 @@
 		return path.slice(0, lastSlash);
 	}
 
-	function truncateDir(dir: string, maxLen: number = 50): string {
+	function truncateDir(dir: string, maxLen: number = 90): string {
 		if (!dir || dir.length <= maxLen) return dir;
-		const half = Math.floor((maxLen - 3) / 2);
-		return dir.slice(0, half) + '...' + dir.slice(-half);
+		const headLen = Math.floor(maxLen * 0.4);
+		const tailLen = maxLen - headLen - 3;
+		return dir.slice(0, headLen) + '...' + dir.slice(-tailLen);
+	}
+
+	function isLongPath(path: string): boolean {
+		if (!path) return false;
+		return getParentDir(path).length > 90;
 	}
 </script>
 
 <div class="p-4 rounded-lg border bg-card">
-	<!-- Header: icon + movie_id + status badge -->
 	<div class="flex items-center justify-between mb-2">
 		<div class="flex items-center gap-2">
-			{#if state === 'success'}
+			{#if opState === 'success'}
 				<CircleCheckBig class="h-4 w-4 text-green-500" />
-			{:else if state === 'reverted'}
+			{:else if opState === 'reverted'}
 				<Undo2 class="h-4 w-4 text-yellow-500" />
 			{:else}
 				<CircleX class="h-4 w-4 text-red-500" />
@@ -63,8 +68,7 @@
 			<StatusBadge status={statusBadge} size="sm" />
 		</div>
 
-		<!-- Right action -->
-		{#if state === 'success' && onRevert && revertible}
+		{#if opState === 'success' && onRevert && revertible}
 			{#if reverting}
 				<Button variant="outline" size="sm" disabled>
 					<LoaderCircle class="h-4 w-4 animate-spin" />
@@ -81,7 +85,7 @@
 					Revert File
 				</Button>
 			{/if}
-		{:else if state === 'reverted'}
+		{:else if opState === 'reverted'}
 			<Button variant="ghost" size="sm" disabled>
 				<Undo2 class="h-4 w-4 mr-1" />
 				Reverted ✓
@@ -89,16 +93,28 @@
 		{/if}
 	</div>
 
-	<!-- Path display: From → To -->
 	<div class="text-sm space-y-1 ml-6">
 		{#if operation.original_path}
 			<div class="flex items-baseline gap-1" title={operation.original_path}>
 				<span class="text-muted-foreground shrink-0">From:</span>
 				<span class="font-medium text-foreground">{getFilename(operation.original_path)}</span>
 				{#if getParentDir(operation.original_path)}
-					<span class="text-muted-foreground text-xs truncate max-w-xs">
-						in {truncateDir(getParentDir(operation.original_path))}
-					</span>
+					{#if isLongPath(operation.original_path)}
+						<button
+							class="text-muted-foreground text-xs cursor-pointer hover:text-foreground transition-colors"
+							onclick={() => expandedPaths.from = !expandedPaths.from}
+						>
+							{#if expandedPaths.from}
+								in {getParentDir(operation.original_path)}
+							{:else}
+								in {truncateDir(getParentDir(operation.original_path))}
+							{/if}
+						</button>
+					{:else}
+						<span class="text-muted-foreground text-xs">
+							in {getParentDir(operation.original_path)}
+						</span>
+					{/if}
 				{/if}
 			</div>
 		{/if}
@@ -107,9 +123,22 @@
 				<span class="text-muted-foreground shrink-0">To:</span>
 				<span class="font-medium text-foreground">{getFilename(operation.new_path)}</span>
 				{#if getParentDir(operation.new_path)}
-					<span class="text-muted-foreground text-xs truncate max-w-xs">
-						in {truncateDir(getParentDir(operation.new_path))}
-					</span>
+					{#if isLongPath(operation.new_path)}
+						<button
+							class="text-muted-foreground text-xs cursor-pointer hover:text-foreground transition-colors"
+							onclick={() => expandedPaths.to = !expandedPaths.to}
+						>
+							{#if expandedPaths.to}
+								in {getParentDir(operation.new_path)}
+							{:else}
+								in {truncateDir(getParentDir(operation.new_path))}
+							{/if}
+						</button>
+					{:else}
+						<span class="text-muted-foreground text-xs">
+							in {getParentDir(operation.new_path)}
+						</span>
+					{/if}
 				{/if}
 			</div>
 		{/if}

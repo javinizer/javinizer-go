@@ -16,7 +16,7 @@ import (
 
 // generatePreview generates an organize preview response for a movie
 // fileResults contains all file results for this movie (to support multi-part files)
-func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, destination string, cfg *config.Config, operationMode organizer.OperationMode) OrganizePreviewResponse {
+func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, destination string, cfg *config.Config, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool) OrganizePreviewResponse {
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = cfg.Output.GroupActress
 	templateEngine := template.NewEngine()
@@ -37,25 +37,25 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 
 	// For in-place-norenamefolder mode: file stays in source directory, only renamed
 	if operationMode == types.OperationModeInPlaceNoRenameFolder {
-		return generateInPlaceNoRenameFolderPreview(movie, fileResults, cfg, ctx, templateEngine, fileName, sourcePath, operationMode)
+		return generateInPlaceNoRenameFolderPreview(movie, fileResults, cfg, ctx, templateEngine, fileName, sourcePath, operationMode, skipNFO, skipDownload)
 	}
 
 	// For in-place mode: file may be moved to a renamed folder in the same parent directory
 	if operationMode == types.OperationModeInPlace {
-		return generateInPlacePreview(movie, fileResults, cfg, ctx, templateEngine, fileName, sourcePath, operationMode)
+		return generateInPlacePreview(movie, fileResults, cfg, ctx, templateEngine, fileName, sourcePath, operationMode, skipNFO, skipDownload)
 	}
 
 	// For metadata-only mode: no file changes, metadata stays alongside source
 	if operationMode == types.OperationModeMetadataOnly {
-		return generateMetadataOnlyPreview(movie, fileResults, cfg, ctx, templateEngine, fileName, sourcePath, operationMode)
+		return generateMetadataOnlyPreview(movie, fileResults, cfg, ctx, templateEngine, fileName, sourcePath, operationMode, skipNFO, skipDownload)
 	}
 
 	// Default: organize mode (and preview mode) — current behavior
-	return generateOrganizePreview(movie, fileResults, destination, cfg, ctx, templateEngine, fileName, operationMode)
+	return generateOrganizePreview(movie, fileResults, destination, cfg, ctx, templateEngine, fileName, operationMode, skipNFO, skipDownload)
 }
 
 // generateOrganizePreview generates a preview for organize mode (move to destination with folder structure)
-func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResult, destination string, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, operationMode organizer.OperationMode) OrganizePreviewResponse {
+func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResult, destination string, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool) OrganizePreviewResponse {
 	// Generate subfolder hierarchy (if configured)
 	subfolderParts := make([]string, 0, len(cfg.Output.SubfolderFormat))
 	for _, subfolderTemplate := range cfg.Output.SubfolderFormat {
@@ -130,14 +130,22 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 		videoFiles = append(videoFiles, primaryVideoPath)
 	}
 
-	nfoPath, nfoPaths := generateNFOPaths(movie, fileResults, cfg, ctx, templateEngine, fileName, folderPath)
-	posterPath := generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, folderPath)
-	fanartPath := generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, folderPath)
-	extrafanartPath := ""
-	if cfg.Output.DownloadExtrafanart {
-		extrafanartPath = filepath.Join(folderPath, cfg.Output.ScreenshotFolder)
+	var nfoPath string
+	var nfoPaths []string
+	if !skipNFO {
+		nfoPath, nfoPaths = generateNFOPaths(movie, fileResults, cfg, ctx, templateEngine, fileName, folderPath)
 	}
-	screenshots := generateScreenshotNames(movie, cfg, ctx, templateEngine)
+	var posterPath, fanartPath string
+	var extrafanartPath string
+	var screenshots []string
+	if !skipDownload {
+		posterPath = generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, folderPath)
+		fanartPath = generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, folderPath)
+		if cfg.Output.DownloadExtrafanart {
+			extrafanartPath = filepath.Join(folderPath, cfg.Output.ScreenshotFolder)
+		}
+		screenshots = generateScreenshotNames(movie, cfg, ctx, templateEngine)
+	}
 
 	validatePathLengths(cfg, templateEngine, videoFiles, nfoPath, nfoPaths, posterPath, fanartPath, extrafanartPath, screenshots)
 
@@ -158,7 +166,7 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 
 // generateInPlaceNoRenameFolderPreview generates a preview for in-place-norenamefolder mode
 // (file stays in source directory, only file is renamed)
-func generateInPlaceNoRenameFolderPreview(movie *models.Movie, fileResults []*worker.FileResult, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, sourcePath string, operationMode organizer.OperationMode) OrganizePreviewResponse {
+func generateInPlaceNoRenameFolderPreview(movie *models.Movie, fileResults []*worker.FileResult, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, sourcePath string, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool) OrganizePreviewResponse {
 	// Return empty preview if no source path available
 	if sourcePath == "" || sourcePath == "." {
 		return OrganizePreviewResponse{OperationMode: string(operationMode)}
@@ -209,14 +217,22 @@ func generateInPlaceNoRenameFolderPreview(movie *models.Movie, fileResults []*wo
 		videoFiles = append(videoFiles, primaryVideoPath)
 	}
 
-	nfoPath, nfoPaths := generateNFOPaths(movie, fileResults, cfg, ctx, templateEngine, fileName, sourceDir)
-	posterPath := generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
-	fanartPath := generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
-	extrafanartPath := ""
-	if cfg.Output.DownloadExtrafanart {
-		extrafanartPath = filepath.Join(sourceDir, cfg.Output.ScreenshotFolder)
+	var nfoPath string
+	var nfoPaths []string
+	if !skipNFO {
+		nfoPath, nfoPaths = generateNFOPaths(movie, fileResults, cfg, ctx, templateEngine, fileName, sourceDir)
 	}
-	screenshots := generateScreenshotNames(movie, cfg, ctx, templateEngine)
+	var posterPath, fanartPath string
+	var extrafanartPath string
+	var screenshots []string
+	if !skipDownload {
+		posterPath = generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
+		fanartPath = generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
+		if cfg.Output.DownloadExtrafanart {
+			extrafanartPath = filepath.Join(sourceDir, cfg.Output.ScreenshotFolder)
+		}
+		screenshots = generateScreenshotNames(movie, cfg, ctx, templateEngine)
+	}
 
 	return OrganizePreviewResponse{
 		FolderName:      folderName,
@@ -234,9 +250,7 @@ func generateInPlaceNoRenameFolderPreview(movie *models.Movie, fileResults []*wo
 	}
 }
 
-// generateInPlacePreview generates a preview for in-place mode
-// (file stays in same parent directory, but the folder may be renamed if it's a dedicated folder)
-func generateInPlacePreview(movie *models.Movie, fileResults []*worker.FileResult, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, sourcePath string, operationMode organizer.OperationMode) OrganizePreviewResponse {
+func generateInPlacePreview(movie *models.Movie, fileResults []*worker.FileResult, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, sourcePath string, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool) OrganizePreviewResponse {
 	// Return empty preview if no source path available
 	if sourcePath == "" || sourcePath == "." {
 		return OrganizePreviewResponse{OperationMode: string(operationMode)}
@@ -300,14 +314,22 @@ func generateInPlacePreview(movie *models.Movie, fileResults []*worker.FileResul
 		videoFiles = append(videoFiles, primaryVideoPath)
 	}
 
-	nfoPath, nfoPaths := generateNFOPaths(movie, fileResults, cfg, ctx, templateEngine, fileName, targetDir)
-	posterPath := generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, targetDir)
-	fanartPath := generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, targetDir)
-	extrafanartPath := ""
-	if cfg.Output.DownloadExtrafanart {
-		extrafanartPath = filepath.Join(targetDir, cfg.Output.ScreenshotFolder)
+	var nfoPath string
+	var nfoPaths []string
+	if !skipNFO {
+		nfoPath, nfoPaths = generateNFOPaths(movie, fileResults, cfg, ctx, templateEngine, fileName, targetDir)
 	}
-	screenshots := generateScreenshotNames(movie, cfg, ctx, templateEngine)
+	var posterPath, fanartPath string
+	var extrafanartPath string
+	var screenshots []string
+	if !skipDownload {
+		posterPath = generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, targetDir)
+		fanartPath = generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, targetDir)
+		if cfg.Output.DownloadExtrafanart {
+			extrafanartPath = filepath.Join(targetDir, cfg.Output.ScreenshotFolder)
+		}
+		screenshots = generateScreenshotNames(movie, cfg, ctx, templateEngine)
+	}
 
 	return OrganizePreviewResponse{
 		FolderName:      folderName,
@@ -325,9 +347,7 @@ func generateInPlacePreview(movie *models.Movie, fileResults []*worker.FileResul
 	}
 }
 
-// generateMetadataOnlyPreview generates a preview for metadata-only mode
-// (no file moves or renames — metadata files alongside the original)
-func generateMetadataOnlyPreview(movie *models.Movie, fileResults []*worker.FileResult, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, sourcePath string, operationMode organizer.OperationMode) OrganizePreviewResponse {
+func generateMetadataOnlyPreview(movie *models.Movie, fileResults []*worker.FileResult, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, sourcePath string, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool) OrganizePreviewResponse {
 	// Return empty preview if no source path available
 	if sourcePath == "" || sourcePath == "." {
 		return OrganizePreviewResponse{OperationMode: string(operationMode)}
@@ -358,14 +378,22 @@ func generateMetadataOnlyPreview(movie *models.Movie, fileResults []*worker.File
 		videoFiles = append(videoFiles, primaryVideoPath)
 	}
 
-	nfoPath, nfoPaths := generateNFOPaths(movie, fileResults, cfg, ctx, templateEngine, fileName, sourceDir)
-	posterPath := generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
-	fanartPath := generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
-	extrafanartPath := ""
-	if cfg.Output.DownloadExtrafanart {
-		extrafanartPath = filepath.Join(sourceDir, cfg.Output.ScreenshotFolder)
+	var nfoPath string
+	var nfoPaths []string
+	if !skipNFO {
+		nfoPath, nfoPaths = generateNFOPaths(movie, fileResults, cfg, ctx, templateEngine, fileName, sourceDir)
 	}
-	screenshots := generateScreenshotNames(movie, cfg, ctx, templateEngine)
+	var posterPath, fanartPath string
+	var extrafanartPath string
+	var screenshots []string
+	if !skipDownload {
+		posterPath = generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
+		fanartPath = generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
+		if cfg.Output.DownloadExtrafanart {
+			extrafanartPath = filepath.Join(sourceDir, cfg.Output.ScreenshotFolder)
+		}
+		screenshots = generateScreenshotNames(movie, cfg, ctx, templateEngine)
+	}
 
 	return OrganizePreviewResponse{
 		FolderName:      folderName,

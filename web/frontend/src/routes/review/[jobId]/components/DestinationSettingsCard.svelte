@@ -13,6 +13,8 @@
 		previewNeedsDestination: boolean;
 		effectiveOperationMode?: string;
 		showAllPreviewScreenshots: boolean;
+		skipNfo?: boolean;
+		skipDownload?: boolean;
 		onOpenDestinationBrowser: () => void;
 	}
 
@@ -23,6 +25,8 @@
 		previewNeedsDestination = false,
 		effectiveOperationMode,
 		showAllPreviewScreenshots = $bindable(false),
+		skipNfo = $bindable(false),
+		skipDownload = $bindable(false),
 		onOpenDestinationBrowser
 	}: Props = $props();
 
@@ -101,6 +105,36 @@
 				{getOperationLabel(opMode)} — files stay in their current location.
 			</p>
 		{/if}
+
+		<div class="grid gap-3 md:grid-cols-2">
+			<label
+				class="flex items-center gap-3 p-3 rounded-lg border border-border bg-background hover:bg-accent/50 cursor-pointer transition-colors"
+			>
+				<input
+					type="checkbox"
+					bind:checked={skipNfo}
+					class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+				/>
+				<div class="flex-1">
+					<span class="text-sm font-medium">Skip NFO Generation</span>
+					<p class="text-xs text-muted-foreground">Don't create NFO metadata files</p>
+				</div>
+			</label>
+
+			<label
+				class="flex items-center gap-3 p-3 rounded-lg border border-border bg-background hover:bg-accent/50 cursor-pointer transition-colors"
+			>
+				<input
+					type="checkbox"
+					bind:checked={skipDownload}
+					class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+				/>
+				<div class="flex-1">
+					<span class="text-sm font-medium">Skip Media Download</span>
+					<p class="text-xs text-muted-foreground">Don't download cover, poster, and screenshots</p>
+					</div>
+			</label>
+		</div>
 
 		{#if preview}
 			{@const opMode = preview.operation_mode || 'organize'}

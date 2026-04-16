@@ -58,7 +58,9 @@ import type {
 	EventListParams,
 	EventStatsResponse,
 	DeleteEventsParams,
-	DeleteEventsResponse
+	DeleteEventsResponse,
+	UpdateRequest,
+	VersionStatusResponse
 } from './types';
 
 // Build API base URL dynamically from browser location
@@ -232,10 +234,14 @@ class APIClient {
 	}
 
 	// Update batch job (generate NFOs and download media in place)
-	async updateBatchJob(jobId: string): Promise<{ message: string }> {
-		return this.request<{ message: string }>(`/api/v1/batch/${jobId}/update`, {
+	async updateBatchJob(jobId: string, request?: UpdateRequest): Promise<{ message: string }> {
+		const options: RequestInit = {
 			method: 'POST'
-		});
+		};
+		if (request) {
+			options.body = JSON.stringify(request);
+		}
+		return this.request<{ message: string }>(`/api/v1/batch/${jobId}/update`, options);
 	}
 
 	// Preview organize output
@@ -504,6 +510,14 @@ class APIClient {
 		const queryParams = new URLSearchParams();
 		queryParams.set('older_than_days', params.older_than_days.toString());
 		return this.request<DeleteEventsResponse>(`/api/v1/events?${queryParams}`, { method: 'DELETE' });
+	}
+
+	async getVersionStatus(): Promise<VersionStatusResponse> {
+		return this.request<VersionStatusResponse>('/api/v1/version');
+	}
+
+	async checkVersion(): Promise<VersionStatusResponse> {
+		return this.request<VersionStatusResponse>('/api/v1/version/check', { method: 'POST' });
 	}
 }
 

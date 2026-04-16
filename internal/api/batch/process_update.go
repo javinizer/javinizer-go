@@ -23,48 +23,58 @@ import (
 	"github.com/spf13/afero"
 )
 
-// processUpdateJob handles update operation triggered from review page
-// Generates NFOs and downloads media files in place without moving video files
-func processUpdateJob(job *worker.BatchJob, cfg *config.Config, db *database.DB, registry *models.ScraperRegistry, emitter eventlog.EventEmitter) {
-	// Setup context with configurable timeout (mirrors processBatchJob pattern)
+type UpdateOptions struct {
+	ForceOverwrite bool
+	PreserveNFO    bool
+	Preset         string
+	ScalarStrategy string
+	ArrayStrategy  string
+	SkipNFO        bool
+	SkipDownload   bool
+}
+
+func processUpdateJob(job *worker.BatchJob, cfg *config.Config, db *database.DB, registry *models.ScraperRegistry, emitter eventlog.EventEmitter, opts *UpdateOptions) {
+	if opts == nil {
+		opts = &UpdateOptions{}
+	}
+
 	timeout := time.Duration(cfg.Performance.WorkerTimeout) * time.Second
 	if timeout <= 0 {
-		timeout = 600 * time.Second // Default 10 minutes
+		timeout = 600 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	job.SetCancelFunc(cancel)
 	defer cancel()
 
-	processUpdateMode(job, cfg, db, registry, ctx, emitter)
+	processUpdateMode(job, cfg, db, registry, ctx, emitter, opts)
 }
 
-// processUpdateMode handles update mode: generate NFOs and download media files in place (no file organization)
-func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB, registry *models.ScraperRegistry, ctx context.Context, emitter eventlog.EventEmitter) {
-	// Initialize components
+func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB, registry *models.ScraperRegistry, ctx context.Context, emitter eventlog.EventEmitter, opts *UpdateOptions) {
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfo.ConfigFromAppConfig(&cfg.Metadata.NFO, &cfg.Output, &cfg.Metadata, db))
 	historyLogger := history.NewLogger(db)
 	batchFileOpRepo := database.NewBatchFileOperationRepository(db)
 
-	// Initialize HTTP client for downloader
-	httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(cfg, registry)
-	if err != nil {
-		broadcastProgress(&ws.ProgressMessage{
-			JobID:    job.ID,
-			Status:   "error",
-			Progress: 0,
-			Message:  fmt.Sprintf("Failed to create HTTP client: %v", err),
-		})
-		if emitter != nil {
-			if emitErr := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("Update job %s failed: HTTP client setup error", job.ID), models.SeverityError, map[string]interface{}{"job_id": job.ID, "error": err.Error()}); emitErr != nil {
-				logging.Warnf("Failed to emit update error event: %v", emitErr)
+	var dl *downloader.Downloader
+	if !opts.SkipDownload {
+		httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(cfg, registry)
+		if err != nil {
+			broadcastProgress(&ws.ProgressMessage{
+				JobID:    job.ID,
+				Status:   "error",
+				Progress: 0,
+				Message:  fmt.Sprintf("Failed to create HTTP client: %v", err),
+			})
+			if emitter != nil {
+				if emitErr := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("Update job %s failed: HTTP client setup error", job.ID), models.SeverityError, map[string]interface{}{"job_id": job.ID, "error": err.Error()}); emitErr != nil {
+					logging.Warnf("Failed to emit update error event: %v", emitErr)
+				}
 			}
+			job.MarkFailed()
+			return
 		}
-		job.MarkFailed()
-		return
+		dl = downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder, nil)
 	}
-	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder, nil)
 
-	// Broadcast update started
 	broadcastProgress(&ws.ProgressMessage{
 		JobID:    job.ID,
 		Status:   "updating",
@@ -72,7 +82,6 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		Message:  "Generating NFOs and downloading media files in place",
 	})
 
-	// Emit organize event for update start
 	if emitter != nil {
 		if err := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("Update started for job %s", job.ID), models.SeverityInfo, map[string]interface{}{"job_id": job.ID}); err != nil {
 			logging.Warnf("Failed to emit update start event: %v", err)
@@ -87,7 +96,6 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		}
 	}
 
-	// Guard against division by zero when no files were successfully scraped
 	if totalFiles == 0 {
 		broadcastProgress(&ws.ProgressMessage{
 			JobID:    job.ID,
@@ -108,7 +116,6 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 	failedFiles := 0
 
 	for filePath, fileResult := range status.Results {
-		// Check if context is cancelled
 		select {
 		case <-ctx.Done():
 			job.MarkCancelled()
@@ -144,12 +151,10 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		fileCtx, fileCancel := context.WithTimeout(ctx, fileTimeout)
 		defer fileCancel()
 
-		// Skip files that failed during scraping
 		if fileResult.Status != worker.JobStatusCompleted || fileResult.Data == nil {
 			continue
 		}
 
-		// Skip files excluded by user
 		if job.IsExcluded(filePath) {
 			logging.Infof("Skipping excluded file: %s", filePath)
 			continue
@@ -167,19 +172,14 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 			continue
 		}
 
-		// Get source directory (where file currently is)
 		sourceDir := filepath.Dir(filePath)
 
-		// Track whether this file had any errors
 		hasErrors := false
 		errorMsg := ""
 
-		// NFO MERGE LOGIC: Check if NFO already exists and merge if present
-		// Default strategy: prefer scraper data (non-destructive update)
 		movieToWrite := movie
 		var mergeStats *nfo.MergeStats
 
-		// Detect part suffix for multi-part files
 		partSuffix := ""
 		isMultiPart := false
 		var partNum int
@@ -191,11 +191,9 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 			isMultiPart = pt == matcher.PatternExplicit
 		}
 
-		// Construct expected NFO path using centralized resolution (matches generator logic)
 		nfoFilename := nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Metadata.NFO.PerFile, isMultiPart, partSuffix)
 		nfoPath := filepath.Join(sourceDir, nfoFilename)
 
-		// Also try legacy paths for backward compatibility
 		legacyPaths := []string{}
 		if nfoFilename != movie.ID+".nfo" {
 			legacyPaths = append(legacyPaths, filepath.Join(sourceDir, movie.ID+".nfo"))
@@ -208,7 +206,6 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 			}
 		}
 
-		// Check if NFO exists (try template path first, then legacy)
 		foundPath := ""
 		if _, err := os.Stat(nfoPath); err == nil {
 			foundPath = nfoPath
@@ -222,49 +219,70 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 			}
 		}
 
-		if foundPath != "" {
-			// NFO exists - parse and merge
-			logging.Infof("Found existing NFO, merging data: %s", foundPath)
+		if !opts.ForceOverwrite {
+			scalarStrategy := nfo.PreferScraper
+			mergeArrays := true
 
-			parseResult, err := nfo.ParseNFO(afero.NewOsFs(), foundPath)
-			if err != nil {
-				logging.Warnf("Failed to parse existing NFO %s: %v (will overwrite)", foundPath, err)
-			} else {
-				// Merge with prefer-scraper strategy (default)
-				mergeResult, err := nfo.MergeMovieMetadata(movie, parseResult.Movie, nfo.PreferScraper)
-				if err != nil {
-					logging.Warnf("Failed to merge NFO data for %s: %v (using scraper data only)", movie.ID, err)
+			if opts.ScalarStrategy != "" {
+				scalarStrategy = nfo.ParseScalarStrategy(opts.ScalarStrategy)
+			}
+
+			if opts.ArrayStrategy != "" {
+				mergeArrays = nfo.ParseArrayStrategy(opts.ArrayStrategy)
+			}
+
+			if opts.Preset != "" {
+				resolvedScalar, resolvedArray, presetErr := nfo.ApplyPreset(opts.Preset, opts.ScalarStrategy, opts.ArrayStrategy)
+				if presetErr != nil {
+					logging.Warnf("Invalid preset %q: %v, using defaults", opts.Preset, presetErr)
 				} else {
-					movieToWrite = mergeResult.Merged
-					mergeStats = &mergeResult.Stats
-
-					// Determine DisplayTitle: use template or fallback to Title
-					// If Title already looks template-generated (starts with [ID]),
-					// use it directly to avoid double-templating.
-					titleLooksTemplated := worker.LooksLikeTemplatedTitle(movieToWrite.Title, movieToWrite.ID)
-					if titleLooksTemplated {
-						movieToWrite.DisplayTitle = movieToWrite.Title
-					} else if cfg.Metadata.NFO.DisplayTitle != "" {
-						displayTmplCtx := template.NewContextFromMovie(movieToWrite)
-						displayEngine := template.NewEngine()
-						if displayName, err := displayEngine.ExecuteWithContext(fileCtx, cfg.Metadata.NFO.DisplayTitle, displayTmplCtx); err == nil {
-							movieToWrite.DisplayTitle = displayName
-						} else {
-							movieToWrite.DisplayTitle = movieToWrite.Title
-						}
-					} else {
-						movieToWrite.DisplayTitle = movieToWrite.Title
-					}
-
-					logging.Infof("NFO merge complete for %s: %d from scraper, %d from NFO, %d conflicts resolved",
-						movie.ID, mergeStats.FromScraper, mergeStats.FromNFO, mergeStats.ConflictsResolved)
+					scalarStrategy = nfo.ParseScalarStrategy(resolvedScalar)
+					mergeArrays = nfo.ParseArrayStrategy(resolvedArray)
 				}
 			}
-		} else {
-			logging.Debugf("No existing NFO found, creating new one at %s", nfoPath)
+
+			if opts.PreserveNFO {
+				scalarStrategy = nfo.PreserveExisting
+			}
+
+			if foundPath != "" {
+				logging.Infof("Found existing NFO, merging data: %s", foundPath)
+
+				parseResult, err := nfo.ParseNFO(afero.NewOsFs(), foundPath)
+				if err != nil {
+					logging.Warnf("Failed to parse existing NFO %s: %v (will overwrite)", foundPath, err)
+				} else {
+					mergeResult, err := nfo.MergeMovieMetadataWithOptions(movie, parseResult.Movie, scalarStrategy, mergeArrays)
+					if err != nil {
+						logging.Warnf("Failed to merge NFO data for %s: %v (using scraper data only)", movie.ID, err)
+					} else {
+						movieToWrite = mergeResult.Merged
+						mergeStats = &mergeResult.Stats
+
+						logging.Infof("NFO merge complete for %s: %d from scraper, %d from NFO, %d conflicts resolved",
+							movie.ID, mergeStats.FromScraper, mergeStats.FromNFO, mergeStats.ConflictsResolved)
+					}
+				}
+			} else {
+				logging.Debugf("No existing NFO found, creating new one at %s", nfoPath)
+			}
 		}
 
-		// Create multipart info for template conditionals
+		titleLooksTemplated := worker.LooksLikeTemplatedTitle(movieToWrite.Title, movieToWrite.ID)
+		if titleLooksTemplated {
+			movieToWrite.DisplayTitle = movieToWrite.Title
+		} else if cfg.Metadata.NFO.DisplayTitle != "" {
+			displayTmplCtx := template.NewContextFromMovie(movieToWrite)
+			displayEngine := template.NewEngine()
+			if displayName, err := displayEngine.ExecuteWithContext(fileCtx, cfg.Metadata.NFO.DisplayTitle, displayTmplCtx); err == nil {
+				movieToWrite.DisplayTitle = displayName
+			} else {
+				movieToWrite.DisplayTitle = movieToWrite.Title
+			}
+		} else {
+			movieToWrite.DisplayTitle = movieToWrite.Title
+		}
+
 		var multipart *downloader.MultipartInfo
 		if isMultiPart {
 			multipart = &downloader.MultipartInfo{
@@ -274,9 +292,11 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 			}
 		}
 
-		posterPath := copyTempCroppedPoster(job, movieToWrite, sourceDir, cfg, "Update", multipart)
+		var posterPath string
+		if !opts.SkipDownload {
+			posterPath = copyTempCroppedPoster(job, movieToWrite, sourceDir, cfg, "Update", multipart)
+		}
 
-		// Capture NFO snapshot BEFORE overwrite (HIST-05: crash-safe)
 		snapshotResult := history.ReadNFOSnapshot(afero.NewOsFs(),
 			nfoPath,
 			filepath.Join(sourceDir, movie.ID+".nfo"),
@@ -294,23 +314,19 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		updateRecord := history.NewPreOrganizeRecord(
 			job.ID, movie.ID, filePath, snapshotResult.Content, effectiveNFOPath, sourceDir, models.OperationTypeUpdate, false,
 		)
-		updateRecord.NewPath = filePath // In update mode, file doesn't move
+		updateRecord.NewPath = filePath
 		if err := batchFileOpRepo.Create(updateRecord); err != nil {
 			logging.Warnf("Failed to persist update-mode record for %s: %v", movie.ID, err)
 		}
 
-		// Note: partSuffix already computed above for NFO template lookup
-
-		// Generate NFO in source directory (with merged data if applicable)
-		// Only generate NFO if enabled in config
-		if cfg.Metadata.NFO.Enabled {
-			nfoErr := nfoGen.Generate(movieToWrite, sourceDir, partSuffix, filePath)
+		var nfoErr error
+		if cfg.Metadata.NFO.Enabled && !opts.SkipNFO {
+			nfoErr = nfoGen.Generate(movieToWrite, sourceDir, partSuffix, filePath)
 			if nfoErr != nil {
 				logging.Warnf("Failed to generate NFO for %s: %v", movieToWrite.ID, nfoErr)
 				hasErrors = true
 				errorMsg = fmt.Sprintf("NFO generation failed: %v", nfoErr)
 
-				// Emit organize event for NFO failure
 				if emitter != nil {
 					if err := emitter.EmitOrganizeEvent("nfo_gen", fmt.Sprintf("NFO generation failed for %s", movieToWrite.ID), models.SeverityError, map[string]interface{}{"job_id": job.ID, "movie_id": movieToWrite.ID, "error": nfoErr.Error()}); err != nil {
 						logging.Warnf("Failed to emit NFO failure event: %v", err)
@@ -325,57 +341,58 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 				}
 			}
 
-			// Log NFO generation to history
 			if logErr := historyLogger.LogNFO(movie.ID, nfoPath, nfoErr); logErr != nil {
 				logging.Warnf("Failed to log NFO history for %s: %v", movie.ID, logErr)
 			}
+		} else if opts.SkipNFO {
+			logging.Debugf("NFO generation skipped for %s (skip_nfo requested)", movie.ID)
 		} else {
 			logging.Infof("NFO generation disabled in config, skipping for %s", movie.ID)
 		}
 
-		// Download all media files to source directory
-		// Use movieToWrite (merged) to include NFO data in downloads
-		// Reuse multipart info created earlier for template rendering
-		results, err := dl.DownloadAll(fileCtx, movieToWrite, sourceDir, multipart)
-		if err != nil {
-			logging.Warnf("Failed to download media for %s: %v", movie.ID, err)
-			hasErrors = true
+		var results []downloader.DownloadResult
+		if !opts.SkipDownload {
+			dlResults, dlErr := dl.DownloadAll(fileCtx, movieToWrite, sourceDir, multipart)
+			if dlErr != nil {
+				logging.Warnf("Failed to download media for %s: %v", movie.ID, dlErr)
+				hasErrors = true
 
-			// Emit organize event for media download failure
-			if emitter != nil {
-				if err := emitter.EmitOrganizeEvent("media_download", fmt.Sprintf("Media download failed for %s", movie.ID), models.SeverityError, map[string]interface{}{"job_id": job.ID, "movie_id": movie.ID, "error": err.Error()}); err != nil {
-					logging.Warnf("Failed to emit download failure event: %v", err)
+				if emitter != nil {
+					if err := emitter.EmitOrganizeEvent("media_download", fmt.Sprintf("Media download failed for %s", movie.ID), models.SeverityError, map[string]interface{}{"job_id": job.ID, "movie_id": movie.ID, "error": dlErr.Error()}); err != nil {
+						logging.Warnf("Failed to emit download failure event: %v", err)
+					}
 				}
-			}
 
-			if errorMsg != "" {
-				errorMsg += "; Media download failed: " + err.Error()
+				if errorMsg != "" {
+					errorMsg += "; Media download failed: " + dlErr.Error()
+				} else {
+					errorMsg = fmt.Sprintf("Media download failed: %v", dlErr)
+				}
 			} else {
-				errorMsg = fmt.Sprintf("Media download failed: %v", err)
+				results = dlResults
+				for _, result := range dlResults {
+					if result.Downloaded {
+						logging.Infof("Downloaded %s: %s (%d bytes)", result.Type, result.LocalPath, result.Size)
+					}
+					if result.Error != nil {
+						hasErrors = true
+						logging.Warnf("[post-move] mode=Update movie=%s file=%s stage=download media_type=%s url=%s dst=%s err=%v", movie.ID, filePath, result.Type, result.URL, result.LocalPath, result.Error)
+						if errorMsg != "" {
+							errorMsg += "; "
+						}
+						errorMsg += fmt.Sprintf("%s download failed: %v", result.Type, result.Error)
+					}
+					if result.URL != "" {
+						if logErr := historyLogger.LogDownload(movie.ID, result.URL, result.LocalPath, string(result.Type), result.Error); logErr != nil {
+							logging.Warnf("Failed to log download history for %s: %v", movie.ID, logErr)
+						}
+					}
+				}
 			}
 		} else {
-			for _, result := range results {
-				if result.Downloaded {
-					logging.Infof("Downloaded %s: %s (%d bytes)", result.Type, result.LocalPath, result.Size)
-				}
-				if result.Error != nil {
-					hasErrors = true
-					logging.Warnf("[post-move] mode=Update movie=%s file=%s stage=download media_type=%s url=%s dst=%s err=%v", movie.ID, filePath, result.Type, result.URL, result.LocalPath, result.Error)
-					if errorMsg != "" {
-						errorMsg += "; "
-					}
-					errorMsg += fmt.Sprintf("%s download failed: %v", result.Type, result.Error)
-				}
-				// Log download to history (both successful and failed)
-				if result.URL != "" {
-					if logErr := historyLogger.LogDownload(movie.ID, result.URL, result.LocalPath, string(result.Type), result.Error); logErr != nil {
-						logging.Warnf("Failed to log download history for %s: %v", movie.ID, logErr)
-					}
-				}
-			}
+			logging.Debugf("Media download skipped for %s (skip_download requested)", movie.ID)
 		}
 
-		// Update BatchFileOperation record with generated file paths after post-ops
 		if updateRecord.ID > 0 {
 			var downloadPaths []string
 			if posterPath != "" {
@@ -387,7 +404,7 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 				}
 			}
 			generatedNFOPath := ""
-			if cfg.Metadata.NFO.Enabled {
+			if cfg.Metadata.NFO.Enabled && !opts.SkipNFO {
 				generatedNFOPath = nfoPath
 			}
 			generatedFilesJSON := history.BuildGeneratedFilesJSON(generatedNFOPath, nil, downloadPaths)
@@ -400,7 +417,6 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		processedFiles++
 		progress := float64(processedFiles) / float64(totalFiles) * 100
 
-		// Broadcast progress with error status if errors occurred
 		if hasErrors {
 			failedFiles++
 			_ = job.AtomicUpdateFileResult(filePath, func(fr *worker.FileResult) (*worker.FileResult, error) {
@@ -431,7 +447,6 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		}
 	}
 
-	// Broadcast completion
 	broadcastProgress(&ws.ProgressMessage{
 		JobID:    job.ID,
 		Status:   "update_completed",
@@ -439,7 +454,6 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 		Message:  fmt.Sprintf("Update completed: %d file(s) processed", processedFiles),
 	})
 
-	// Emit organize event for update completion
 	if emitter != nil {
 		sev := models.SeverityInfo
 		if failedFiles > 0 && processedFiles > failedFiles {

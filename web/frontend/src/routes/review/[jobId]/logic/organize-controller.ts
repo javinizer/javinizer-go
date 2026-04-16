@@ -1,4 +1,4 @@
-import type { BatchJobResponse, Movie, ProgressMessage } from '$lib/api/types';
+import type { BatchJobResponse, Movie, ProgressMessage, UpdateRequest } from '$lib/api/types';
 
 export type OrganizeOperation = 'move' | 'copy' | 'hardlink' | 'softlink';
 export type OrganizeStatus = 'idle' | 'organizing' | 'completed' | 'failed';
@@ -34,9 +34,9 @@ interface OrganizeControllerDeps {
 		getBatchJob: (jobId: string, includeData?: boolean) => Promise<BatchJobResponse>;
 		organizeBatchJob: (
 			jobId: string,
-			request: { destination: string; copy_only: boolean; link_mode?: 'hard' | 'soft' }
+			request: { destination: string; copy_only: boolean; link_mode?: 'hard' | 'soft'; skip_nfo?: boolean; skip_download?: boolean }
 		) => Promise<unknown>;
-		updateBatchJob: (jobId: string) => Promise<unknown>;
+		updateBatchJob: (jobId: string, request?: UpdateRequest) => Promise<unknown>;
 	};
 	pollIntervalMs?: number;
 	pollTimeoutMs?: number;
@@ -198,11 +198,18 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		clearOrganizeCompletionTimer();
 	}
 
-	async function organizeAll() {
+	let lastUpdateOptions: UpdateRequest | undefined;
+	let lastSkipNfo = false;
+	let lastSkipDownload = false;
+
+	async function organizeAll(skipNfo?: boolean, skipDownload?: boolean) {
 		if (!deps.getDestinationPath().trim()) {
 			deps.toastError('Please enter a destination path');
 			return;
 		}
+
+		lastSkipNfo = skipNfo ?? false;
+		lastSkipDownload = skipDownload ?? false;
 
 		const { copyOnly, linkMode } = getOrganizeRequestOptions(deps.getOrganizeOperation());
 		prepareOrganizeRun();
@@ -215,7 +222,9 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			await deps.api.organizeBatchJob(deps.getJobId(), {
 				destination: deps.getDestinationPath(),
 				copy_only: copyOnly,
-				link_mode: linkMode
+				link_mode: linkMode,
+				skip_nfo: skipNfo || false,
+				skip_download: skipDownload || false
 			});
 
 			startOrganizeCompletionPolling();
@@ -228,15 +237,19 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		}
 	}
 
-	async function updateAll() {
+	async function updateAll(options?: UpdateRequest) {
 		prepareOrganizeRun();
+
+		if (options) {
+			lastUpdateOptions = options;
+		}
 
 		try {
 			if (deps.getEditedMovies().size > 0) {
 				await deps.saveAllEdits();
 			}
 
-			await deps.api.updateBatchJob(deps.getJobId());
+			await deps.api.updateBatchJob(deps.getJobId(), options);
 			startOrganizeCompletionPolling();
 		} catch (e) {
 			deps.setOrganizeStatus('failed');
@@ -254,9 +267,9 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		deps.toastInfo(`Retrying ${failedCount} failed file${failedCount > 1 ? 's' : ''}...`);
 
 		if (deps.getIsUpdateMode()) {
-			await updateAll();
+			await updateAll(lastUpdateOptions);
 		} else {
-			await organizeAll();
+			await organizeAll(lastSkipNfo, lastSkipDownload);
 		}
 	}
 

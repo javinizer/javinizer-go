@@ -1,7 +1,6 @@
 package dmm
 
 import (
-	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -32,19 +31,19 @@ func (m *scraperModule) ConfigFactory() any {
 }
 func (m *scraperModule) Options() any {
 	return []any{
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "use_browser",
 			Label:       "Use Browser",
 			Description: "Enable browser automation for this scraper. Requires global 'Use Browser' to be enabled.",
 			Type:        "boolean",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "scrape_actress",
 			Label:       "Scrape Actress Information",
 			Description: "Override global setting: Extract actress names and IDs. Requires global 'Scrape Actress Information' to be enabled.",
 			Type:        "boolean",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "placeholder_threshold",
 			Label:       "Placeholder Threshold",
 			Description: "File size threshold in KB for detecting placeholder images. Files smaller than this are considered potential placeholders.",
@@ -54,7 +53,7 @@ func (m *scraperModule) Options() any {
 			Max:         scraperutil.IntPtr(1000),
 			Unit:        "KB",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "extra_placeholder_hashes",
 			Label:       "Extra Placeholder Hashes",
 			Description: "Additional SHA256 hashes of known placeholder images. Each hash is a 64-character hex string.",

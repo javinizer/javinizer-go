@@ -54,7 +54,7 @@ func TestProcessUpdateMode_GeneratesMergedNFO(t *testing.T) {
 		},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusCompleted {
@@ -102,7 +102,7 @@ func TestProcessUpdateMode_TemplatedTitleNotDoubleApplied(t *testing.T) {
 		},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusCompleted {
@@ -149,7 +149,7 @@ func TestProcessUpdateMode_CancelledContextMarksJobCancelled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, ctx, nil)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, ctx, nil, &UpdateOptions{})
 
 	if status := job.GetStatus(); status.Status != worker.JobStatusCancelled {
 		t.Fatalf("job status = %q, want cancelled", status.Status)
@@ -191,7 +191,7 @@ func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 		},
 	})
 
-	processOrganizeJob(context.Background(), job, deps.JobQueue, destDir, true, "", deps.DB, cfg, deps.Registry, nil)
+	processOrganizeJob(context.Background(), job, deps.JobQueue, destDir, true, "", false, false, deps.DB, cfg, deps.Registry, nil)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusOrganized {
@@ -240,7 +240,7 @@ func TestProcessOrganizeJob_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	processOrganizeJob(ctx, job, deps.JobQueue, t.TempDir(), false, "", deps.DB, cfg, deps.Registry, nil)
+	processOrganizeJob(ctx, job, deps.JobQueue, t.TempDir(), false, "", false, false, deps.DB, cfg, deps.Registry, nil)
 
 	status := job.GetStatus()
 	if status.Status != worker.JobStatusCancelled {

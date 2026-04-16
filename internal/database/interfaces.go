@@ -100,6 +100,7 @@ type ContentIDMappingRepositoryInterface interface {
 type JobRepositoryInterface interface {
 	Create(job *models.Job) error
 	Update(job *models.Job) error
+	Upsert(job *models.Job) error
 	FindByID(id string) (*models.Job, error)
 	List() ([]models.Job, error)
 	Delete(id string) error

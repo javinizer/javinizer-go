@@ -580,6 +580,9 @@ const docTemplate = `{
         "/api/v1/batch/{id}/update": {
             "post": {
                 "description": "Generate NFOs and download media files in place without moving video files",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -594,6 +597,14 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Update options (optional, backward compatible)",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/batch.UpdateRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -2368,9 +2379,14 @@ const docTemplate = `{
                     "example": "hard"
                 },
                 "operation_mode": {
-                    "description": "organize, in-place, in-place-norenamefolder, metadata-only, preview",
                     "type": "string",
                     "example": "organize"
+                },
+                "skip_download": {
+                    "type": "boolean"
+                },
+                "skip_nfo": {
+                    "type": "boolean"
                 }
             }
         },
@@ -2466,9 +2482,14 @@ const docTemplate = `{
                     "example": "hard"
                 },
                 "operation_mode": {
-                    "description": "organize, in-place, in-place-norenamefolder, metadata-only",
                     "type": "string",
                     "example": "organize"
+                },
+                "skip_download": {
+                    "type": "boolean"
+                },
+                "skip_nfo": {
+                    "type": "boolean"
                 }
             }
         },
@@ -2509,6 +2530,47 @@ const docTemplate = `{
             "properties": {
                 "movie": {
                     "$ref": "#/definitions/models.Movie"
+                }
+            }
+        },
+        "batch.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "array_strategy": {
+                    "type": "string",
+                    "enum": [
+                        "merge",
+                        "replace"
+                    ]
+                },
+                "force_overwrite": {
+                    "type": "boolean"
+                },
+                "preserve_nfo": {
+                    "type": "boolean"
+                },
+                "preset": {
+                    "type": "string",
+                    "enum": [
+                        "conservative",
+                        "gap-fill",
+                        "aggressive"
+                    ]
+                },
+                "scalar_strategy": {
+                    "type": "string",
+                    "enum": [
+                        "prefer-scraper",
+                        "prefer-nfo",
+                        "preserve-existing",
+                        "fill-missing-only"
+                    ]
+                },
+                "skip_download": {
+                    "type": "boolean"
+                },
+                "skip_nfo": {
+                    "type": "boolean"
                 }
             }
         },
@@ -3738,19 +3800,6 @@ const docTemplate = `{
                 }
             }
         },
-        "contracts.ScraperChoice": {
-            "type": "object",
-            "properties": {
-                "label": {
-                    "type": "string",
-                    "example": "English"
-                },
-                "value": {
-                    "type": "string",
-                    "example": "en"
-                }
-            }
-        },
         "contracts.ScraperInfo": {
             "type": "object",
             "properties": {
@@ -3778,15 +3827,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "choices": {
-                    "description": "For select type: available choices",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/contracts.ScraperChoice"
+                        "$ref": "#/definitions/models.ScraperChoice"
                     }
                 },
-                "default": {
-                    "description": "Default value for this option"
-                },
+                "default": {},
                 "description": {
                     "type": "string",
                     "example": "Enable detailed actress data scraping from DMM (may be slower)"
@@ -3808,7 +3854,6 @@ const docTemplate = `{
                     "example": 5
                 },
                 "type": {
-                    "description": "boolean, string, number, select",
                     "type": "string",
                     "example": "boolean"
                 },
@@ -4486,6 +4531,19 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "models.ScraperChoice": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string",
+                    "example": "English"
+                },
+                "value": {
+                    "type": "string",
+                    "example": "en"
                 }
             }
         },

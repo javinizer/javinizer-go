@@ -358,3 +358,54 @@ func (_c *MockJobRepositoryInterface_Update_Call) RunAndReturn(run func(job *mod
 	_c.Call.Return(run)
 	return _c
 }
+
+// Upsert provides a mock function for the type MockJobRepositoryInterface
+func (_mock *MockJobRepositoryInterface) Upsert(job *models.Job) error {
+	ret := _mock.Called(job)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Upsert")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(*models.Job) error); ok {
+		r0 = returnFunc(job)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockJobRepositoryInterface_Upsert_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Upsert'
+type MockJobRepositoryInterface_Upsert_Call struct {
+	*mock.Call
+}
+
+// Upsert is a helper method to define mock.On call
+//   - job *models.Job
+func (_e *MockJobRepositoryInterface_Expecter) Upsert(job interface{}) *MockJobRepositoryInterface_Upsert_Call {
+	return &MockJobRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", job)}
+}
+
+func (_c *MockJobRepositoryInterface_Upsert_Call) Run(run func(job *models.Job)) *MockJobRepositoryInterface_Upsert_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 *models.Job
+		if args[0] != nil {
+			arg0 = args[0].(*models.Job)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockJobRepositoryInterface_Upsert_Call) Return(err error) *MockJobRepositoryInterface_Upsert_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockJobRepositoryInterface_Upsert_Call) RunAndReturn(run func(job *models.Job) error) *MockJobRepositoryInterface_Upsert_Call {
+	_c.Call.Return(run)
+	return _c
+}

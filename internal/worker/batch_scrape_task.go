@@ -95,7 +95,6 @@ func NewBatchScrapeTask(opts *BatchScrapeOptions) *BatchScrapeTask {
 
 // Execute implements the Task interface
 func (t *BatchScrapeTask) Execute(ctx context.Context) error {
-	// Extract movie ID first for progress tracking
 	fileInfo := scanner.FileInfo{
 		Path:      t.filePath,
 		Name:      filepath.Base(t.filePath),
@@ -108,7 +107,7 @@ func (t *BatchScrapeTask) Execute(ctx context.Context) error {
 	if len(matchResults) > 0 {
 		movieID = matchResults[0].ID
 	} else {
-		movieID = filepath.Base(t.filePath) // Fallback to filename for progress display
+		movieID = filepath.Base(t.filePath)
 	}
 
 	// Step 1: Initial progress update
@@ -131,7 +130,7 @@ func (t *BatchScrapeTask) Execute(ctx context.Context) error {
 		t.job,
 		t.filePath,
 		t.fileIndex,
-		"", // No query override for normal batch scraping
+		"",
 		t.registry,
 		t.aggregator,
 		t.movieRepo,

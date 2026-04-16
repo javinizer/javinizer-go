@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 func TestOptions(t *testing.T) {
@@ -14,9 +14,9 @@ func TestOptions(t *testing.T) {
 
 	assert.Len(t, options, 4, "should have 4 options")
 
-	optionMap := make(map[string]contracts.ScraperOption)
+	optionMap := make(map[string]models.ScraperOption)
 	for _, opt := range options {
-		so := opt.(contracts.ScraperOption)
+		so := opt.(models.ScraperOption)
 		optionMap[so.Key] = so
 	}
 

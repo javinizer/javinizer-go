@@ -15,6 +15,7 @@ type BatchFileResultSlim = contracts.BatchFileResultSlim
 type BatchJobResponse = contracts.BatchJobResponse
 type BatchJobResponseSlim = contracts.BatchJobResponseSlim
 type OrganizeRequest = contracts.OrganizeRequest
+type UpdateRequest = contracts.UpdateRequest
 type OrganizePreviewRequest = contracts.OrganizePreviewRequest
 type OrganizePreviewResponse = contracts.OrganizePreviewResponse
 type UpdateMovieRequest = contracts.UpdateMovieRequest

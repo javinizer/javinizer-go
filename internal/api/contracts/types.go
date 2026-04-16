@@ -79,24 +79,11 @@ type ErrorResponse struct {
 	Errors []string `json:"errors,omitempty"`
 }
 
-// ScraperOption represents a configurable option for a scraper
-type ScraperOption struct {
-	Key         string          `json:"key" example:"scrape_actress"`
-	Label       string          `json:"label" example:"Scrape Actress Information"`
-	Description string          `json:"description" example:"Enable detailed actress data scraping from DMM (may be slower)"`
-	Type        string          `json:"type" example:"boolean"` // boolean, string, number, select
-	Default     interface{}     `json:"default,omitempty"`      // Default value for this option
-	Min         *int            `json:"min,omitempty" example:"5"`
-	Max         *int            `json:"max,omitempty" example:"120"`
-	Unit        string          `json:"unit,omitempty" example:"seconds"`
-	Choices     []ScraperChoice `json:"choices,omitempty"` // For select type: available choices
-}
+// ScraperOption is an alias for models.ScraperOption
+type ScraperOption = models.ScraperOption
 
-// ScraperChoice represents a choice for a select-type scraper option
-type ScraperChoice struct {
-	Value string `json:"value" example:"en"`
-	Label string `json:"label" example:"English"`
-}
+// ScraperChoice is an alias for models.ScraperChoice
+type ScraperChoice = models.ScraperChoice
 
 // ScraperInfo represents information about a scraper
 type ScraperInfo struct {
@@ -200,12 +187,24 @@ type BatchScrapeResponse struct {
 	JobID string `json:"job_id" example:"550e8400-e29b-41d4-a716-446655440000"`
 }
 
+type UpdateRequest struct {
+	ForceOverwrite bool   `json:"force_overwrite"`
+	PreserveNFO    bool   `json:"preserve_nfo"`
+	Preset         string `json:"preset,omitempty" binding:"omitempty,oneof=conservative gap-fill aggressive"`
+	ScalarStrategy string `json:"scalar_strategy,omitempty" binding:"omitempty,oneof=prefer-scraper prefer-nfo preserve-existing fill-missing-only"`
+	ArrayStrategy  string `json:"array_strategy,omitempty" binding:"omitempty,oneof=merge replace"`
+	SkipNFO        bool   `json:"skip_nfo"`
+	SkipDownload   bool   `json:"skip_download"`
+}
+
 // OrganizeRequest represents an organize request
 type OrganizeRequest struct {
 	Destination   string `json:"destination" binding:"required" example:"/path/to/output"`
 	CopyOnly      bool   `json:"copy_only" example:"false"`
 	LinkMode      string `json:"link_mode,omitempty" binding:"omitempty,oneof=hard soft" example:"hard"`
-	OperationMode string `json:"operation_mode,omitempty" example:"organize"` // organize, in-place, in-place-norenamefolder, metadata-only
+	OperationMode string `json:"operation_mode,omitempty" example:"organize"`
+	SkipNFO       bool   `json:"skip_nfo"`
+	SkipDownload  bool   `json:"skip_download"`
 }
 
 // OrganizePreviewRequest represents a preview request
@@ -213,7 +212,9 @@ type OrganizePreviewRequest struct {
 	Destination   string `json:"destination" binding:"required" example:"/path/to/output"`
 	CopyOnly      bool   `json:"copy_only" example:"false"`
 	LinkMode      string `json:"link_mode,omitempty" binding:"omitempty,oneof=hard soft" example:"hard"`
-	OperationMode string `json:"operation_mode,omitempty" example:"organize"` // organize, in-place, in-place-norenamefolder, metadata-only, preview
+	OperationMode string `json:"operation_mode,omitempty" example:"organize"`
+	SkipNFO       bool   `json:"skip_nfo"`
+	SkipDownload  bool   `json:"skip_download"`
 }
 
 // OrganizePreviewResponse represents the expected output structure

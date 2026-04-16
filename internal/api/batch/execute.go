@@ -1,8 +1,10 @@
 package batch
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sort"
 
 	"github.com/gin-gonic/gin"
@@ -107,7 +109,7 @@ func organizeJob(deps *ServerDependencies) gin.HandlerFunc {
 			ctx, cancel := context.WithCancel(context.Background())
 			job.SetCancelFunc(cancel)
 			defer cancel()
-			processOrganizeJob(ctx, job, deps.JobQueue, req.Destination, req.CopyOnly, req.LinkMode, deps.DB, cfg, deps.GetRegistry(), deps.EventEmitter)
+			processOrganizeJob(ctx, job, deps.JobQueue, req.Destination, req.CopyOnly, req.LinkMode, req.SkipNFO, req.SkipDownload, deps.DB, cfg, deps.GetRegistry(), deps.EventEmitter)
 		}()
 
 		c.JSON(200, gin.H{"message": "Organization started"})
@@ -118,8 +120,10 @@ func organizeJob(deps *ServerDependencies) gin.HandlerFunc {
 // @Summary Update batch job files
 // @Description Generate NFOs and download media files in place without moving video files
 // @Tags web
+// @Accept json
 // @Produce json
 // @Param id path string true "Job ID"
+// @Param request body UpdateRequest false "Update options (optional, backward compatible)"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -128,24 +132,40 @@ func updateBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jobID := c.Param("id")
 
-		// Use GetJobPointer to get the real job (not a snapshot) for mutations
 		job, ok := deps.JobQueue.GetJobPointer(jobID)
 		if !ok {
 			c.JSON(404, ErrorResponse{Error: "Job not found"})
 			return
 		}
 
-		// Check if job is in correct state (completed scraping)
 		status := job.GetStatus()
 		if status.Status != worker.JobStatusCompleted {
 			c.JSON(400, ErrorResponse{Error: "Job must be completed before updating"})
 			return
 		}
 
-		// Reuse the batch job lifecycle for update progress polling.
+		var req UpdateRequest
+		if c.Request.Body != nil && c.Request.ContentLength != 0 {
+			bodyBytes, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
+			if err != nil {
+				c.JSON(400, ErrorResponse{Error: "Failed to read request body"})
+				return
+			}
+			if len(bodyBytes) > 0 {
+				c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				if err := c.ShouldBindJSON(&req); err != nil {
+					c.JSON(400, ErrorResponse{Error: "Invalid request body: " + err.Error()})
+					return
+				}
+				if req.ForceOverwrite && req.PreserveNFO {
+					c.JSON(400, ErrorResponse{Error: "force_overwrite and preserve_nfo are mutually exclusive"})
+					return
+				}
+			}
+		}
+
 		job.MarkStarted()
 
-		// Start update in background with panic recovery
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -161,7 +181,16 @@ func updateBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 					})
 				}
 			}()
-			processUpdateJob(job, deps.GetConfig(), deps.DB, deps.GetRegistry(), deps.EventEmitter)
+			opts := &UpdateOptions{
+				ForceOverwrite: req.ForceOverwrite,
+				PreserveNFO:    req.PreserveNFO,
+				Preset:         req.Preset,
+				ScalarStrategy: req.ScalarStrategy,
+				ArrayStrategy:  req.ArrayStrategy,
+				SkipNFO:        req.SkipNFO,
+				SkipDownload:   req.SkipDownload,
+			}
+			processUpdateJob(job, deps.GetConfig(), deps.DB, deps.GetRegistry(), deps.EventEmitter, opts)
 		}()
 
 		c.JSON(200, gin.H{"message": "Update started"})
@@ -260,7 +289,7 @@ func previewOrganize(deps *ServerDependencies) gin.HandlerFunc {
 		})
 
 		// Use the helper function from processors.go - pass all file results for multi-part support
-		preview := generatePreview(movie, fileResults, req.Destination, deps.GetConfig(), effectiveMode)
+		preview := generatePreview(movie, fileResults, req.Destination, deps.GetConfig(), effectiveMode, req.SkipNFO, req.SkipDownload)
 		c.JSON(200, preview)
 	}
 }

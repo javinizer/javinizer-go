@@ -214,9 +214,12 @@ definitions:
         example: hard
         type: string
       operation_mode:
-        description: organize, in-place, in-place-norenamefolder, metadata-only, preview
         example: organize
         type: string
+      skip_download:
+        type: boolean
+      skip_nfo:
+        type: boolean
     required:
     - destination
     type: object
@@ -286,9 +289,12 @@ definitions:
         example: hard
         type: string
       operation_mode:
-        description: organize, in-place, in-place-norenamefolder, metadata-only
         example: organize
         type: string
+      skip_download:
+        type: boolean
+      skip_nfo:
+        type: boolean
     required:
     - destination
     type: object
@@ -318,6 +324,35 @@ definitions:
         $ref: '#/definitions/models.Movie'
     required:
     - movie
+    type: object
+  batch.UpdateRequest:
+    properties:
+      array_strategy:
+        enum:
+        - merge
+        - replace
+        type: string
+      force_overwrite:
+        type: boolean
+      preserve_nfo:
+        type: boolean
+      preset:
+        enum:
+        - conservative
+        - gap-fill
+        - aggressive
+        type: string
+      scalar_strategy:
+        enum:
+        - prefer-scraper
+        - prefer-nfo
+        - preserve-existing
+        - fill-missing-only
+        type: string
+      skip_download:
+        type: boolean
+      skip_nfo:
+        type: boolean
     type: object
   config.APIConfig:
     properties:
@@ -1168,15 +1203,6 @@ definitions:
         example: anchor_missing
         type: string
     type: object
-  contracts.ScraperChoice:
-    properties:
-      label:
-        example: English
-        type: string
-      value:
-        example: en
-        type: string
-    type: object
   contracts.ScraperInfo:
     properties:
       display_title:
@@ -1196,12 +1222,10 @@ definitions:
   contracts.ScraperOption:
     properties:
       choices:
-        description: 'For select type: available choices'
         items:
-          $ref: '#/definitions/contracts.ScraperChoice'
+          $ref: '#/definitions/models.ScraperChoice'
         type: array
-      default:
-        description: Default value for this option
+      default: {}
       description:
         example: Enable detailed actress data scraping from DMM (may be slower)
         type: string
@@ -1218,7 +1242,6 @@ definitions:
         example: 5
         type: integer
       type:
-        description: boolean, string, number, select
         example: boolean
         type: string
       unit:
@@ -1683,6 +1706,15 @@ definitions:
       title:
         type: string
       updated_at:
+        type: string
+    type: object
+  models.ScraperChoice:
+    properties:
+      label:
+        example: English
+        type: string
+      value:
+        example: en
         type: string
     type: object
   movie.ErrorResponse:
@@ -2416,6 +2448,8 @@ paths:
       - web
   /api/v1/batch/{id}/update:
     post:
+      consumes:
+      - application/json
       description: Generate NFOs and download media files in place without moving
         video files
       parameters:
@@ -2424,6 +2458,11 @@ paths:
         name: id
         required: true
         type: string
+      - description: Update options (optional, backward compatible)
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/batch.UpdateRequest'
       produces:
       - application/json
       responses:

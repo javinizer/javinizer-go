@@ -46,16 +46,15 @@ import (
 func setupTestDB(t *testing.T) *database.DB {
 	t.Helper()
 
-	// Use in-memory SQLite with shared cache for speed
-	// Each test gets isolated database instance (test name in DSN)
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
 			Type: "sqlite",
-			// Use test name for isolation: file:TESTNAME:?mode=memory&cache=shared
-			DSN: "file:" + t.Name() + ":?mode=memory&cache=shared&_busy_timeout=5000",
+			DSN:  dbPath + "?_journal_mode=WAL&_busy_timeout=10000",
 		},
 		Logging: config.LoggingConfig{
-			Level: "error", // Suppress database logs in tests
+			Level: "error",
 		},
 	}
 

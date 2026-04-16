@@ -3,6 +3,7 @@
 	import { cubicOut } from 'svelte/easing';
 	import { apiClient } from '$lib/api/client';
 	import { formatBytes } from '$lib/utils';
+	import { splitPath, buildPathUp, buildBreadcrumbPath, isRootPath } from '$lib/utils/path';
 	import type { FileInfo, BrowseResponse, PathAutocompleteSuggestion } from '$lib/api/types';
 	import {
 		Folder,
@@ -51,6 +52,7 @@
 	}: Props = $props();
 
 	let currentPath = $state('');
+	let parentPath = $state('');
 	let items: FileInfo[] = $state([]);
 
 	// Internal Set derived from external array for efficient lookups
@@ -58,7 +60,7 @@
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let filterText = $state('');
-	let pathParts = $derived(currentPath.split('/').filter((p) => p));
+	let pathParts = $derived(splitPath(currentPath));
 
 	// Editable path input state
 	let pathInputValue = $state('');
@@ -254,6 +256,7 @@
 		try {
 			const response: BrowseResponse = await apiClient.browse({ path: path || '/' });
 			currentPath = response.current_path;
+			parentPath = response.parent_path || '';
 			pathInputValue = response.current_path; // Sync path input
 			isPathEditing = false; // Reset editing state
 			onPathChange?.(currentPath);
@@ -267,9 +270,7 @@
 	}
 
 	function navigateToPath(index: number) {
-		const parts = pathParts.slice(0, index + 1);
-		const newPath = '/' + parts.join('/');
-		browse(newPath);
+		browse(buildBreadcrumbPath(currentPath, index));
 	}
 
 	function handleItemClick(item: FileInfo) {
@@ -296,10 +297,7 @@
 	}
 
 	function goUp() {
-		const parts = currentPath.split('/').filter((p) => p);
-		parts.pop();
-		const newPath = parts.length > 0 ? '/' + parts.join('/') : '/';
-		browse(newPath);
+		browse(buildPathUp(currentPath, parentPath));
 	}
 
 	function selectAll() {
@@ -363,7 +361,7 @@
 			{/snippet}
 		</Button>
 
-		<Button variant="ghost" size="icon" onclick={goUp} disabled={currentPath === '/'} title="Go up">
+		<Button variant="ghost" size="icon" onclick={goUp} disabled={!currentPath || isRootPath(currentPath)} title="Go up">
 			{#snippet children()}
 				<span class="text-lg">↑</span>
 			{/snippet}

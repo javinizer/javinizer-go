@@ -1,7 +1,6 @@
 package aventertainment
 
 import (
-	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -37,18 +36,18 @@ func (m *scraperModule) ConfigFactory() any {
 }
 func (m *scraperModule) Options() any {
 	return []any{
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "language",
 			Label:       "Language",
 			Description: "Language for metadata fields",
 			Type:        "select",
 			Default:     "en",
-			Choices: []contracts.ScraperChoice{
+			Choices: []models.ScraperChoice{
 				{Value: "en", Label: "English"},
 				{Value: "ja", Label: "Japanese"},
 			},
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "request_delay",
 			Label:       "Request Delay",
 			Description: "Delay between requests to avoid rate limiting",
@@ -57,13 +56,13 @@ func (m *scraperModule) Options() any {
 			Max:         scraperutil.IntPtr(5000),
 			Unit:        "ms",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "base_url",
 			Label:       "Base URL",
 			Description: "AV Entertainment base URL",
 			Type:        "string",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "scrape_bonus_screens",
 			Label:       "Scrape bonus screenshots",
 			Description: "Append bonus image files to screenshots",

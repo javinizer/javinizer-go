@@ -75,15 +75,20 @@ type Actress struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// FormatActressName builds a display name from actress name components
+func FormatActressName(lastName, firstName, japaneseName string) string {
+	if lastName != "" && firstName != "" {
+		return lastName + " " + firstName
+	}
+	if firstName != "" {
+		return firstName
+	}
+	return japaneseName
+}
+
 // FullName returns the actress's full English name
 func (a *Actress) FullName() string {
-	if a.LastName != "" && a.FirstName != "" {
-		return a.LastName + " " + a.FirstName
-	}
-	if a.FirstName != "" {
-		return a.FirstName
-	}
-	return a.JapaneseName
+	return FormatActressName(a.LastName, a.FirstName, a.JapaneseName)
 }
 
 // Genre represents a category/tag

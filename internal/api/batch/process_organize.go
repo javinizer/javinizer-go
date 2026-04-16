@@ -25,7 +25,7 @@ import (
 )
 
 // processOrganizeJob processes file organization for a completed scrape job
-func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *worker.JobQueue, destination string, copyOnly bool, linkModeRaw string, db *database.DB, cfg *config.Config, registry *models.ScraperRegistry, emitter eventlog.EventEmitter) {
+func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *worker.JobQueue, destination string, copyOnly bool, linkModeRaw string, skipNFO bool, skipDownload bool, db *database.DB, cfg *config.Config, registry *models.ScraperRegistry, emitter eventlog.EventEmitter) {
 	// Determine effective operation mode and apply overrides
 	outputConfig := cfg.Output
 	if job.GetOperationModeOverride() != "" {
@@ -116,26 +116,29 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 	}
 
 	// Initialize HTTP client for downloader
-	httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(cfg, registry)
-	if err != nil {
-		broadcastProgress(&ws.ProgressMessage{
-			JobID:    job.ID,
-			Status:   "error",
-			Progress: 0,
-			Message:  fmt.Sprintf("Failed to create HTTP client: %v", err),
-		})
-		if emitter != nil {
-			if emitErr := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("Organize job %s failed: HTTP client setup error", job.ID), models.SeverityError, map[string]interface{}{"job_id": job.ID, "error": err.Error()}); emitErr != nil {
-				logging.Warnf("Failed to emit organize error event: %v", emitErr)
+	var dl *downloader.Downloader
+	if !skipDownload {
+		httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(cfg, registry)
+		if err != nil {
+			broadcastProgress(&ws.ProgressMessage{
+				JobID:    job.ID,
+				Status:   "error",
+				Progress: 0,
+				Message:  fmt.Sprintf("Failed to create HTTP client: %v", err),
+			})
+			if emitter != nil {
+				if emitErr := emitter.EmitOrganizeEvent("batch", fmt.Sprintf("Organize job %s failed: HTTP client setup error", job.ID), models.SeverityError, map[string]interface{}{"job_id": job.ID, "error": err.Error()}); emitErr != nil {
+					logging.Warnf("Failed to emit organize error event: %v", emitErr)
+				}
 			}
+			job.MarkFailed()
+			if jobQueue != nil {
+				jobQueue.PersistJob(job)
+			}
+			return
 		}
-		job.MarkFailed()
-		if jobQueue != nil {
-			jobQueue.PersistJob(job)
-		}
-		return
+		dl = downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, "Javinizer/1.0", cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder, sharedEngine)
 	}
-	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, "Javinizer/1.0", cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder, sharedEngine)
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfo.ConfigFromAppConfig(&cfg.Metadata.NFO, &cfg.Output, &cfg.Metadata, db))
 
 	// Broadcast organization started
@@ -306,7 +309,7 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 			}
 		}
 
-		if result.ShouldGenerateMetadata {
+		if result.ShouldGenerateMetadata && !skipDownload {
 			var multipart *downloader.MultipartInfo
 			if match.IsMultiPart {
 				multipart = &downloader.MultipartInfo{
@@ -323,9 +326,11 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 
 			dlPaths := downloadMediaFilesWithHistory(ctx, dl, movie, result.FolderPath, cfg, historyLogger, multipart)
 			downloadPaths = append(downloadPaths, dlPaths...)
+		} else if result.ShouldGenerateMetadata && skipDownload {
+			logging.Debugf("Media download skipped for %s (skip_download requested)", movie.ID)
 		}
 
-		if result.ShouldGenerateMetadata && cfg.Metadata.NFO.Enabled {
+		if result.ShouldGenerateMetadata && cfg.Metadata.NFO.Enabled && !skipNFO {
 			if cfg.Metadata.NFO.PerFile && match.IsMultiPart {
 				partSuffix = match.PartSuffix
 			}
@@ -344,8 +349,12 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 			if logErr := historyLogger.LogNFO(movie.ID, nfoPath, nfoErr); logErr != nil {
 				logging.Warnf("Failed to log NFO history for %s: %v", movie.ID, logErr)
 			}
-		} else if result.ShouldGenerateMetadata && !cfg.Metadata.NFO.Enabled {
-			logging.Debugf("NFO generation disabled in config, skipping for %s", movie.ID)
+		} else if result.ShouldGenerateMetadata && (skipNFO || !cfg.Metadata.NFO.Enabled) {
+			if skipNFO {
+				logging.Debugf("NFO generation skipped for %s (skip_nfo requested)", movie.ID)
+			} else {
+				logging.Debugf("NFO generation disabled in config, skipping for %s", movie.ID)
+			}
 		}
 
 		if postMoveIssueCount > 0 {
@@ -355,7 +364,7 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 		if preRecord.ID > 0 {
 			nfoPath := ""
 			generatedNFOPath := ""
-			if result.ShouldGenerateMetadata && cfg.Metadata.NFO.Enabled {
+			if result.ShouldGenerateMetadata && cfg.Metadata.NFO.Enabled && !skipNFO {
 				generatedNFOPath = filepath.Join(result.FolderPath, nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Metadata.NFO.PerFile, match.IsMultiPart, partSuffix))
 				if snapshotResult.FoundPath != "" {
 					nfoPath = snapshotResult.FoundPath

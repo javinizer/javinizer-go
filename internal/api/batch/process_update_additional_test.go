@@ -78,7 +78,7 @@ func TestProcessUpdateMode_PerFileLegacyNFOAndHistoryFailures(t *testing.T) {
 	// Force history logging branches to exercise warning paths.
 	require.NoError(t, deps.DB.Exec("DROP TABLE history").Error)
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusCompleted, status.Status)
@@ -113,7 +113,7 @@ func TestProcessUpdateMode_MetadataFallbackFilename(t *testing.T) {
 		},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusCompleted, status.Status)
@@ -147,7 +147,7 @@ func TestProcessUpdateMode_InvalidConditionalTemplateFallsBackToMovieID(t *testi
 		},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 
 	status := job.GetStatus()
 	assert.Equal(t, worker.JobStatusCompleted, status.Status)

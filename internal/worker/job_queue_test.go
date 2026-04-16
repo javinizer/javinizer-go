@@ -998,11 +998,10 @@ func TestBatchJob_PersistError(t *testing.T) {
 
 // TestJobQueue_PersistToDatabase_SetsPersistError tests that persistToDatabase stores errors
 func TestJobQueue_PersistToDatabase_SetsPersistError(t *testing.T) {
-	t.Run("create failure sets PersistError", func(t *testing.T) {
+	t.Run("upsert failure sets PersistError", func(t *testing.T) {
 		mockRepo := mocks.NewMockJobRepositoryInterface(t)
 		mockRepo.On("List").Return([]models.Job{}, nil).Once()
-		mockRepo.On("FindByID", "test-job-1").Return(nil, fmt.Errorf("not found")).Once()
-		mockRepo.On("Create", mock.AnythingOfType("*models.Job")).Return(fmt.Errorf("disk full")).Once()
+		mockRepo.On("Upsert", mock.AnythingOfType("*models.Job")).Return(fmt.Errorf("disk full")).Once()
 
 		jq := NewJobQueue(mockRepo, "", nil)
 		job := &BatchJob{
@@ -1019,16 +1018,15 @@ func TestJobQueue_PersistToDatabase_SetsPersistError(t *testing.T) {
 		jq.mu.Unlock()
 
 		jq.persistToDatabase(job)
-		assert.Contains(t, job.GetPersistError(), "create failed")
+		assert.Contains(t, job.GetPersistError(), "upsert failed")
 
 		mockRepo.AssertExpectations(t)
 	})
 
-	t.Run("update failure sets PersistError", func(t *testing.T) {
+	t.Run("upsert failure sets PersistError", func(t *testing.T) {
 		mockRepo := mocks.NewMockJobRepositoryInterface(t)
 		mockRepo.On("List").Return([]models.Job{}, nil).Once()
-		mockRepo.On("FindByID", "test-job-2").Return(&models.Job{ID: "test-job-2"}, nil).Once()
-		mockRepo.On("Update", mock.AnythingOfType("*models.Job")).Return(fmt.Errorf("connection refused")).Once()
+		mockRepo.On("Upsert", mock.AnythingOfType("*models.Job")).Return(fmt.Errorf("connection refused")).Once()
 
 		jq := NewJobQueue(mockRepo, "", nil)
 		job := &BatchJob{
@@ -1045,7 +1043,7 @@ func TestJobQueue_PersistToDatabase_SetsPersistError(t *testing.T) {
 		jq.mu.Unlock()
 
 		jq.persistToDatabase(job)
-		assert.Contains(t, job.GetPersistError(), "update failed")
+		assert.Contains(t, job.GetPersistError(), "upsert failed")
 
 		mockRepo.AssertExpectations(t)
 	})
@@ -1053,8 +1051,7 @@ func TestJobQueue_PersistToDatabase_SetsPersistError(t *testing.T) {
 	t.Run("success clears PersistError", func(t *testing.T) {
 		mockRepo := mocks.NewMockJobRepositoryInterface(t)
 		mockRepo.On("List").Return([]models.Job{}, nil).Once()
-		mockRepo.On("FindByID", "test-job-3").Return(&models.Job{ID: "test-job-3"}, nil).Once()
-		mockRepo.On("Update", mock.AnythingOfType("*models.Job")).Return(nil).Once()
+		mockRepo.On("Upsert", mock.AnythingOfType("*models.Job")).Return(nil).Once()
 
 		jq := NewJobQueue(mockRepo, "", nil)
 		job := &BatchJob{

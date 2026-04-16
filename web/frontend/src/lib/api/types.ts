@@ -344,11 +344,23 @@ export interface HealthResponse {
 	build_date?: string;
 }
 
+export interface UpdateRequest {
+	force_overwrite?: boolean;
+	preserve_nfo?: boolean;
+	preset?: 'conservative' | 'gap-fill' | 'aggressive';
+	scalar_strategy?: 'prefer-scraper' | 'prefer-nfo' | 'preserve-existing' | 'fill-missing-only';
+	array_strategy?: 'merge' | 'replace';
+	skip_nfo?: boolean;
+	skip_download?: boolean;
+}
+
 export interface OrganizeRequest {
 	destination: string;
 	copy_only?: boolean;
 	link_mode?: 'hard' | 'soft';
 	operation_mode?: OperationMode;
+	skip_nfo?: boolean;
+	skip_download?: boolean;
 }
 
 export interface OrganizeResponse {
@@ -360,6 +372,8 @@ export interface OrganizePreviewRequest {
 	copy_only?: boolean;
 	link_mode?: 'hard' | 'soft';
 	operation_mode?: OperationMode;
+	skip_nfo?: boolean;
+	skip_download?: boolean;
 }
 
 export interface OrganizePreviewResponse {
@@ -636,4 +650,14 @@ export interface DeleteEventsParams {
 export interface DeleteEventsResponse {
 	deleted: number;
 	message: string;
+}
+
+export interface VersionStatusResponse {
+	current: string;
+	latest: string;
+	update_available: boolean;
+	prerelease: boolean;
+	checked_at: string;
+	source: string;
+	error?: string;
 }

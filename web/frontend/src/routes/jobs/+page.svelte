@@ -14,7 +14,8 @@
 		FolderOpen,
 		Trash2,
 		Eye,
-		Undo2
+		Undo2,
+		Timer
 	} from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -29,6 +30,9 @@
 	let hasLoadedOnce = $state(false);
 	let isRefreshing = $state(false);
 	let isClearing = $state(false);
+	let olderThanDays = $state(30);
+	let isCleaningHistory = $state(false);
+	let isCleaningEvents = $state(false);
 	let error = $state<string | null>(null);
 	let listRenderVersion = $state(0);
 	let activeFilter = $state<string>('all');
@@ -136,6 +140,38 @@
 			await loadJobs();
 		} finally {
 			isClearing = false;
+		}
+	}
+
+	async function cleanHistory() {
+		if (!olderThanDays || !Number.isFinite(olderThanDays) || olderThanDays < 1) {
+			toastStore.error('Please enter a valid number of days');
+			return;
+		}
+		isCleaningHistory = true;
+		try {
+			const result = await apiClient.deleteHistoryBulk({ older_than_days: olderThanDays });
+			toastStore.success(`Deleted ${result.deleted} history record${result.deleted !== 1 ? 's' : ''} older than ${olderThanDays} day${olderThanDays !== 1 ? 's' : ''}`);
+		} catch (e) {
+			toastStore.error(`Failed to clean history: ${e instanceof Error ? e.message : 'Unknown error'}`);
+		} finally {
+			isCleaningHistory = false;
+		}
+	}
+
+	async function cleanEvents() {
+		if (!olderThanDays || !Number.isFinite(olderThanDays) || olderThanDays < 1) {
+			toastStore.error('Please enter a valid number of days');
+			return;
+		}
+		isCleaningEvents = true;
+		try {
+			const result = await apiClient.deleteEvents({ older_than_days: olderThanDays });
+			toastStore.success(`Deleted ${result.deleted} event${result.deleted !== 1 ? 's' : ''} older than ${olderThanDays} day${olderThanDays !== 1 ? 's' : ''}`);
+		} catch (e) {
+			toastStore.error(`Failed to clean events: ${e instanceof Error ? e.message : 'Unknown error'}`);
+		} finally {
+			isCleaningEvents = false;
 		}
 	}
 
@@ -262,6 +298,37 @@
 				<Button size="sm" onclick={() => goto('/browse')}>
 					<FolderOpen class="h-4 w-4 mr-1.5" />
 					New Scrape
+				</Button>
+			</div>
+		</div>
+
+		<div class="flex items-center gap-2 mb-6 p-3 bg-card border border-border rounded-lg">
+			<Timer class="h-4 w-4 text-muted-foreground flex-shrink-0" />
+			<label class="text-sm text-muted-foreground whitespace-nowrap" for="older-than-days">Older than</label>
+			<input
+				id="older-than-days"
+				type="number"
+				bind:value={olderThanDays}
+				min="1"
+				class="w-20 h-8 rounded-md border border-input bg-background px-2 text-sm"
+			/>
+			<span class="text-sm text-muted-foreground">days</span>
+			<div class="flex items-center gap-2 ml-2">
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={cleanHistory}
+					disabled={isCleaningHistory || isCleaningEvents || olderThanDays < 1}
+				>
+					{isCleaningHistory ? 'Cleaning...' : 'Clean History'}
+				</Button>
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={cleanEvents}
+					disabled={isCleaningHistory || isCleaningEvents || olderThanDays < 1}
+				>
+					{isCleaningEvents ? 'Cleaning...' : 'Clean Events'}
 				</Button>
 			</div>
 		</div>

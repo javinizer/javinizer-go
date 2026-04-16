@@ -46,7 +46,7 @@ func TestProcessUpdateMode_MalformedExistingNFOAndDownloadFailure(t *testing.T) 
 		},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 
 	status := job.GetStatus()
 	require.Equal(t, worker.JobStatusCompleted, status.Status)
@@ -81,7 +81,7 @@ func TestProcessUpdateMode_NFOFilenameFallbacks(t *testing.T) {
 			Data:     &models.Movie{ID: "IPX-889", Title: "Template Error"},
 		})
 
-		processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+		processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 		require.Equal(t, worker.JobStatusCompleted, job.GetStatus().Status)
 		entries, err := os.ReadDir(sourceDir)
 		require.NoError(t, err)
@@ -119,7 +119,7 @@ func TestProcessUpdateMode_NFOFilenameFallbacks(t *testing.T) {
 			Data:     &models.Movie{ID: "IPX-890", Title: "///"},
 		})
 
-		processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil)
+		processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
 		require.Equal(t, worker.JobStatusCompleted, job.GetStatus().Status)
 		entries, err := os.ReadDir(sourceDir)
 		require.NoError(t, err)

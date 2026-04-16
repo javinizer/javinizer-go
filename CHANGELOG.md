@@ -5,6 +5,113 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.8-alpha] - 2026-04-16
+
+### Added
+
+- `FormatActressName` shared helper in `internal/models/movie.go` deduplicating `Actress.FullName()` and `ActressInfo.FullName()` implementations
+- `ScraperOption` and `ScraperChoice` types moved from `internal/api/contracts` to `internal/models/` with backward-compatible aliases, eliminating reverse dependency where all 14 scrapers imported the API layer
+- `JobRepositoryInterface.Upsert()` method replacing read-then-write `FindByID` → `Create`/`Update` pattern with single atomic operation
+- `UpdateRequest` struct for `POST /api/v1/batch/{id}/update` with `force_overwrite`, `preserve_nfo`, `preset`, `scalar_strategy`, `array_strategy`, `skip_nfo`, `skip_download` fields
+- `skip_nfo` and `skip_download` fields on `OrganizeRequest` for `POST /api/v1/batch/{id}/organize`
+- Update options UI in review page header (force overwrite, preserve NFO, skip NFO, skip download toggles) with collapsible options panel
+- Organize options UI in destination settings card (skip NFO, skip download toggles)
+- Older-than-days cleanup picker on Jobs page with "Clean History" and "Clean Events" buttons and client-side validation
+- Version check section in ServerSettingsSection: current/latest version display, "Update available" badge, "Check for Updates" button, error state handling
+- `getVersionStatus()` and `checkVersion()` API client methods
+- `VersionStatusResponse` TypeScript interface with error field
+- Server-side validation rejecting `force_overwrite` + `preserve_nfo` as mutually exclusive (returns 400)
+- `preset` binding validation (`oneof=conservative gap-fill aggressive`)
+- 1MB request body size cap on update endpoint via `io.LimitReader`
+
+### Changed
+
+- Javstash scraper `module.go` proxy declaration changed from value type `config.ProxyConfig` to pointer type `*config.ProxyConfig`, matching the pattern used by all other 13 scrapers
+- `AggregatorOptions` and `Aggregator` struct fields changed from concrete `*database.GenreReplacementRepository`/`*database.ActressAliasRepository` to interface types `database.GenreReplacementRepositoryInterface`/`database.ActressAliasRepositoryInterface`
+- `processUpdateJob` and `processUpdateMode` now accept `*UpdateOptions` parameter for configurable update behavior
+- `processOrganizeJob` now accepts `skipNFO` and `skipDownload` parameters
+- `updateBatchJob` handler now parses optional `UpdateRequest` body (backward compatible with empty body), validates job existence/status before body parsing, and returns 400 for malformed JSON
+- `persistToDatabase` uses `Upsert` instead of `FindByID` + `Create`/`Update`, eliminating persistence race condition
+- All 14 scraper module.go files updated to import `models.ScraperOption`/`models.ScraperChoice` instead of `contracts.ScraperOption`/`contracts.ScraperChoice`
+- Downloader HTTP client creation deferred until actually needed — `skip_download=true` no longer triggers downloader setup, preventing proxy/registry errors on NFO-only updates
+- `preserve_nfo` now uses `PreserveExisting` merge strategy (not `PreferNFO`) to prevent blanking fields when existing NFO is incomplete
+- `preserve_nfo` takes final precedence after preset resolution, preventing silent override
+- DisplayTitle templating runs for ALL update paths (including `force_overwrite`), not just the NFO merge block
+- Preview `$effect` reactive to skip toggles via `void` references; retry path persists last update options and skip flags
+- Force Overwrite and Preserve NFO made mutually exclusive in UI via reactive `$effects`
+- Test databases switched from in-memory shared-cache SQLite to temp file-based SQLite with WAL mode, eliminating `database table is locked` flaky test failures under concurrency
+- Cross-platform path utility (`path.ts`) with `splitPath`, `buildPathUp`, `buildBreadcrumbPath`, `isRootPath` functions for Windows/Unix path handling
+- FileBrowser breadcrumb navigation, "go up" button, and path construction now use cross-platform path utility instead of Unix-only logic
+- OperationRow truncated paths now show 40/60 head-tail split with click-to-expand/collapse
+- 54 files changed, ~1,192 lines added, ~468 lines removed
+
+## [v0.2.7-alpha] - 2026-04-16
+
+### Added
+
+- Per-IP rate limiting middleware (`internal/api/middleware/ratelimit.go`) for write endpoints using `golang.org/x/time/rate` token bucket
+- Sort-by whitelist validation returning 400 Bad Request on invalid column names per endpoint
+- Secure cookie flag support for reverse proxy via `X-Forwarded-Proto` header and `force_secure_cookies` config option
+- Bootstrap secret env var (`JAVINIZER_SETUP_SECRET`) for `/auth/setup` endpoint protection with local-only fallback
+- `DrainAndClose` HTTP utility (`internal/httpclient/drain.go`) replacing bare `resp.Body.Close()` on all error paths
+- JobQueue cleanup goroutine lifecycle with `stopCleanup` channel for graceful shutdown
+- BatchJob thread-safe accessors (`GetID`, `GetJobStatus`) for concurrent read access
+- `ErrNotFound` sentinel error (`internal/database/errors.go`) for cache miss distinction from actual database failures
+- Partial success response for NFO merge operations indicating which fields succeeded or failed
+- Per-file timeout for `processUpdateJob` with configurable duration bounds (30s–600s)
+- Job queue `PersistError` field for persistence failure visibility in job status
+- Database save error wrapping with operation context for debugging
+- `GetStatusSlim` for lightweight status polling without full movie data payloads
+- `MovieRepository.Upsert` returning populated `(*Movie, error)` with associations, eliminating extra database query
+- Template engine injection as shared dependency (`template.Engine`) across organizer, downloader, and job queue
+- `strings.Fields` replacing character-by-character `splitActressName` concatenation
+- O(1) scanner extension map lookup replacing linear scan
+- `DefaultFlattenConfig` and `DefaultFlattenConfigWithRaw` helpers (`internal/scraperutil/flatten.go`) with `FlattenOverrides` struct for all 14 scrapers
+- Rescrape handler decomposition into focused files: `rescrape_scrape.go`, `rescrape_update.go`, `rescrape_validate.go`, `rescrape_poster.go`
+- `BatchProcessOptions` and `BatchScrapeOptions` structs replacing positional parameters
+- `AggregateWithPriority` method on `AggregatorInterface` for priority-based aggregation
+- `MovieRepositoryInterface.Upsert` updated to return `(*Movie, error)`
+- Genre replacement CRUD API at `/api/v1/genres/replacements/` with list, create (idempotent), and delete endpoints
+- `GenreReplacementsSection` Svelte component in settings page with two-column add/remove table
+
+### Changed
+
+- All 14 scrapers migrated to shared `DefaultFlattenConfig` or `DefaultFlattenConfigWithRaw` helpers, eliminating per-scraper `FlattenFunc` boilerplate
+- Rescrape handler decomposed from 666-line monolith to 110-line main handler + 8 focused helper functions
+- Batch job processing uses options structs instead of positional parameters
+- Mocks regenerated with updated `AggregatorInterface` and `MovieRepositoryInterface` signatures
+- 146 files changed, ~4,057 lines added, ~2,382 lines removed
+
+### Fixed
+
+- Unauthenticated users cannot create admin accounts via `/auth/setup` without bootstrap secret or local access
+- Authenticated API endpoints reject excessive requests from a single IP with 429 response
+- Invalid `sort_by` query parameters rejected with 400 instead of being passed to the database
+- Session cookies have Secure flag set when request arrives via HTTPS reverse proxy
+- HTTP response bodies fully drained before close on all error paths — no leaked connections
+- Job cleanup goroutine stops cleanly when application shuts down
+- Concurrent access to BatchJob fields passes race detector with no warnings
+- Download errors for covers, posters, and trailers visible in logs and API responses
+- Cache miss errors distinguishable from actual database failures in code
+- Job queue persistence failures visible in job status
+- Review page explicitly requests full batch data (`include_data=true`) to prevent blank editor
+- Slim polling by default for `BackgroundJobIndicator` and `ProgressModal` — avoids unnecessary payload overhead
+- Genre replacement POST/DELETE routes under rate-limited `writeProtected` group
+- `GetStatusSlim` deep-copies `FieldSources` and `ActressSources` maps to prevent shared mutable state
+- Preview effect gated during organize polling to avoid redundant `/preview` API calls
+
+### Removed
+
+- `normalizeJSONLDImageURL` dead code from `internal/scraper/dmm/jsonld.go`
+- Ineffective first loop from `extractDescriptionNewSite` in `internal/scraper/dmm/video_dmm.go`
+
+### Security
+
+- Rate limiting protects write endpoints (scrape, batch, proxy, auth, genre mutations) from per-IP abuse
+- Sort-by whitelist prevents SQL injection via query parameters
+- Bootstrap secret prevents first-arriver takeover of `/auth/setup`
+- Secure cookie flag prevents session cookie leakage over HTTP behind reverse proxy
+
 ## [v0.2.6-alpha] - 2026-04-16
 
 ### Added

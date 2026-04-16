@@ -38,7 +38,7 @@ func TestGeneratePreview_MultipartFallbackPaths(t *testing.T) {
 		{FilePath: "/videos/ABC-123-pt2.mp4", IsMultiPart: true, PartNumber: 2, PartSuffix: "-pt2"},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, "")
+	resp := generatePreview(movie, fileResults, "/library", cfg, "", false, false)
 
 	folderPath := filepath.Join("/library", "IdeaPocket", "ABC-123")
 	if resp.FolderName != "ABC-123" {
@@ -94,7 +94,7 @@ func TestGeneratePreview_NoFileResultsFallback(t *testing.T) {
 		Screenshots: []string{"shot"},
 	}
 
-	resp := generatePreview(movie, nil, "/library", cfg, "")
+	resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
 
 	folderPath := filepath.Join("/library", "XYZ-999")
 	if resp.FullPath != filepath.Join(folderPath, "XYZ-999.mp4") {
@@ -163,7 +163,7 @@ func TestGeneratePreview_PosterDownloadFlag(t *testing.T) {
 				Title: "Test Movie",
 			}
 
-			resp := generatePreview(movie, nil, "/library", cfg, "")
+			resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
 
 			if tt.expectPoster {
 				assert.NotEmpty(t, resp.PosterPath, "poster path should be generated")
@@ -222,7 +222,7 @@ func TestGeneratePreview_FanartDownloadFlag(t *testing.T) {
 				movie.Screenshots = []string{"http://example.com/shot1.jpg", "http://example.com/shot2.jpg"}
 			}
 
-			resp := generatePreview(movie, nil, "/library", cfg, "")
+			resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
 
 			if tt.expectFanart {
 				assert.NotEmpty(t, resp.FanartPath, "fanart path should be generated")
@@ -254,7 +254,7 @@ func TestGeneratePreview_NFODisabled(t *testing.T) {
 		Title: "Test Movie",
 	}
 
-	resp := generatePreview(movie, nil, "/library", cfg, "")
+	resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
 
 	assert.Empty(t, resp.NFOPath, "NFO path should be empty when NFO is disabled")
 	assert.Empty(t, resp.NFOPaths, "NFO paths should be empty when NFO is disabled")
@@ -282,7 +282,7 @@ func TestGeneratePreview_MultipartContext(t *testing.T) {
 		{FilePath: "/videos/TEST-004-pt2.mp4", IsMultiPart: true, PartNumber: 2, PartSuffix: "-pt2"},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, "")
+	resp := generatePreview(movie, fileResults, "/library", cfg, "", false, false)
 
 	assert.Contains(t, resp.PosterPath, "-pt1-poster", "poster should use first file's pt1 suffix")
 	assert.Contains(t, resp.FanartPath, "-pt1-fanart", "fanart should use first file's pt1 suffix")
@@ -310,7 +310,7 @@ func TestGeneratePreview_MultipartContextReverse(t *testing.T) {
 		{FilePath: "/videos/TEST-004B-pt1.mp4", IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, "")
+	resp := generatePreview(movie, fileResults, "/library", cfg, "", false, false)
 
 	// First file is pt2, so poster/fanart will use pt2 context
 	assert.Contains(t, resp.PosterPath, "-pt2-poster", "poster should use first file's pt2 suffix")
@@ -337,7 +337,7 @@ func TestGeneratePreview_SingleFileNoMultipart(t *testing.T) {
 		{FilePath: "/videos/TEST-005.mp4", IsMultiPart: false},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, "")
+	resp := generatePreview(movie, fileResults, "/library", cfg, "", false, false)
 
 	assert.NotContains(t, resp.PosterPath, "-pt", "poster should not have multipart suffix for single file")
 	assert.NotContains(t, resp.FanartPath, "-pt", "fanart should not have multipart suffix for single file")
@@ -363,7 +363,7 @@ func TestGeneratePreview_NFOPerFile(t *testing.T) {
 		{FilePath: "/videos/TEST-006-pt2.mp4", IsMultiPart: true, PartNumber: 2, PartSuffix: "-pt2"},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, "")
+	resp := generatePreview(movie, fileResults, "/library", cfg, "", false, false)
 
 	// PerFile=true means NFOPaths has multiple entries, but NFOPath is set to first for backward compatibility
 	assert.Len(t, resp.NFOPaths, 2, "should have 2 NFO paths for per-file mode")
@@ -409,7 +409,7 @@ func TestGeneratePreview_OperationMode(t *testing.T) {
 				Title: "Operation Mode Test",
 			}
 
-			resp := generatePreview(movie, nil, "/library", cfg, tt.operationMode)
+			resp := generatePreview(movie, nil, "/library", cfg, tt.operationMode, false, false)
 
 			assert.Equal(t, tt.expectedInResp, resp.OperationMode,
 				"operation_mode in preview response should match")
@@ -428,7 +428,7 @@ func TestGeneratePreview_OperationModeDefaultBehavior(t *testing.T) {
 			Title: "Empty Mode Test",
 		}
 
-		resp := generatePreview(movie, nil, "/library", cfg, organizer.OperationMode(""))
+		resp := generatePreview(movie, nil, "/library", cfg, organizer.OperationMode(""), false, false)
 
 		assert.Equal(t, "", resp.OperationMode,
 			"empty operation_mode should pass through as empty string")
@@ -453,7 +453,7 @@ func TestGeneratePreview_NFOSingleFile(t *testing.T) {
 		{FilePath: "/videos/TEST-007.mp4"},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, "")
+	resp := generatePreview(movie, fileResults, "/library", cfg, "", false, false)
 
 	assert.NotEmpty(t, resp.NFOPath, "NFOPath should be set when PerFile is false")
 	assert.True(t, strings.Contains(resp.NFOPath, "TEST-007.nfo"), "NFO path should match template")
@@ -479,7 +479,7 @@ func TestGeneratePreview_InPlaceNoRenameFolder(t *testing.T) {
 		{FilePath: "/source/videos/IPX-535.mp4"},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeInPlaceNoRenameFolder)
+	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeInPlaceNoRenameFolder, false, false)
 
 	// Should use source directory as target, not /library
 	assert.Equal(t, "in-place-norenamefolder", resp.OperationMode)
@@ -506,7 +506,7 @@ func TestGeneratePreview_InPlace(t *testing.T) {
 		{FilePath: "/source/videos/IPX-535.mp4"},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeInPlace)
+	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeInPlace, false, false)
 
 	assert.Equal(t, "in-place", resp.OperationMode)
 	assert.Equal(t, "/source/videos/IPX-535.mp4", resp.SourcePath, "SourcePath should be the original file path")
@@ -531,7 +531,7 @@ func TestGeneratePreview_MetadataOnly(t *testing.T) {
 		{FilePath: "/source/videos/IPX-535.mp4"},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeMetadataOnly)
+	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeMetadataOnly, false, false)
 
 	assert.Equal(t, "metadata-only", resp.OperationMode)
 	assert.Equal(t, "/source/videos/IPX-535.mp4", resp.SourcePath)
@@ -557,7 +557,7 @@ func TestGeneratePreview_OrganizeModeDefault(t *testing.T) {
 		{FilePath: "/source/videos/IPX-535.mp4"},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeOrganize)
+	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeOrganize, false, false)
 
 	assert.Equal(t, "organize", resp.OperationMode)
 	assert.Contains(t, resp.FullPath, "/library/", "Organize mode should use destination directory")

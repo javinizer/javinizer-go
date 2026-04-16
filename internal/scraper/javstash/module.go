@@ -1,7 +1,6 @@
 package javstash
 
 import (
-	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -18,13 +17,13 @@ func (m *scraperModule) Name() string        { return "javstash" }
 func (m *scraperModule) Description() string { return "Javstash" }
 func (m *scraperModule) Constructor() any {
 	return func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		var globalProxy config.ProxyConfig
+		var globalProxy *config.ProxyConfig
 		var globalFlareSolverr config.FlareSolverrConfig
 		if globalConfig != nil {
-			globalProxy = globalConfig.Proxy
+			globalProxy = &globalConfig.Proxy
 			globalFlareSolverr = globalConfig.FlareSolverr
 		}
-		return New(settings, &globalProxy, globalFlareSolverr), nil
+		return New(settings, globalProxy, globalFlareSolverr), nil
 	}
 }
 func (m *scraperModule) Validator() any {
@@ -37,32 +36,32 @@ func (m *scraperModule) ConfigFactory() any {
 }
 func (m *scraperModule) Options() any {
 	return []any{
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "api_key",
 			Label:       "API Key",
 			Description: "API key for Javstash.org authentication",
 			Type:        "password",
 			Default:     "",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "language",
 			Label:       "Language",
 			Description: "Language for metadata fields",
 			Type:        "select",
 			Default:     "en",
-			Choices: []contracts.ScraperChoice{
+			Choices: []models.ScraperChoice{
 				{Value: "en", Label: "English"},
 				{Value: "ja", Label: "Japanese"},
 			},
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "base_url",
 			Label:       "Base URL",
 			Description: "GraphQL API endpoint URL",
 			Type:        "string",
 			Default:     "https://javstash.org/graphql",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "request_delay",
 			Label:       "Request Delay",
 			Description: "Delay between requests in milliseconds",

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,19 +60,16 @@ var (
 func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	// Use unique named in-memory SQLite database per test for isolation
-	// Format: file:test_name?mode=memory&cache=shared&_fk=1
-	// Each test gets its own database, preventing cross-test pollution
-	// URL-escape test name to handle subtests with special characters (?, #, /, etc.)
-	escapedName := url.PathEscape(t.Name())
-	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared&_fk=1", escapedName)
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+	dbName := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=10000&_fk=1", dbPath)
 	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
 	})
-	require.NoError(t, err, "Failed to open in-memory database")
+	require.NoError(t, err, "Failed to open test database")
 
 	// Limit connection pool to ensure migrations are visible to all queries
 	sqlDB, err := db.DB()

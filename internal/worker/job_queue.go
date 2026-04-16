@@ -445,23 +445,10 @@ func (jq *JobQueue) persistToDatabase(job *BatchJob) {
 		RevertedAt:    job.RevertedAt,
 	}
 
-	// Try to update first, if not found then create
-	existing, err := jq.jobRepo.FindByID(job.ID)
-	if err != nil || existing == nil {
-		if err := jq.jobRepo.Create(dbJob); err != nil {
-			logging.Warnf("Failed to create job %s in database: %v", job.ID, err)
-			job.mu.RUnlock()
-			job.SetPersistError(fmt.Sprintf("create failed: %v", err))
-			return
-		}
+	if err := jq.jobRepo.Upsert(dbJob); err != nil {
+		logging.Warnf("Failed to upsert job %s in database: %v", job.ID, err)
 		job.mu.RUnlock()
-		job.SetPersistError("")
-		return
-	}
-	if err := jq.jobRepo.Update(dbJob); err != nil {
-		logging.Warnf("Failed to update job %s in database: %v", job.ID, err)
-		job.mu.RUnlock()
-		job.SetPersistError(fmt.Sprintf("update failed: %v", err))
+		job.SetPersistError(fmt.Sprintf("upsert failed: %v", err))
 		return
 	}
 	job.mu.RUnlock()

@@ -65,7 +65,7 @@ func TestBatchJob_PanicRecovery(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			processUpdateJob(job, cfg, deps.DB, deps.Registry, nil)
+			processUpdateJob(job, cfg, deps.DB, deps.Registry, nil, nil)
 		}()
 
 		select {

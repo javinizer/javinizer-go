@@ -1,7 +1,6 @@
 package libredmm
 
 import (
-	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -37,7 +36,7 @@ func (m *scraperModule) ConfigFactory() any {
 }
 func (m *scraperModule) Options() any {
 	return []any{
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "request_delay",
 			Label:       "Request Delay",
 			Description: "Delay between requests to avoid rate limiting",
@@ -46,13 +45,13 @@ func (m *scraperModule) Options() any {
 			Max:         scraperutil.IntPtr(5000),
 			Unit:        "ms",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "base_url",
 			Label:       "Base URL",
 			Description: "LibreDMM base URL",
 			Type:        "string",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "placeholder_threshold",
 			Label:       "Placeholder Threshold",
 			Description: "File size threshold in KB for detecting placeholder screenshots. Files smaller than this are checked against known placeholder hashes.",
@@ -62,7 +61,7 @@ func (m *scraperModule) Options() any {
 			Max:         scraperutil.IntPtr(1000),
 			Unit:        "KB",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "extra_placeholder_hashes",
 			Label:       "Extra Placeholder Hashes",
 			Description: "Additional SHA256 hashes of known placeholder images. Each hash is a 64-character hex string.",

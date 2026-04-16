@@ -116,17 +116,12 @@ func NewMockActressRepo() *database.ActressRepository {
 func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.ServerDependencies {
 	t.Helper()
 
-	// Initialize in-memory database with a unique name per test to avoid cross-test pollution
-	// Using file:TESTNAME:?mode=memory&cache=shared&_busy_timeout=5000 ensures:
-	// 1. Isolation between different tests (each gets its own DB)
-	// 2. Shared cache within a test (concurrent goroutines see same data)
-	// 3. Busy timeout (5s) reduces "database is locked" errors in concurrent scenarios
-	// Note: WAL mode is not compatible with in-memory databases
-	dbName := t.Name()
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
 	dbCfg := &config.Config{
 		Database: config.DatabaseConfig{
 			Type: "sqlite",
-			DSN:  "file:" + dbName + ":?mode=memory&cache=shared&_busy_timeout=5000",
+			DSN:  dbPath + "?_journal_mode=WAL&_busy_timeout=10000",
 		},
 		Logging: config.LoggingConfig{
 			Level: "error",

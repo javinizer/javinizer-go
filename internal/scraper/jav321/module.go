@@ -1,7 +1,6 @@
 package jav321
 
 import (
-	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -37,7 +36,7 @@ func (m *scraperModule) ConfigFactory() any {
 }
 func (m *scraperModule) Options() any {
 	return []any{
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "request_delay",
 			Label:       "Request Delay",
 			Description: "Delay between requests to avoid rate limiting",
@@ -46,13 +45,13 @@ func (m *scraperModule) Options() any {
 			Max:         scraperutil.IntPtr(5000),
 			Unit:        "ms",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "base_url",
 			Label:       "Base URL",
 			Description: "Jav321 base URL",
 			Type:        "string",
 		},
-		contracts.ScraperOption{
+		models.ScraperOption{
 			Key:         "use_flaresolverr",
 			Label:       "Use FlareSolverr",
 			Description: "Route requests through FlareSolverr to bypass Cloudflare protection",

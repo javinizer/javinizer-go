@@ -107,13 +107,7 @@ type ActressInfo struct {
 
 // FullName returns the actress's full name
 func (a *ActressInfo) FullName() string {
-	if a.LastName != "" && a.FirstName != "" {
-		return a.LastName + " " + a.FirstName
-	}
-	if a.FirstName != "" {
-		return a.FirstName
-	}
-	return a.JapaneseName
+	return FormatActressName(a.LastName, a.FirstName, a.JapaneseName)
 }
 
 // Scraper defines the interface that all scrapers must implement
@@ -341,4 +335,23 @@ func ResolveSearchQueryForScraper(scraper Scraper, input string) (string, bool) 
 	}
 
 	return query, true
+}
+
+// ScraperOption represents a configurable option for a scraper
+type ScraperOption struct {
+	Key         string          `json:"key" example:"scrape_actress"`
+	Label       string          `json:"label" example:"Scrape Actress Information"`
+	Description string          `json:"description" example:"Enable detailed actress data scraping from DMM (may be slower)"`
+	Type        string          `json:"type" example:"boolean"`
+	Default     interface{}     `json:"default,omitempty"`
+	Min         *int            `json:"min,omitempty" example:"5"`
+	Max         *int            `json:"max,omitempty" example:"120"`
+	Unit        string          `json:"unit,omitempty" example:"seconds"`
+	Choices     []ScraperChoice `json:"choices,omitempty"`
+}
+
+// ScraperChoice represents a choice for a select-type scraper option
+type ScraperChoice struct {
+	Value string `json:"value" example:"en"`
+	Label string `json:"label" example:"English"`
 }

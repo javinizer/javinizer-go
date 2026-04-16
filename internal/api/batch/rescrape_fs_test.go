@@ -67,6 +67,10 @@ func (m *mockJobRepo) Update(job *models.Job) error {
 	return nil
 }
 
+func (m *mockJobRepo) Upsert(job *models.Job) error {
+	return nil
+}
+
 func (m *mockJobRepo) Delete(id string) error {
 	return m.deleteErr
 }

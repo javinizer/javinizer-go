@@ -5,7 +5,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { apiClient } from '$lib/api/client';
-	import type { BatchJobResponse, FileResult, Movie, OrganizePreviewResponse, Scraper } from '$lib/api/types';
+	import type { BatchJobResponse, FileResult, Movie, OrganizePreviewResponse, Scraper, UpdateRequest } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
 	import { websocketStore } from '$lib/stores/websocket';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -108,6 +108,11 @@
 
 	// Source file path expansion state
 	let showFullSourcePath = $state(false);
+
+	let forceOverwrite = $state(false);
+	let preserveNfo = $state(false);
+	let skipNfo = $state(false);
+	let skipDownload = $state(false);
 
 	// Image panel collapse state
 	let showImagePanelContent = $state(true);
@@ -264,7 +269,9 @@
 				destination: destinationPath,
 				copy_only: copyOnly,
 				link_mode: linkMode,
-				operation_mode: operationMode as 'organize' | 'in-place' | 'in-place-norenamefolder' | 'metadata-only' | 'preview'
+				operation_mode: operationMode as 'organize' | 'in-place' | 'in-place-norenamefolder' | 'metadata-only' | 'preview',
+				skip_nfo: skipNfo,
+				skip_download: skipDownload
 			});
 		} catch (e) {
 			console.error('Failed to fetch preview:', e);
@@ -276,6 +283,8 @@
 	$effect(() => {
 		const operationMode = job?.operation_mode_override || config?.output?.operation_mode;
 		const needsDestination = !operationMode || operationMode === 'organize';
+		void skipNfo;
+		void skipDownload;
 		if (organizeStatus !== 'organizing' && currentMovie && (needsDestination ? destinationPath : true)) {
 			fetchPreview();
 		} else if (organizeStatus !== 'organizing') {
@@ -377,7 +386,7 @@
 		api: {
 			getBatchJob: (nextJobId) => apiClient.getBatchJob(nextJobId, true),
 			organizeBatchJob: (nextJobId, request) => apiClient.organizeBatchJob(nextJobId, request),
-			updateBatchJob: (nextJobId) => apiClient.updateBatchJob(nextJobId)
+			updateBatchJob: (nextJobId, request) => apiClient.updateBatchJob(nextJobId, request)
 		}
 	});
 
@@ -547,11 +556,16 @@
 	}
 
 	async function organizeAll() {
-		await organizeController.organizeAll();
+		await organizeController.organizeAll(skipNfo, skipDownload);
 	}
 
 	async function updateAll() {
-		await organizeController.updateAll();
+		const options: UpdateRequest = {};
+		if (forceOverwrite) options.force_overwrite = true;
+		if (preserveNfo) options.preserve_nfo = true;
+		if (skipNfo) options.skip_nfo = true;
+		if (skipDownload) options.skip_download = true;
+		await organizeController.updateAll(options);
 	}
 
 	async function retryFailed() {
@@ -623,6 +637,10 @@
 				organizing={organizing}
 				movieResultsLength={movieResults.length}
 				destinationPath={destinationPath}
+				bind:forceOverwrite={forceOverwrite}
+				bind:preserveNfo={preserveNfo}
+				bind:skipNfo={skipNfo}
+				bind:skipDownload={skipDownload}
 				onClose={() => goto('/browse')}
 				onUpdateAll={updateAll}
 				onOrganizeAll={organizeAll}
@@ -680,6 +698,8 @@
 							{previewNeedsDestination}
 							effectiveOperationMode={getEffectiveOperationMode()}
 							bind:showAllPreviewScreenshots={showAllPreviewScreenshots}
+							bind:skipNfo={skipNfo}
+							bind:skipDownload={skipDownload}
 							onOpenDestinationBrowser={reviewPageController.openDestinationBrowser}
 						/>
 					{/if}

@@ -31,6 +31,13 @@ func (r *JobRepository) Update(job *models.Job) error {
 	return nil
 }
 
+func (r *JobRepository) Upsert(job *models.Job) error {
+	if err := r.db.Save(job).Error; err != nil {
+		return wrapDBErr("upsert", fmt.Sprintf("job %s", job.ID), err)
+	}
+	return nil
+}
+
 func (r *JobRepository) FindByID(id string) (*models.Job, error) {
 	var job models.Job
 	err := r.db.First(&job, "id = ?", id).Error

@@ -38,12 +38,12 @@ type AggregatorOptions struct {
 	// GenreReplacementRepo is an optional genre replacement repository for tests.
 	// If nil, loadGenreReplacementCache() is skipped (empty cache).
 	// If non-nil, genre replacements are loaded from the repository during initialization.
-	GenreReplacementRepo *database.GenreReplacementRepository
+	GenreReplacementRepo database.GenreReplacementRepositoryInterface
 
 	// ActressAliasRepo is an optional actress alias repository for tests.
 	// If nil, loadActressAliasCache() is skipped (empty cache).
 	// If non-nil, actress aliases are loaded from the repository during initialization.
-	ActressAliasRepo *database.ActressAliasRepository
+	ActressAliasRepo database.ActressAliasRepositoryInterface
 
 	// TemplateEngine is an optional template engine for tests.
 	// If nil, a real template.NewEngine() is created.
@@ -74,10 +74,10 @@ type Aggregator struct {
 	config                *config.Config
 	scrapers              []models.Scraper // Injected scrapers for priority (nil = use scraperutil)
 	templateEngine        *template.Engine
-	genreReplacementRepo  *database.GenreReplacementRepository
+	genreReplacementRepo  database.GenreReplacementRepositoryInterface
 	genreReplacementCache map[string]string
 	genreCacheMutex       sync.RWMutex // Protects genreReplacementCache from concurrent access
-	actressAliasRepo      *database.ActressAliasRepository
+	actressAliasRepo      database.ActressAliasRepositoryInterface
 	actressAliasCache     map[string]string   // Maps alias name to canonical name
 	aliasCacheMutex       sync.RWMutex        // Protects actressAliasCache from concurrent access
 	resolvedPriorities    map[string][]string // Cached resolved priorities for each field
