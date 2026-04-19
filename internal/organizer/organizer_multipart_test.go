@@ -88,7 +88,7 @@ func TestPlan_AppendsPartSuffix(t *testing.T) {
 			}
 
 			expectedDir := "IPX-535 [IdeaPocket] - Beautiful Day"
-			if !filepath.IsAbs(plan.TargetDir) {
+			if !filepath.IsAbs(plan.TargetDir) && !filepath.IsAbs(filepath.FromSlash(plan.TargetDir)) {
 				t.Errorf("TargetDir should be absolute, got %q", plan.TargetDir)
 			}
 			if filepath.Base(plan.TargetDir) != expectedDir {

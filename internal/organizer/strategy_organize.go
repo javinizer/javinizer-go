@@ -106,10 +106,10 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 		}
 	}
 
-	willMove := match.File.Path != targetPath
+	willMove := filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
 
 	conflicts := make([]string, 0)
-	if !forceUpdate && match.File.Path != targetPath {
+	if !forceUpdate && filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath) {
 		if _, err := s.fs.Stat(targetPath); err == nil {
 			conflicts = append(conflicts, targetPath)
 		}

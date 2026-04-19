@@ -108,7 +108,7 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 	sourceDir := filepath.Dir(match.File.Path)
 	targetDir := sourceDir
 	targetPath := filepath.Join(targetDir, fileName)
-	willMove := match.File.Path != targetPath
+	willMove := filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
 
 	inPlace := false
 	oldDir := ""

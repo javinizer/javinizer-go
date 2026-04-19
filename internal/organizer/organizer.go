@@ -324,11 +324,11 @@ func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir
 	}
 
 	// Check if move is needed
-	willMove := match.File.Path != targetPath
+	willMove := filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
 
 	// Check for conflicts (skip if forceUpdate is enabled or no-op)
 	conflicts := make([]string, 0)
-	if !forceUpdate && match.File.Path != targetPath {
+	if !forceUpdate && filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath) {
 		if stat, err := o.fs.Stat(targetPath); err == nil {
 			// Check if target is actually the same file as source (case-insensitive FS)
 			sourceStat, sourceErr := o.fs.Stat(match.File.Path)
