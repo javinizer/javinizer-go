@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	api "github.com/javinizer/javinizer-go/cmd/javinizer/commands/api"
@@ -87,7 +88,7 @@ func setupTagTestDB(t *testing.T) (string, *database.DB) {
 	t.Helper()
 
 	tmpDir := t.TempDir()
-	tmpFile := tmpDir + "/config.yaml"
+	tmpFile := filepath.Join(tmpDir, "config.yaml")
 
 	configContent := `config_version: 3
 database:

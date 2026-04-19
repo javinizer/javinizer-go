@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -145,6 +146,7 @@ func TestInitConfig_EnvironmentOverride(t *testing.T) {
 
 	// Call initConfig - it should use JAVINIZER_CONFIG
 	// We need to ensure the logger can be initialized
+	defer logging.CloseLogger()
 	initConfig()
 
 	// Verify cfgFile was set from environment variable
@@ -176,6 +178,7 @@ func TestInitConfig_VerboseFlagSetsDebug(t *testing.T) {
 	verboseFlag = true
 
 	// Call initConfig
+	defer logging.CloseLogger()
 	initConfig()
 
 	// The verbose flag should cause debug logging
@@ -209,6 +212,7 @@ func TestInitConfig_ProxyValidation_EmptyURL(t *testing.T) {
 	cfgFile = configPath
 
 	// Call initConfig - it should warn and disable the proxy
+	defer logging.CloseLogger()
 	initConfig()
 
 	// Test passes if initConfig doesn't panic or exit
@@ -241,6 +245,7 @@ func TestInitConfig_ProxyValidation_ValidURL(t *testing.T) {
 	cfgFile = configPath
 
 	// Call initConfig - it should accept the valid proxy
+	defer logging.CloseLogger()
 	initConfig()
 
 	// Test passes if initConfig doesn't panic or exit
@@ -275,6 +280,7 @@ func TestInitConfig_DownloadProxyValidation(t *testing.T) {
 	cfgFile = configPath
 
 	// Call initConfig
+	defer logging.CloseLogger()
 	initConfig()
 
 	// Test passes if initConfig doesn't panic
@@ -300,6 +306,7 @@ func TestInitConfig_UmaskValid(t *testing.T) {
 	cfgFile = configPath
 
 	// Call initConfig - should apply umask without error
+	defer logging.CloseLogger()
 	initConfig()
 
 	// Test passes if initConfig doesn't panic
@@ -325,6 +332,7 @@ func TestInitConfig_UmaskInvalid(t *testing.T) {
 	cfgFile = configPath
 
 	// Call initConfig - should warn but not fail
+	defer logging.CloseLogger()
 	initConfig()
 
 	// Test passes if initConfig doesn't panic (it should warn but continue)
@@ -358,6 +366,7 @@ func TestInitConfig_MultipleEnvironmentVariables(t *testing.T) {
 	cfgFile = ""
 
 	// Call initConfig with all env vars set
+	defer logging.CloseLogger()
 	initConfig()
 
 	// Test passes if initConfig doesn't panic with multiple env vars

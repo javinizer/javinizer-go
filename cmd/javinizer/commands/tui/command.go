@@ -331,23 +331,21 @@ func run(cmd *cobra.Command, args []string) error {
 
 // BuildFileTree constructs a tree structure of files and directories
 func BuildFileTree(basePath string, files []scanner.FileInfo, matchMap map[string]matcher.MatchResult) []tui.FileItem {
-	// Normalize base path
-	absBasePath, err := filepath.Abs(basePath)
+	absBasePath, err := filepath.Abs(filepath.FromSlash(basePath))
 	if err != nil {
-		absBasePath = basePath
+		absBasePath = filepath.FromSlash(basePath)
 	}
 
-	// Group files by their immediate parent directory
 	dirFiles := make(map[string][]scanner.FileInfo)
 	allDirs := make(map[string]bool)
 
 	for _, file := range files {
-		dir := filepath.Dir(file.Path)
+		normalizedPath := filepath.FromSlash(file.Path)
+		dir := filepath.Dir(normalizedPath)
 		dirFiles[dir] = append(dirFiles[dir], file)
 
-		// Track all directories between file and base path
 		current := dir
-		for current != absBasePath && current != "." && current != "/" && strings.HasPrefix(current, absBasePath) {
+		for current != absBasePath && current != "." && current != string(os.PathSeparator) && strings.HasPrefix(current, absBasePath) {
 			allDirs[current] = true
 			parent := filepath.Dir(current)
 			if parent == current {
@@ -412,7 +410,12 @@ func BuildFileTree(basePath string, files []scanner.FileInfo, matchMap map[strin
 					Parent:   dir,
 				}
 
-				if match, found := matchMap[file.Path]; found {
+				lookupPath := file.Path
+				normalizedLookup := filepath.FromSlash(file.Path)
+				if match, found := matchMap[lookupPath]; found {
+					item.Matched = true
+					item.ID = match.ID
+				} else if match, found := matchMap[normalizedLookup]; found {
 					item.Matched = true
 					item.ID = match.ID
 				}
@@ -440,7 +443,12 @@ func BuildFileTree(basePath string, files []scanner.FileInfo, matchMap map[strin
 				Parent:   absBasePath,
 			}
 
-			if match, found := matchMap[file.Path]; found {
+			lookupPath := file.Path
+			normalizedLookup := filepath.FromSlash(file.Path)
+			if match, found := matchMap[lookupPath]; found {
+				item.Matched = true
+				item.ID = match.ID
+			} else if match, found := matchMap[normalizedLookup]; found {
 				item.Matched = true
 				item.ID = match.ID
 			}

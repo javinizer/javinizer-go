@@ -3,6 +3,7 @@ package testkit
 import (
 	"context"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -117,7 +118,7 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.S
 	t.Helper()
 
 	tmpDir := t.TempDir()
-	dbPath := tmpDir + "/test.db"
+	dbPath := filepath.Join(tmpDir, "test.db")
 	dbCfg := &config.Config{
 		Database: config.DatabaseConfig{
 			Type: "sqlite",

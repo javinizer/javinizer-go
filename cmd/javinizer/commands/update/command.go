@@ -307,5 +307,5 @@ func ConstructNFOPath(match matcher.MatchResult, movie *models.Movie, perFile bo
 
 	filename := sanitized + ".nfo"
 
-	return filepath.Join(outputDir, filename)
+	return filepath.ToSlash(filepath.Join(outputDir, filename))
 }

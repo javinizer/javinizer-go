@@ -221,7 +221,11 @@ func sqliteFilePathFromDSN(dsn string) (string, bool) {
 		return pathPart, true
 	}
 
-	return trimmed, true
+	pathPart := trimmed
+	if idx := strings.Index(pathPart, "?"); idx >= 0 {
+		pathPart = pathPart[:idx]
+	}
+	return pathPart, true
 }
 
 func quoteSQLiteStringLiteral(value string) string {

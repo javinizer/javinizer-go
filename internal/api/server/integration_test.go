@@ -24,6 +24,7 @@ package server
 import (
 	"context"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func setupTestDB(t *testing.T) *database.DB {
 	t.Helper()
 
 	tmpDir := t.TempDir()
-	dbPath := tmpDir + "/test.db"
+	dbPath := filepath.Join(tmpDir, "test.db")
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
 			Type: "sqlite",

@@ -61,7 +61,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	tmpDir := t.TempDir()
-	dbPath := tmpDir + "/test.db"
+	dbPath := filepath.Join(tmpDir, "test.db")
 	dbName := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=10000&_fk=1", dbPath)
 	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),

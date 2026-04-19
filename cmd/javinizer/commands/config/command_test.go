@@ -163,5 +163,5 @@ func TestMigrateCommand_DefaultConfigPath(t *testing.T) {
 	err := rootCmd.Execute()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "config file not found")
-	assert.Contains(t, err.Error(), "configs/config.yaml")
+	assert.Contains(t, err.Error(), filepath.Join("configs", "config.yaml"))
 }
