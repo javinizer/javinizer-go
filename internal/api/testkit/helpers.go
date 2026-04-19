@@ -134,6 +134,12 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.S
 		t.Fatalf("Failed to create test database: %v", err)
 	}
 
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Logf("Warning: failed to close test database: %v", err)
+		}
+	})
+
 	if err := db.AutoMigrate(); err != nil {
 		t.Fatalf("Failed to migrate test database: %v", err)
 	}

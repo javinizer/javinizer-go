@@ -91,6 +91,13 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	)
 	require.NoError(t, err, "Failed to run migrations")
 
+	t.Cleanup(func() {
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
 	return db
 }
 
