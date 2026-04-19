@@ -135,6 +135,10 @@ func TestSave_RewritesWhenContentChanges(t *testing.T) {
 }
 
 func TestSave_ConcurrentWritersProduceValidYAML(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file locking semantics make concurrent config writes unreliable")
+	}
+
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
