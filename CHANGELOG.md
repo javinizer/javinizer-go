@@ -5,7 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.2.8-alpha] - 2026-04-16
+## [v0.2.8-alpha] - 2026-04-19
+
+### Added
+
+- Windows CI test runner for path-specific bug detection
+- `fsPath()` helper in `internal/history/reverter.go` that normalizes paths for afero MemMapFs (forward-slash + drive letter stripping)
+- `filepath.ToSlash()` normalization on `WillMove` path comparisons in organizer strategies to prevent false positives on Windows
+- `filepath.ToSlash()` normalization on `isDescendant()` path comparisons for cross-platform directory hierarchy checks
+- Windows volume root detection in `cleanupEmptyDir` termination conditions
+- `runtime.GOOS == "windows"` skip guards for Unix-only tests (file permissions, shell scripts, `/dev/null`, concurrent file locking)
+
+### Fixed
+
+- Windows path separator mismatches in organizer plan tests and batch preview tests (hardcoded `/` vs `\` from `filepath.Join`)
+- Windows file handle locks preventing `t.TempDir()` cleanup — added `defer CloseLogger()` and `defer db.Close()` in test helpers
+- Windows `filepath.IsAbs` returning false for `\dest\...` paths (no drive letter) in multipart test
+- Windows tilde expansion failure in `validateNFOPath` — `filepath.Join("~", ...)` produces `~\...` which doesn't match the `~/` prefix check
+- Windows double-slash in database error messages — normalized with `strings.ReplaceAll("//", "/")` after `filepath.ToSlash`
+- Windows `WillMove` incorrectly `true` when source/target paths differ only in separator style (production bug in `organizer.go`, `strategy_organize.go`, `strategy_inplace.go`, `strategy_inplace_norenamefolder.go`)
+- Windows `isDescendant()` failing to detect descendant paths due to separator mismatch
+- Windows `cleanupEmptyDir` walking past drive root — added `filepath.VolumeName` root detection
+- Windows concurrent config writer test timing out due to different file locking semantics
+- Windows `fsPath()` drive-letter check order — check before `filepath.ToSlash()` to avoid dead code
+- Windows afero MemMapFs path lookup failures in `ReadNFOSnapshot` — use `fsPath()` to strip drive letter and normalize separators
+- Windows LogDir output using backslash separators — apply `filepath.ToSlash` in `overrides.go`
 
 ### Added
 
