@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -450,8 +451,7 @@ func (o *Organizer) Execute(plan *OrganizePlan, dryRun bool) (*OrganizeResult, e
 			return result, result.Error
 		}
 
-		// Move/rename the file
-		if err := o.fs.Rename(plan.SourcePath, plan.TargetPath); err != nil {
+		if err := fsutil.MoveFileFs(o.fs, plan.SourcePath, plan.TargetPath); err != nil {
 			result.Error = fmt.Errorf("failed to move file: %w", err)
 			return result, result.Error
 		}
@@ -490,7 +490,7 @@ func (o *Organizer) Execute(plan *OrganizePlan, dryRun bool) (*OrganizeResult, e
 
 				// Move subtitle file
 				if !dryRun {
-					if err := o.fs.Rename(subtitle.OriginalPath, subtitleResult.NewPath); err != nil {
+					if err := fsutil.MoveFileFs(o.fs, subtitle.OriginalPath, subtitleResult.NewPath); err != nil {
 						subtitleResult.Error = fmt.Errorf("failed to move subtitle: %w", err)
 					} else {
 						subtitleResult.Moved = true
@@ -742,7 +742,7 @@ func (o *Organizer) Revert(result *OrganizeResult) error {
 	}
 
 	// Move file back to original location
-	if err := o.fs.Rename(result.NewPath, result.OriginalPath); err != nil {
+	if err := fsutil.MoveFileFs(o.fs, result.NewPath, result.OriginalPath); err != nil {
 		return fmt.Errorf("failed to revert move: %w", err)
 	}
 

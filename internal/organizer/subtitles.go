@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/spf13/afero"
 )
@@ -167,7 +168,7 @@ func (sh *SubtitleHandler) MoveSubtitles(subtitles []SubtitleMatch, targetDir, v
 		}
 
 		// Move the subtitle file
-		if err := sh.fs.Rename(subtitle.OriginalPath, newPath); err != nil {
+		if err := fsutil.MoveFileFs(sh.fs, subtitle.OriginalPath, newPath); err != nil {
 			return fmt.Errorf("failed to move subtitle %s to %s: %w", subtitle.OriginalPath, newPath, err)
 		}
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
@@ -155,7 +156,7 @@ func (s *OrganizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		return result, result.Error
 	}
 
-	if err := s.fs.Rename(plan.SourcePath, plan.TargetPath); err != nil {
+	if err := fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
 		result.Error = fmt.Errorf("failed to move file: %w", err)
 		return result, result.Error
 	}
@@ -181,7 +182,7 @@ func (s *OrganizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				)
 				subtitleResult.NewPath = filepath.Join(plan.TargetDir, newSubtitleName)
 
-				if err := s.fs.Rename(subtitle.OriginalPath, subtitleResult.NewPath); err != nil {
+				if err := fsutil.MoveFileFs(s.fs, subtitle.OriginalPath, subtitleResult.NewPath); err != nil {
 					subtitleResult.Error = fmt.Errorf("failed to move subtitle: %w", err)
 				} else {
 					subtitleResult.Moved = true
