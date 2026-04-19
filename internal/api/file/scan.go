@@ -131,14 +131,11 @@ func getCurrentWorkingDirectory(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var defaultPath string
 
-		// Read current config (respects config reloads)
 		cfg := deps.GetConfig()
 
-		// Prefer first allowed directory if configured (for Docker environments)
 		if len(cfg.API.Security.AllowedDirectories) > 0 {
 			defaultPath = cfg.API.Security.AllowedDirectories[0]
 		} else {
-			// Fall back to current working directory
 			cwd, err := os.Getwd()
 			if err != nil {
 				c.JSON(500, ErrorResponse{Error: err.Error()})

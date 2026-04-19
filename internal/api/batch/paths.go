@@ -139,7 +139,16 @@ func canonicalizePath(absPath string) (string, error) {
 }
 
 func isPathWithin(path, base string) bool {
-	return strings.HasPrefix(path, base+string(os.PathSeparator)) || path == base
+	if path == base {
+		return true
+	}
+
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return false
+	}
+
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // discoverSiblingPartsWithMetadata finds all multi-part files and returns match metadata.
