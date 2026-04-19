@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -452,6 +453,10 @@ func TestParseFloat_EdgeCases(t *testing.T) {
 
 // TestCLIProber_Probe_Timeout tests the CLI prober timeout behavior
 func TestCLIProber_Probe_Timeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Shell scripts cannot be executed directly on Windows")
+	}
+
 	// Use a script that sleeps longer than the timeout
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "slow_script.sh")
@@ -503,6 +508,10 @@ func TestCLIProber_Probe_CommandNotFound(t *testing.T) {
 
 // TestCLIProber_Probe_InvalidJSONOutput tests handling of invalid JSON from CLI
 func TestCLIProber_Probe_InvalidJSONOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Shell scripts cannot be executed directly on Windows")
+	}
+
 	// Create a script that outputs invalid JSON
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "invalid_json.sh")
@@ -531,6 +540,10 @@ func TestCLIProber_Probe_InvalidJSONOutput(t *testing.T) {
 
 // TestCLIProber_Probe_EmptyOutput tests handling of empty output from CLI
 func TestCLIProber_Probe_EmptyOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Shell scripts cannot be executed directly on Windows")
+	}
+
 	// Create a script that outputs empty string
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "empty_output.sh")
@@ -583,6 +596,10 @@ func TestCLIProber_Probe_InvalidFilePath(t *testing.T) {
 
 // TestCLIProber_Probe_ContextCancellation tests behavior when context is cancelled
 func TestCLIProber_Probe_ContextCancellation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Shell scripts cannot be executed directly on Windows")
+	}
+
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "slow_script.sh")
 	err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nsleep 5"), 0755)

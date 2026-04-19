@@ -3,6 +3,7 @@ package nfo
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -163,6 +164,10 @@ func TestWriteNFO_ErrorPaths(t *testing.T) {
 	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
 
 	t.Run("Invalid directory path", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("/dev/null is not a special path on Windows")
+		}
+
 		nfo := &Movie{
 			Title: "Test",
 			ID:    "TEST-001",
@@ -279,6 +284,10 @@ func TestExtractStreamDetails(t *testing.T) {
 // TestGenerateFromScraperResult_ErrorPaths tests error handling
 func TestGenerateFromScraperResult_ErrorPaths(t *testing.T) {
 	t.Run("Invalid write location", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("/dev/null is not a special path on Windows")
+		}
+
 		gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
 
 		result := &models.ScraperResult{
@@ -297,6 +306,10 @@ func TestGenerateFromScraperResult_ErrorPaths(t *testing.T) {
 // TestGenerate_ErrorPaths tests error handling in Generate
 func TestGenerate_ErrorPaths(t *testing.T) {
 	t.Run("Write to invalid directory", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("/dev/null is not a special path on Windows")
+		}
+
 		gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
 
 		movie := &models.Movie{

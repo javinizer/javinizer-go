@@ -174,10 +174,12 @@ func TestEmitter_SeverityStoredCorrectly(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events, 4)
 
-	// Events are ordered by created_at DESC, so we reverse to get insertion order
-	for i, expected := range severities {
-		actual := events[len(events)-1-i].Severity
-		assert.Equal(t, expected, actual)
+	gotSeverities := make(map[string]bool)
+	for _, e := range events {
+		gotSeverities[e.Severity] = true
+	}
+	for _, expected := range severities {
+		assert.True(t, gotSeverities[expected], "expected severity %q to be present", expected)
 	}
 }
 

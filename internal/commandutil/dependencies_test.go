@@ -3,6 +3,7 @@ package commandutil
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -39,7 +40,10 @@ func TestNewDependencies_NilConfig(t *testing.T) {
 
 // TestNewDependencies_DBDirCreationFails tests error when database directory creation fails
 func TestNewDependencies_DBDirCreationFails(t *testing.T) {
-	// Use a path that will fail directory creation (e.g., under a read-only file)
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style file permissions")
+	}
+
 	tmpDir := t.TempDir()
 	readOnlyFile := filepath.Join(tmpDir, "readonly.txt")
 	err := os.WriteFile(readOnlyFile, []byte("test"), 0444)
@@ -59,7 +63,10 @@ func TestNewDependencies_DBDirCreationFails(t *testing.T) {
 
 // TestNewDependencies_DBInitFails tests error when database initialization fails
 func TestNewDependencies_DBInitFails(t *testing.T) {
-	// Create a read-only directory that will prevent DB creation
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style directory permissions")
+	}
+
 	tmpDir := t.TempDir()
 	dbDir := filepath.Join(tmpDir, "readonly_dir")
 	err := os.MkdirAll(dbDir, 0555) // Read-only directory

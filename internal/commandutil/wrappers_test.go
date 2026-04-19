@@ -2,6 +2,7 @@ package commandutil
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -12,7 +13,7 @@ import (
 // TestRunWithDeps_Success tests successful execution with dependencies
 func TestRunWithDeps_Success(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, cfg := createTestConfig(t, WithDatabaseDSN(tmpDir+"/test.db"))
+	_, cfg := createTestConfig(t, WithDatabaseDSN(filepath.Join(tmpDir, "test.db")))
 
 	loadConfigCalled := false
 	newDepsCalled := false
@@ -83,7 +84,7 @@ func TestRunWithDeps_ConfigLoadError(t *testing.T) {
 // TestRunWithDeps_DependencyCreationError tests error when dependency creation fails
 func TestRunWithDeps_DependencyCreationError(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, cfg := createTestConfig(t, WithDatabaseDSN(tmpDir+"/test.db"))
+	_, cfg := createTestConfig(t, WithDatabaseDSN(filepath.Join(tmpDir, "test.db")))
 
 	loadConfig := func() (*config.Config, error) {
 		return cfg, nil
@@ -112,7 +113,7 @@ func TestRunWithDeps_DependencyCreationError(t *testing.T) {
 // TestRunWithDeps_WithApplyOverrides tests that overrides are applied
 func TestRunWithDeps_WithApplyOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, cfg := createTestConfig(t, WithDatabaseDSN(tmpDir+"/test.db"))
+	_, cfg := createTestConfig(t, WithDatabaseDSN(filepath.Join(tmpDir, "test.db")))
 
 	loadConfig := func() (*config.Config, error) {
 		return cfg, nil
@@ -145,7 +146,7 @@ func TestRunWithDeps_WithApplyOverrides(t *testing.T) {
 // TestRunWithDeps_NilApplyOverrides tests that nil applyOverrides works
 func TestRunWithDeps_NilApplyOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, cfg := createTestConfig(t, WithDatabaseDSN(tmpDir+"/test.db"))
+	_, cfg := createTestConfig(t, WithDatabaseDSN(filepath.Join(tmpDir, "test.db")))
 
 	loadConfig := func() (*config.Config, error) {
 		return cfg, nil
@@ -171,7 +172,7 @@ func TestRunWithDeps_NilApplyOverrides(t *testing.T) {
 // TestRunWithDeps_FnError tests that errors from fn are propagated
 func TestRunWithDeps_FnError(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, cfg := createTestConfig(t, WithDatabaseDSN(tmpDir+"/test.db"))
+	_, cfg := createTestConfig(t, WithDatabaseDSN(filepath.Join(tmpDir, "test.db")))
 
 	loadConfig := func() (*config.Config, error) {
 		return cfg, nil
@@ -197,7 +198,7 @@ func TestRunWithDeps_FnError(t *testing.T) {
 // TestRunWithConfig_Success tests successful execution with config only
 func TestRunWithConfig_Success(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, cfg := createTestConfig(t, WithDatabaseDSN(tmpDir+"/test.db"))
+	_, cfg := createTestConfig(t, WithDatabaseDSN(filepath.Join(tmpDir, "test.db")))
 
 	loadConfigCalled := false
 	loadConfig := func() (*config.Config, error) {
@@ -248,7 +249,7 @@ func TestRunWithConfig_ConfigLoadError(t *testing.T) {
 // TestRunWithConfig_FnError tests that errors from fn are propagated
 func TestRunWithConfig_FnError(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, cfg := createTestConfig(t, WithDatabaseDSN(tmpDir+"/test.db"))
+	_, cfg := createTestConfig(t, WithDatabaseDSN(filepath.Join(tmpDir, "test.db")))
 
 	loadConfig := func() (*config.Config, error) {
 		return cfg, nil

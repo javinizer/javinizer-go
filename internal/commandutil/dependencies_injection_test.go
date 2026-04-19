@@ -1,6 +1,7 @@
 package commandutil
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -15,7 +16,7 @@ import (
 func TestNewDependenciesWithOptions_NilOptions(t *testing.T) {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
-			DSN: t.TempDir() + "/test.db",
+			DSN: filepath.Join(t.TempDir(), "test.db"),
 		},
 	}
 
@@ -58,7 +59,7 @@ func TestNewDependenciesWithOptions_InjectedDB(t *testing.T) {
 func TestNewDependenciesWithOptions_InjectedRegistry(t *testing.T) {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
-			DSN: t.TempDir() + "/test.db",
+			DSN: filepath.Join(t.TempDir(), "test.db"),
 		},
 	}
 
@@ -121,7 +122,7 @@ func TestNewDependenciesWithOptions_NilConfig(t *testing.T) {
 func TestDependenciesInterface_Compliance(t *testing.T) {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
-			DSN: t.TempDir() + "/test.db",
+			DSN: filepath.Join(t.TempDir(), "test.db"),
 		},
 	}
 
@@ -142,7 +143,7 @@ func TestDependenciesInterface_Compliance(t *testing.T) {
 func TestGetConfig(t *testing.T) {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
-			DSN: t.TempDir() + "/test.db",
+			DSN: filepath.Join(t.TempDir(), "test.db"),
 		},
 	}
 
@@ -157,7 +158,7 @@ func TestGetConfig(t *testing.T) {
 func TestGetDB(t *testing.T) {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
-			DSN: t.TempDir() + "/test.db",
+			DSN: filepath.Join(t.TempDir(), "test.db"),
 		},
 	}
 
@@ -174,7 +175,7 @@ func TestGetDB(t *testing.T) {
 func TestGetScraperRegistry(t *testing.T) {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
-			DSN: t.TempDir() + "/test.db",
+			DSN: filepath.Join(t.TempDir(), "test.db"),
 		},
 	}
 
@@ -191,7 +192,7 @@ func TestGetScraperRegistry(t *testing.T) {
 func TestNewDependencies_BackwardCompatibility(t *testing.T) {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
-			DSN: t.TempDir() + "/test.db",
+			DSN: filepath.Join(t.TempDir(), "test.db"),
 		},
 	}
 
@@ -209,7 +210,7 @@ func TestNewDependencies_BackwardCompatibility(t *testing.T) {
 func TestNewDependenciesWithOptions_EmptyOptions(t *testing.T) {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
-			DSN: t.TempDir() + "/test.db",
+			DSN: filepath.Join(t.TempDir(), "test.db"),
 		},
 	}
 

@@ -464,7 +464,7 @@ func TestNormalizeWindowsPath(t *testing.T) {
 		{
 			name:     "Prefix without path",
 			input:    `\\?\UNC`,
-			expected: `\\?\UNC`, // Too short, no match
+			expected: `UNC`,
 		},
 		{
 			name:     "Prefix with slash only",

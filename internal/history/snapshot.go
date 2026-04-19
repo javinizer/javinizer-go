@@ -30,7 +30,7 @@ func ReadNFOSnapshot(fs afero.Fs, candidatePaths ...string) NFOSnapshotResult {
 		if err != nil {
 			continue
 		}
-		data, err := afero.ReadFile(fs, canonical)
+		data, err := afero.ReadFile(fs, filepath.ToSlash(canonical))
 		if err == nil {
 			return NFOSnapshotResult{Content: string(data), FoundPath: canonical}
 		}

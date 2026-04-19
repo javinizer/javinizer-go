@@ -3,6 +3,7 @@ package organizer
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -406,8 +407,11 @@ func TestOrganizerWithAfero_CleanEmptyDirectories(t *testing.T) {
 	// This is expected behavior - the function is designed for real filesystem with symlink support
 	err = org.CleanEmptyDirectories(nestedPath, baseDir)
 	assert.Error(t, err, "MemMapFs doesn't support EvalSymlinks - error expected")
-	assert.Contains(t, err.Error(), "no such file or directory",
-		"Should fail because EvalSymlinks doesn't work with MemMapFs")
+
+	if runtime.GOOS != "windows" {
+		assert.Contains(t, err.Error(), "no such file or directory",
+			"Should fail because EvalSymlinks doesn't work with MemMapFs")
+	}
 
 	// Note: Comprehensive CleanEmptyDirectories tests exist in organizer_test.go using afero.NewOsFs()
 }

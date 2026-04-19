@@ -198,9 +198,11 @@ func TestSyncAndAtomicReplaceFile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "hello", string(got))
 
-		info, err := os.Stat(path)
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+		if runtime.GOOS != "windows" {
+			info, err := os.Stat(path)
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+		}
 
 		err = atomicReplaceFile(filepath.Join(dir, "missing", "config.yaml"), []byte("x"), 0o600)
 		require.Error(t, err)
@@ -275,6 +277,9 @@ func TestSaveAndLoadOrCreateBranches(t *testing.T) {
 	})
 
 	t.Run("LoadOrCreate wraps save default errors", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows does not enforce Unix-style directory permissions")
+		}
 		dir := filepath.Join(t.TempDir(), "readonly")
 		require.NoError(t, os.MkdirAll(dir, 0o755))
 		require.NoError(t, os.Chmod(dir, 0o500))
@@ -286,6 +291,9 @@ func TestSaveAndLoadOrCreateBranches(t *testing.T) {
 	})
 
 	t.Run("LoadOrCreate wraps migration errors", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows does not enforce Unix-style directory permissions")
+		}
 		dir := filepath.Join(t.TempDir(), "readonly")
 		require.NoError(t, os.MkdirAll(dir, 0o755))
 		path := filepath.Join(dir, "config.yaml")

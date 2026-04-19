@@ -59,7 +59,7 @@ func TestReadNFOSnapshot_FoundPathIsCanonical(t *testing.T) {
 	result := ReadNFOSnapshot(fs, nfoPath)
 	assert.Equal(t, "<nfo/>", result.Content)
 	canonical, _ := filepath.Abs(filepath.Clean(nfoPath))
-	assert.Equal(t, canonical, result.FoundPath)
+	assert.Equal(t, filepath.ToSlash(canonical), filepath.ToSlash(result.FoundPath))
 }
 
 // --- DetermineOperationType tests ---

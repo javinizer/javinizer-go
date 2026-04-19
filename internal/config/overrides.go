@@ -40,7 +40,7 @@ func ApplyEnvironmentOverrides(cfg *Config) {
 			output = strings.TrimSpace(output)
 			if output != "stdout" && output != "stderr" && output != "" {
 				filename := filepath.Base(output)
-				newOutputs = append(newOutputs, filepath.Join(envLogDir, filename))
+				newOutputs = append(newOutputs, filepath.ToSlash(filepath.Join(envLogDir, filename)))
 			} else {
 				newOutputs = append(newOutputs, output)
 			}

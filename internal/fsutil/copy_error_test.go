@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -74,6 +75,9 @@ func TestCopyFileAtomic_ErrorPaths(t *testing.T) {
 		if os.Geteuid() == 0 {
 			t.Skip("Skipping permission test as root")
 		}
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows does not enforce Unix-style directory permissions")
+		}
 
 		tmpDir := t.TempDir()
 		srcFile := filepath.Join(tmpDir, "source.txt")
@@ -129,6 +133,9 @@ func TestCopyFileAtomic_CorruptedSource(t *testing.T) {
 func TestCopyFileAtomic_NoWritePermission(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("Skipping as root - permission tests don't work")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style directory permissions")
 	}
 
 	tmpDir := t.TempDir()
@@ -449,6 +456,9 @@ func TestCopyFileAtomic_ChmodError(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("Skipping chmod test as root")
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style directory permissions")
+	}
 
 	tmpDir := t.TempDir()
 
@@ -478,6 +488,10 @@ func TestCopyFileAtomic_ChmodError(t *testing.T) {
 
 // TestCopyFileAtomic_SourceReadError tests when source file becomes unreadable
 func TestCopyFileAtomic_SourceReadError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style file permissions")
+	}
+
 	tmpDir := t.TempDir()
 
 	// Create a source file

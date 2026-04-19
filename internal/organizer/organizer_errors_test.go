@@ -1,12 +1,14 @@
 package organizer
 
 import (
-	"github.com/spf13/afero"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/afero"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -242,6 +244,9 @@ func TestOrganizer_Execute_InPlaceErrors(t *testing.T) {
 func TestOrganizer_Execute_PermissionErrors(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("Skipping permission tests when running as root")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not enforce Unix-style directory permissions")
 	}
 
 	tmpDir := t.TempDir()
