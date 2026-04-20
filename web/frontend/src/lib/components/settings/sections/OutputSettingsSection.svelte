@@ -131,7 +131,7 @@
 				placeholder="<ID> - <TITLE>"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Available tags: &lt;ID&gt;, &lt;TITLE&gt;, &lt;STUDIO&gt;, &lt;YEAR&gt;, &lt;ACTRESS&gt;
+				Available tags: &lt;ID&gt;, &lt;TITLE&gt;, &lt;STUDIO&gt;, &lt;YEAR&gt;, &lt;ACTRESS&gt;, &lt;ACTRESSES&gt;, &lt;ACTORNAME&gt;
 			</p>
 		</div>
 

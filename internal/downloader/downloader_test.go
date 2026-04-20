@@ -826,8 +826,7 @@ func TestDownloader_generateFilenameActress(t *testing.T) {
 	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
 
 	actressMovie := &models.Movie{
-		ID:    "IPX-535",
-		Title: "Momo Sakura",
+		ID: "IPX-535",
 	}
 
 	tests := []struct {
@@ -849,9 +848,9 @@ func TestDownloader_generateFilenameActress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := downloader.generateFilename(actressMovie, tt.template, 0, nil)
+			result := downloader.generateActressFilename(actressMovie, "Momo Sakura", tt.template)
 			if result != tt.expected {
-				t.Errorf("generateFilename() = %q, want %q", result, tt.expected)
+				t.Errorf("generateActressFilename() = %q, want %q", result, tt.expected)
 			}
 		})
 	}

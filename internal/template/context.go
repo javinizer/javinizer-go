@@ -25,10 +25,11 @@ type Context struct {
 	Runtime     int // in minutes
 
 	// People
-	Director  string
-	Actresses []string // Array of actress names
-	FirstName string   // For single actress context
-	LastName  string   // For single actress context
+	Director    string
+	Actresses   []string // Array of actress names
+	FirstName   string   // For single actress context
+	LastName    string   // For single actress context
+	ActressName string   // Explicit actress name for .actors image filenames
 
 	// Production info
 	Maker  string // Studio/Maker
@@ -179,6 +180,7 @@ func (c *Context) Clone() *Context {
 		ReleaseDate:      c.ReleaseDate,
 		Runtime:          c.Runtime,
 		Director:         c.Director,
+		ActressName:      c.ActressName,
 		FirstName:        c.FirstName,
 		LastName:         c.LastName,
 		Maker:            c.Maker,
