@@ -498,6 +498,7 @@ func TestClone(t *testing.T) {
 				Runtime:          120,
 				Director:         "Test Director",
 				Actresses:        []string{"Actress 1", "Actress 2"},
+				ActressName:      "Custom Actress Name",
 				FirstName:        "Test",
 				LastName:         "Actress",
 				Maker:            "Test Studio",
@@ -566,6 +567,7 @@ func TestClone(t *testing.T) {
 			assert.Equal(t, tt.ctx.ReleaseDate, clone.ReleaseDate)
 			assert.Equal(t, tt.ctx.Runtime, clone.Runtime)
 			assert.Equal(t, tt.ctx.Director, clone.Director)
+			assert.Equal(t, tt.ctx.ActressName, clone.ActressName)
 			assert.Equal(t, tt.ctx.FirstName, clone.FirstName)
 			assert.Equal(t, tt.ctx.LastName, clone.LastName)
 			assert.Equal(t, tt.ctx.Maker, clone.Maker)

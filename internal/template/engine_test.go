@@ -98,7 +98,7 @@ func TestTemplateEngine_Execute(t *testing.T) {
 		{
 			name:     "Actor name tag",
 			template: "actress-<ACTORNAME>.jpg",
-			want:     "actress-Test Movie Title.jpg",
+			want:     "actress-Sakura Momo.jpg",
 		},
 	}
 
@@ -891,6 +891,16 @@ func TestTemplateEngine_AllTags(t *testing.T) {
 			want:     "Actress One, Actress Two",
 		},
 		{
+			name:     "ACTRESS returns first actress only",
+			template: "<ACTRESS>",
+			want:     "Actress One",
+		},
+		{
+			name:     "ACTORNAME returns first actress when no explicit ActressName",
+			template: "<ACTORNAME>",
+			want:     "Actress One",
+		},
+		{
 			name:     "GENRES with custom delimiter",
 			template: "<GENRES: / >",
 			want:     "Genre1 / Genre2",
@@ -909,6 +919,67 @@ func TestTemplateEngine_AllTags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTemplateEngine_ActorNameExplicit(t *testing.T) {
+	engine := NewEngine()
+
+	t.Run("ACTORNAME uses ActressName when set", func(t *testing.T) {
+		ctx := &Context{
+			ID:          "IPX-535",
+			Actresses:   []string{"Sakura Momo"},
+			ActressName: "Custom Name",
+		}
+		got, err := engine.Execute("<ACTORNAME>", ctx)
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		if got != "Custom Name" {
+			t.Errorf("Execute() = %q, want %q", got, "Custom Name")
+		}
+	})
+
+	t.Run("ACTRESS uses ActressName when set", func(t *testing.T) {
+		ctx := &Context{
+			ID:          "IPX-535",
+			Actresses:   []string{"Sakura Momo"},
+			ActressName: "Custom Name",
+		}
+		got, err := engine.Execute("<ACTRESS>", ctx)
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		if got != "Custom Name" {
+			t.Errorf("Execute() = %q, want %q", got, "Custom Name")
+		}
+	})
+
+	t.Run("ACTORNAME falls back to first actress when ActressName empty", func(t *testing.T) {
+		ctx := &Context{
+			ID:        "IPX-535",
+			Actresses: []string{"Sakura Momo"},
+		}
+		got, err := engine.Execute("<ACTORNAME>", ctx)
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		if got != "Sakura Momo" {
+			t.Errorf("Execute() = %q, want %q", got, "Sakura Momo")
+		}
+	})
+
+	t.Run("ACTORNAME empty when no actress data", func(t *testing.T) {
+		ctx := &Context{
+			ID: "IPX-535",
+		}
+		got, err := engine.Execute("<ACTORNAME>", ctx)
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		if got != "" {
+			t.Errorf("Execute() = %q, want empty string", got)
+		}
+	})
 }
 
 func TestTemplateEngine_ZeroAndEmptyValues(t *testing.T) {

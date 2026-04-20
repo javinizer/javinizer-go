@@ -292,10 +292,9 @@ func (d *Downloader) generateFilename(movie *models.Movie, templateStr string, i
 	}
 
 	ctx := template.NewContextFromMovie(movie)
-	ctx.Index = index // Set index for screenshot numbering
+	ctx.Index = index
 	ctx.GroupActress = d.config.GroupActress
 
-	// Set multipart info if provided
 	if multipart != nil {
 		ctx.IsMultiPart = multipart.IsMultiPart
 		ctx.PartNumber = multipart.PartNumber
@@ -305,8 +304,26 @@ func (d *Downloader) generateFilename(movie *models.Movie, templateStr string, i
 	engine := d.templateEngine
 	filename, err := engine.Execute(templateStr, ctx)
 	if err != nil {
-		// Fallback to ID-based naming if template fails
 		return fmt.Sprintf("%s-unknown", ctx.ID)
+	}
+
+	return filename
+}
+
+func (d *Downloader) generateActressFilename(movie *models.Movie, actressName string, templateStr string) string {
+	if templateStr == "" {
+		return ""
+	}
+
+	ctx := template.NewContextFromMovie(movie)
+	ctx.ActressName = actressName
+	ctx.GroupActress = d.config.GroupActress
+
+	engine := d.templateEngine
+	filename, err := engine.Execute(templateStr, ctx)
+	if err != nil {
+		name := template.SanitizeFilename(actressName)
+		return fmt.Sprintf("%s.jpg", name)
 	}
 
 	return filename
@@ -537,11 +554,10 @@ func (d *Downloader) DownloadActressImages(ctx context.Context, movie *models.Mo
 		// Use configurable template for actress filenames
 		// Create a temporary movie with actress data for template processing
 		actressMovie := &models.Movie{
-			ID:    movie.ID,
-			Title: formattedName,
+			ID: movie.ID,
 		}
 
-		filename := d.generateFilename(actressMovie, d.config.ActressFormat, 0, nil)
+		filename := d.generateActressFilename(actressMovie, formattedName, d.config.ActressFormat)
 		if filename == "" {
 			// Fallback to default format
 			name := template.SanitizeFilename(formattedName)

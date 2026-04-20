@@ -484,7 +484,7 @@ func TestGeneratePreview_InPlaceNoRenameFolder(t *testing.T) {
 
 	// Should use source directory as target, not /library
 	assert.Equal(t, "in-place-norenamefolder", resp.OperationMode)
-	assert.Equal(t, filepath.FromSlash("/source/videos/IPX-535.mp4"), resp.SourcePath, "SourcePath should be the original file path")
+	assert.Equal(t, "/source/videos/IPX-535.mp4", filepath.ToSlash(resp.SourcePath), "SourcePath should be the original file path")
 	assert.Contains(t, filepath.ToSlash(resp.FullPath), "/source/videos/", "In-place-norenamefolder should place files in source directory")
 	assert.NotContains(t, filepath.ToSlash(resp.FullPath), "/library/", "In-place-norenamefolder should NOT use destination directory")
 	assert.Empty(t, resp.FolderName, "In-place-norenamefolder should have no folder name (no folder creation)")
@@ -510,7 +510,7 @@ func TestGeneratePreview_InPlace(t *testing.T) {
 	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeInPlace, false, false)
 
 	assert.Equal(t, "in-place", resp.OperationMode)
-	assert.Equal(t, filepath.FromSlash("/source/videos/IPX-535.mp4"), resp.SourcePath, "SourcePath should be the original file path")
+	assert.Equal(t, "/source/videos/IPX-535.mp4", filepath.ToSlash(resp.SourcePath), "SourcePath should be the original file path")
 	assert.Contains(t, filepath.ToSlash(resp.FullPath), "/source/", "In-place should use parent of source directory")
 	assert.NotEmpty(t, resp.FolderName, "In-place should have a folder name for potential rename")
 }
@@ -535,8 +535,8 @@ func TestGeneratePreview_MetadataOnly(t *testing.T) {
 	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeMetadataOnly, false, false)
 
 	assert.Equal(t, "metadata-only", resp.OperationMode)
-	assert.Equal(t, filepath.FromSlash("/source/videos/IPX-535.mp4"), resp.SourcePath)
-	assert.Equal(t, filepath.FromSlash("/source/videos/IPX-535.mp4"), resp.FullPath, "Metadata-only should keep original file path")
+	assert.Equal(t, "/source/videos/IPX-535.mp4", filepath.ToSlash(resp.SourcePath))
+	assert.Equal(t, "/source/videos/IPX-535.mp4", filepath.ToSlash(resp.FullPath), "Metadata-only should keep original file path")
 	assert.Empty(t, resp.FolderName, "Metadata-only should have no folder name")
 	assert.Contains(t, filepath.ToSlash(resp.NFOPath), "/source/videos/", "NFO should be in source directory")
 }
