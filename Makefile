@@ -265,6 +265,7 @@ web-build:
 	cd web/frontend && npm run build
 
 web-restore-placeholder:
+	rm -rf web/dist
 	git checkout -- web/dist/
 
 web-preview:

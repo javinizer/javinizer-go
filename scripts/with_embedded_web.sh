@@ -9,7 +9,8 @@ if [ ! -f "$repo_root/web/frontend/build/index.html" ]; then
 fi
 
 restore_placeholder() {
-	git -C "$repo_root" checkout -- web/dist/
+	rm -rf "$repo_root/web/dist"
+	git -C "$repo_root" checkout -- web/dist/ || true
 }
 
 trap restore_placeholder EXIT
