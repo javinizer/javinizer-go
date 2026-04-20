@@ -2450,6 +2450,11 @@ const docTemplate = `{
                     "type": "string",
                     "example": "/source/folder/ABC-123.mp4"
                 },
+                "subfolder_path": {
+                    "description": "Subfolder hierarchy relative to destination (e.g. \"Studio/Year\")",
+                    "type": "string",
+                    "example": "IdeaPocket/2025"
+                },
                 "video_files": {
                     "description": "For multi-part files: all video file paths",
                     "type": "array",

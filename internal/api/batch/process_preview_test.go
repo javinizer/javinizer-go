@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -483,9 +484,9 @@ func TestGeneratePreview_InPlaceNoRenameFolder(t *testing.T) {
 
 	// Should use source directory as target, not /library
 	assert.Equal(t, "in-place-norenamefolder", resp.OperationMode)
-	assert.Equal(t, "/source/videos/IPX-535.mp4", resp.SourcePath, "SourcePath should be the original file path")
+	assert.Equal(t, filepath.FromSlash("/source/videos/IPX-535.mp4"), resp.SourcePath, "SourcePath should be the original file path")
 	assert.Contains(t, filepath.ToSlash(resp.FullPath), "/source/videos/", "In-place-norenamefolder should place files in source directory")
-	assert.NotContains(t, resp.FullPath, "/library/", "In-place-norenamefolder should NOT use destination directory")
+	assert.NotContains(t, filepath.ToSlash(resp.FullPath), "/library/", "In-place-norenamefolder should NOT use destination directory")
 	assert.Empty(t, resp.FolderName, "In-place-norenamefolder should have no folder name (no folder creation)")
 }
 
@@ -509,7 +510,7 @@ func TestGeneratePreview_InPlace(t *testing.T) {
 	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeInPlace, false, false)
 
 	assert.Equal(t, "in-place", resp.OperationMode)
-	assert.Equal(t, "/source/videos/IPX-535.mp4", resp.SourcePath, "SourcePath should be the original file path")
+	assert.Equal(t, filepath.FromSlash("/source/videos/IPX-535.mp4"), resp.SourcePath, "SourcePath should be the original file path")
 	assert.Contains(t, filepath.ToSlash(resp.FullPath), "/source/", "In-place should use parent of source directory")
 	assert.NotEmpty(t, resp.FolderName, "In-place should have a folder name for potential rename")
 }
@@ -534,13 +535,45 @@ func TestGeneratePreview_MetadataOnly(t *testing.T) {
 	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeMetadataOnly, false, false)
 
 	assert.Equal(t, "metadata-only", resp.OperationMode)
-	assert.Equal(t, "/source/videos/IPX-535.mp4", resp.SourcePath)
-	assert.Equal(t, "/source/videos/IPX-535.mp4", resp.FullPath, "Metadata-only should keep original file path")
+	assert.Equal(t, filepath.FromSlash("/source/videos/IPX-535.mp4"), resp.SourcePath)
+	assert.Equal(t, filepath.FromSlash("/source/videos/IPX-535.mp4"), resp.FullPath, "Metadata-only should keep original file path")
 	assert.Empty(t, resp.FolderName, "Metadata-only should have no folder name")
 	assert.Contains(t, filepath.ToSlash(resp.NFOPath), "/source/videos/", "NFO should be in source directory")
 }
 
 // TestGeneratePreview_OrganizeModeDefault tests that organize mode (default) uses destination directory
+func TestGeneratePreview_SubfolderPath_NonOrganizeModes(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Output.SubfolderFormat = []string{"<MAKER>"}
+	cfg.Output.FolderFormat = "<ID>"
+	cfg.Output.FileFormat = "<ID>"
+
+	movie := &models.Movie{
+		ID:    "MODE-001",
+		Title: "Mode Test",
+		Maker: "StudioC",
+	}
+
+	fileResults := []*worker.FileResult{
+		{FilePath: "/source/MODE-001.mp4"},
+	}
+
+	t.Run("in-place mode has no subfolder_path", func(t *testing.T) {
+		resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeInPlace, false, false)
+		assert.Empty(t, resp.SubfolderPath, "In-place mode should not have SubfolderPath")
+	})
+
+	t.Run("in-place-norenamefolder mode has no subfolder_path", func(t *testing.T) {
+		resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeInPlaceNoRenameFolder, false, false)
+		assert.Empty(t, resp.SubfolderPath, "In-place-norenamefolder mode should not have SubfolderPath")
+	})
+
+	t.Run("metadata-only mode has no subfolder_path", func(t *testing.T) {
+		resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeMetadataOnly, false, false)
+		assert.Empty(t, resp.SubfolderPath, "Metadata-only mode should not have SubfolderPath")
+	})
+}
+
 func TestGeneratePreview_OrganizeModeDefault(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Output.FolderFormat = "<ID>"
@@ -561,7 +594,174 @@ func TestGeneratePreview_OrganizeModeDefault(t *testing.T) {
 
 	assert.Equal(t, "organize", resp.OperationMode)
 	assert.Contains(t, filepath.ToSlash(resp.FullPath), "/library/", "Organize mode should use destination directory")
-	assert.NotContains(t, resp.FullPath, "/source/", "Organize mode should NOT use source directory")
+	assert.NotContains(t, filepath.ToSlash(resp.FullPath), "/source/", "Organize mode should NOT use source directory")
 	assert.Equal(t, "", resp.SourcePath, "Organize mode should not set source path")
 	assert.NotEmpty(t, resp.FolderName, "Organize mode should have a folder name")
+}
+
+func TestGeneratePreview_SubfolderPath(t *testing.T) {
+	t.Run("subfolder_path populated with subfolder format", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Output.SubfolderFormat = []string{"<MAKER>", "<YEAR>"}
+		cfg.Output.FolderFormat = "<ID>"
+		cfg.Output.FileFormat = "<ID>"
+
+		releaseDate := time.Date(2025, 6, 15, 0, 0, 0, 0, time.UTC)
+		movie := &models.Movie{
+			ID:          "ABC-123",
+			Title:       "Test Movie",
+			Maker:       "IdeaPocket",
+			ReleaseDate: &releaseDate,
+		}
+
+		resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
+
+		assert.Equal(t, filepath.Join("IdeaPocket", "2025"), resp.SubfolderPath, "SubfolderPath should contain subfolder parts joined by platform separator")
+		assert.Contains(t, filepath.ToSlash(resp.FullPath), "IdeaPocket/2025", "FullPath should include subfolder hierarchy")
+	})
+
+	t.Run("subfolder_path empty when no subfolder format", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Output.SubfolderFormat = []string{}
+		cfg.Output.FolderFormat = "<ID>"
+		cfg.Output.FileFormat = "<ID>"
+
+		movie := &models.Movie{
+			ID:    "XYZ-999",
+			Title: "Test Movie",
+		}
+
+		resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
+
+		assert.Equal(t, "", resp.SubfolderPath, "SubfolderPath should be empty when no subfolder format configured")
+	})
+
+	t.Run("subfolder_path with single subfolder", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Output.SubfolderFormat = []string{"<ID>"}
+		cfg.Output.FolderFormat = "<ID> [<STUDIO>] - <TITLE> (<YEAR>)"
+		cfg.Output.FileFormat = "<ID>"
+
+		releaseDate := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
+		movie := &models.Movie{
+			ID:          "IPX-535",
+			Title:       "Test Movie",
+			Maker:       "IdeaPocket",
+			ReleaseDate: &releaseDate,
+		}
+
+		resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
+
+		assert.Equal(t, "IPX-535", resp.SubfolderPath, "SubfolderPath should contain single subfolder part")
+		assert.NotEmpty(t, resp.FolderName, "FolderName should be populated")
+		assert.NotEqual(t, resp.SubfolderPath, resp.FolderName, "FolderName and SubfolderPath should differ when formats differ")
+	})
+
+	t.Run("subfolder_path empty when template resolves to empty", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Output.SubfolderFormat = []string{"<YEAR>", "<MAKER>"}
+		cfg.Output.FolderFormat = "<ID>"
+		cfg.Output.FileFormat = "<ID>"
+
+		movie := &models.Movie{
+			ID:    "NO-DATE-001",
+			Title: "No Date Movie",
+		}
+
+		resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
+
+		assert.Equal(t, "", resp.SubfolderPath, "SubfolderPath should be empty when all templates resolve to empty")
+		assert.Contains(t, filepath.ToSlash(resp.FullPath), "/library/NO-DATE-001", "FullPath should skip empty subfolders")
+	})
+
+	t.Run("subfolder_path partially resolves", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Output.SubfolderFormat = []string{"<MAKER>", "<YEAR>"}
+		cfg.Output.FolderFormat = "<ID>"
+		cfg.Output.FileFormat = "<ID>"
+
+		movie := &models.Movie{
+			ID:    "PARTIAL-001",
+			Title: "Partial Subfolder",
+			Maker: "S1",
+		}
+
+		resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
+
+		assert.Equal(t, "S1", resp.SubfolderPath, "SubfolderPath should only contain non-empty parts")
+		assert.Contains(t, filepath.ToSlash(resp.FullPath), "S1/", "FullPath should include non-empty subfolder")
+	})
+
+	t.Run("subfolder_path with special characters sanitized", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Output.SubfolderFormat = []string{"<MAKER>", "<LABEL>"}
+		cfg.Output.FolderFormat = "<ID>"
+		cfg.Output.FileFormat = "<ID>"
+
+		movie := &models.Movie{
+			ID:    "SAN-001",
+			Title: "Sanitize Test",
+			Maker: "Studio: Tokyo",
+			Label: `Label? "Test"`,
+		}
+
+		resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
+
+		assert.NotContains(t, resp.SubfolderPath, ":", "SubfolderPath should not contain colons")
+		assert.NotContains(t, resp.SubfolderPath, "?", "SubfolderPath should not contain question marks")
+		assert.NotContains(t, resp.SubfolderPath, `"`, "SubfolderPath should not contain double quotes")
+		assert.NotContains(t, filepath.ToSlash(resp.FullPath), ":", "FullPath should not contain unsanitized characters")
+	})
+
+	t.Run("subfolder_path uses platform separator consistent with FullPath", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Output.SubfolderFormat = []string{"<MAKER>", "<YEAR>"}
+		cfg.Output.FolderFormat = "<ID>"
+		cfg.Output.FileFormat = "<ID>"
+
+		releaseDate := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)
+		movie := &models.Movie{
+			ID:          "CROSS-001",
+			Title:       "Cross Platform",
+			Maker:       "StudioA",
+			ReleaseDate: &releaseDate,
+		}
+
+		resp := generatePreview(movie, nil, "/library", cfg, "", false, false)
+
+		expectedSubfolderParts := []string{"StudioA", "2025"}
+		expectedSubfolderPath := filepath.Join(expectedSubfolderParts...)
+		assert.Equal(t, expectedSubfolderPath, resp.SubfolderPath, "SubfolderPath should use platform path separator")
+
+		expectedFullPath := filepath.Join("/library", "StudioA", "2025", "CROSS-001", "CROSS-001.mp4")
+		assert.Equal(t, filepath.ToSlash(expectedFullPath), filepath.ToSlash(resp.FullPath), "FullPath should match subfolder hierarchy")
+	})
+
+	t.Run("subfolder_path with multipart files", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Output.SubfolderFormat = []string{"<MAKER>"}
+		cfg.Output.FolderFormat = "<ID>"
+		cfg.Output.FileFormat = "<ID><IF:MULTIPART>-pt<PART></IF>"
+		cfg.Output.DownloadPoster = true
+		cfg.Output.DownloadExtrafanart = true
+
+		movie := &models.Movie{
+			ID:    "MULTI-001",
+			Title: "Multi Part Movie",
+			Maker: "StudioB",
+		}
+
+		fileResults := []*worker.FileResult{
+			{FilePath: "/source/MULTI-001-pt1.mp4", IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"},
+			{FilePath: "/source/MULTI-001-pt2.mp4", IsMultiPart: true, PartNumber: 2, PartSuffix: "-pt2"},
+		}
+
+		resp := generatePreview(movie, fileResults, "/library", cfg, "", false, false)
+
+		assert.Equal(t, "StudioB", resp.SubfolderPath, "SubfolderPath should work with multipart files")
+		assert.Len(t, resp.VideoFiles, 2, "Should have 2 video files")
+		for _, vf := range resp.VideoFiles {
+			assert.Contains(t, filepath.ToSlash(vf), "StudioB/", "All video file paths should include subfolder")
+		}
+	})
 }

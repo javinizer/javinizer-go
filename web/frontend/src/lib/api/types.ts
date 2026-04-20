@@ -379,6 +379,7 @@ export interface OrganizePreviewRequest {
 export interface OrganizePreviewResponse {
 	folder_name: string;
 	file_name: string;
+	subfolder_path?: string; // Subfolder hierarchy relative to destination (e.g. "Studio/2025")
 	full_path: string;
 	video_files?: string[]; // For multi-part files: all video file paths
 	nfo_path?: string; // Single NFO (backward compatibility) - empty if NFO disabled

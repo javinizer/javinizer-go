@@ -70,6 +70,11 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 		}
 	}
 
+	var subfolderPath string
+	if len(subfolderParts) > 0 {
+		subfolderPath = filepath.Join(subfolderParts...)
+	}
+
 	// Generate folder name
 	folderName, err := templateEngine.Execute(cfg.Output.FolderFormat, ctx)
 	if err != nil {
@@ -152,6 +157,7 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 	return OrganizePreviewResponse{
 		FolderName:      folderName,
 		FileName:        fileName,
+		SubfolderPath:   subfolderPath,
 		FullPath:        primaryVideoPath,
 		VideoFiles:      videoFiles,
 		NFOPath:         nfoPath,
