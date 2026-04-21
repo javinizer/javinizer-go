@@ -108,6 +108,8 @@ func run(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 
+	config.ApplyEnvironmentOverrides(cfg)
+
 	// Override config with flag if extrafanart is explicitly enabled
 	if downloadExtrafanart {
 		cfg.Output.DownloadExtrafanart = true
@@ -116,6 +118,11 @@ func run(cmd *cobra.Command, args []string) error {
 	// Override config with flag if scraper priority is provided
 	if len(scraperPriority) > 0 {
 		cfg.Scrapers.Priority = scraperPriority
+	}
+
+	if _, err := config.Prepare(cfg); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Invalid configuration: %v\n", err)
+		os.Exit(1)
 	}
 
 	// For TUI mode, log to file only (not stdout)

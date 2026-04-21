@@ -77,12 +77,18 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
+	config.ApplyEnvironmentOverrides(cfg)
+
 	// Override config with flags if provided
 	if hostFlag != "" {
 		cfg.Server.Host = hostFlag
 	}
 	if portFlag != 0 {
 		cfg.Server.Port = portFlag
+	}
+
+	if _, err := config.Prepare(cfg); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	logging.Infof("Loaded configuration from %s", configFile)

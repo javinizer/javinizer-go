@@ -542,3 +542,149 @@ func TestRun_ErrorConfigNotFound(t *testing.T) {
 	assert.Nil(t, deps)
 	assert.Contains(t, err.Error(), "failed to load config")
 }
+
+// TestRun_EnvironmentOverrides verifies that DEEPL_API_KEY and other env vars
+// are applied before validation, preventing "api_key is required" errors
+// when the key is provided via environment instead of config file.
+func TestRun_EnvironmentOverrides(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	t.Run("deepl_api_key_env_var_satisfies_validation", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		configContent := `config_version: 3
+database:
+  dsn: ":memory:"
+  type: sqlite
+scrapers:
+  priority: ["r18dev", "dmm"]
+  timeout_seconds: 30
+  request_timeout_seconds: 60
+  r18dev:
+    enabled: true
+    language: en
+  dmm:
+    enabled: true
+metadata:
+  priority: {}
+  translation:
+    enabled: true
+    provider: deepl
+    deepl:
+      mode: free
+matching:
+  extensions: [".mp4"]
+  regex_enabled: false
+server:
+  host: localhost
+  port: 8080
+system:
+  temp_dir: ` + tmpDir + `
+`
+		require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
+
+		t.Setenv("DEEPL_API_KEY", "test-deepl-key-from-env")
+
+		cmd := api.NewCommand()
+		deps, err := api.Run(cmd, configPath, "", 0)
+		require.NoError(t, err, "DEEPL_API_KEY env var should satisfy validation when config api_key is empty")
+		require.NotNil(t, deps)
+		defer func() { _ = deps.DB.Close() }()
+
+		currentCfg := deps.GetConfig()
+		assert.Equal(t, "test-deepl-key-from-env", currentCfg.Metadata.Translation.DeepL.APIKey,
+			"env var DEEPL_API_KEY should be applied to config")
+	})
+
+	t.Run("deepl_missing_key_still_fails", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		configContent := `config_version: 3
+database:
+  dsn: ":memory:"
+  type: sqlite
+scrapers:
+  priority: ["r18dev", "dmm"]
+  timeout_seconds: 30
+  request_timeout_seconds: 60
+  r18dev:
+    enabled: true
+    language: en
+  dmm:
+    enabled: true
+metadata:
+  priority: {}
+  translation:
+    enabled: true
+    provider: deepl
+    deepl:
+      mode: free
+matching:
+  extensions: [".mp4"]
+  regex_enabled: false
+server:
+  host: localhost
+  port: 8080
+system:
+  temp_dir: ` + tmpDir + `
+`
+		require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
+
+		t.Setenv("DEEPL_API_KEY", "")
+
+		cmd := api.NewCommand()
+		deps, err := api.Run(cmd, configPath, "", 0)
+		assert.Error(t, err, "should still fail when deepl api_key is missing from both config and env")
+		assert.Nil(t, deps)
+		assert.Contains(t, err.Error(), "invalid configuration")
+	})
+
+	t.Run("openai_api_key_env_var", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		configContent := `config_version: 3
+database:
+  dsn: ":memory:"
+  type: sqlite
+scrapers:
+  priority: ["r18dev", "dmm"]
+  timeout_seconds: 30
+  request_timeout_seconds: 60
+  r18dev:
+    enabled: true
+    language: en
+  dmm:
+    enabled: true
+metadata:
+  priority: {}
+  translation:
+    enabled: true
+    provider: openai
+matching:
+  extensions: [".mp4"]
+  regex_enabled: false
+server:
+  host: localhost
+  port: 8080
+system:
+  temp_dir: ` + tmpDir + `
+`
+		require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
+
+		t.Setenv("OPENAI_API_KEY", "sk-test-openai-key-from-env")
+
+		cmd := api.NewCommand()
+		deps, err := api.Run(cmd, configPath, "", 0)
+		require.NoError(t, err, "OPENAI_API_KEY env var should satisfy validation")
+		require.NotNil(t, deps)
+		defer func() { _ = deps.DB.Close() }()
+
+		currentCfg := deps.GetConfig()
+		assert.Equal(t, "sk-test-openai-key-from-env", currentCfg.Metadata.Translation.OpenAI.APIKey)
+	})
+}
