@@ -75,6 +75,8 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	config.ApplyEnvironmentOverrides(cfg)
+
 	// Default destination is same as source
 	// If source is a file, use its directory as destination
 	if destPath == "" {
@@ -95,6 +97,10 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	effectiveScraperPriority := cfg.Scrapers.Priority
 	if len(scraperPriority) > 0 {
 		effectiveScraperPriority = scraperPriority
+	}
+
+	if _, err := config.Prepare(cfg); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	// Initialize dependencies

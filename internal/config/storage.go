@@ -553,6 +553,7 @@ func LoadOrCreate(path string) (*Config, error) {
 	}
 
 	// Normal prepare for current version configs
+	ApplyEnvironmentOverrides(cfg)
 	changed, err := Prepare(cfg)
 	if err != nil {
 		return nil, err
