@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.9-alpha] - 2026-04-22
+
+### Fixed
+
+- Apply environment variable overrides (DEEPL_API_KEY, OPENAI_API_KEY, etc.) before config validation in `LoadOrCreate()`, preventing "api_key is required" errors when keys are set via env vars but empty in config file
+- Persist per-field scraper priorities to config file and add scrollbar to priority modal
+- Clean `web/dist` before `git checkout` to remove stale build artifacts
+- Update `with_embedded_web.sh` restore_placeholder to use `git checkout`
+- Add `ACTRESS` singular tag and fix `ACTORNAME` to resolve from actress data instead of movie title
+- Add `subfolder_path` to organize preview response and improve cross-platform compatibility
+- Add cross-device move fallback to file organizer
+
+### Changed
+
+- Switch nightly releases to commit-hash tagging scheme
+- Remove duplicated `web/placeholder` dir, use `git checkout` in Makefile restore target
+
 ## [v0.2.8-alpha] - 2026-04-19
 
 ### Added
