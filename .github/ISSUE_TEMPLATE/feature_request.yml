@@ -1,0 +1,53 @@
+name: Feature Request
+description: Suggest a new feature or enhancement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem does this feature solve? What's the current limitation?
+      placeholder: |
+        When I use javinizer to sort files, I have to manually do X because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or behavior you'd like to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you tried any workarounds or alternative approaches?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part of javinizer does this relate to?
+      multiple: true
+      options:
+        - CLI commands
+        - TUI
+        - API / Web UI
+        - File matching
+        - Scrapers
+        - File organization
+        - Configuration
+        - Database
+        - Image / NFO generation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Any other context, screenshots, or examples.

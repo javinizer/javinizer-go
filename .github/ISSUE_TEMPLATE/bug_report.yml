@@ -1,0 +1,105 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Run `javinizer tui ~/Videos` with config having scraper.x enabled
+        2. Process file `IPX-123.mp4`
+        3. See error in output
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Execution mode
+      description: How were you running javinizer?
+      options:
+        - CLI (javinizer scrape)
+        - CLI (javinizer sort)
+        - TUI (javinizer tui)
+        - API / Web UI (javinizer api)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Javinizer version
+      description: Output of `javinizer version` or the release tag.
+      placeholder: e.g. v0.5.0, latest commit hash
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: Operating system and version.
+      placeholder: e.g. Windows 11, macOS 15.2, Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: input
+    id: go_version
+    attributes:
+      label: Go version
+      description: Output of `go version` (if building from source).
+      placeholder: e.g. go1.23.4
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        Paste any relevant log output. Run with `LOG_LEVEL=debug` for more detail.
+        **Do not paste scraped URLs or API keys.**
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: |
+        Paste the relevant sections of your config (sanitize any personal info).
+        The config file is typically at `~/.javinizer/config.yaml` or set via `JAVINIZER_CONFIG`.
+      render: yaml
+
+  - type: textarea
+    id: file_example
+    attributes:
+      label: Example file
+      description: |
+        If the bug involves file matching/scraping/organizing, provide an example filename
+        and the expected scraper result.
+      placeholder: |
+        Filename: IPX-123.mp4
+        Expected match: IPX-123
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add any other context about the problem here.

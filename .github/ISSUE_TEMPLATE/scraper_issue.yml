@@ -1,0 +1,77 @@
+name: Scraper Issue
+description: Report a problem with a specific scraper
+labels: ["scraper"]
+body:
+  - type: dropdown
+    id: scraper
+    attributes:
+      label: Scraper
+      description: Which scraper is affected?
+      options:
+        - AVEntertainment
+        - Caribbeancom
+        - DLGetchu
+        - DMM
+        - FC2
+        - JAV321
+        - JavBus
+        - JavDB
+        - JavLibrary
+        - JavStash
+        - LibreDMM
+        - MGSStage
+        - R18Dev
+        - TokyoHot
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the issue
+      description: What went wrong? What data is missing or incorrect?
+    validations:
+      required: true
+
+  - type: input
+    id: search_query
+    attributes:
+      label: Search query / movie ID
+      description: The ID or URL you searched for.
+      placeholder: e.g. IPX-123, https://www.javbus.com/IPX-123
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: What data should the scraper have returned?
+      placeholder: |
+        Title: ...
+        Actress: ...
+        Genres: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: What data did the scraper actually return? Paste relevant log output if available.
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Javinizer version
+      placeholder: e.g. v0.5.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Config overrides, proxy settings, or any other relevant info.
