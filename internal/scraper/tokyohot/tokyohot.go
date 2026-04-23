@@ -23,10 +23,12 @@ import (
 const defaultBaseURL = "https://www.tokyo-hot.com"
 
 var (
-	nonAlphaNumRegex = regexp.MustCompile(`[^a-z0-9]+`)
-	runtimeRegex     = regexp.MustCompile(`(\d{1,3})`)
-	timeRuntimeRegex = regexp.MustCompile(`(\d{1,2}):(\d{2}):(\d{2})`)
-	dateRegex        = regexp.MustCompile(`(\d{4}/\d{2}/\d{2}|\d{4}-\d{2}-\d{2})`)
+	nonAlphaNumRegex  = regexp.MustCompile(`[^a-z0-9]+`)
+	runtimeRegex      = regexp.MustCompile(`(\d{1,3})`)
+	timeRuntimeRegex  = regexp.MustCompile(`(\d{1,2}):(\d{2}):(\d{2})`)
+	dateRegex         = regexp.MustCompile(`(\d{4}/\d{2}/\d{2}|\d{4}-\d{2}-\d{2})`)
+	tokyoHotURLIDRe   = regexp.MustCompile(`(?i)^https?://(?:www\.)?tokyo-hot\.com/product/([A-Za-z]{1,4})[-_]?(\d{2,5})(?:[A-Za-z])?(?:/?\?.*)?$`)
+	tokyoHotShortIDRe = regexp.MustCompile(`(?i)^([A-Za-z]{1,2})[-_]?(\d{2,5})$`)
 )
 
 // Scraper implements the TokyoHot scraper.
@@ -112,6 +114,30 @@ func (s *Scraper) Config() *config.ScraperSettings {
 // Close cleans up resources held by the scraper
 func (s *Scraper) Close() error {
 	return nil
+}
+
+func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", false
+	}
+
+	if isHTTPURL(input) && s.CanHandleURL(input) {
+		id, err := s.ExtractIDFromURL(input)
+		if err == nil && id != "" {
+			return id, true
+		}
+	}
+
+	lower := strings.ToLower(input)
+	if m := tokyoHotURLIDRe.FindStringSubmatch(lower); len(m) == 3 && m[1] != "" && m[2] != "" {
+		return strings.ToUpper(m[1]) + "-" + m[2], true
+	}
+	if m := tokyoHotShortIDRe.FindStringSubmatch(lower); len(m) == 3 && m[1] != "" && m[2] != "" {
+		return strings.ToUpper(m[1]) + "-" + m[2], true
+	}
+
+	return "", false
 }
 
 // ValidateConfig validates the scraper configuration.

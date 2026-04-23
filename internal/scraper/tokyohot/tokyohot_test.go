@@ -72,6 +72,7 @@ func TestScraperInterfaceCompliance_TokyoHot(t *testing.T) {
 	var _ models.Scraper = s
 	var _ models.URLHandler = s
 	var _ models.DirectURLScraper = s
+	var _ models.ScraperQueryResolver = s
 }
 
 func testSettings(baseURL string) config.ScraperSettings {
@@ -213,6 +214,42 @@ func TestHelpers(t *testing.T) {
 	}
 	if !hasJapanese("花子") {
 		t.Fatal("expected Japanese text detection")
+	}
+}
+
+func TestResolveSearchQuery(t *testing.T) {
+	s := New(testSettings("https://www.tokyo-hot.com"), nil, config.FlareSolverrConfig{})
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		ok    bool
+	}{
+		{"N prefix hyphen", "N-1234", "N-1234", true},
+		{"N prefix no hyphen", "N1234", "N-1234", true},
+		{"KEED prefix hyphen - not claimed", "KEED-528", "", false},
+		{"Red prefix hyphen - not claimed", "Red-015", "", false},
+		{"lowercase n prefix", "n-1234", "N-1234", true},
+		{"lowercase no hyphen", "n1234", "N-1234", true},
+		{"product URL", "https://www.tokyo-hot.com/product/N1234/", "N1234", true},
+		{"product URL KEED", "https://www.tokyo-hot.com/product/KEED528/", "KEED528", true},
+		{"product URL with query", "https://www.tokyo-hot.com/product/N1234/?lang=en", "N1234", true},
+		{"standard JAV ID not matched", "IPX-535", "", false},
+		{"empty string", "", "", false},
+		{"whitespace only", "   ", "", false},
+		{"FC2 not matched", "FC2-PPV-123456", "", false},
+		{"short number", "N-1", "", false},
+		{"two letter prefix", "AB-123", "AB-123", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := s.ResolveSearchQuery(tt.input)
+			if ok != tt.ok || got != tt.want {
+				t.Errorf("ResolveSearchQuery(%q) = (%q, %v), want (%q, %v)", tt.input, got, ok, tt.want, tt.ok)
+			}
+		})
 	}
 }
 
