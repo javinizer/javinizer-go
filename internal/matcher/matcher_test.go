@@ -73,6 +73,12 @@ func TestMatcher_MatchFile(t *testing.T) {
 		{"Ntk 3 letters matches", "ntk456.mp4", "NTK456", 0, false, true}, // Matches but normalizes with padding
 		{"Ara 3 letters matches", "ara789.mp4", "ARA789", 0, false, true}, // Matches but normalizes with padding
 
+		// TokyoHot-style IDs (short prefix, no hyphen)
+		{"TokyoHot N prefix no hyphen", "N1234.mp4", "N1234", 0, false, true},
+		{"TokyoHot N prefix hyphen", "N-1234.mp4", "N-1234", 0, false, true},
+		{"TokyoHot 2-letter no hyphen", "AB567.mp4", "AB567", 0, false, true},
+		{"TokyoHot KEED hyphen", "KEED-528.mp4", "KEED-528", 0, false, true},
+
 		// DMM h_<digits> prefix format
 		{"DMM h_ prefix", "h_1472smkcx003.mp4", "H_1472SMKCX003", 0, false, true},
 		{"DMM h_ prefix san", "h_796san167.mp4", "H_796SAN167", 0, false, true},
@@ -362,6 +368,11 @@ func TestMatcher_RealWorldFilenames(t *testing.T) {
 		{"PRED-123E Exclusive Beauty.mp4", "PRED-123E"},
 		{"SSIS-001Z Special Edition.mp4", "SSIS-001Z"},
 		{"T28-567 Student Edition.mp4", "T28-567"},
+
+		// TokyoHot real-world filenames
+		{"N-1234.mp4", "N-1234"},
+		{"N1234.mp4", "N1234"},
+		{"KEED-528.mp4", "KEED-528"},
 
 		// With additional metadata
 		{"IPX-535 [FHD][MP4]", "IPX-535"},
