@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { flip } from 'svelte/animate';
-	import { cubicOut } from 'svelte/easing';
 	import { apiClient } from '$lib/api/client';
 	import { formatBytes } from '$lib/utils';
 	import { splitPath, buildPathUp, buildBreadcrumbPath, isRootPath } from '$lib/utils/path';
@@ -91,6 +89,9 @@
 	let sortField = $state<SortField>('name');
 	let sortDirection = $state<SortDirection>('asc');
 
+	let currentPage = $state(1);
+	const PAGE_SIZE = 100;
+
 	// Filter and sort items
 	const sortedAndFilteredItems = $derived(() => {
 		// First filter
@@ -122,6 +123,19 @@
 
 			return sortDirection === 'asc' ? comparison : -comparison;
 		});
+	});
+
+	const pagedItems = $derived(() => {
+		const all = sortedAndFilteredItems();
+		const start = (currentPage - 1) * PAGE_SIZE;
+		return all.slice(start, start + PAGE_SIZE);
+	});
+
+	const totalPages = $derived(Math.max(1, Math.ceil(sortedAndFilteredItems().length / PAGE_SIZE)));
+
+	$effect(() => {
+		filterText;
+		currentPage = 1;
 	});
 
 	// Toggle sort - click same field toggles direction, different field switches to it
@@ -262,6 +276,7 @@
 			onPathChange?.(currentPath);
 			// Items will be sorted by sortedAndFilteredItems derived
 			items = response.items;
+			currentPage = 1;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to browse directory';
 		} finally {
@@ -331,6 +346,7 @@
 	// Clear filter when navigating to a new directory
 	function clearFilter() {
 		filterText = '';
+		currentPage = 1;
 	}
 
 	// Format date for display
@@ -609,8 +625,8 @@
 				</button>
 			</div>
 		{:else}
-			{#each sortedAndFilteredItems() as item (item.path)}
-				<div animate:flip={{ duration: 220, easing: cubicOut }}>
+			{#each pagedItems() as item (item.path)}
+				<div>
 					{#if item.is_dir}
 					<!-- Directories are always clickable -->
 					<button
@@ -680,6 +696,27 @@
 					{/if}
 				</div>
 			{/each}
+			{#if totalPages > 1}
+				<div class="flex items-center justify-between pt-4 border-t mt-4">
+					<span class="text-xs text-muted-foreground">
+						Page {currentPage} of {totalPages} ({sortedAndFilteredItems().length} items)
+					</span>
+					<div class="flex items-center gap-2">
+						<Button variant="outline" size="sm" onclick={() => currentPage = 1} disabled={currentPage === 1}>
+							{#snippet children()}&laquo;{/snippet}
+						</Button>
+						<Button variant="outline" size="sm" onclick={() => currentPage--} disabled={currentPage === 1}>
+							{#snippet children()}&lsaquo;{/snippet}
+						</Button>
+						<Button variant="outline" size="sm" onclick={() => currentPage++} disabled={currentPage === totalPages}>
+							{#snippet children()}&rsaquo;{/snippet}
+						</Button>
+						<Button variant="outline" size="sm" onclick={() => currentPage = totalPages} disabled={currentPage === totalPages}>
+							{#snippet children()}&raquo;{/snippet}
+						</Button>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </Card>
