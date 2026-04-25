@@ -60,6 +60,10 @@ services:
       # Timezone
       - TZ=${TZ:-UTC}
 
+      # Trusted CIDRs for /auth/setup access (Docker bridge gateway)
+      # Without this, setup is only available from localhost inside the container
+      - JAVINIZER_SETUP_TRUSTED_CIDRS=${JAVINIZER_SETUP_TRUSTED_CIDRS:-172.16.0.0/12}
+
     healthcheck:
       test: ["CMD", "wget", "--method=GET", "-O", "/dev/null", "-q", "http://localhost:8080/health"]
       interval: 30s
