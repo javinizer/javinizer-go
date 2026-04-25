@@ -602,6 +602,29 @@
 		</div>
 	{/if}
 
+	<!-- Pagination Controls (top) -->
+	{#if items.length > 0 && totalPages > 1}
+		<div class="mb-4 pb-4 border-b flex items-center justify-between gap-4">
+			<span class="text-xs text-muted-foreground">
+				Page {currentPage} of {totalPages} ({sortedAndFilteredItems().length} items)
+			</span>
+			<div class="flex items-center gap-2">
+				<Button variant="outline" size="sm" onclick={() => currentPage = 1} disabled={currentPage === 1}>
+					{#snippet children()}&laquo;{/snippet}
+				</Button>
+				<Button variant="outline" size="sm" onclick={() => currentPage--} disabled={currentPage === 1}>
+					{#snippet children()}&lsaquo;{/snippet}
+				</Button>
+				<Button variant="outline" size="sm" onclick={() => currentPage++} disabled={currentPage === totalPages}>
+					{#snippet children()}&rsaquo;{/snippet}
+				</Button>
+				<Button variant="outline" size="sm" onclick={() => currentPage = totalPages} disabled={currentPage === totalPages}>
+					{#snippet children()}&raquo;{/snippet}
+				</Button>
+			</div>
+		</div>
+	{/if}
+
 	<!-- File List -->
 	<div class="space-y-1">
 		{#if loading}
