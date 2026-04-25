@@ -352,14 +352,18 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 					DVDID     string `json:"dvd_id"`
 				}
 				if err := json.Unmarshal(resp.Body(), &lookupData); err == nil && lookupData.ContentID != "" {
-					// Validate that the returned dvd_id matches what we're looking for
 					returnedDVDID := strings.ToLower(strings.ReplaceAll(lookupData.DVDID, "-", ""))
 					expectedDVDID := idVariation
 
-					if returnedDVDID == expectedDVDID && lookupData.ContentID != "" {
+					if returnedDVDID == expectedDVDID {
 						contentID = lookupData.ContentID
 						successfulVariation = idVariation
 						logging.Debugf("R18: ✓ Resolved %s (tried: %s) to content-id: %s", id, idVariation, contentID)
+						break
+					} else if returnedDVDID == "" && contentIDMatchesExpected(lookupData.ContentID, expectedDVDID) {
+						contentID = lookupData.ContentID
+						successfulVariation = idVariation
+						logging.Debugf("R18: ✓ Resolved %s (tried: %s) to content-id: %s (dvd_id empty, validated via content_id)", id, idVariation, contentID)
 						break
 					} else {
 						logging.Debugf("R18: Returned dvd_id '%s' doesn't match expected '%s', skipping", returnedDVDID, expectedDVDID)
@@ -668,6 +672,33 @@ func normalizeID(id string) string {
 
 // stripDMMPrefix removes DMM content ID prefix (leading digits)
 // Example: "4sone860" -> "sone860", "118abw001" -> "abw001", "sone-860" -> "sone-860" (unchanged)
+func contentIDMatchesExpected(contentID, expectedDVDID string) bool {
+	if contentID == "" {
+		return false
+	}
+	stripped := strings.ToLower(stripDMMPrefix(contentID))
+	re := regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
+	strippedMatches := re.FindStringSubmatch(stripped)
+	expectedMatches := re.FindStringSubmatch(expectedDVDID)
+	if len(strippedMatches) < 4 || len(expectedMatches) < 4 {
+		return false
+	}
+	if strippedMatches[2] != expectedMatches[2] {
+		return false
+	}
+	strippedNum, err1 := strconv.Atoi(strippedMatches[3])
+	expectedNum, err2 := strconv.Atoi(expectedMatches[3])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	if strippedNum != expectedNum {
+		return false
+	}
+	strippedSuffix := strings.ToLower(strippedMatches[4])
+	expectedSuffix := strings.ToLower(expectedMatches[4])
+	return strippedSuffix == expectedSuffix
+}
+
 func stripDMMPrefix(id string) string {
 	// DMM content IDs have leading digits before the series code
 	// Use regex to detect and remove them
