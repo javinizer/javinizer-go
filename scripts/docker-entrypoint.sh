@@ -64,6 +64,8 @@ prepare_internal_path() {
     mkdir -p "${target_path}"
     if ! awk -v path="${target_path}" '$2 == path { found=1; exit } END { exit found ? 0 : 1 }' /proc/mounts; then
         chown -R "${target_uid}:${target_gid}" "${target_path}"
+    else
+        chown "${target_uid}:${target_gid}" "${target_path}"
     fi
 }
 
