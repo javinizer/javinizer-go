@@ -133,13 +133,16 @@ func NewServer(deps *core.ServerDependencies) *gin.Engine {
 		CheckOrigin: func(r *http.Request) bool {
 			origin := r.Header.Get("Origin")
 			allowedOrigins := deps.GetConfig().API.Security.AllowedOrigins
-			if len(allowedOrigins) == 0 {
-				return isSameOrigin(origin, r)
-			}
-			if isOriginAllowed(origin, allowedOrigins) {
+			if origin != "" && isSameOrigin(origin, r) {
 				return true
 			}
-			logging.Debugf("WebSocket: Rejected origin %s (not in allowed list)", origin)
+			if len(allowedOrigins) == 0 && origin == "" {
+				return true
+			}
+			if len(allowedOrigins) > 0 && isOriginAllowed(origin, allowedOrigins) {
+				return true
+			}
+			logging.Debugf("WebSocket: Rejected origin %s (not same-origin and not in allowed list)", origin)
 			return false
 		},
 	})

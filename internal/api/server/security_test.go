@@ -70,6 +70,22 @@ func TestCORS_OriginValidation(t *testing.T) {
 			shouldAllowConnection: false,
 		},
 		{
+			name:                  "same-origin allowed even when AllowedOrigins is configured",
+			allowedOrigins:        []string{"http://localhost:3000"},
+			requestOrigin:         "http://localhost:8080",
+			expectedAllowOrigin:   "http://localhost:8080",
+			expectedAllowCreds:    "true",
+			shouldAllowConnection: true,
+		},
+		{
+			name:                  "empty origin blocked when AllowedOrigins is configured",
+			allowedOrigins:        []string{"http://localhost:3000"},
+			requestOrigin:         "",
+			expectedAllowOrigin:   "",
+			expectedAllowCreds:    "",
+			shouldAllowConnection: false,
+		},
+		{
 			name:                  "multiple allowed origins - first matches",
 			allowedOrigins:        []string{"http://localhost:3000", "http://localhost:8080"},
 			requestOrigin:         "http://localhost:3000",
@@ -82,7 +98,7 @@ func TestCORS_OriginValidation(t *testing.T) {
 			allowedOrigins:        []string{},
 			requestOrigin:         "",
 			expectedAllowOrigin:   "",
-			expectedAllowCreds:    "true",
+			expectedAllowCreds:    "",
 			shouldAllowConnection: true,
 		},
 	}
@@ -734,6 +750,18 @@ func TestSecurity_WebSocketOriginValidation(t *testing.T) {
 			name:               "specific origin blocked",
 			allowedOrigins:     []string{"http://localhost:3000"},
 			requestOrigin:      "http://evil.com",
+			shouldAllowUpgrade: false,
+		},
+		{
+			name:               "same-origin allowed even when AllowedOrigins is configured",
+			allowedOrigins:     []string{"http://localhost:3000"},
+			requestOrigin:      "http://localhost:8080",
+			shouldAllowUpgrade: true,
+		},
+		{
+			name:               "empty origin blocked when AllowedOrigins is configured",
+			allowedOrigins:     []string{"http://localhost:3000"},
+			requestOrigin:      "",
 			shouldAllowUpgrade: false,
 		},
 	}
