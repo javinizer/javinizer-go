@@ -576,7 +576,9 @@ func TestAuth_SetupRejectedFromRemoteWithoutSecret(t *testing.T) {
 	assert.Contains(t, errResp.Error, "bootstrap secret")
 }
 
-func TestAuth_SetupAllowedFromLocalhostWithoutSecret(t *testing.T) {
+func createSetupServerWithoutSecret(t *testing.T) (*gin.Engine, *ServerDependencies) {
+	t.Helper()
+
 	cfg := config.DefaultConfig()
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	deps := createTestDeps(t, cfg, configFile)
@@ -591,6 +593,12 @@ func TestAuth_SetupAllowedFromLocalhostWithoutSecret(t *testing.T) {
 		_ = deps.DB.Close()
 	})
 
+	return router, deps
+}
+
+func TestAuth_SetupAllowedFromLocalhostWithoutSecret(t *testing.T) {
+	router, _ := createSetupServerWithoutSecret(t)
+
 	body := map[string]string{"username": "admin", "password": "password123"}
 	bodyBytes, err := json.Marshal(body)
 	require.NoError(t, err)
@@ -601,6 +609,97 @@ func TestAuth_SetupAllowedFromLocalhostWithoutSecret(t *testing.T) {
 	setupW := httptest.NewRecorder()
 	router.ServeHTTP(setupW, setupReq)
 	assert.Equal(t, http.StatusOK, setupW.Code)
+}
+
+func TestAuth_SetupAllowedFromDockerBridgeWithoutSecret(t *testing.T) {
+	t.Setenv("JAVINIZER_SETUP_TRUSTED_CIDRS", "172.16.0.0/12")
+	router, _ := createSetupServerWithoutSecret(t)
+
+	body := map[string]string{"username": "admin", "password": "password123"}
+	bodyBytes, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.RemoteAddr = "172.30.0.1:12345"
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	assert.Equal(t, http.StatusOK, setupW.Code)
+}
+
+func TestAuth_SetupRejectedFromDockerBridgeWithoutEnvVar(t *testing.T) {
+	router, _ := createSetupServerWithoutSecret(t)
+
+	body := map[string]string{"username": "admin", "password": "password123"}
+	bodyBytes, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.RemoteAddr = "172.30.0.1:12345"
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	assert.Equal(t, http.StatusForbidden, setupW.Code)
+}
+
+func TestAuth_SetupAllowedFromCustomTrustedCIDR(t *testing.T) {
+	t.Setenv("JAVINIZER_SETUP_TRUSTED_CIDRS", "10.0.0.0/8,192.168.0.0/16")
+
+	for _, addr := range []string{"10.0.0.5:12345", "192.168.1.100:12345"} {
+		t.Run(addr, func(t *testing.T) {
+			router, _ := createSetupServerWithoutSecret(t)
+
+			body := map[string]string{"username": "admin", "password": "password123"}
+			bodyBytes, err := json.Marshal(body)
+			require.NoError(t, err)
+
+			setupReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+			setupReq.Header.Set("Content-Type", "application/json")
+			setupReq.RemoteAddr = addr
+			setupW := httptest.NewRecorder()
+			router.ServeHTTP(setupW, setupReq)
+			assert.Equal(t, http.StatusOK, setupW.Code)
+		})
+	}
+}
+
+func TestAuth_SetupRejectedFromPrivateLanWithoutSecret(t *testing.T) {
+	router, _ := createSetupServerWithoutSecret(t)
+
+	body := map[string]string{"username": "admin", "password": "password123"}
+	bodyBytes, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	for _, addr := range []string{"192.168.1.100:12345", "10.0.0.5:12345"} {
+		t.Run(addr, func(t *testing.T) {
+			setupReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+			setupReq.Header.Set("Content-Type", "application/json")
+			setupReq.RemoteAddr = addr
+			setupW := httptest.NewRecorder()
+			router.ServeHTTP(setupW, setupReq)
+			assert.Equal(t, http.StatusForbidden, setupW.Code)
+
+			var errResp ErrorResponse
+			require.NoError(t, json.Unmarshal(setupW.Body.Bytes(), &errResp))
+			assert.Contains(t, errResp.Error, "trusted network")
+		})
+	}
+}
+
+func TestAuth_SetupRejectsSpoofedForwardedHeader(t *testing.T) {
+	router, _ := createSetupServerWithoutSecret(t)
+
+	body := map[string]string{"username": "admin", "password": "password123"}
+	bodyBytes, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/setup", bytes.NewReader(bodyBytes))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.Header.Set("X-Forwarded-For", "127.0.0.1")
+	setupReq.RemoteAddr = "203.0.113.5:12345"
+	setupW := httptest.NewRecorder()
+	router.ServeHTTP(setupW, setupReq)
+	assert.Equal(t, http.StatusForbidden, setupW.Code)
 }
 
 func TestAuth_SetupAllowedWithCorrectBootstrapSecret(t *testing.T) {

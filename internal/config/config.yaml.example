@@ -7,6 +7,11 @@ config_version: 3
 # for the /auth/setup endpoint. If not set, setup is only available from localhost.
 # Example: export JAVINIZER_SETUP_SECRET="my-secret-key"
 # When set, include X-Setup-Secret: my-secret-key header in the setup request.
+#
+# To allow setup from additional networks (e.g. Docker bridge), set
+# JAVINIZER_SETUP_TRUSTED_CIDRS to a comma-separated list of CIDRs.
+# Example: export JAVINIZER_SETUP_TRUSTED_CIDRS="172.16.0.0/12"
+# This adds the given networks to the default loopback-only allowlist.
 
 server:
     host: localhost
