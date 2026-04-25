@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.10-alpha] - 2026-04-25
+
+### Added
+
+- Add client-side pagination to FileBrowser
+- Add pagination controls above file list in FileBrowser
+
+### Fixed
+
+- Allow same-origin WebSocket and CORS when AllowedOrigins is configured
+- Remove user directive from docker-compose to enable entrypoint privilege bootstrap
+- Add Docker defaults for setup CIDRs and fix bind mount ownership
+- Allow Docker bridge access to /auth/setup via configurable trusted CIDRs
+- Resolve AP-288 404 from r18.dev by accepting blank dvd_id with validated content_id fallback
+- Add TokyoHot short-prefix ID matching and search query resolution
+
+### Changed
+
+- Add GitHub issue templates for bug reports, feature requests, and scraper issues
+
 ## [v0.2.9-alpha] - 2026-04-22
 
 ### Fixed
