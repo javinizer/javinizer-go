@@ -477,7 +477,6 @@ services:
     image: javinizer:latest
     container_name: javinizer
     restart: unless-stopped
-    user: "${PUID:-${USER_ID:-1000}}:${PGID:-${GROUP_ID:-1000}}"
 
     ports:
       - "127.0.0.1:8080:8080"  # Localhost only
