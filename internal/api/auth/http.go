@@ -106,8 +106,75 @@ func getAuthStatus(deps *ServerDependencies) gin.HandlerFunc {
 	}
 }
 
-func isLocalhost(ip string) bool {
-	return ip == "127.0.0.1" || ip == "::1" || ip == "[::1]"
+var defaultTrustedCIDRs = []string{
+	"127.0.0.0/8",
+	"::1/128",
+}
+
+func parseCIDRList(raw string) []*net.IPNet {
+	if raw == "" {
+		return nil
+	}
+	var cidrs []*net.IPNet
+	for _, s := range strings.Split(raw, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		_, n, err := net.ParseCIDR(s)
+		if err != nil {
+			logging.Warnf("Ignoring invalid CIDR in JAVINIZER_SETUP_TRUSTED_CIDRS: %s", s)
+			continue
+		}
+		cidrs = append(cidrs, n)
+	}
+	return cidrs
+}
+
+func trustedCIDRs() []*net.IPNet {
+	if extra := os.Getenv("JAVINIZER_SETUP_TRUSTED_CIDRS"); extra != "" {
+		var cidrs []*net.IPNet
+		for _, s := range defaultTrustedCIDRs {
+			_, n, err := net.ParseCIDR(s)
+			if err != nil {
+				continue
+			}
+			cidrs = append(cidrs, n)
+		}
+		cidrs = append(cidrs, parseCIDRList(extra)...)
+		return cidrs
+	}
+	var cidrs []*net.IPNet
+	for _, s := range defaultTrustedCIDRs {
+		_, n, err := net.ParseCIDR(s)
+		if err != nil {
+			continue
+		}
+		cidrs = append(cidrs, n)
+	}
+	return cidrs
+}
+
+func isTrustedClient(ipStr string) bool {
+	ipStr = strings.TrimPrefix(strings.TrimSuffix(ipStr, "]"), "[")
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	for _, cidr := range trustedCIDRs() {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func peerIP(remoteAddr string) string {
+	ip, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return ip
 }
 
 func setupAuth(deps *ServerDependencies) gin.HandlerFunc {
@@ -118,7 +185,7 @@ func setupAuth(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		bootstrapSecret := os.Getenv("JAVINIZER_SETUP_SECRET")
-		clientIP := c.ClientIP()
+		clientIP := peerIP(c.Request.RemoteAddr)
 
 		if bootstrapSecret != "" {
 			headerSecret := c.GetHeader("X-Setup-Secret")
@@ -128,9 +195,9 @@ func setupAuth(deps *ServerDependencies) gin.HandlerFunc {
 				return
 			}
 		} else {
-			if !isLocalhost(clientIP) {
+			if !isTrustedClient(clientIP) {
 				logging.Warnf("Setup attempt rejected from %s: remote access without bootstrap secret", clientIP)
-				c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{Error: "setup is only available from localhost"})
+				c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{Error: "setup is only available from localhost or trusted networks"})
 				return
 			}
 		}
