@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.2.10-alpha] - 2026-04-25
+## [v0.2.11-alpha] - 2026-04-26
+
+### Added
+
+- Persist file browser sort preference across navigation within session
+- Use '...' truncation marker with '~' fallback for trailing dots
+- Auto-switch operation mode to 'Rename file only' when destination matches source path with empty folder/subfolder format
+
+### Fixed
+
+- Prevent blank file on Windows when src==dst and harden preview/organizer edge cases
+- Windows mixed slashes in preview and empty folder format creating unwanted subfolders
 
 ### Added
 
