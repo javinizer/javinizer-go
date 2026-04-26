@@ -561,7 +561,7 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 		require.NoError(t, err)
 
 		folderName := filepath.Base(plan.TargetDir)
-		assert.Equal(t, "IPX-123 - This is an extremely long~ (2024)", folderName,
+		assert.Equal(t, "IPX-123 - This is an extremely long... (2024)", folderName,
 			"Folder should have truncated title with YEAR preserved")
 	})
 
@@ -630,7 +630,7 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 		plan, err := org.Plan(match, movie, "/movies", false)
 		require.NoError(t, err)
 
-		assert.Equal(t, "IPX-123 - This is an extremely long~ (2024).mp4", plan.TargetFile,
+		assert.Equal(t, "IPX-123 - This is an extremely long... (2024).mp4", plan.TargetFile,
 			"Filename should have truncated title with YEAR preserved")
 	})
 }

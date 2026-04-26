@@ -719,6 +719,16 @@ func TestSanitizeFolderPath(t *testing.T) {
 			input: `Test\テスト: "Movie" 映画`,
 			want:  `Test_テスト - 'Movie' 映画`,
 		},
+		{
+			name:  "Trailing dots replaced with tilde",
+			input: "Truncated Title...",
+			want:  "Truncated Title~",
+		},
+		{
+			name:  "Truncation marker in middle preserved",
+			input: "IPX-123 - Long Title... (2020)",
+			want:  "IPX-123 - Long Title... (2020)",
+		},
 	}
 
 	for _, tt := range tests {

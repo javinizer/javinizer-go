@@ -43,10 +43,9 @@ func SanitizeFilename(s string) string {
 
 // SanitizeFolderPath sanitizes a folder name by replacing invalid filesystem characters
 func SanitizeFolderPath(s string) string {
-	// Replace invalid characters including forward slashes to prevent unintended subdirectories
 	replacements := map[rune]string{
-		'\\': "_", // Convert backslash to underscore
-		'/':  "_", // Convert forward slash to underscore (prevents accidental subdirectories)
+		'\\': "_",
+		'/':  "_",
 		':':  " -",
 		'*':  "",
 		'?':  "",
@@ -65,7 +64,14 @@ func SanitizeFolderPath(s string) string {
 		}
 	}
 
-	// Windows/SMB can mangle names that end with a period.
-	// Match original Javinizer behavior by trimming only trailing dots/spaces.
-	return strings.TrimRight(result.String(), " .")
+	sanitized := result.String()
+
+	if strings.HasSuffix(sanitized, ".") || strings.HasSuffix(sanitized, " .") {
+		sanitized = strings.TrimRight(sanitized, " .")
+		sanitized += "~"
+	} else {
+		sanitized = strings.TrimRight(sanitized, " .")
+	}
+
+	return sanitized
 }

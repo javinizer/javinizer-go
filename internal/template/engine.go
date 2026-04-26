@@ -453,13 +453,11 @@ func (e *Engine) TruncateTitle(title string, maxLen int) string {
 		return title
 	}
 
-	marker := "~"
+	marker := "..."
 
-	// Check if title contains CJK characters
 	isCJK := e.containsCJK(title)
 
 	if isCJK {
-		// CJK: Hard truncate at character boundary and add truncation marker
 		if maxLen > 3 {
 			runes := []rune(title)
 			if len(runes) > maxLen-3 {
@@ -469,7 +467,6 @@ func (e *Engine) TruncateTitle(title string, maxLen int) string {
 		return title
 	}
 
-	// English/Latin: Smart truncate at word boundary (rune-aware)
 	runes := []rune(title)
 	if maxLen > 3 {
 		if len(runes) > maxLen-3 {
@@ -479,7 +476,6 @@ func (e *Engine) TruncateTitle(title string, maxLen int) string {
 			if lastSpace > 0 {
 				return truncStr[:lastSpace] + marker
 			}
-			// No space found, truncate at character boundary
 			return truncStr + marker
 		}
 		return title
@@ -503,7 +499,7 @@ func (e *Engine) TruncateTitleBytes(title string, maxBytes int) string {
 		return title
 	}
 
-	marker := "~"
+	marker := "..."
 	markerReserve := 3
 
 	// Preserve legacy budget behavior by reserving 3 bytes for truncation marker.

@@ -432,7 +432,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 					"en": {Language: "en", Title: "Very Long English Title That Should Be Truncated"},
 				},
 			},
-			want:    "Very Long English Title~",
+			want:    "Very Long English Title...",
 			wantErr: false,
 		},
 		{
@@ -556,7 +556,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 			ctx: &Context{
 				Title: "Very Long Title That Should Be Truncated To Fit",
 			},
-			want:    "Very Long Title That~",
+			want:    "Very Long Title That...",
 			wantErr: false,
 		},
 		{
@@ -569,7 +569,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 					"en": {Language: "en", Title: "Very Long English Title That Should Be Truncated"},
 				},
 			},
-			want:    "Very Long English Title~",
+			want:    "Very Long English Title...",
 			wantErr: false,
 		},
 		{
@@ -765,7 +765,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 					"en": {Language: "en", Title: "English Title That Is Very Long And Needs Truncation"},
 				},
 			},
-			want:    "English Title That Is Very~",
+			want:    "English Title That Is Very...",
 			wantErr: false,
 		},
 		{
