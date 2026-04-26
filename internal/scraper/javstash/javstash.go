@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -313,7 +314,7 @@ func (s *Scraper) parseScene(scene *Scene, searchID string) (*models.ScraperResu
 		ContentID:   scene.Code,
 		Title:       scraperutil.CleanString(scene.Title),
 		Description: scraperutil.CleanString(scene.Details),
-		Runtime:     scene.Duration,
+		Runtime:     int(math.Round(float64(scene.Duration) / 60.0)),
 		Director:    scraperutil.CleanString(scene.Director),
 	}
 
