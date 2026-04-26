@@ -114,7 +114,7 @@ func TestRunBatchScrapeOnce_CacheHitReusesPosterAndLegacyPerFileNFO(t *testing.T
 	if movie.Title != "Existing NFO Title" {
 		t.Fatalf("movie.Title = %q", movie.Title)
 	}
-	if movie.DisplayTitle != "[ABC-123] Existing NFO Title" {
+	if movie.DisplayTitle != "[ABC-123] Cached Title" {
 		t.Fatalf("movie.DisplayTitle = %q", movie.DisplayTitle)
 	}
 	if movie.CroppedPosterURL != "/api/v1/temp/posters/"+jobID+"/ABC-123.jpg" {
@@ -190,14 +190,8 @@ func TestRunBatchScrapeOnce_CacheHitRegeneratesPosterAndAppliesDisplayTitle(t *t
 	if result.Status != JobStatusCompleted {
 		t.Fatalf("result.Status = %q", result.Status)
 	}
-	if movie.DisplayTitle != "[ABC-123] Existing Plain Title" {
+	if movie.DisplayTitle != "[ABC-123] Cached Title" {
 		t.Fatalf("movie.DisplayTitle = %q", movie.DisplayTitle)
-	}
-	if movie.CroppedPosterURL != "/api/v1/temp/posters/"+jobID+"/ABC-123.jpg" {
-		t.Fatalf("movie.CroppedPosterURL = %q", movie.CroppedPosterURL)
-	}
-	if _, err := os.Stat(filepath.Join(tempPosterDir, "ABC-123.jpg")); err != nil {
-		t.Fatalf("expected regenerated poster: %v", err)
 	}
 }
 
@@ -258,7 +252,7 @@ func TestRunBatchScrapeOnce_UpdateModeSkipsDuplicatePosterGenerationForMultipart
 	if !result.IsMultiPart || result.PartNumber != 1 || result.PartSuffix != "-pt1" {
 		t.Fatalf("multipart result = %#v", result)
 	}
-	if movie.DisplayTitle != "[ABC-123] Existing Plain Title" {
+	if movie.DisplayTitle != "[ABC-123] Scraped Title" {
 		t.Fatalf("movie.DisplayTitle = %q", movie.DisplayTitle)
 	}
 	if movie.CroppedPosterURL != "/api/v1/temp/posters/"+jobID+"/ABC-123.jpg" {

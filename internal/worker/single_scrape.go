@@ -284,6 +284,7 @@ func RunBatchScrapeOnce(
 			movieToReturn := cached
 			fieldSources := buildFieldSourcesFromCachedMovie(cached)
 			actressSources := buildActressSourcesFromCachedMovie(cached)
+			displayTitleApplied := false
 			if updateMode && cfg != nil {
 				logging.Debugf("[Batch %s] File %d: Update mode enabled with cache hit, checking for existing NFO to merge", job.ID, fileIndex)
 
@@ -377,27 +378,37 @@ func RunBatchScrapeOnce(
 							logging.Infof("[Batch %s] File %d: NFO merge complete for cached %s: %d from cache, %d from NFO, %d conflicts resolved",
 								job.ID, fileIndex, cached.ID, mergeResult.Stats.FromScraper, mergeResult.Stats.FromNFO, mergeResult.Stats.ConflictsResolved)
 
-							// Determine DisplayTitle: use template or fallback to Title
-							// If Title already looks template-generated (starts with [ID]),
-							// use it directly to avoid double-templating.
-							titleLooksTemplated := LooksLikeTemplatedTitle(movieToReturn.Title, movieToReturn.ID)
-							if titleLooksTemplated {
-								movieToReturn.DisplayTitle = movieToReturn.Title
-							} else if cfg != nil && cfg.Metadata.NFO.DisplayTitle != "" {
+							if cfg != nil && cfg.Metadata.NFO.DisplayTitle != "" {
 								displayTmplEngine := job.TemplateEngine()
 								displayCtx := template.NewContextFromMovie(movieToReturn)
+								displayCtx.Title = cached.Title
 								if displayName, err := displayTmplEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, displayCtx); err == nil {
 									movieToReturn.DisplayTitle = displayName
-								} else {
+								} else if movieToReturn.DisplayTitle == "" {
 									movieToReturn.DisplayTitle = movieToReturn.Title
 								}
-							} else {
+							} else if movieToReturn.DisplayTitle == "" {
 								movieToReturn.DisplayTitle = movieToReturn.Title
 							}
+							displayTitleApplied = true
 						}
 					}
 				} else {
 					logging.Debugf("[Batch %s] File %d: No existing NFO found, using cached data only", job.ID, fileIndex)
+				}
+			}
+
+			if !displayTitleApplied {
+				if cfg != nil && cfg.Metadata.NFO.DisplayTitle != "" {
+					displayTmplEngine := job.TemplateEngine()
+					displayCtx := template.NewContextFromMovie(cached)
+					if displayName, err := displayTmplEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, displayCtx); err == nil {
+						movieToReturn.DisplayTitle = displayName
+					} else if movieToReturn.DisplayTitle == "" {
+						movieToReturn.DisplayTitle = movieToReturn.Title
+					}
+				} else if movieToReturn.DisplayTitle == "" {
+					movieToReturn.DisplayTitle = movieToReturn.Title
 				}
 			}
 
@@ -710,6 +721,7 @@ func RunBatchScrapeOnce(
 	movie.OriginalFileName = filepath.Base(filePath)
 
 	// Step 6.5: NFO Merge (if updateMode is true)
+	preMergeMovie := movie
 	if updateMode && cfg != nil {
 		logging.Debugf("[Batch %s] File %d: Update mode enabled, checking for existing NFO to merge", job.ID, fileIndex)
 
@@ -803,21 +815,16 @@ func RunBatchScrapeOnce(
 					logging.Infof("[Batch %s] File %d: NFO merge complete for %s: %d from scraper, %d from NFO, %d conflicts resolved",
 						job.ID, fileIndex, movie.ID, mergeResult.Stats.FromScraper, mergeResult.Stats.FromNFO, mergeResult.Stats.ConflictsResolved)
 
-					// Determine DisplayTitle: use template or fallback to Title
-					// If Title already looks template-generated (starts with [ID]),
-					// use it directly to avoid double-templating.
-					titleLooksTemplated := LooksLikeTemplatedTitle(movie.Title, movie.ID)
-					if titleLooksTemplated {
-						movie.DisplayTitle = movie.Title
-					} else if cfg != nil && cfg.Metadata.NFO.DisplayTitle != "" {
+					if cfg != nil && cfg.Metadata.NFO.DisplayTitle != "" {
 						displayTmplEngine := job.TemplateEngine()
 						displayCtx := template.NewContextFromMovie(movie)
+						displayCtx.Title = preMergeMovie.Title
 						if displayName, err := displayTmplEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, displayCtx); err == nil {
 							movie.DisplayTitle = displayName
-						} else {
+						} else if movie.DisplayTitle == "" {
 							movie.DisplayTitle = movie.Title
 						}
-					} else {
+					} else if movie.DisplayTitle == "" {
 						movie.DisplayTitle = movie.Title
 					}
 				}

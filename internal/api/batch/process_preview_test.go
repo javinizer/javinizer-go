@@ -60,10 +60,10 @@ func TestGeneratePreview_MultipartFallbackPaths(t *testing.T) {
 	if len(resp.NFOPaths) != 2 {
 		t.Fatalf("len(NFOPaths) = %d, want 2", len(resp.NFOPaths))
 	}
-	if resp.NFOPaths[0] != filepath.Join(folderPath, "ABC-123-pt1.nfo") {
+	if resp.NFOPaths[0] != filepath.Join(folderPath, "ABC-123.nfo") {
 		t.Fatalf("NFOPaths[0] = %q", resp.NFOPaths[0])
 	}
-	if resp.NFOPaths[1] != filepath.Join(folderPath, "ABC-123-pt2.nfo") {
+	if resp.NFOPaths[1] != filepath.Join(folderPath, "ABC-123.nfo") {
 		t.Fatalf("NFOPaths[1] = %q", resp.NFOPaths[1])
 	}
 	if resp.PosterPath != filepath.Join(folderPath, "ABC-123-poster.jpg") {
@@ -488,6 +488,58 @@ func TestGeneratePreview_InPlaceNoRenameFolder(t *testing.T) {
 	assert.Contains(t, filepath.ToSlash(resp.FullPath), "/source/videos/", "In-place-norenamefolder should place files in source directory")
 	assert.NotContains(t, filepath.ToSlash(resp.FullPath), "/library/", "In-place-norenamefolder should NOT use destination directory")
 	assert.Empty(t, resp.FolderName, "In-place-norenamefolder should have no folder name (no folder creation)")
+}
+
+func TestGeneratePreview_WindowsPathFallbackUsesMatchedMovieID(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Output.FolderFormat = "<ID>"
+	cfg.Output.FileFormat = "<TITLE>"
+
+	movie := &models.Movie{
+		ID:    "",
+		Title: "",
+	}
+
+	fileResults := []*worker.FileResult{
+		{
+			FilePath: `C:\Users\me\test-videos\folder4\ABF-345.sd 5 (1).mkv`,
+			MovieID:  "ABF-345",
+			Status:   worker.JobStatusCompleted,
+		},
+	}
+
+	resp := generatePreview(movie, fileResults, `C:\output`, cfg, organizer.OperationModeOrganize, true, true)
+
+	assert.Equal(t, "ABF-345", resp.FileName)
+	assert.Equal(t, "", resp.FolderName)
+	assert.Equal(t, `C:\output\ABF-345.mkv`, resp.FullPath)
+	assert.Equal(t, []string{`C:\output\ABF-345.mkv`}, resp.VideoFiles)
+}
+
+func TestGeneratePreview_InPlaceNoRenameFolder_WindowsSourcePath(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Output.FolderFormat = "<ID>"
+	cfg.Output.FileFormat = "<TITLE>"
+
+	movie := &models.Movie{
+		ID:    "",
+		Title: "",
+	}
+
+	fileResults := []*worker.FileResult{
+		{
+			FilePath: `C:\Users\me\test-videos\folder4\ABF-345.sd 5 (1).mkv`,
+			MovieID:  "ABF-345",
+			Status:   worker.JobStatusCompleted,
+		},
+	}
+
+	resp := generatePreview(movie, fileResults, `C:\output`, cfg, organizer.OperationModeInPlaceNoRenameFolder, true, true)
+
+	assert.Equal(t, "ABF-345", resp.FileName)
+	assert.Equal(t, `C:\Users\me\test-videos\folder4\ABF-345.sd 5 (1).mkv`, resp.SourcePath)
+	assert.Equal(t, `C:\Users\me\test-videos\folder4\ABF-345.mkv`, resp.FullPath)
+	assert.Equal(t, []string{`C:\Users\me\test-videos\folder4\ABF-345.mkv`}, resp.VideoFiles)
 }
 
 // TestGeneratePreview_InPlace tests that in-place preview shows folder rename in source parent

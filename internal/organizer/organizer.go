@@ -20,6 +20,65 @@ import (
 	"github.com/spf13/afero"
 )
 
+var videoExtensions = map[string]bool{
+	".mp4": true, ".mkv": true, ".avi": true, ".wmv": true,
+	".flv": true, ".mov": true, ".m4v": true, ".webm": true,
+	".mpg": true, ".mpeg": true, ".m2ts": true, ".ts": true,
+}
+
+// resolveFileName generates the target filename from the template, falling back
+// to the match ID (then original filename) when sanitization produces an empty string.
+// This prevents creating paths like "/dest/.mkv" when template fields are all empty.
+func resolveFileName(cfg *config.OutputConfig, engine *template.Engine, ctx *template.Context, match matcher.MatchResult) (string, error) {
+	fileName, err := engine.Execute(cfg.FileFormat, ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate file name: %w", err)
+	}
+
+	fileName = template.SanitizeFilename(fileName)
+
+	if fileName == "" {
+		if match.ID != "" {
+			fileName = template.SanitizeFilename(match.ID)
+		}
+		if fileName == "" {
+			fileName = template.SanitizeFilename(strings.TrimSuffix(match.File.Name, match.File.Extension))
+		}
+		if fileName == "" {
+			fileName = "file"
+		}
+		logging.Warnf("[%s] Template produced empty filename after sanitization, falling back to %q", match.ID, fileName)
+	}
+
+	fileName = fileName + match.File.Extension
+	return fileName, nil
+}
+
+func applyTitleTruncation(engine *template.Engine, ctx *template.Context, maxLen int) {
+	if maxLen <= 0 {
+		return
+	}
+	ctx.Title = engine.TruncateTitle(ctx.Title, maxLen)
+	ctx.OriginalTitle = engine.TruncateTitle(ctx.OriginalTitle, maxLen)
+}
+
+func checkTargetConflict(fs afero.Fs, sourcePath, targetPath string, forceUpdate, willMove bool) []string {
+	conflicts := make([]string, 0)
+	if forceUpdate || !willMove {
+		return conflicts
+	}
+	stat, err := fs.Stat(targetPath)
+	if err != nil {
+		return conflicts
+	}
+	sourceStat, sourceErr := fs.Stat(sourcePath)
+	if sourceErr == nil && os.SameFile(sourceStat, stat) {
+		return conflicts
+	}
+	conflicts = append(conflicts, targetPath)
+	return conflicts
+}
+
 // Organizer handles file organization (moving/renaming)
 type Organizer struct {
 	fs              afero.Fs
@@ -142,17 +201,7 @@ func (o *Organizer) isDedicatedFolder(dir string, id string, m *matcher.Matcher)
 		name := entry.Name()
 		ext := strings.ToLower(filepath.Ext(name))
 
-		// Check if it's a video file (common video extensions)
-		isVideo := false
-		videoExts := []string{".mp4", ".mkv", ".avi", ".wmv", ".flv", ".mov", ".m4v", ".mpg", ".mpeg", ".m2ts", ".ts"}
-		for _, videoExt := range videoExts {
-			if ext == videoExt {
-				isVideo = true
-				break
-			}
-		}
-
-		if !isVideo {
+		if !videoExtensions[ext] {
 			continue
 		}
 
@@ -176,7 +225,8 @@ func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = o.config.GroupActress
 
-	// Add multi-part information to template context
+	applyTitleTruncation(o.templateEngine, ctx, o.config.MaxTitleLength)
+
 	ctx.PartNumber = match.PartNumber
 	ctx.PartSuffix = match.PartSuffix
 	ctx.IsMultiPart = match.IsMultiPart
@@ -201,31 +251,21 @@ func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir
 		return nil, fmt.Errorf("failed to generate folder name: %w", err)
 	}
 
-	// Apply title truncation if configured
-	if o.config.MaxTitleLength > 0 {
-		folderName = o.templateEngine.TruncateTitle(folderName, o.config.MaxTitleLength)
-	}
 	folderName = template.SanitizeFolderPath(folderName)
+	if folderName == "" && (o.config.MoveToFolder || o.config.RenameFolderInPlace) {
+		folderName = template.SanitizeFolderPath(match.ID)
+		if folderName == "" {
+			folderName = "unknown"
+		}
+	}
 
-	// Generate file name
 	var fileName string
 	if o.config.RenameFile {
-		// Use template to generate new filename
-		fileName, err = o.templateEngine.Execute(o.config.FileFormat, ctx)
+		fileName, err = resolveFileName(o.config, o.templateEngine, ctx, match)
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate file name: %w", err)
+			return nil, err
 		}
-
-		// Apply title truncation if configured (for file names too)
-		if o.config.MaxTitleLength > 0 {
-			fileName = o.templateEngine.TruncateTitle(fileName, o.config.MaxTitleLength)
-		}
-		fileName = template.SanitizeFilename(fileName)
-
-		// Add extension (part suffix now handled in template via <PART> or <PARTSUFFIX> placeholders)
-		fileName = fileName + match.File.Extension
 	} else {
-		// Keep original filename
 		fileName = match.File.Name
 	}
 
@@ -233,7 +273,9 @@ func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir
 	// Start with destDir, add subfolder parts, then final folder name
 	pathParts := []string{destDir}
 	pathParts = append(pathParts, subfolderParts...)
-	pathParts = append(pathParts, folderName)
+	if folderName != "" {
+		pathParts = append(pathParts, folderName)
+	}
 	targetDir := filepath.Join(pathParts...)
 	targetPath := filepath.Join(targetDir, fileName)
 
@@ -310,7 +352,9 @@ func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir
 			} else if targetDir != sourceDir {
 				pathParts := []string{destDir}
 				pathParts = append(pathParts, subfolderParts...)
-				pathParts = append(pathParts, folderName)
+				if folderName != "" {
+					pathParts = append(pathParts, folderName)
+				}
 				targetDir = filepath.Join(pathParts...)
 			}
 			targetPath = filepath.Join(targetDir, fileName)
@@ -327,19 +371,7 @@ func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir
 	// Check if move is needed
 	willMove := filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
 
-	// Check for conflicts (skip if forceUpdate is enabled or no-op)
-	conflicts := make([]string, 0)
-	if !forceUpdate && filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath) {
-		if stat, err := o.fs.Stat(targetPath); err == nil {
-			// Check if target is actually the same file as source (case-insensitive FS)
-			sourceStat, sourceErr := o.fs.Stat(match.File.Path)
-			if sourceErr == nil && os.SameFile(sourceStat, stat) {
-				// Same file, skip conflict (case-only rename on case-insensitive FS)
-			} else {
-				conflicts = append(conflicts, fmt.Sprintf("target file exists: %s", targetPath))
-			}
-		}
-	}
+	conflicts := checkTargetConflict(o.fs, match.File.Path, targetPath, forceUpdate, willMove)
 
 	return &OrganizePlan{
 		Match:             match,

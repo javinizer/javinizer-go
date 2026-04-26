@@ -38,6 +38,8 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = s.config.GroupActress
 
+	applyTitleTruncation(s.templateEngine, ctx, s.config.MaxTitleLength)
+
 	ctx.PartNumber = match.PartNumber
 	ctx.PartSuffix = match.PartSuffix
 	ctx.IsMultiPart = match.IsMultiPart
@@ -59,30 +61,23 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 		return nil, fmt.Errorf("failed to generate folder name: %w", err)
 	}
 
-	if s.config.MaxTitleLength > 0 {
-		folderName = s.templateEngine.TruncateTitle(folderName, s.config.MaxTitleLength)
-	}
 	folderName = template.SanitizeFolderPath(folderName)
 
 	var fileName string
 	if s.config.RenameFile {
-		fileName, err = s.templateEngine.Execute(s.config.FileFormat, ctx)
+		fileName, err = resolveFileName(s.config, s.templateEngine, ctx, match)
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate file name: %w", err)
+			return nil, err
 		}
-
-		if s.config.MaxTitleLength > 0 {
-			fileName = s.templateEngine.TruncateTitle(fileName, s.config.MaxTitleLength)
-		}
-		fileName = template.SanitizeFilename(fileName)
-		fileName = fileName + match.File.Extension
 	} else {
 		fileName = match.File.Name
 	}
 
 	pathParts := []string{destDir}
 	pathParts = append(pathParts, subfolderParts...)
-	pathParts = append(pathParts, folderName)
+	if folderName != "" {
+		pathParts = append(pathParts, folderName)
+	}
 	targetDir := filepath.Join(pathParts...)
 	targetPath := filepath.Join(targetDir, fileName)
 
@@ -95,7 +90,9 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 
 			pathParts := []string{destDir}
 			pathParts = append(pathParts, subfolderParts...)
-			pathParts = append(pathParts, folderName)
+			if folderName != "" {
+				pathParts = append(pathParts, folderName)
+			}
 			targetDir = filepath.Join(pathParts...)
 			targetPath = filepath.Join(targetDir, fileName)
 		}
@@ -109,12 +106,7 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 
 	willMove := filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
 
-	conflicts := make([]string, 0)
-	if !forceUpdate && filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath) {
-		if _, err := s.fs.Stat(targetPath); err == nil {
-			conflicts = append(conflicts, targetPath)
-		}
-	}
+	conflicts := checkTargetConflict(s.fs, match.File.Path, targetPath, forceUpdate, willMove)
 
 	return &OrganizePlan{
 		Match:             match,

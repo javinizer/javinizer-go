@@ -96,6 +96,9 @@ func (t *ScrapeTask) Execute(ctx context.Context) (*models.Movie, error) {
 		} else {
 			logging.Debugf("[%s] Found in cache: Title=%s, Maker=%s, Actresses=%d",
 				t.javID, cached.Title, cached.Maker, len(cached.Actresses))
+
+			t.applyDisplayTitleFromConfig(ctx, cached)
+
 			msg := "Found in cache"
 			if t.dryRun {
 				msg = "[DRY RUN] " + msg
@@ -1011,20 +1014,15 @@ func (t *ProcessFileTask) mergeWithExistingNFO(ctx context.Context, movie *model
 
 	merged := mergeResult.Merged
 
-	// Determine DisplayTitle: use template or fallback to Title
-	// If Title already looks template-generated (starts with [ID]), use it directly
-	// to avoid double-templating. Otherwise, apply the template.
-	titleLooksTemplated := LooksLikeTemplatedTitle(merged.Title, merged.ID)
-	if titleLooksTemplated {
-		merged.DisplayTitle = merged.Title
-	} else if t.cfg.Metadata.NFO.DisplayTitle != "" {
-		tmplCtx := template.NewContextFromMovie(merged)
-		if displayName, err := templateEngine.ExecuteWithContext(ctx, t.cfg.Metadata.NFO.DisplayTitle, tmplCtx); err == nil {
+	if t.cfg.Metadata.NFO.DisplayTitle != "" {
+		displayCtx := template.NewContextFromMovie(merged)
+		displayCtx.Title = movie.Title
+		if displayName, err := templateEngine.ExecuteWithContext(ctx, t.cfg.Metadata.NFO.DisplayTitle, displayCtx); err == nil {
 			merged.DisplayTitle = displayName
-		} else {
+		} else if merged.DisplayTitle == "" {
 			merged.DisplayTitle = merged.Title
 		}
-	} else {
+	} else if merged.DisplayTitle == "" {
 		merged.DisplayTitle = merged.Title
 	}
 
@@ -1048,4 +1046,24 @@ func LooksLikeTemplatedTitle(title, id string) bool {
 	}
 	r, _ := utf8.DecodeRuneInString(rest)
 	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+}
+
+func (t *ScrapeTask) applyDisplayTitleFromConfig(ctx context.Context, movie *models.Movie) {
+	cfg := t.aggregator.Config()
+	if cfg == nil || cfg.Metadata.NFO.DisplayTitle == "" {
+		if movie.DisplayTitle == "" {
+			movie.DisplayTitle = movie.Title
+		}
+		return
+	}
+	templateEngine := t.aggregator.TemplateEngine()
+	if templateEngine == nil {
+		templateEngine = template.NewEngine()
+	}
+	tmplCtx := template.NewContextFromMovie(movie)
+	if displayName, err := templateEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, tmplCtx); err == nil {
+		movie.DisplayTitle = displayName
+	} else if movie.DisplayTitle == "" {
+		movie.DisplayTitle = movie.Title
+	}
 }

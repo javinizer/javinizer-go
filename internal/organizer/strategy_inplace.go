@@ -2,6 +2,7 @@ package organizer
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -51,12 +52,8 @@ func (s *InPlaceStrategy) isDedicatedFolder(dir string, id string, m *matcher.Ma
 		}
 
 		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		videoExts := map[string]bool{
-			".mp4": true, ".avi": true, ".mkv": true, ".mov": true,
-			".wmv": true, ".flv": true, ".webm": true, ".m4v": true,
-		}
 
-		if !videoExts[ext] {
+		if !videoExtensions[ext] {
 			continue
 		}
 
@@ -75,6 +72,8 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = s.config.GroupActress
 
+	applyTitleTruncation(s.templateEngine, ctx, s.config.MaxTitleLength)
+
 	ctx.PartNumber = match.PartNumber
 	ctx.PartSuffix = match.PartSuffix
 	ctx.IsMultiPart = match.IsMultiPart
@@ -84,23 +83,20 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 		return nil, fmt.Errorf("failed to generate folder name: %w", err)
 	}
 
-	if s.config.MaxTitleLength > 0 {
-		folderName = s.templateEngine.TruncateTitle(folderName, s.config.MaxTitleLength)
-	}
 	folderName = template.SanitizeFolderPath(folderName)
+	if folderName == "" {
+		folderName = template.SanitizeFolderPath(match.ID)
+		if folderName == "" {
+			folderName = "unknown"
+		}
+	}
 
 	var fileName string
 	if s.config.RenameFile {
-		fileName, err = s.templateEngine.Execute(s.config.FileFormat, ctx)
+		fileName, err = resolveFileName(s.config, s.templateEngine, ctx, match)
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate file name: %w", err)
+			return nil, err
 		}
-
-		if s.config.MaxTitleLength > 0 {
-			fileName = s.templateEngine.TruncateTitle(fileName, s.config.MaxTitleLength)
-		}
-		fileName = template.SanitizeFilename(fileName)
-		fileName = fileName + match.File.Extension
 	} else {
 		fileName = match.File.Name
 	}
@@ -136,13 +132,10 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 		skipInPlaceReason = "matcher not set"
 	}
 
-	conflicts := make([]string, 0)
-	if !forceUpdate && willMove {
-		if _, err := s.fs.Stat(targetPath); err == nil {
-			conflicts = append(conflicts, targetPath)
-		}
-		if inPlace {
-			if _, err := s.fs.Stat(targetDir); err == nil {
+	conflicts := checkTargetConflict(s.fs, match.File.Path, targetPath, forceUpdate, willMove)
+	if inPlace && !forceUpdate {
+		if stat, err := s.fs.Stat(targetDir); err == nil {
+			if oldStat, oldErr := s.fs.Stat(oldDir); oldErr != nil || !os.SameFile(oldStat, stat) {
 				conflicts = append(conflicts, targetDir)
 			}
 		}

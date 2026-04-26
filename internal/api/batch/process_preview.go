@@ -21,41 +21,43 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 	ctx.GroupActress = cfg.Output.GroupActress
 	templateEngine := template.NewEngine()
 
-	// Generate file name (used by all modes)
 	fileName, err := templateEngine.Execute(cfg.Output.FileFormat, ctx)
 	if err != nil {
 		logging.Errorf("Failed to generate file name: %v", err)
 		fileName = "error"
 	}
 	fileName = template.SanitizeFilename(fileName)
-
-	// Determine source file path for in-place modes
-	sourcePath := ""
-	if len(fileResults) > 0 && fileResults[0] != nil {
-		sourcePath = fileResults[0].FilePath
+	if fileName == "" {
+		fileName = resolvePreviewFallbackName(movie, fileResults)
 	}
 
-	// For in-place-norenamefolder mode: file stays in source directory, only renamed
+	sourcePath := ""
+	for _, result := range fileResults {
+		if result != nil && result.FilePath != "" {
+			sourcePath = result.FilePath
+			break
+		}
+	}
+
 	if operationMode == types.OperationModeInPlaceNoRenameFolder {
 		return generateInPlaceNoRenameFolderPreview(movie, fileResults, cfg, ctx, templateEngine, fileName, sourcePath, operationMode, skipNFO, skipDownload)
 	}
 
-	// For in-place mode: file may be moved to a renamed folder in the same parent directory
 	if operationMode == types.OperationModeInPlace {
 		return generateInPlacePreview(movie, fileResults, cfg, ctx, templateEngine, fileName, sourcePath, operationMode, skipNFO, skipDownload)
 	}
 
-	// For metadata-only mode: no file changes, metadata stays alongside source
 	if operationMode == types.OperationModeMetadataOnly {
 		return generateMetadataOnlyPreview(movie, fileResults, cfg, ctx, templateEngine, fileName, sourcePath, operationMode, skipNFO, skipDownload)
 	}
 
-	// Default: organize mode (and preview mode) — current behavior
 	return generateOrganizePreview(movie, fileResults, destination, cfg, ctx, templateEngine, fileName, operationMode, skipNFO, skipDownload)
 }
 
 // generateOrganizePreview generates a preview for organize mode (move to destination with folder structure)
 func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResult, destination string, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool) OrganizePreviewResponse {
+	sourceExt := resolveSourceExt(fileResults)
+
 	// Generate subfolder hierarchy (if configured)
 	subfolderParts := make([]string, 0, len(cfg.Output.SubfolderFormat))
 	for _, subfolderTemplate := range cfg.Output.SubfolderFormat {
@@ -72,7 +74,7 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 
 	var subfolderPath string
 	if len(subfolderParts) > 0 {
-		subfolderPath = filepath.Join(subfolderParts...)
+		subfolderPath = previewJoinParts(subfolderParts...)
 	}
 
 	// Generate folder name
@@ -86,8 +88,10 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 	// Build target paths with subfolder hierarchy
 	pathParts := []string{destination}
 	pathParts = append(pathParts, subfolderParts...)
-	pathParts = append(pathParts, folderName)
-	folderPath := filepath.Join(pathParts...)
+	if folderName != "" {
+		pathParts = append(pathParts, folderName)
+	}
+	folderPath := previewJoinParts(pathParts...)
 
 	// Validate folder path length if configured
 	if cfg.Output.MaxPathLength > 0 {
@@ -102,10 +106,7 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 
 	for _, result := range fileResults {
 		if result != nil && result.FilePath != "" {
-			ext := filepath.Ext(result.FilePath)
-			if ext == "" {
-				ext = ".mp4"
-			}
+			ext := previewPathExt(result.FilePath)
 
 			fileCtx := ctx.Clone()
 			fileCtx.PartNumber = result.PartNumber
@@ -120,8 +121,14 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 				}
 			}
 			videoFileName = template.SanitizeFilename(videoFileName)
+			if videoFileName == "" {
+				videoFileName = fileName
+				if result.IsMultiPart && result.PartSuffix != "" {
+					videoFileName = fileName + result.PartSuffix
+				}
+			}
 
-			videoPath := filepath.Join(folderPath, videoFileName+ext)
+			videoPath := previewJoinPath(folderPath, videoFileName+ext)
 			videoFiles = append(videoFiles, videoPath)
 
 			if primaryVideoPath == "" {
@@ -131,7 +138,7 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 	}
 
 	if primaryVideoPath == "" {
-		primaryVideoPath = filepath.Join(folderPath, fileName+".mp4")
+		primaryVideoPath = previewJoinPath(folderPath, fileName+sourceExt)
 		videoFiles = append(videoFiles, primaryVideoPath)
 	}
 
@@ -147,7 +154,7 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 		posterPath = generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, folderPath)
 		fanartPath = generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, folderPath)
 		if cfg.Output.DownloadExtrafanart {
-			extrafanartPath = filepath.Join(folderPath, cfg.Output.ScreenshotFolder)
+			extrafanartPath = previewJoinPath(folderPath, cfg.Output.ScreenshotFolder)
 		}
 		screenshots = generateScreenshotNames(movie, cfg, ctx, templateEngine)
 	}
@@ -173,27 +180,21 @@ func generateOrganizePreview(movie *models.Movie, fileResults []*worker.FileResu
 // generateInPlaceNoRenameFolderPreview generates a preview for in-place-norenamefolder mode
 // (file stays in source directory, only file is renamed)
 func generateInPlaceNoRenameFolderPreview(movie *models.Movie, fileResults []*worker.FileResult, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, sourcePath string, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool) OrganizePreviewResponse {
-	// Return empty preview if no source path available
 	if sourcePath == "" || sourcePath == "." {
 		return OrganizePreviewResponse{OperationMode: string(operationMode)}
 	}
 
-	// Determine source directory
-	sourceDir := filepath.Dir(sourcePath)
+	sourceDir := previewPathDir(sourcePath)
+	sourceExt := resolveSourceExt(fileResults)
 
-	// No folder name or subfolders in this mode — file stays in place
 	folderName := ""
 
-	// Generate video file paths in source directory
 	videoFiles := make([]string, 0, len(fileResults))
 	var primaryVideoPath string
 
 	for _, result := range fileResults {
 		if result != nil && result.FilePath != "" {
-			ext := filepath.Ext(result.FilePath)
-			if ext == "" {
-				ext = ".mp4"
-			}
+			ext := previewPathExt(result.FilePath)
 
 			fileCtx := ctx.Clone()
 			fileCtx.PartNumber = result.PartNumber
@@ -208,8 +209,14 @@ func generateInPlaceNoRenameFolderPreview(movie *models.Movie, fileResults []*wo
 				}
 			}
 			videoFileName = template.SanitizeFilename(videoFileName)
+			if videoFileName == "" {
+				videoFileName = fileName
+				if result.IsMultiPart && result.PartSuffix != "" {
+					videoFileName = fileName + result.PartSuffix
+				}
+			}
 
-			videoPath := filepath.Join(sourceDir, videoFileName+ext)
+			videoPath := previewJoinPath(sourceDir, videoFileName+ext)
 			videoFiles = append(videoFiles, videoPath)
 
 			if primaryVideoPath == "" {
@@ -219,7 +226,7 @@ func generateInPlaceNoRenameFolderPreview(movie *models.Movie, fileResults []*wo
 	}
 
 	if primaryVideoPath == "" {
-		primaryVideoPath = filepath.Join(sourceDir, fileName+".mp4")
+		primaryVideoPath = previewJoinPath(sourceDir, fileName+sourceExt)
 		videoFiles = append(videoFiles, primaryVideoPath)
 	}
 
@@ -235,7 +242,7 @@ func generateInPlaceNoRenameFolderPreview(movie *models.Movie, fileResults []*wo
 		posterPath = generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
 		fanartPath = generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
 		if cfg.Output.DownloadExtrafanart {
-			extrafanartPath = filepath.Join(sourceDir, cfg.Output.ScreenshotFolder)
+			extrafanartPath = previewJoinPath(sourceDir, cfg.Output.ScreenshotFolder)
 		}
 		screenshots = generateScreenshotNames(movie, cfg, ctx, templateEngine)
 	}
@@ -257,40 +264,38 @@ func generateInPlaceNoRenameFolderPreview(movie *models.Movie, fileResults []*wo
 }
 
 func generateInPlacePreview(movie *models.Movie, fileResults []*worker.FileResult, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, fileName string, sourcePath string, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool) OrganizePreviewResponse {
-	// Return empty preview if no source path available
 	if sourcePath == "" || sourcePath == "." {
 		return OrganizePreviewResponse{OperationMode: string(operationMode)}
 	}
 
-	// Generate folder name for potential rename
 	folderName, err := templateEngine.Execute(cfg.Output.FolderFormat, ctx)
 	if err != nil {
 		logging.Errorf("Failed to generate folder name: %v", err)
 		folderName = "error"
 	}
 	folderName = template.SanitizeFolderPath(folderName)
+	if folderName == "" {
+		folderName = template.SanitizeFolderPath(movie.ID)
+		if folderName == "" {
+			folderName = "unknown"
+		}
+	}
 
-	// In in-place mode, the file stays in its current parent directory
-	// The folder rename is conditional on whether the current folder is dedicated
-	// For preview, we show both the source directory and potential new folder name
-	sourceDir := filepath.Dir(sourcePath)
+	sourceDir := previewPathDir(sourcePath)
+	sourceExt := resolveSourceExt(fileResults)
 
-	// Use parent of source directory + new folder name as potential target
-	// The actual strategy checks if the folder is "dedicated" and renames accordingly
-	// For preview, show the potential renamed folder path
-	parentDir := filepath.Dir(sourceDir)
-	targetDir := filepath.Join(parentDir, folderName)
+	parentDir := previewPathDir(sourceDir)
+	targetDir := parentDir
+	if folderName != "" {
+		targetDir = previewJoinPath(parentDir, folderName)
+	}
 
-	// Generate video file paths in target directory
 	videoFiles := make([]string, 0, len(fileResults))
 	var primaryVideoPath string
 
 	for _, result := range fileResults {
 		if result != nil && result.FilePath != "" {
-			ext := filepath.Ext(result.FilePath)
-			if ext == "" {
-				ext = ".mp4"
-			}
+			ext := previewPathExt(result.FilePath)
 
 			fileCtx := ctx.Clone()
 			fileCtx.PartNumber = result.PartNumber
@@ -305,8 +310,14 @@ func generateInPlacePreview(movie *models.Movie, fileResults []*worker.FileResul
 				}
 			}
 			videoFileName = template.SanitizeFilename(videoFileName)
+			if videoFileName == "" {
+				videoFileName = fileName
+				if result.IsMultiPart && result.PartSuffix != "" {
+					videoFileName = fileName + result.PartSuffix
+				}
+			}
 
-			videoPath := filepath.Join(targetDir, videoFileName+ext)
+			videoPath := previewJoinPath(targetDir, videoFileName+ext)
 			videoFiles = append(videoFiles, videoPath)
 
 			if primaryVideoPath == "" {
@@ -316,7 +327,7 @@ func generateInPlacePreview(movie *models.Movie, fileResults []*worker.FileResul
 	}
 
 	if primaryVideoPath == "" {
-		primaryVideoPath = filepath.Join(targetDir, fileName+".mp4")
+		primaryVideoPath = previewJoinPath(targetDir, fileName+sourceExt)
 		videoFiles = append(videoFiles, primaryVideoPath)
 	}
 
@@ -332,7 +343,7 @@ func generateInPlacePreview(movie *models.Movie, fileResults []*worker.FileResul
 		posterPath = generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, targetDir)
 		fanartPath = generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, targetDir)
 		if cfg.Output.DownloadExtrafanart {
-			extrafanartPath = filepath.Join(targetDir, cfg.Output.ScreenshotFolder)
+			extrafanartPath = previewJoinPath(targetDir, cfg.Output.ScreenshotFolder)
 		}
 		screenshots = generateScreenshotNames(movie, cfg, ctx, templateEngine)
 	}
@@ -360,10 +371,9 @@ func generateMetadataOnlyPreview(movie *models.Movie, fileResults []*worker.File
 	}
 
 	// In metadata-only mode, nothing is renamed — use original file name
-	sourceDir := filepath.Dir(sourcePath)
+	sourceDir := previewPathDir(sourcePath)
 
-	// Use original filename from source path
-	originalFileName := filepath.Base(sourcePath)
+	originalFileName := previewPathBase(sourcePath)
 
 	// No folder name in metadata-only mode
 	folderName := ""
@@ -396,7 +406,7 @@ func generateMetadataOnlyPreview(movie *models.Movie, fileResults []*worker.File
 		posterPath = generatePosterPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
 		fanartPath = generateFanartPath(movie, fileResults, cfg, ctx, templateEngine, sourceDir)
 		if cfg.Output.DownloadExtrafanart {
-			extrafanartPath = filepath.Join(sourceDir, cfg.Output.ScreenshotFolder)
+			extrafanartPath = previewJoinPath(sourceDir, cfg.Output.ScreenshotFolder)
 		}
 		screenshots = generateScreenshotNames(movie, cfg, ctx, templateEngine)
 	}
@@ -424,7 +434,13 @@ func generateNFOPaths(movie *models.Movie, fileResults []*worker.FileResult, cfg
 		return "", nil
 	}
 
-	isMultiPart := len(fileResults) > 1 && fileResults[0] != nil && fileResults[0].IsMultiPart
+	isMultiPart := false
+	for _, result := range fileResults {
+		if result != nil && result.IsMultiPart {
+			isMultiPart = true
+			break
+		}
+	}
 	generatePerFileNFO := cfg.Metadata.NFO.PerFile && isMultiPart
 
 	var nfoPath string
@@ -441,10 +457,13 @@ func generateNFOPaths(movie *models.Movie, fileResults []*worker.FileResult, cfg
 
 				nfoFileName, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, nfoCtx)
 				if err != nil || nfoFileName == "" {
-					nfoFileName = fileName
-					if result.IsMultiPart && result.PartSuffix != "" {
-						nfoFileName = fileName + result.PartSuffix
+					sanitized := template.SanitizeFilename(movie.ID)
+					if sanitized == "" {
+						sanitized = "metadata"
 					}
+					nfoFilePath := previewJoinPath(folderPath, sanitized+".nfo")
+					nfoPaths = append(nfoPaths, nfoFilePath)
+					continue
 				}
 
 				basename := nfoFileName
@@ -455,13 +474,17 @@ func generateNFOPaths(movie *models.Movie, fileResults []*worker.FileResult, cfg
 				sanitized := template.SanitizeFilename(basename)
 
 				if sanitized == "" {
-					sanitized = template.SanitizeFilename(fileName)
+					sanitized = template.SanitizeFilename(movie.ID)
 					if sanitized == "" {
 						sanitized = "metadata"
 					}
 				}
 
-				nfoFilePath := filepath.Join(folderPath, sanitized+".nfo")
+				if result.PartSuffix != "" && generatePerFileNFO {
+					sanitized += result.PartSuffix
+				}
+
+				nfoFilePath := previewJoinPath(folderPath, sanitized+".nfo")
 				nfoPaths = append(nfoPaths, nfoFilePath)
 			}
 		}
@@ -471,7 +494,11 @@ func generateNFOPaths(movie *models.Movie, fileResults []*worker.FileResult, cfg
 	} else {
 		nfoFileName, err := templateEngine.Execute(cfg.Metadata.NFO.FilenameTemplate, ctx)
 		if err != nil || nfoFileName == "" {
-			nfoFileName = fileName + ".nfo"
+			sanitized := template.SanitizeFilename(movie.ID)
+			if sanitized == "" {
+				sanitized = "metadata"
+			}
+			nfoFileName = sanitized + ".nfo"
 		} else {
 			basename := nfoFileName
 			lower := strings.ToLower(basename)
@@ -481,7 +508,7 @@ func generateNFOPaths(movie *models.Movie, fileResults []*worker.FileResult, cfg
 			sanitized := template.SanitizeFilename(basename)
 
 			if sanitized == "" {
-				sanitized = template.SanitizeFilename(fileName)
+				sanitized = template.SanitizeFilename(movie.ID)
 				if sanitized == "" {
 					sanitized = "metadata"
 				}
@@ -489,7 +516,7 @@ func generateNFOPaths(movie *models.Movie, fileResults []*worker.FileResult, cfg
 
 			nfoFileName = sanitized + ".nfo"
 		}
-		nfoPath = filepath.Join(folderPath, nfoFileName)
+		nfoPath = previewJoinPath(folderPath, nfoFileName)
 	}
 
 	return nfoPath, nfoPaths
@@ -501,10 +528,10 @@ func generatePosterPath(movie *models.Movie, fileResults []*worker.FileResult, c
 	}
 
 	posterCtx := ctx.Clone()
-	if len(fileResults) > 0 && fileResults[0] != nil {
-		posterCtx.PartNumber = fileResults[0].PartNumber
-		posterCtx.PartSuffix = fileResults[0].PartSuffix
-		posterCtx.IsMultiPart = fileResults[0].IsMultiPart
+	if first := firstValidFileResult(fileResults); first != nil {
+		posterCtx.PartNumber = first.PartNumber
+		posterCtx.PartSuffix = first.PartSuffix
+		posterCtx.IsMultiPart = first.IsMultiPart
 	}
 	posterFileName, err := templateEngine.Execute(cfg.Output.PosterFormat, posterCtx)
 	if err != nil || posterFileName == "" {
@@ -512,9 +539,13 @@ func generatePosterPath(movie *models.Movie, fileResults []*worker.FileResult, c
 	}
 	posterFileName = template.SanitizeFilename(posterFileName)
 	if posterFileName == "" {
-		posterFileName = fmt.Sprintf("%s-poster.jpg", template.SanitizeFilename(movie.ID))
+		sanitizedID := template.SanitizeFilename(movie.ID)
+		if sanitizedID == "" {
+			sanitizedID = "unknown"
+		}
+		posterFileName = fmt.Sprintf("%s-poster.jpg", sanitizedID)
 	}
-	return filepath.Join(folderPath, posterFileName)
+	return previewJoinPath(folderPath, posterFileName)
 }
 
 func generateFanartPath(movie *models.Movie, fileResults []*worker.FileResult, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine, folderPath string) string {
@@ -523,10 +554,10 @@ func generateFanartPath(movie *models.Movie, fileResults []*worker.FileResult, c
 	}
 
 	fanartCtx := ctx.Clone()
-	if len(fileResults) > 0 && fileResults[0] != nil {
-		fanartCtx.PartNumber = fileResults[0].PartNumber
-		fanartCtx.PartSuffix = fileResults[0].PartSuffix
-		fanartCtx.IsMultiPart = fileResults[0].IsMultiPart
+	if first := firstValidFileResult(fileResults); first != nil {
+		fanartCtx.PartNumber = first.PartNumber
+		fanartCtx.PartSuffix = first.PartSuffix
+		fanartCtx.IsMultiPart = first.IsMultiPart
 	}
 	fanartFileName, err := templateEngine.Execute(cfg.Output.FanartFormat, fanartCtx)
 	if err != nil || fanartFileName == "" {
@@ -534,9 +565,13 @@ func generateFanartPath(movie *models.Movie, fileResults []*worker.FileResult, c
 	}
 	fanartFileName = template.SanitizeFilename(fanartFileName)
 	if fanartFileName == "" {
-		fanartFileName = fmt.Sprintf("%s-fanart.jpg", template.SanitizeFilename(movie.ID))
+		sanitizedID := template.SanitizeFilename(movie.ID)
+		if sanitizedID == "" {
+			sanitizedID = "unknown"
+		}
+		fanartFileName = fmt.Sprintf("%s-fanart.jpg", sanitizedID)
 	}
-	return filepath.Join(folderPath, fanartFileName)
+	return previewJoinPath(folderPath, fanartFileName)
 }
 
 func generateScreenshotNames(movie *models.Movie, cfg *config.Config, ctx *template.Context, templateEngine *template.Engine) []string {
@@ -595,9 +630,161 @@ func validatePathLengths(cfg *config.Config, templateEngine *template.Engine, vi
 		logging.Warnf("Preview: fanart path exceeds max length: %s (length: %d, max: %d)", fanartPath, len(fanartPath), cfg.Output.MaxPathLength)
 	}
 	for _, screenshot := range screenshots {
-		screenshotPath := filepath.Join(extrafanartPath, screenshot)
+		screenshotPath := previewJoinPath(extrafanartPath, screenshot)
 		if err := templateEngine.ValidatePathLength(screenshotPath, cfg.Output.MaxPathLength); err != nil {
 			logging.Warnf("Preview: screenshot path exceeds max length: %s (length: %d, max: %d)", screenshotPath, len(screenshotPath), cfg.Output.MaxPathLength)
 		}
 	}
+}
+
+func firstValidFileResult(fileResults []*worker.FileResult) *worker.FileResult {
+	for _, result := range fileResults {
+		if result != nil && result.FilePath != "" {
+			return result
+		}
+	}
+	return nil
+}
+
+func resolveSourceExt(fileResults []*worker.FileResult) string {
+	for _, result := range fileResults {
+		if result != nil && result.FilePath != "" {
+			return previewPathExt(result.FilePath)
+		}
+	}
+	return ".mp4"
+}
+
+func resolvePreviewFallbackName(movie *models.Movie, fileResults []*worker.FileResult) string {
+	if movie.ID != "" {
+		if sanitized := template.SanitizeFilename(movie.ID); sanitized != "" {
+			return sanitized
+		}
+	}
+	for _, result := range fileResults {
+		if result != nil && result.MovieID != "" {
+			if sanitized := template.SanitizeFilename(result.MovieID); sanitized != "" {
+				return sanitized
+			}
+		}
+	}
+	for _, result := range fileResults {
+		if result != nil && result.FilePath != "" {
+			base := previewPathBase(result.FilePath)
+			ext := previewPathExt(result.FilePath)
+			nameWithoutExt := strings.TrimSuffix(base, ext)
+			if sanitized := template.SanitizeFilename(nameWithoutExt); sanitized != "" {
+				return sanitized
+			}
+		}
+	}
+	return "file"
+}
+
+func previewPathBase(path string) string {
+	trimmed := trimPreviewPath(path)
+	if trimmed == "" {
+		return ""
+	}
+
+	idx := strings.LastIndexAny(trimmed, `/\`)
+	if idx == -1 {
+		return trimmed
+	}
+
+	return trimmed[idx+1:]
+}
+
+func previewPathDir(path string) string {
+	trimmed := trimPreviewPath(path)
+	if trimmed == "" {
+		return "."
+	}
+
+	idx := strings.LastIndexAny(trimmed, `/\`)
+	if idx == -1 {
+		return "."
+	}
+
+	switch {
+	case idx == 0:
+		return trimmed[:1]
+	case idx == 2 && len(trimmed) >= 3 && trimmed[1] == ':' && (trimmed[2] == '\\' || trimmed[2] == '/'):
+		return trimmed[:3]
+	default:
+		return trimmed[:idx]
+	}
+}
+
+func previewPathExt(path string) string {
+	return filepath.Ext(previewPathBase(path))
+}
+
+func previewJoinParts(parts ...string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+
+	joined := parts[0]
+	for _, part := range parts[1:] {
+		joined = previewJoinPath(joined, part)
+	}
+
+	return joined
+}
+
+func previewJoinPath(base string, elems ...string) string {
+	if base == "" {
+		return filepath.Join(elems...)
+	}
+
+	windowsStyle := isWindowsPathLike(base) || strings.Contains(base, `\`)
+	if !windowsStyle {
+		parts := make([]string, 0, len(elems)+1)
+		parts = append(parts, base)
+		parts = append(parts, elems...)
+		return filepath.Join(parts...)
+	}
+
+	joined := strings.ReplaceAll(base, "/", `\`)
+	joined = trimPreviewPath(joined)
+
+	for _, elem := range elems {
+		clean := strings.Trim(elem, `/\`)
+		if clean == "" {
+			continue
+		}
+
+		clean = strings.ReplaceAll(clean, "/", `\`)
+
+		switch {
+		case joined == "", joined == ".":
+			joined = clean
+		case joined == `\` || (len(joined) == 3 && joined[1] == ':' && joined[2] == '\\'):
+			if strings.HasSuffix(joined, `\`) {
+				joined += clean
+			} else {
+				joined += `\` + clean
+			}
+		default:
+			joined += `\` + clean
+		}
+	}
+
+	return joined
+}
+
+func trimPreviewPath(path string) string {
+	switch {
+	case path == "", path == "/", path == `\`:
+		return path
+	case len(path) == 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/'):
+		return path
+	default:
+		return strings.TrimRight(path, `/\`)
+	}
+}
+
+func isWindowsPathLike(path string) bool {
+	return len(path) >= 2 && path[1] == ':' || strings.HasPrefix(path, `\\`)
 }

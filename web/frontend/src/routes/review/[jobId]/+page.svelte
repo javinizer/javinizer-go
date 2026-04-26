@@ -69,7 +69,19 @@
 	let previewNeedsDestination = $state(false);
 
 	function getEffectiveOperationMode(): string {
-		return job?.operation_mode_override || config?.output?.operation_mode || 'organize';
+		const configured = job?.operation_mode_override || config?.output?.operation_mode || 'organize';
+		if (configured === 'organize') {
+			const srcDir = currentResult?.file_path
+				? currentResult.file_path.substring(0, currentResult.file_path.replace(/\\/g, '/').lastIndexOf('/'))
+				: '';
+			const destMatchesSrc = destinationPath.trim() !== '' && destinationPath.trim() === srcDir.trim();
+			const noFolderFormat = !config?.output?.folder_format;
+			const noSubfolderFormat = !config?.output?.subfolder_format || config.output.subfolder_format.length === 0;
+			if (destMatchesSrc && noFolderFormat && noSubfolderFormat) {
+				return 'in-place-norenamefolder';
+			}
+		}
+		return configured;
 	}
 	let isUpdateMode = $derived($page.url.searchParams.get('update') === 'true');
 	let showFieldScraperSources = $state(false);

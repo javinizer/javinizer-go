@@ -53,7 +53,18 @@
 		return 'organize';
 	}
 
-	let effectiveOperationMode: OperationMode = $derived(operationModeOverrideTouched ? operationModeOverride : getSettingsOperationMode());
+	let isInPlaceImplied: boolean = $derived(
+		destinationPath.trim() !== '' &&
+		destinationPath.trim() === initialPath.trim() &&
+		(config?.output?.folder_format === '' || config?.output?.folder_format === undefined || config?.output?.folder_format === null) &&
+		(!config?.output?.subfolder_format || config.output.subfolder_format.length === 0)
+	);
+
+	let effectiveOperationMode: OperationMode = $derived(
+		isInPlaceImplied && (operationModeOverride === 'organize' || operationModeOverride === 'in-place')
+			? 'in-place-norenamefolder'
+			: (operationModeOverrideTouched ? operationModeOverride : getSettingsOperationMode())
+	);
 
 	// localStorage keys
 	const STORAGE_KEY_INPUT = 'javinizer_input_path';
@@ -105,52 +116,87 @@
 
 	// Unified scan handler - handles both recursive and non-recursive scans
 	// filter: when provided with recursive scan, only scans directories/files matching the filter (case-insensitive)
-	async function handleScan(path: string, recursive: boolean, visibleFiles: FileInfo[], filter: string = '') {
+	async function handleScan(path: string, recursive: boolean, visibleFiles: FileInfo[], filter: string = '', selectedFolders: string[] = []) {
 		if (!path.trim()) return;
 
 		scanning = true;
 		try {
-			const response = await apiClient.scan({
-				path: path,
-				recursive: recursive,
-				filter: recursive ? filter : undefined  // Only pass filter for recursive scans
-			});
-
-			let matchedFiles: string[];
-
-			if (recursive) {
-				// For recursive scan, include all matched files (backend already filtered by folder/file name)
-				matchedFiles = response.files
-					.filter((f) => f.matched && !f.is_dir)
-					.map((f) => f.path);
-			} else {
-				// For non-recursive scan, filter to only visible files (respects filter)
-				const visibleFilePaths = new Set(visibleFiles.map((f) => f.path));
-				matchedFiles = response.files
-					.filter((f) => f.matched && !f.is_dir && visibleFilePaths.has(f.path))
-					.map((f) => f.path);
-			}
-
-			if (matchedFiles.length > 0) {
-				// Merge with existing selections
-				selectedFiles = [...new Set([...selectedFiles, ...matchedFiles])];
-				const scanType = recursive ? 'recursive' : 'current folder';
-				const filterInfo = recursive && filter ? ` matching "${filter}"` : '';
-				toastStore.success(
-					`Added ${matchedFiles.length} JAV file${matchedFiles.length !== 1 ? 's' : ''}${filterInfo} (${scanType})`,
-					3000
+			if (recursive && selectedFolders.length > 0) {
+				const scanPromises = selectedFolders.map(folderPath =>
+					apiClient.scan({ path: folderPath, recursive: true, filter: filter || undefined })
 				);
-			} else {
-				if (!recursive) {
-					// Check if there are matches outside the filter
-					const totalMatched = response.files.filter((f) => f.matched && !f.is_dir).length;
-					if (totalMatched > 0) {
-						toastStore.warning(`No JAV files match current filter (${totalMatched} found in folder)`, 5000);
-						return;
+				const settled = await Promise.allSettled(scanPromises);
+				const seenPaths = new Set<string>();
+				const allMatched: string[] = [];
+				const failedFolders: string[] = [];
+				let fulfilledCount = 0;
+				for (let i = 0; i < settled.length; i++) {
+					const result = settled[i];
+					if (result.status === 'fulfilled') {
+						fulfilledCount++;
+						for (const f of result.value.files) {
+							if (f.matched && !f.is_dir && !seenPaths.has(f.path)) {
+								seenPaths.add(f.path);
+								allMatched.push(f.path);
+							}
+						}
+					} else {
+						failedFolders.push(selectedFolders[i]);
 					}
 				}
-				const filterInfo = recursive && filter ? ` matching "${filter}"` : '';
-				toastStore.warning(`No JAV files found${filterInfo}${recursive ? ' in any subfolder' : ''}`, 5000);
+				if (allMatched.length > 0) {
+					selectedFiles = [...new Set([...selectedFiles, ...allMatched])];
+					const failedInfo = failedFolders.length > 0 ? ` (${failedFolders.length} folder${failedFolders.length !== 1 ? 's' : ''} failed)` : '';
+					toastStore.success(
+						`Added ${allMatched.length} JAV file${allMatched.length !== 1 ? 's' : ''} from ${fulfilledCount} folder${fulfilledCount !== 1 ? 's' : ''}${failedInfo}`,
+						3000
+					);
+				} else if (failedFolders.length === selectedFolders.length) {
+					toastStore.error(`All ${failedFolders.length} folder scan${failedFolders.length !== 1 ? 's' : ''} failed`, 5000);
+				} else if (failedFolders.length > 0) {
+					toastStore.warning(`No JAV files found in ${fulfilledCount} folder${fulfilledCount !== 1 ? 's' : ''}; ${failedFolders.length} folder${failedFolders.length !== 1 ? 's' : ''} failed`, 5000);
+				} else {
+					toastStore.warning(`No JAV files found in selected folders`, 5000);
+				}
+			} else {
+				const response = await apiClient.scan({
+					path: path,
+					recursive: recursive,
+					filter: recursive ? filter : undefined
+				});
+
+				let matchedFiles: string[];
+
+				if (recursive) {
+					matchedFiles = response.files
+						.filter((f) => f.matched && !f.is_dir)
+						.map((f) => f.path);
+				} else {
+					const visibleFilePaths = new Set(visibleFiles.map((f) => f.path));
+					matchedFiles = response.files
+						.filter((f) => f.matched && !f.is_dir && visibleFilePaths.has(f.path))
+						.map((f) => f.path);
+				}
+
+				if (matchedFiles.length > 0) {
+					selectedFiles = [...new Set([...selectedFiles, ...matchedFiles])];
+					const scanType = recursive ? 'recursive' : 'current folder';
+					const filterInfo = recursive && filter ? ` matching "${filter}"` : '';
+					toastStore.success(
+						`Added ${matchedFiles.length} JAV file${matchedFiles.length !== 1 ? 's' : ''}${filterInfo} (${scanType})`,
+						3000
+					);
+				} else {
+					if (!recursive) {
+						const totalMatched = response.files.filter((f) => f.matched && !f.is_dir).length;
+						if (totalMatched > 0) {
+							toastStore.warning(`No JAV files match current filter (${totalMatched} found in folder)`, 5000);
+							return;
+						}
+					}
+					const filterInfo = recursive && filter ? ` matching "${filter}"` : '';
+					toastStore.warning(`No JAV files found${filterInfo}${recursive ? ' in any subfolder' : ''}`, 5000);
+				}
 			}
 		} catch (error) {
 			toastStore.error(error instanceof Error ? error.message : 'Failed to scan directory', 5000);
@@ -445,9 +491,11 @@
 						{ value: 'in-place-norenamefolder' as OperationMode, label: 'Rename file only', desc: 'Rename video file, keep folder', icon: FileEdit },
 						{ value: 'metadata-only' as OperationMode, label: 'Metadata only', desc: 'No file changes', icon: FileText },
 					] as mode}
+						{@const disabled = isInPlaceImplied && (mode.value === 'organize' || mode.value === 'in-place')}
 						<button
-							onclick={() => { operationModeOverride = mode.value; operationModeOverrideTouched = true; }}
-							class="relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-sm transition-all {effectiveOperationMode === mode.value ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+							onclick={() => { if (!disabled) { operationModeOverride = mode.value; operationModeOverrideTouched = true; } }}
+							disabled={disabled}
+							class="relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-sm transition-all {disabled ? 'border-border opacity-40 cursor-not-allowed' : effectiveOperationMode === mode.value ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 						>
 							{#if !operationModeOverrideTouched && getSettingsOperationMode() === mode.value}
 								<span class="absolute top-1 right-1 text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded">Default</span>
@@ -457,7 +505,11 @@
 						</button>
 					{/each}
 				</div>
-				{#if operationModeOverrideTouched && effectiveOperationMode !== getSettingsOperationMode()}
+				{#if isInPlaceImplied}
+					<p class="text-xs text-muted-foreground">
+						Output destination matches source path with no folder/subfolder format — Organize and Rename in place are unavailable. <button class="underline text-primary" onclick={() => { destinationPath = ''; localStorage.removeItem(STORAGE_KEY_OUTPUT); }}>Change destination</button>
+					</p>
+				{:else if operationModeOverrideTouched && effectiveOperationMode !== getSettingsOperationMode()}
 					<p class="text-xs text-primary">
 						Overriding settings for this batch only. <button class="underline" onclick={() => operationModeOverrideTouched = false}>Reset to default</button>
 					</p>
@@ -495,8 +547,12 @@
 						</Button>
 					</div>
 					<p class="text-xs text-muted-foreground">
+					{#if isInPlaceImplied}
+						Destination matches source path with no folder format — files will be renamed in place only.
+					{:else}
 						Scraped files will be organized with metadata, artwork, and NFO files in this directory
-					</p>
+					{/if}
+				</p>
 				</div>
 			</Card>
 		</div>

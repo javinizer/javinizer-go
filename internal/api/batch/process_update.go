@@ -268,18 +268,16 @@ func processUpdateMode(job *worker.BatchJob, cfg *config.Config, db *database.DB
 			}
 		}
 
-		titleLooksTemplated := worker.LooksLikeTemplatedTitle(movieToWrite.Title, movieToWrite.ID)
-		if titleLooksTemplated {
-			movieToWrite.DisplayTitle = movieToWrite.Title
-		} else if cfg.Metadata.NFO.DisplayTitle != "" {
+		if cfg.Metadata.NFO.DisplayTitle != "" {
 			displayTmplCtx := template.NewContextFromMovie(movieToWrite)
+			displayTmplCtx.Title = movie.Title
 			displayEngine := template.NewEngine()
 			if displayName, err := displayEngine.ExecuteWithContext(fileCtx, cfg.Metadata.NFO.DisplayTitle, displayTmplCtx); err == nil {
 				movieToWrite.DisplayTitle = displayName
-			} else {
+			} else if movieToWrite.DisplayTitle == "" {
 				movieToWrite.DisplayTitle = movieToWrite.Title
 			}
-		} else {
+		} else if movieToWrite.DisplayTitle == "" {
 			movieToWrite.DisplayTitle = movieToWrite.Title
 		}
 

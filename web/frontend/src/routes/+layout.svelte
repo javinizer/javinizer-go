@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/state';
 	import { cubicOut } from 'svelte/easing';
-	import { fade, fly } from 'svelte/transition';
+	import { fly } from 'svelte/transition';
 	import favicon from '$lib/assets/favicon.svg';
 	import Navigation from '$lib/components/Navigation.svelte';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
@@ -288,7 +288,6 @@
 				<div
 					class="route-content"
 					in:fly|local={{ y: 12, duration: 220, opacity: 0.15, easing: cubicOut }}
-					out:fade|local={{ duration: 130 }}
 				>
 					{@render children?.()}
 				</div>
@@ -304,6 +303,6 @@
 	}
 
 	.route-content {
-		will-change: auto;
+		min-height: 0;
 	}
 </style>

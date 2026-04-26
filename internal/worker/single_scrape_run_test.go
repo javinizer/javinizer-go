@@ -440,7 +440,7 @@ func TestRunBatchScrapeOnce_UpdateModeMergesExistingNFO(t *testing.T) {
 	if movie.Title != "Existing NFO Title" {
 		t.Fatalf("movie.Title = %q", movie.Title)
 	}
-	if movie.DisplayTitle != "[ABC-123] Existing NFO Title" {
+	if movie.DisplayTitle != "[ABC-123] Scraped Title" {
 		t.Fatalf("movie.DisplayTitle = %q", movie.DisplayTitle)
 	}
 }

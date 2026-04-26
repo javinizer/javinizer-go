@@ -235,11 +235,10 @@ func TestOrganizeTask_Execute_PlanningError(t *testing.T) {
 }
 
 func TestOrganizeTask_Execute_ValidationError(t *testing.T) {
-	t.Run("Returns error when validation fails", func(t *testing.T) {
+	t.Run("Empty folder template falls back to ID", func(t *testing.T) {
 		progressChan := make(chan ProgressUpdate, 100)
 		tracker := NewProgressTracker(progressChan)
 
-		// Use empty template with MoveToFolder=true to cause validation issues
 		cfg := &config.OutputConfig{
 			FolderFormat:    "",
 			FileFormat:      "<ID>",
@@ -250,6 +249,9 @@ func TestOrganizeTask_Execute_ValidationError(t *testing.T) {
 		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 		tmpDir := t.TempDir()
+		destDir := filepath.Join(tmpDir, "output")
+		require.NoError(t, os.MkdirAll(destDir, 0755))
+
 		srcPath := filepath.Join(tmpDir, "ipx-123.mp4")
 		require.NoError(t, os.WriteFile(srcPath, []byte("test"), 0644))
 
@@ -263,14 +265,12 @@ func TestOrganizeTask_Execute_ValidationError(t *testing.T) {
 		}
 		movie := &models.Movie{ID: "IPX-123", Title: "Test Movie"}
 
-		task := NewOrganizeTask(match, movie, "", true, false, org, tracker, false)
+		task := NewOrganizeTask(match, movie, destDir, true, false, org, tracker, false)
 
 		ctx := context.Background()
 		err := task.Execute(ctx)
 
-		// Should fail due to validation issues (empty folder template with MoveToFolder=true)
-		require.Error(t, err, "Expected validation error with empty folder template")
-		assert.Contains(t, err.Error(), "validation", "Error should mention validation")
+		require.NoError(t, err, "Empty folder template should fall back to match.ID")
 	})
 }
 

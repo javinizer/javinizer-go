@@ -523,3 +523,114 @@ func TestOrganizerTemplate_EdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	sourcePath := "/temp/test.mp4"
+	err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
+	require.NoError(t, err)
+
+	t.Run("YEAR preserved after truncation", func(t *testing.T) {
+		longTitle := "This is an extremely long movie title that goes on and on and should definitely be truncated"
+		cfg := &config.OutputConfig{
+			FolderFormat:   "<ID> - <TITLE> (<YEAR>)",
+			FileFormat:     "<ID>",
+			RenameFile:     true,
+			MoveToFolder:   true,
+			MoveSubtitles:  false,
+			MaxTitleLength: 30,
+		}
+		org := NewOrganizer(fs, cfg, nil)
+
+		movie := testutil.NewMovieBuilder().
+			WithID("IPX-123").
+			WithTitle(longTitle).
+			WithReleaseDate(time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC)).
+			Build()
+
+		match := matcher.MatchResult{
+			File: scanner.FileInfo{
+				Path:      sourcePath,
+				Name:      "test.mp4",
+				Extension: ".mp4",
+			},
+			ID: "IPX-123",
+		}
+
+		plan, err := org.Plan(match, movie, "/movies", false)
+		require.NoError(t, err)
+
+		folderName := filepath.Base(plan.TargetDir)
+		assert.Equal(t, "IPX-123 - This is an extremely long~ (2024)", folderName,
+			"Folder should have truncated title with YEAR preserved")
+	})
+
+	t.Run("STUDIO preserved after truncation", func(t *testing.T) {
+		longTitle := "This is an extremely long movie title that goes on and on and should definitely be truncated"
+		cfg := &config.OutputConfig{
+			FolderFormat:   "<ID> [<STUDIO>] - <TITLE>",
+			FileFormat:     "<ID>",
+			RenameFile:     true,
+			MoveToFolder:   true,
+			MoveSubtitles:  false,
+			MaxTitleLength: 30,
+		}
+		org := NewOrganizer(fs, cfg, nil)
+
+		movie := testutil.NewMovieBuilder().
+			WithID("IPX-123").
+			WithTitle(longTitle).
+			WithStudio("Prestige").
+			Build()
+
+		match := matcher.MatchResult{
+			File: scanner.FileInfo{
+				Path:      sourcePath,
+				Name:      "test.mp4",
+				Extension: ".mp4",
+			},
+			ID: "IPX-123",
+		}
+
+		plan, err := org.Plan(match, movie, "/movies", false)
+		require.NoError(t, err)
+
+		folderName := filepath.Base(plan.TargetDir)
+		assert.Equal(t, "IPX-123 [Prestige] - This is an extremely long~", folderName,
+			"Folder should have truncated title with STUDIO preserved")
+	})
+
+	t.Run("file format with TITLE truncation preserves other tags", func(t *testing.T) {
+		longTitle := "This is an extremely long movie title that goes on and on and should definitely be truncated"
+		cfg := &config.OutputConfig{
+			FolderFormat:   "<ID>",
+			FileFormat:     "<ID> - <TITLE> (<YEAR>)",
+			RenameFile:     true,
+			MoveToFolder:   true,
+			MoveSubtitles:  false,
+			MaxTitleLength: 30,
+		}
+		org := NewOrganizer(fs, cfg, nil)
+
+		movie := testutil.NewMovieBuilder().
+			WithID("IPX-123").
+			WithTitle(longTitle).
+			WithReleaseDate(time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC)).
+			Build()
+
+		match := matcher.MatchResult{
+			File: scanner.FileInfo{
+				Path:      sourcePath,
+				Name:      "test.mp4",
+				Extension: ".mp4",
+			},
+			ID: "IPX-123",
+		}
+
+		plan, err := org.Plan(match, movie, "/movies", false)
+		require.NoError(t, err)
+
+		assert.Equal(t, "IPX-123 - This is an extremely long~ (2024).mp4", plan.TargetFile,
+			"Filename should have truncated title with YEAR preserved")
+	})
+}

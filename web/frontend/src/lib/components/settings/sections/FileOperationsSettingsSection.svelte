@@ -16,6 +16,10 @@
 		(config?.output?.operation_mode || 'organize') as OperationMode
 	);
 
+	let noFolderFormat: boolean = $derived(
+		!config?.output?.folder_format
+	);
+
 	function handleOperationModeChange(mode: OperationMode) {
 		config.output.operation_mode = mode;
 	}
@@ -58,6 +62,11 @@
 				<div class="text-xs text-muted-foreground">No file or folder changes</div>
 			</button>
 		</div>
+		{#if effectiveMode === 'organize' && noFolderFormat}
+			<p class="text-xs text-muted-foreground">
+				No folder naming template set — when destination matches source path, files will be renamed in place only.
+			</p>
+		{/if}
 	</div>
 
 	<FormToggle
