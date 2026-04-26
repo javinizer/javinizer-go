@@ -109,14 +109,29 @@ func TestSanitizeFolderPath_EdgeCases(t *testing.T) {
 			want:  "_",
 		},
 		{
-			name:  "Trailing dots are removed for Windows compatibility",
+			name:  "Trailing dots replaced with tilde for Windows/SMB compatibility",
 			input: "Movie Title...",
-			want:  "Movie Title",
+			want:  "Movie Title~",
 		},
 		{
 			name:  "Trailing spaces and dots are trimmed",
 			input: " . Movie Title . ",
 			want:  " . Movie Title",
+		},
+		{
+			name:  "Trailing dot replaced with tilde",
+			input: "Movie Title.",
+			want:  "Movie Title~",
+		},
+		{
+			name:  "Trailing space-dot replaced with tilde",
+			input: "Movie Title .",
+			want:  "Movie Title~",
+		},
+		{
+			name:  "Truncation marker in middle preserved",
+			input: "IPX-123 - Beautiful... (2020)",
+			want:  "IPX-123 - Beautiful... (2020)",
 		},
 		{
 			name:  "Japanese folder names",
