@@ -122,7 +122,7 @@ func TestProcessFileTask_MergeWithExistingNFO(t *testing.T) {
 		assert.Equal(t, movie, merged)
 	})
 
-	t.Run("merges NFO title and regenerates display name", func(t *testing.T) {
+	t.Run("merges NFO title and regenerates display name from raw title", func(t *testing.T) {
 		task := newTask(baseCfg, baseMatch)
 		movie := &models.Movie{
 			ID:    "ABC-123",
@@ -134,10 +134,10 @@ func TestProcessFileTask_MergeWithExistingNFO(t *testing.T) {
 		merged := task.mergeWithExistingNFO(context.Background(), movie)
 		require.NotNil(t, merged)
 		assert.Equal(t, "NFO Preferred Title", merged.Title)
-		assert.Equal(t, "[ABC-123] NFO Preferred Title", merged.DisplayTitle)
+		assert.Equal(t, "[ABC-123] Scraped Title", merged.DisplayTitle)
 	})
 
-	t.Run("templated NFO title is preserved as display name", func(t *testing.T) {
+	t.Run("templated NFO title uses raw title for display name", func(t *testing.T) {
 		task := newTask(baseCfg, baseMatch)
 		movie := &models.Movie{
 			ID:    "ABC-123",
@@ -149,7 +149,7 @@ func TestProcessFileTask_MergeWithExistingNFO(t *testing.T) {
 		merged := task.mergeWithExistingNFO(context.Background(), movie)
 		require.NotNil(t, merged)
 		assert.Equal(t, "[ABC-123] Existing Templated Title", merged.Title)
-		assert.Equal(t, merged.Title, merged.DisplayTitle)
+		assert.Equal(t, "[ABC-123] Scraped Title", merged.DisplayTitle)
 	})
 
 	t.Run("legacy per-file path is used for multipart files", func(t *testing.T) {

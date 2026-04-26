@@ -16,6 +16,10 @@ func MoveFile(src, dst string) error {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
+	if filepath.Clean(src) == filepath.Clean(dst) {
+		return nil
+	}
+
 	err := os.Rename(src, dst)
 	if err == nil {
 		return nil
@@ -31,6 +35,10 @@ func MoveFile(src, dst string) error {
 func MoveFileFs(fs afero.Fs, src, dst string) error {
 	if err := fs.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	if filepath.Clean(src) == filepath.Clean(dst) {
+		return nil
 	}
 
 	err := fs.Rename(src, dst)

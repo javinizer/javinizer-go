@@ -29,13 +29,13 @@
 
 	interface Props {
 		initialPath?: string;
-		selectedFiles?: string[];  // Bindable selected files array
+		selectedFiles?: string[];
 		onFileSelect?: (files: string[]) => void;
 		onPathChange?: (path: string) => void;
 		multiSelect?: boolean;
-		folderOnly?: boolean;  // When true, only allows folder navigation (no file selection)
-		onScan?: (path: string, recursive: boolean, visibleFiles: FileInfo[], filter: string) => void;  // Unified scan callback with filter
-		scanLoading?: boolean;  // External loading state
+		folderOnly?: boolean;
+		onScan?: (path: string, recursive: boolean, visibleFiles: FileInfo[], filter: string, selectedFolders: string[]) => void;
+		scanLoading?: boolean;
 	}
 
 	let {
@@ -53,7 +53,6 @@
 	let parentPath = $state('');
 	let items: FileInfo[] = $state([]);
 
-	// Internal Set derived from external array for efficient lookups
 	let selectedFilesSet = $derived(new Set(externalSelectedFiles));
 	let loading = $state(false);
 	let error = $state<string | null>(null);
@@ -82,6 +81,9 @@
 
 	// Scan options
 	let recursiveScan = $state(false);
+	let selectedFolders: string[] = $state([]);
+	let anchorFolderPath: string | null = $state(null);
+	let selectedFoldersSet = $derived(new Set(selectedFolders));
 
 	// Sort state
 	type SortField = 'name' | 'mod_time' | 'size';
@@ -152,7 +154,7 @@
 	// Handle scan button click
 	function handleScan() {
 		const visibleFiles = sortedAndFilteredItems().filter((f) => !f.is_dir);
-		onScan?.(currentPath, recursiveScan, visibleFiles, filterText);
+		onScan?.(currentPath, recursiveScan, visibleFiles, filterText, selectedFolders);
 	}
 
 	function clearPathSuggestions() {
@@ -266,7 +268,9 @@
 		loading = true;
 		error = null;
 		clearPathSuggestions();
-		filterText = ''; // Clear filter when navigating
+		filterText = '';
+		selectedFolders = [];
+		anchorFolderPath = null;
 		try {
 			const response: BrowseResponse = await apiClient.browse({ path: path || '/' });
 			currentPath = response.current_path;
@@ -288,14 +292,47 @@
 		browse(buildBreadcrumbPath(currentPath, index));
 	}
 
-	function handleItemClick(item: FileInfo) {
+	function getFolderPathsSorted(): string[] {
+		return sortedAndFilteredItems().filter((i) => i.is_dir).map((i) => i.path);
+	}
+
+	function handleItemClick(item: FileInfo, event: MouseEvent) {
 		if (item.is_dir) {
-			browse(item.path);
-			// Don't clear selections when navigating folders
+			if (event.shiftKey && anchorFolderPath !== null) {
+				const folderPaths = getFolderPathsSorted();
+				const anchorIdx = folderPaths.indexOf(anchorFolderPath);
+				const clickedIdx = folderPaths.indexOf(item.path);
+				if (anchorIdx >= 0 && clickedIdx >= 0) {
+					const start = Math.min(anchorIdx, clickedIdx);
+					const end = Math.max(anchorIdx, clickedIdx);
+					selectedFolders = folderPaths.slice(start, end + 1);
+				} else {
+					selectedFolders = [item.path];
+					anchorFolderPath = item.path;
+				}
+			} else if (event.shiftKey) {
+				selectedFolders = [item.path];
+				anchorFolderPath = item.path;
+			} else if (event.ctrlKey || event.metaKey) {
+				if (selectedFoldersSet.has(item.path)) {
+					selectedFolders = selectedFolders.filter((p) => p !== item.path);
+				} else {
+					selectedFolders = [...selectedFolders, item.path];
+				}
+				anchorFolderPath = item.path;
+			} else {
+				selectedFolders = [];
+				anchorFolderPath = null;
+				browse(item.path);
+			}
 		} else if (!folderOnly) {
-			// Only allow file selection if not in folderOnly mode
 			toggleFileSelection(item.path);
 		}
+	}
+
+	function clearFolderSelection() {
+		selectedFolders = [];
+		anchorFolderPath = null;
 	}
 
 	function toggleFileSelection(path: string) {
@@ -537,6 +574,15 @@
 						/>
 						<span class="text-muted-foreground">Recursive</span>
 					</label>
+					{#if selectedFolders.length > 0}
+						<span class="text-xs text-primary font-medium">{selectedFolders.length} folder{selectedFolders.length !== 1 ? 's' : ''} selected</span>
+						<button
+							onclick={clearFolderSelection}
+							class="text-xs text-muted-foreground hover:text-foreground transition-colors underline"
+						>
+							Clear
+						</button>
+					{/if}
 					<Button
 						variant="default"
 						size="sm"
@@ -651,12 +697,20 @@
 			{#each pagedItems() as item (item.path)}
 				<div>
 					{#if item.is_dir}
-					<!-- Directories are always clickable -->
 					<button
-						onclick={() => handleItemClick(item)}
+						onclick={(e) => handleItemClick(item, e)}
 						class="group w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 cursor-pointer
-							border-2 border-transparent hover:border-accent hover:bg-accent/50 hover:shadow-md"
+							{selectedFoldersSet.has(item.path)
+								? 'bg-primary/10 border-2 border-primary shadow-sm'
+								: 'border-2 border-transparent hover:border-accent hover:bg-accent/50 hover:shadow-md'}"
 					>
+						{#if selectedFolders.length > 0}
+							{#if selectedFoldersSet.has(item.path)}
+								<CheckSquare class="h-5 w-5 text-primary shrink-0" />
+							{:else}
+								<Square class="h-5 w-5 text-muted-foreground shrink-0" />
+							{/if}
+						{/if}
 						<Folder class="h-5 w-5 text-blue-500 transition-transform group-hover:scale-110" />
 						<div class="flex-1 text-left">
 							<div class="font-medium text-blue-600 dark:text-blue-400">
@@ -686,9 +740,8 @@
 						</div>
 					</div>
 					{:else}
-					<!-- Files in normal mode: selectable -->
 					<button
-						onclick={() => handleItemClick(item)}
+						onclick={(e) => handleItemClick(item, e)}
 						class="group w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 cursor-pointer
 							{selectedFilesSet.has(item.path)
 								? 'bg-primary/10 border-2 border-primary shadow-sm'

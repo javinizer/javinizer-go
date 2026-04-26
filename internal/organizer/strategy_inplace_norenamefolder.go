@@ -40,6 +40,8 @@ func (s *InPlaceNoRenameFolderStrategy) Plan(match matcher.MatchResult, movie *m
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = s.config.GroupActress
 
+	applyTitleTruncation(s.templateEngine, ctx, s.config.MaxTitleLength)
+
 	ctx.PartNumber = match.PartNumber
 	ctx.PartSuffix = match.PartSuffix
 	ctx.IsMultiPart = match.IsMultiPart
@@ -47,16 +49,10 @@ func (s *InPlaceNoRenameFolderStrategy) Plan(match matcher.MatchResult, movie *m
 	var fileName string
 	var err error
 	if s.config.RenameFile {
-		fileName, err = s.templateEngine.Execute(s.config.FileFormat, ctx)
+		fileName, err = resolveFileName(s.config, s.templateEngine, ctx, match)
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate file name: %w", err)
+			return nil, err
 		}
-
-		if s.config.MaxTitleLength > 0 {
-			fileName = s.templateEngine.TruncateTitle(fileName, s.config.MaxTitleLength)
-		}
-		fileName = template.SanitizeFilename(fileName)
-		fileName = fileName + match.File.Extension
 	} else {
 		fileName = match.File.Name
 	}
@@ -66,12 +62,7 @@ func (s *InPlaceNoRenameFolderStrategy) Plan(match matcher.MatchResult, movie *m
 	targetPath := filepath.Join(targetDir, fileName)
 	willMove := filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
 
-	conflicts := make([]string, 0)
-	if !forceUpdate && willMove {
-		if _, err := s.fs.Stat(targetPath); err == nil {
-			conflicts = append(conflicts, targetPath)
-		}
-	}
+	conflicts := checkTargetConflict(s.fs, match.File.Path, targetPath, forceUpdate, willMove)
 
 	return &OrganizePlan{
 		Match:             match,

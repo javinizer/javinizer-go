@@ -84,6 +84,20 @@ type Aggregator struct {
 	ignoreGenreRegexes    []*regexp.Regexp    // Compiled regex patterns for genre filtering
 }
 
+func (a *Aggregator) Config() *config.Config {
+	if a == nil {
+		return nil
+	}
+	return a.config
+}
+
+func (a *Aggregator) TemplateEngine() *template.Engine {
+	if a == nil {
+		return nil
+	}
+	return a.templateEngine
+}
+
 // New creates a new aggregator
 func New(cfg *config.Config) *Aggregator {
 	agg := &Aggregator{

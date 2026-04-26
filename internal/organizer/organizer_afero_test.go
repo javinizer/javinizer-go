@@ -544,3 +544,131 @@ func TestOrganizerWithAfero_RenameFileDisabled(t *testing.T) {
 	assert.Equal(t, originalFilename, plan.TargetFile,
 		"Should keep original filename when RenameFile=false")
 }
+
+func TestOrganizerWithAfero_EmptyFilenameAfterSanitization(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	sourcePath := "/source/ABF-345.sd 5 (1).mkv"
+	err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
+	require.NoError(t, err)
+
+	t.Run("empty movie ID falls back to match ID", func(t *testing.T) {
+		cfg := &config.OutputConfig{
+			FolderFormat:  "<ID> - <TITLE>",
+			FileFormat:    "<ID>",
+			RenameFile:    true,
+			MoveSubtitles: false,
+			MoveToFolder:  true,
+		}
+		org := NewOrganizer(fs, cfg, nil)
+
+		movie := testutil.NewMovieBuilder().
+			WithID("").
+			WithTitle("Test").
+			Build()
+
+		match := matcher.MatchResult{
+			File: scanner.FileInfo{
+				Path:      sourcePath,
+				Name:      "ABF-345.sd 5 (1).mkv",
+				Extension: ".mkv",
+			},
+			ID: "ABF-345",
+		}
+
+		plan, err := org.Plan(match, movie, "/dest", false)
+		require.NoError(t, err)
+
+		assert.Equal(t, "ABF-345.mkv", plan.TargetFile)
+	})
+
+	t.Run("title with only invalid chars still produces valid filename", func(t *testing.T) {
+		cfg := &config.OutputConfig{
+			FolderFormat:  "<ID>",
+			FileFormat:    "<ID> - <TITLE>",
+			RenameFile:    true,
+			MoveSubtitles: false,
+			MoveToFolder:  true,
+		}
+		org := NewOrganizer(fs, cfg, nil)
+
+		movie := testutil.NewMovieBuilder().
+			WithID("ABF-345").
+			WithTitle("::***??").
+			Build()
+
+		match := matcher.MatchResult{
+			File: scanner.FileInfo{
+				Path:      sourcePath,
+				Name:      "ABF-345.sd 5 (1).mkv",
+				Extension: ".mkv",
+			},
+			ID: "ABF-345",
+		}
+
+		plan, err := org.Plan(match, movie, "/dest", false)
+		require.NoError(t, err)
+
+		assert.Equal(t, "ABF-345 - - -.mkv", plan.TargetFile)
+	})
+
+	t.Run("file format with only sanitizable content falls back to match ID", func(t *testing.T) {
+		cfg := &config.OutputConfig{
+			FolderFormat:  "<ID>",
+			FileFormat:    "<TITLE>",
+			RenameFile:    true,
+			MoveSubtitles: false,
+			MoveToFolder:  true,
+		}
+		org := NewOrganizer(fs, cfg, nil)
+
+		movie := testutil.NewMovieBuilder().
+			WithID("ABF-345").
+			WithTitle("").
+			Build()
+
+		match := matcher.MatchResult{
+			File: scanner.FileInfo{
+				Path:      sourcePath,
+				Name:      "ABF-345.sd 5 (1).mkv",
+				Extension: ".mkv",
+			},
+			ID: "ABF-345",
+		}
+
+		plan, err := org.Plan(match, movie, "/dest", false)
+		require.NoError(t, err)
+
+		assert.Equal(t, "ABF-345.mkv", plan.TargetFile)
+	})
+
+	t.Run("all fallbacks sanitize to empty uses safe default", func(t *testing.T) {
+		cfg := &config.OutputConfig{
+			FolderFormat:  "<ID>",
+			FileFormat:    "<TITLE>",
+			RenameFile:    true,
+			MoveSubtitles: false,
+			MoveToFolder:  true,
+		}
+		org := NewOrganizer(fs, cfg, nil)
+
+		movie := testutil.NewMovieBuilder().
+			WithID("").
+			WithTitle("").
+			Build()
+
+		match := matcher.MatchResult{
+			File: scanner.FileInfo{
+				Path:      "/source/   ....mkv",
+				Name:      "   ....mkv",
+				Extension: ".mkv",
+			},
+			ID: "",
+		}
+
+		plan, err := org.Plan(match, movie, "/dest", false)
+		require.NoError(t, err)
+
+		assert.Equal(t, "file.mkv", plan.TargetFile,
+			"Should use safe default when all fallbacks sanitize to empty")
+	})
+}

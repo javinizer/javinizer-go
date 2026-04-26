@@ -133,6 +133,11 @@
 			<p class="text-xs text-muted-foreground mt-1">
 				Available tags: &lt;ID&gt;, &lt;TITLE&gt;, &lt;STUDIO&gt;, &lt;YEAR&gt;, &lt;ACTRESS&gt;, &lt;ACTRESSES&gt;, &lt;ACTORNAME&gt;
 			</p>
+			{#if !config.output.folder_format}
+				<p class="text-xs text-primary mt-1">
+					No folder template — Organize mode will not create movie subfolders. When destination matches source, Rename file only mode is used automatically.
+				</p>
+			{/if}
 		</div>
 
 		<div>

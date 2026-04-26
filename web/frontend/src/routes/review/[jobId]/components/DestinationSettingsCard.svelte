@@ -32,6 +32,9 @@
 
 	let opMode = $derived(preview?.operation_mode || effectiveOperationMode || 'organize');
 	let needsDestination = $derived(opMode === 'organize');
+	let isInPlaceImplied = $derived(
+		effectiveOperationMode === 'organize' && opMode === 'in-place-norenamefolder'
+	);
 
 	function getOperationLabel(mode?: string): string {
 		switch (mode) {
@@ -108,6 +111,11 @@
 			<p class="text-xs text-muted-foreground">
 				{getOperationLabel(opMode)} — files stay in their current location.
 			</p>
+			{#if isInPlaceImplied}
+				<p class="text-xs text-primary mt-1">
+					Auto-switched from Organize: destination matches source path with no folder/subfolder format.
+				</p>
+			{/if}
 		{/if}
 
 		<div class="grid gap-3 md:grid-cols-2">
