@@ -88,8 +88,32 @@
 	// Sort state
 	type SortField = 'name' | 'mod_time' | 'size';
 	type SortDirection = 'asc' | 'desc';
+	const SORT_STORAGE_KEY = 'javinizer_filebrowser_sort';
 	let sortField = $state<SortField>('name');
 	let sortDirection = $state<SortDirection>('asc');
+
+	function loadSortFromStorage() {
+		try {
+			const stored = sessionStorage.getItem(SORT_STORAGE_KEY);
+			if (stored) {
+				const parsed = JSON.parse(stored);
+				if (parsed.field === 'name' || parsed.field === 'mod_time' || parsed.field === 'size') {
+					sortField = parsed.field;
+				}
+				if (parsed.direction === 'asc' || parsed.direction === 'desc') {
+					sortDirection = parsed.direction;
+				}
+			}
+		} catch {}
+	}
+
+	function saveSortToStorage() {
+		try {
+			sessionStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ field: sortField, direction: sortDirection }));
+		} catch {}
+	}
+
+	loadSortFromStorage();
 
 	let currentPage = $state(1);
 	const PAGE_SIZE = 100;
@@ -146,9 +170,9 @@
 			sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
 		} else {
 			sortField = field;
-			// Default direction: name=asc, date/size=desc (most recent/largest first)
 			sortDirection = field === 'name' ? 'asc' : 'desc';
 		}
+		saveSortToStorage();
 	}
 
 	// Handle scan button click
