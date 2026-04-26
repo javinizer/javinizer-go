@@ -79,6 +79,7 @@ func (s *InPlaceNoRenameFolderStrategy) Plan(match matcher.MatchResult, movie *m
 		SkipInPlaceReason: "in-place-norenamefolder mode - file rename only",
 		FolderName:        "",
 		SubfolderPath:     "",
+		BaseFileName:      resolveBaseFileName(s.config, s.templateEngine, movie, match),
 	}, nil
 }
 

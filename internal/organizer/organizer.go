@@ -54,6 +54,39 @@ func resolveFileName(cfg *config.OutputConfig, engine *template.Engine, ctx *tem
 	return fileName, nil
 }
 
+func resolveBaseFileName(cfg *config.OutputConfig, engine *template.Engine, movie *models.Movie, match matcher.MatchResult) string {
+	if cfg.RenameFile {
+		baseCtx := template.NewContextFromMovie(movie)
+		baseCtx.GroupActress = cfg.GroupActress
+		applyTitleTruncation(engine, baseCtx, cfg.MaxTitleLength)
+
+		rendered, err := engine.Execute(cfg.FileFormat, baseCtx)
+		if err == nil {
+			sanitized := template.SanitizeFilename(rendered)
+			if sanitized != "" {
+				return sanitized
+			}
+		}
+		if match.ID != "" {
+			if sanitized := template.SanitizeFilename(match.ID); sanitized != "" {
+				return sanitized
+			}
+		}
+		if name := template.SanitizeFilename(strings.TrimSuffix(match.File.Name, match.File.Extension)); name != "" {
+			return name
+		}
+		return "file"
+	}
+	base := strings.TrimSuffix(match.File.Name, match.File.Extension)
+	if base != "" {
+		return base
+	}
+	if match.ID != "" {
+		return match.ID
+	}
+	return "file"
+}
+
 func applyTitleTruncation(engine *template.Engine, ctx *template.Context, maxLen int) {
 	if maxLen <= 0 {
 		return
@@ -180,6 +213,7 @@ type OrganizePlan struct {
 	SkipInPlaceReason string // Reason why in-place was not used
 	FolderName        string // Resolved folder name (empty if no folder created)
 	SubfolderPath     string // Resolved subfolder path relative to destination (empty if none)
+	BaseFileName      string // Base filename without extension or part suffix (for NFO/metadata naming)
 }
 
 // isDedicatedFolder checks if a folder is dedicated to a single movie ID
@@ -395,6 +429,7 @@ func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir
 		SkipInPlaceReason: skipInPlaceReason,
 		FolderName:        folderName,
 		SubfolderPath:     subfolderPath,
+		BaseFileName:      resolveBaseFileName(o.config, o.templateEngine, movie, match),
 	}, nil
 }
 

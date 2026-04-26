@@ -30,7 +30,7 @@ func TestGeneratePreview_MultipartFallbackPaths(t *testing.T) {
 	cfg.Output.ScreenshotFolder = "shots"
 	cfg.Output.ScreenshotFormat = "<SERIES>"
 	cfg.Output.ScreenshotPadding = 2
-	cfg.Output.MaxPathLength = 1
+	cfg.Output.MaxPathLength = 0
 	cfg.Output.DownloadExtrafanart = true // Enable for screenshot/fanart preview
 	cfg.Metadata.NFO.PerFile = true
 	cfg.Metadata.NFO.FilenameTemplate = "<SERIES>"

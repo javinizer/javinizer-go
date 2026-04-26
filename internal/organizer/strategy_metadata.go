@@ -3,6 +3,7 @@ package organizer
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -45,6 +46,7 @@ func (s *MetadataOnlyStrategy) Plan(match matcher.MatchResult, movie *models.Mov
 		SkipInPlaceReason: "metadata-only mode",
 		FolderName:        "",
 		SubfolderPath:     "",
+		BaseFileName:      strings.TrimSuffix(match.File.Name, match.File.Extension),
 	}, nil
 }
 

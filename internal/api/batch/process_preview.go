@@ -1,7 +1,6 @@
 package batch
 
 import (
-	"path/filepath"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -18,7 +17,6 @@ import (
 
 func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, destination string, cfg *config.Config, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool) OrganizePreviewResponse {
 	outputConfig := deriveOutputConfig(cfg, operationMode)
-	outputConfig.MaxPathLength = 0
 
 	sharedEngine := template.NewEngine()
 	strategy, _ := createPreviewStrategy(&outputConfig, cfg)
@@ -115,7 +113,7 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 	folderPath := normalize(primaryPlan.TargetDir)
 	subfolderPath := normalize(primaryPlan.SubfolderPath)
 	folderName := primaryPlan.FolderName
-	fileName := computeBaseFileName(movie, fileResults, destination, strategy, operationMode)
+	fileName := primaryPlan.BaseFileName
 
 	var nfoPath string
 	var nfoPaths []string
@@ -467,49 +465,4 @@ func toWindowsPath(path string) string {
 		return ""
 	}
 	return strings.ReplaceAll(path, `/`, `\`)
-}
-
-func stripExtension(filename string) string {
-	ext := filepath.Ext(filename)
-	return strings.TrimSuffix(filename, ext)
-}
-
-// computeBaseFileName returns the base file name (without extension or part suffix)
-// by planning with a non-multipart match. This is needed because the response's
-// FileName field represents the primary name used for NFO/metadata, not the
-// per-part filename that may include -pt1, -pt2 suffixes.
-func computeBaseFileName(movie *models.Movie, fileResults []*worker.FileResult, destination string, strategy organizer.OperationStrategy, operationMode organizer.OperationMode) string {
-	if operationMode == types.OperationModeMetadataOnly {
-		if len(fileResults) > 0 && fileResults[0] != nil && fileResults[0].FilePath != "" {
-			base := previewPathBase(fileResults[0].FilePath)
-			ext := previewPathExt(base)
-			return strings.TrimSuffix(base, ext)
-		}
-	}
-
-	var baseMatch matcher.MatchResult
-	first := firstValidFileResult(fileResults)
-	if first != nil {
-		baseMatch = fileResultToMatchResult(first)
-		baseMatch.IsMultiPart = false
-		baseMatch.PartNumber = 0
-		baseMatch.PartSuffix = ""
-	} else {
-		baseMatch = matcher.MatchResult{
-			File: scanner.FileInfo{
-				Path:      "",
-				Name:      "",
-				Extension: ".mp4",
-			},
-			ID: movie.ID,
-		}
-	}
-
-	plan, err := strategy.Plan(baseMatch, movie, destination, false)
-	if err != nil {
-		logging.Warnf("Preview: failed to compute base file name: %v", err)
-		return resolvePreviewFallbackName(movie, fileResults)
-	}
-
-	return stripExtension(plan.TargetFile)
 }

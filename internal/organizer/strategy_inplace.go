@@ -156,6 +156,7 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 		SkipInPlaceReason: skipInPlaceReason,
 		FolderName:        folderName,
 		SubfolderPath:     "",
+		BaseFileName:      resolveBaseFileName(s.config, s.templateEngine, movie, match),
 	}, nil
 }
 

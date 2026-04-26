@@ -128,6 +128,7 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 		SkipInPlaceReason: "organize mode - always move to destination",
 		FolderName:        folderName,
 		SubfolderPath:     subfolderPath,
+		BaseFileName:      resolveBaseFileName(s.config, s.templateEngine, movie, match),
 	}, nil
 }
 
