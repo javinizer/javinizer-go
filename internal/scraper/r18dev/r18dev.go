@@ -45,23 +45,12 @@ type Scraper struct {
 
 // New creates a new R18.dev scraper
 func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	// Create scraper config for HTTP client ownership (HTTP-01)
-	scraperCfg := &config.ScraperSettings{
-		Enabled:       settings.Enabled,
-		Timeout:       settings.Timeout,
-		RateLimit:     settings.RateLimit,
-		RetryCount:    settings.RetryCount,
-		UserAgent:     settings.UserAgent,
-		Proxy:         settings.Proxy,
-		DownloadProxy: settings.DownloadProxy,
-	}
-
-	// Create HTTP client via per-scraper NewHTTPClient (HTTP-01)
-	client, err := NewHTTPClient(scraperCfg, globalProxy, globalFlareSolverr)
-	if err != nil {
-		logging.Errorf("R18Dev: Failed to create HTTP client: %v, using explicit no-proxy fallback", err)
-		client = httpclient.NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)
-	}
+	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+		httpclient.WithScraperHeaders(httpclient.R18DevHeaders()),
+		httpclient.WithScraperHeaders(httpclient.RefererHeader("https://r18.dev/")),
+		httpclient.WithScraperUserAgent(settings.UserAgent),
+	)
+	client := result.Client
 
 	language := scraperutil.NormalizeLanguage(settings.Language)
 
@@ -75,18 +64,8 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	client.SetHeader("Accept-Encoding", "gzip, deflate, br")
 	client.SetHeader("Connection", "keep-alive")
 
-	// Handle nil globalProxy to avoid dereference panic
-	globalProxyVal := config.ProxyConfig{}
-	if globalProxy != nil {
-		globalProxyVal = *globalProxy
-	}
-	proxyEnabled := globalProxyVal.Enabled
-	if settings.Proxy != nil && settings.Proxy.Enabled {
-		proxyEnabled = true
-	}
-	proxyConfig := config.ResolveScraperProxy(globalProxyVal, settings.Proxy)
-	if proxyEnabled && proxyConfig.URL != "" {
-		logging.Infof("R18Dev: Using proxy %s", httpclient.SanitizeProxyURL(proxyConfig.URL))
+	if result.ProxyEnabled && result.ProxyProfile.URL != "" {
+		logging.Infof("R18Dev: Using proxy %s", httpclient.SanitizeProxyURL(result.ProxyProfile.URL))
 	}
 
 	// Set defaults for rate limiting if not configured
