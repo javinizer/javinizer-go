@@ -299,6 +299,9 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 		if ctx.ReleaseDate != nil {
 			return fmt.Sprintf("%d", ctx.ReleaseDate.Year()), nil
 		}
+		if ctx.ReleaseYear > 0 {
+			return fmt.Sprintf("%d", ctx.ReleaseYear), nil
+		}
 		return "", nil
 
 	case "RELEASEDATE":
@@ -340,7 +343,7 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 		}
 		return ctx.Label, nil
 
-	case "SERIES":
+	case "SERIES", "SET":
 		if e.isTranslatableTag(tagName) && !parsed.rejectedLanguage {
 			return e.resolveTranslatedTag(tagName, parsed.languageSpec, ctx), nil
 		}
@@ -435,8 +438,13 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 		// Original part suffix from filename (e.g., "-pt1", "-A", "-cd2")
 		return ctx.PartSuffix, nil
 
+	case "RATING":
+		if ctx.Rating > 0 {
+			return fmt.Sprintf("%.1f", ctx.Rating), nil
+		}
+		return "", nil
+
 	case "MULTIPART":
-		// Returns "true" if multi-part, empty string otherwise (for use in conditionals)
 		if ctx.IsMultiPart {
 			return "true", nil
 		}
@@ -743,7 +751,7 @@ func (e *Engine) looksLikeLanguageSpec(modifier string) bool {
 
 func (e *Engine) isTranslatableTag(tagName string) bool {
 	switch tagName {
-	case "TITLE", "ORIGINALTITLE", "DIRECTOR", "MAKER", "STUDIO", "LABEL", "SERIES", "DESCRIPTION":
+	case "TITLE", "ORIGINALTITLE", "DIRECTOR", "MAKER", "STUDIO", "LABEL", "SERIES", "SET", "DESCRIPTION":
 		return true
 	default:
 		return false
@@ -824,7 +832,7 @@ func (e *Engine) resolveBaseTag(tagName string, ctx *Context) string {
 		return ctx.Maker
 	case "LABEL":
 		return ctx.Label
-	case "SERIES":
+	case "SERIES", "SET":
 		return ctx.Series
 	case "DESCRIPTION":
 		return ctx.Description
@@ -855,7 +863,7 @@ func (e *Engine) translationFieldValue(tagName, lang string, ctx *Context) strin
 		return translation.Maker
 	case "LABEL":
 		return translation.Label
-	case "SERIES":
+	case "SERIES", "SET":
 		return translation.Series
 	case "DESCRIPTION":
 		return translation.Description

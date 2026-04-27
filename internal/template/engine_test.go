@@ -5,6 +5,9 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/mediainfo"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTemplateEngine_Execute(t *testing.T) {
@@ -114,6 +117,113 @@ func TestTemplateEngine_Execute(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTemplateEngine_YEARFallback(t *testing.T) {
+	engine := NewEngine()
+
+	t.Run("YEAR from ReleaseDate", func(t *testing.T) {
+		releaseDate := time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC)
+		ctx := &Context{
+			ID:          "ABC-123",
+			ReleaseDate: &releaseDate,
+			ReleaseYear: 0,
+		}
+		got, err := engine.Execute("<ID> (<YEAR>)", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "ABC-123 (2024)", got)
+	})
+
+	t.Run("YEAR from ReleaseYear when ReleaseDate is nil", func(t *testing.T) {
+		ctx := &Context{
+			ID:          "ABC-123",
+			ReleaseDate: nil,
+			ReleaseYear: 2024,
+		}
+		got, err := engine.Execute("<ID> [<STUDIO>] - <TITLE> (<YEAR>)", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "ABC-123 [] -  (2024)", got)
+	})
+
+	t.Run("YEAR empty when both ReleaseDate and ReleaseYear are missing", func(t *testing.T) {
+		ctx := &Context{
+			ID:          "ABC-123",
+			ReleaseDate: nil,
+			ReleaseYear: 0,
+		}
+		got, err := engine.Execute("<ID> (<YEAR>)", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "ABC-123 ()", got)
+	})
+
+	t.Run("ReleaseDate takes priority over ReleaseYear", func(t *testing.T) {
+		releaseDate := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+		ctx := &Context{
+			ID:          "ABC-123",
+			ReleaseDate: &releaseDate,
+			ReleaseYear: 2024,
+		}
+		got, err := engine.Execute("<YEAR>", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "2023", got)
+	})
+}
+
+func TestTemplateEngine_RatingTag(t *testing.T) {
+	engine := NewEngine()
+
+	t.Run("RATING with decimal value", func(t *testing.T) {
+		ctx := &Context{ID: "ABC-123", Rating: 4.5}
+		got, err := engine.Execute("<ID> <RATING>", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "ABC-123 4.5", got)
+	})
+
+	t.Run("RATING with whole number", func(t *testing.T) {
+		ctx := &Context{ID: "ABC-123", Rating: 7.0}
+		got, err := engine.Execute("<RATING>", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "7.0", got)
+	})
+
+	t.Run("RATING with zero returns empty", func(t *testing.T) {
+		ctx := &Context{ID: "ABC-123", Rating: 0}
+		got, err := engine.Execute("<ID> <RATING>", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "ABC-123 ", got)
+	})
+}
+
+func TestTemplateEngine_SETSynonym(t *testing.T) {
+	engine := NewEngine()
+
+	t.Run("SET resolves to Series", func(t *testing.T) {
+		ctx := &Context{ID: "ABC-123", Series: "Test Series"}
+		got, err := engine.Execute("<ID> [<SET>]", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "ABC-123 [Test Series]", got)
+	})
+
+	t.Run("SET matches SERIES output", func(t *testing.T) {
+		ctx := &Context{ID: "ABC-123", Series: "Same Value"}
+		gotSet, err := engine.Execute("<SET>", ctx)
+		require.NoError(t, err)
+		gotSeries, err := engine.Execute("<SERIES>", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, gotSeries, gotSet)
+	})
+
+	t.Run("SET with language modifier", func(t *testing.T) {
+		ctx := &Context{
+			Series: "Japanese Series",
+			Translations: map[string]models.MovieTranslation{
+				"en": {Language: "en", Series: "English Series"},
+			},
+		}
+		got, err := engine.Execute("<SET:en>", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "English Series", got)
+	})
 }
 
 func TestSanitizeFilename(t *testing.T) {

@@ -162,6 +162,8 @@ func (g *Generator) MovieToNFO(movie *models.Movie, videoFilePath string) *Movie
 		nfo.ReleaseDate = movie.ReleaseDate.Format("2006-01-02")
 		nfo.Premiered = movie.ReleaseDate.Format("2006-01-02")
 		nfo.Year = movie.ReleaseDate.Year()
+	} else if movie.ReleaseYear > 0 {
+		nfo.Year = movie.ReleaseYear
 	}
 
 	// Add runtime

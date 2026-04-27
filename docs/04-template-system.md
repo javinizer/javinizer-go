@@ -59,7 +59,7 @@ BEAUTIFUL DAY
 |-----|-------------|---------|
 | `<STUDIO>` or `<MAKER>` | Studio/maker name (supports [language modifiers](#language-modifiers)) | `Idea Pocket` |
 | `<LABEL>` | Label name (supports [language modifiers](#language-modifiers)) | `IP Label` |
-| `<SERIES>` | Series name (supports [language modifiers](#language-modifiers)) | `Tsubomi Series` |
+| `<SERIES>` or `<SET>` | Series name (supports [language modifiers](#language-modifiers)) | `Tsubomi Series` |
 | `<DIRECTOR>` | Director name (supports [language modifiers](#language-modifiers)) | `John Director` |
 
 ### Date and Time
@@ -92,6 +92,7 @@ BEAUTIFUL DAY
 | Tag | Description | Example |
 |-----|-------------|---------|
 | `<DESCRIPTION>` | Description/plot (supports [language modifiers](#language-modifiers)) | `Long description text...` |
+| `<RATING>` | Rating score (one decimal) | `7.5` |
 
 ### Indexing
 
@@ -191,7 +192,7 @@ Where `XX` is a 2-letter ISO 639-1 language code (e.g., `en`, `ja`, `zh`, `ko`).
 | `<DIRECTOR:XX>` | Director name in specified language |
 | `<MAKER:XX>` or `<STUDIO:XX>` | Studio name in specified language |
 | `<LABEL:XX>` | Label name in specified language |
-| `<SERIES:XX>` | Series name in specified language |
+| `<SERIES:XX>` or `<SET:XX>` | Series name in specified language |
 
 **Examples:**
 

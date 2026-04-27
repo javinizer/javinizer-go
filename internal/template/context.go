@@ -22,6 +22,7 @@ type Context struct {
 
 	// Date information
 	ReleaseDate *time.Time
+	ReleaseYear int // Extracted year when full date is unavailable
 	Runtime     int // in minutes
 
 	// People
@@ -83,6 +84,7 @@ func NewContextFromMovie(movie *models.Movie) *Context {
 		Title:            movie.Title,
 		OriginalTitle:    movie.OriginalTitle,
 		ReleaseDate:      movie.ReleaseDate,
+		ReleaseYear:      movie.ReleaseYear,
 		Runtime:          movie.Runtime,
 		Director:         movie.Director,
 		Maker:            movie.Maker,
@@ -141,7 +143,11 @@ func NewContextFromScraperResult(result *models.ScraperResult) *Context {
 		Description:   result.Description,
 		CoverURL:      result.CoverURL,
 		TrailerURL:    result.TrailerURL,
-		Translations:  map[string]models.MovieTranslation{},
+		Translations:  buildTranslationMap(result.Translations),
+	}
+
+	if result.ReleaseDate != nil {
+		ctx.ReleaseYear = result.ReleaseDate.Year()
 	}
 
 	// Extract rating
@@ -178,6 +184,7 @@ func (c *Context) Clone() *Context {
 		Title:            c.Title,
 		OriginalTitle:    c.OriginalTitle,
 		ReleaseDate:      c.ReleaseDate,
+		ReleaseYear:      c.ReleaseYear,
 		Runtime:          c.Runtime,
 		Director:         c.Director,
 		ActressName:      c.ActressName,

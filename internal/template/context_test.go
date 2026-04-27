@@ -172,6 +172,22 @@ func TestNewContextFromMovie(t *testing.T) {
 			},
 		},
 		{
+			name: "Movie with ReleaseYear but no ReleaseDate",
+			movie: &models.Movie{
+				ID:          "IPX-001",
+				Title:       "Year Only",
+				ReleaseDate: nil,
+				ReleaseYear: 2024,
+			},
+			want: &Context{
+				ID:           "IPX-001",
+				Title:        "Year Only",
+				ReleaseDate:  nil,
+				ReleaseYear:  2024,
+				Translations: map[string]models.MovieTranslation{},
+			},
+		},
+		{
 			name: "Movie with translations",
 			movie: &models.Movie{
 				ID:    "IPX-001",
@@ -237,6 +253,7 @@ func TestNewContextFromMovie(t *testing.T) {
 			assert.Equal(t, tt.want.Title, got.Title)
 			assert.Equal(t, tt.want.OriginalTitle, got.OriginalTitle)
 			assert.Equal(t, tt.want.ReleaseDate, got.ReleaseDate)
+			assert.Equal(t, tt.want.ReleaseYear, got.ReleaseYear)
 			assert.Equal(t, tt.want.Runtime, got.Runtime)
 			assert.Equal(t, tt.want.Director, got.Director)
 			assert.Equal(t, tt.want.Maker, got.Maker)
@@ -297,6 +314,7 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				Title:         "Test Movie Title",
 				OriginalTitle: "テストムービータイトル",
 				ReleaseDate:   &releaseDate,
+				ReleaseYear:   2020,
 				Runtime:       120,
 				Director:      "Test Director",
 				Maker:         "Test Studio",
@@ -451,6 +469,26 @@ func TestNewContextFromScraperResult(t *testing.T) {
 				Translations: map[string]models.MovieTranslation{},
 			},
 		},
+		{
+			name: "Scraper result with translations",
+			result: &models.ScraperResult{
+				Source: "r18dev",
+				ID:     "IPX-001",
+				Title:  "Test",
+				Translations: []models.MovieTranslation{
+					{Language: "en", Title: "English Title"},
+					{Language: "ja", Title: "Japanese Title"},
+				},
+			},
+			want: &Context{
+				ID:    "IPX-001",
+				Title: "Test",
+				Translations: map[string]models.MovieTranslation{
+					"en": {Language: "en", Title: "English Title"},
+					"ja": {Language: "ja", Title: "Japanese Title"},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -462,6 +500,7 @@ func TestNewContextFromScraperResult(t *testing.T) {
 			assert.Equal(t, tt.want.Title, got.Title)
 			assert.Equal(t, tt.want.OriginalTitle, got.OriginalTitle)
 			assert.Equal(t, tt.want.ReleaseDate, got.ReleaseDate)
+			assert.Equal(t, tt.want.ReleaseYear, got.ReleaseYear)
 			assert.Equal(t, tt.want.Runtime, got.Runtime)
 			assert.Equal(t, tt.want.Director, got.Director)
 			assert.Equal(t, tt.want.Maker, got.Maker)
@@ -495,6 +534,7 @@ func TestClone(t *testing.T) {
 				Title:            "Test Movie",
 				OriginalTitle:    "テストムービー",
 				ReleaseDate:      &releaseDate,
+				ReleaseYear:      2020,
 				Runtime:          120,
 				Director:         "Test Director",
 				Actresses:        []string{"Actress 1", "Actress 2"},
@@ -508,10 +548,14 @@ func TestClone(t *testing.T) {
 				OriginalFilename: "original.mp4",
 				VideoFilePath:    "/path/to/video.mp4",
 				Index:            5,
+				PartNumber:       2,
+				PartSuffix:       "-pt2",
+				IsMultiPart:      true,
 				Rating:           4.5,
 				Description:      "Test description",
 				CoverURL:         "https://example.com/cover.jpg",
 				TrailerURL:       "https://example.com/trailer.mp4",
+				DefaultLanguage:  "ja",
 				GroupActress:     true,
 				Translations: map[string]models.MovieTranslation{
 					"en": {Language: "en", Title: "English Title"},
@@ -565,6 +609,7 @@ func TestClone(t *testing.T) {
 			assert.Equal(t, tt.ctx.Title, clone.Title)
 			assert.Equal(t, tt.ctx.OriginalTitle, clone.OriginalTitle)
 			assert.Equal(t, tt.ctx.ReleaseDate, clone.ReleaseDate)
+			assert.Equal(t, tt.ctx.ReleaseYear, clone.ReleaseYear)
 			assert.Equal(t, tt.ctx.Runtime, clone.Runtime)
 			assert.Equal(t, tt.ctx.Director, clone.Director)
 			assert.Equal(t, tt.ctx.ActressName, clone.ActressName)
@@ -576,10 +621,14 @@ func TestClone(t *testing.T) {
 			assert.Equal(t, tt.ctx.OriginalFilename, clone.OriginalFilename)
 			assert.Equal(t, tt.ctx.VideoFilePath, clone.VideoFilePath)
 			assert.Equal(t, tt.ctx.Index, clone.Index)
+			assert.Equal(t, tt.ctx.PartNumber, clone.PartNumber)
+			assert.Equal(t, tt.ctx.PartSuffix, clone.PartSuffix)
+			assert.Equal(t, tt.ctx.IsMultiPart, clone.IsMultiPart)
 			assert.Equal(t, tt.ctx.Rating, clone.Rating)
 			assert.Equal(t, tt.ctx.Description, clone.Description)
 			assert.Equal(t, tt.ctx.CoverURL, clone.CoverURL)
 			assert.Equal(t, tt.ctx.TrailerURL, clone.TrailerURL)
+			assert.Equal(t, tt.ctx.DefaultLanguage, clone.DefaultLanguage)
 			assert.Equal(t, tt.ctx.GroupActress, clone.GroupActress)
 
 			// Verify slices are equal
