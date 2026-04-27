@@ -19,6 +19,7 @@ import (
 	imageutil "github.com/javinizer/javinizer-go/internal/image"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
 )
@@ -494,44 +495,6 @@ func (d *Downloader) DownloadTrailer(ctx context.Context, movie *models.Movie, d
 	return d.download(ctx, movie.TrailerURL, destPath, MediaTypeTrailer)
 }
 
-// formatActressName formats an actress name according to NFO settings
-// This mirrors the logic in the NFO generator to ensure consistency
-func (d *Downloader) formatActressName(actress models.Actress) string {
-	// Use Japanese name if configured and available
-	if d.actorJapaneseNames && actress.JapaneseName != "" {
-		return actress.JapaneseName
-	}
-
-	// Format based on name order preference
-	firstName := actress.FirstName
-	lastName := actress.LastName
-
-	if firstName != "" && lastName != "" {
-		if d.actorFirstNameOrder {
-			// FirstName LastName
-			return firstName + " " + lastName
-		}
-		// LastName FirstName
-		return lastName + " " + firstName
-	}
-
-	// Single name only
-	if firstName != "" {
-		return firstName
-	}
-	if lastName != "" {
-		return lastName
-	}
-
-	// Fallback to Japanese name if English names are empty
-	if actress.JapaneseName != "" {
-		return actress.JapaneseName
-	}
-
-	// Last resort: use FullName() which tries all options
-	return actress.FullName()
-}
-
 // DownloadActressImages downloads actress thumbnail images
 func (d *Downloader) DownloadActressImages(ctx context.Context, movie *models.Movie, destDir string) ([]DownloadResult, error) {
 	if !d.config.DownloadActress || len(movie.Actresses) == 0 {
@@ -549,7 +512,7 @@ func (d *Downloader) DownloadActressImages(ctx context.Context, movie *models.Mo
 		}
 
 		// Format actress name according to NFO settings (Japanese vs English)
-		formattedName := d.formatActressName(actress)
+		formattedName := nfo.FormatActressName(actress, d.actorJapaneseNames, d.actorFirstNameOrder, "")
 
 		// Use configurable template for actress filenames
 		// Create a temporary movie with actress data for template processing

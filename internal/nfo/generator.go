@@ -360,49 +360,54 @@ func normalizeActressNameForDedup(name string) string {
 
 // formatActressName formats an actress name according to config
 func (g *Generator) formatActressName(actress models.Actress) string {
-	return g.formatActressNameFromInfo(actress.FirstName, actress.LastName, actress.JapaneseName)
+	return FormatActressName(actress, g.config.ActorJapaneseNames, g.config.ActorFirstNameOrder, g.config.UnknownActress)
 }
 
 // formatActressNameFromActressInfo formats an actress name from ActressInfo
 func (g *Generator) formatActressNameFromActressInfo(actress models.ActressInfo) string {
-	return g.formatActressNameFromInfo(actress.FirstName, actress.LastName, actress.JapaneseName)
+	return FormatActressName(models.Actress{
+		FirstName:    actress.FirstName,
+		LastName:     actress.LastName,
+		JapaneseName: actress.JapaneseName,
+	}, g.config.ActorJapaneseNames, g.config.ActorFirstNameOrder, g.config.UnknownActress)
 }
 
-// formatActressNameFromInfo is the common implementation for formatting actress names
-func (g *Generator) formatActressNameFromInfo(firstName, lastName, japaneseName string) string {
-	// Use Japanese name if configured and available
-	if g.config.ActorJapaneseNames && japaneseName != "" {
-		return japaneseName
+// FormatActressName formats an actress name according to the given settings.
+// unknownActress is returned when the actress has no name in any language.
+// Pass "" for unknownActress to use the default "Unknown" placeholder.
+func FormatActressName(actress models.Actress, japaneseNames bool, firstNameOrder bool, unknownActress string) string {
+	if unknownActress == "" {
+		unknownActress = "Unknown"
 	}
 
-	// Handle unknown actress - fall back to Japanese name if available
-	if firstName == "" && lastName == "" {
-		if japaneseName != "" {
-			return japaneseName // Better to show Japanese name than "Unknown"
-		}
-		return g.config.UnknownActress
+	if japaneseNames && actress.JapaneseName != "" {
+		return actress.JapaneseName
 	}
 
-	// Format based on name order preference
-	if g.config.ActorFirstNameOrder {
-		// FirstName LastName
-		if firstName != "" && lastName != "" {
-			return firstName + " " + lastName
+	if actress.FirstName == "" && actress.LastName == "" {
+		if actress.JapaneseName != "" {
+			return actress.JapaneseName
 		}
-		if firstName != "" {
-			return firstName
-		}
-		return lastName
+		return unknownActress
 	}
 
-	// LastName FirstName
-	if firstName != "" && lastName != "" {
-		return lastName + " " + firstName
+	if firstNameOrder {
+		if actress.FirstName != "" && actress.LastName != "" {
+			return actress.FirstName + " " + actress.LastName
+		}
+		if actress.FirstName != "" {
+			return actress.FirstName
+		}
+		return actress.LastName
 	}
-	if lastName != "" {
-		return lastName
+
+	if actress.FirstName != "" && actress.LastName != "" {
+		return actress.LastName + " " + actress.FirstName
 	}
-	return firstName
+	if actress.LastName != "" {
+		return actress.LastName
+	}
+	return actress.FirstName
 }
 
 // WriteNFO writes an NFO structure to a file

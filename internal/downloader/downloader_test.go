@@ -20,6 +20,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -2178,15 +2179,15 @@ func TestFormatActressName(t *testing.T) {
 			description:    "Fallback to Japanese when English names empty",
 		},
 		{
-			name: "Japanese name not available - fallback to FullName",
+			name: "Japanese name not available - fallback to Unknown",
 			actress: models.Actress{
 				FirstName: "",
 				LastName:  "",
 			},
 			useJapanese:    true,
 			firstNameOrder: true,
-			expectedName:   "",
-			description:    "Empty name when all fields empty",
+			expectedName:   "Unknown",
+			description:    "Returns Unknown when all name fields are empty",
 		},
 		{
 			name: "First name with Japanese preference but no Japanese name",
@@ -2203,10 +2204,7 @@ func TestFormatActressName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.OutputConfig{}
-			downloader := NewDownloaderWithNFOConfig(http.DefaultClient, afero.NewMemMapFs(), cfg, "test", tt.useJapanese, tt.firstNameOrder, nil)
-
-			result := downloader.formatActressName(tt.actress)
+			result := nfo.FormatActressName(tt.actress, tt.useJapanese, tt.firstNameOrder, "")
 
 			if result != tt.expectedName {
 				t.Errorf("%s: Expected %q, got %q", tt.description, tt.expectedName, result)
