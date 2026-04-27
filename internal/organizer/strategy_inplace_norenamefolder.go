@@ -65,11 +65,13 @@ func (s *InPlaceNoRenameFolderStrategy) Plan(match matcher.MatchResult, movie *m
 		excess := len(targetPath) - s.config.MaxPathLength
 		ext := match.File.Extension
 		currentNameLen := len(fileName) - len(ext)
-		if currentNameLen > excess {
+		if currentNameLen > excess && currentNameLen-excess > 0 {
 			baseName := s.templateEngine.TruncateTitleBytes(strings.TrimSuffix(fileName, ext), currentNameLen-excess)
-			fileName = baseName + ext
-			targetPath = filepath.Join(targetDir, fileName)
-			willMove = filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
+			if baseName != "" {
+				fileName = baseName + ext
+				targetPath = filepath.Join(targetDir, fileName)
+				willMove = filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
+			}
 		}
 	}
 

@@ -92,7 +92,12 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 		currentFolderLen := len(folderName)
 		if currentFolderLen > excess {
 			newFolderByteLen := currentFolderLen - excess
-			folderName = s.templateEngine.TruncateTitleBytes(folderName, newFolderByteLen)
+			if newFolderByteLen > 0 {
+				truncated := s.templateEngine.TruncateTitleBytes(folderName, newFolderByteLen)
+				if truncated != "" {
+					folderName = truncated
+				}
+			}
 
 			pathParts := []string{destDir}
 			pathParts = append(pathParts, subfolderParts...)

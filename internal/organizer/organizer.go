@@ -254,7 +254,7 @@ func (o *Organizer) resolveStrategy() OperationStrategy {
 			return NewInPlaceStrategy(o.fs, o.config, o.matcher, o.templateEngine)
 		case "in-place-norenamefolder":
 			return NewInPlaceNoRenameFolderStrategy(o.fs, o.config, o.matcher, o.templateEngine)
-		case "metadata-only":
+		case "metadata-only", "preview":
 			return NewMetadataOnlyStrategy(o.fs, o.config)
 		default:
 			return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
@@ -413,6 +413,40 @@ func (o *Organizer) moveSubtitles(plan *OrganizePlan, result *OrganizeResult) {
 	result.Subtitles = subtitleResults
 }
 
+func (o *Organizer) copySubtitles(plan *OrganizePlan, result *OrganizeResult) {
+	subtitles := o.subtitleHandler.FindSubtitles(o.subtitleFileInfo(plan))
+	if len(subtitles) == 0 {
+		return
+	}
+
+	subtitleResults := make([]SubtitleResult, len(subtitles))
+	for i, subtitle := range subtitles {
+		subtitleResult := SubtitleResult{
+			OriginalPath: subtitle.OriginalPath,
+			Moved:        false,
+		}
+
+		videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
+		newSubtitleName := o.subtitleHandler.generateSubtitleFileName(
+			videoNameWithoutExt,
+			subtitle.Language,
+			subtitle.Extension,
+		)
+		subtitleResult.NewPath = filepath.Join(plan.TargetDir, newSubtitleName)
+
+		if _, err := o.fs.Stat(subtitleResult.NewPath); err == nil {
+			subtitleResult.Skipped = true
+		} else if err := fsutil.CopyFileFs(o.fs, subtitle.OriginalPath, subtitleResult.NewPath); err != nil {
+			subtitleResult.Error = fmt.Errorf("failed to copy subtitle: %w", err)
+		} else {
+			subtitleResult.Moved = true
+		}
+
+		subtitleResults[i] = subtitleResult
+	}
+	result.Subtitles = subtitleResults
+}
+
 // Organize plans and executes file organization in one step
 func (o *Organizer) Organize(match matcher.MatchResult, movie *models.Movie, destDir string, dryRun bool, forceUpdate bool, copyOnly bool) (*OrganizeResult, error) {
 	return o.OrganizeWithLinkMode(match, movie, destDir, dryRun, forceUpdate, copyOnly, LinkModeNone)
@@ -546,13 +580,15 @@ func (o *Organizer) CopyWithLinkMode(plan *OrganizePlan, dryRun bool, linkMode L
 		return result, result.Error
 	}
 
-	// Skip if no operation needed
 	if !plan.WillMove {
+		result.ShouldGenerateMetadata = true
+		o.planSubtitles(plan, result)
 		return result, nil
 	}
 
-	// Dry run - don't actually copy
 	if dryRun {
+		result.ShouldGenerateMetadata = true
+		o.planSubtitles(plan, result)
 		return result, nil
 	}
 
@@ -651,6 +687,11 @@ func (o *Organizer) CopyWithLinkMode(plan *OrganizePlan, dryRun bool, linkMode L
 
 	result.Moved = true // "Moved" means operation succeeded (even though it's a copy)
 	result.ShouldGenerateMetadata = true
+
+	if o.config.MoveSubtitles {
+		o.copySubtitles(plan, result)
+	}
+
 	return result, nil
 }
 

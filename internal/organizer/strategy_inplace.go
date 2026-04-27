@@ -153,7 +153,12 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 		currentFolderLen := len(folderName)
 		if currentFolderLen > excess {
 			newFolderByteLen := currentFolderLen - excess
-			folderName = s.templateEngine.TruncateTitleBytes(folderName, newFolderByteLen)
+			if newFolderByteLen > 0 {
+				truncated := s.templateEngine.TruncateTitleBytes(folderName, newFolderByteLen)
+				if truncated != "" {
+					folderName = truncated
+				}
+			}
 			if inPlace {
 				targetDir = filepath.Join(filepath.Dir(sourceDir), folderName)
 			} else if s.config.MoveToFolder {

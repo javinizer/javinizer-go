@@ -219,15 +219,15 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 			// Continue organizing — snapshot data is best-effort but must not block organize
 		}
 
-		if effectiveMode == types.OperationModeOrganize {
-			result, organizeErr = org.OrganizeWithLinkMode(match, movie, destination, false, false, copyOnly, linkMode)
-		} else {
+		if copyOnly {
 			plan, planErr := org.Plan(match, movie, destination, false)
 			if planErr != nil {
 				organizeErr = planErr
 			} else {
-				result, organizeErr = org.Execute(plan, false)
+				result, organizeErr = org.CopyWithLinkMode(plan, false, linkMode)
 			}
+		} else {
+			result, organizeErr = org.OrganizeWithLinkMode(match, movie, destination, false, false, false, linkMode)
 		}
 
 		if organizeErr != nil {

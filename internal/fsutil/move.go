@@ -32,6 +32,18 @@ func MoveFile(src, dst string) error {
 	return crossDeviceMove(src, dst)
 }
 
+func CopyFileFs(fs afero.Fs, src, dst string) error {
+	if err := fs.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	if filepath.Clean(src) == filepath.Clean(dst) {
+		return nil
+	}
+
+	return copyFileDataFs(fs, src, dst)
+}
+
 func MoveFileFs(fs afero.Fs, src, dst string) error {
 	if err := fs.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)

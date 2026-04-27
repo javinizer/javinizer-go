@@ -2,6 +2,7 @@ package organizer
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -314,4 +315,38 @@ func TestInPlaceNoRenameFolderStrategy_Plan_StaysInSourceDirectory(t *testing.T)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.ToSlash("/videos/JAV"), filepath.ToSlash(plan.TargetDir), "Should stay in source directory, not move to destDir")
 	assert.Equal(t, filepath.ToSlash("/videos/JAV/ABC-123.mp4"), filepath.ToSlash(plan.TargetPath), "Should rename file in source directory")
+}
+
+func TestInPlaceNoRenameFolderStrategy_Plan_TruncationEdgeCase(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &config.OutputConfig{
+		FileFormat:    "<ID> <TITLE>",
+		RenameFile:    true,
+		MaxPathLength: 30,
+	}
+	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
+	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
+
+	_ = fs.MkdirAll("/source/folder", 0777)
+	_ = afero.WriteFile(fs, "/source/folder/ABC-123.mp4", []byte("video"), 0644)
+
+	match := matcher.MatchResult{
+		ID: "ABC-123",
+		File: scanner.FileInfo{
+			Path:      "/source/folder/ABC-123.mp4",
+			Name:      "ABC-123.mp4",
+			Extension: ".mp4",
+		},
+	}
+	movie := &models.Movie{
+		ID:    "ABC-123",
+		Title: "Very Long Title That Will Exceed Max Path Length Limit",
+	}
+
+	plan, err := strategy.Plan(match, movie, "/dest", false)
+	require.NoError(t, err)
+	assert.NotEqual(t, ".mp4", plan.TargetFile, "Should not produce empty basename")
+	assert.True(t, strings.HasSuffix(plan.TargetFile, ".mp4"), "Should preserve extension")
+	baseName := strings.TrimSuffix(plan.TargetFile, ".mp4")
+	assert.NotEmpty(t, baseName, "Basename should not be empty after truncation")
 }
