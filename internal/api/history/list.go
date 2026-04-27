@@ -116,10 +116,6 @@ func getHistory(historyRepo *database.HistoryRepository) gin.HandlerFunc {
 			}
 		}
 
-		if records == nil {
-			records = []HistoryRecord{}
-		}
-
 		c.JSON(200, HistoryListResponse{
 			Records: records,
 			Total:   total,
