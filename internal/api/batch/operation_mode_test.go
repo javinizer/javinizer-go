@@ -73,7 +73,6 @@ func TestOrganizeJob_OperationMode(t *testing.T) {
 					RegexEnabled: false,
 				},
 				Output: config.OutputConfig{
-					MoveToFolder:  true,
 					OperationMode: config.GetOperationMode(tt.configMode),
 				},
 				API: config.APIConfig{

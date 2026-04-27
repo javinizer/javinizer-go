@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/testutil"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,7 +69,7 @@ func TestOrganizerTemplate_LongTitles(t *testing.T) {
 				FolderFormat:   "<ID> - <TITLE>",
 				FileFormat:     "<ID>",
 				RenameFile:     true,
-				MoveToFolder:   true,
+				OperationMode:  types.OperationModeOrganize,
 				MoveSubtitles:  false,
 				MaxTitleLength: tt.maxTitleLength,
 			}
@@ -210,7 +211,7 @@ func TestOrganizerTemplate_CustomFunctions(t *testing.T) {
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				MoveToFolder:  true,
+				OperationMode: types.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
 			org := NewOrganizer(fs, cfg, nil)
@@ -286,7 +287,7 @@ func TestOrganizerTemplate_MultipleActresses(t *testing.T) {
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				MoveToFolder:  true,
+				OperationMode: types.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
 			org := NewOrganizer(fs, cfg, nil)
@@ -371,7 +372,7 @@ func TestOrganizerTemplate_FilenameTemplates(t *testing.T) {
 				FolderFormat:  tt.folderTemplate,
 				FileFormat:    tt.fileTemplate,
 				RenameFile:    true,
-				MoveToFolder:  true,
+				OperationMode: types.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
 			org := NewOrganizer(fs, cfg, nil)
@@ -410,7 +411,7 @@ func TestOrganizerTemplate_PathLengthValidation(t *testing.T) {
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		MoveToFolder:  true,
+		OperationMode: types.OperationModeOrganize,
 		MoveSubtitles: false,
 		MaxPathLength: 200, // Set path limit
 	}
@@ -497,7 +498,7 @@ func TestOrganizerTemplate_EdgeCases(t *testing.T) {
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				MoveToFolder:  true,
+				OperationMode: types.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
 			org := NewOrganizer(fs, cfg, nil)
@@ -536,7 +537,7 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 			FolderFormat:   "<ID> - <TITLE> (<YEAR>)",
 			FileFormat:     "<ID>",
 			RenameFile:     true,
-			MoveToFolder:   true,
+			OperationMode:  types.OperationModeOrganize,
 			MoveSubtitles:  false,
 			MaxTitleLength: 30,
 		}
@@ -571,7 +572,7 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 			FolderFormat:   "<ID> [<STUDIO>] - <TITLE>",
 			FileFormat:     "<ID>",
 			RenameFile:     true,
-			MoveToFolder:   true,
+			OperationMode:  types.OperationModeOrganize,
 			MoveSubtitles:  false,
 			MaxTitleLength: 30,
 		}
@@ -606,7 +607,7 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 			FolderFormat:   "<ID>",
 			FileFormat:     "<ID> - <TITLE> (<YEAR>)",
 			RenameFile:     true,
-			MoveToFolder:   true,
+			OperationMode:  types.OperationModeOrganize,
 			MoveSubtitles:  false,
 			MaxTitleLength: 30,
 		}

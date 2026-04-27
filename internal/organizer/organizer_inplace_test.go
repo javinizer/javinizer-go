@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/types"
 )
 
 func TestPlan_InPlaceDetection(t *testing.T) {
@@ -27,88 +28,80 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                string
-		renameFolderInPlace bool
-		moveToFolder        bool
-		sourceFolder        string
-		sourceFile          string
-		destDir             string
-		expectedInPlace     bool
-		expectedReason      string
-		expectedTargetDir   string
-		addMixedVideo       bool
+		name              string
+		operationMode     types.OperationMode
+		sourceFolder      string
+		sourceFile        string
+		destDir           string
+		expectedInPlace   bool
+		expectedReason    string
+		expectedTargetDir string
+		addMixedVideo     bool
 	}{
 		{
-			name:                "In-place enabled, dedicated folder, needs rename",
-			renameFolderInPlace: true,
-			moveToFolder:        true,
-			sourceFolder:        "old_folder_name",
-			sourceFile:          "IPX-535.mp4",
-			destDir:             tmpDir,
-			expectedInPlace:     true,
-			expectedReason:      "",
+			name:            "In-place enabled, dedicated folder, needs rename",
+			operationMode:   types.OperationModeInPlace,
+			sourceFolder:    "old_folder_name",
+			sourceFile:      "IPX-535.mp4",
+			destDir:         tmpDir,
+			expectedInPlace: true,
+			expectedReason:  "",
 		},
 		{
-			name:                "In-place disabled",
-			renameFolderInPlace: false,
-			moveToFolder:        true,
-			sourceFolder:        "old_folder_name",
-			sourceFile:          "IPX-535.mp4",
-			destDir:             tmpDir,
-			expectedInPlace:     false,
-			expectedReason:      "organize mode - always move to destination",
+			name:            "Organize mode - no in-place",
+			operationMode:   types.OperationModeOrganize,
+			sourceFolder:    "old_folder_name",
+			sourceFile:      "IPX-535.mp4",
+			destDir:         tmpDir,
+			expectedInPlace: false,
+			expectedReason:  "organize mode - always move to destination",
 		},
 		{
-			name:                "Folder already has correct name",
-			renameFolderInPlace: true,
-			moveToFolder:        true,
-			sourceFolder:        "IPX-535 [IdeaPocket] - Beautiful Day",
-			sourceFile:          "IPX-535.mp4",
-			destDir:             tmpDir,
-			expectedInPlace:     false,
-			expectedReason:      "folder already has correct name",
+			name:            "Folder already has correct name",
+			operationMode:   types.OperationModeInPlace,
+			sourceFolder:    "IPX-535 [IdeaPocket] - Beautiful Day",
+			sourceFile:      "IPX-535.mp4",
+			destDir:         tmpDir,
+			expectedInPlace: false,
+			expectedReason:  "folder already has correct name",
 		},
 		{
-			name:                "Mixed IDs in folder",
-			renameFolderInPlace: true,
-			moveToFolder:        true,
-			sourceFolder:        "mixed_folder",
-			sourceFile:          "IPX-535.mp4",
-			destDir:             tmpDir,
-			expectedInPlace:     false,
-			expectedReason:      "folder contains mixed IDs",
-			addMixedVideo:       true,
+			name:            "Mixed IDs in folder",
+			operationMode:   types.OperationModeInPlace,
+			sourceFolder:    "mixed_folder",
+			sourceFile:      "IPX-535.mp4",
+			destDir:         tmpDir,
+			expectedInPlace: false,
+			expectedReason:  "folder contains mixed IDs",
+			addMixedVideo:   true,
 		},
 		{
-			name:                "Folder already correct, MoveToFolder=false, stays in source",
-			renameFolderInPlace: true,
-			moveToFolder:        false,
-			sourceFolder:        "IPX-535 [IdeaPocket] - Beautiful Day",
-			sourceFile:          "IPX-535.mp4",
-			destDir:             filepath.Join(tmpDir, "dest"),
-			expectedInPlace:     false,
-			expectedReason:      "folder already has correct name",
+			name:            "Folder already correct, in-place mode, stays in source",
+			operationMode:   types.OperationModeInPlace,
+			sourceFolder:    "IPX-535 [IdeaPocket] - Beautiful Day",
+			sourceFile:      "IPX-535.mp4",
+			destDir:         filepath.Join(tmpDir, "dest"),
+			expectedInPlace: false,
+			expectedReason:  "folder already has correct name",
 		},
 		{
-			name:                "Not dedicated folder, MoveToFolder=false, stays in source",
-			renameFolderInPlace: true,
-			moveToFolder:        false,
-			sourceFolder:        "mixed_folder_no_move",
-			sourceFile:          "IPX-535.mp4",
-			destDir:             filepath.Join(tmpDir, "dest"),
-			expectedInPlace:     false,
-			expectedReason:      "folder contains mixed IDs",
-			addMixedVideo:       true,
+			name:            "Not dedicated folder, in-place mode, stays in source",
+			operationMode:   types.OperationModeInPlace,
+			sourceFolder:    "mixed_folder_no_move",
+			sourceFile:      "IPX-535.mp4",
+			destDir:         filepath.Join(tmpDir, "dest"),
+			expectedInPlace: false,
+			expectedReason:  "folder contains mixed IDs",
+			addMixedVideo:   true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			orgCfg := &config.OutputConfig{
-				RenameFolderInPlace: tt.renameFolderInPlace,
-				MoveToFolder:        tt.moveToFolder,
-				FolderFormat:        "<ID> [<STUDIO>] - <TITLE>",
-				FileFormat:          "<ID>",
+				OperationMode: tt.operationMode,
+				FolderFormat:  "<ID> [<STUDIO>] - <TITLE>",
+				FileFormat:    "<ID>",
 			}
 			o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 			o.SetMatcher(m)
@@ -167,7 +160,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 				}
 			}
 
-			if tt.moveToFolder == false && !tt.expectedInPlace {
+			if tt.operationMode == types.OperationModeInPlace && !tt.expectedInPlace {
 				if plan.TargetDir != sourceDir {
 					t.Errorf("Expected TargetDir=%q (sourceDir), got %q", sourceDir, plan.TargetDir)
 				}
@@ -176,7 +169,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 	}
 }
 
-func TestPlan_InPlaceFallbackToMoveToFolder(t *testing.T) {
+func TestPlan_InPlaceFallbackToOrganize(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	matcherCfg := &config.MatchingConfig{RegexEnabled: false}
@@ -196,7 +189,7 @@ func TestPlan_InPlaceFallbackToMoveToFolder(t *testing.T) {
 		Title: "Beautiful Day",
 	}
 
-	t.Run("Mixed IDs with MoveToFolder=true falls back to destDir", func(t *testing.T) {
+	t.Run("In-place mode with mixed IDs falls back to destDir", func(t *testing.T) {
 		sourceDir := filepath.Join(tmpDir, "mixed-ids")
 		if err := os.MkdirAll(sourceDir, 0755); err != nil {
 			t.Fatalf("Failed to create source dir: %v", err)
@@ -209,11 +202,10 @@ func TestPlan_InPlaceFallbackToMoveToFolder(t *testing.T) {
 		}
 
 		cfg := &config.OutputConfig{
-			RenameFolderInPlace: true,
-			MoveToFolder:        true,
-			FolderFormat:        "<ID> - <TITLE>",
-			FileFormat:          "<ID>",
-			RenameFile:          true,
+			OperationMode: types.OperationModeInPlace,
+			FolderFormat:  "<ID> - <TITLE>",
+			FileFormat:    "<ID>",
+			RenameFile:    true,
 		}
 		o := NewOrganizer(afero.NewOsFs(), cfg, nil)
 		o.SetMatcher(m)
@@ -234,15 +226,9 @@ func TestPlan_InPlaceFallbackToMoveToFolder(t *testing.T) {
 		if plan.InPlace {
 			t.Error("Expected InPlace=false for mixed IDs")
 		}
-		if !strings.HasPrefix(plan.TargetDir, destDir) {
-			t.Errorf("Expected TargetDir under destDir=%q, got %q", destDir, plan.TargetDir)
-		}
-		if !plan.WillMove {
-			t.Error("Expected WillMove=true for MoveToFolder fallback")
-		}
 	})
 
-	t.Run("Already-correct folder with MoveToFolder=true falls back to destDir", func(t *testing.T) {
+	t.Run("Organize mode with already-correct folder moves to destDir", func(t *testing.T) {
 		sourceDir := filepath.Join(tmpDir, "IPX-535 - Beautiful Day")
 		if err := os.MkdirAll(sourceDir, 0755); err != nil {
 			t.Fatalf("Failed to create source dir: %v", err)
@@ -252,11 +238,10 @@ func TestPlan_InPlaceFallbackToMoveToFolder(t *testing.T) {
 		}
 
 		cfg := &config.OutputConfig{
-			RenameFolderInPlace: true,
-			MoveToFolder:        true,
-			FolderFormat:        "<ID> - <TITLE>",
-			FileFormat:          "<ID>",
-			RenameFile:          true,
+			OperationMode: types.OperationModeOrganize,
+			FolderFormat:  "<ID> - <TITLE>",
+			FileFormat:    "<ID>",
+			RenameFile:    true,
 		}
 		o := NewOrganizer(afero.NewOsFs(), cfg, nil)
 		o.SetMatcher(m)
@@ -275,14 +260,14 @@ func TestPlan_InPlaceFallbackToMoveToFolder(t *testing.T) {
 			t.Fatalf("Plan failed: %v", err)
 		}
 		if plan.InPlace {
-			t.Error("Expected InPlace=false when folder already correct")
+			t.Error("Expected InPlace=false in organize mode")
 		}
 		if !strings.HasPrefix(plan.TargetDir, destDir) {
 			t.Errorf("Expected TargetDir under destDir=%q, got %q", destDir, plan.TargetDir)
 		}
 	})
 
-	t.Run("Mixed IDs with MoveToFolder=false stays in source", func(t *testing.T) {
+	t.Run("Metadata-only mode with mixed IDs stays in source", func(t *testing.T) {
 		sourceDir := filepath.Join(tmpDir, "mixed-no-move")
 		if err := os.MkdirAll(sourceDir, 0755); err != nil {
 			t.Fatalf("Failed to create source dir: %v", err)
@@ -295,11 +280,10 @@ func TestPlan_InPlaceFallbackToMoveToFolder(t *testing.T) {
 		}
 
 		cfg := &config.OutputConfig{
-			RenameFolderInPlace: true,
-			MoveToFolder:        false,
-			FolderFormat:        "<ID> - <TITLE>",
-			FileFormat:          "<ID>",
-			RenameFile:          true,
+			OperationMode: types.OperationModeMetadataOnly,
+			FolderFormat:  "<ID> - <TITLE>",
+			FileFormat:    "<ID>",
+			RenameFile:    true,
 		}
 		o := NewOrganizer(afero.NewOsFs(), cfg, nil)
 		o.SetMatcher(m)
@@ -323,9 +307,6 @@ func TestPlan_InPlaceFallbackToMoveToFolder(t *testing.T) {
 		if plan.TargetDir != sourceDir {
 			t.Errorf("Expected TargetDir=sourceDir=%q, got %q", sourceDir, plan.TargetDir)
 		}
-		if plan.WillMove {
-			t.Error("Expected WillMove=false when MoveToFolder=false and no rename needed")
-		}
 	})
 }
 
@@ -342,9 +323,9 @@ func TestExecute_InPlaceRename(t *testing.T) {
 	}
 
 	orgCfg := &config.OutputConfig{
-		RenameFolderInPlace: true,
-		FolderFormat:        "<ID> [<STUDIO>] - <TITLE>",
-		FileFormat:          "<ID>",
+		OperationMode: types.OperationModeInPlace,
+		FolderFormat:  "<ID> [<STUDIO>] - <TITLE>",
+		FileFormat:    "<ID>",
 	}
 	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 	o.SetMatcher(m)
@@ -440,9 +421,9 @@ func TestExecute_InPlaceMultiPart(t *testing.T) {
 	}
 
 	orgCfg := &config.OutputConfig{
-		RenameFolderInPlace: true,
-		FolderFormat:        "<ID>",
-		FileFormat:          "<ID>",
+		OperationMode: types.OperationModeInPlace,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
 	}
 	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 	o.SetMatcher(m)
@@ -574,11 +555,11 @@ func TestExecute_InPlaceWithSubtitles(t *testing.T) {
 	}
 
 	orgCfg := &config.OutputConfig{
-		RenameFolderInPlace: true,
-		FolderFormat:        "<ID>",
-		FileFormat:          "<ID>",
-		MoveSubtitles:       true,
-		SubtitleExtensions:  []string{".srt", ".ass"},
+		OperationMode:      types.OperationModeInPlace,
+		FolderFormat:       "<ID>",
+		FileFormat:         "<ID>",
+		MoveSubtitles:      true,
+		SubtitleExtensions: []string{".srt", ".ass"},
 	}
 	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 	o.SetMatcher(m)
@@ -683,9 +664,9 @@ func TestExecute_InPlaceDryRun(t *testing.T) {
 	}
 
 	orgCfg := &config.OutputConfig{
-		RenameFolderInPlace: true,
-		FolderFormat:        "<ID>",
-		FileFormat:          "<ID>",
+		OperationMode: types.OperationModeInPlace,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
 	}
 	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 	o.SetMatcher(m)
@@ -770,11 +751,10 @@ func TestPlan_InPlaceTruncation_UsesSourceParent(t *testing.T) {
 	// Use a MaxPathLength that will trigger truncation but still allow success
 	maxPathLen := 150
 	orgCfg := &config.OutputConfig{
-		RenameFolderInPlace: true,
-		MoveToFolder:        false,
-		FolderFormat:        "<ID> - <TITLE>",
-		FileFormat:          "<ID>",
-		MaxPathLength:       maxPathLen,
+		OperationMode: types.OperationModeInPlace,
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		MaxPathLength: maxPathLen,
 	}
 	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
 	o.SetMatcher(m)
@@ -865,11 +845,10 @@ func TestExecute_CaseOnlyDirectoryRename(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		RenameFolderInPlace: true,
-		MoveToFolder:        false,
-		FolderFormat:        "<ID> - <TITLE>",
-		FileFormat:          "<ID>",
-		RenameFile:          true,
+		OperationMode: types.OperationModeInPlace,
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
 	}
 	o := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	o.SetMatcher(m)

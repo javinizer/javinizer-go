@@ -67,7 +67,6 @@ func TestDefaultConfigMatchesExample(t *testing.T) {
 
 	t.Run("OutputConfig_Toggles", func(t *testing.T) {
 		assert.Equal(t, exampleCfg.Output.RenameFile, defaultCfg.Output.RenameFile, "output.rename_file mismatch")
-		assert.Equal(t, exampleCfg.Output.MoveToFolder, defaultCfg.Output.MoveToFolder, "output.move_to_folder mismatch")
 		assert.Equal(t, exampleCfg.Output.AllowRevert, defaultCfg.Output.AllowRevert, "output.allow_revert mismatch")
 	})
 

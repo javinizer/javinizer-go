@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -385,10 +386,10 @@ func TestOrganizeTask_Execute(t *testing.T) {
 
 			// Create organizer
 			outputCfg := &config.OutputConfig{
-				FolderFormat: "<ID>",
-				FileFormat:   "<ID>",
-				RenameFile:   true,
-				MoveToFolder: true,
+				FolderFormat:  "<ID>",
+				FileFormat:    "<ID>",
+				RenameFile:    true,
+				OperationMode: types.OperationModeOrganize,
 			}
 			org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg, nil)
 

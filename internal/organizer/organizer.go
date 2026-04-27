@@ -245,40 +245,19 @@ type OrganizePlan struct {
 
 // Plan creates an organization plan without executing it
 func (o *Organizer) resolveStrategy() OperationStrategy {
-	if o.config.OperationMode != "" {
-		mode := o.config.GetOperationMode()
-		switch mode {
-		case "organize":
-			return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
-		case "in-place":
-			return NewInPlaceStrategy(o.fs, o.config, o.matcher, o.templateEngine)
-		case "in-place-norenamefolder":
-			return NewInPlaceNoRenameFolderStrategy(o.fs, o.config, o.matcher, o.templateEngine)
-		case "metadata-only", "preview":
-			return NewMetadataOnlyStrategy(o.fs, o.config)
-		default:
-			return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
-		}
-	}
-
-	// Legacy flag fallback (mirrors config.Prepare() precedence in pipeline.go):
-	// RenameFolderInPlace → InPlace (or Organize if no matcher)
-	// MoveToFolder → Organize
-	// RenameFile → InPlaceNoRenameFolder (matcher optional — strategy ignores it)
-	// none → MetadataOnly
-	if o.config.RenameFolderInPlace {
-		if o.matcher != nil {
-			return NewInPlaceStrategy(o.fs, o.config, o.matcher, o.templateEngine)
-		}
+	mode := o.config.GetOperationMode()
+	switch mode {
+	case "organize":
 		return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
-	}
-	if o.config.MoveToFolder {
-		return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
-	}
-	if o.config.RenameFile {
+	case "in-place":
+		return NewInPlaceStrategy(o.fs, o.config, o.matcher, o.templateEngine)
+	case "in-place-norenamefolder":
 		return NewInPlaceNoRenameFolderStrategy(o.fs, o.config, o.matcher, o.templateEngine)
+	case "metadata-only", "preview":
+		return NewMetadataOnlyStrategy(o.fs, o.config)
+	default:
+		return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
 	}
-	return NewMetadataOnlyStrategy(o.fs, o.config)
 }
 
 func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {

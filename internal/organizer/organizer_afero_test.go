@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/testutil"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,7 +34,7 @@ func TestOrganizerWithAfero_MoveFile(t *testing.T) {
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
-		MoveToFolder:  true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(fs, cfg, nil)
 
@@ -88,7 +89,7 @@ func TestOrganizerWithAfero_MoveWithDirectoryCreation(t *testing.T) {
 		FileFormat:      "<ID>",
 		RenameFile:      true,
 		MoveSubtitles:   false,
-		MoveToFolder:    true,
+		OperationMode:   types.OperationModeOrganize,
 	}
 	org := NewOrganizer(fs, cfg, nil)
 
@@ -135,7 +136,7 @@ func TestOrganizerWithAfero_CopyPreservesOriginal(t *testing.T) {
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
-		MoveToFolder:  true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(fs, cfg, nil)
 
@@ -194,7 +195,7 @@ func TestOrganizerWithAfero_MoveCollision(t *testing.T) {
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
-		MoveToFolder:  true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(fs, cfg, nil)
 
@@ -237,7 +238,7 @@ func TestOrganizerWithAfero_ComplexTemplate(t *testing.T) {
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
-		MoveToFolder:  true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(fs, cfg, nil)
 
@@ -347,7 +348,7 @@ func TestOrganizerWithAfero_DryRun(t *testing.T) {
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
-		MoveToFolder:  true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(fs, cfg, nil)
 
@@ -438,7 +439,7 @@ func TestOrganizerWithAfero_RenameFileDisabled(t *testing.T) {
 		FileFormat:    "<ID>",
 		RenameFile:    false,
 		MoveSubtitles: false,
-		MoveToFolder:  true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(fs, cfg, nil)
 
@@ -472,7 +473,7 @@ func TestOrganizerWithAfero_EmptyFilenameAfterSanitization(t *testing.T) {
 			FileFormat:    "<ID>",
 			RenameFile:    true,
 			MoveSubtitles: false,
-			MoveToFolder:  true,
+			OperationMode: types.OperationModeOrganize,
 		}
 		org := NewOrganizer(fs, cfg, nil)
 
@@ -502,7 +503,7 @@ func TestOrganizerWithAfero_EmptyFilenameAfterSanitization(t *testing.T) {
 			FileFormat:    "<ID> - <TITLE>",
 			RenameFile:    true,
 			MoveSubtitles: false,
-			MoveToFolder:  true,
+			OperationMode: types.OperationModeOrganize,
 		}
 		org := NewOrganizer(fs, cfg, nil)
 
@@ -532,7 +533,7 @@ func TestOrganizerWithAfero_EmptyFilenameAfterSanitization(t *testing.T) {
 			FileFormat:    "<TITLE>",
 			RenameFile:    true,
 			MoveSubtitles: false,
-			MoveToFolder:  true,
+			OperationMode: types.OperationModeOrganize,
 		}
 		org := NewOrganizer(fs, cfg, nil)
 
@@ -562,7 +563,7 @@ func TestOrganizerWithAfero_EmptyFilenameAfterSanitization(t *testing.T) {
 			FileFormat:    "<TITLE>",
 			RenameFile:    true,
 			MoveSubtitles: false,
-			MoveToFolder:  true,
+			OperationMode: types.OperationModeOrganize,
 		}
 		org := NewOrganizer(fs, cfg, nil)
 

@@ -164,13 +164,9 @@ func deriveOutputConfig(cfg *config.Config, operationMode organizer.OperationMod
 	outputConfig := cfg.Output
 	if operationMode != "" {
 		outputConfig.OperationMode = operationMode
-		outputConfig.MoveToFolder = operationMode == types.OperationModeOrganize
-		outputConfig.RenameFolderInPlace = operationMode == types.OperationModeInPlace
 	} else {
 		effectiveMode := outputConfig.GetOperationMode()
 		outputConfig.OperationMode = effectiveMode
-		outputConfig.MoveToFolder = effectiveMode == types.OperationModeOrganize
-		outputConfig.RenameFolderInPlace = effectiveMode == types.OperationModeInPlace
 	}
 	return outputConfig
 }

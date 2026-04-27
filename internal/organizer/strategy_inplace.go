@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 )
 
@@ -134,7 +135,7 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 		skipInPlaceReason = "matcher not set"
 	}
 
-	if !inPlace && s.config.MoveToFolder {
+	if !inPlace && s.config.GetOperationMode() == types.OperationModeOrganize {
 		pathParts := []string{destDir}
 		if folderName != "" {
 			pathParts = append(pathParts, folderName)
@@ -161,7 +162,7 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 			}
 			if inPlace {
 				targetDir = filepath.Join(filepath.Dir(sourceDir), folderName)
-			} else if s.config.MoveToFolder {
+			} else if s.config.GetOperationMode() == types.OperationModeOrganize {
 				pathParts := []string{destDir}
 				if folderName != "" {
 					pathParts = append(pathParts, folderName)

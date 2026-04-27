@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/types"
 )
 
 func TestPlan_AppendsPartSuffix(t *testing.T) {
@@ -18,7 +19,7 @@ func TestPlan_AppendsPartSuffix(t *testing.T) {
 		FolderFormat:    "<ID> [<STUDIO>] - <TITLE>",
 		FileFormat:      "<ID><PARTSUFFIX>", // Use <PARTSUFFIX> placeholder for multi-part support
 		RenameFile:      true,
-		MoveToFolder:    true,
+		OperationMode:   types.OperationModeOrganize,
 		SubfolderFormat: []string{},
 		MaxTitleLength:  0,
 		MaxPathLength:   260,
@@ -104,7 +105,7 @@ func TestOrganizeBatch_GroupsAndSortsParts(t *testing.T) {
 		FolderFormat:    "<ID>",
 		FileFormat:      "<ID><PARTSUFFIX>", // Use <PARTSUFFIX> placeholder for multi-part support
 		RenameFile:      true,
-		MoveToFolder:    true,
+		OperationMode:   types.OperationModeOrganize,
 		SubfolderFormat: []string{},
 	}
 	o := NewOrganizer(afero.NewOsFs(), cfg, nil)

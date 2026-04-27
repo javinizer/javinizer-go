@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -243,7 +244,7 @@ func TestOrganizeTask_Execute_ValidationError(t *testing.T) {
 			FolderFormat:    "",
 			FileFormat:      "<ID>",
 			SubfolderFormat: []string{},
-			MoveToFolder:    true,
+			OperationMode:   types.OperationModeOrganize,
 			RenameFile:      true,
 		}
 		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -366,7 +367,7 @@ func TestOrganizeTask_Execute_MoveVsCopy(t *testing.T) {
 		cfg := &config.OutputConfig{
 			FolderFormat:    destDir,
 			FileFormat:      "<ID>",
-			MoveToFolder:    true,
+			OperationMode:   types.OperationModeOrganize,
 			SubfolderFormat: []string{},
 		}
 		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -417,7 +418,7 @@ func TestOrganizeTask_Execute_MoveVsCopy(t *testing.T) {
 		cfg := &config.OutputConfig{
 			FolderFormat:    destDir,
 			FileFormat:      "<ID>",
-			MoveToFolder:    true,
+			OperationMode:   types.OperationModeOrganize,
 			SubfolderFormat: []string{},
 		}
 		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -512,7 +513,7 @@ func TestOrganizeTask_ConcurrentExecution(t *testing.T) {
 		cfg := &config.OutputConfig{
 			FolderFormat:    tmpDir,
 			FileFormat:      "<ID>",
-			MoveToFolder:    true,
+			OperationMode:   types.OperationModeOrganize,
 			SubfolderFormat: []string{},
 		}
 		org := organizer.NewOrganizer(afero.NewOsFs(), cfg, nil)

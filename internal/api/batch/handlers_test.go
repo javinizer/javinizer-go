@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -506,7 +507,7 @@ func TestOrganizeJob(t *testing.T) {
 					RegexEnabled: false,
 				},
 				Output: config.OutputConfig{
-					MoveToFolder: true,
+					OperationMode: types.OperationModeOrganize,
 				},
 				API: config.APIConfig{
 					Security: config.SecurityConfig{
@@ -1290,7 +1291,7 @@ func TestOrganizeJobSecurityValidation(t *testing.T) {
 					RegexEnabled: false,
 				},
 				Output: config.OutputConfig{
-					MoveToFolder: true,
+					OperationMode: types.OperationModeOrganize,
 				},
 				API: config.APIConfig{
 					Security: config.SecurityConfig{

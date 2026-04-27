@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,10 +24,10 @@ func TestOrganizer_Copy_ErrorPaths(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -141,10 +142,10 @@ func TestOrganizer_Execute_InPlaceErrors(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.OutputConfig{
-		FolderFormat:        "<ID>",
-		FileFormat:          "<ID>",
-		RenameFile:          true,
-		RenameFolderInPlace: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeInPlace,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -255,10 +256,10 @@ func TestOrganizer_Execute_PermissionErrors(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -430,7 +431,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			FolderFormat:    "<ID>",
 			FileFormat:      "<ID>",
 			RenameFile:      true,
-			MoveToFolder:    true,
+			OperationMode:   types.OperationModeOrganize,
 			SubfolderFormat: []string{"<STUDIO>"}, // Single subfolder for simplicity
 		}
 
@@ -459,7 +460,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			FolderFormat:  "<ID> - <TITLE>",
 			FileFormat:    "<ID>",
 			RenameFile:    true,
-			MoveToFolder:  true,
+			OperationMode: types.OperationModeOrganize,
 			MaxPathLength: 50,
 		}
 
@@ -487,7 +488,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			FolderFormat:   "<ID> - <TITLE>",
 			FileFormat:     "<ID>",
 			RenameFile:     true,
-			MoveToFolder:   true,
+			OperationMode:  types.OperationModeOrganize,
 			MaxTitleLength: 10, // Long enough to keep ID but truncate title
 		}
 
@@ -516,10 +517,10 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 
 	t.Run("Plan with multi-part file", func(t *testing.T) {
 		cfg := &config.OutputConfig{
-			FolderFormat: "<ID>",
-			FileFormat:   "<ID><PARTSUFFIX>",
-			RenameFile:   true,
-			MoveToFolder: true,
+			FolderFormat:  "<ID>",
+			FileFormat:    "<ID><PARTSUFFIX>",
+			RenameFile:    true,
+			OperationMode: types.OperationModeOrganize,
 		}
 
 		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -550,7 +551,7 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			FileFormat:      "<ID>",
 			SubfolderFormat: []string{"<STUDIO>", "<YEAR>"},
 			RenameFile:      true,
-			MoveToFolder:    true,
+			OperationMode:   types.OperationModeOrganize,
 		}
 
 		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -602,10 +603,10 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 
 	t.Run("Plan with force update (ignore conflicts)", func(t *testing.T) {
 		cfg := &config.OutputConfig{
-			FolderFormat: "<ID>",
-			FileFormat:   "<ID>",
-			RenameFile:   true,
-			MoveToFolder: true,
+			FolderFormat:  "<ID>",
+			FileFormat:    "<ID>",
+			RenameFile:    true,
+			OperationMode: types.OperationModeOrganize,
 		}
 
 		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -648,10 +649,10 @@ func TestOrganizer_OrganizeBatch_EdgeCases(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -816,10 +817,10 @@ func TestOrganizer_Organize_Integration(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -831,7 +832,7 @@ func TestOrganizer_Organize_Integration(t *testing.T) {
 			FolderFormat:  "<ID> - <TITLE>",
 			FileFormat:    "<ID>",
 			RenameFile:    true,
-			MoveToFolder:  true,
+			OperationMode: types.OperationModeOrganize,
 			MaxPathLength: 10,
 		}
 		badOrg := NewOrganizer(afero.NewOsFs(), badCfg, nil)

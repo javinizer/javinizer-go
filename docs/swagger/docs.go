@@ -3070,10 +3070,6 @@ const docTemplate = `{
                 "move_subtitles": {
                     "type": "boolean"
                 },
-                "move_to_folder": {
-                    "description": "Move/copy files to organized folders (default: true)",
-                    "type": "boolean"
-                },
                 "operation_mode": {
                     "$ref": "#/definitions/types.OperationMode"
                 },
@@ -3082,9 +3078,6 @@ const docTemplate = `{
                 },
                 "rename_file": {
                     "description": "Rename files using file_format template (default: true)",
-                    "type": "boolean"
-                },
-                "rename_folder_in_place": {
                     "type": "boolean"
                 },
                 "screenshot_folder": {

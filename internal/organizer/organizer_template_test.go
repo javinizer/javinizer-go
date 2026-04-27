@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/testutil"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,7 +79,7 @@ func TestOrganizerTemplate_SimplePatterns(t *testing.T) {
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				MoveToFolder:  true,
+				OperationMode: types.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
 			org := NewOrganizer(fs, cfg, nil)
@@ -175,7 +176,7 @@ func TestOrganizerTemplate_ComplexPatterns(t *testing.T) {
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				MoveToFolder:  true,
+				OperationMode: types.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
 			org := NewOrganizer(fs, cfg, nil)
@@ -264,7 +265,7 @@ func TestOrganizerTemplate_ConditionalLogic(t *testing.T) {
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				MoveToFolder:  true,
+				OperationMode: types.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
 			org := NewOrganizer(fs, cfg, nil)
@@ -352,7 +353,7 @@ func TestOrganizerTemplate_MissingFields(t *testing.T) {
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				MoveToFolder:  true,
+				OperationMode: types.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
 			org := NewOrganizer(fs, cfg, nil)
@@ -452,7 +453,7 @@ func TestOrganizerTemplate_SpecialCharacters(t *testing.T) {
 				FolderFormat:  "<ID> - <TITLE>",
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				MoveToFolder:  true,
+				OperationMode: types.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
 			org := NewOrganizer(fs, cfg, nil)
@@ -538,7 +539,7 @@ func TestOrganizerTemplate_UnicodeHandling(t *testing.T) {
 				FolderFormat:  "<ID> - <TITLE>",
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				MoveToFolder:  true,
+				OperationMode: types.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
 			org := NewOrganizer(fs, cfg, nil)

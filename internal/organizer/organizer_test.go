@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 )
 
@@ -31,10 +32,10 @@ func createTestMovie() *models.Movie {
 
 func TestOrganizer_Plan(t *testing.T) {
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID> - <TITLE>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -88,10 +89,10 @@ func TestOrganizer_Execute_DryRun(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -146,10 +147,10 @@ func TestOrganizer_Execute_ActualMove(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID> - <TITLE>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -211,10 +212,10 @@ func TestOrganizer_Execute_Conflict(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -277,10 +278,10 @@ func TestOrganizer_Copy(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -337,10 +338,10 @@ func TestOrganizer_CopyWithLinkMode_HardLink(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
@@ -390,10 +391,10 @@ func TestOrganizer_CopyWithLinkMode_SoftLink(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
@@ -450,10 +451,10 @@ func TestOrganizer_CopyWithLinkMode_Copy(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
@@ -514,10 +515,10 @@ func TestOrganizer_CopyWithLinkMode_DryRun(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
@@ -559,10 +560,10 @@ func TestOrganizer_CopyWithLinkMode_Conflicts(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
@@ -588,10 +589,10 @@ func TestOrganizer_CopyWithLinkMode_NoMove(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
@@ -624,10 +625,10 @@ func TestOrganizer_CopyWithLinkMode_InvalidLinkMode(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
@@ -652,10 +653,10 @@ func TestOrganizer_CopyWithLinkMode_SourceNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
@@ -829,10 +830,10 @@ func TestOrganizer_OrganizeBatch(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -891,10 +892,10 @@ func TestOrganizer_Copy_SourceDoesNotExist(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -928,7 +929,7 @@ func TestOrganizer_Plan_WithSubfolderFormat(t *testing.T) {
 		FolderFormat:    "<ID> - <TITLE>",
 		FileFormat:      "<ID>",
 		RenameFile:      true,
-		MoveToFolder:    true,
+		OperationMode:   types.OperationModeOrganize,
 		SubfolderFormat: []string{"<STUDIO>", "<YEAR>"},
 	}
 
@@ -982,11 +983,10 @@ func TestOrganizer_Execute_InPlaceRename_DirectoryAlreadyExists(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat:        "<ID> - <TITLE>",
-		FileFormat:          "<ID>",
-		RenameFile:          true,
-		MoveToFolder:        true,
-		RenameFolderInPlace: true,
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -1034,10 +1034,10 @@ func TestOrganizer_OrganizeBatch_PartialFailure(t *testing.T) {
 	file2 := filepath.Join(sourceDir, "xyz-999.mp4")
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -1100,10 +1100,10 @@ func TestOrganizer_OrganizeBatch_MissingMovieData(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeOrganize,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -1139,7 +1139,7 @@ func TestOrganizer_OrganizeBatch_MissingMovieData(t *testing.T) {
 	}
 }
 
-func TestOrganizer_Plan_RenameFolderInPlace_Priority(t *testing.T) {
+func TestOrganizer_Plan_InPlaceMode_DedicatedFolder(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	sourceDir := filepath.Join(tmpDir, "source", "old-folder")
@@ -1153,11 +1153,10 @@ func TestOrganizer_Plan_RenameFolderInPlace_Priority(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat:        "<ID> - <TITLE>",
-		FileFormat:          "<ID>",
-		RenameFile:          true,
-		RenameFolderInPlace: true,
-		MoveToFolder:        false,
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeInPlace,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -1188,7 +1187,7 @@ func TestOrganizer_Plan_RenameFolderInPlace_Priority(t *testing.T) {
 	}
 
 	if !plan.InPlace {
-		t.Errorf("Expected InPlace=true when RenameFolderInPlace=true, got false. SkipReason: %s", plan.SkipInPlaceReason)
+		t.Errorf("Expected InPlace=true when OperationMode=in-place, got false. SkipReason: %s", plan.SkipInPlaceReason)
 	}
 
 	expectedOldDir := sourceDir
@@ -1202,7 +1201,7 @@ func TestOrganizer_Plan_RenameFolderInPlace_Priority(t *testing.T) {
 	}
 }
 
-func TestOrganizer_Plan_BothConfigsTrue_RenamePriority(t *testing.T) {
+func TestOrganizer_Plan_InPlaceMode_BothFieldsReplacedByOperationMode(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	sourceDir := filepath.Join(tmpDir, "source", "old-folder")
@@ -1216,11 +1215,10 @@ func TestOrganizer_Plan_BothConfigsTrue_RenamePriority(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat:        "<ID> - <TITLE>",
-		FileFormat:          "<ID>",
-		RenameFile:          true,
-		RenameFolderInPlace: true,
-		MoveToFolder:        true, // Both configs true - rename should take priority
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeInPlace,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -1251,7 +1249,7 @@ func TestOrganizer_Plan_BothConfigsTrue_RenamePriority(t *testing.T) {
 	}
 
 	if !plan.InPlace {
-		t.Errorf("Expected InPlace=true when both configs true (rename takes priority), got false. SkipReason: %s", plan.SkipInPlaceReason)
+		t.Errorf("Expected InPlace=true with OperationMode=in-place, got false. SkipReason: %s", plan.SkipInPlaceReason)
 	}
 
 	expectedTargetDir := filepath.Join(tmpDir, "source", "IPX-535 - Beautiful Day")
@@ -1274,11 +1272,10 @@ func TestOrganizer_Plan_BothConfigsFalse_NoFolderChanges(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat:        "<ID> - <TITLE>",
-		FileFormat:          "<ID>",
-		RenameFile:          true,
-		RenameFolderInPlace: false,
-		MoveToFolder:        false,
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeMetadataOnly,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -1309,7 +1306,7 @@ func TestOrganizer_Plan_BothConfigsFalse_NoFolderChanges(t *testing.T) {
 	}
 
 	if plan.InPlace {
-		t.Error("Expected InPlace=false when both configs are false")
+		t.Error("Expected InPlace=false in metadata-only mode")
 	}
 
 	if filepath.ToSlash(plan.TargetDir) != filepath.ToSlash(sourceDir) {
@@ -1331,11 +1328,10 @@ func TestOrganizer_Plan_NoOpHasEmptyConflicts(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat:        "<ID> - <TITLE>",
-		FileFormat:          "<ID>",
-		RenameFile:          true,
-		RenameFolderInPlace: false,
-		MoveToFolder:        false,
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeMetadataOnly,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -1381,11 +1377,10 @@ func TestOrganizer_Plan_TruncationPreservesInPlaceSkip(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat:        "<ID> - <TITLE>",
-		FileFormat:          "<ID>",
-		RenameFile:          true,
-		RenameFolderInPlace: true,
-		MoveToFolder:        false,
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeInPlace,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -1451,11 +1446,10 @@ func TestOrganizer_Plan_TruncationPreservesMixedIdSkip(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat:        "<ID> - <TITLE>",
-		FileFormat:          "<ID>",
-		RenameFile:          true,
-		RenameFolderInPlace: true,
-		MoveToFolder:        false,
+		FolderFormat:  "<ID> - <TITLE>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: types.OperationModeInPlace,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)

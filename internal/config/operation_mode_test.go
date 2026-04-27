@@ -156,8 +156,6 @@ output:
 		cfg, err := Load(cfgPath)
 		require.NoError(t, err)
 		assert.Equal(t, types.OperationModeInPlace, cfg.Output.OperationMode)
-		assert.True(t, cfg.Output.RenameFolderInPlace)
-		assert.True(t, cfg.Output.MoveToFolder)
 	})
 
 	t.Run("default OperationMode is empty string", func(t *testing.T) {

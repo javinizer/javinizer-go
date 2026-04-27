@@ -87,17 +87,7 @@ func Normalize(cfg *Config) bool {
 	changed = normalizeTranslationConfig(&cfg.Metadata.Translation) || changed
 
 	if cfg.Output.OperationMode == "" {
-		var migrated types.OperationMode
-		if cfg.Output.RenameFolderInPlace {
-			migrated = types.OperationModeInPlace
-		} else if cfg.Output.MoveToFolder {
-			migrated = types.OperationModeOrganize
-		} else if cfg.Output.RenameFile {
-			migrated = types.OperationModeInPlaceNoRenameFolder
-		} else {
-			migrated = types.OperationModeMetadataOnly
-		}
-		cfg.Output.OperationMode = migrated
+		cfg.Output.OperationMode = types.OperationModeOrganize
 		changed = true
 	}
 

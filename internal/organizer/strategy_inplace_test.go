@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -417,13 +418,13 @@ func TestInPlaceStrategy_Execute_FileRenameAfterDirRename(t *testing.T) {
 	assert.False(t, exists, "Old directory should not exist")
 }
 
-func TestInPlaceStrategy_Execute_MoveToFolderFallback(t *testing.T) {
+func TestInPlaceStrategy_Execute_MoveToOrganizeFolder(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{
-		MoveToFolder: true,
-		FolderFormat: "<ID>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
+		OperationMode: types.OperationModeOrganize,
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
 	}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
 	strategy := NewInPlaceStrategy(fs, cfg, m, nil)

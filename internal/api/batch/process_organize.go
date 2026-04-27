@@ -36,19 +36,9 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 		} else {
 			outputConfig.OperationMode = parsed
 		}
-	} else {
-		if override := job.GetMoveToFolderOverride(); override != nil && *override {
-			outputConfig.MoveToFolder = true
-			outputConfig.RenameFolderInPlace = false
-		} else if override := job.GetRenameFolderInPlaceOverride(); override != nil && *override {
-			outputConfig.RenameFolderInPlace = true
-			outputConfig.MoveToFolder = false
-		}
 	}
 	effectiveMode := outputConfig.GetOperationMode()
 	outputConfig.OperationMode = effectiveMode
-	outputConfig.MoveToFolder = effectiveMode == types.OperationModeOrganize
-	outputConfig.RenameFolderInPlace = effectiveMode == types.OperationModeInPlace
 
 	// Create a single shared template engine for all strategies and components
 	sharedEngine := template.NewEngine()

@@ -7,6 +7,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/testutil"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,7 +79,7 @@ func TestOrganizerTemplate_ErrorHandling(t *testing.T) {
 				FolderFormat:   tt.template,
 				FileFormat:     "<ID>",
 				RenameFile:     true,
-				MoveToFolder:   true,
+				OperationMode:  types.OperationModeOrganize,
 				MoveSubtitles:  false,
 				MaxTitleLength: 0,
 			}
@@ -131,7 +132,7 @@ func TestOrganizerTemplate_NilContext(t *testing.T) {
 		FolderFormat:   "<ID> - <TITLE>",
 		FileFormat:     "<ID>",
 		RenameFile:     true,
-		MoveToFolder:   true,
+		OperationMode:  types.OperationModeOrganize,
 		MoveSubtitles:  false,
 		MaxTitleLength: 0,
 	}
@@ -210,7 +211,7 @@ func TestOrganizerTemplate_ConditionalErrors(t *testing.T) {
 				FolderFormat:   tt.template,
 				FileFormat:     "<ID>",
 				RenameFile:     true,
-				MoveToFolder:   true,
+				OperationMode:  types.OperationModeOrganize,
 				MoveSubtitles:  false,
 				MaxTitleLength: 0,
 			}

@@ -16,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -321,8 +322,8 @@ func TestGenerateNFOs(t *testing.T) {
 
 		nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfo.DefaultConfig())
 		outputCfg := &config.OutputConfig{
-			FolderFormat: "<ID>",
-			MoveToFolder: true,
+			FolderFormat:  "<ID>",
+			OperationMode: types.OperationModeOrganize,
 		}
 		org := organizer.NewOrganizer(afero.NewOsFs(), outputCfg, nil)
 		destPath := filepath.Join(tmpDir, "dest")

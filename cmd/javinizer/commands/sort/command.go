@@ -16,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 )
@@ -169,7 +170,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	// Step 4: Generate NFO files
 	if generateNFO {
 		_, err = commandutil.GenerateNFOs(movies, matches, nfoGenerator, fileOrganizer,
-			deps.Config.Metadata.NFO.Enabled, deps.Config.Output.MoveToFolder,
+			deps.Config.Metadata.NFO.Enabled, deps.Config.Output.GetOperationMode() == types.OperationModeOrganize,
 			deps.Config.Metadata.NFO.PerFile, destPath, forceUpdate, dryRun)
 		if err != nil {
 			return err
@@ -180,7 +181,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	if downloadMedia {
 		_, err = commandutil.DownloadMediaFiles(cmd.Context(), movies, matches, mediaDownloader, fileOrganizer,
 			deps.Config.Output.DownloadCover, deps.Config.Output.DownloadExtrafanart,
-			deps.Config.Output.MoveToFolder, destPath, forceUpdate, dryRun)
+			deps.Config.Output.GetOperationMode() == types.OperationModeOrganize, destPath, forceUpdate, dryRun)
 		if err != nil {
 			return err
 		}

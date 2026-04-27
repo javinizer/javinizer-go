@@ -214,8 +214,6 @@ func DefaultConfig() *Config {
 			MoveSubtitles:       false,
 			SubtitleExtensions:  []string{".srt", ".ass", ".ssa", ".smi", ".vtt"},
 			OperationMode:       "",
-			RenameFolderInPlace: false,
-			MoveToFolder:        true,  // Move to organized folders by default
 			RenameFile:          true,  // Rename files by default
 			AllowRevert:         false, // Opt-in: revert is disabled by default for safety
 			GroupActress:        false, // Don't group actresses by default

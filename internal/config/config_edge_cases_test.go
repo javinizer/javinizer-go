@@ -306,8 +306,6 @@ output:
 	assert.Equal(t, 200, output.MaxPathLength)
 	assert.True(t, output.MoveSubtitles)
 	assert.Len(t, output.SubtitleExtensions, 3)
-	assert.True(t, output.RenameFolderInPlace)
-	assert.False(t, output.MoveToFolder)
 	assert.False(t, output.RenameFile)
 	assert.True(t, output.GroupActress)
 	assert.Equal(t, "poster-<ID>.jpg", output.PosterFormat)

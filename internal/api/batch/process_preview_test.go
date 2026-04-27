@@ -963,8 +963,6 @@ func TestGeneratePreview_StrategyParity(t *testing.T) {
 
 			outputConfig := cfg.Output
 			outputConfig.OperationMode = mode
-			outputConfig.MoveToFolder = mode == types.OperationModeOrganize
-			outputConfig.RenameFolderInPlace = mode == types.OperationModeInPlace
 			outputConfig.MaxPathLength = 0
 
 			fs := afero.NewOsFs()
@@ -1050,8 +1048,6 @@ func TestGeneratePreview_StrategyParity_InPlaceRename(t *testing.T) {
 
 	outputConfig := cfg.Output
 	outputConfig.OperationMode = organizer.OperationModeInPlace
-	outputConfig.MoveToFolder = false
-	outputConfig.RenameFolderInPlace = true
 	outputConfig.MaxPathLength = 0
 
 	fs := afero.NewOsFs()
