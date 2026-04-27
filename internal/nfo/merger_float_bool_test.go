@@ -28,7 +28,7 @@ func TestMergeMovieMetadata_FloatMergeArrays(t *testing.T) {
 	}
 
 	// With MergeArrays strategy, scalar fields like RatingScore fall back to PreferScraper
-	result, err := MergeMovieMetadata(scraped, nfo, MergeArrays)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, true)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -54,7 +54,7 @@ func TestMergeMovieMetadata_BoolMergeArrays(t *testing.T) {
 	}
 
 	// With MergeArrays strategy, bool fields like ShouldCropPoster fall back to PreferScraper
-	result, err := MergeMovieMetadata(scraped, nfo, MergeArrays)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, true)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -80,7 +80,7 @@ func TestMergeFloatField_PreserveExisting(t *testing.T) {
 		RatingScore: 7.0,
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreserveExisting)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreserveExisting, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -105,7 +105,7 @@ func TestMergeBoolField_PreserveExisting(t *testing.T) {
 		ShouldCropPoster: true, // Both true to test conflict resolution (false = empty)
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreserveExisting)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreserveExisting, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -130,7 +130,7 @@ func TestMergeFloatField_FillMissingOnly(t *testing.T) {
 		RatingScore: 7.0,
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, FillMissingOnly)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, FillMissingOnly, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -155,7 +155,7 @@ func TestMergeBoolField_FillMissingOnly(t *testing.T) {
 		ShouldCropPoster: true, // Both true to test conflict resolution
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, FillMissingOnly)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, FillMissingOnly, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -179,7 +179,7 @@ func TestMergeFloatField_ScraperOnly(t *testing.T) {
 		Title:     "NFO",
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferScraper)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -203,7 +203,7 @@ func TestMergeBoolField_ScraperOnly(t *testing.T) {
 		Title:     "NFO",
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferScraper)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -227,7 +227,7 @@ func TestMergeFloatField_NFOOnly(t *testing.T) {
 		RatingScore: 7.0,
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferNFO)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferNFO, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -251,7 +251,7 @@ func TestMergeBoolField_NFOOnly(t *testing.T) {
 		ShouldCropPoster: true,
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferNFO)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferNFO, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -274,7 +274,7 @@ func TestMergeFloatField_BothEmpty(t *testing.T) {
 		Title:     "NFO",
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferScraper)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -298,7 +298,7 @@ func TestMergeBoolField_BothEmpty(t *testing.T) {
 		Title:     "NFO",
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferScraper)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -324,7 +324,7 @@ func TestMergeFloatField_PreferScraper_EmptyNFO(t *testing.T) {
 		RatingScore: 0, // Empty
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferScraper)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -349,7 +349,7 @@ func TestMergeBoolField_PreferScraper_EmptyNFO(t *testing.T) {
 		ShouldCropPoster: false, // Empty (false = empty for bool)
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferScraper)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -374,7 +374,7 @@ func TestMergeFloatField_PreferNFO_EmptyScraper(t *testing.T) {
 		RatingScore: 7.0,
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferNFO)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferNFO, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -399,7 +399,7 @@ func TestMergeBoolField_PreferNFO_EmptyScraper(t *testing.T) {
 		ShouldCropPoster: true,
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferNFO)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferNFO, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -424,7 +424,7 @@ func TestMergeFloatField_StrictPreferScraper_BothHaveData(t *testing.T) {
 		RatingScore: 7.0,
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferScraper)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -450,7 +450,7 @@ func TestMergeBoolField_StrictPreferScraper_BothHaveData(t *testing.T) {
 		ShouldCropPoster: true, // Both true to test conflict resolution (false = empty)
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferScraper)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -476,7 +476,7 @@ func TestMergeFloatField_StrictPreferNFO_BothHaveData(t *testing.T) {
 		RatingScore: 7.0,
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferNFO)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferNFO, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -502,7 +502,7 @@ func TestMergeBoolField_StrictPreferNFO_BothHaveData(t *testing.T) {
 		ShouldCropPoster: true, // Both true to test conflict resolution (false = empty)
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferNFO)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferNFO, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -533,7 +533,7 @@ func TestMergeFloatField_Timestamps(t *testing.T) {
 		UpdatedAt:   nfoTS,
 	}
 
-	result, err := MergeMovieMetadata(scraped, nfo, PreferScraper)
+	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -554,7 +554,7 @@ func TestMergeBoolField_Timestamps(t *testing.T) {
 		UpdatedAt:        scrapedTS,
 	}
 
-	result, err := MergeMovieMetadata(scraped, nil, PreferScraper)
+	result, err := MergeMovieMetadataWithOptions(scraped, nil, PreferScraper, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
