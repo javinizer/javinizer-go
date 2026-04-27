@@ -8,16 +8,22 @@ Conventions for keeping `internal/api` maintainable with subpackage boundaries.
 - `internal/api/core`: dependency container, runtime state, and shared security/path helpers.
 - `internal/api/server`: Gin router composition, middleware, docs/static/no-route setup.
 - Domain packages:
-  - `auth`
-  - `system`
-  - `movie`
   - `actress`
-  - `file`
+  - `apperrors`
+  - `auth`
   - `batch`
+  - `data`
+  - `events`
+  - `file`
+  - `genre`
   - `history`
+  - `jobs`
+  - `middleware`
+  - `movie`
+  - `realtime`
+  - `system`
   - `temp`
   - `version`
-  - `realtime`
 - `internal/api/testkit`: shared API test utilities.
 
 ## Guardrails
