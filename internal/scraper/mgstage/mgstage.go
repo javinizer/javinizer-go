@@ -45,38 +45,19 @@ var (
 
 // New creates a new MGStage scraper
 func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	// Handle nil globalProxy to avoid dereference panic
-	globalProxyVal := config.ProxyConfig{}
-	if globalProxy != nil {
-		globalProxyVal = *globalProxy
-	}
-	proxyCfg := config.ResolveScraperProxy(globalProxyVal, settings.Proxy)
+	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
+			httpclient.StandardHTMLHeaders(),
+			httpclient.UserAgentHeader(settings.UserAgent),
+			map[string]string{"Accept-Language": "ja,en-US;q=0.7,en;q=0.3"},
+		)),
+		httpclient.WithScraperCookies(map[string]string{
+			"adc": "1",
+		}),
+	)
+	client := result.Client
 
-	// Build ScraperConfig for HTTP client (HTTP-01 pattern)
-	configForHTTP := &config.ScraperSettings{
-		Enabled:       settings.Enabled,
-		Timeout:       settings.Timeout,
-		RateLimit:     settings.RateLimit,
-		RetryCount:    settings.RetryCount,
-		UserAgent:     settings.UserAgent,
-		Proxy:         settings.Proxy,
-		DownloadProxy: settings.DownloadProxy,
-	}
-
-	client, err := NewHTTPClient(configForHTTP, globalProxy, globalFlareSolverr)
-	proxyEnabled := globalProxy != nil && globalProxy.Enabled
-	if settings.Proxy != nil && settings.Proxy.Enabled {
-		proxyEnabled = true
-	}
-	usingProxy := err == nil && proxyEnabled && strings.TrimSpace(proxyCfg.URL) != ""
-	if err != nil {
-		logging.Errorf("MGStage: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
-		client = httpclient.NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)
-	}
-
-	if usingProxy {
-		logging.Infof("MGStage: Using proxy %s", httpclient.SanitizeProxyURL(proxyCfg.URL))
-	}
+	usingProxy := result.ProxyEnabled && strings.TrimSpace(result.ProxyProfile.URL) != ""
 
 	scraper := &Scraper{
 		client:        client,

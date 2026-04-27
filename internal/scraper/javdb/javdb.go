@@ -51,8 +51,7 @@ type Scraper struct {
 
 // New creates a new JavDB scraper.
 func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	// Create scraper config for HTTP client ownership (HTTP-01)
-	javdbScraperCfg := &config.ScraperSettings{
+	configForHTTP := &config.ScraperSettings{
 		Enabled:       settings.Enabled,
 		Timeout:       settings.Timeout,
 		RateLimit:     settings.RateLimit,
@@ -62,8 +61,11 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		DownloadProxy: settings.DownloadProxy,
 	}
 
-	// Create HTTP client and FlareSolverr via per-scraper NewHTTPClient (HTTP-01, HTTP-03)
-	client, flaresolverr, err := NewHTTPClient(javdbScraperCfg, globalProxy, globalFlareSolverr)
+	client, flaresolverr, err := httpclient.FromScraperSettings(configForHTTP, globalProxy, globalFlareSolverr,
+		httpclient.WithHeaders(httpclient.StandardHTMLHeaders()),
+		httpclient.WithHeaders(httpclient.UserAgentHeader(settings.UserAgent)),
+	).BuildWithFlareSolverr()
+
 	proxyEnabled := false
 	var proxyCfg *config.ProxyProfile
 	if globalProxy != nil {
