@@ -268,8 +268,6 @@ output:
     - .srt
     - .vtt
     - .sub
-  rename_folder_in_place: true
-  move_to_folder: false
   rename_file: false
   group_actress: true
   poster_format: "poster-<ID>.jpg"
