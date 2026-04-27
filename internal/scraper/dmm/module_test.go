@@ -3,13 +3,45 @@ package dmm
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestOptions(t *testing.T) {
 	m := &scraperModule{}
+	m.StandardModule = scraperutil.StandardModule{
+		ScraperOptions: []any{
+			models.ScraperOption{
+				Key:         "use_browser",
+				Label:       "Use Browser",
+				Description: "Enable browser automation for this scraper. Requires global 'Use Browser' to be enabled.",
+				Type:        "boolean",
+			},
+			models.ScraperOption{
+				Key:         "scrape_actress",
+				Label:       "Scrape Actress Information",
+				Description: "Override global setting: Extract actress names and IDs. Requires global 'Scrape Actress Information' to be enabled.",
+				Type:        "boolean",
+			},
+			models.ScraperOption{
+				Key:         "placeholder_threshold",
+				Label:       "Placeholder Threshold",
+				Description: "File size threshold in KB for detecting placeholder images. Files smaller than this are considered potential placeholders.",
+				Type:        "number",
+				Default:     10,
+				Min:         scraperutil.IntPtr(1),
+				Max:         scraperutil.IntPtr(1000),
+				Unit:        "KB",
+			},
+			models.ScraperOption{
+				Key:         "extra_placeholder_hashes",
+				Label:       "Extra Placeholder Hashes",
+				Description: "Additional SHA256 hashes of known placeholder images. Each hash is a 64-character hex string.",
+				Type:        "string",
+			},
+		},
+	}
 	options := m.Options().([]any)
 
 	assert.Len(t, options, 4, "should have 4 options")

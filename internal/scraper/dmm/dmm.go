@@ -88,43 +88,15 @@ func New(settings config.ScraperSettings, globalConfig *config.ScrapersConfig, c
 	resolvedTimeout := resolveTimeout(settings.Timeout, globalConfig.TimeoutSeconds)
 	settings.Timeout = resolvedTimeout
 
-	scraperCfg := &config.ScraperSettings{
-		Enabled:       settings.Enabled,
-		Timeout:       resolvedTimeout,
-		RateLimit:     settings.RateLimit,
-		RetryCount:    settings.RetryCount,
-		UserAgent:     settings.UserAgent,
-		Proxy:         settings.Proxy,
-		DownloadProxy: settings.DownloadProxy,
-	}
-
-	client, proxyProfile, err := NewHTTPClient(scraperCfg, &globalConfig.Proxy, globalConfig.FlareSolverr)
-	if err != nil {
-		fallbackCfg := &config.ScraperSettings{
-			Enabled:       settings.Enabled,
-			Timeout:       resolveTimeout(settings.Timeout, 0),
-			RateLimit:     settings.RateLimit,
-			RetryCount:    settings.RetryCount,
-			UserAgent:     settings.UserAgent,
-			Proxy:         settings.Proxy,
-			DownloadProxy: settings.DownloadProxy,
-		}
-		var fallbackErr error
-		client, proxyProfile, fallbackErr = NewHTTPClient(fallbackCfg, nil, globalConfig.FlareSolverr)
-		if fallbackErr != nil {
-			logging.Warnf("DMM: Failed to create HTTP client: %v (fallback also failed: %v)", err, fallbackErr)
-			return nil
-		}
-		logging.Debugf("DMM: Using fallback HTTP client without proxy: %v", err)
-	}
-
-	proxyEnabled := globalConfig.Proxy.Enabled
-	if settings.Proxy != nil && settings.Proxy.Enabled {
-		proxyEnabled = true
-	}
-	if proxyEnabled && proxyProfile != nil && proxyProfile.URL != "" {
-		logging.Infof("DMM: Using proxy %s", httpclient.SanitizeProxyURL(proxyProfile.URL))
-	}
+	result := httpclient.InitScraperClient(&settings, &globalConfig.Proxy, globalConfig.FlareSolverr,
+		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
+			httpclient.DMMHeaders(),
+			httpclient.UserAgentHeader(settings.UserAgent),
+		)),
+		httpclient.WithProxyProfile(),
+	)
+	client := result.Client
+	proxyProfile := result.ProxyProfile
 
 	return &Scraper{
 		client:        client,

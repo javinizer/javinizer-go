@@ -133,14 +133,16 @@ func TestValidateConfig(t *testing.T) {
 func TestDMMConfig_ToScraperSettings(t *testing.T) {
 	testHash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	cfg := &DMMConfig{
-		Enabled:                true,
-		RequestDelay:           500,
-		MaxRetries:             7,
-		UserAgent:              "CustomUA/1.0",
 		UseBrowser:             true,
 		ScrapeActress:          true,
 		PlaceholderThresholdKB: 15,
 		ExtraPlaceholderHashes: []string{testHash},
+	}
+	cfg.BaseScraperConfig = config.BaseScraperConfig{
+		Enabled:      true,
+		RequestDelay: 500,
+		MaxRetries:   7,
+		UserAgent:    "CustomUA/1.0",
 	}
 
 	settings := cfg.ToScraperSettings()
@@ -159,9 +161,9 @@ func TestDMMConfig_ToScraperSettings(t *testing.T) {
 
 func TestDMMConfig_ToScraperSettings_ScrapeActressFalse(t *testing.T) {
 	cfg := &DMMConfig{
-		Enabled:       true,
 		ScrapeActress: false,
 	}
+	cfg.BaseScraperConfig.Enabled = true
 
 	settings := cfg.ToScraperSettings()
 
@@ -170,9 +172,8 @@ func TestDMMConfig_ToScraperSettings_ScrapeActressFalse(t *testing.T) {
 }
 
 func TestDMMConfig_ToScraperSettings_EmptyFields(t *testing.T) {
-	cfg := &DMMConfig{
-		Enabled: true,
-	}
+	cfg := &DMMConfig{}
+	cfg.BaseScraperConfig.Enabled = true
 
 	settings := cfg.ToScraperSettings()
 
