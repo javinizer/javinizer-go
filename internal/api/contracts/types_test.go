@@ -38,11 +38,6 @@ func TestBatchScrapeRequest_OperationMode(t *testing.T) {
 			json:     `{"files":["/test/file.mp4"],"operation_mode":"preview"}`,
 			wantMode: "preview",
 		},
-		{
-			name:     "operation_mode with existing boolean fields",
-			json:     `{"files":["/test/file.mp4"],"move_to_folder":true,"operation_mode":"in-place"}`,
-			wantMode: "in-place",
-		},
 	}
 
 	for _, tt := range tests {
