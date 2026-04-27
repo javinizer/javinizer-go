@@ -678,6 +678,25 @@ func normalizeNameKey(name string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(name))), " ")
 }
 
+func isUnknownActress(info models.ActressInfo, nameKey string, unknownText string) bool {
+	if unknownText == "" {
+		return false
+	}
+	if nameKey == unknownText {
+		return true
+	}
+	if normalizeNameKey(info.JapaneseName) == unknownText {
+		return true
+	}
+	if normalizeNameKey(info.FirstName) == unknownText {
+		return true
+	}
+	if normalizeNameKey(info.LastName) == unknownText {
+		return true
+	}
+	return false
+}
+
 func resolveNameKey(japaneseName, firstName, lastName string) string {
 	if k := normalizeNameKey(japaneseName); k != "" {
 		return k
@@ -695,10 +714,15 @@ func (a *Aggregator) getActressesByPriority(
 ) []models.Actress {
 	// Collect actresses from all sources, keyed by DMMID (most reliable identifier)
 	actressByDMMID := make(map[int]*models.Actress)
-	// Track actresses without DMMID separately (keyed by name)
 	actressByName := make(map[string]*models.Actress)
 
-	// Process sources in priority order
+	unknownText := ""
+	if a.config != nil {
+		unknownText = strings.ToLower(strings.TrimSpace(a.config.Metadata.NFO.UnknownActressText))
+	}
+
+	hadAnyActressFromScrapers := false
+
 	for _, source := range priority {
 		result, exists := results[source]
 		if !exists || len(result.Actresses) == 0 {
@@ -706,7 +730,13 @@ func (a *Aggregator) getActressesByPriority(
 		}
 
 		for _, info := range result.Actresses {
+			hadAnyActressFromScrapers = true
+
 			nameKey := resolveNameKey(info.JapaneseName, info.FirstName, info.LastName)
+
+			if unknownText != "" && isUnknownActress(info, nameKey, unknownText) {
+				continue
+			}
 
 			var existing *models.Actress
 			var foundInDMMIDMap bool
@@ -803,7 +833,7 @@ func (a *Aggregator) getActressesByPriority(
 	}
 
 	// If no actresses found and unknown actress text is set, add unknown
-	if a.config.Metadata.NFO.UnknownActressText != "" {
+	if !hadAnyActressFromScrapers && a.config.Metadata.NFO.UnknownActressText != "" {
 		return []models.Actress{
 			{
 				FirstName:    a.config.Metadata.NFO.UnknownActressText,

@@ -96,6 +96,96 @@ func TestAggregatePerFieldPreference(t *testing.T) {
 	assert.Equal(t, "MGStage Title", movie.Title, "Per-field override should set mgstage as preferred for title")
 }
 
+func TestUnknownActressFilteredFromScraperResults(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"mgstage"},
+		},
+		Metadata: config.MetadataConfig{
+			NFO: config.NFOConfig{
+				UnknownActressText: "Unknown",
+			},
+		},
+	}
+
+	agg := New(cfg)
+
+	results := []*models.ScraperResult{
+		{
+			Source: "mgstage",
+			ID:     "200GANA-3215",
+			Title:  "マジ軟派、初撮。 2172",
+			Actresses: []models.ActressInfo{
+				{FirstName: "Unknown"},
+			},
+		},
+	}
+
+	movie, _, err := agg.Aggregate(results)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+
+	assert.Equal(t, 0, len(movie.Actresses), "Actress named 'Unknown' should be filtered out")
+}
+
+func TestUnknownActressJapaneseNameFiltered(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"mgstage"},
+		},
+		Metadata: config.MetadataConfig{
+			NFO: config.NFOConfig{
+				UnknownActressText: "Unknown",
+			},
+		},
+	}
+
+	agg := New(cfg)
+
+	results := []*models.ScraperResult{
+		{
+			Source: "mgstage",
+			ID:     "200GANA-3215",
+			Title:  "マジ軟派、初撮。 2172",
+			Actresses: []models.ActressInfo{
+				{JapaneseName: "Unknown"},
+				{JapaneseName: "テスト女優"},
+			},
+		},
+	}
+
+	movie, _, err := agg.Aggregate(results)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+
+	assert.Equal(t, 1, len(movie.Actresses), "Only non-Unknown actress should remain")
+	assert.Equal(t, "テスト女優", movie.Actresses[0].JapaneseName)
+}
+
+func TestIsUnknownActress(t *testing.T) {
+	tests := []struct {
+		name        string
+		info        models.ActressInfo
+		unknownText string
+		want        bool
+	}{
+		{"first name unknown", models.ActressInfo{FirstName: "Unknown"}, "unknown", true},
+		{"japanese name unknown", models.ActressInfo{JapaneseName: "Unknown"}, "unknown", true},
+		{"last name unknown", models.ActressInfo{LastName: "Unknown"}, "unknown", true},
+		{"case insensitive", models.ActressInfo{FirstName: "UNKNOWN"}, "unknown", true},
+		{"normal name", models.ActressInfo{JapaneseName: "テスト女優"}, "unknown", false},
+		{"empty unknown text", models.ActressInfo{FirstName: "Unknown"}, "", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			nameKey := resolveNameKey(tc.info.JapaneseName, tc.info.FirstName, tc.info.LastName)
+			got := isUnknownActress(tc.info, nameKey, tc.unknownText)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestMergePriorityLists(t *testing.T) {
 	tests := []struct {
 		name     string
