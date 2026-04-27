@@ -67,9 +67,7 @@ export interface BatchScrapeRequest {
 	preset?: 'conservative' | 'gap-fill' | 'aggressive'; // Merge strategy preset (overrides scalar/array)
 	scalar_strategy?: 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
 	array_strategy?: 'merge' | 'replace';
-	move_to_folder?: boolean; // Override config.output.move_to_folder
-	rename_folder_in_place?: boolean; // Override config.output.rename_folder_in_place
-	operation_mode?: OperationMode; // Per-request override of config operation_mode. Takes priority over boolean fields when set.
+	operation_mode?: OperationMode; // Per-request override of config operation_mode
 }
 
 export interface RescrapeRequest {
@@ -128,7 +126,6 @@ export interface FieldDifference {
 
 export interface NFOComparisonRequest {
 	nfo_path?: string;
-	merge_strategy?: 'prefer-scraper' | 'prefer-nfo' | 'merge-arrays'; // Deprecated: use preset or scalar/array strategies
 	preset?: 'conservative' | 'gap-fill' | 'aggressive';
 	scalar_strategy?: 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
 	array_strategy?: 'merge' | 'replace';

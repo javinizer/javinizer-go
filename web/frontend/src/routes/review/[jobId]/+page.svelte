@@ -726,7 +726,7 @@
 						bind:showFullSourcePath={showFullSourcePath}
 					/>
 
-					<!-- Destination Path (hidden in update mode or when move_to_folder disabled) -->
+					<!-- Destination Path (hidden in update mode or metadata-only mode) -->
 					{#if canOrganize}
 						<DestinationSettingsCard
 							bind:destinationPath={destinationPath}
