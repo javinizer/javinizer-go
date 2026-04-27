@@ -37,6 +37,7 @@ func init() {
 		ScraperPriority: 35,
 		ConfigType:      func() scraperutil.ScraperConfigInterface { return &FC2Config{} },
 		NewScraperFunc: func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
+			_ = db
 			var globalProxy *config.ProxyConfig
 			var globalFlareSolverr config.FlareSolverrConfig
 			if globalConfig != nil {

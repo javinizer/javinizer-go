@@ -42,6 +42,7 @@ func init() {
 		ScraperPriority: 75,
 		ConfigType:      func() scraperutil.ScraperConfigInterface { return &JavDBConfig{} },
 		NewScraperFunc: func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
+			_ = db
 			var globalProxy *config.ProxyConfig
 			var globalFlareSolverr config.FlareSolverrConfig
 			if globalConfig != nil {
