@@ -356,14 +356,15 @@ func (a *Aggregator) resolvePriorities() {
 	}
 
 	for _, field := range fields {
-		// Check for per-field override from config
+		fieldPriority := copySlice(globalPriority)
+
 		if a.config != nil {
 			if fp := a.config.Metadata.Priority.GetFieldPriority(toSnakeCase(field)); len(fp) > 0 {
-				a.resolvedPriorities[field] = copySlice(fp)
-				continue
+				fieldPriority = mergePriorityLists(fp, globalPriority)
 			}
 		}
-		a.resolvedPriorities[field] = copySlice(globalPriority)
+
+		a.resolvedPriorities[field] = fieldPriority
 	}
 }
 
@@ -371,6 +372,26 @@ func (a *Aggregator) resolvePriorities() {
 // Implements AggregatorInterface
 func (a *Aggregator) GetResolvedPriorities() map[string][]string {
 	return a.resolvedPriorities
+}
+
+// mergePriorityLists appends globalFallback to perFieldOverride, skipping duplicates.
+// Per-field entries keep their relative order; global entries fill in after.
+func mergePriorityLists(perFieldOverride, globalFallback []string) []string {
+	seen := make(map[string]struct{}, len(perFieldOverride)+len(globalFallback))
+	merged := make([]string, 0, len(perFieldOverride)+len(globalFallback))
+	for _, s := range perFieldOverride {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			merged = append(merged, s)
+		}
+	}
+	for _, s := range globalFallback {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			merged = append(merged, s)
+		}
+	}
+	return merged
 }
 
 // getFieldPriorityFromConfig returns the scraper priority list.
@@ -383,14 +404,19 @@ func getFieldPriorityFromConfig(cfg *config.Config, fieldKey string) []string {
 		return nil
 	}
 
-	// Check per-field override via GetFieldPriority (handles fallback internally)
 	if fp := cfg.Metadata.Priority.GetFieldPriority(fieldKey); len(fp) > 0 {
 		return fp
 	}
 
-	// Fall back to configured global scraper priority.
-	// This keeps default aggregation behavior aligned with scrape execution order.
-	return cfg.Scrapers.Priority
+	if len(cfg.Scrapers.Priority) > 0 {
+		return cfg.Scrapers.Priority
+	}
+
+	if priorities := scraperutil.GetPriorities(); len(priorities) > 0 {
+		return priorities
+	}
+
+	return nil
 }
 
 // copySlice creates a copy of a string slice
