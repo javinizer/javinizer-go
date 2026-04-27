@@ -25,7 +25,6 @@ import (
 // If updateMode is true, will also download media files and generate NFOs in place without moving files.
 // scalarStrategy determines how to merge scalar fields (prefer-scraper, prefer-nfo)
 // arrayStrategy determines how to merge array fields (merge, replace)
-// moveToFolderOverride and renameFolderInPlaceOverride allow per-job folder mode overrides.
 // operationModeOverride allows per-job operation mode override (organize, in-place, metadata-only, preview).
 type BatchProcessOptions struct {
 	Job                   *worker.BatchJob
