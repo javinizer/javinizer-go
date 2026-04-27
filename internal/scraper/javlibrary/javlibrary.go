@@ -38,7 +38,6 @@ type Scraper struct {
 
 // New creates a new JavLibrary scraper.
 func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	// Build ScraperConfig for NewHTTPClient (HTTP-01 pattern)
 	configForHTTP := &config.ScraperSettings{
 		Enabled:         settings.Enabled,
 		Language:        settings.Language,
@@ -48,11 +47,14 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		UserAgent:       settings.UserAgent,
 		Proxy:           settings.Proxy,
 		DownloadProxy:   settings.DownloadProxy,
-		UseFlareSolverr: settings.UseFlareSolverr, // Pass the FlareSolverr flag
+		UseFlareSolverr: settings.UseFlareSolverr,
 	}
 
-	client, flaresolverr, err := NewHTTPClient(configForHTTP, globalProxy, globalFlareSolverr)
-	// Resolve proxy to check if it's actually being used
+	client, flaresolverr, err := httpclient.FromScraperSettings(configForHTTP, globalProxy, globalFlareSolverr,
+		httpclient.WithHeaders(httpclient.StandardHTMLHeaders()),
+		httpclient.WithHeaders(httpclient.UserAgentHeader(settings.UserAgent)),
+	).BuildWithFlareSolverr()
+
 	var resolvedProxy *config.ProxyProfile
 	usingProxy := false
 	if globalProxy != nil {
@@ -70,7 +72,6 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		baseURL = "http://www.javlibrary.com"
 	}
 
-	// Normalize language to a supported value
 	language := settings.Language
 	if language == "" {
 		language = "en"

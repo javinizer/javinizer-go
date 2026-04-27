@@ -8,95 +8,78 @@ import (
 )
 
 func init() {
-	scraperutil.RegisterModule(&scraperModule{})
-}
-
-type scraperModule struct{}
-
-func (m *scraperModule) Name() string        { return "javlibrary" }
-func (m *scraperModule) Description() string { return "JavLibrary" }
-func (m *scraperModule) Constructor() any {
-	return func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-		var globalProxy *config.ProxyConfig
-		var globalFlareSolverr config.FlareSolverrConfig
-		if globalConfig != nil {
-			globalProxy = &globalConfig.Proxy
-			globalFlareSolverr = globalConfig.FlareSolverr
-		}
-		return New(settings, globalProxy, globalFlareSolverr), nil
-	}
-}
-func (m *scraperModule) Validator() any {
-	return scraperutil.ValidatorFunc(func(a any) error {
-		return (&JavLibraryConfig{}).ValidateConfig(a.(*config.ScraperSettings))
-	})
-}
-func (m *scraperModule) ConfigFactory() any {
-	return scraperutil.ConfigFactory(func() any { return &JavLibraryConfig{} })
-}
-func (m *scraperModule) Options() any {
-	return []any{
-		models.ScraperOption{
-			Key:         "language",
-			Label:       "Language",
-			Description: "Language for metadata fields",
-			Type:        "select",
-			Default:     "ja",
-			Choices: []models.ScraperChoice{
-				{Value: "en", Label: "English"},
-				{Value: "ja", Label: "Japanese"},
-				{Value: "cn", Label: "Chinese (Simplified)"},
-				{Value: "tw", Label: "Chinese (Traditional)"},
+	m := &scraperModule{}
+	m.StandardModule = scraperutil.StandardModule{
+		ScraperName:        "javlibrary",
+		ScraperDescription: "JavLibrary",
+		ScraperOptions: []any{
+			models.ScraperOption{
+				Key:         "language",
+				Label:       "Language",
+				Description: "Language for metadata fields",
+				Type:        "select",
+				Default:     "ja",
+				Choices: []models.ScraperChoice{
+					{Value: "en", Label: "English"},
+					{Value: "ja", Label: "Japanese"},
+					{Value: "cn", Label: "Chinese (Simplified)"},
+					{Value: "tw", Label: "Chinese (Traditional)"},
+				},
+			},
+			models.ScraperOption{
+				Key:         "request_delay",
+				Label:       "Request Delay",
+				Description: "Delay between requests to avoid rate limiting",
+				Type:        "number",
+				Min:         scraperutil.IntPtr(0),
+				Max:         scraperutil.IntPtr(5000),
+				Unit:        "ms",
+			},
+			models.ScraperOption{
+				Key:         "base_url",
+				Label:       "Base URL",
+				Description: "JavLibrary base URL (leave default unless you need a mirror)",
+				Type:        "string",
+			},
+			models.ScraperOption{
+				Key:         "use_flaresolverr",
+				Label:       "Use FlareSolverr",
+				Description: "Route requests through FlareSolverr to bypass Cloudflare protection",
+				Type:        "boolean",
 			},
 		},
-		models.ScraperOption{
-			Key:         "request_delay",
-			Label:       "Request Delay",
-			Description: "Delay between requests to avoid rate limiting",
-			Type:        "number",
-			Min:         scraperutil.IntPtr(0),
-			Max:         scraperutil.IntPtr(5000),
-			Unit:        "ms",
+		ScraperDefaults: config.ScraperSettings{
+			Enabled:   false,
+			Language:  "en",
+			RateLimit: 1000,
 		},
-		models.ScraperOption{
-			Key:         "base_url",
-			Label:       "Base URL",
-			Description: "JavLibrary base URL (leave default unless you need a mirror)",
-			Type:        "string",
+		ScraperPriority: 80,
+		ConfigType:      func() scraperutil.ScraperConfigInterface { return &JavLibraryConfig{} },
+		NewScraperFunc: func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
+			var globalProxy *config.ProxyConfig
+			var globalFlareSolverr config.FlareSolverrConfig
+			if globalConfig != nil {
+				globalProxy = &globalConfig.Proxy
+				globalFlareSolverr = globalConfig.FlareSolverr
+			}
+			return New(settings, globalProxy, globalFlareSolverr), nil
 		},
-		models.ScraperOption{
-			Key:         "use_flaresolverr",
-			Label:       "Use FlareSolverr",
-			Description: "Route requests through FlareSolverr to bypass Cloudflare protection",
-			Type:        "boolean",
+		FlatBuilderRaw: func(fc *scraperutil.FlattenedConfig, _ scraperutil.FlattenOverrides, raw any) any {
+			s := &config.ScraperSettings{Enabled: fc.Enabled, RateLimit: fc.RateLimit, Proxy: config.ProxyAsConfig(fc.Proxy), DownloadProxy: config.ProxyAsConfig(fc.DownloadProxy)}
+			if jlCfg, ok := raw.(*JavLibraryConfig); ok {
+				s.Language = jlCfg.Language
+				s.BaseURL = jlCfg.BaseURL
+				s.Cookies = jlCfg.Cookies
+			}
+			return s
 		},
+		UseRawBuilder: true,
 	}
-}
-func (m *scraperModule) Defaults() any {
-	return config.ScraperSettings{
-		Enabled:   false,
-		Language:  "en",
-		RateLimit: 1000,
-	}
-}
-func (m *scraperModule) Priority() int { return 80 }
-func proxyAsConfig(p any) *config.ProxyConfig {
-	if p == nil {
-		return nil
-	}
-	return p.(*config.ProxyConfig)
+	scraperutil.RegisterModule(m)
 }
 
-func (m *scraperModule) FlattenFunc() any {
-	return scraperutil.DefaultFlattenConfigWithRaw(scraperutil.FlattenOverrides{}, func(fc *scraperutil.FlattenedConfig, _ scraperutil.FlattenOverrides, raw any) any {
-		s := &config.ScraperSettings{Enabled: fc.Enabled, RateLimit: fc.RateLimit, Proxy: proxyAsConfig(fc.Proxy), DownloadProxy: proxyAsConfig(fc.DownloadProxy)}
-		if jlCfg, ok := raw.(*JavLibraryConfig); ok {
-			s.Language = jlCfg.Language
-			s.BaseURL = jlCfg.BaseURL
-			s.Cookies = jlCfg.Cookies
-		}
-		return s
-	})
+type scraperModule struct {
+	scraperutil.StandardModule
 }
 
 var _ scraperutil.ScraperModule = (*scraperModule)(nil)
