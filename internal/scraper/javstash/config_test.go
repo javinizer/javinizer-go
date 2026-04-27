@@ -4,8 +4,51 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestFlattenFunc_WithValidConfig(t *testing.T) {
+	fn := scraperutil.GetFlattenFunc("javstash")
+	require.NotNil(t, fn)
+
+	cfg := &JavstashConfig{BaseScraperConfig: config.BaseScraperConfig{Enabled: true, RequestDelay: 1000}, Language: "en", BaseURL: "https://javstash.org/graphql", APIKey: "test-key"}
+	result := fn(cfg)
+	require.NotNil(t, result)
+
+	settings, ok := result.(*config.ScraperSettings)
+	require.True(t, ok)
+	assert.True(t, settings.Enabled)
+	assert.Equal(t, 1000, settings.RateLimit)
+	assert.Equal(t, "en", settings.Language)
+	assert.Equal(t, "https://javstash.org/graphql", settings.BaseURL)
+	require.NotNil(t, settings.Extra)
+	assert.Equal(t, "test-key", settings.Extra["api_key"])
+}
+
+func TestFlattenFunc_WithProxy(t *testing.T) {
+	fn := scraperutil.GetFlattenFunc("javstash")
+	require.NotNil(t, fn)
+
+	proxyCfg := &config.ProxyConfig{Enabled: true, Profile: "test"}
+	cfg := &JavstashConfig{BaseScraperConfig: config.BaseScraperConfig{Enabled: true, RequestDelay: 500, Proxy: proxyCfg, DownloadProxy: proxyCfg}, APIKey: "test-key"}
+	result := fn(cfg)
+	require.NotNil(t, result)
+
+	settings, ok := result.(*config.ScraperSettings)
+	require.True(t, ok)
+	assert.NotNil(t, settings.Proxy)
+	assert.NotNil(t, settings.DownloadProxy)
+}
+
+func TestFlattenFunc_WithNonScraperConfig(t *testing.T) {
+	fn := scraperutil.GetFlattenFunc("javstash")
+	require.NotNil(t, fn)
+
+	result := fn("not a config")
+	assert.Nil(t, result)
+}
 
 func TestValidateConfig(t *testing.T) {
 	tests := []struct {
