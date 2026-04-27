@@ -230,8 +230,7 @@ func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
 
 // searchByID tries to find the product URL for a given ID via search and direct URL lookup.
 func (s *Scraper) searchByID(ctx context.Context, id string) (string, error) {
-	searchID := normalizeIDForSearch(id)
-	searchReqURL := fmt.Sprintf(searchURL, searchID)
+	searchReqURL := fmt.Sprintf(searchURL, url.QueryEscape(id))
 
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
