@@ -110,9 +110,9 @@ func compareNFO(deps *ServerDependencies) gin.HandlerFunc {
 		// Aggregate results
 		var scrapedMovie *models.Movie
 		if len(req.SelectedScrapers) > 0 {
-			scrapedMovie, err = deps.GetAggregator().AggregateWithPriority(results, req.SelectedScrapers)
+			scrapedMovie, _, err = deps.GetAggregator().AggregateWithPriority(results, req.SelectedScrapers)
 		} else {
-			scrapedMovie, err = deps.GetAggregator().Aggregate(results)
+			scrapedMovie, _, err = deps.GetAggregator().Aggregate(results)
 		}
 		if err != nil {
 			c.JSON(500, ErrorResponse{Error: fmt.Sprintf("Aggregation failed: %v", err)})

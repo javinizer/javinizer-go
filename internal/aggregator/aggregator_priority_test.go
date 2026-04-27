@@ -63,7 +63,7 @@ func TestAggregatePriority_JapaneseFirst(t *testing.T) {
 	// Test with DMM first in results array
 	t.Run("DMM prioritized in config", func(t *testing.T) {
 		results := []*models.ScraperResult{r18devResult, dmmResult}
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -99,7 +99,7 @@ func TestAggregatePriority_JapaneseFirst(t *testing.T) {
 
 		aggR18First := New(cfgR18First)
 		results := []*models.ScraperResult{r18devResult, dmmResult}
-		movie, err := aggR18First.Aggregate(results)
+		movie, _, err := aggR18First.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -144,7 +144,7 @@ func TestAggregatePriority_MissingData(t *testing.T) {
 	}
 
 	results := []*models.ScraperResult{dmmResult, r18devResult}
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -198,7 +198,7 @@ func TestAggregatePriority_EmptyPriorityFallsBackToGlobal(t *testing.T) {
 	}
 
 	results := []*models.ScraperResult{r18devResult, dmmResult}
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -250,7 +250,7 @@ func TestAggregatePriority_MissingPriorityFallsBackToGlobal(t *testing.T) {
 	}
 
 	results := []*models.ScraperResult{r18devResult, dmmResult}
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -311,7 +311,7 @@ func TestAggregateWithPriority_CustomPriority(t *testing.T) {
 
 	// Test with custom priority that overrides config (r18dev first)
 	customPriority := []string{"r18dev", "dmm"}
-	movie, err := agg.AggregateWithPriority(results, customPriority)
+	movie, _, err := agg.AggregateWithPriority(results, customPriority)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -327,7 +327,7 @@ func TestAggregateWithPriority_CustomPriority(t *testing.T) {
 
 	// Test with opposite custom priority (dmm first)
 	customPriorityDMM := []string{"dmm", "r18dev"}
-	movie2, err := agg.AggregateWithPriority(results, customPriorityDMM)
+	movie2, _, err := agg.AggregateWithPriority(results, customPriorityDMM)
 	require.NoError(t, err)
 	require.NotNil(t, movie2)
 
@@ -348,7 +348,7 @@ func TestAggregateWithPriority_EmptyResults(t *testing.T) {
 	results := []*models.ScraperResult{}
 	customPriority := []string{"r18dev", "dmm"}
 
-	movie, err := agg.AggregateWithPriority(results, customPriority)
+	movie, _, err := agg.AggregateWithPriority(results, customPriority)
 	assert.Error(t, err)
 	assert.Nil(t, movie)
 	assert.Contains(t, err.Error(), "no scraper results to aggregate")
@@ -380,7 +380,7 @@ func TestAggregateWithPriority_FallbackToNextPriority(t *testing.T) {
 	results := []*models.ScraperResult{firstResult, secondResult}
 	customPriority := []string{"scraper1", "scraper2"}
 
-	movie, err := agg.AggregateWithPriority(results, customPriority)
+	movie, _, err := agg.AggregateWithPriority(results, customPriority)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -444,7 +444,7 @@ func TestAggregateWithPriority_AllFields(t *testing.T) {
 	results := []*models.ScraperResult{result}
 	customPriority := []string{"test-scraper"}
 
-	movie, err := agg.AggregateWithPriority(results, customPriority)
+	movie, _, err := agg.AggregateWithPriority(results, customPriority)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -615,13 +615,13 @@ func TestAggregateWithPriority_ShouldCropPoster(t *testing.T) {
 
 	// Test with r18dev first - should get ShouldCropPoster = false
 	results := []*models.ScraperResult{r18devResult, dmmResult}
-	movie, err := agg.AggregateWithPriority(results, []string{"r18dev", "dmm"})
+	movie, _, err := agg.AggregateWithPriority(results, []string{"r18dev", "dmm"})
 	require.NoError(t, err)
 	assert.Equal(t, "https://r18dev.com/poster.jpg", movie.PosterURL)
 	assert.False(t, movie.ShouldCropPoster, "ShouldCropPoster should match r18dev source")
 
 	// Test with dmm first - should get ShouldCropPoster = true
-	movie2, err := agg.AggregateWithPriority(results, []string{"dmm", "r18dev"})
+	movie2, _, err := agg.AggregateWithPriority(results, []string{"dmm", "r18dev"})
 	require.NoError(t, err)
 	assert.Equal(t, "https://dmm.com/poster.jpg", movie2.PosterURL)
 	assert.True(t, movie2.ShouldCropPoster, "ShouldCropPoster should match dmm source")

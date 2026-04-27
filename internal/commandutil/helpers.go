@@ -150,7 +150,7 @@ func ScrapeMetadata(
 		logging.Debugf("[%s] Collected %d results from scrapers, starting aggregation", id, len(results))
 
 		// Aggregate and save
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		if err != nil {
 			fmt.Printf("❌ (aggregate error: %v)\n", err)
 			logging.Debugf("[%s] Aggregation failed: %v", id, err)

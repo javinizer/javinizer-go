@@ -254,9 +254,9 @@ func Run(cmd *cobra.Command, args []string, configFile string, deps *commandutil
 	// metadata priorities don't accidentally exclude the selected source(s).
 	var movie *models.Movie
 	if usingCustomScrapers {
-		movie, err = agg.AggregateWithPriority(results, scrapersToUse)
+		movie, _, err = agg.AggregateWithPriority(results, scrapersToUse)
 	} else {
-		movie, err = agg.Aggregate(results)
+		movie, _, err = agg.Aggregate(results)
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to aggregate: %w", err)

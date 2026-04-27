@@ -297,7 +297,7 @@ func TestActressAliasWithAggregate(t *testing.T) {
 		},
 	}
 
-	movie, warnings := agg.Aggregate(results)
+	movie, warnings, err := agg.Aggregate(results)
 
 	require.NotNil(t, movie)
 	assert.Empty(t, warnings)

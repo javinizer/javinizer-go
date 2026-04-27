@@ -127,7 +127,7 @@ func TestFullWorkflow(t *testing.T) {
 
 	movies := make(map[string]*models.Movie)
 	for id, results := range scraperResults {
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		if err != nil {
 			t.Fatalf("Aggregation failed for %s: %v", id, err)
 		}

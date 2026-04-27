@@ -46,7 +46,7 @@ func TestAggregateBasic(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -72,7 +72,7 @@ func TestAggregateNoResults(t *testing.T) {
 
 	agg := New(cfg)
 
-	movie, err := agg.Aggregate([]*models.ScraperResult{})
+	movie, _, err := agg.Aggregate([]*models.ScraperResult{})
 	assert.Error(t, err)
 	assert.Nil(t, movie)
 	assert.Contains(t, err.Error(), "no scraper results")
@@ -865,7 +865,7 @@ func TestAggregateSourceMetadata(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -892,7 +892,7 @@ func TestAggregateTimestamps(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -957,7 +957,7 @@ func TestAggregateWithAllFields(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -1034,7 +1034,7 @@ func TestAggregateGenresWithFiltering(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -1089,7 +1089,7 @@ func TestAggregateGenresWithReplacement(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -1138,7 +1138,7 @@ func TestAggregateActressMergingByJapaneseName(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -1202,7 +1202,7 @@ func TestAggregateActressAliasConversion(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -1243,7 +1243,7 @@ func TestAggregateGenresWithRegexFiltering(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -1285,7 +1285,7 @@ func TestAggregateRequiredFieldsValidation(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 		assert.Equal(t, "IPX-001", movie.ID)
@@ -1301,7 +1301,7 @@ func TestAggregateRequiredFieldsValidation(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		assert.Error(t, err)
 		assert.Nil(t, movie)
 		assert.Contains(t, err.Error(), "required field validation failed")
@@ -1317,7 +1317,7 @@ func TestAggregateRequiredFieldsValidation(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		assert.Error(t, err)
 		assert.Nil(t, movie)
 		assert.Contains(t, err.Error(), "ID")
@@ -1349,7 +1349,7 @@ func TestAggregateDisplayTitleTemplate(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1381,7 +1381,7 @@ func TestAggregateDisplayTitleTemplate(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1410,7 +1410,7 @@ func TestAggregateDisplayTitleTemplate(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1440,7 +1440,7 @@ func TestAggregateDisplayTitleTemplate(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 

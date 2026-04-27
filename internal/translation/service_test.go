@@ -114,7 +114,7 @@ func TestTranslateMovie_EarlyReturns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := tt.service.TranslateMovie(context.Background(), tt.movie, "")
+			result, _, err := tt.service.TranslateMovie(context.Background(), tt.movie, "")
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, result)
@@ -163,7 +163,7 @@ func TestTranslateMovie_ApplyToPrimary(t *testing.T) {
 
 		s := New(cfg)
 		movie := &models.Movie{Title: "テスト"}
-		result, err := s.TranslateMovie(context.Background(), movie, "")
+		result, _, err := s.TranslateMovie(context.Background(), movie, "")
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -205,7 +205,7 @@ func TestTranslateMovie_ApplyToPrimary(t *testing.T) {
 		s := New(cfg)
 		movie := &models.Movie{Title: "テスト"}
 		originalTitle := movie.Title
-		result, err := s.TranslateMovie(context.Background(), movie, "")
+		result, _, err := s.TranslateMovie(context.Background(), movie, "")
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -1494,7 +1494,7 @@ func TestTranslateMovie_FullFlow(t *testing.T) {
 
 			originalTitle := movieCopy.Title
 
-			result, err := s.TranslateMovie(context.Background(), movieCopy, "")
+			result, _, err := s.TranslateMovie(context.Background(), movieCopy, "")
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -1632,7 +1632,7 @@ func TestTranslateMovie_TranslationCountMismatch(t *testing.T) {
 				movie.Director = "Test Director"
 			}
 
-			_, err := s.TranslateMovie(context.Background(), movie, "")
+			_, _, err := s.TranslateMovie(context.Background(), movie, "")
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -1931,7 +1931,7 @@ func TestTranslateMovie_ContextCancellation(t *testing.T) {
 		}()
 
 		movie := &models.Movie{Title: "テスト"}
-		_, err := s.TranslateMovie(ctx, movie, "")
+		_, _, err := s.TranslateMovie(ctx, movie, "")
 
 		close(done) // Unblock the server handler
 		require.Error(t, err)
@@ -1975,7 +1975,7 @@ func TestTranslateMovie_ContextCancellation(t *testing.T) {
 		defer cancel()
 
 		movie := &models.Movie{Title: "テスト"}
-		_, err := s.TranslateMovie(ctx, movie, "")
+		_, _, err := s.TranslateMovie(ctx, movie, "")
 
 		close(done) // Unblock the server handler
 		require.Error(t, err)
@@ -2894,7 +2894,7 @@ func TestService_TranslateMovie_StoresHash(t *testing.T) {
 	}
 
 	service := New(*cfg)
-	translation, err := service.TranslateMovie(context.Background(), movie, "abc123def456")
+	translation, _, err := service.TranslateMovie(context.Background(), movie, "abc123def456")
 
 	require.NoError(t, err)
 	require.NotNil(t, translation)

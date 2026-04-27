@@ -21,13 +21,10 @@ import (
 // Allows CLI commands and API endpoints to accept either real Aggregator or test mocks.
 // Added in Epic 8 Story 8.2 to enable testable aggregation logic.
 type AggregatorInterface interface {
-	// Aggregate merges multiple scraper results into a single Movie based on field-level priorities
-	Aggregate(results []*models.ScraperResult) (*models.Movie, error)
+	Aggregate(results []*models.ScraperResult) (*models.Movie, string, error)
 
-	// AggregateWithPriority aggregates results using a custom scraper priority order
-	AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, error)
+	AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, string, error)
 
-	// GetResolvedPriorities returns the cached field-level priority map (for debugging)
 	GetResolvedPriorities() map[string][]string
 }
 
@@ -434,15 +431,13 @@ func toSnakeCase(s string) string {
 }
 
 // Aggregate combines multiple scraper results into a single Movie
-func (a *Aggregator) Aggregate(results []*models.ScraperResult) (*models.Movie, error) {
+func (a *Aggregator) Aggregate(results []*models.ScraperResult) (*models.Movie, string, error) {
 	return a.aggregateWithPriority(results, func(field string) []string {
 		return a.resolvedPriorities[field]
 	})
 }
 
-// AggregateWithPriority aggregates results using a custom scraper priority order
-// This is used for manual scraping where users specify which scrapers to use and in what order
-func (a *Aggregator) AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, error) {
+func (a *Aggregator) AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, string, error) {
 	return a.aggregateWithPriority(results, func(field string) []string {
 		return customPriority
 	})
@@ -450,9 +445,9 @@ func (a *Aggregator) AggregateWithPriority(results []*models.ScraperResult, cust
 
 // aggregateWithPriority contains the shared aggregation logic used by both Aggregate and AggregateWithPriority.
 // The priorityFunc parameter returns the priority list for a given field name.
-func (a *Aggregator) aggregateWithPriority(results []*models.ScraperResult, priorityFunc func(field string) []string) (*models.Movie, error) {
+func (a *Aggregator) aggregateWithPriority(results []*models.ScraperResult, priorityFunc func(field string) []string) (*models.Movie, string, error) {
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no scraper results to aggregate")
+		return nil, "", fmt.Errorf("no scraper results to aggregate")
 	}
 
 	movie := &models.Movie{}
@@ -559,7 +554,7 @@ func (a *Aggregator) aggregateWithPriority(results []*models.ScraperResult, prio
 	preTranslationMaker := movie.Maker
 	preTranslationContentID := movie.ContentID
 
-	a.ApplyConfiguredTranslation(movie)
+	translationWarning := a.ApplyConfiguredTranslation(movie)
 
 	if preTranslationTitle != movie.Title || preTranslationMaker != movie.Maker || preTranslationContentID != movie.ContentID {
 		logging.Debugf("Aggregation: translation modified primary fields - Title: %q->%q, Maker: %q->%q, ContentID: %q->%q",
@@ -579,7 +574,7 @@ func (a *Aggregator) aggregateWithPriority(results []*models.ScraperResult, prio
 
 	if len(a.config.Metadata.RequiredFields) > 0 {
 		if err := validateRequiredFields(movie, a.config.Metadata.RequiredFields); err != nil {
-			return nil, fmt.Errorf("required field validation failed: %w", err)
+			return nil, translationWarning, fmt.Errorf("required field validation failed: %w", err)
 		}
 	}
 
@@ -587,7 +582,7 @@ func (a *Aggregator) aggregateWithPriority(results []*models.ScraperResult, prio
 	movie.CreatedAt = now
 	movie.UpdatedAt = now
 
-	return movie, nil
+	return movie, translationWarning, nil
 }
 
 // getFieldByPriority retrieves a string field based on priority
@@ -985,16 +980,16 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult, movie *m
 	return translations
 }
 
-func (a *Aggregator) ApplyConfiguredTranslation(movie *models.Movie) {
+func (a *Aggregator) ApplyConfiguredTranslation(movie *models.Movie) string {
 	if a == nil || movie == nil || a.config == nil {
 		logging.Debugf("Translation: skipped (nil aggregator, movie, or config)")
-		return
+		return ""
 	}
 
 	translationCfg := a.config.Metadata.Translation
 	if !translationCfg.Enabled {
 		logging.Debugf("Translation: skipped (disabled)")
-		return
+		return ""
 	}
 
 	settingsHash := translationCfg.SettingsHash()
@@ -1009,18 +1004,18 @@ func (a *Aggregator) ApplyConfiguredTranslation(movie *models.Movie) {
 	defer cancel()
 
 	service := translation.New(translationCfg)
-	translatedRecord, err := service.TranslateMovie(ctx, movie, settingsHash)
+	translatedRecord, warning, err := service.TranslateMovie(ctx, movie, settingsHash)
 	if err != nil {
 		id := movie.ID
 		if id == "" {
 			id = movie.ContentID
 		}
 		logging.Warnf("[%s] Metadata translation failed: %v", id, err)
-		return
+		return warning
 	}
 	if translatedRecord == nil {
 		logging.Debugf("Translation: returned nil record (no fields to translate or source==target)")
-		return
+		return ""
 	}
 
 	logging.Debugf("Translation: appending %s translation (title=%q, hash=%s)", translatedRecord.Language, translatedRecord.Title, translatedRecord.SettingsHash)
@@ -1032,6 +1027,7 @@ func (a *Aggregator) ApplyConfiguredTranslation(movie *models.Movie) {
 	)
 
 	logging.Debugf("Translation: movie now has %d translation(s)", len(movie.Translations))
+	return warning
 }
 
 // applyGenreReplacement applies genre replacement if one exists

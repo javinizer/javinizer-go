@@ -688,30 +688,33 @@ func RunBatchScrapeOnce(
 	logging.Debugf("[Batch %s] File %d: Starting metadata aggregation", job.ID, fileIndex)
 
 	var (
-		movie *models.Movie
-		err   error
+		movie              *models.Movie
+		translationWarning string
+		err                error
 	)
 	if usingCustomScrapers {
-		// Use custom priority order from manual scrape/rescrape dialog
 		logging.Debugf("[Batch %s] File %d: Using custom scraper priority: %v", job.ID, fileIndex, selectedScrapers)
-		movie, err = agg.AggregateWithPriority(results, selectedScrapers)
+		movie, translationWarning, err = agg.AggregateWithPriority(results, selectedScrapers)
 	} else {
-		// Use config-defined field priorities
-		movie, err = agg.Aggregate(results)
+		movie, translationWarning, err = agg.Aggregate(results)
 	}
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to aggregate: %v", err)
 		logging.Debugf("[Batch %s] File %d: Aggregation failed: %v", job.ID, fileIndex, err)
 
 		now := time.Now()
-		return nil, &FileResult{
+		fileResult := &FileResult{
 			FilePath:  filePath,
 			MovieID:   movieID,
 			Status:    JobStatusFailed,
 			Error:     errMsg,
 			StartedAt: startTime,
 			EndedAt:   &now,
-		}, errors.New(errMsg)
+		}
+		if translationWarning != "" {
+			fileResult.TranslationWarning = &translationWarning
+		}
+		return nil, fileResult, errors.New(errMsg)
 	}
 
 	logging.Debugf("[Batch %s] File %d: Aggregation complete - Title: %s, Maker: %s, Actresses: %d, Genres: %d",
@@ -961,6 +964,10 @@ func RunBatchScrapeOnce(
 		PosterError:    posterErr,
 		StartedAt:      startTime,
 		EndedAt:        &now,
+	}
+
+	if translationWarning != "" {
+		fileResult.TranslationWarning = &translationWarning
 	}
 
 	// Populate multi-part fields (only valid if not using query override)

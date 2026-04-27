@@ -156,6 +156,8 @@ export interface FileResult {
 	movie_id: string;
 	status: string;
 	error?: string;
+	poster_error?: string;
+	translation_warning?: string;
 	field_sources?: Record<string, string>;
 	actress_sources?: Record<string, string>;
 	data?: Movie;

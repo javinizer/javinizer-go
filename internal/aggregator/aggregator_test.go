@@ -431,7 +431,7 @@ func TestDisplayTitleFormatting(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -465,7 +465,7 @@ func TestDisplayTitleFormattingWithTemplate(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -497,7 +497,7 @@ func TestDisplayTitleEmpty(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -708,7 +708,7 @@ func TestRequiredFieldsValidation(t *testing.T) {
 			agg := New(cfg)
 			results := []*models.ScraperResult{tt.movie}
 
-			movie, err := agg.Aggregate(results)
+			movie, _, err := agg.Aggregate(results)
 
 			if tt.shouldPass {
 				require.NoError(t, err, "Expected validation to pass but got error")
@@ -763,7 +763,7 @@ func TestRequiredFieldsValidationAliases(t *testing.T) {
 				agg := New(cfg)
 				results := []*models.ScraperResult{movie}
 
-				_, err := agg.Aggregate(results)
+				_, _, err := agg.Aggregate(results)
 				require.Error(t, err,
 					"Alias %q should trigger validation error for missing %s", alias, fieldName)
 				assert.Contains(t, err.Error(), fieldName,
@@ -806,7 +806,7 @@ func TestAggregateErrorResilience(t *testing.T) {
 			// javlibrary failed - not included
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err, "Should succeed with 1 successful scraper")
 		require.NotNil(t, movie)
 
@@ -837,7 +837,7 @@ func TestAggregateErrorResilience(t *testing.T) {
 			// javlibrary failed - not included
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err, "Should succeed with 2 partial results")
 		require.NotNil(t, movie)
 
@@ -855,7 +855,7 @@ func TestAggregateErrorResilience(t *testing.T) {
 		// Scenario: All scrapers failed (empty results)
 		results := []*models.ScraperResult{}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		assert.Error(t, err, "Should fail when all scrapers fail")
 		assert.Nil(t, movie)
 		assert.Contains(t, err.Error(), "no scraper results to aggregate")
@@ -874,7 +874,7 @@ func TestAggregateErrorResilience(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err, "Should succeed with fallback scraper")
 		require.NotNil(t, movie)
 
@@ -976,7 +976,7 @@ func TestAggregateConcurrentCacheAccess(t *testing.T) {
 				defer func() { done <- true }()
 
 				results := []*models.ScraperResult{createTestResult("IPX-" + fmt.Sprint(iteration))}
-				movie, err := agg.Aggregate(results)
+				movie, _, err := agg.Aggregate(results)
 
 				// All should succeed
 				if err != nil {
@@ -1038,7 +1038,7 @@ func TestAggregateConcurrentCacheAccess(t *testing.T) {
 				defer func() { done <- true }()
 
 				results := []*models.ScraperResult{createTestResult("IPX-" + fmt.Sprint(iteration+100))}
-				_, err := agg.Aggregate(results)
+				_, _, err := agg.Aggregate(results)
 
 				if err != nil {
 					t.Errorf("Aggregation goroutine %d: Unexpected error: %v", iteration, err)
@@ -1099,7 +1099,7 @@ func TestAggregateNilAndInvalidData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1117,7 +1117,7 @@ func TestAggregateNilAndInvalidData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 		// Empty ID is accepted - aggregator doesn't validate required fields
@@ -1142,7 +1142,7 @@ func TestAggregateNilAndInvalidData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1162,7 +1162,7 @@ func TestAggregateNilAndInvalidData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1186,7 +1186,7 @@ func TestAggregateNilAndInvalidData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1222,7 +1222,7 @@ func TestAggregatePartialData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err, "Should accept minimal valid data")
 		require.NotNil(t, movie)
 
@@ -1250,7 +1250,7 @@ func TestAggregatePartialData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1287,7 +1287,7 @@ func TestAggregatePartialData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 		require.Len(t, movie.Actresses, 1)
@@ -1311,7 +1311,7 @@ func TestAggregatePartialData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1333,7 +1333,7 @@ func TestAggregatePartialData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1380,7 +1380,7 @@ func TestAggregatePartialData(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
@@ -1447,7 +1447,7 @@ func TestAggregateConcurrencySameID(t *testing.T) {
 		// Start all goroutines simultaneously
 		for i := 0; i < numGoroutines; i++ {
 			go func() {
-				movie, err := agg.Aggregate(createResults())
+				movie, _, err := agg.Aggregate(createResults())
 				results <- result{movie, err}
 			}()
 		}
@@ -1521,7 +1521,7 @@ func TestAggregateConcurrencyDifferentMovies(t *testing.T) {
 					},
 				}
 
-				movie, err := agg.Aggregate(scraperResults)
+				movie, _, err := agg.Aggregate(scraperResults)
 				results <- result{id, title, movie, err}
 			}(movieID, movieTitle)
 		}
@@ -1584,7 +1584,7 @@ func BenchmarkAggregateSingleMovie(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = agg.Aggregate(results)
+		_, _, _ = agg.Aggregate(results)
 	}
 }
 
@@ -1633,7 +1633,7 @@ func BenchmarkAggregateBatch(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				for _, results := range allResults {
-					_, _ = agg.Aggregate(results)
+					_, _, _ = agg.Aggregate(results)
 				}
 			}
 		})
@@ -1669,7 +1669,7 @@ func TestAggregateAllScrapersEmptyResults(t *testing.T) {
 			},
 		}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 
 		// The aggregator should still return a movie (with empty fields) since results were provided
 		// It doesn't validate that fields are populated - that's the caller's responsibility
@@ -1686,7 +1686,7 @@ func TestAggregateAllScrapersEmptyResults(t *testing.T) {
 		// Scenario: Empty results array
 		results := []*models.ScraperResult{}
 
-		movie, err := agg.Aggregate(results)
+		movie, _, err := agg.Aggregate(results)
 
 		// This SHOULD return an error - no results to aggregate
 		require.Error(t, err, "Should return error when no results provided")
@@ -1838,7 +1838,7 @@ func TestAggregateConcurrentCacheReload(t *testing.T) {
 		for i := 0; i < numAggregations; i++ {
 			go func(idx int) {
 				movieID := fmt.Sprintf("IPX-%03d", idx+1)
-				_, err := agg.Aggregate(createResults(movieID))
+				_, _, err := agg.Aggregate(createResults(movieID))
 				results <- err
 			}(i)
 		}
@@ -1895,11 +1895,11 @@ func TestAggregateConcurrentCacheReload(t *testing.T) {
 				var movie *models.Movie
 				var err error
 				if idx%2 == 0 {
-					movie, err = agg.Aggregate(createResults())
+					movie, _, err = agg.Aggregate(createResults())
 				} else {
 					// Create new aggregator (cache initialization) and aggregate
 					newAgg := New(cfg)
-					movie, err = newAgg.Aggregate(createResults())
+					movie, _, err = newAgg.Aggregate(createResults())
 				}
 				require.NoError(t, err)
 				results <- movie

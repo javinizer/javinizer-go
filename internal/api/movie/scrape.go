@@ -212,9 +212,9 @@ func scrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 		var movie *models.Movie
 		if len(req.SelectedScrapers) > 0 {
 			logging.Infof("Aggregating with custom priority: %v", scrapersToUse)
-			movie, err = deps.GetAggregator().AggregateWithPriority(results, scrapersToUse)
+			movie, _, err = deps.GetAggregator().AggregateWithPriority(results, scrapersToUse)
 		} else {
-			movie, err = deps.GetAggregator().Aggregate(results)
+			movie, _, err = deps.GetAggregator().Aggregate(results)
 		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})

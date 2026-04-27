@@ -64,21 +64,22 @@ const (
 
 // FileResult represents the result of processing a single file
 type FileResult struct {
-	FilePath       string            `json:"file_path"`
-	MovieID        string            `json:"movie_id"`
-	Revision       uint64            `json:"revision"`
-	Status         JobStatus         `json:"status"`
-	Error          string            `json:"error,omitempty"`
-	PosterError    *string           `json:"poster_error,omitempty"`
-	FieldSources   map[string]string `json:"field_sources,omitempty"`
-	ActressSources map[string]string `json:"actress_sources,omitempty"`
-	DataType       string            `json:"data_type,omitempty"`
-	Data           interface{}       `json:"data,omitempty"`
-	StartedAt      time.Time         `json:"started_at"`
-	EndedAt        *time.Time        `json:"ended_at,omitempty"`
-	IsMultiPart    bool              `json:"is_multi_part,omitempty"`
-	PartNumber     int               `json:"part_number,omitempty"`
-	PartSuffix     string            `json:"part_suffix,omitempty"`
+	FilePath           string            `json:"file_path"`
+	MovieID            string            `json:"movie_id"`
+	Revision           uint64            `json:"revision"`
+	Status             JobStatus         `json:"status"`
+	Error              string            `json:"error,omitempty"`
+	PosterError        *string           `json:"poster_error,omitempty"`
+	TranslationWarning *string           `json:"translation_warning,omitempty"`
+	FieldSources       map[string]string `json:"field_sources,omitempty"`
+	ActressSources     map[string]string `json:"actress_sources,omitempty"`
+	DataType           string            `json:"data_type,omitempty"`
+	Data               interface{}       `json:"data,omitempty"`
+	StartedAt          time.Time         `json:"started_at"`
+	EndedAt            *time.Time        `json:"ended_at,omitempty"`
+	IsMultiPart        bool              `json:"is_multi_part,omitempty"`
+	PartNumber         int               `json:"part_number,omitempty"`
+	PartSuffix         string            `json:"part_suffix,omitempty"`
 }
 
 const (
@@ -88,20 +89,21 @@ const (
 // FileResultSlim is a lightweight FileResult that omits the Data field
 // for efficient status polling without deep-copying movie objects.
 type FileResultSlim struct {
-	FilePath       string            `json:"file_path"`
-	MovieID        string            `json:"movie_id"`
-	Revision       uint64            `json:"revision"`
-	Status         JobStatus         `json:"status"`
-	Error          string            `json:"error,omitempty"`
-	PosterError    *string           `json:"poster_error,omitempty"`
-	FieldSources   map[string]string `json:"field_sources,omitempty"`
-	ActressSources map[string]string `json:"actress_sources,omitempty"`
-	DataType       string            `json:"data_type,omitempty"`
-	StartedAt      time.Time         `json:"started_at"`
-	EndedAt        *time.Time        `json:"ended_at,omitempty"`
-	IsMultiPart    bool              `json:"is_multi_part,omitempty"`
-	PartNumber     int               `json:"part_number,omitempty"`
-	PartSuffix     string            `json:"part_suffix,omitempty"`
+	FilePath           string            `json:"file_path"`
+	MovieID            string            `json:"movie_id"`
+	Revision           uint64            `json:"revision"`
+	Status             JobStatus         `json:"status"`
+	Error              string            `json:"error,omitempty"`
+	PosterError        *string           `json:"poster_error,omitempty"`
+	TranslationWarning *string           `json:"translation_warning,omitempty"`
+	FieldSources       map[string]string `json:"field_sources,omitempty"`
+	ActressSources     map[string]string `json:"actress_sources,omitempty"`
+	DataType           string            `json:"data_type,omitempty"`
+	StartedAt          time.Time         `json:"started_at"`
+	EndedAt            *time.Time        `json:"ended_at,omitempty"`
+	IsMultiPart        bool              `json:"is_multi_part,omitempty"`
+	PartNumber         int               `json:"part_number,omitempty"`
+	PartSuffix         string            `json:"part_suffix,omitempty"`
 }
 
 // BatchJobSlim is a lightweight BatchJob snapshot that uses FileResultSlim
@@ -641,6 +643,10 @@ func (job *BatchJob) AtomicUpdateFileResult(filePath string, updateFn func(*File
 		s := *current.PosterError
 		copied.PosterError = &s
 	}
+	if current.TranslationWarning != nil {
+		s := *current.TranslationWarning
+		copied.TranslationWarning = &s
+	}
 	if current.FieldSources != nil {
 		copied.FieldSources = make(map[string]string, len(current.FieldSources))
 		for k, v := range current.FieldSources {
@@ -862,6 +868,10 @@ func (job *BatchJob) GetStatus() *BatchJob {
 			s := *v.PosterError
 			copyResult.PosterError = &s
 		}
+		if v.TranslationWarning != nil {
+			s := *v.TranslationWarning
+			copyResult.TranslationWarning = &s
+		}
 		if v.FieldSources != nil {
 			copyResult.FieldSources = make(map[string]string, len(v.FieldSources))
 			for sourceField, sourceName := range v.FieldSources {
@@ -940,28 +950,37 @@ func (job *BatchJob) GetStatus() *BatchJob {
 		revertedAt = &t
 	}
 
-	return &BatchJob{
-		ID:                          job.ID,
-		Status:                      job.Status,
-		TotalFiles:                  job.TotalFiles,
-		Completed:                   job.Completed,
-		Failed:                      job.Failed,
-		Excluded:                    excluded,
-		Files:                       files,
-		Results:                     results,
-		FileMatchInfo:               fileMatchInfo,
-		Progress:                    job.Progress,
-		Destination:                 job.Destination,
-		TempDir:                     job.TempDir,
-		StartedAt:                   job.StartedAt,
-		CompletedAt:                 completedAt,
-		OrganizedAt:                 organizedAt,
-		RevertedAt:                  revertedAt,
-		MoveToFolderOverride:        job.MoveToFolderOverride,
-		RenameFolderInPlaceOverride: job.RenameFolderInPlaceOverride,
-		OperationModeOverride:       job.OperationModeOverride,
-		PersistError:                job.PersistError,
+	status := &BatchJob{
+		ID:                    job.ID,
+		Status:                job.Status,
+		TotalFiles:            job.TotalFiles,
+		Completed:             job.Completed,
+		Failed:                job.Failed,
+		Excluded:              excluded,
+		Files:                 files,
+		Results:               results,
+		FileMatchInfo:         fileMatchInfo,
+		Progress:              job.Progress,
+		Destination:           job.Destination,
+		TempDir:               job.TempDir,
+		StartedAt:             job.StartedAt,
+		CompletedAt:           completedAt,
+		OrganizedAt:           organizedAt,
+		RevertedAt:            revertedAt,
+		OperationModeOverride: job.OperationModeOverride,
+		PersistError:          job.PersistError,
 	}
+
+	if job.MoveToFolderOverride != nil {
+		v := *job.MoveToFolderOverride
+		status.MoveToFolderOverride = &v
+	}
+	if job.RenameFolderInPlaceOverride != nil {
+		v := *job.RenameFolderInPlaceOverride
+		status.RenameFolderInPlaceOverride = &v
+	}
+
+	return status
 }
 
 // GetStatusSlim returns a lightweight snapshot of the job status without movie Data.
@@ -1003,6 +1022,10 @@ func (job *BatchJob) GetStatusSlim() *BatchJobSlim {
 			s := *v.PosterError
 			slim.PosterError = &s
 		}
+		if v.TranslationWarning != nil {
+			s := *v.TranslationWarning
+			slim.TranslationWarning = &s
+		}
 		if v.EndedAt != nil {
 			t := *v.EndedAt
 			slim.EndedAt = &t
@@ -1041,28 +1064,37 @@ func (job *BatchJob) GetStatusSlim() *BatchJobSlim {
 		revertedAt = &t
 	}
 
-	return &BatchJobSlim{
-		ID:                          job.ID,
-		Status:                      job.Status,
-		TotalFiles:                  job.TotalFiles,
-		Completed:                   job.Completed,
-		Failed:                      job.Failed,
-		Excluded:                    excluded,
-		Files:                       files,
-		Results:                     results,
-		FileMatchInfo:               fileMatchInfo,
-		Progress:                    job.Progress,
-		Destination:                 job.Destination,
-		TempDir:                     job.TempDir,
-		StartedAt:                   job.StartedAt,
-		CompletedAt:                 completedAt,
-		OrganizedAt:                 organizedAt,
-		RevertedAt:                  revertedAt,
-		MoveToFolderOverride:        job.MoveToFolderOverride,
-		RenameFolderInPlaceOverride: job.RenameFolderInPlaceOverride,
-		OperationModeOverride:       job.OperationModeOverride,
-		PersistError:                job.PersistError,
+	status := &BatchJobSlim{
+		ID:                    job.ID,
+		Status:                job.Status,
+		TotalFiles:            job.TotalFiles,
+		Completed:             job.Completed,
+		Failed:                job.Failed,
+		Excluded:              excluded,
+		Files:                 files,
+		Results:               results,
+		FileMatchInfo:         fileMatchInfo,
+		Progress:              job.Progress,
+		Destination:           job.Destination,
+		TempDir:               job.TempDir,
+		StartedAt:             job.StartedAt,
+		CompletedAt:           completedAt,
+		OrganizedAt:           organizedAt,
+		RevertedAt:            revertedAt,
+		OperationModeOverride: job.OperationModeOverride,
+		PersistError:          job.PersistError,
 	}
+
+	if job.MoveToFolderOverride != nil {
+		v := *job.MoveToFolderOverride
+		status.MoveToFolderOverride = &v
+	}
+	if job.RenameFolderInPlaceOverride != nil {
+		v := *job.RenameFolderInPlaceOverride
+		status.RenameFolderInPlaceOverride = &v
+	}
+
+	return status
 }
 
 // GetTempDir returns the job's temporary directory path in a thread-safe manner.

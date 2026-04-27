@@ -52,27 +52,28 @@ func New(cfg config.TranslationConfig) *Service {
 // to primary movie fields. It returns a target-language translation record when
 // translation work was performed. The settingsHash parameter identifies which
 // translation settings were used to generate this translation.
-func (s *Service) TranslateMovie(ctx context.Context, movie *models.Movie, settingsHash string) (*models.MovieTranslation, error) {
+func (s *Service) TranslateMovie(ctx context.Context, movie *models.Movie, settingsHash string) (*models.MovieTranslation, string, error) {
 	if s == nil || movie == nil || !s.cfg.Enabled {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	targetLang := normalizeLanguage(s.cfg.TargetLanguage)
 	sourceLang := normalizeLanguage(s.cfg.SourceLanguage)
 	if targetLang == "" {
-		return nil, fmt.Errorf("target language is required")
+		return nil, "", fmt.Errorf("target language is required")
 	}
 	if sourceLang == "" {
 		sourceLang = "auto"
 	}
 
 	if sourceLang != "auto" && sourceLang == targetLang {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	type pendingText struct {
-		text  string
-		apply func(string)
+		text      string
+		fieldName string
+		apply     func(string)
 	}
 
 	requests := make([]pendingText, 0)
@@ -82,13 +83,14 @@ func (s *Service) TranslateMovie(ctx context.Context, movie *models.Movie, setti
 		SettingsHash: settingsHash,
 	}
 
-	queueField := func(raw string, assignRecord func(string), assignMovie func(string)) {
+	queueField := func(raw string, assignRecord func(string), assignMovie func(string), fieldName string) {
 		trimmed := strings.TrimSpace(raw)
 		if trimmed == "" {
 			return
 		}
 		requests = append(requests, pendingText{
-			text: trimmed,
+			text:      trimmed,
+			fieldName: fieldName,
 			apply: func(translated string) {
 				assignRecord(translated)
 				if s.cfg.ApplyToPrimary {
@@ -100,32 +102,32 @@ func (s *Service) TranslateMovie(ctx context.Context, movie *models.Movie, setti
 
 	fields := s.cfg.Fields
 	if fields.Title {
-		queueField(movie.Title, func(v string) { translatedRecord.Title = v }, func(v string) { movie.Title = v })
+		queueField(movie.Title, func(v string) { translatedRecord.Title = v }, func(v string) { movie.Title = v }, "title")
 	}
 	if fields.OriginalTitle {
-		queueField(movie.OriginalTitle, func(v string) { translatedRecord.OriginalTitle = v }, func(v string) { movie.OriginalTitle = v })
+		queueField(movie.OriginalTitle, func(v string) { translatedRecord.OriginalTitle = v }, func(v string) { movie.OriginalTitle = v }, "original_title")
 	}
 	if fields.Description {
-		queueField(movie.Description, func(v string) { translatedRecord.Description = v }, func(v string) { movie.Description = v })
+		queueField(movie.Description, func(v string) { translatedRecord.Description = v }, func(v string) { movie.Description = v }, "description")
 	}
 	if fields.Director {
-		queueField(movie.Director, func(v string) { translatedRecord.Director = v }, func(v string) { movie.Director = v })
+		queueField(movie.Director, func(v string) { translatedRecord.Director = v }, func(v string) { movie.Director = v }, "director")
 	}
 	if fields.Maker {
-		queueField(movie.Maker, func(v string) { translatedRecord.Maker = v }, func(v string) { movie.Maker = v })
+		queueField(movie.Maker, func(v string) { translatedRecord.Maker = v }, func(v string) { movie.Maker = v }, "maker")
 	}
 	if fields.Label {
-		queueField(movie.Label, func(v string) { translatedRecord.Label = v }, func(v string) { movie.Label = v })
+		queueField(movie.Label, func(v string) { translatedRecord.Label = v }, func(v string) { movie.Label = v }, "label")
 	}
 	if fields.Series {
-		queueField(movie.Series, func(v string) { translatedRecord.Series = v }, func(v string) { movie.Series = v })
+		queueField(movie.Series, func(v string) { translatedRecord.Series = v }, func(v string) { movie.Series = v }, "series")
 	}
 	if fields.Genres {
 		for i := range movie.Genres {
 			idx := i
 			queueField(movie.Genres[idx].Name, func(string) {}, func(v string) {
 				movie.Genres[idx].Name = v
-			})
+			}, fmt.Sprintf("genre[%d]", i))
 		}
 	}
 	if fields.Actresses {
@@ -137,12 +139,12 @@ func (s *Service) TranslateMovie(ctx context.Context, movie *models.Movie, setti
 			}
 			queueField(name, func(string) {}, func(v string) {
 				replaceActressName(&movie.Actresses[idx], v)
-			})
+			}, fmt.Sprintf("actress[%d]", i))
 		}
 	}
 
 	if len(requests) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	texts := make([]string, 0, len(requests))
@@ -152,25 +154,58 @@ func (s *Service) TranslateMovie(ctx context.Context, movie *models.Movie, setti
 
 	translatedTexts, err := s.translateTexts(ctx, sourceLang, targetLang, texts)
 	if err != nil {
-		return nil, err
+		logging.Debugf("Translation: translateTexts failed: %v", err)
+		warning := sanitizeTranslationWarning(normalizeProvider(s.cfg.Provider), err)
+		return nil, warning, err
 	}
 	if len(translatedTexts) != len(requests) {
-		return nil, fmt.Errorf("translation provider returned %d items for %d inputs", len(translatedTexts), len(requests))
+		logging.Debugf("Translation: count mismatch - got %d, expected %d", len(translatedTexts), len(requests))
+		return nil, "", fmt.Errorf("translation provider returned %d items for %d inputs", len(translatedTexts), len(requests))
 	}
 
+	var warnings []string
 	for i := range requests {
-		translated := strings.TrimSpace(translatedTexts[i])
+		raw := translatedTexts[i]
+		translated := strings.TrimSpace(raw)
 		if translated == "" {
+			logging.Debugf("Translation: empty result for %s (original=%q, raw=%q), falling back to original", requests[i].fieldName, requests[i].text, raw)
+			warnings = append(warnings, fmt.Sprintf("%s: empty translation, kept original", requests[i].fieldName))
 			translated = requests[i].text
 		}
 		requests[i].apply(translated)
 	}
 
-	return translatedRecord, nil
+	var warning string
+	if len(warnings) > 0 {
+		warning = fmt.Sprintf("Translation (%s): %s", normalizeProvider(s.cfg.Provider), strings.Join(warnings, "; "))
+		logging.Warnf("Translation: %s", warning)
+	}
+
+	return translatedRecord, warning, nil
 }
 
 func normalizeProvider(provider string) string {
 	return strings.ToLower(strings.TrimSpace(provider))
+}
+
+func sanitizeTranslationWarning(provider string, err error) string {
+	var te *TranslationError
+	if errors.As(err, &te) && te.Kind == TranslationErrorHTTPStatus {
+		switch {
+		case te.StatusCode == 429:
+			return fmt.Sprintf("Translation failed (%s provider): rate limited (HTTP 429), try again later", provider)
+		case te.StatusCode == 403:
+			return fmt.Sprintf("Translation failed (%s provider): access denied (HTTP 403), check API key", provider)
+		case te.StatusCode >= 500:
+			return fmt.Sprintf("Translation failed (%s provider): service error (HTTP %d)", provider, te.StatusCode)
+		case te.StatusCode >= 400:
+			return fmt.Sprintf("Translation failed (%s provider): request error (HTTP %d)", provider, te.StatusCode)
+		}
+	}
+	if errors.As(err, &te) {
+		return fmt.Sprintf("Translation failed (%s provider): %s", provider, te.Kind)
+	}
+	return fmt.Sprintf("Translation failed (%s provider): internal error", provider)
 }
 
 func normalizeLanguage(language string) string {
@@ -271,7 +306,10 @@ func (s *Service) translateTexts(ctx context.Context, sourceLang, targetLang str
 	if lastErr != nil {
 		return nil, lastErr
 	}
-	return nil, fmt.Errorf("translation failed after %d attempts", maxTranslationRetries)
+	return nil, &TranslationError{
+		Kind:    TranslationErrorProvider,
+		Message: fmt.Sprintf("translation failed after %d attempts", maxTranslationRetries),
+	}
 }
 
 func isRetryableError(err error, result *translationResult) bool {
@@ -731,7 +769,11 @@ func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, target
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("anthropic translation failed with status %d: %s", resp.StatusCode, string(respBody))
+		return nil, &TranslationError{
+			Kind:       TranslationErrorHTTPStatus,
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("anthropic translation failed with status %d: %s", resp.StatusCode, string(respBody)),
+		}
 	}
 
 	logging.Debugf("Translation (anthropic): response: %s", string(respBody))
@@ -815,7 +857,11 @@ func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("deepl translation failed with status %d: %s", resp.StatusCode, string(respBody))
+		return nil, &TranslationError{
+			Kind:       TranslationErrorHTTPStatus,
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("deepl translation failed with status %d: %s", resp.StatusCode, string(respBody)),
+		}
 	}
 
 	var decoded deepLTranslateResponse
@@ -901,7 +947,11 @@ func (s *Service) translateWithGooglePaid(ctx context.Context, sourceLang, targe
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("google paid translation failed with status %d: %s", resp.StatusCode, string(respBody))
+		return nil, &TranslationError{
+			Kind:       TranslationErrorHTTPStatus,
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("google paid translation failed with status %d: %s", resp.StatusCode, string(respBody)),
+		}
 	}
 
 	var decoded googlePaidTranslateResponse
@@ -1042,12 +1092,21 @@ func (s *Service) performGoogleFreeTranslation(ctx context.Context, baseURL, sou
 		return googleFreeResult{err: readErr}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return googleFreeResult{err: fmt.Errorf("google free translation failed with status %d: %s", resp.StatusCode, string(respBody))}
+		logging.Debugf("Translation (google-free): HTTP %d for text=%q body=%s", resp.StatusCode, text[:min(100, len(text))], string(respBody[:min(200, len(respBody))]))
+		return googleFreeResult{err: &TranslationError{
+			Kind:       TranslationErrorHTTPStatus,
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("google free translation failed with status %d: %s", resp.StatusCode, string(respBody)),
+		}}
 	}
 
 	translated, err := parseGoogleFreeResponse(respBody)
 	if err != nil {
+		logging.Debugf("Translation (google-free): parse error for text=%q: %v (body=%s)", text[:min(100, len(text))], err, string(respBody[:min(200, len(respBody))]))
 		return googleFreeResult{err: err}
+	}
+	if translated == "" {
+		logging.Debugf("Translation (google-free): empty result for text=%q (body=%s)", text[:min(100, len(text))], string(respBody[:min(200, len(respBody))]))
 	}
 	return googleFreeResult{text: translated}
 }

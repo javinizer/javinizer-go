@@ -58,7 +58,7 @@ func TestAggregate_AppliesConfiguredTranslation(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
@@ -103,7 +103,7 @@ func TestAggregate_TranslationFailureDoesNotFailAggregate(t *testing.T) {
 		Title:     "Original Title",
 	}}
 
-	movie, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 	assert.Equal(t, "Original Title", movie.Title)

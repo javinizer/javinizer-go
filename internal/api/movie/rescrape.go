@@ -71,7 +71,7 @@ func rescrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
 
 		// Aggregate using custom priority order
 		logging.Infof("Aggregating results with custom priority: %v", req.SelectedScrapers)
-		movie, err := deps.GetAggregator().AggregateWithPriority(results, req.SelectedScrapers)
+		movie, _, err := deps.GetAggregator().AggregateWithPriority(results, req.SelectedScrapers)
 		if err != nil {
 			c.JSON(500, ErrorResponse{Error: err.Error()})
 			return

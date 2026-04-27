@@ -247,7 +247,7 @@ func TestAggregate_WithMockedGenreCache(t *testing.T) {
 		Genres: []string{"Creampie", "Blowjob", "Unknown"},
 	}
 
-	movie, err := agg.Aggregate([]*models.ScraperResult{result})
+	movie, _, err := agg.Aggregate([]*models.ScraperResult{result})
 
 	require.NoError(t, err)
 	require.NotNil(t, movie)
@@ -287,7 +287,7 @@ func TestAggregate_WithMockedActressAlias(t *testing.T) {
 		},
 	}
 
-	movie, err := agg.Aggregate([]*models.ScraperResult{result})
+	movie, _, err := agg.Aggregate([]*models.ScraperResult{result})
 
 	require.NoError(t, err)
 	require.NotNil(t, movie)

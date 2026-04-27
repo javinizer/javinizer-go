@@ -177,7 +177,7 @@ func (t *ScrapeTask) Execute(ctx context.Context) (*models.Movie, error) {
 	t.progressTracker.Update(t.id, 0.8, msg, 0)
 
 	logging.Debugf("[%s] Starting metadata aggregation", t.javID)
-	movie, err := t.aggregator.Aggregate(results)
+	movie, _, err := t.aggregator.Aggregate(results)
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate: %w", err)
 	}
