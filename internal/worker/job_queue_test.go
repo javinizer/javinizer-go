@@ -1089,44 +1089,6 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 		assert.Empty(t, job.GetOperationModeOverride())
 	})
 
-	t.Run("GetMoveToFolderOverride and SetMoveToFolderOverride", func(t *testing.T) {
-		jq := NewJobQueue(nil, "", nil)
-		job := jq.CreateJob([]string{"file1.mp4"})
-
-		assert.Nil(t, job.GetMoveToFolderOverride())
-
-		tTrue := true
-		job.SetMoveToFolderOverride(&tTrue)
-		result := job.GetMoveToFolderOverride()
-		require.NotNil(t, result)
-		assert.True(t, *result)
-
-		tFalse := false
-		job.SetMoveToFolderOverride(&tFalse)
-		result = job.GetMoveToFolderOverride()
-		require.NotNil(t, result)
-		assert.False(t, *result)
-
-		job.SetMoveToFolderOverride(nil)
-		assert.Nil(t, job.GetMoveToFolderOverride())
-	})
-
-	t.Run("GetRenameFolderInPlaceOverride and SetRenameFolderInPlaceOverride", func(t *testing.T) {
-		jq := NewJobQueue(nil, "", nil)
-		job := jq.CreateJob([]string{"file1.mp4"})
-
-		assert.Nil(t, job.GetRenameFolderInPlaceOverride())
-
-		tTrue := true
-		job.SetRenameFolderInPlaceOverride(&tTrue)
-		result := job.GetRenameFolderInPlaceOverride()
-		require.NotNil(t, result)
-		assert.True(t, *result)
-
-		job.SetRenameFolderInPlaceOverride(nil)
-		assert.Nil(t, job.GetRenameFolderInPlaceOverride())
-	})
-
 	t.Run("GetDestination and SetDestination", func(t *testing.T) {
 		jq := NewJobQueue(nil, "", nil)
 		job := jq.CreateJob([]string{"file1.mp4"})
@@ -1188,11 +1150,6 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 				_ = job.GetOperationModeOverride()
 				job.SetDestination("/test/dir")
 				_ = job.GetDestination()
-				t := true
-				job.SetMoveToFolderOverride(&t)
-				_ = job.GetMoveToFolderOverride()
-				job.SetRenameFolderInPlaceOverride(&t)
-				_ = job.GetRenameFolderInPlaceOverride()
 				_ = job.GetFiles()
 				_ = job.GetCompleted()
 				_ = job.GetFailed()
@@ -1203,8 +1160,6 @@ func TestBatchJob_GettersSetters(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			_ = job.GetOperationModeOverride()
 			_ = job.GetDestination()
-			_ = job.GetMoveToFolderOverride()
-			_ = job.GetRenameFolderInPlaceOverride()
 			_ = job.GetFiles()
 			_ = job.GetCompleted()
 			_ = job.GetFailed()
@@ -1355,54 +1310,6 @@ func TestBatchJob_GetStatusSlim(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, result2.TranslationWarning)
 		assert.Equal(t, warning, *result2.TranslationWarning, "mutation of slim snapshot should not affect source")
-	})
-
-	t.Run("MoveToFolderOverride deep-copied in GetStatus", func(t *testing.T) {
-		jq := NewJobQueue(nil, "", nil)
-		job := jq.CreateJob([]string{"file1.mp4"})
-
-		tTrue := true
-		job.SetMoveToFolderOverride(&tTrue)
-
-		status := job.GetStatus()
-		require.NotNil(t, status.MoveToFolderOverride)
-		assert.True(t, *status.MoveToFolderOverride)
-
-		*status.MoveToFolderOverride = false
-		status2 := job.GetStatus()
-		assert.True(t, *status2.MoveToFolderOverride, "mutation of snapshot should not affect source")
-	})
-
-	t.Run("MoveToFolderOverride deep-copied in GetStatusSlim", func(t *testing.T) {
-		jq := NewJobQueue(nil, "", nil)
-		job := jq.CreateJob([]string{"file1.mp4"})
-
-		tTrue := true
-		job.SetMoveToFolderOverride(&tTrue)
-
-		slim := job.GetStatusSlim()
-		require.NotNil(t, slim.MoveToFolderOverride)
-		assert.True(t, *slim.MoveToFolderOverride)
-
-		*slim.MoveToFolderOverride = false
-		slim2 := job.GetStatusSlim()
-		assert.True(t, *slim2.MoveToFolderOverride, "mutation of slim snapshot should not affect source")
-	})
-
-	t.Run("RenameFolderInPlaceOverride deep-copied in GetStatus", func(t *testing.T) {
-		jq := NewJobQueue(nil, "", nil)
-		job := jq.CreateJob([]string{"file1.mp4"})
-
-		tFalse := false
-		job.SetRenameFolderInPlaceOverride(&tFalse)
-
-		status := job.GetStatus()
-		require.NotNil(t, status.RenameFolderInPlaceOverride)
-		assert.False(t, *status.RenameFolderInPlaceOverride)
-
-		*status.RenameFolderInPlaceOverride = true
-		status2 := job.GetStatus()
-		assert.False(t, *status2.RenameFolderInPlaceOverride, "mutation of snapshot should not affect source")
 	})
 
 	t.Run("GetID and GetJobStatus", func(t *testing.T) {

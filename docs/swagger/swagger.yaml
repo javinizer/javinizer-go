@@ -128,10 +128,6 @@ definitions:
       force:
         example: false
         type: boolean
-      move_to_folder:
-        description: Override config.output.move_to_folder
-        example: true
-        type: boolean
       operation_mode:
         description: 'Override config.output.operation_mode: organize, in-place, in-place-norenamefolder,
           metadata-only, preview'
@@ -142,10 +138,6 @@ definitions:
           scalar/array strategies)'
         example: conservative
         type: string
-      rename_folder_in_place:
-        description: Override config.output.rename_folder_in_place
-        example: false
-        type: boolean
       scalar_strategy:
         description: 'For Update mode: prefer-nfo, prefer-scraper, preserve-existing,
           fill-missing-only'
@@ -1755,11 +1747,6 @@ definitions:
       array_strategy:
         description: 'Array field merge strategy: merge or replace'
         example: merge
-        type: string
-      merge_strategy:
-        description: 'Deprecated: prefer-scraper, prefer-nfo, merge-arrays (use preset
-          or scalar/array strategies instead)'
-        example: prefer-scraper
         type: string
       nfo_path:
         description: 'Optional: explicit NFO path'

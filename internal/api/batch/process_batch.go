@@ -28,25 +28,23 @@ import (
 // moveToFolderOverride and renameFolderInPlaceOverride allow per-job folder mode overrides.
 // operationModeOverride allows per-job operation mode override (organize, in-place, metadata-only, preview).
 type BatchProcessOptions struct {
-	Job                         *worker.BatchJob
-	JobQueue                    *worker.JobQueue
-	Registry                    *models.ScraperRegistry
-	Aggregator                  *aggregator.Aggregator
-	MovieRepo                   *database.MovieRepository
-	Matcher                     *matcher.Matcher
-	Strict                      bool
-	Force                       bool
-	UpdateMode                  bool
-	Destination                 string
-	Cfg                         *config.Config
-	SelectedScrapers            []string
-	ScalarStrategy              string
-	ArrayStrategy               string
-	DB                          *database.DB
-	MoveToFolderOverride        *bool
-	RenameFolderInPlaceOverride *bool
-	OperationModeOverride       string
-	Emitter                     eventlog.EventEmitter
+	Job                   *worker.BatchJob
+	JobQueue              *worker.JobQueue
+	Registry              *models.ScraperRegistry
+	Aggregator            *aggregator.Aggregator
+	MovieRepo             *database.MovieRepository
+	Matcher               *matcher.Matcher
+	Strict                bool
+	Force                 bool
+	UpdateMode            bool
+	Destination           string
+	Cfg                   *config.Config
+	SelectedScrapers      []string
+	ScalarStrategy        string
+	ArrayStrategy         string
+	DB                    *database.DB
+	OperationModeOverride string
+	Emitter               eventlog.EventEmitter
 }
 
 func processBatchJob(opts *BatchProcessOptions) {

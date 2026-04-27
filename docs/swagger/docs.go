@@ -2263,11 +2263,6 @@ const docTemplate = `{
                     "type": "boolean",
                     "example": false
                 },
-                "move_to_folder": {
-                    "description": "Override config.output.move_to_folder",
-                    "type": "boolean",
-                    "example": true
-                },
                 "operation_mode": {
                     "description": "Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-only, preview",
                     "type": "string",
@@ -2277,11 +2272,6 @@ const docTemplate = `{
                     "description": "Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)",
                     "type": "string",
                     "example": "conservative"
-                },
-                "rename_folder_in_place": {
-                    "description": "Override config.output.rename_folder_in_place",
-                    "type": "boolean",
-                    "example": false
                 },
                 "scalar_strategy": {
                     "description": "For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only",
@@ -4605,11 +4595,6 @@ const docTemplate = `{
                     "description": "Array field merge strategy: merge or replace",
                     "type": "string",
                     "example": "merge"
-                },
-                "merge_strategy": {
-                    "description": "Deprecated: prefer-scraper, prefer-nfo, merge-arrays (use preset or scalar/array strategies instead)",
-                    "type": "string",
-                    "example": "prefer-scraper"
                 },
                 "nfo_path": {
                     "description": "Optional: explicit NFO path",

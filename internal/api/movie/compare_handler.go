@@ -135,26 +135,6 @@ func compareNFO(deps *ServerDependencies) gin.HandlerFunc {
 			logging.Infof("compareNFO: Applied preset '%s': scalar=%s, array=%s", req.Preset, scalarStrategyStr, arrayStrategyStr)
 		}
 
-		// Support backward compatibility with old merge_strategy field
-		if req.MergeStrategy != "" && req.Preset == "" && scalarStrategyStr == "" {
-			logging.Warnf("compareNFO: Using deprecated merge_strategy field: %s", req.MergeStrategy)
-			// Map old single-parameter strategy to two-parameter system
-			switch strings.ToLower(strings.TrimSpace(req.MergeStrategy)) {
-			case "prefer-scraper":
-				scalarStrategyStr = "prefer-scraper"
-				arrayStrategyStr = "replace"
-			case "prefer-nfo":
-				scalarStrategyStr = "prefer-nfo"
-				arrayStrategyStr = "merge"
-			case "merge-arrays":
-				scalarStrategyStr = "prefer-scraper"
-				arrayStrategyStr = "merge"
-			default:
-				c.JSON(400, ErrorResponse{Error: fmt.Sprintf("Invalid merge strategy: %s", req.MergeStrategy)})
-				return
-			}
-		}
-
 		// Apply defaults if not specified
 		if scalarStrategyStr == "" {
 			scalarStrategyStr = "prefer-nfo" // default for comparison/update mode

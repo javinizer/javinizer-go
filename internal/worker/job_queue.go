@@ -206,26 +206,24 @@ type FileResultSlim struct {
 // BatchJobSlim is a lightweight BatchJob snapshot that uses FileResultSlim
 // to avoid deep-copying movie Data on every poll.
 type BatchJobSlim struct {
-	ID                          string                     `json:"id"`
-	Status                      JobStatus                  `json:"status"`
-	TotalFiles                  int                        `json:"total_files"`
-	Completed                   int                        `json:"completed"`
-	Failed                      int                        `json:"failed"`
-	Excluded                    map[string]bool            `json:"excluded"`
-	Files                       []string                   `json:"files"`
-	Results                     map[string]*FileResultSlim `json:"results"`
-	FileMatchInfo               map[string]FileMatchInfo   `json:"file_match_info,omitempty"`
-	Progress                    float64                    `json:"progress"`
-	Destination                 string                     `json:"destination"`
-	TempDir                     string                     `json:"temp_dir"`
-	StartedAt                   time.Time                  `json:"started_at"`
-	CompletedAt                 *time.Time                 `json:"completed_at,omitempty"`
-	OrganizedAt                 *time.Time                 `json:"organized_at,omitempty"`
-	RevertedAt                  *time.Time                 `json:"reverted_at,omitempty"`
-	MoveToFolderOverride        *bool                      `json:"move_to_folder_override,omitempty"`
-	RenameFolderInPlaceOverride *bool                      `json:"rename_folder_in_place_override,omitempty"`
-	OperationModeOverride       string                     `json:"operation_mode_override,omitempty"`
-	PersistError                string                     `json:"persist_error,omitempty"`
+	ID                    string                     `json:"id"`
+	Status                JobStatus                  `json:"status"`
+	TotalFiles            int                        `json:"total_files"`
+	Completed             int                        `json:"completed"`
+	Failed                int                        `json:"failed"`
+	Excluded              map[string]bool            `json:"excluded"`
+	Files                 []string                   `json:"files"`
+	Results               map[string]*FileResultSlim `json:"results"`
+	FileMatchInfo         map[string]FileMatchInfo   `json:"file_match_info,omitempty"`
+	Progress              float64                    `json:"progress"`
+	Destination           string                     `json:"destination"`
+	TempDir               string                     `json:"temp_dir"`
+	StartedAt             time.Time                  `json:"started_at"`
+	CompletedAt           *time.Time                 `json:"completed_at,omitempty"`
+	OrganizedAt           *time.Time                 `json:"organized_at,omitempty"`
+	RevertedAt            *time.Time                 `json:"reverted_at,omitempty"`
+	OperationModeOverride string                     `json:"operation_mode_override,omitempty"`
+	PersistError          string                     `json:"persist_error,omitempty"`
 }
 
 type fileResultAlias FileResult
@@ -262,31 +260,29 @@ func (fr *FileResult) UnmarshalJSON(data []byte) error {
 
 // BatchJob represents a batch processing job
 type BatchJob struct {
-	ID                          string                   `json:"id"`
-	Status                      JobStatus                `json:"status"`
-	TotalFiles                  int                      `json:"total_files"`
-	Completed                   int                      `json:"completed"`
-	Failed                      int                      `json:"failed"`
-	Excluded                    map[string]bool          `json:"excluded"`
-	Files                       []string                 `json:"files"`
-	Results                     map[string]*FileResult   `json:"results"`
-	FileMatchInfo               map[string]FileMatchInfo `json:"file_match_info,omitempty"`
-	Progress                    float64                  `json:"progress"`
-	Destination                 string                   `json:"destination"`
-	TempDir                     string                   `json:"temp_dir"`
-	StartedAt                   time.Time                `json:"started_at"`
-	CompletedAt                 *time.Time               `json:"completed_at,omitempty"`
-	OrganizedAt                 *time.Time               `json:"organized_at,omitempty"`
-	RevertedAt                  *time.Time               `json:"reverted_at,omitempty"`
-	MoveToFolderOverride        *bool                    `json:"move_to_folder_override,omitempty"`
-	RenameFolderInPlaceOverride *bool                    `json:"rename_folder_in_place_override,omitempty"`
-	OperationModeOverride       string                   `json:"operation_mode_override,omitempty"`
-	PersistError                string                   `json:"persist_error,omitempty"`
-	CancelFunc                  context.CancelFunc       `json:"-"`
-	Done                        chan struct{}            `json:"-"`
-	mu                          sync.RWMutex             `json:"-"`
-	deleted                     bool                     `json:"-"` // Tombstone flag - prevents persist after deletion
-	templateEngine              *template.Engine         `json:"-"` // Shared template engine (safe for concurrent use)
+	ID                    string                   `json:"id"`
+	Status                JobStatus                `json:"status"`
+	TotalFiles            int                      `json:"total_files"`
+	Completed             int                      `json:"completed"`
+	Failed                int                      `json:"failed"`
+	Excluded              map[string]bool          `json:"excluded"`
+	Files                 []string                 `json:"files"`
+	Results               map[string]*FileResult   `json:"results"`
+	FileMatchInfo         map[string]FileMatchInfo `json:"file_match_info,omitempty"`
+	Progress              float64                  `json:"progress"`
+	Destination           string                   `json:"destination"`
+	TempDir               string                   `json:"temp_dir"`
+	StartedAt             time.Time                `json:"started_at"`
+	CompletedAt           *time.Time               `json:"completed_at,omitempty"`
+	OrganizedAt           *time.Time               `json:"organized_at,omitempty"`
+	RevertedAt            *time.Time               `json:"reverted_at,omitempty"`
+	OperationModeOverride string                   `json:"operation_mode_override,omitempty"`
+	PersistError          string                   `json:"persist_error,omitempty"`
+	CancelFunc            context.CancelFunc       `json:"-"`
+	Done                  chan struct{}            `json:"-"`
+	mu                    sync.RWMutex             `json:"-"`
+	deleted               bool                     `json:"-"` // Tombstone flag - prevents persist after deletion
+	templateEngine        *template.Engine         `json:"-"` // Shared template engine (safe for concurrent use)
 }
 
 // Lock acquires the job's write lock for exclusive access
@@ -987,15 +983,6 @@ func (job *BatchJob) GetStatus() *BatchJob {
 		PersistError:          job.PersistError,
 	}
 
-	if job.MoveToFolderOverride != nil {
-		v := *job.MoveToFolderOverride
-		status.MoveToFolderOverride = &v
-	}
-	if job.RenameFolderInPlaceOverride != nil {
-		v := *job.RenameFolderInPlaceOverride
-		status.RenameFolderInPlaceOverride = &v
-	}
-
 	return status
 }
 
@@ -1065,15 +1052,6 @@ func (job *BatchJob) GetStatusSlim() *BatchJobSlim {
 		PersistError:          job.PersistError,
 	}
 
-	if job.MoveToFolderOverride != nil {
-		v := *job.MoveToFolderOverride
-		status.MoveToFolderOverride = &v
-	}
-	if job.RenameFolderInPlaceOverride != nil {
-		v := *job.RenameFolderInPlaceOverride
-		status.RenameFolderInPlaceOverride = &v
-	}
-
 	return status
 }
 
@@ -1097,42 +1075,6 @@ func (job *BatchJob) SetOperationModeOverride(mode string) {
 	job.mu.Lock()
 	defer job.mu.Unlock()
 	job.OperationModeOverride = mode
-}
-
-// GetMoveToFolderOverride returns the move-to-folder override (thread-safe)
-func (job *BatchJob) GetMoveToFolderOverride() *bool {
-	job.mu.RLock()
-	defer job.mu.RUnlock()
-	if job.MoveToFolderOverride == nil {
-		return nil
-	}
-	v := *job.MoveToFolderOverride
-	return &v
-}
-
-// SetMoveToFolderOverride sets the move-to-folder override (thread-safe)
-func (job *BatchJob) SetMoveToFolderOverride(val *bool) {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	job.MoveToFolderOverride = val
-}
-
-// GetRenameFolderInPlaceOverride returns the rename-in-place override (thread-safe)
-func (job *BatchJob) GetRenameFolderInPlaceOverride() *bool {
-	job.mu.RLock()
-	defer job.mu.RUnlock()
-	if job.RenameFolderInPlaceOverride == nil {
-		return nil
-	}
-	v := *job.RenameFolderInPlaceOverride
-	return &v
-}
-
-// SetRenameFolderInPlaceOverride sets the rename-in-place override (thread-safe)
-func (job *BatchJob) SetRenameFolderInPlaceOverride(val *bool) {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	job.RenameFolderInPlaceOverride = val
 }
 
 // GetDestination returns the destination path (thread-safe)

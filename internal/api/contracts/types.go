@@ -168,18 +168,16 @@ type FileInfo struct {
 
 // BatchScrapeRequest represents a batch scrape request
 type BatchScrapeRequest struct {
-	Files               []string `json:"files" binding:"required"`
-	Strict              bool     `json:"strict" example:"false"`
-	Force               bool     `json:"force" example:"false"`
-	Destination         string   `json:"destination,omitempty" example:"/path/to/output"`
-	Update              bool     `json:"update" example:"false"` // Update mode: only create/update metadata files without moving video files
-	SelectedScrapers    []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
-	Preset              string   `json:"preset,omitempty" example:"conservative"`          // Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)
-	ScalarStrategy      string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"`   // For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
-	ArrayStrategy       string   `json:"array_strategy,omitempty" example:"merge"`         // For Update mode: merge, replace
-	MoveToFolder        *bool    `json:"move_to_folder,omitempty" example:"true"`          // Override config.output.move_to_folder
-	RenameFolderInPlace *bool    `json:"rename_folder_in_place,omitempty" example:"false"` // Override config.output.rename_folder_in_place
-	OperationMode       string   `json:"operation_mode,omitempty" example:"organize"`      // Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-only, preview
+	Files            []string `json:"files" binding:"required"`
+	Strict           bool     `json:"strict" example:"false"`
+	Force            bool     `json:"force" example:"false"`
+	Destination      string   `json:"destination,omitempty" example:"/path/to/output"`
+	Update           bool     `json:"update" example:"false"` // Update mode: only create/update metadata files without moving video files
+	SelectedScrapers []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
+	Preset           string   `json:"preset,omitempty" example:"conservative"`        // Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)
+	ScalarStrategy   string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"` // For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
+	ArrayStrategy    string   `json:"array_strategy,omitempty" example:"merge"`       // For Update mode: merge, replace
+	OperationMode    string   `json:"operation_mode,omitempty" example:"organize"`    // Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-only, preview
 }
 
 // BatchScrapeResponse represents batch scrape response
@@ -381,12 +379,11 @@ type BatchRescrapeResponse struct {
 
 // NFOComparisonRequest represents a request to compare NFO with scraped data
 type NFOComparisonRequest struct {
-	NFOPath          string   `json:"nfo_path,omitempty" example:"/path/to/movie.nfo"`   // Optional: explicit NFO path
-	MergeStrategy    string   `json:"merge_strategy,omitempty" example:"prefer-scraper"` // Deprecated: prefer-scraper, prefer-nfo, merge-arrays (use preset or scalar/array strategies instead)
-	Preset           string   `json:"preset,omitempty" example:"conservative"`           // Merge strategy preset: conservative, gap-fill, or aggressive (overrides scalar/array strategies)
-	ScalarStrategy   string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"`    // Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing, or fill-missing-only
-	ArrayStrategy    string   `json:"array_strategy,omitempty" example:"merge"`          // Array field merge strategy: merge or replace
-	SelectedScrapers []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`  // Optional: custom scrapers for comparison
+	NFOPath          string   `json:"nfo_path,omitempty" example:"/path/to/movie.nfo"`  // Optional: explicit NFO path
+	Preset           string   `json:"preset,omitempty" example:"conservative"`          // Merge strategy preset: conservative, gap-fill, or aggressive (overrides scalar/array strategies)
+	ScalarStrategy   string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"`   // Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing, or fill-missing-only
+	ArrayStrategy    string   `json:"array_strategy,omitempty" example:"merge"`         // Array field merge strategy: merge or replace
+	SelectedScrapers []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"` // Optional: custom scrapers for comparison
 }
 
 // NFOComparisonResponse represents the result of comparing NFO with scraped data

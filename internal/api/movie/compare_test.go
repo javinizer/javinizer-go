@@ -202,13 +202,15 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 	deps.GetRegistry().Register(mockScraper)
 
 	tests := []struct {
-		name          string
-		mergeStrategy string
-		checkResponse func(*testing.T, *NFOComparisonResponse)
+		name           string
+		scalarStrategy string
+		arrayStrategy  string
+		checkResponse  func(*testing.T, *NFOComparisonResponse)
 	}{
 		{
-			name:          "prefer-scraper strategy",
-			mergeStrategy: "prefer-scraper",
+			name:           "prefer-scraper strategy",
+			scalarStrategy: "prefer-scraper",
+			arrayStrategy:  "replace",
 			checkResponse: func(t *testing.T, resp *NFOComparisonResponse) {
 				assert.True(t, resp.NFOExists)
 				assert.NotNil(t, resp.NFOData)
@@ -231,8 +233,9 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			},
 		},
 		{
-			name:          "prefer-nfo strategy",
-			mergeStrategy: "prefer-nfo",
+			name:           "prefer-nfo strategy",
+			scalarStrategy: "prefer-nfo",
+			arrayStrategy:  "merge",
 			checkResponse: func(t *testing.T, resp *NFOComparisonResponse) {
 				// With prefer-nfo, NFO data should be preferred when available
 				assert.NotNil(t, resp.NFOData)
@@ -245,8 +248,9 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			},
 		},
 		{
-			name:          "merge-arrays strategy",
-			mergeStrategy: "merge-arrays",
+			name:           "merge-arrays strategy",
+			scalarStrategy: "prefer-scraper",
+			arrayStrategy:  "merge",
 			checkResponse: func(t *testing.T, resp *NFOComparisonResponse) {
 				// With merge-arrays, arrays should be combined
 				// Actresses should include both NFO and scraped
@@ -258,8 +262,9 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			},
 		},
 		{
-			name:          "default strategy (empty string)",
-			mergeStrategy: "",
+			name:           "default strategy (empty string)",
+			scalarStrategy: "",
+			arrayStrategy:  "",
 			checkResponse: func(t *testing.T, resp *NFOComparisonResponse) {
 				// Default for compareNFO should be prefer-nfo (conservative, preserves existing data)
 				assert.Equal(t, "NFO Title", resp.MergedData.Title)
@@ -271,8 +276,9 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create request
 			reqBody := NFOComparisonRequest{
-				NFOPath:       nfoPath,
-				MergeStrategy: tt.mergeStrategy,
+				NFOPath:        nfoPath,
+				ScalarStrategy: tt.scalarStrategy,
+				ArrayStrategy:  tt.arrayStrategy,
 			}
 			bodyBytes, _ := json.Marshal(reqBody)
 
@@ -306,23 +312,24 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 		name           string
 		setupNFO       func() string
 		movieID        string
-		mergeStrategy  string
+		preset         string
+		scalarStrategy string
+		arrayStrategy  string
 		setupScraper   func(*models.ScraperRegistry)
 		expectedStatus int
 		checkError     func(*testing.T, ErrorResponse)
 	}{
 		{
-			name: "invalid merge strategy",
+			name: "invalid preset",
 			setupNFO: func() string {
 				nfoPath := filepath.Join(tempDir, "test.nfo")
 				content := `<?xml version="1.0" encoding="UTF-8"?><movie><title>Test</title></movie>`
 				_ = os.WriteFile(nfoPath, []byte(content), 0644)
 				return nfoPath
 			},
-			movieID:       "IPX-001",
-			mergeStrategy: "invalid-strategy",
+			movieID: "IPX-001",
+			preset:  "invalid-preset",
 			setupScraper: func(registry *models.ScraperRegistry) {
-				// Register a working scraper so we get to the merge strategy validation
 				now := time.Now()
 				mockScraper := &mockScraperWithResults{
 					name:    "r18dev",
@@ -339,7 +346,7 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 			},
 			expectedStatus: 400,
 			checkError: func(t *testing.T, err ErrorResponse) {
-				assert.Contains(t, err.Error, "Invalid merge strategy")
+				assert.Contains(t, err.Error, "invalid preset")
 			},
 		},
 		{
@@ -351,7 +358,7 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 				return nfoPath
 			},
 			movieID:        "IPX-001",
-			mergeStrategy:  "prefer-scraper",
+			scalarStrategy: "prefer-scraper",
 			expectedStatus: 500,
 			checkError: func(t *testing.T, err ErrorResponse) {
 				assert.Contains(t, err.Error, "Failed to parse NFO")
@@ -365,8 +372,8 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 				_ = os.WriteFile(nfoPath, []byte(content), 0644)
 				return nfoPath
 			},
-			movieID:       "INVALID-999",
-			mergeStrategy: "prefer-scraper",
+			movieID:        "INVALID-999",
+			scalarStrategy: "prefer-scraper",
 			setupScraper: func(registry *models.ScraperRegistry) {
 				// Register a scraper that will fail
 				mockScraper := &mockScraperWithResults{
@@ -407,8 +414,10 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 
 			// Create request
 			reqBody := NFOComparisonRequest{
-				NFOPath:       nfoPath,
-				MergeStrategy: tt.mergeStrategy,
+				NFOPath:        nfoPath,
+				Preset:         tt.preset,
+				ScalarStrategy: tt.scalarStrategy,
+				ArrayStrategy:  tt.arrayStrategy,
 			}
 			bodyBytes, _ := json.Marshal(reqBody)
 
@@ -482,8 +491,9 @@ func TestCompareNFO_ProvenanceTracking(t *testing.T) {
 
 	// Create request
 	reqBody := NFOComparisonRequest{
-		NFOPath:       nfoPath,
-		MergeStrategy: "prefer-scraper",
+		NFOPath:        nfoPath,
+		ScalarStrategy: "prefer-scraper",
+		ArrayStrategy:  "replace",
 	}
 	bodyBytes, _ := json.Marshal(reqBody)
 

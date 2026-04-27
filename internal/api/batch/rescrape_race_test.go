@@ -35,30 +35,28 @@ func setJobDeleted(job *worker.BatchJob, deleted bool) {
 	// Using a shadow struct to calculate offset:
 
 	type batchJobShadow struct {
-		ID                          string
-		Status                      worker.JobStatus
-		TotalFiles                  int
-		Completed                   int
-		Failed                      int
-		Excluded                    map[string]bool
-		Files                       []string
-		Results                     map[string]*worker.FileResult
-		FileMatchInfo               map[string]worker.FileMatchInfo
-		Progress                    float64
-		Destination                 string
-		TempDir                     string
-		StartedAt                   time.Time
-		CompletedAt                 *time.Time
-		OrganizedAt                 *time.Time
-		RevertedAt                  *time.Time
-		MoveToFolderOverride        *bool
-		RenameFolderInPlaceOverride *bool
-		OperationModeOverride       string
-		PersistError                string
-		CancelFunc                  context.CancelFunc
-		Done                        chan struct{}
-		Mu                          sync.RWMutex
-		Deleted                     bool
+		ID                    string
+		Status                worker.JobStatus
+		TotalFiles            int
+		Completed             int
+		Failed                int
+		Excluded              map[string]bool
+		Files                 []string
+		Results               map[string]*worker.FileResult
+		FileMatchInfo         map[string]worker.FileMatchInfo
+		Progress              float64
+		Destination           string
+		TempDir               string
+		StartedAt             time.Time
+		CompletedAt           *time.Time
+		OrganizedAt           *time.Time
+		RevertedAt            *time.Time
+		OperationModeOverride string
+		PersistError          string
+		CancelFunc            context.CancelFunc
+		Done                  chan struct{}
+		Mu                    sync.RWMutex
+		Deleted               bool
 	}
 
 	// Calculate offset to Deleted field

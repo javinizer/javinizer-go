@@ -70,8 +70,6 @@ func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		// Set folder mode overrides for the job (used during organization)
-		job.SetMoveToFolderOverride(req.MoveToFolder)
-		job.SetRenameFolderInPlaceOverride(req.RenameFolderInPlace)
 		if req.OperationMode != "" {
 			job.SetOperationModeOverride(req.OperationMode)
 		}
@@ -83,25 +81,23 @@ func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
 
 		// Start processing in background - use getters for thread-safe access
 		go processBatchJob(&BatchProcessOptions{
-			Job:                         job,
-			JobQueue:                    deps.JobQueue,
-			Registry:                    deps.GetRegistry(),
-			Aggregator:                  deps.GetAggregator(),
-			MovieRepo:                   deps.MovieRepo,
-			Matcher:                     deps.GetMatcher(),
-			Strict:                      req.Strict,
-			Force:                       req.Force,
-			UpdateMode:                  req.Update,
-			Destination:                 req.Destination,
-			Cfg:                         deps.GetConfig(),
-			SelectedScrapers:            req.SelectedScrapers,
-			ScalarStrategy:              req.ScalarStrategy,
-			ArrayStrategy:               req.ArrayStrategy,
-			DB:                          deps.DB,
-			MoveToFolderOverride:        req.MoveToFolder,
-			RenameFolderInPlaceOverride: req.RenameFolderInPlace,
-			OperationModeOverride:       req.OperationMode,
-			Emitter:                     deps.EventEmitter,
+			Job:                   job,
+			JobQueue:              deps.JobQueue,
+			Registry:              deps.GetRegistry(),
+			Aggregator:            deps.GetAggregator(),
+			MovieRepo:             deps.MovieRepo,
+			Matcher:               deps.GetMatcher(),
+			Strict:                req.Strict,
+			Force:                 req.Force,
+			UpdateMode:            req.Update,
+			Destination:           req.Destination,
+			Cfg:                   deps.GetConfig(),
+			SelectedScrapers:      req.SelectedScrapers,
+			ScalarStrategy:        req.ScalarStrategy,
+			ArrayStrategy:         req.ArrayStrategy,
+			DB:                    deps.DB,
+			OperationModeOverride: req.OperationMode,
+			Emitter:               deps.EventEmitter,
 		})
 
 		c.JSON(200, BatchScrapeResponse{
