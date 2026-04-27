@@ -95,7 +95,7 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 			if newFolderByteLen > 0 {
 				truncated := s.templateEngine.TruncateTitleBytes(folderName, newFolderByteLen)
 				if truncated != "" {
-					folderName = truncated
+					folderName = template.SanitizeFolderPath(truncated)
 				}
 			}
 

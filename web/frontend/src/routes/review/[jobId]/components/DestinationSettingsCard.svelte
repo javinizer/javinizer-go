@@ -49,6 +49,20 @@
 	function extractFileName(path: string): string {
 		return path.split(/[\\/]/).pop() || path;
 	}
+
+	function extractParentDir(path: string): string {
+		const isUnc = path.startsWith('\\\\');
+		const isWindows = path.includes('\\');
+		const isAbsPosix = !isWindows && path.startsWith('/');
+		const sep = isWindows ? '\\' : '/';
+		const parts = path.split(/[\\/]/).filter(Boolean);
+		parts.pop();
+		const result = parts.join(sep);
+		if (!result) return '/';
+		if (isUnc) return '\\\\' + result;
+		if (isAbsPosix) return '/' + result;
+		return result;
+	}
 </script>
 
 <Card class="p-4">
@@ -214,42 +228,45 @@
 						{@render screenshotList(4)}
 					</div>
 				</div>
-			{:else if isInPlace}
-				<div class="mt-3 p-3 bg-accent/50 rounded border border-dashed overflow-hidden">
-					<p class="text-xs font-medium mb-1 text-muted-foreground">{getOperationLabel(opMode)}:</p>
-					<div class="font-mono text-xs space-y-1 overflow-x-auto">
-						{#if preview.source_path}
-							<div class="text-muted-foreground break-all">📄 {preview.source_path}</div>
-							<div class="text-muted-foreground">→</div>
-						{/if}
-						{#if preview.folder_name}
-							<div class="text-muted-foreground break-all">📁 {preview.folder_name}/</div>
-						{/if}
-						{#if preview.video_files && preview.video_files.length > 0}
-							{#each preview.video_files as videoFile}
-								<div class="break-all" style="margin-left: 4px">🎬 {extractFileName(videoFile)}</div>
+		{:else if isInPlace}
+			<div class="mt-3 p-3 bg-accent/50 rounded border border-dashed overflow-hidden">
+				<p class="text-xs font-medium mb-1 text-muted-foreground">{getOperationLabel(opMode)}:</p>
+				<div class="font-mono text-xs space-y-1 overflow-x-auto">
+					{#if preview.source_path}
+						<div class="text-muted-foreground break-all">📄 {preview.source_path}</div>
+						<div class="text-muted-foreground">→</div>
+					{/if}
+					{#if preview.full_path}
+						{@const targetDir = extractParentDir(preview.full_path)}
+						<div class="text-muted-foreground break-all">📁 {targetDir}/</div>
+					{:else if preview.folder_name}
+						<div class="text-muted-foreground break-all">📁 {preview.folder_name}/</div>
+					{/if}
+					{#if preview.video_files && preview.video_files.length > 0}
+						{#each preview.video_files as videoFile}
+							<div class="break-all" style="margin-left: 4px">🎬 {extractFileName(videoFile)}</div>
+						{/each}
+					{:else}
+						<div class="break-all" style="margin-left: 4px">🎬 {preview.file_name}.mp4</div>
+					{/if}
+					{#if preview.nfo_path || (preview.nfo_paths && preview.nfo_paths.length > 0)}
+						{#if preview.nfo_paths && preview.nfo_paths.length > 0}
+							{#each preview.nfo_paths as nfoFile}
+								<div class="break-all" style="margin-left: 4px">📄 {extractFileName(nfoFile)}</div>
 							{/each}
-						{:else}
-							<div class="break-all" style="margin-left: 4px">🎬 {preview.file_name}.mp4</div>
+						{:else if preview.nfo_path}
+							<div class="break-all" style="margin-left: 4px">📄 {extractFileName(preview.nfo_path)}</div>
 						{/if}
-						{#if preview.nfo_path || (preview.nfo_paths && preview.nfo_paths.length > 0)}
-							{#if preview.nfo_paths && preview.nfo_paths.length > 0}
-								{#each preview.nfo_paths as nfoFile}
-									<div class="break-all" style="margin-left: 4px">📄 {extractFileName(nfoFile)}</div>
-								{/each}
-							{:else if preview.nfo_path}
-								<div class="break-all" style="margin-left: 4px">📄 {extractFileName(preview.nfo_path)}</div>
-							{/if}
-						{/if}
-						{#if preview.poster_path}
-							<div class="break-all" style="margin-left: 4px">🖼️ {extractFileName(preview.poster_path)}</div>
-						{/if}
-						{#if preview.fanart_path}
-							<div class="break-all" style="margin-left: 4px">🖼️ {extractFileName(preview.fanart_path)}</div>
-						{/if}
-						{@render screenshotList(8)}
-					</div>
+					{/if}
+					{#if preview.poster_path}
+						<div class="break-all" style="margin-left: 4px">🖼️ {extractFileName(preview.poster_path)}</div>
+					{/if}
+					{#if preview.fanart_path}
+						<div class="break-all" style="margin-left: 4px">🖼️ {extractFileName(preview.fanart_path)}</div>
+					{/if}
+					{@render screenshotList(8)}
 				</div>
+			</div>
 			{:else if isMetadataOnly}
 				<div class="mt-3 p-3 bg-accent/50 rounded border border-dashed overflow-hidden">
 					<p class="text-xs font-medium mb-1 text-muted-foreground">{getOperationLabel(opMode)} (no file changes):</p>

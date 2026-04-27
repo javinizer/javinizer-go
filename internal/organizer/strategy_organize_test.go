@@ -141,7 +141,7 @@ func TestOrganizeStrategy_Plan_TitleTruncation(t *testing.T) {
 
 	plan, err := strategy.Plan(match, movie, "/dest", false)
 	require.NoError(t, err)
-	// TruncateTitle adds ~ to indicate truncation
+	// TruncateTitle adds ... then SanitizeFolderPath converts trailing ... to ~
 	assert.Contains(t, filepath.ToSlash(plan.TargetDir), "ABC-123 This is")
 	assert.Contains(t, filepath.ToSlash(plan.TargetFile), "ABC-123 This is")
 	assert.LessOrEqual(t, len(plan.TargetDir), 50)
@@ -273,6 +273,9 @@ func TestOrganizeStrategy_Plan_MaxPathLength(t *testing.T) {
 	plan, err := strategy.Plan(match, movie, "/dest", false)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(plan.TargetPath), 40, "Path should be truncated to fit MaxPathLength")
+	assert.NotContains(t, plan.FolderName, "...", "Truncated folder name should use ~ not ...")
+	require.NotEmpty(t, plan.FolderName)
+	assert.Equal(t, byte('~'), plan.FolderName[len(plan.FolderName)-1], "Truncated folder name should end with ~")
 }
 
 func TestOrganizeStrategy_Plan_MaxPathLengthTooShort(t *testing.T) {

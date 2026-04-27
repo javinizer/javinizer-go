@@ -157,7 +157,7 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 			if newFolderByteLen > 0 {
 				truncated := s.templateEngine.TruncateTitleBytes(folderName, newFolderByteLen)
 				if truncated != "" {
-					folderName = truncated
+					folderName = template.SanitizeFolderPath(truncated)
 				}
 			}
 			if inPlace {

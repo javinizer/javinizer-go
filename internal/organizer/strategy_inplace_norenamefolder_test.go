@@ -349,4 +349,5 @@ func TestInPlaceNoRenameFolderStrategy_Plan_TruncationEdgeCase(t *testing.T) {
 	assert.True(t, strings.HasSuffix(plan.TargetFile, ".mp4"), "Should preserve extension")
 	baseName := strings.TrimSuffix(plan.TargetFile, ".mp4")
 	assert.NotEmpty(t, baseName, "Basename should not be empty after truncation")
+	assert.NotContains(t, baseName, "...", "Truncated file name should use ~ not ...")
 }
