@@ -28,6 +28,9 @@ func NewMetadataOnlyStrategy(fs afero.Fs, cfg *config.OutputConfig) *MetadataOnl
 func (s *MetadataOnlyStrategy) Plan(match matcher.MatchResult, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
 	// Metadata-only mode never renames files — preserve the original filename
 	fileName := match.File.Name
+	if fileName == "" && match.File.Path != "" {
+		fileName = filepath.Base(match.File.Path)
+	}
 
 	sourceDir := filepath.Dir(match.File.Path)
 
@@ -46,7 +49,9 @@ func (s *MetadataOnlyStrategy) Plan(match matcher.MatchResult, movie *models.Mov
 		SkipInPlaceReason: "metadata-only mode",
 		FolderName:        "",
 		SubfolderPath:     "",
-		BaseFileName:      strings.TrimSuffix(match.File.Name, match.File.Extension),
+		BaseFileName:      strings.TrimSuffix(fileName, match.File.Extension),
+		Strategy:          StrategyTypeMetadataOnly,
+		executeStrategy:   s,
 	}, nil
 }
 

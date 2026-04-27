@@ -164,6 +164,7 @@ func TestOrganizer_Execute_InPlaceErrors(t *testing.T) {
 			WillMove:   true,
 			InPlace:    true,
 			OldDir:     filepath.Join(tmpDir, "nonexistent-dir"),
+			Strategy:   StrategyTypeInPlace,
 		}
 
 		result, err := org.Execute(plan, false)
@@ -185,6 +186,7 @@ func TestOrganizer_Execute_InPlaceErrors(t *testing.T) {
 			WillMove:   true,
 			InPlace:    true,
 			OldDir:     filePath,
+			Strategy:   StrategyTypeInPlace,
 		}
 
 		result, err := org.Execute(plan, false)
@@ -212,6 +214,7 @@ func TestOrganizer_Execute_InPlaceErrors(t *testing.T) {
 			WillMove:   true,
 			InPlace:    true,
 			OldDir:     oldDir,
+			Strategy:   StrategyTypeInPlace,
 		}
 
 		result, err := org.Execute(plan, false)
@@ -492,7 +495,8 @@ func TestOrganizer_Plan_EdgeCases(t *testing.T) {
 			FolderFormat:  "<ID> - <TITLE>",
 			FileFormat:    "<ID>",
 			RenameFile:    true,
-			MaxPathLength: 50, // Very short to trigger validation error
+			MoveToFolder:  true,
+			MaxPathLength: 50,
 		}
 
 		org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -683,6 +687,7 @@ func TestOrganizer_OrganizeBatch_EdgeCases(t *testing.T) {
 		FolderFormat: "<ID>",
 		FileFormat:   "<ID>",
 		RenameFile:   true,
+		MoveToFolder: true,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -931,7 +936,8 @@ func TestOrganizer_Organize_Integration(t *testing.T) {
 			FolderFormat:  "<ID> - <TITLE>",
 			FileFormat:    "<ID>",
 			RenameFile:    true,
-			MaxPathLength: 10, // Too short
+			MoveToFolder:  true,
+			MaxPathLength: 10,
 		}
 		badOrg := NewOrganizer(afero.NewOsFs(), badCfg, nil)
 

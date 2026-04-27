@@ -1107,16 +1107,16 @@ func TestOrganizer_Execute_InPlaceRename_DirectoryAlreadyExists(t *testing.T) {
 	}
 
 	cfg := &config.OutputConfig{
-		FolderFormat: "<ID> - <TITLE>",
-		FileFormat:   "<ID>",
-		RenameFile:   true,
-		MoveToFolder: true,
+		FolderFormat:        "<ID> - <TITLE>",
+		FileFormat:          "<ID>",
+		RenameFile:          true,
+		MoveToFolder:        true,
+		RenameFolderInPlace: true,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
-	// Create plan with in-place rename
 	plan := &OrganizePlan{
 		SourcePath: sourceFile,
 		TargetDir:  targetDir,
@@ -1127,6 +1127,7 @@ func TestOrganizer_Execute_InPlaceRename_DirectoryAlreadyExists(t *testing.T) {
 		InPlace:    true,
 		OldDir:     sourceDir,
 		Movie:      movie,
+		Strategy:   StrategyTypeInPlace,
 	}
 
 	// Execute should fail because target directory already exists

@@ -78,6 +78,7 @@ func TestOrganizerTemplate_ErrorHandling(t *testing.T) {
 				FolderFormat:   tt.template,
 				FileFormat:     "<ID>",
 				RenameFile:     true,
+				MoveToFolder:   true,
 				MoveSubtitles:  false,
 				MaxTitleLength: 0,
 			}
@@ -130,6 +131,7 @@ func TestOrganizerTemplate_NilContext(t *testing.T) {
 		FolderFormat:   "<ID> - <TITLE>",
 		FileFormat:     "<ID>",
 		RenameFile:     true,
+		MoveToFolder:   true,
 		MoveSubtitles:  false,
 		MaxTitleLength: 0,
 	}
@@ -208,6 +210,7 @@ func TestOrganizerTemplate_ConditionalErrors(t *testing.T) {
 				FolderFormat:   tt.template,
 				FileFormat:     "<ID>",
 				RenameFile:     true,
+				MoveToFolder:   true,
 				MoveSubtitles:  false,
 				MaxTitleLength: 0,
 			}

@@ -124,9 +124,9 @@ func initConfig() {
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "Invalid umask value '%s': %v\n", cfg.System.Umask, err)
 		} else {
-			oldUmask, applied := applyUmask(int(umaskValue))
-			if applied {
-				defer func() { _, _ = applyUmask(oldUmask) }()
+			_, applied := applyUmask(int(umaskValue))
+			if !applied {
+				_, _ = fmt.Fprintf(os.Stderr, "Umask not supported on this platform\n")
 			}
 		}
 	}

@@ -14,84 +14,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scanner"
 )
 
-func TestIsDedicatedFolder(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create a matcher
-	cfg := &config.MatchingConfig{
-		RegexEnabled: false,
-	}
-	m, err := matcher.NewMatcher(cfg)
-	if err != nil {
-		t.Fatalf("Failed to create matcher: %v", err)
-	}
-
-	orgCfg := &config.OutputConfig{}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
-
-	tests := []struct {
-		name           string
-		files          []string
-		id             string
-		shouldDedicate bool
-	}{
-		{
-			name:           "Single ID - dedicated",
-			files:          []string{"IPX-535.mp4", "IPX-535.nfo", "cover.jpg"},
-			id:             "IPX-535",
-			shouldDedicate: true,
-		},
-		{
-			name:           "Multi-part same ID - dedicated",
-			files:          []string{"IPX-535-pt1.mp4", "IPX-535-pt2.mp4"},
-			id:             "IPX-535",
-			shouldDedicate: true,
-		},
-		{
-			name:           "Mixed IDs - not dedicated",
-			files:          []string{"IPX-535.mp4", "ABC-123.mp4"},
-			id:             "IPX-535",
-			shouldDedicate: false,
-		},
-		{
-			name:           "No video files - not dedicated",
-			files:          []string{"cover.jpg", "metadata.nfo"},
-			id:             "IPX-535",
-			shouldDedicate: false,
-		},
-		{
-			name:           "Different ID - not dedicated",
-			files:          []string{"ABC-123.mp4"},
-			id:             "IPX-535",
-			shouldDedicate: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create test directory
-			testDir := filepath.Join(tmpDir, tt.name)
-			if err := os.MkdirAll(testDir, 0755); err != nil {
-				t.Fatalf("Failed to create test directory: %v", err)
-			}
-
-			// Create test files
-			for _, file := range tt.files {
-				filePath := filepath.Join(testDir, file)
-				if err := os.WriteFile(filePath, []byte("test"), 0644); err != nil {
-					t.Fatalf("Failed to create test file: %v", err)
-				}
-			}
-
-			// Test isDedicatedFolder
-			isDedicated := o.isDedicatedFolder(testDir, tt.id, m)
-			if isDedicated != tt.shouldDedicate {
-				t.Errorf("Expected isDedicated=%v, got %v", tt.shouldDedicate, isDedicated)
-			}
-		})
-	}
-}
-
 func TestPlan_InPlaceDetection(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -134,7 +56,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 			sourceFile:          "IPX-535.mp4",
 			destDir:             tmpDir,
 			expectedInPlace:     false,
-			expectedReason:      "feature disabled in config",
+			expectedReason:      "organize mode - always move to destination",
 		},
 		{
 			name:                "Folder already has correct name",
@@ -252,6 +174,159 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPlan_InPlaceFallbackToMoveToFolder(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	matcherCfg := &config.MatchingConfig{RegexEnabled: false}
+	m, err := matcher.NewMatcher(matcherCfg)
+	if err != nil {
+		t.Fatalf("Failed to create matcher: %v", err)
+	}
+
+	destDir := filepath.Join(tmpDir, "dest")
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		t.Fatalf("Failed to create dest dir: %v", err)
+	}
+
+	movie := &models.Movie{
+		ID:    "IPX-535",
+		Maker: "IdeaPocket",
+		Title: "Beautiful Day",
+	}
+
+	t.Run("Mixed IDs with MoveToFolder=true falls back to destDir", func(t *testing.T) {
+		sourceDir := filepath.Join(tmpDir, "mixed-ids")
+		if err := os.MkdirAll(sourceDir, 0755); err != nil {
+			t.Fatalf("Failed to create source dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "IPX-535.mp4"), []byte("video"), 0644); err != nil {
+			t.Fatalf("Failed to create source file: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "ABC-123.mp4"), []byte("other"), 0644); err != nil {
+			t.Fatalf("Failed to create mixed file: %v", err)
+		}
+
+		cfg := &config.OutputConfig{
+			RenameFolderInPlace: true,
+			MoveToFolder:        true,
+			FolderFormat:        "<ID> - <TITLE>",
+			FileFormat:          "<ID>",
+			RenameFile:          true,
+		}
+		o := NewOrganizer(afero.NewOsFs(), cfg, nil)
+		o.SetMatcher(m)
+
+		match := matcher.MatchResult{
+			ID: "IPX-535",
+			File: scanner.FileInfo{
+				Path:      filepath.Join(sourceDir, "IPX-535.mp4"),
+				Name:      "IPX-535.mp4",
+				Extension: ".mp4",
+			},
+		}
+
+		plan, err := o.Plan(match, movie, destDir, false)
+		if err != nil {
+			t.Fatalf("Plan failed: %v", err)
+		}
+		if plan.InPlace {
+			t.Error("Expected InPlace=false for mixed IDs")
+		}
+		if !strings.HasPrefix(plan.TargetDir, destDir) {
+			t.Errorf("Expected TargetDir under destDir=%q, got %q", destDir, plan.TargetDir)
+		}
+		if !plan.WillMove {
+			t.Error("Expected WillMove=true for MoveToFolder fallback")
+		}
+	})
+
+	t.Run("Already-correct folder with MoveToFolder=true falls back to destDir", func(t *testing.T) {
+		sourceDir := filepath.Join(tmpDir, "IPX-535 - Beautiful Day")
+		if err := os.MkdirAll(sourceDir, 0755); err != nil {
+			t.Fatalf("Failed to create source dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "IPX-535.mp4"), []byte("video"), 0644); err != nil {
+			t.Fatalf("Failed to create source file: %v", err)
+		}
+
+		cfg := &config.OutputConfig{
+			RenameFolderInPlace: true,
+			MoveToFolder:        true,
+			FolderFormat:        "<ID> - <TITLE>",
+			FileFormat:          "<ID>",
+			RenameFile:          true,
+		}
+		o := NewOrganizer(afero.NewOsFs(), cfg, nil)
+		o.SetMatcher(m)
+
+		match := matcher.MatchResult{
+			ID: "IPX-535",
+			File: scanner.FileInfo{
+				Path:      filepath.Join(sourceDir, "IPX-535.mp4"),
+				Name:      "IPX-535.mp4",
+				Extension: ".mp4",
+			},
+		}
+
+		plan, err := o.Plan(match, movie, destDir, false)
+		if err != nil {
+			t.Fatalf("Plan failed: %v", err)
+		}
+		if plan.InPlace {
+			t.Error("Expected InPlace=false when folder already correct")
+		}
+		if !strings.HasPrefix(plan.TargetDir, destDir) {
+			t.Errorf("Expected TargetDir under destDir=%q, got %q", destDir, plan.TargetDir)
+		}
+	})
+
+	t.Run("Mixed IDs with MoveToFolder=false stays in source", func(t *testing.T) {
+		sourceDir := filepath.Join(tmpDir, "mixed-no-move")
+		if err := os.MkdirAll(sourceDir, 0755); err != nil {
+			t.Fatalf("Failed to create source dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "IPX-535.mp4"), []byte("video"), 0644); err != nil {
+			t.Fatalf("Failed to create source file: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "ABC-123.mp4"), []byte("other"), 0644); err != nil {
+			t.Fatalf("Failed to create mixed file: %v", err)
+		}
+
+		cfg := &config.OutputConfig{
+			RenameFolderInPlace: true,
+			MoveToFolder:        false,
+			FolderFormat:        "<ID> - <TITLE>",
+			FileFormat:          "<ID>",
+			RenameFile:          true,
+		}
+		o := NewOrganizer(afero.NewOsFs(), cfg, nil)
+		o.SetMatcher(m)
+
+		match := matcher.MatchResult{
+			ID: "IPX-535",
+			File: scanner.FileInfo{
+				Path:      filepath.Join(sourceDir, "IPX-535.mp4"),
+				Name:      "IPX-535.mp4",
+				Extension: ".mp4",
+			},
+		}
+
+		plan, err := o.Plan(match, movie, destDir, false)
+		if err != nil {
+			t.Fatalf("Plan failed: %v", err)
+		}
+		if plan.InPlace {
+			t.Error("Expected InPlace=false for mixed IDs")
+		}
+		if plan.TargetDir != sourceDir {
+			t.Errorf("Expected TargetDir=sourceDir=%q, got %q", sourceDir, plan.TargetDir)
+		}
+		if plan.WillMove {
+			t.Error("Expected WillMove=false when MoveToFolder=false and no rename needed")
+		}
+	})
 }
 
 func TestExecute_InPlaceRename(t *testing.T) {

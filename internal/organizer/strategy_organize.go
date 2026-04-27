@@ -14,10 +14,9 @@ import (
 )
 
 type OrganizeStrategy struct {
-	fs              afero.Fs
-	config          *config.OutputConfig
-	templateEngine  *template.Engine
-	subtitleHandler *SubtitleHandler
+	fs             afero.Fs
+	config         *config.OutputConfig
+	templateEngine *template.Engine
 }
 
 var _ OperationStrategy = (*OrganizeStrategy)(nil)
@@ -27,10 +26,9 @@ func NewOrganizeStrategy(fs afero.Fs, cfg *config.OutputConfig, engine *template
 		engine = template.NewEngine()
 	}
 	return &OrganizeStrategy{
-		fs:              fs,
-		config:          cfg,
-		templateEngine:  engine,
-		subtitleHandler: NewSubtitleHandler(fs, cfg),
+		fs:             fs,
+		config:         cfg,
+		templateEngine: engine,
 	}
 }
 
@@ -62,6 +60,12 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 	}
 
 	folderName = template.SanitizeFolderPath(folderName)
+	if folderName == "" {
+		folderName = template.SanitizeFolderPath(match.ID)
+		if folderName == "" {
+			folderName = "unknown"
+		}
+	}
 
 	var fileName string
 	if s.config.RenameFile {
@@ -71,6 +75,9 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 		}
 	} else {
 		fileName = match.File.Name
+		if fileName == "" && match.File.Path != "" {
+			fileName = filepath.Base(match.File.Path)
+		}
 	}
 
 	pathParts := []string{destDir}
@@ -129,6 +136,8 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 		FolderName:        folderName,
 		SubfolderPath:     subfolderPath,
 		BaseFileName:      resolveBaseFileName(s.config, s.templateEngine, movie, match),
+		Strategy:          StrategyTypeOrganize,
+		executeStrategy:   s,
 	}, nil
 }
 
@@ -163,36 +172,6 @@ func (s *OrganizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 
 	result.Moved = true
 	result.ShouldGenerateMetadata = true
-
-	if s.config.MoveSubtitles {
-		subtitles := s.subtitleHandler.FindSubtitles(plan.Match.File)
-		if len(subtitles) > 0 {
-			subtitleResults := make([]SubtitleResult, len(subtitles))
-			for i, subtitle := range subtitles {
-				subtitleResult := SubtitleResult{
-					OriginalPath: subtitle.OriginalPath,
-					Moved:        false,
-				}
-
-				videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
-				newSubtitleName := s.subtitleHandler.generateSubtitleFileName(
-					videoNameWithoutExt,
-					subtitle.Language,
-					subtitle.Extension,
-				)
-				subtitleResult.NewPath = filepath.Join(plan.TargetDir, newSubtitleName)
-
-				if err := fsutil.MoveFileFs(s.fs, subtitle.OriginalPath, subtitleResult.NewPath); err != nil {
-					subtitleResult.Error = fmt.Errorf("failed to move subtitle: %w", err)
-				} else {
-					subtitleResult.Moved = true
-				}
-
-				subtitleResults[i] = subtitleResult
-			}
-			result.Subtitles = subtitleResults
-		}
-	}
 
 	return result, nil
 }

@@ -14,25 +14,21 @@ import (
 )
 
 type InPlaceNoRenameFolderStrategy struct {
-	fs              afero.Fs
-	config          *config.OutputConfig
-	templateEngine  *template.Engine
-	subtitleHandler *SubtitleHandler
-	matcher         *matcher.Matcher
+	fs             afero.Fs
+	config         *config.OutputConfig
+	templateEngine *template.Engine
 }
 
 var _ OperationStrategy = (*InPlaceNoRenameFolderStrategy)(nil)
 
-func NewInPlaceNoRenameFolderStrategy(fs afero.Fs, cfg *config.OutputConfig, m *matcher.Matcher, engine *template.Engine) *InPlaceNoRenameFolderStrategy {
+func NewInPlaceNoRenameFolderStrategy(fs afero.Fs, cfg *config.OutputConfig, _ *matcher.Matcher, engine *template.Engine) *InPlaceNoRenameFolderStrategy {
 	if engine == nil {
 		engine = template.NewEngine()
 	}
 	return &InPlaceNoRenameFolderStrategy{
-		fs:              fs,
-		config:          cfg,
-		templateEngine:  engine,
-		subtitleHandler: NewSubtitleHandler(fs, cfg),
-		matcher:         m,
+		fs:             fs,
+		config:         cfg,
+		templateEngine: engine,
 	}
 }
 
@@ -55,12 +51,21 @@ func (s *InPlaceNoRenameFolderStrategy) Plan(match matcher.MatchResult, movie *m
 		}
 	} else {
 		fileName = match.File.Name
+		if fileName == "" && match.File.Path != "" {
+			fileName = filepath.Base(match.File.Path)
+		}
 	}
 
 	sourceDir := filepath.Dir(match.File.Path)
 	targetDir := sourceDir
 	targetPath := filepath.Join(targetDir, fileName)
 	willMove := filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
+
+	if s.config.MaxPathLength > 0 {
+		if err := s.templateEngine.ValidatePathLength(targetPath, s.config.MaxPathLength); err != nil {
+			return nil, fmt.Errorf("path validation failed: %w", err)
+		}
+	}
 
 	conflicts := checkTargetConflict(s.fs, match.File.Path, targetPath, forceUpdate, willMove)
 
@@ -80,6 +85,8 @@ func (s *InPlaceNoRenameFolderStrategy) Plan(match matcher.MatchResult, movie *m
 		FolderName:        "",
 		SubfolderPath:     "",
 		BaseFileName:      resolveBaseFileName(s.config, s.templateEngine, movie, match),
+		Strategy:          StrategyTypeInPlaceNoRenameFolder,
+		executeStrategy:   s,
 	}, nil
 }
 
@@ -108,36 +115,6 @@ func (s *InPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 	}
 
 	result.Moved = true
-
-	if s.config.MoveSubtitles {
-		subtitles := s.subtitleHandler.FindSubtitles(plan.Match.File)
-		if len(subtitles) > 0 {
-			subtitleResults := make([]SubtitleResult, len(subtitles))
-			for i, subtitle := range subtitles {
-				subtitleResult := SubtitleResult{
-					OriginalPath: subtitle.OriginalPath,
-					Moved:        false,
-				}
-
-				videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
-				newSubtitleName := s.subtitleHandler.generateSubtitleFileName(
-					videoNameWithoutExt,
-					subtitle.Language,
-					subtitle.Extension,
-				)
-				subtitleResult.NewPath = filepath.Join(plan.TargetDir, newSubtitleName)
-
-				if err := fsutil.MoveFileFs(s.fs, subtitle.OriginalPath, subtitleResult.NewPath); err != nil {
-					subtitleResult.Error = fmt.Errorf("failed to rename subtitle: %w", err)
-				} else {
-					subtitleResult.Moved = true
-				}
-
-				subtitleResults[i] = subtitleResult
-			}
-			result.Subtitles = subtitleResults
-		}
-	}
 
 	return result, nil
 }

@@ -42,7 +42,7 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 	}
 
 	if uncSource {
-		return generateUNCPreview(movie, fileResults, destination, cfg, operationMode, skipNFO, skipDownload, &outputConfig, sharedEngine)
+		return generateUNCPreview(movie, fileResults, destination, cfg, operationMode, skipNFO, skipDownload, &outputConfig, sharedEngine, strategy)
 	}
 
 	normalize := func(path string) string {
@@ -88,10 +88,11 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 			videoPath := normalize(plan.TargetPath)
 			videoFiles = append(videoFiles, videoPath)
 		} else {
+			syntheticName := movie.ID + ".mp4"
 			match := matcher.MatchResult{
 				File: scanner.FileInfo{
 					Path:      "",
-					Name:      "",
+					Name:      syntheticName,
 					Extension: ".mp4",
 				},
 				ID: movie.ID,
@@ -197,11 +198,7 @@ func createPreviewStrategy(outputConfig *config.OutputConfig, cfg *config.Config
 			strategy = organizer.NewOrganizeStrategy(fs, outputConfig, sharedEngine)
 		}
 	case types.OperationModeInPlaceNoRenameFolder:
-		if fileMatcher != nil {
-			strategy = organizer.NewInPlaceNoRenameFolderStrategy(fs, outputConfig, fileMatcher, sharedEngine)
-		} else {
-			strategy = organizer.NewOrganizeStrategy(fs, outputConfig, sharedEngine)
-		}
+		strategy = organizer.NewInPlaceNoRenameFolderStrategy(fs, outputConfig, fileMatcher, sharedEngine)
 	case types.OperationModeMetadataOnly:
 		strategy = organizer.NewMetadataOnlyStrategy(fs, outputConfig)
 	default:
@@ -233,132 +230,98 @@ func fileResultToMatchResult(result *worker.FileResult) matcher.MatchResult {
 // the // prefix on non-Windows platforms. Instead, it uses the
 // cross-platform previewPathDir/previewJoinPath helpers that correctly
 // parse and join Windows-style paths regardless of the host OS.
-func generateUNCPreview(movie *models.Movie, fileResults []*worker.FileResult, destination string, cfg *config.Config, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool, outputConfig *config.OutputConfig, sharedEngine *template.Engine) OrganizePreviewResponse {
-	firstResult := firstValidFileResult(fileResults)
-
-	ctx := template.NewContextFromMovie(movie)
-	ctx.GroupActress = outputConfig.GroupActress
-	if firstResult != nil {
-		ctx.PartNumber = firstResult.PartNumber
-		ctx.PartSuffix = firstResult.PartSuffix
-		ctx.IsMultiPart = firstResult.IsMultiPart
-	}
-	applyPreviewTitleTruncation(sharedEngine, ctx, outputConfig.MaxTitleLength)
-
-	sourceDir := ""
+func generateUNCPreview(movie *models.Movie, fileResults []*worker.FileResult, destination string, cfg *config.Config, operationMode organizer.OperationMode, skipNFO bool, skipDownload bool, outputConfig *config.OutputConfig, sharedEngine *template.Engine, strategy organizer.OperationStrategy) OrganizePreviewResponse {
 	sourcePath := ""
 	for _, result := range fileResults {
 		if result != nil && result.FilePath != "" {
 			sourcePath = result.FilePath
-			sourceDir = previewPathDir(result.FilePath)
 			break
 		}
 	}
 
-	folderName := ""
-	subfolderPath := ""
-	folderPath := sourceDir
+	posixDest := toPosixPath(destination)
 
-	switch operationMode {
-	case types.OperationModeMetadataOnly:
-	case types.OperationModeInPlaceNoRenameFolder:
-	case types.OperationModeInPlace:
-		rendered, err := sharedEngine.Execute(outputConfig.FolderFormat, ctx)
-		if err == nil {
-			folderName = template.SanitizeFolderPath(rendered)
-		}
-		if folderName == "" && movie.ID != "" {
-			folderName = template.SanitizeFolderPath(movie.ID)
-		}
-		if folderName == "" {
-			folderName = "unknown"
-		}
-		if sourceDir != "" && folderName != "" {
-			parentDir := previewPathDir(sourceDir)
-			folderPath = previewJoinPath(parentDir, folderName)
-		}
-	default:
-		subfolderParts := make([]string, 0, len(outputConfig.SubfolderFormat))
-		for _, subfolderTemplate := range outputConfig.SubfolderFormat {
-			subfolderName, err := sharedEngine.Execute(subfolderTemplate, ctx)
-			if err == nil {
-				sanitized := template.SanitizeFolderPath(subfolderName)
-				if sanitized != "" {
-					subfolderParts = append(subfolderParts, sanitized)
-				}
-			}
-		}
-		if len(subfolderParts) > 0 {
-			subfolderPath = strings.Join(subfolderParts, `\`)
-		}
-
-		rendered, err := sharedEngine.Execute(outputConfig.FolderFormat, ctx)
-		if err == nil {
-			folderName = template.SanitizeFolderPath(rendered)
-		}
-		if folderName == "" && movie.ID != "" {
-			folderName = template.SanitizeFolderPath(movie.ID)
-		}
-		if folderName == "" {
-			folderName = "unknown"
-		}
-
-		pathBase := destination
-		if pathBase == "" {
-			pathBase = sourceDir
-		}
-		if len(subfolderParts) > 0 {
-			for _, sp := range subfolderParts {
-				pathBase = previewJoinPath(pathBase, sp)
-			}
-		}
-		folderPath = previewJoinPath(pathBase, folderName)
-	}
-
+	var primaryPlan *organizer.OrganizePlan
 	videoFiles := make([]string, 0, len(fileResults))
+
 	for _, result := range fileResults {
 		if result == nil || result.FilePath == "" {
 			continue
 		}
+
 		match := fileResultToMatchResult(result)
-		perFileCtx := template.NewContextFromMovie(movie)
-		perFileCtx.GroupActress = outputConfig.GroupActress
-		perFileCtx.PartNumber = result.PartNumber
-		perFileCtx.PartSuffix = result.PartSuffix
-		perFileCtx.IsMultiPart = result.IsMultiPart
-		applyPreviewTitleTruncation(sharedEngine, perFileCtx, outputConfig.MaxTitleLength)
-		videoFileName := resolveUNCVideoFileName(movie, outputConfig, sharedEngine, perFileCtx, match)
-		videoPath := previewJoinPath(folderPath, videoFileName)
-		videoFiles = append(videoFiles, videoPath)
-	}
+		match.File.Path = toPosixPath(match.File.Path)
 
-	if len(videoFiles) == 0 {
-		ext := previewPathExt(previewPathBase(sourcePath))
-		if ext == "" {
-			ext = ".mp4"
+		plan, err := strategy.Plan(match, movie, posixDest, false)
+		if err != nil {
+			logging.Warnf("Preview: strategy.Plan failed for %s: %v", result.FilePath, err)
+			continue
 		}
-		videoPath := previewJoinPath(folderPath, resolvePreviewFallbackName(movie, fileResults)+ext)
-		videoFiles = append(videoFiles, videoPath)
+
+		if primaryPlan == nil {
+			primaryPlan = plan
+		}
+
+		uncTargetPath := rebuildUNCPath(plan, sourcePath, destination)
+		videoFiles = append(videoFiles, uncTargetPath)
 	}
 
-	fileName := computeUNCBaseFileName(movie, fileResults, outputConfig, sharedEngine, ctx, operationMode)
+	if primaryPlan == nil {
+		first := firstValidFileResult(fileResults)
+		if first != nil {
+			match := fileResultToMatchResult(first)
+			match.File.Path = toPosixPath(match.File.Path)
+			plan, err := strategy.Plan(match, movie, posixDest, false)
+			if err != nil {
+				return OrganizePreviewResponse{OperationMode: string(operationMode)}
+			}
+			primaryPlan = plan
+			uncTargetPath := rebuildUNCPath(plan, sourcePath, destination)
+			videoFiles = append(videoFiles, uncTargetPath)
+		} else {
+			syntheticName := movie.ID + ".mp4"
+			match := matcher.MatchResult{
+				File: scanner.FileInfo{Path: "", Name: syntheticName, Extension: ".mp4"},
+				ID:   movie.ID,
+			}
+			plan, err := strategy.Plan(match, movie, posixDest, false)
+			if err != nil {
+				return OrganizePreviewResponse{OperationMode: string(operationMode)}
+			}
+			primaryPlan = plan
+			uncTargetPath := rebuildUNCPath(plan, sourcePath, destination)
+			videoFiles = append(videoFiles, uncTargetPath)
+		}
+	}
+
+	if primaryPlan == nil {
+		return OrganizePreviewResponse{OperationMode: string(operationMode)}
+	}
+
+	folderPath := rebuildUNCTargetDir(primaryPlan, sourcePath, destination)
+	subfolderPath := primaryPlan.SubfolderPath
+	if subfolderPath != "" {
+		subfolderPath = strings.ReplaceAll(subfolderPath, "/", `\`)
+	}
+	folderName := primaryPlan.FolderName
+	fileName := primaryPlan.BaseFileName
 
 	var nfoPath string
 	var nfoPaths []string
 	if !skipNFO {
-		nfoPath, nfoPaths = generateNFOPaths(movie, fileResults, cfg, ctx, sharedEngine, fileName, folderPath)
+		nfoPath, nfoPaths = generateNFOPaths(movie, fileResults, cfg, template.NewContextFromMovie(movie), sharedEngine, fileName, folderPath)
 	}
 
 	var posterPath, fanartPath string
 	var extrafanartPath string
 	var screenshots []string
 	if !skipDownload {
-		posterPath = generatePosterPath(movie, fileResults, cfg, ctx, sharedEngine, folderPath)
-		fanartPath = generateFanartPath(movie, fileResults, cfg, ctx, sharedEngine, folderPath)
+		posterPath = generatePosterPath(movie, fileResults, cfg, template.NewContextFromMovie(movie), sharedEngine, folderPath)
+		fanartPath = generateFanartPath(movie, fileResults, cfg, template.NewContextFromMovie(movie), sharedEngine, folderPath)
 		if cfg.Output.DownloadExtrafanart {
 			extrafanartPath = previewJoinPath(folderPath, cfg.Output.ScreenshotFolder)
 		}
-		screenshots = generateScreenshotNames(movie, cfg, ctx, sharedEngine)
+		screenshots = generateScreenshotNames(movie, cfg, template.NewContextFromMovie(movie), sharedEngine)
 	}
 
 	validatePathLengths(cfg, sharedEngine, videoFiles, nfoPath, nfoPaths, posterPath, fanartPath, extrafanartPath, screenshots)
@@ -385,64 +348,52 @@ func generateUNCPreview(movie *models.Movie, fileResults []*worker.FileResult, d
 	}
 }
 
-func resolveUNCVideoFileName(movie *models.Movie, outputConfig *config.OutputConfig, engine *template.Engine, ctx *template.Context, match matcher.MatchResult) string {
-	if outputConfig.RenameFile {
-		rendered, err := engine.Execute(outputConfig.FileFormat, ctx)
-		if err == nil {
-			sanitized := template.SanitizeFilename(rendered)
-			if sanitized != "" {
-				return sanitized + match.File.Extension
-			}
-		}
-		fallback := ""
-		if match.ID != "" {
-			fallback = template.SanitizeFilename(match.ID)
-		}
-		if fallback == "" {
-			fallback = template.SanitizeFilename(strings.TrimSuffix(match.File.Name, match.File.Extension))
-		}
-		if fallback == "" {
-			fallback = "file"
-		}
-		logging.Warnf("[%s] Template produced empty filename after sanitization, falling back to %q", match.ID, fallback)
-		return fallback + match.File.Extension
-	}
-	return match.File.Name
+func rebuildUNCPath(plan *organizer.OrganizePlan, originalSource string, destination string) string {
+	targetDir := rebuildUNCTargetDir(plan, originalSource, destination)
+	return previewJoinPath(targetDir, plan.TargetFile)
 }
 
-func computeUNCBaseFileName(movie *models.Movie, fileResults []*worker.FileResult, outputConfig *config.OutputConfig, engine *template.Engine, ctx *template.Context, operationMode organizer.OperationMode) string {
-	if operationMode == types.OperationModeMetadataOnly {
-		if len(fileResults) > 0 && fileResults[0] != nil && fileResults[0].FilePath != "" {
-			base := previewPathBase(fileResults[0].FilePath)
-			ext := previewPathExt(base)
-			return strings.TrimSuffix(base, ext)
+func rebuildUNCTargetDir(plan *organizer.OrganizePlan, originalSource string, destination string) string {
+	sourceDir := previewPathDir(originalSource)
+
+	if plan.Strategy == organizer.StrategyTypeMetadataOnly {
+		return sourceDir
+	}
+
+	if plan.Strategy == organizer.StrategyTypeInPlaceNoRenameFolder {
+		return sourceDir
+	}
+
+	if plan.Strategy == organizer.StrategyTypeInPlace {
+		if plan.InPlace {
+			parentDir := previewPathDir(sourceDir)
+			if plan.FolderName != "" {
+				return previewJoinPath(parentDir, plan.FolderName)
+			}
+			return sourceDir
 		}
 	}
 
-	nonMultipartCtx := template.NewContextFromMovie(movie)
-	nonMultipartCtx.GroupActress = outputConfig.GroupActress
-	nonMultipartCtx.IsMultiPart = false
-	nonMultipartCtx.PartNumber = 0
-	nonMultipartCtx.PartSuffix = ""
-	applyPreviewTitleTruncation(engine, nonMultipartCtx, outputConfig.MaxTitleLength)
+	pathBase := destination
+	if pathBase == "" {
+		pathBase = sourceDir
+	}
 
-	if outputConfig.RenameFile {
-		rendered, err := engine.Execute(outputConfig.FileFormat, nonMultipartCtx)
-		if err == nil {
-			sanitized := template.SanitizeFilename(rendered)
-			if sanitized != "" {
-				return sanitized
+	if plan.SubfolderPath != "" {
+		parts := strings.Split(plan.SubfolderPath, `/`)
+		for _, sp := range parts {
+			clean := strings.Trim(sp, `/\`)
+			if clean != "" {
+				pathBase = previewJoinPath(pathBase, clean)
 			}
 		}
 	}
-	return resolvePreviewFallbackName(movie, fileResults)
-}
 
-func applyPreviewTitleTruncation(engine *template.Engine, ctx *template.Context, maxTitleLength int) {
-	if maxTitleLength > 0 {
-		ctx.Title = engine.TruncateTitle(ctx.Title, maxTitleLength)
-		ctx.OriginalTitle = engine.TruncateTitle(ctx.OriginalTitle, maxTitleLength)
+	if plan.FolderName != "" {
+		return previewJoinPath(pathBase, plan.FolderName)
 	}
+
+	return pathBase
 }
 
 // toPosixPath converts Windows-style backslashes to forward slashes so that

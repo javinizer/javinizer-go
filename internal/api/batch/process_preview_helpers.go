@@ -229,32 +229,6 @@ func firstValidFileResult(fileResults []*worker.FileResult) *worker.FileResult {
 	return nil
 }
 
-func resolvePreviewFallbackName(movie *models.Movie, fileResults []*worker.FileResult) string {
-	if movie.ID != "" {
-		if sanitized := template.SanitizeFilename(movie.ID); sanitized != "" {
-			return sanitized
-		}
-	}
-	for _, result := range fileResults {
-		if result != nil && result.MovieID != "" {
-			if sanitized := template.SanitizeFilename(result.MovieID); sanitized != "" {
-				return sanitized
-			}
-		}
-	}
-	for _, result := range fileResults {
-		if result != nil && result.FilePath != "" {
-			base := previewPathBase(result.FilePath)
-			ext := previewPathExt(base)
-			nameWithoutExt := strings.TrimSuffix(base, ext)
-			if sanitized := template.SanitizeFilename(nameWithoutExt); sanitized != "" {
-				return sanitized
-			}
-		}
-	}
-	return "file"
-}
-
 func previewPathBase(path string) string {
 	trimmed := trimPreviewPath(path)
 	if trimmed == "" {

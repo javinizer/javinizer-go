@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -131,19 +132,25 @@ func parseCIDRList(raw string) []*net.IPNet {
 	return cidrs
 }
 
+var (
+	trustedCIDRsOnce  sync.Once
+	trustedCIDRSCache []*net.IPNet
+)
+
 func trustedCIDRs() []*net.IPNet {
-	if extra := os.Getenv("JAVINIZER_SETUP_TRUSTED_CIDRS"); extra != "" {
-		var cidrs []*net.IPNet
-		for _, s := range defaultTrustedCIDRs {
-			_, n, err := net.ParseCIDR(s)
-			if err != nil {
-				continue
-			}
-			cidrs = append(cidrs, n)
-		}
-		cidrs = append(cidrs, parseCIDRList(extra)...)
-		return cidrs
-	}
+	trustedCIDRsOnce.Do(func() {
+		trustedCIDRSCache = computeTrustedCIDRs()
+	})
+	return trustedCIDRSCache
+}
+
+//nolint:unused
+func resetTrustedCIDRsCache() {
+	trustedCIDRsOnce = sync.Once{}
+	trustedCIDRSCache = nil
+}
+
+func computeTrustedCIDRs() []*net.IPNet {
 	var cidrs []*net.IPNet
 	for _, s := range defaultTrustedCIDRs {
 		_, n, err := net.ParseCIDR(s)
@@ -151,6 +158,9 @@ func trustedCIDRs() []*net.IPNet {
 			continue
 		}
 		cidrs = append(cidrs, n)
+	}
+	if extra := os.Getenv("JAVINIZER_SETUP_TRUSTED_CIDRS"); extra != "" {
+		cidrs = append(cidrs, parseCIDRList(extra)...)
 	}
 	return cidrs
 }

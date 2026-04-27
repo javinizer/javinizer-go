@@ -21,7 +21,6 @@ func TestNewOrganizeStrategy(t *testing.T) {
 	assert.NotNil(t, strategy.fs)
 	assert.NotNil(t, strategy.config)
 	assert.NotNil(t, strategy.templateEngine)
-	assert.NotNil(t, strategy.subtitleHandler)
 }
 
 func TestOrganizeStrategy_ImplementsInterface(t *testing.T) {
@@ -411,42 +410,6 @@ func TestOrganizeStrategy_Execute_RenameError(t *testing.T) {
 	assert.Error(t, err, "Should fail when source file does not exist for rename")
 	assert.Contains(t, err.Error(), "failed to move file")
 	assert.False(t, result.Moved)
-}
-
-func TestOrganizeStrategy_Execute_WithSubtitles(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
-		MoveSubtitles:      true,
-		SubtitleExtensions: []string{".srt", ".ass", ".ssa"},
-	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
-
-	// Create source files
-	_ = fs.MkdirAll("/source", 0777)
-	_ = afero.WriteFile(fs, "/source/ABC-123.mp4", []byte("video"), 0644)
-	_ = afero.WriteFile(fs, "/source/ABC-123.en.srt", []byte("subtitle"), 0644)
-
-	plan := &OrganizePlan{
-		SourcePath: "/source/ABC-123.mp4",
-		TargetDir:  "/dest/ABC-123",
-		TargetFile: "ABC-123.mp4",
-		TargetPath: "/dest/ABC-123/ABC-123.mp4",
-		WillMove:   true,
-		Conflicts:  []string{},
-		Match: matcher.MatchResult{
-			File: scanner.FileInfo{
-				Path:      "/source/ABC-123.mp4",
-				Name:      "ABC-123.mp4",
-				Extension: ".mp4",
-			},
-		},
-	}
-
-	result, err := strategy.Execute(plan)
-	require.NoError(t, err)
-	assert.True(t, result.Moved)
-	assert.Len(t, result.Subtitles, 1, "Should have moved subtitle")
-	assert.True(t, result.Subtitles[0].Moved)
 }
 
 func TestOrganizeStrategy_Plan_MultiPart(t *testing.T) {

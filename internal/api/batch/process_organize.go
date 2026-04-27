@@ -38,12 +38,13 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 			outputConfig.RenameFolderInPlace = parsed == types.OperationModeInPlace
 		}
 	} else {
-		// Apply legacy boolean overrides only when no explicit mode override
 		if moveToFolder := job.GetMoveToFolderOverride(); moveToFolder != nil {
 			outputConfig.MoveToFolder = *moveToFolder
+			outputConfig.OperationMode = ""
 		}
 		if renameFolderInPlace := job.GetRenameFolderInPlaceOverride(); renameFolderInPlace != nil {
 			outputConfig.RenameFolderInPlace = *renameFolderInPlace
+			outputConfig.OperationMode = ""
 		}
 		effectiveMode := outputConfig.GetOperationMode()
 		outputConfig.OperationMode = effectiveMode
@@ -78,12 +79,7 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 			strategy = organizer.NewOrganizeStrategy(fs, &outputConfig, sharedEngine)
 		}
 	case types.OperationModeInPlaceNoRenameFolder:
-		if fileMatcher != nil {
-			strategy = organizer.NewInPlaceNoRenameFolderStrategy(fs, &outputConfig, fileMatcher, sharedEngine)
-		} else {
-			logging.Warnf("No matcher available for in-place-norenamefolder mode, falling back to organize")
-			strategy = organizer.NewOrganizeStrategy(fs, &outputConfig, sharedEngine)
-		}
+		strategy = organizer.NewInPlaceNoRenameFolderStrategy(fs, &outputConfig, fileMatcher, sharedEngine)
 	case types.OperationModeMetadataOnly:
 		strategy = organizer.NewMetadataOnlyStrategy(fs, &outputConfig)
 	case types.OperationModePreview:
@@ -246,18 +242,13 @@ func processOrganizeJob(ctx context.Context, job *worker.BatchJob, jobQueue *wor
 		}
 
 		if effectiveMode == types.OperationModeOrganize {
-			// Use existing Organizer for organize mode (trusted code path)
 			result, organizeErr = org.OrganizeWithLinkMode(match, movie, destination, false, false, copyOnly, linkMode)
 		} else {
-			// Use strategy for non-organize modes
 			plan, planErr := strategy.Plan(match, movie, destination, false)
 			if planErr != nil {
 				organizeErr = planErr
 			} else {
-				result, organizeErr = strategy.Execute(plan)
-				if result == nil && organizeErr == nil {
-					result = &organizer.OrganizeResult{}
-				}
+				result, organizeErr = org.Execute(plan, false)
 			}
 		}
 

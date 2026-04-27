@@ -613,6 +613,8 @@ func TestAuth_SetupAllowedFromLocalhostWithoutSecret(t *testing.T) {
 
 func TestAuth_SetupAllowedFromDockerBridgeWithoutSecret(t *testing.T) {
 	t.Setenv("JAVINIZER_SETUP_TRUSTED_CIDRS", "172.16.0.0/12")
+	resetTrustedCIDRsCache()
+	t.Cleanup(resetTrustedCIDRsCache)
 	router, _ := createSetupServerWithoutSecret(t)
 
 	body := map[string]string{"username": "admin", "password": "password123"}
@@ -644,6 +646,8 @@ func TestAuth_SetupRejectedFromDockerBridgeWithoutEnvVar(t *testing.T) {
 
 func TestAuth_SetupAllowedFromCustomTrustedCIDR(t *testing.T) {
 	t.Setenv("JAVINIZER_SETUP_TRUSTED_CIDRS", "10.0.0.0/8,192.168.0.0/16")
+	resetTrustedCIDRsCache()
+	t.Cleanup(resetTrustedCIDRsCache)
 
 	for _, addr := range []string{"10.0.0.5:12345", "192.168.1.100:12345"} {
 		t.Run(addr, func(t *testing.T) {

@@ -22,7 +22,6 @@ func TestNewInPlaceNoRenameFolderStrategy(t *testing.T) {
 	assert.NotNil(t, strategy.fs)
 	assert.NotNil(t, strategy.config)
 	assert.NotNil(t, strategy.templateEngine)
-	assert.NotNil(t, strategy.matcher)
 }
 
 func TestInPlaceNoRenameFolderStrategy_ImplementsInterface(t *testing.T) {
@@ -179,7 +178,6 @@ func TestInPlaceNoRenameFolderStrategy_Execute_Subtitles(t *testing.T) {
 		SubtitleExtensions: []string{".srt", ".ass"},
 	}
 	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
-	strategy := NewInPlaceNoRenameFolderStrategy(fs, cfg, m, nil)
 
 	_ = fs.MkdirAll("/source/folder", 0777)
 	_ = afero.WriteFile(fs, "/source/folder/ABC-123.mp4", []byte("video"), 0644)
@@ -201,9 +199,12 @@ func TestInPlaceNoRenameFolderStrategy_Execute_Subtitles(t *testing.T) {
 		TargetPath: "/source/folder/ABC-123 Test Movie.mp4",
 		WillMove:   true,
 		Conflicts:  []string{},
+		Strategy:   StrategyTypeInPlaceNoRenameFolder,
 	}
 
-	result, err := strategy.Execute(plan)
+	org := NewOrganizer(fs, cfg, nil)
+	org.SetMatcher(m)
+	result, err := org.Execute(plan, false)
 	require.NoError(t, err)
 	assert.True(t, result.Moved)
 	assert.Len(t, result.Subtitles, 2)

@@ -16,6 +16,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
 )
@@ -43,6 +44,9 @@ func resolveFileName(cfg *config.OutputConfig, engine *template.Engine, ctx *tem
 		}
 		if fileName == "" {
 			fileName = template.SanitizeFilename(strings.TrimSuffix(match.File.Name, match.File.Extension))
+		}
+		if fileName == "" && match.File.Path != "" {
+			fileName = template.SanitizeFilename(strings.TrimSuffix(filepath.Base(match.File.Path), match.File.Extension))
 		}
 		if fileName == "" {
 			fileName = "file"
@@ -75,11 +79,21 @@ func resolveBaseFileName(cfg *config.OutputConfig, engine *template.Engine, movi
 		if name := template.SanitizeFilename(strings.TrimSuffix(match.File.Name, match.File.Extension)); name != "" {
 			return name
 		}
+		if match.File.Path != "" {
+			if name := template.SanitizeFilename(strings.TrimSuffix(filepath.Base(match.File.Path), match.File.Extension)); name != "" {
+				return name
+			}
+		}
 		return "file"
 	}
 	base := strings.TrimSuffix(match.File.Name, match.File.Extension)
 	if base != "" {
 		return base
+	}
+	if match.File.Path != "" {
+		if pathBase := strings.TrimSuffix(filepath.Base(match.File.Path), match.File.Extension); pathBase != "" {
+			return pathBase
+		}
 	}
 	if match.ID != "" {
 		return match.ID
@@ -194,10 +208,21 @@ type SubtitleResult struct {
 	OriginalPath string
 	NewPath      string
 	Moved        bool
+	Skipped      bool
+	Planned      bool
 	Error        error
 }
 
 // OrganizePlan represents a planned file organization operation
+type StrategyType int
+
+const (
+	StrategyTypeOrganize StrategyType = iota
+	StrategyTypeInPlace
+	StrategyTypeInPlaceNoRenameFolder
+	StrategyTypeMetadataOnly
+)
+
 type OrganizePlan struct {
 	Match             matcher.MatchResult
 	Movie             *models.Movie
@@ -207,230 +232,57 @@ type OrganizePlan struct {
 	TargetPath        string
 	WillMove          bool
 	Conflicts         []string
-	InPlace           bool   // Whether renaming folder in-place
-	OldDir            string // Original directory path (for in-place renames)
-	IsDedicated       bool   // Whether source folder is dedicated to this ID
-	SkipInPlaceReason string // Reason why in-place was not used
-	FolderName        string // Resolved folder name (empty if no folder created)
-	SubfolderPath     string // Resolved subfolder path relative to destination (empty if none)
-	BaseFileName      string // Base filename without extension or part suffix (for NFO/metadata naming)
-}
-
-// isDedicatedFolder checks if a folder is dedicated to a single movie ID
-// It scans the directory for video files and checks if they all belong to the same ID
-func (o *Organizer) isDedicatedFolder(dir string, id string, m *matcher.Matcher) bool {
-	// Read directory contents
-	entries, err := afero.ReadDir(o.fs, dir)
-	if err != nil {
-		return false
-	}
-
-	// Check all video files in the directory
-	videoCount := 0
-	matchingCount := 0
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		ext := strings.ToLower(filepath.Ext(name))
-
-		if !videoExtensions[ext] {
-			continue
-		}
-
-		videoCount++
-
-		// Try to extract ID from filename
-		extractedID := m.MatchString(name)
-		if extractedID == id {
-			matchingCount++
-		}
-	}
-
-	// Dedicated if:
-	// - At least one video file found
-	// - All video files match the same ID
-	return videoCount > 0 && videoCount == matchingCount
+	InPlace           bool
+	OldDir            string
+	IsDedicated       bool
+	SkipInPlaceReason string
+	FolderName        string
+	SubfolderPath     string
+	BaseFileName      string
+	Strategy          StrategyType
+	executeStrategy   OperationStrategy
 }
 
 // Plan creates an organization plan without executing it
-func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
-	ctx := template.NewContextFromMovie(movie)
-	ctx.GroupActress = o.config.GroupActress
-
-	applyTitleTruncation(o.templateEngine, ctx, o.config.MaxTitleLength)
-
-	ctx.PartNumber = match.PartNumber
-	ctx.PartSuffix = match.PartSuffix
-	ctx.IsMultiPart = match.IsMultiPart
-
-	// Generate subfolder hierarchy (if configured)
-	subfolderParts := make([]string, 0, len(o.config.SubfolderFormat))
-	for _, subfolderTemplate := range o.config.SubfolderFormat {
-		subfolderName, err := o.templateEngine.Execute(subfolderTemplate, ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate subfolder from template '%s': %w", subfolderTemplate, err)
-		}
-		// Sanitize and add to parts if not empty
-		subfolderName = template.SanitizeFolderPath(subfolderName)
-		if subfolderName != "" {
-			subfolderParts = append(subfolderParts, subfolderName)
+func (o *Organizer) resolveStrategy() OperationStrategy {
+	if o.config.OperationMode != "" {
+		mode := o.config.GetOperationMode()
+		switch mode {
+		case "organize":
+			return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
+		case "in-place":
+			return NewInPlaceStrategy(o.fs, o.config, o.matcher, o.templateEngine)
+		case "in-place-norenamefolder":
+			return NewInPlaceNoRenameFolderStrategy(o.fs, o.config, o.matcher, o.templateEngine)
+		case "metadata-only":
+			return NewMetadataOnlyStrategy(o.fs, o.config)
+		default:
+			return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
 		}
 	}
 
-	// Generate folder name
-	folderName, err := o.templateEngine.Execute(o.config.FolderFormat, ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate folder name: %w", err)
-	}
-
-	folderName = template.SanitizeFolderPath(folderName)
-	if folderName == "" && (o.config.MoveToFolder || o.config.RenameFolderInPlace) {
-		folderName = template.SanitizeFolderPath(match.ID)
-		if folderName == "" {
-			folderName = "unknown"
+	// Legacy flag fallback (mirrors config.Prepare() precedence in pipeline.go):
+	// RenameFolderInPlace → InPlace (or Organize if no matcher)
+	// MoveToFolder → Organize
+	// RenameFile → InPlaceNoRenameFolder (matcher optional — strategy ignores it)
+	// none → MetadataOnly
+	if o.config.RenameFolderInPlace {
+		if o.matcher != nil {
+			return NewInPlaceStrategy(o.fs, o.config, o.matcher, o.templateEngine)
 		}
+		return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
 	}
-
-	var fileName string
+	if o.config.MoveToFolder {
+		return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
+	}
 	if o.config.RenameFile {
-		fileName, err = resolveFileName(o.config, o.templateEngine, ctx, match)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		fileName = match.File.Name
+		return NewInPlaceNoRenameFolderStrategy(o.fs, o.config, o.matcher, o.templateEngine)
 	}
+	return NewMetadataOnlyStrategy(o.fs, o.config)
+}
 
-	// Build target paths with subfolder hierarchy
-	// Start with destDir, add subfolder parts, then final folder name
-	pathParts := []string{destDir}
-	pathParts = append(pathParts, subfolderParts...)
-	if folderName != "" {
-		pathParts = append(pathParts, folderName)
-	}
-	targetDir := filepath.Join(pathParts...)
-	targetPath := filepath.Join(targetDir, fileName)
-
-	// In-place rename detection - check RenameFolderInPlace FIRST (priority over MoveToFolder)
-	inPlace := false
-	oldDir := ""
-	isDedicated := false
-	skipInPlaceReason := ""
-
-	sourceDir := filepath.Dir(match.File.Path)
-	sourceParent := filepath.Dir(sourceDir)
-
-	// Check RenameFolderInPlace first - this takes priority over MoveToFolder
-	if o.config.RenameFolderInPlace && o.matcher != nil {
-		// Warn if both configs are enabled (rename takes priority)
-		if o.config.MoveToFolder {
-			logging.Warnf("[%s] Both rename_folder_in_place and move_to_folder enabled; rename takes priority", match.ID)
-		}
-
-		// Check if source folder is dedicated to this ID (unconditional - no path check)
-		isDedicated = o.isDedicatedFolder(sourceDir, match.ID, o.matcher)
-
-		if isDedicated {
-			currentFolderName := filepath.Base(sourceDir)
-			if currentFolderName != folderName {
-				inPlace = true
-				oldDir = sourceDir
-				// In-place rename: rename folder in its current location (ignore destDir)
-				targetDir = filepath.Join(filepath.Dir(sourceDir), folderName)
-				targetPath = filepath.Join(targetDir, fileName)
-				logging.Debugf("[%s] In-place folder rename enabled: %s → %s", match.ID, oldDir, targetDir)
-			} else {
-				skipInPlaceReason = "folder already has correct name"
-				if !o.config.MoveToFolder {
-					targetDir = sourceDir
-					targetPath = filepath.Join(targetDir, fileName)
-				}
-			}
-		} else {
-			skipInPlaceReason = "folder contains mixed IDs"
-			if !o.config.MoveToFolder {
-				targetDir = sourceDir
-				targetPath = filepath.Join(targetDir, fileName)
-			}
-		}
-	} else if !o.config.RenameFolderInPlace {
-		skipInPlaceReason = "feature disabled in config"
-	} else if o.matcher == nil {
-		skipInPlaceReason = "matcher not set"
-	}
-
-	// When both configs are false, keep file in current location (no folder changes)
-	// This enables "metadata only" mode where NFO/images are generated but files aren't moved
-	if !o.config.RenameFolderInPlace && !o.config.MoveToFolder {
-		targetDir = sourceDir
-		targetPath = filepath.Join(targetDir, fileName)
-	}
-
-	// Automatically truncate path if it exceeds MaxPathLength
-	if o.config.MaxPathLength > 0 && len(targetPath) > o.config.MaxPathLength {
-		// Calculate how much we need to truncate (in bytes)
-		excess := len(targetPath) - o.config.MaxPathLength
-
-		// Truncate the folder name (usually the longest variable part)
-		currentFolderLen := len(folderName)
-		if currentFolderLen > excess {
-			// Calculate the byte budget for the new folder name
-			// TruncateTitleBytes will handle adding ellipsis if there's room
-			newFolderByteLen := currentFolderLen - excess
-			folderName = o.templateEngine.TruncateTitleBytes(folderName, newFolderByteLen)
-
-			if inPlace {
-				targetDir = filepath.Join(sourceParent, folderName)
-			} else if targetDir != sourceDir {
-				pathParts := []string{destDir}
-				pathParts = append(pathParts, subfolderParts...)
-				if folderName != "" {
-					pathParts = append(pathParts, folderName)
-				}
-				targetDir = filepath.Join(pathParts...)
-			}
-			targetPath = filepath.Join(targetDir, fileName)
-		}
-	}
-
-	// Validate final path length
-	if o.config.MaxPathLength > 0 {
-		if err := o.templateEngine.ValidatePathLength(targetPath, o.config.MaxPathLength); err != nil {
-			return nil, fmt.Errorf("path validation failed: %w", err)
-		}
-	}
-
-	// Check if move is needed
-	willMove := filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
-
-	var subfolderPath string
-	if len(subfolderParts) > 0 {
-		subfolderPath = filepath.Join(subfolderParts...)
-	}
-
-	conflicts := checkTargetConflict(o.fs, match.File.Path, targetPath, forceUpdate, willMove)
-
-	return &OrganizePlan{
-		Match:             match,
-		Movie:             movie,
-		SourcePath:        match.File.Path,
-		TargetDir:         targetDir,
-		TargetFile:        fileName,
-		TargetPath:        targetPath,
-		WillMove:          willMove,
-		Conflicts:         conflicts,
-		InPlace:           inPlace,
-		OldDir:            oldDir,
-		IsDedicated:       isDedicated,
-		SkipInPlaceReason: skipInPlaceReason,
-		FolderName:        folderName,
-		SubfolderPath:     subfolderPath,
-		BaseFileName:      resolveBaseFileName(o.config, o.templateEngine, movie, match),
-	}, nil
+func (o *Organizer) Plan(match matcher.MatchResult, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
+	return o.resolveStrategy().Plan(match, movie, destDir, forceUpdate)
 }
 
 // Execute executes an organization plan
@@ -444,145 +296,121 @@ func (o *Organizer) Execute(plan *OrganizePlan, dryRun bool) (*OrganizeResult, e
 		ShouldGenerateMetadata: false,
 	}
 
-	// Check for conflicts
 	if len(plan.Conflicts) > 0 {
 		result.Error = fmt.Errorf("conflicts detected: %s", strings.Join(plan.Conflicts, "; "))
 		return result, result.Error
 	}
 
-	// Skip if no move needed
 	if !plan.WillMove {
+		result.ShouldGenerateMetadata = true
 		return result, nil
 	}
 
-	// Dry run - don't actually move
 	if dryRun {
+		result.ShouldGenerateMetadata = true
+		o.planSubtitles(plan, result)
 		return result, nil
 	}
 
-	// In-place rename: rename directory first, then rename file within
-	if plan.InPlace {
-		// Safety check: verify old directory exists and is a directory
-		info, err := o.fs.Stat(plan.OldDir)
-		if err != nil {
-			result.Error = fmt.Errorf("failed to stat old directory: %w", err)
-			return result, result.Error
-		}
-		if !info.IsDir() {
-			result.Error = fmt.Errorf("old path is not a directory: %s", plan.OldDir)
-			return result, result.Error
-		}
-
-		// Check if target directory already exists (conflict)
-		if _, err := o.fs.Stat(plan.TargetDir); err == nil {
-			// Check if it's actually the same directory (case-only rename on case-insensitive FS)
-			oldInfo, oldErr := o.fs.Stat(plan.OldDir)
-			if oldErr == nil {
-				newInfo, newErr := o.fs.Stat(plan.TargetDir)
-				if newErr == nil && os.SameFile(oldInfo, newInfo) {
-					// Same directory with different case — skip conflict, proceed with rename
-				} else {
-					result.Error = fmt.Errorf("target directory already exists: %s", plan.TargetDir)
-					return result, result.Error
-				}
-			} else {
-				result.Error = fmt.Errorf("target directory already exists: %s", plan.TargetDir)
-				return result, result.Error
-			}
-		}
-
-		// Rename the directory
-		if err := o.fs.Rename(plan.OldDir, plan.TargetDir); err != nil {
-			result.Error = fmt.Errorf("failed to rename directory: %w", err)
-			return result, result.Error
-		}
-
-		// Track in-place rename for multi-part path updates
-		result.InPlaceRenamed = true
-		result.OldDirectoryPath = plan.OldDir
-		result.NewDirectoryPath = plan.TargetDir
-
-		// After directory rename, the file is now at: plan.TargetDir/<old_filename>
-		// We need to rename it to plan.TargetFile
-		oldFileName := filepath.Base(plan.SourcePath)
-		currentFilePath := filepath.Join(plan.TargetDir, oldFileName)
-
-		// Only rename file if the name actually changed
-		if oldFileName != plan.TargetFile {
-			if err := o.fs.Rename(currentFilePath, plan.TargetPath); err != nil {
-				// Try to rollback directory rename on file rename failure
-				_ = o.fs.Rename(plan.TargetDir, plan.OldDir)
-				result.Error = fmt.Errorf("failed to rename file after directory rename: %w", err)
-				return result, result.Error
-			}
-		}
-
-		result.Moved = true
-		result.ShouldGenerateMetadata = true
+	var strategy OperationStrategy
+	if plan.executeStrategy != nil {
+		strategy = plan.executeStrategy
 	} else {
-		// Normal move: create target directory and move file
-		// Create target directory
-		if err := o.fs.MkdirAll(plan.TargetDir, 0755); err != nil {
-			result.Error = fmt.Errorf("failed to create directory: %w", err)
-			return result, result.Error
+		switch plan.Strategy {
+		case StrategyTypeInPlace:
+			strategy = NewInPlaceStrategy(o.fs, o.config, o.matcher, o.templateEngine)
+		case StrategyTypeInPlaceNoRenameFolder:
+			strategy = NewInPlaceNoRenameFolderStrategy(o.fs, o.config, o.matcher, o.templateEngine)
+		case StrategyTypeMetadataOnly:
+			strategy = NewMetadataOnlyStrategy(o.fs, o.config)
+		default:
+			strategy = NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
 		}
-
-		if err := fsutil.MoveFileFs(o.fs, plan.SourcePath, plan.TargetPath); err != nil {
-			result.Error = fmt.Errorf("failed to move file: %w", err)
-			return result, result.Error
-		}
-
-		result.Moved = true
-		result.ShouldGenerateMetadata = true
 	}
 
-	// Handle subtitle files if enabled
+	strategyResult, err := strategy.Execute(plan)
+	if err != nil {
+		return strategyResult, err
+	}
+
 	if o.config.MoveSubtitles {
-		// For in-place renames, we need to update the file info to point to the new location
-		// so subtitle discovery works correctly
-		fileInfoForSubtitles := plan.Match.File
-		if plan.InPlace {
-			// Update path to the new location after directory rename
-			fileInfoForSubtitles.Path = plan.TargetPath
-		}
-
-		subtitles := o.subtitleHandler.FindSubtitles(fileInfoForSubtitles)
-		if len(subtitles) > 0 {
-			subtitleResults := make([]SubtitleResult, len(subtitles))
-			for i, subtitle := range subtitles {
-				subtitleResult := SubtitleResult{
-					OriginalPath: subtitle.OriginalPath,
-					Moved:        false,
-				}
-
-				// Generate new subtitle path
-				videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
-				newSubtitleName := o.subtitleHandler.generateSubtitleFileName(
-					videoNameWithoutExt,
-					subtitle.Language,
-					subtitle.Extension,
-				)
-				subtitleResult.NewPath = filepath.Join(plan.TargetDir, newSubtitleName)
-
-				// Move subtitle file
-				if !dryRun {
-					if err := fsutil.MoveFileFs(o.fs, subtitle.OriginalPath, subtitleResult.NewPath); err != nil {
-						subtitleResult.Error = fmt.Errorf("failed to move subtitle: %w", err)
-					} else {
-						subtitleResult.Moved = true
-					}
-				} else {
-					// Dry run - just mark as would be moved
-					subtitleResult.Moved = true
-				}
-
-				subtitleResults[i] = subtitleResult
-			}
-			result.Subtitles = subtitleResults
-		}
+		o.moveSubtitles(plan, strategyResult)
 	}
 
-	return result, nil
+	return strategyResult, nil
+}
+
+func (o *Organizer) subtitleFileInfo(plan *OrganizePlan) scanner.FileInfo {
+	fileInfoForSubtitles := plan.Match.File
+	if plan.InPlace {
+		fileInfoForSubtitles.Path = plan.TargetPath
+		oldFileName := plan.Match.File.Name
+		if oldFileName == "" && plan.Match.File.Path != "" {
+			oldFileName = filepath.Base(plan.Match.File.Path)
+		}
+		if oldFileName != "" && oldFileName != plan.TargetFile {
+			fileInfoForSubtitles.Path = filepath.Join(plan.TargetDir, oldFileName)
+		}
+	}
+	return fileInfoForSubtitles
+}
+
+func (o *Organizer) planSubtitles(plan *OrganizePlan, result *OrganizeResult) {
+	subtitles := o.subtitleHandler.FindSubtitles(o.subtitleFileInfo(plan))
+	if len(subtitles) == 0 {
+		return
+	}
+
+	subtitleResults := make([]SubtitleResult, len(subtitles))
+	for i, subtitle := range subtitles {
+		videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
+		newSubtitleName := o.subtitleHandler.generateSubtitleFileName(
+			videoNameWithoutExt,
+			subtitle.Language,
+			subtitle.Extension,
+		)
+		subtitleResults[i] = SubtitleResult{
+			OriginalPath: subtitle.OriginalPath,
+			NewPath:      filepath.Join(plan.TargetDir, newSubtitleName),
+			Moved:        false,
+			Planned:      true,
+		}
+	}
+	result.Subtitles = subtitleResults
+}
+
+func (o *Organizer) moveSubtitles(plan *OrganizePlan, result *OrganizeResult) {
+	subtitles := o.subtitleHandler.FindSubtitles(o.subtitleFileInfo(plan))
+	if len(subtitles) == 0 {
+		return
+	}
+
+	subtitleResults := make([]SubtitleResult, len(subtitles))
+	for i, subtitle := range subtitles {
+		subtitleResult := SubtitleResult{
+			OriginalPath: subtitle.OriginalPath,
+			Moved:        false,
+		}
+
+		videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
+		newSubtitleName := o.subtitleHandler.generateSubtitleFileName(
+			videoNameWithoutExt,
+			subtitle.Language,
+			subtitle.Extension,
+		)
+		subtitleResult.NewPath = filepath.Join(plan.TargetDir, newSubtitleName)
+
+		if _, err := o.fs.Stat(subtitleResult.NewPath); err == nil {
+			subtitleResult.Skipped = true
+		} else if err := fsutil.MoveFileFs(o.fs, subtitle.OriginalPath, subtitleResult.NewPath); err != nil {
+			subtitleResult.Error = fmt.Errorf("failed to move subtitle: %w", err)
+		} else {
+			subtitleResult.Moved = true
+		}
+
+		subtitleResults[i] = subtitleResult
+	}
+	result.Subtitles = subtitleResults
 }
 
 // Organize plans and executes file organization in one step

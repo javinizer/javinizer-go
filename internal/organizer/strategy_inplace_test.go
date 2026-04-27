@@ -417,7 +417,7 @@ func TestInPlaceStrategy_Execute_DirRenameError(t *testing.T) {
 
 	result, err := strategy.Execute(plan)
 	assert.Error(t, err, "Should fail when directory rename source doesn't exist")
-	assert.Contains(t, err.Error(), "failed to rename directory")
+	assert.Contains(t, err.Error(), "failed to stat old directory")
 	assert.False(t, result.Moved)
 }
 
@@ -459,4 +459,45 @@ func TestInPlaceStrategy_Execute_FileRenameAfterDirRename(t *testing.T) {
 	assert.True(t, exists, "File should be renamed in new directory")
 	exists, _ = afero.Exists(fs, "/source/old-folder")
 	assert.False(t, exists, "Old directory should not exist")
+}
+
+func TestInPlaceStrategy_Execute_MoveToFolderFallback(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &config.OutputConfig{
+		MoveToFolder: true,
+		FolderFormat: "<ID>",
+		FileFormat:   "<ID>",
+		RenameFile:   true,
+	}
+	m, _ := matcher.NewMatcher(&config.MatchingConfig{})
+	strategy := NewInPlaceStrategy(fs, cfg, m, nil)
+
+	_ = fs.MkdirAll("/source/folder", 0777)
+	_ = afero.WriteFile(fs, "/source/folder/ABC-123.mp4", []byte("video"), 0644)
+
+	plan := &OrganizePlan{
+		SourcePath: "/source/folder/ABC-123.mp4",
+		TargetDir:  "/dest/ABC-123",
+		TargetFile: "ABC-123.mp4",
+		TargetPath: "/dest/ABC-123/ABC-123.mp4",
+		WillMove:   true,
+		InPlace:    false,
+		OldDir:     "",
+		Conflicts:  []string{},
+		Match: matcher.MatchResult{
+			File: scanner.FileInfo{
+				Path:      "/source/folder/ABC-123.mp4",
+				Name:      "ABC-123.mp4",
+				Extension: ".mp4",
+			},
+		},
+	}
+
+	result, err := strategy.Execute(plan)
+	require.NoError(t, err)
+	assert.True(t, result.Moved)
+	assert.False(t, result.InPlaceRenamed, "Should not have renamed directory")
+
+	exists, _ := afero.Exists(fs, "/dest/ABC-123/ABC-123.mp4")
+	assert.True(t, exists, "File should exist at destination")
 }

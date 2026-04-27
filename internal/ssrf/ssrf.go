@@ -35,11 +35,6 @@ func IsPrivateIP(ip net.IP) bool {
 	if ip.IsLinkLocalMulticast() {
 		return true
 	}
-	if ip4 := ip.To4(); ip4 != nil {
-		if ip4[0] == 169 && ip4[1] == 254 {
-			return true
-		}
-	}
 	if ip.IsUnspecified() {
 		return true
 	}

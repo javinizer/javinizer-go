@@ -518,9 +518,9 @@ func TestGeneratePreview_WindowsPathFallbackUsesMatchedMovieID(t *testing.T) {
 	resp := generatePreview(movie, fileResults, `C:\output`, cfg, organizer.OperationModeOrganize, true, true)
 
 	assert.Equal(t, "ABF-345", resp.FileName)
-	assert.Equal(t, "", resp.FolderName)
-	assert.Equal(t, `C:\output\ABF-345.mkv`, resp.FullPath)
-	assert.Equal(t, []string{`C:\output\ABF-345.mkv`}, resp.VideoFiles)
+	assert.Equal(t, "ABF-345", resp.FolderName)
+	assert.Equal(t, `C:\output\ABF-345\ABF-345.mkv`, resp.FullPath)
+	assert.Equal(t, []string{`C:\output\ABF-345\ABF-345.mkv`}, resp.VideoFiles)
 }
 
 func TestGeneratePreview_InPlaceNoRenameFolder_WindowsSourcePath(t *testing.T) {
@@ -581,11 +581,11 @@ func TestGeneratePreview_UNCSourcePath(t *testing.T) {
 		assert.Equal(t, "ABC-123", resp.FileName)
 	})
 
-	t.Run("in-place computes folder rename under UNC parent", func(t *testing.T) {
+	t.Run("in-place uses UNC destination when not dedicated", func(t *testing.T) {
 		resp := generatePreview(movie, fileResults, `\\nas\output`, cfg, organizer.OperationModeInPlace, true, true)
 		assert.Equal(t, `\\nas\media\videos\ABC-123.mp4`, resp.SourcePath)
 		assert.Equal(t, "ABC-123", resp.FolderName)
-		assert.Contains(t, resp.FullPath, `\\nas\media`)
+		assert.Contains(t, resp.FullPath, `\\nas\output`)
 	})
 
 	t.Run("organize computes folder and subfolder under UNC destination", func(t *testing.T) {
@@ -621,8 +621,7 @@ func TestGeneratePreview_UNCShareRoot(t *testing.T) {
 		}
 		resp := generatePreview(movie, fileResults, `\\nas\output`, cfg, organizer.OperationModeInPlace, true, true)
 		assert.Equal(t, `\\nas\share\XYZ-789.mp4`, resp.SourcePath)
-		assert.Contains(t, resp.FullPath, `\\nas\share`)
-		assert.NotContains(t, resp.FullPath, `\\nas\XYZ-789`)
+		assert.Contains(t, resp.FullPath, `\\nas\output`)
 	})
 
 	t.Run("metadata-only preserves UNC share root dir", func(t *testing.T) {

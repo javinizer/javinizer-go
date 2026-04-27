@@ -123,7 +123,7 @@ func (t *ScrapeTask) Execute(ctx context.Context) (*models.Movie, error) {
 		scrapers = t.registry.GetByPriorityForInput(t.customScraperPriority, t.javID)
 		logging.Debugf("[%s] Using custom scraper priority: %v (%d scrapers)", t.javID, t.customScraperPriority, len(scrapers))
 	} else {
-		scrapers = t.registry.GetByPriorityForInput([]string{"r18dev", "dmm"}, t.javID)
+		scrapers = t.registry.GetByPriorityForInput([]string{"dmm", "r18dev"}, t.javID)
 		logging.Debugf("[%s] Using default scraper priority (%d scrapers)", t.javID, len(scrapers))
 	}
 	scraperFailures := make([]scraperFailure, 0, len(scrapers))
