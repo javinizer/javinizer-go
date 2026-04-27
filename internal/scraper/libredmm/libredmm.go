@@ -85,34 +85,14 @@ type Scraper struct {
 
 // New creates a new LibreDMM scraper.
 func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	// Handle nil globalProxy to avoid dereference panic
-	globalProxyVal := config.ProxyConfig{}
-	if globalProxy != nil {
-		globalProxyVal = *globalProxy
-	}
-	proxyCfg := config.ResolveScraperProxy(globalProxyVal, settings.Proxy)
-
-	// Build ScraperConfig for HTTP client (HTTP-01 pattern)
-	configForHTTP := &config.ScraperSettings{
-		Enabled:       settings.Enabled,
-		Timeout:       settings.Timeout,
-		RateLimit:     settings.RateLimit,
-		RetryCount:    settings.RetryCount,
-		UserAgent:     settings.UserAgent,
-		Proxy:         settings.Proxy,
-		DownloadProxy: settings.DownloadProxy,
-	}
-
-	client, err := NewHTTPClient(configForHTTP, globalProxy, globalFlareSolverr)
-	proxyEnabled := globalProxy != nil && globalProxy.Enabled
-	if settings.Proxy != nil && settings.Proxy.Enabled {
-		proxyEnabled = true
-	}
-	usingProxy := err == nil && proxyEnabled && strings.TrimSpace(proxyCfg.URL) != ""
-	if err != nil {
-		logging.Errorf("LibreDMM: Failed to create HTTP client with proxy: %v, using explicit no-proxy fallback", err)
-		client = httpclient.NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)
-	}
+	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
+			httpclient.JSONAPIHeaders(),
+			httpclient.UserAgentHeader(settings.UserAgent),
+			map[string]string{"Accept-Language": "ja,en-US;q=0.8,en;q=0.6"},
+		)),
+	)
+	client := result.Client
 
 	base := strings.TrimSpace(settings.BaseURL)
 	if base == "" {
@@ -132,8 +112,8 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		settings:        settings,
 	}
 
-	if usingProxy {
-		logging.Infof("LibreDMM: Using proxy %s", httpclient.SanitizeProxyURL(proxyCfg.URL))
+	if result.ProxyEnabled && strings.TrimSpace(result.ProxyProfile.URL) != "" {
+		logging.Infof("LibreDMM: Using proxy %s", httpclient.SanitizeProxyURL(result.ProxyProfile.URL))
 	}
 
 	return s
