@@ -95,27 +95,6 @@ func (s *Scraper) Close() error {
 	return nil
 }
 
-// ValidateConfig validates the scraper configuration.
-// Returns error if config is invalid, nil if valid.
-func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
-	if cfg == nil {
-		return fmt.Errorf("fc2: config is nil")
-	}
-	if !cfg.Enabled {
-		return nil // Disabled is valid
-	}
-	if cfg.RateLimit < 0 {
-		return fmt.Errorf("fc2: rate_limit must be non-negative, got %d", cfg.RateLimit)
-	}
-	if cfg.RetryCount < 0 {
-		return fmt.Errorf("fc2: retry_count must be non-negative, got %d", cfg.RetryCount)
-	}
-	if cfg.Timeout < 0 {
-		return fmt.Errorf("fc2: timeout must be non-negative, got %d", cfg.Timeout)
-	}
-	return nil
-}
-
 // ResolveDownloadProxyForHost declares FC2-owned media hosts for downloader proxy routing.
 func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))

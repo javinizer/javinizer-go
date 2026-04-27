@@ -235,30 +235,6 @@ func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 	return result, nil
 }
 
-// ValidateConfig validates the scraper configuration.
-// Returns error if config is invalid, nil if valid.
-func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
-	if cfg == nil {
-		return fmt.Errorf("javdb: config is nil")
-	}
-	if !cfg.Enabled {
-		return nil // Disabled is valid
-	}
-	// Validate rate limit
-	if cfg.RateLimit < 0 {
-		return fmt.Errorf("javdb: rate_limit must be non-negative, got %d", cfg.RateLimit)
-	}
-	// Validate retry count
-	if cfg.RetryCount < 0 {
-		return fmt.Errorf("javdb: retry_count must be non-negative, got %d", cfg.RetryCount)
-	}
-	// Validate timeout
-	if cfg.Timeout < 0 {
-		return fmt.Errorf("javdb: timeout must be non-negative, got %d", cfg.Timeout)
-	}
-	return nil
-}
-
 // ResolveDownloadProxyForHost declares JavDB-owned media hosts for downloader proxy routing.
 func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))

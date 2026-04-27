@@ -829,27 +829,3 @@ func isValidLanguage(lang string) bool {
 	}
 	return false
 }
-
-// ValidateConfig validates the scraper configuration.
-// Returns error if config is invalid, nil if valid.
-func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
-	if cfg == nil {
-		return fmt.Errorf("javlibrary: config is nil")
-	}
-	if !cfg.Enabled {
-		return nil // Disabled is valid
-	}
-	// Validate rate limit
-	if cfg.RateLimit < 0 {
-		return fmt.Errorf("javlibrary: rate_limit must be non-negative, got %d", cfg.RateLimit)
-	}
-	// Validate retry count
-	if cfg.RetryCount < 0 {
-		return fmt.Errorf("javlibrary: retry_count must be non-negative, got %d", cfg.RetryCount)
-	}
-	// Validate timeout
-	if cfg.Timeout < 0 {
-		return fmt.Errorf("javlibrary: timeout must be non-negative, got %d", cfg.Timeout)
-	}
-	return nil
-}

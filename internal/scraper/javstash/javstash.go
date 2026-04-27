@@ -146,8 +146,8 @@ func (s *Scraper) Close() error {
 }
 
 func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
-	if cfg == nil {
-		return fmt.Errorf("javstash: config is nil")
+	if err := config.ValidateCommonSettings("javstash", cfg); err != nil {
+		return err
 	}
 	if !cfg.Enabled {
 		return nil
@@ -164,15 +164,6 @@ func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
 		return fmt.Errorf("javstash: api_key is required (set in config or JAVSTASH_API_KEY env var)")
 	}
 
-	if cfg.RateLimit < 0 {
-		return fmt.Errorf("javstash: rate_limit must be non-negative, got %d", cfg.RateLimit)
-	}
-	if cfg.RetryCount < 0 {
-		return fmt.Errorf("javstash: retry_count must be non-negative, got %d", cfg.RetryCount)
-	}
-	if cfg.Timeout < 0 {
-		return fmt.Errorf("javstash: timeout must be non-negative, got %d", cfg.Timeout)
-	}
 	return nil
 }
 
