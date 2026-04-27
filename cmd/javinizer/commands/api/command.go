@@ -101,7 +101,7 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 
 	// Ensure data directory exists
 	dataDir := filepath.Dir(cfg.Database.DSN)
-	if err := os.MkdirAll(dataDir, config.DirPermConfig); err != nil {
+	if err := os.MkdirAll(dataDir, config.DirPerm); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 

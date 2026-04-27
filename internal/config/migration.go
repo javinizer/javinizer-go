@@ -93,7 +93,7 @@ func (m *LegacyMigration) Migrate(cfg *Config) error {
 			if err != nil {
 				return fmt.Errorf("failed to read config for backup: %w", err)
 			}
-			if err := os.WriteFile(backupPath, data, 0644); err != nil {
+			if err := os.WriteFile(backupPath, data, FilePerm); err != nil {
 				return fmt.Errorf("failed to create backup: %w", err)
 			}
 			ctx.BackupPath = backupPath

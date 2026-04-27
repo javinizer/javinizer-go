@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/mediainfo"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -414,7 +415,7 @@ func FormatActressName(actress models.Actress, japaneseNames bool, firstNameOrde
 func (g *Generator) WriteNFO(nfo *Movie, path string) error {
 	// Ensure output directory exists
 	dir := filepath.Dir(path)
-	if err := g.fs.MkdirAll(dir, 0755); err != nil {
+	if err := g.fs.MkdirAll(dir, configutil.DirPerm); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 

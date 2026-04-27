@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	imageutil "github.com/javinizer/javinizer-go/internal/image"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -641,7 +642,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 
 	// Create destination directory
 	destDir := filepath.Dir(destPath)
-	if err := d.fs.MkdirAll(destDir, 0755); err != nil {
+	if err := d.fs.MkdirAll(destDir, configutil.DirPerm); err != nil {
 		result.Error = fmt.Errorf("failed to create directory: %w", err)
 		result.Duration = time.Since(startTime)
 		return result, result.Error
@@ -805,7 +806,7 @@ func (d *Downloader) downloadSimple(ctx context.Context, url, destPath string) e
 
 	// Create destination directory
 	destDir := filepath.Dir(destPath)
-	if err := d.fs.MkdirAll(destDir, 0755); err != nil {
+	if err := d.fs.MkdirAll(destDir, configutil.DirPerm); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 

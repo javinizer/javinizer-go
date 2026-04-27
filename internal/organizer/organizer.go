@@ -573,7 +573,7 @@ func (o *Organizer) CopyWithLinkMode(plan *OrganizePlan, dryRun bool, linkMode L
 	}
 
 	// Create target directory
-	if err := o.fs.MkdirAll(plan.TargetDir, 0755); err != nil {
+	if err := o.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
 		result.Error = fmt.Errorf("failed to create directory: %w", err)
 		return result, result.Error
 	}
@@ -600,12 +600,6 @@ func (o *Organizer) CopyWithLinkMode(plan *OrganizePlan, dryRun bool, linkMode L
 		}
 		defer func() { _ = sourceFile.Close() }()
 
-		srcInfo, err := o.fs.Stat(plan.SourcePath)
-		if err != nil {
-			result.Error = fmt.Errorf("failed to stat source file: %w", err)
-			return result, result.Error
-		}
-
 		targetFile, err := o.fs.Create(plan.TargetPath)
 		if err != nil {
 			result.Error = fmt.Errorf("failed to create target file: %w", err)
@@ -626,8 +620,6 @@ func (o *Organizer) CopyWithLinkMode(plan *OrganizePlan, dryRun bool, linkMode L
 			result.Error = fmt.Errorf("failed to sync copied file: %w", err)
 			return result, result.Error
 		}
-
-		_ = o.fs.Chmod(plan.TargetPath, srcInfo.Mode())
 	case LinkModeHard:
 		if err := os.Link(plan.SourcePath, plan.TargetPath); err != nil {
 			if errors.Is(err, syscall.EXDEV) {

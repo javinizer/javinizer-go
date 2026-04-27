@@ -274,7 +274,7 @@ func (s *InPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 
 		result.Moved = true
 	} else {
-		if err := s.fs.MkdirAll(plan.TargetDir, 0755); err != nil {
+		if err := s.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
 			result.Error = fmt.Errorf("failed to create directory: %w", err)
 			return result, result.Error
 		}

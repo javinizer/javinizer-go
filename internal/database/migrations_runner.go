@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	dbmigrations "github.com/javinizer/javinizer-go/internal/database/migrations"
 	"github.com/pressly/goose/v3"
 	gooselock "github.com/pressly/goose/v3/lock"
@@ -171,7 +172,7 @@ func newStartupMigrationLocker(dsn string) (gooselock.Locker, error) {
 		return processMigrationLocker{}, nil
 	}
 	lockPath := dbPath + ".migration.lock"
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(lockPath), configutil.DirPerm); err != nil {
 		return nil, fmt.Errorf("create migration lock directory: %w", err)
 	}
 	return &fileMigrationLocker{fileLock: flock.New(lockPath)}, nil
@@ -184,7 +185,7 @@ func createSQLiteBackupSnapshot(ctx context.Context, db *sql.DB, dsn string) (st
 	}
 
 	backupPath := fmt.Sprintf("%s.%s.backup", dbPath, time.Now().UTC().Format("20060102T150405Z"))
-	if err := os.MkdirAll(filepath.Dir(backupPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(backupPath), configutil.DirPerm); err != nil {
 		return "", fmt.Errorf("create backup directory: %w", err)
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -91,7 +92,7 @@ func (m *AuthManager) writeCredentialsToDisk(creds *storedCredentials) error {
 	}
 
 	dir := filepath.Dir(m.credentialPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, configutil.DirPermTemp); err != nil {
 		return fmt.Errorf("failed to create auth credential directory: %w", err)
 	}
 
@@ -218,7 +219,7 @@ func (m *AuthManager) writePersistentSessionsLocked() error {
 	}
 
 	dir := filepath.Dir(m.sessionPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, configutil.DirPermTemp); err != nil {
 		return fmt.Errorf("failed to create auth session directory: %w", err)
 	}
 

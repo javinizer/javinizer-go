@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"github.com/javinizer/javinizer-go/internal/runtime"
 )
 
@@ -51,7 +52,7 @@ func (s *StateStore) LoadState() (*UpdateState, error) {
 
 	// Ensure data directory exists
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, configutil.DirPerm); err != nil {
 		return nil, err
 	}
 
@@ -81,7 +82,7 @@ func (s *StateStore) SaveState(state *UpdateState) error {
 
 	// Ensure data directory exists
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, configutil.DirPerm); err != nil {
 		return err
 	}
 
@@ -93,7 +94,7 @@ func (s *StateStore) SaveState(state *UpdateState) error {
 
 	// Write to temp file first, then rename (atomic on most systems)
 	tmpPath := s.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, data, configutil.FilePerm); err != nil {
 		return err
 	}
 
@@ -178,7 +179,7 @@ func LoadStateFromFile(path string) (*UpdateState, error) {
 // SaveStateToFile saves state to file directly (for testing).
 func SaveStateToFile(path string, state *UpdateState) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, configutil.DirPerm); err != nil {
 		return err
 	}
 
@@ -188,7 +189,7 @@ func SaveStateToFile(path string, state *UpdateState) error {
 	}
 
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, data, configutil.FilePerm); err != nil {
 		return err
 	}
 

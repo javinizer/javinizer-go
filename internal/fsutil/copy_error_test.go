@@ -308,7 +308,7 @@ func TestCopyWithFallback(t *testing.T) {
 			}
 
 			// Test fallback copy
-			err := copyWithFallback(srcPath, dstPath, 0644)
+			err := copyWithFallback(srcPath, dstPath)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -381,7 +381,7 @@ func TestCopyWithFallback_ErrorCases(t *testing.T) {
 				}
 			}
 
-			err := copyWithFallback(tt.src, tt.dst, tt.perms)
+			err := copyWithFallback(tt.src, tt.dst)
 
 			if !tt.check(err) {
 				t.Errorf("Expected error for case %s, got: %v", tt.name, err)
@@ -620,7 +620,7 @@ func TestCopyWithFallback_LargeBinary(t *testing.T) {
 		t.Fatalf("Failed to create source: %v", err)
 	}
 
-	err := copyWithFallback(srcPath, dstPath, 0644)
+	err := copyWithFallback(srcPath, dstPath)
 	if err != nil {
 		t.Fatalf("copyWithFallback failed for large binary: %v", err)
 	}

@@ -3,8 +3,10 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"github.com/javinizer/javinizer-go/internal/types"
 	"gopkg.in/yaml.v3"
 )
@@ -15,31 +17,23 @@ type UserAgentString struct {
 	Value string
 }
 
-// Permission constants are centralized to ensure consistency across the codebase
 const (
-	// CurrentConfigVersion tracks compatibility breakpoints for on-disk config.
-	// Do not bump for additive/default-only fields; those are handled by loading
-	// into DefaultConfig() and idempotent normalization rules.
 	CurrentConfigVersion = 3
 
-	// DirPermConfig is the permission mode for configuration directories (owner + group read/execute)
-	DirPermConfig = 0755
-	// DirPermTemp is the permission mode for temporary/sensitive directories (owner-only access)
-	DirPermTemp = 0700
-	// FilePermConfig is the permission mode for configuration files
-	FilePermConfig = 0644
+	DirPerm     = configutil.DirPerm
+	DirPermTemp = configutil.DirPermTemp
+	FilePerm    = configutil.FilePerm
 
-	// DefaultUserAgent is the true/identifying UA for Javinizer.
 	DefaultUserAgent = "Javinizer (+https://github.com/javinizer/Javinizer)"
 
-	// DefaultFakeUserAgent is a browser-like UA for scraper-hostile sites.
-	// Used as fallback when scraper UserAgent is not set.
 	DefaultFakeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 
-	// DefaultTempDir is the default temporary directory for transient files (e.g., temp posters).
-	// This constant is referenced by both config defaults and database migrations to ensure consistency.
 	DefaultTempDir = "data/temp"
 )
+
+func ApplyUmask(perm os.FileMode) os.FileMode {
+	return configutil.ApplyUmask(perm)
+}
 
 // Config represents the application configuration
 type Config struct {

@@ -66,7 +66,7 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 		// Ensure database directory exists before opening database
 		// This prevents "unable to open database file" errors on clean installs
 		dbDir := filepath.Dir(cfg.Database.DSN)
-		if err := os.MkdirAll(dbDir, config.DirPermConfig); err != nil {
+		if err := os.MkdirAll(dbDir, config.DirPerm); err != nil {
 			return nil, fmt.Errorf("failed to create database directory: %w", err)
 		}
 

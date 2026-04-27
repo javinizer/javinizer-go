@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -88,7 +89,7 @@ func InitLogger(cfg *Config) error {
 		default:
 			// It's a file path - create directory if needed
 			dir := filepath.Dir(output)
-			if err := os.MkdirAll(dir, 0755); err != nil {
+			if err := os.MkdirAll(dir, configutil.DirPerm); err != nil {
 				// Close any files we've opened so far
 				for _, c := range closers {
 					_ = c.Close()
@@ -99,9 +100,9 @@ func InitLogger(cfg *Config) error {
 			// Use lumberjack for rotation if MaxSizeMB > 0, otherwise plain file
 			if cfg.MaxSizeMB > 0 {
 				// Lumberjack defaults to 0600 permissions. Pre-create the file
-				// with desired permissions (0644) to match non-rotation behavior.
+				// with umask-aware permissions (configutil.FilePerm) to match non-rotation behavior.
 				if _, err := os.Stat(output); os.IsNotExist(err) {
-					if file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+					if file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY, configutil.FilePerm); err == nil {
 						_ = file.Close()
 					}
 				}
@@ -117,7 +118,7 @@ func InitLogger(cfg *Config) error {
 				closers = append(closers, lj) // Track for cleanup
 			} else {
 				// No rotation - plain file append
-				file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, configutil.FilePerm)
 				if err != nil {
 					// Close any files we've opened so far
 					for _, c := range closers {

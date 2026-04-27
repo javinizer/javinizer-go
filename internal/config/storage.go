@@ -354,11 +354,11 @@ func syncDir(dir string) error {
 
 func atomicReplaceFile(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	tmpPath := filepath.Join(dir, fmt.Sprintf(".%s.tmp-%d-%d", filepath.Base(path), time.Now().UnixNano(), os.Getpid()))
+	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
 	if err != nil {
 		return fmt.Errorf("failed to create temp config file: %w", err)
 	}
-	tmpPath := tmp.Name()
 	cleanup := true
 	defer func() {
 		if cleanup {
@@ -366,19 +366,15 @@ func atomicReplaceFile(path string, data []byte, perm os.FileMode) error {
 		}
 	}()
 
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
 		return fmt.Errorf("failed to write temp config file: %w", err)
 	}
-	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("failed to set temp config permissions: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
 		return fmt.Errorf("failed to sync temp config file: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
+	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed to close temp config file: %w", err)
 	}
 
@@ -434,7 +430,7 @@ func replaceFileOnWindows(path string, tmpPath string) error {
 // Save writes the configuration to a YAML file.
 func Save(cfg *Config, path string) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, DirPermConfig); err != nil {
+	if err := os.MkdirAll(dir, DirPerm); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -486,7 +482,7 @@ func Save(cfg *Config, path string) error {
 		return nil
 	}
 
-	if err := atomicReplaceFile(path, data, FilePermConfig); err != nil {
+	if err := atomicReplaceFile(path, data, FilePerm); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -573,7 +569,7 @@ func LoadOrCreate(path string) (*Config, error) {
 // This preserves all comments and documentation from config.yaml.example.
 func createConfigFromEmbedded(path string) (*Config, error) {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, DirPermConfig); err != nil {
+	if err := os.MkdirAll(dir, DirPerm); err != nil {
 		return nil, fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -581,7 +577,7 @@ func createConfigFromEmbedded(path string) (*Config, error) {
 	embeddedData := EmbeddedConfigBytes()
 
 	// Write the raw embedded config first to preserve all comments
-	if err := atomicReplaceFile(path, embeddedData, FilePermConfig); err != nil {
+	if err := atomicReplaceFile(path, embeddedData, FilePerm); err != nil {
 		return nil, fmt.Errorf("failed to save default config: %w", err)
 	}
 

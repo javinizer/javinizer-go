@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -198,7 +199,7 @@ func (r *Reverter) revertUpdateMode(op *models.BatchFileOperation) (*RevertFileR
 					Error:        fmt.Sprintf("failed to canonicalize NFO path: %v", err),
 				}, nil
 			}
-			if err := r.fs.MkdirAll(fsPath(canonicalNfoDir), 0755); err != nil {
+			if err := r.fs.MkdirAll(fsPath(canonicalNfoDir), configutil.DirPerm); err != nil {
 				if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
 					logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
 				}
@@ -213,7 +214,7 @@ func (r *Reverter) revertUpdateMode(op *models.BatchFileOperation) (*RevertFileR
 				}, nil
 			}
 			canonicalNfoPath := fsPath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
-			if err := afero.WriteFile(r.fs, canonicalNfoPath, []byte(op.NFOSnapshot), 0666); err != nil {
+			if err := afero.WriteFile(r.fs, canonicalNfoPath, []byte(op.NFOSnapshot), configutil.FilePerm); err != nil {
 				// NFO restore IS the operation in update-mode — this is a hard failure (D-05)
 				if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
 					logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
@@ -296,7 +297,7 @@ func (r *Reverter) revertMoveMode(op *models.BatchFileOperation) (*RevertFileRes
 		// If OriginalPath differs from current location, rename the file within the directory
 		if sourcePath != op.OriginalPath {
 			targetDir := filepath.Dir(op.OriginalPath)
-			if err := r.fs.MkdirAll(targetDir, 0755); err != nil {
+			if err := r.fs.MkdirAll(targetDir, configutil.DirPerm); err != nil {
 				if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
 					logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
 				}
@@ -363,7 +364,7 @@ func (r *Reverter) revertMoveMode(op *models.BatchFileOperation) (*RevertFileRes
 				Error:        fmt.Sprintf("failed to canonicalize directory path: %v", err),
 			}, nil
 		}
-		if err := r.fs.MkdirAll(fsPath(canonicalDir), 0755); err != nil {
+		if err := r.fs.MkdirAll(fsPath(canonicalDir), configutil.DirPerm); err != nil {
 			if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
 				logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
 			}
@@ -423,9 +424,9 @@ func (r *Reverter) revertMoveMode(op *models.BatchFileOperation) (*RevertFileRes
 			nfoDir := filepath.Dir(op.OriginalPath)
 			canonicalNfoDir, err := filepath.Abs(filepath.Clean(nfoDir))
 			if err == nil {
-				_ = r.fs.MkdirAll(fsPath(canonicalNfoDir), 0755)
+				_ = r.fs.MkdirAll(fsPath(canonicalNfoDir), configutil.DirPerm)
 				restorePath := fsPath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
-				if err := afero.WriteFile(r.fs, restorePath, []byte(op.NFOSnapshot), 0666); err != nil {
+				if err := afero.WriteFile(r.fs, restorePath, []byte(op.NFOSnapshot), configutil.FilePerm); err != nil {
 					// NFO restore failed — log warning, but the primary revert succeeded (D-05)
 					logging.Warnf("Failed to restore NFO for op %d: %v (move-mode: treating as warning)", op.ID, err)
 					nfoWarning = fmt.Sprintf("NFO restore failed: %v", err)

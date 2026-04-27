@@ -178,9 +178,9 @@ func GenerateCroppedPoster(
 	}
 
 	// Create persistent directory: data/posters/
-	// Use DirPermConfig (0755) for publicly accessible static files
+	// Use DirPerm (0777) so umask controls final directory permissions
 	posterDir := filepath.Join("data", "posters")
-	if err := os.MkdirAll(posterDir, config.DirPermConfig); err != nil {
+	if err := os.MkdirAll(posterDir, config.DirPerm); err != nil {
 		return "", fmt.Errorf("failed to create poster directory: %w", err)
 	}
 
@@ -263,7 +263,7 @@ func GenerateCroppedPoster(
 	_ = os.Remove(tempDownloadPath)
 
 	// Set predictable permissions for static file serving
-	if err := os.Chmod(croppedPath, 0644); err != nil {
+	if err := os.Chmod(croppedPath, config.ApplyUmask(config.FilePerm)); err != nil {
 		logging.Warnf("Failed to set poster permissions: %v", err)
 	}
 

@@ -91,7 +91,7 @@ func SetupTestDB(t *testing.T) (configPath string, dbPath string) {
 	dbPath = filepath.Join(tmpDir, "data", "test.db")
 
 	// Ensure database directory exists
-	err := os.MkdirAll(filepath.Dir(dbPath), 0755)
+	err := os.MkdirAll(filepath.Dir(dbPath), config.DirPerm)
 	require.NoError(t, err, "Failed to create database directory")
 
 	// Create test config
@@ -125,7 +125,7 @@ func SetupTestDBWithConfig(t *testing.T, customizeFn func(*config.Config)) (conf
 	dbPath = filepath.Join(tmpDir, "data", "test.db")
 
 	// Ensure database directory exists
-	err := os.MkdirAll(filepath.Dir(dbPath), 0755)
+	err := os.MkdirAll(filepath.Dir(dbPath), config.DirPerm)
 	require.NoError(t, err, "Failed to create database directory")
 
 	// Create test config with customizations

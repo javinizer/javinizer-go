@@ -8,11 +8,12 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"github.com/spf13/afero"
 )
 
 func MoveFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), configutil.DirPerm); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
@@ -33,7 +34,7 @@ func MoveFile(src, dst string) error {
 }
 
 func CopyFileFs(fs afero.Fs, src, dst string) error {
-	if err := fs.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := fs.MkdirAll(filepath.Dir(dst), configutil.DirPerm); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
@@ -45,7 +46,7 @@ func CopyFileFs(fs afero.Fs, src, dst string) error {
 }
 
 func MoveFileFs(fs afero.Fs, src, dst string) error {
-	if err := fs.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := fs.MkdirAll(filepath.Dir(dst), configutil.DirPerm); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
@@ -102,12 +103,7 @@ func copyFileData(src, dst string) error {
 	}
 	defer func() { _ = srcFile.Close() }()
 
-	srcInfo, err := srcFile.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat source: %w", err)
-	}
-
-	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm())
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, configutil.FilePerm)
 	if err != nil {
 		return fmt.Errorf("failed to create destination: %w", err)
 	}
@@ -127,12 +123,7 @@ func copyFileDataFs(fs afero.Fs, src, dst string) error {
 	}
 	defer func() { _ = srcFile.Close() }()
 
-	srcInfo, err := srcFile.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat source: %w", err)
-	}
-
-	dstFile, err := fs.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm())
+	dstFile, err := fs.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, configutil.FilePerm)
 	if err != nil {
 		return fmt.Errorf("failed to create destination: %w", err)
 	}

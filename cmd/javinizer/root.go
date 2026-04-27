@@ -23,6 +23,7 @@ import (
 	versioncmd "github.com/javinizer/javinizer-go/cmd/javinizer/commands/version"
 	"github.com/javinizer/javinizer-go/internal/config"
 	_ "github.com/javinizer/javinizer-go/internal/config/migrations"
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/spf13/cobra"
@@ -125,7 +126,9 @@ func initConfig() {
 			_, _ = fmt.Fprintf(os.Stderr, "Invalid umask value '%s': %v\n", cfg.System.Umask, err)
 		} else {
 			_, applied := applyUmask(int(umaskValue))
-			if !applied {
+			if applied {
+				configutil.StoreUmask(int(umaskValue))
+			} else {
 				_, _ = fmt.Fprintf(os.Stderr, "Umask not supported on this platform\n")
 			}
 		}
