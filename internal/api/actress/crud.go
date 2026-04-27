@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"gorm.io/gorm"
@@ -48,27 +49,6 @@ func validateActressRequest(req *actressRequest) error {
 	return nil
 }
 
-func parsePagination(c *gin.Context) (int, int) {
-	limit := 50
-	offset := 0
-
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
-			limit = parsed
-			if limit > 500 {
-				limit = 500
-			}
-		}
-	}
-	if offsetStr := c.Query("offset"); offsetStr != "" {
-		if parsed, err := strconv.Atoi(offsetStr); err == nil && parsed >= 0 {
-			offset = parsed
-		}
-	}
-
-	return limit, offset
-}
-
 func parseSort(c *gin.Context) (string, string, error) {
 	sortBy := strings.TrimSpace(strings.ToLower(c.Query("sort_by")))
 	sortOrder := strings.TrimSpace(strings.ToLower(c.Query("sort_order")))
@@ -106,7 +86,7 @@ func parseActressID(c *gin.Context) (uint, bool) {
 // listActresses handles GET /api/v1/actresses.
 func listActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		limit, offset := parsePagination(c)
+		limit, offset := core.ParsePagination(c, 50, 500)
 		query := strings.TrimSpace(c.Query("q"))
 		sortBy, sortOrder, err := parseSort(c)
 		if err != nil {

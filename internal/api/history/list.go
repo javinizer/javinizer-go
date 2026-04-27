@@ -1,10 +1,10 @@
 package history
 
 import (
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
@@ -25,24 +25,7 @@ import (
 // @Router /api/v1/history [get]
 func getHistory(historyRepo *database.HistoryRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Parse pagination params
-		limit := 50
-		offset := 0
-
-		if limitStr := c.Query("limit"); limitStr != "" {
-			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-				limit = l
-				if limit > 500 {
-					limit = 500
-				}
-			}
-		}
-
-		if offsetStr := c.Query("offset"); offsetStr != "" {
-			if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
-				offset = o
-			}
-		}
+		limit, offset := core.ParsePagination(c, 50, 500)
 
 		// Get filter params
 		operation := c.Query("operation")

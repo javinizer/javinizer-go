@@ -2,7 +2,6 @@ package genre
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -23,30 +22,9 @@ type genreReplacementListResponse struct {
 	Offset       int                       `json:"offset"`
 }
 
-func parsePagination(c *gin.Context) (int, int) {
-	limit := 50
-	offset := 0
-
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
-			limit = parsed
-			if limit > 500 {
-				limit = 500
-			}
-		}
-	}
-	if offsetStr := c.Query("offset"); offsetStr != "" {
-		if parsed, err := strconv.Atoi(offsetStr); err == nil && parsed >= 0 {
-			offset = parsed
-		}
-	}
-
-	return limit, offset
-}
-
 func listGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		limit, offset := parsePagination(c)
+		limit, offset := core.ParsePagination(c, 50, 500)
 
 		replacements, err := deps.GenreReplacementRepo.List()
 		if err != nil {

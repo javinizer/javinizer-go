@@ -2,11 +2,11 @@ package events
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -53,8 +53,6 @@ func listEvents(deps *ServerDependencies) gin.HandlerFunc {
 		eventType := c.Query("type")
 		severity := c.Query("severity")
 		source := c.Query("source")
-		limitStr := c.DefaultQuery("limit", "50")
-		offsetStr := c.DefaultQuery("offset", "0")
 		startStr := c.Query("start")
 		endStr := c.Query("end")
 
@@ -73,18 +71,7 @@ func listEvents(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		limit, err := strconv.Atoi(limitStr)
-		if err != nil || limit < 1 {
-			limit = 50
-		}
-		if limit > 200 {
-			limit = 200
-		}
-
-		offset, err := strconv.Atoi(offsetStr)
-		if err != nil || offset < 0 {
-			offset = 0
-		}
+		limit, offset := core.ParsePagination(c, 50, 200)
 
 		filter := database.EventFilter{
 			EventType: eventType,
