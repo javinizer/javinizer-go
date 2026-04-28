@@ -35,7 +35,7 @@
 </script>
 
 <button
-	class="group text-left rounded-lg border {isSelected ? 'ring-2 ring-primary' : 'border-border'} bg-card overflow-hidden cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-md"
+	class="group text-left rounded-lg border {isSelected ? 'ring-2 ring-primary' : 'border-border'} bg-card overflow-hidden cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-md hover:border-primary/50"
 	onclick={onclick}
 >
 	<div class="relative w-full aspect-2/3 overflow-hidden bg-muted">
@@ -61,7 +61,7 @@
 		{#if isEdited}
 			<span class="absolute top-2 left-2 text-orange-600 bg-orange-100 dark:bg-orange-900/40 text-xs font-medium px-1.5 py-0.5 rounded-full flex items-center gap-1">
 				<CircleAlert class="h-3 w-3" />
-				Modified
+				Edited
 			</span>
 		{/if}
 	</div>

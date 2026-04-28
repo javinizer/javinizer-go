@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount, untrack } from 'svelte';
-	import { fade } from 'svelte/transition';
+	import { fade, fly } from 'svelte/transition';
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -53,7 +53,8 @@
 	import equal from 'fast-deep-equal';
 	import {
 		ChevronLeft,
-		CircleAlert
+		CircleAlert,
+		X
 	} from 'lucide-svelte';
 
 	let jobId = $derived($page.params.jobId as string);
@@ -262,8 +263,7 @@
 	let isUpdateMode = $derived($page.url.searchParams.get('update') === 'true');
 	let showFieldScraperSources = $state(false);
 	const SHOW_FIELD_SCRAPER_SOURCES_KEY = 'javinizer.review.showFieldScraperSources';
-	const VIEW_MODE_KEY = 'javinizer.review.viewMode';
-	let viewMode = $state<'detail' | 'grid'>('detail');
+	let showGridModal = $state(false);
 	let posterCropStatesStorageKey = $derived(`javinizer.review.posterCropStates.${jobId}`);
 
 	// Organize operation state
@@ -500,11 +500,6 @@
 			SHOW_FIELD_SCRAPER_SOURCES_KEY,
 			showFieldScraperSources ? 'true' : 'false'
 		);
-	});
-
-	$effect(() => {
-		if (!browser) return;
-		localStorage.setItem(VIEW_MODE_KEY, viewMode);
 	});
 
 	$effect(() => {
@@ -803,7 +798,6 @@
 		if (browser) {
 			showFieldScraperSources =
 				localStorage.getItem(SHOW_FIELD_SCRAPER_SOURCES_KEY) === 'true';
-			viewMode = localStorage.getItem(VIEW_MODE_KEY) === 'grid' ? 'grid' : 'detail';
 			const savedCrops = localStorage.getItem(posterCropStatesStorageKey);
 			if (savedCrops) {
 				try {
@@ -876,7 +870,6 @@
 				organizing={organizing}
 				movieResultsLength={movieResults.length}
 				destinationPath={destinationPath}
-				bind:viewMode={viewMode}
 				bind:forceOverwrite={forceOverwrite}
 				bind:preserveNfo={preserveNfo}
 				bind:skipNfo={skipNfo}
@@ -884,6 +877,7 @@
 				onClose={() => goto('/browse')}
 				onUpdateAll={updateAll}
 				onOrganizeAll={organizeAll}
+				onshowgrid={() => { showGridModal = true; }}
 			/>
 
 			<OrganizeStatusCard
@@ -896,36 +890,9 @@
 				onContinue={() => goto('/browse')}
 			/>
 
-			{#if viewMode === 'grid'}
-				<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-					{#each movieGroups as group, index}
-						<ReviewGridCard
-							movieGroup={group}
-							isSelected={index === currentMovieIndex}
-							isEdited={editedMovies.has(group.primaryResult.file_path)}
-							displayPosterUrl={(() => {
-								const movie = group.primaryResult.data;
-								if (!movie) return undefined;
-								const override = posterPreviewOverrides.get(group.primaryResult.file_path);
-								const baseURL = override?.url || movie.cropped_poster_url || movie.poster_url;
-								if (!baseURL) return undefined;
-								if (!override) return baseURL;
-								if (baseURL.includes('v=')) return baseURL;
-								const separator = baseURL.includes('?') ? '&' : '?';
-								return `${baseURL}${separator}v=${override.version}`;
-							})()}
-							previewImageURL={reviewPageController.previewImageURL}
-							onclick={() => {
-								currentMovieIndex = index;
-								viewMode = 'detail';
-							}}
-						/>
-					{/each}
-				</div>
-			{:else}
-				{#key currentResult.file_path}
-					<div class="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6" in:fade|local={{ duration: 180 }}>
-					<ReviewMediaSidebar
+			{#key currentResult.file_path}
+				<div class="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6" in:fade|local={{ duration: 180 }}>
+				<ReviewMediaSidebar
 						currentMovie={currentMovie}
 						displayPosterUrl={displayPosterUrl}
 						showPosterPanel={showPosterPanel}
@@ -1017,10 +984,62 @@
 				</div>
 				</div>
 			{/key}
-			{/if}
 {/if}
 	</div>
 </div>
+
+{#if showGridModal}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center"
+		out:fade={{ duration: 150 }}
+	>
+		<div class="absolute inset-0 bg-black/60" onclick={() => { showGridModal = false; }}></div>
+		<div
+			class="relative w-full h-full bg-background overflow-y-auto"
+			in:fly={{ y: 30, duration: 200 }}
+			out:fly={{ y: 30, duration: 150 }}
+		>
+			<div class="sticky top-0 z-10 bg-background border-b border-border px-6 py-4 flex items-center justify-between">
+				<h2 class="text-xl font-semibold">All Movies ({movieGroups.length})</h2>
+				<button
+					onclick={() => { showGridModal = false; }}
+					class="rounded-md p-2 hover:bg-accent transition-colors"
+				>
+					<X class="h-5 w-5" />
+				</button>
+			</div>
+			<div class="p-6">
+				<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+					{#each movieGroups as group, index}
+						<ReviewGridCard
+							movieGroup={group}
+							isSelected={index === currentMovieIndex}
+							isEdited={editedMovies.has(group.primaryResult.file_path)}
+							displayPosterUrl={(() => {
+								const movie = group.primaryResult.data;
+								if (!movie) return undefined;
+								const override = posterPreviewOverrides.get(group.primaryResult.file_path);
+								const baseURL = override?.url || movie.cropped_poster_url || movie.poster_url;
+								if (!baseURL) return undefined;
+								if (!override) return baseURL;
+								if (baseURL.includes('v=')) return baseURL;
+								const separator = baseURL.includes('?') ? '&' : '?';
+								return `${baseURL}${separator}v=${override.version}`;
+							})()}
+							previewImageURL={reviewPageController.previewImageURL}
+							onclick={() => {
+								currentMovieIndex = index;
+								showGridModal = false;
+							}}
+						/>
+					{/each}
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <!-- Trailer Modal -->
 <VideoModal

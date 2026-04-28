@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/Button.svelte';
-	import { ChevronDown, ChevronUp, LayoutGrid, List, LoaderCircle, Play, RefreshCw, Settings2, X } from 'lucide-svelte';
+	import { ChevronDown, ChevronUp, LayoutGrid, LoaderCircle, Play, RefreshCw, Settings2, X } from 'lucide-svelte';
 
 	interface Props {
 		isUpdateMode: boolean;
@@ -8,7 +8,6 @@
 		organizing: boolean;
 		movieResultsLength: number;
 		destinationPath: string;
-		viewMode?: 'detail' | 'grid';
 		forceOverwrite?: boolean;
 		preserveNfo?: boolean;
 		skipNfo?: boolean;
@@ -16,6 +15,7 @@
 		onClose: () => void;
 		onUpdateAll: () => void;
 		onOrganizeAll: () => void;
+		onshowgrid?: () => void;
 	}
 
 		let {
@@ -24,14 +24,14 @@
 		organizing,
 		movieResultsLength,
 		destinationPath,
-		viewMode = $bindable<'detail' | 'grid'>('detail'),
 		forceOverwrite = $bindable(false),
 		preserveNfo = $bindable(false),
 		skipNfo = $bindable(false),
 		skipDownload = $bindable(false),
 		onClose,
 		onUpdateAll,
-		onOrganizeAll
+		onOrganizeAll,
+		onshowgrid
 	}: Props = $props();
 
 	$effect(() => {
@@ -57,28 +57,12 @@
 		</p>
 	</div>
 	<div class="flex items-center gap-3">
-		<div class="inline-flex rounded-md border border-input p-1">
-			<Button
-				size="sm"
-				variant={viewMode === 'detail' ? 'default' : 'ghost'}
-				onclick={() => { viewMode = 'detail'; }}
-			>
-				{#snippet children()}
-					<List class="h-4 w-4 mr-1" />
-					Detail
-				{/snippet}
-			</Button>
-			<Button
-				size="sm"
-				variant={viewMode === 'grid' ? 'default' : 'ghost'}
-				onclick={() => { viewMode = 'grid'; }}
-			>
-				{#snippet children()}
-					<LayoutGrid class="h-4 w-4 mr-1" />
-					Grid
-				{/snippet}
-			</Button>
-		</div>
+		<Button variant="outline" onclick={onshowgrid}>
+			{#snippet children()}
+				<LayoutGrid class="h-4 w-4 mr-2" />
+				Grid View
+			{/snippet}
+		</Button>
 		<Button variant="outline" onclick={onClose} disabled={organizing}>
 			{#snippet children()}
 				<X class="h-4 w-4 mr-2" />
