@@ -4,8 +4,9 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
+	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { apiClient } from '$lib/api/client';
+	import { createConfigQuery } from '$lib/query/queries';
 	import type { BatchJobResponse, FileResult, Movie, OrganizePreviewResponse, PosterCropResponse, PosterFromURLResponse, Scraper, UpdateRequest } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
 	import { websocketStore } from '$lib/stores/websocket';
@@ -55,12 +56,20 @@
 	} from 'lucide-svelte';
 
 	let jobId = $derived($page.params.jobId as string);
-	let job: BatchJobResponse | null = $state(null);
-	let config: any = $state(null);
-	let loading = $state(true);
-	let error = $state<string | null>(null);
 
 	const queryClient = useQueryClient();
+
+	const jobQuery = createQuery(() => ({
+		queryKey: ['batch-job', jobId],
+		queryFn: () => apiClient.getBatchJob(jobId, true),
+	}));
+
+	let job = $derived(jobQuery.data ?? null);
+	let loading = $derived(jobQuery.isPending);
+	let error = $derived(jobQuery.error?.message ?? null);
+
+	const configQuery = createConfigQuery();
+	let config = $derived(configQuery.data ?? null);
 
 	const posterFromUrlMutation = createMutation(() => ({
 		mutationFn: async ({ movieId, url }: { movieId: string; url: string }) => {
@@ -128,7 +137,7 @@
 		},
 		onSuccess: async (_data, { movieId }) => {
 			toastStore.success(`Movie ${movieId} excluded from organization`);
-			await fetchJob();
+			await queryClient.invalidateQueries({ queryKey: ['batch-job', jobId] });
 
 			const movieResultsLength = movieResults.length;
 			if (movieResultsLength === 0) {
@@ -291,6 +300,28 @@
 	let posterPreviewOverrides = $state<Map<string, PosterPreviewOverride>>(new Map());
 	let posterCropStates = $state<Map<string, PosterCropState>>(new Map());
 
+	$effect(() => {
+		const jobData = jobQuery.data;
+		if (jobData) {
+			if (jobData.destination && !destinationPath) {
+				destinationPath = jobData.destination;
+			}
+			if (originalPosterState.size === 0) {
+				const posterMap = new Map<string, { poster_url: string; cropped_poster_url: string; should_crop_poster: boolean }>();
+				for (const result of Object.values(jobData.results) as FileResult[]) {
+					if (result.data) {
+						posterMap.set(result.file_path, {
+							poster_url: result.data.original_poster_url || result.data.poster_url || '',
+							cropped_poster_url: result.data.original_cropped_poster_url || result.data.cropped_poster_url || '',
+							should_crop_poster: result.data.original_should_crop_poster ?? result.data.should_crop_poster ?? false
+						});
+					}
+				}
+				originalPosterState = posterMap;
+			}
+		}
+	});
+
 	// Rescrape modal state
 	let availableScrapers: Scraper[] = $state([]);
 	let showRescrapeModal = $state(false);
@@ -377,41 +408,6 @@
 			return `${baseURL}${separator}v=${override.version}`;
 		})()
 	);
-
-	async function fetchJob() {
-		try {
-			job = await apiClient.getBatchJob(jobId, true);
-			if (job && job.destination && !destinationPath) {
-				destinationPath = job.destination;
-			}
-			if (job && originalPosterState.size === 0) {
-				const posterMap = new Map<string, { poster_url: string; cropped_poster_url: string; should_crop_poster: boolean }>();
-				for (const result of Object.values(job.results) as FileResult[]) {
-					if (result.data) {
-						posterMap.set(result.file_path, {
-							poster_url: result.data.original_poster_url || result.data.poster_url || '',
-							cropped_poster_url: result.data.original_cropped_poster_url || result.data.cropped_poster_url || '',
-							should_crop_poster: result.data.original_should_crop_poster ?? result.data.should_crop_poster ?? false
-						});
-					}
-				}
-				originalPosterState = posterMap;
-			}
-			loading = false;
-		} catch (e) {
-			console.error('Failed to fetch batch job:', e);
-			error = e instanceof Error ? e.message : 'Failed to fetch job';
-			loading = false;
-		}
-	}
-
-	async function fetchConfig() {
-		try {
-			config = await apiClient.getConfig();
-		} catch (e) {
-			console.error('Failed to fetch config:', e);
-		}
-	}
 
 	async function fetchPreview() {
 		if (!currentMovie) {
@@ -792,8 +788,6 @@
 	}
 
 	onMount(() => {
-		fetchJob();
-		fetchConfig();
 		if (browser) {
 			showFieldScraperSources =
 				localStorage.getItem(SHOW_FIELD_SCRAPER_SOURCES_KEY) === 'true';
