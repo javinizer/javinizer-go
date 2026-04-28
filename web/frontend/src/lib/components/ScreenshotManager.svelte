@@ -13,11 +13,12 @@
 		movie: Movie;
 		displayPosterUrl?: string;
 		onUpdate: (movie: Movie) => void;
+		onUseScreenshotAsPoster?: (url: string) => void;
 		fieldSources?: Record<string, string>;
 		showFieldSources?: boolean;
 	}
 
-	let { movie, displayPosterUrl, onUpdate, fieldSources, showFieldSources = false }: Props = $props();
+	let { movie, displayPosterUrl, onUpdate, onUseScreenshotAsPoster, fieldSources, showFieldSources = false }: Props = $props();
 
 	let screenshots = $state<string[]>([]);
 	let posterUrl = $state('');
@@ -48,8 +49,7 @@
 
 	let clearCropState = $state(false);
 
-	// Update parent when data changes
-	$effect(() => {
+	function notifyParent() {
 		onUpdate({
 			...movie,
 			screenshot_urls: screenshots,
@@ -59,17 +59,19 @@
 			...(clearCropState ? { should_crop_poster: false, cropped_poster_url: '' } : {})
 		});
 		clearCropState = false;
-	});
+	}
 
 	function addScreenshot() {
 		if (newScreenshotUrl.trim()) {
 			screenshots = [...screenshots, newScreenshotUrl.trim()];
 			newScreenshotUrl = '';
+			notifyParent();
 		}
 	}
 
 	function removeScreenshot(index: number) {
 		screenshots = screenshots.filter((_, i) => i !== index);
+		notifyParent();
 	}
 
 	function removeAllScreenshots() {
@@ -84,9 +86,15 @@
 		screenshots = [];
 		showViewer = false;
 		viewerIndex = 0;
+		notifyParent();
 	}
 
 	function useScreenshotAsPoster(url: string) {
+		if (onUseScreenshotAsPoster) {
+			onUseScreenshotAsPoster(url);
+			return;
+		}
+
 		const confirmed = typeof window === 'undefined'
 			? true
 			: window.confirm('Use this screenshot as the poster? This will replace the current poster image.');
@@ -95,6 +103,7 @@
 
 		clearCropState = true;
 		posterUrl = url;
+		notifyParent();
 	}
 
 	function handleKeyPress(e: KeyboardEvent) {
@@ -157,6 +166,7 @@
 					id="poster-url"
 					type="url"
 					bind:value={posterUrl}
+					onchange={notifyParent}
 					placeholder="https://..."
 					class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 				/>
@@ -225,6 +235,7 @@
 					id="cover-url"
 					type="url"
 					bind:value={coverUrl}
+					onchange={notifyParent}
 					placeholder="https://..."
 					class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 				/>
@@ -279,6 +290,7 @@
 					id="trailer-url"
 					type="url"
 					bind:value={trailerUrl}
+					onchange={notifyParent}
 					placeholder="https://..."
 					class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 				/>

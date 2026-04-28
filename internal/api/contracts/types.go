@@ -355,6 +355,15 @@ type PosterCropResponse struct {
 	CroppedPosterURL string `json:"cropped_poster_url"`
 }
 
+type PosterFromURLRequest struct {
+	URL string `json:"url" binding:"required"`
+}
+
+type PosterFromURLResponse struct {
+	CroppedPosterURL string `json:"cropped_poster_url"`
+	PosterURL        string `json:"poster_url"`
+}
+
 // RescrapeRequest represents a request to rescrape with specific scrapers
 type RescrapeRequest struct {
 	SelectedScrapers []string `json:"selected_scrapers" binding:"required" example:"r18dev,dmm"`

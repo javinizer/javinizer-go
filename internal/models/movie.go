@@ -6,27 +6,30 @@ import (
 
 // Movie represents the aggregated metadata for a JAV movie
 type Movie struct {
-	ContentID        string     `json:"content_id" gorm:"primaryKey"`
-	ID               string     `json:"id" gorm:"index"`
-	DisplayTitle     string     `json:"display_title"`
-	Title            string     `json:"title"`
-	OriginalTitle    string     `json:"original_title"` // Japanese/original language title
-	Description      string     `json:"description" gorm:"type:text"`
-	ReleaseDate      *time.Time `json:"release_date"`
-	ReleaseYear      int        `json:"release_year"`
-	Runtime          int        `json:"runtime"` // in minutes
-	Director         string     `json:"director"`
-	Maker            string     `json:"maker"`  // Studio/maker
-	Label            string     `json:"label"`  // Sub-label
-	Series           string     `json:"series"` // Series name
-	RatingScore      float64    `json:"rating_score" gorm:"column:rating_score"`
-	RatingVotes      int        `json:"rating_votes" gorm:"column:rating_votes"`
-	PosterURL        string     `json:"poster_url"`         // Portrait/box art image
-	CoverURL         string     `json:"cover_url"`          // Landscape/fanart image
-	CroppedPosterURL string     `json:"cropped_poster_url"` // URL to the cropped poster (persisted)
-	ShouldCropPoster bool       `json:"should_crop_poster"` // Whether poster needs cropping from cover
-	TrailerURL       string     `json:"trailer_url"`
-	OriginalFileName string     `json:"original_filename"`
+	ContentID                string     `json:"content_id" gorm:"primaryKey"`
+	ID                       string     `json:"id" gorm:"index"`
+	DisplayTitle             string     `json:"display_title"`
+	Title                    string     `json:"title"`
+	OriginalTitle            string     `json:"original_title"` // Japanese/original language title
+	Description              string     `json:"description" gorm:"type:text"`
+	ReleaseDate              *time.Time `json:"release_date"`
+	ReleaseYear              int        `json:"release_year"`
+	Runtime                  int        `json:"runtime"` // in minutes
+	Director                 string     `json:"director"`
+	Maker                    string     `json:"maker"`  // Studio/maker
+	Label                    string     `json:"label"`  // Sub-label
+	Series                   string     `json:"series"` // Series name
+	RatingScore              float64    `json:"rating_score" gorm:"column:rating_score"`
+	RatingVotes              int        `json:"rating_votes" gorm:"column:rating_votes"`
+	PosterURL                string     `json:"poster_url"`         // Portrait/box art image
+	CoverURL                 string     `json:"cover_url"`          // Landscape/fanart image
+	CroppedPosterURL         string     `json:"cropped_poster_url"` // URL to the cropped poster (persisted)
+	ShouldCropPoster         bool       `json:"should_crop_poster"` // Whether poster needs cropping from cover
+	OriginalPosterURL        string     `json:"original_poster_url"`
+	OriginalCroppedPosterURL string     `json:"original_cropped_poster_url"`
+	OriginalShouldCropPoster *bool      `json:"original_should_crop_poster"`
+	TrailerURL               string     `json:"trailer_url"`
+	OriginalFileName         string     `json:"original_filename"`
 
 	// Relationships
 	Actresses   []Actress `json:"actresses" gorm:"many2many:movie_actresses;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:ActressID"`

@@ -5,7 +5,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { apiClient } from '$lib/api/client';
-	import type { BatchJobResponse, FileResult, Movie, OrganizePreviewResponse, Scraper, UpdateRequest } from '$lib/api/types';
+	import type { BatchJobResponse, FileResult, Movie, OrganizePreviewResponse, PosterFromURLResponse, Scraper, UpdateRequest } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
 	import { websocketStore } from '$lib/stores/websocket';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -57,8 +57,68 @@
 	let config: any = $state(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+
+	let posterFromUrlLoading = $state(false);
+
+	function applyPosterFromUrl(movieId: string, url: string) {
+		if (!job || posterFromUrlLoading) return;
+
+		posterFromUrlLoading = true;
+		apiClient.updateBatchMoviePosterFromURL(jobId, movieId, { url })
+			.then((data: PosterFromURLResponse) => {
+				const currentJob = job;
+				if (currentJob) {
+					const updatedJob: BatchJobResponse = {
+						...currentJob,
+						results: { ...currentJob.results }
+					};
+					for (const [filePath, result] of Object.entries(updatedJob.results)) {
+						const r = result as FileResult;
+						if (r.movie_id === movieId && r.data) {
+							updatedJob.results[filePath] = {
+								...r,
+								data: {
+									...r.data,
+									poster_url: data.poster_url,
+									cropped_poster_url: data.cropped_poster_url,
+									should_crop_poster: false
+								}
+							};
+						}
+					}
+					job = updatedJob;
+
+					const updatedEdited = new Map(editedMovies);
+					for (const [filePath, movie] of updatedEdited) {
+						if (movie.id === movieId) {
+							updatedEdited.set(filePath, {
+								...movie,
+								poster_url: data.poster_url,
+								cropped_poster_url: data.cropped_poster_url,
+								should_crop_poster: false
+							});
+						}
+					}
+					editedMovies = updatedEdited;
+				}
+
+				if (currentResult) {
+					posterPreviewOverrides = new Map(posterPreviewOverrides).set(currentResult.file_path, {
+						url: data.cropped_poster_url,
+						version: Date.now()
+					});
+				}
+			})
+			.catch((err: Error) => {
+				toastStore.error(`Failed to set poster from screenshot: ${err.message}`);
+			})
+			.finally(() => {
+				posterFromUrlLoading = false;
+			});
+	}
 	let currentMovieIndex = $state(0);
 	let editedMovies = $state<Map<string, Movie>>(new Map());
+	let originalPosterState = $state<Map<string, { poster_url: string; cropped_poster_url: string; should_crop_poster: boolean }>>(new Map());
 	let organizing = $state(false);
 	let destinationPath = $state('');
 	let organizeOperation = $state<OrganizeOperation>('move');
@@ -226,6 +286,8 @@
 
 			if (!override) return baseURL;
 
+			if (baseURL.includes('v=')) return baseURL;
+
 			const separator = baseURL.includes('?') ? '&' : '?';
 			return `${baseURL}${separator}v=${override.version}`;
 		})()
@@ -236,6 +298,19 @@
 			job = await apiClient.getBatchJob(jobId, true);
 			if (job && job.destination && !destinationPath) {
 				destinationPath = job.destination;
+			}
+			if (job && originalPosterState.size === 0) {
+				const posterMap = new Map<string, { poster_url: string; cropped_poster_url: string; should_crop_poster: boolean }>();
+				for (const result of Object.values(job.results) as FileResult[]) {
+					if (result.data) {
+						posterMap.set(result.file_path, {
+							poster_url: result.data.original_poster_url || result.data.poster_url || '',
+							cropped_poster_url: result.data.original_cropped_poster_url || result.data.cropped_poster_url || '',
+							should_crop_poster: result.data.original_should_crop_poster ?? result.data.should_crop_poster ?? false
+						});
+					}
+				}
+				originalPosterState = posterMap;
 			}
 			loading = false;
 		} catch (e) {
@@ -354,28 +429,58 @@
 	function updateCurrentMovie(movie: Movie) {
 		if (!currentResult?.data) return;
 
-		// Use fast-deep-equal to compare with original
 		const isActuallyModified = !equal(movie, currentResult.data);
 
 		if (isActuallyModified) {
-			editedMovies.set(currentResult.file_path, movie);
+			editedMovies = new Map(editedMovies).set(currentResult.file_path, movie);
 		} else {
-			// Remove from edited movies if no actual changes
-			editedMovies.delete(currentResult.file_path);
+			const next = new Map(editedMovies);
+			next.delete(currentResult.file_path);
+			editedMovies = next;
 		}
-		editedMovies = editedMovies; // Trigger reactivity
 		schedulePreviewRefresh();
 	}
 
 	function resetCurrentMovie() {
 		if (!currentResult?.data) return;
-		editedMovies.delete(currentResult.file_path);
-		editedMovies = editedMovies;
+		const next = new Map(editedMovies);
+		next.delete(currentResult.file_path);
+		editedMovies = next;
 		schedulePreviewRefresh();
 	}
 
+	function clearPosterPreviewOverride() {
+		if (!currentResult) return;
+		const next = new Map(posterPreviewOverrides);
+		next.delete(currentResult.file_path);
+		posterPreviewOverrides = next;
+	}
+
+	function resetPoster() {
+		if (!currentResult || !currentMovie) return;
+
+		const original = originalPosterState.get(currentResult.file_path);
+		if (!original || !original.poster_url) return;
+
+		const posterChanged = currentMovie.poster_url !== original.poster_url
+			|| currentMovie.cropped_poster_url !== original.cropped_poster_url
+			|| currentMovie.should_crop_poster !== original.should_crop_poster;
+		if (!posterChanged) return;
+
+		if (original.poster_url !== currentMovie.poster_url) {
+			applyPosterFromUrl(currentMovie.id, original.poster_url);
+		} else {
+			updateCurrentMovie({
+				...currentMovie,
+				cropped_poster_url: original.cropped_poster_url,
+				should_crop_poster: original.should_crop_poster
+			});
+			clearPosterPreviewOverride();
+		}
+	}
+
 	function useScreenshotAsPoster(url: string) {
-		if (!currentMovie) return;
+		if (!currentMovie || !currentResult) return;
 
 		const confirmed = typeof window === 'undefined'
 			? true
@@ -383,12 +488,8 @@
 
 		if (!confirmed) return;
 
-		updateCurrentMovie({
-			...currentMovie,
-			poster_url: url,
-			should_crop_poster: false,
-			cropped_poster_url: ''
-		});
+		clearPosterPreviewOverride();
+		applyPosterFromUrl(currentMovie.id, url);
 	}
 
 	function schedulePreviewRefresh() {
@@ -749,6 +850,7 @@
 						onOpenCoverViewer={reviewPageController.openCoverViewer}
 						onOpenScreenshotViewer={reviewPageController.openScreenshotViewer}
 						onUseScreenshotAsPoster={useScreenshotAsPoster}
+						onResetPoster={resetPoster}
 						previewImageURL={reviewPageController.previewImageURL}
 					/>
 
@@ -811,6 +913,7 @@
 						displayPosterUrl={displayPosterUrl}
 						showFieldScraperSources={showFieldScraperSources}
 						onUpdateCurrentMovie={updateCurrentMovie}
+						onUseScreenshotAsPoster={useScreenshotAsPoster}
 					/>
 
 					{#if canOrganize}

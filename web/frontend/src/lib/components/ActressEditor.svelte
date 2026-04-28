@@ -63,10 +63,9 @@
 		return actress.japanese_name || 'Unknown';
 	}
 
-	// Update parent when actresses change
-	$effect(() => {
+	function notifyParent() {
 		onUpdate({ ...movie, actresses });
-	});
+	}
 
 	function openAddActress() {
 		editingIndex = null;
@@ -94,19 +93,19 @@
 		}
 
 		if (editingIndex !== null) {
-			// Edit existing
-			actresses[editingIndex] = editingActress;
+			actresses = actresses.map((a, i) => i === editingIndex ? editingActress : a);
 		} else {
-			// Add new
 			actresses = [...actresses, editingActress];
 		}
 
 		showEditModal = false;
+		notifyParent();
 	}
 
 	function removeActress(index: number) {
 		if (confirm('Remove this actress?')) {
 			actresses = actresses.filter((_, i) => i !== index);
+			notifyParent();
 		}
 	}
 

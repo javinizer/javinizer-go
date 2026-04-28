@@ -86,6 +86,15 @@ export interface PosterCropResponse {
 	cropped_poster_url: string;
 }
 
+export interface PosterFromURLRequest {
+	url: string;
+}
+
+export interface PosterFromURLResponse {
+	cropped_poster_url: string;
+	poster_url: string;
+}
+
 export interface BatchRescrapeRequest {
 	force?: boolean;
 	selected_scrapers?: string[];
@@ -240,6 +249,9 @@ export interface Movie {
 	poster_url?: string;
 	cropped_poster_url?: string;
 	should_crop_poster?: boolean;
+	original_poster_url?: string;
+	original_cropped_poster_url?: string;
+	original_should_crop_poster?: boolean;
 	screenshot_urls?: string[];
 	trailer_url?: string;
 	original_file_name?: string;

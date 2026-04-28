@@ -4418,8 +4418,17 @@ const docTemplate = `{
                     "description": "Studio/maker",
                     "type": "string"
                 },
+                "original_cropped_poster_url": {
+                    "type": "string"
+                },
                 "original_filename": {
                     "type": "string"
+                },
+                "original_poster_url": {
+                    "type": "string"
+                },
+                "original_should_crop_poster": {
+                    "type": "boolean"
                 },
                 "original_title": {
                     "description": "Japanese/original language title",

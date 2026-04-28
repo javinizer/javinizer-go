@@ -2,7 +2,7 @@
 	import type { Movie } from '$lib/api/types';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
-	import { Image as ImageIcon, ImagePlus, Play } from 'lucide-svelte';
+	import { Image as ImageIcon, ImagePlus, Play, RotateCcw } from 'lucide-svelte';
 
 	interface Props {
 		currentMovie: Movie;
@@ -17,6 +17,7 @@
 		onOpenCoverViewer: () => void;
 		onOpenScreenshotViewer: (index: number) => void;
 		onUseScreenshotAsPoster: (url: string) => void;
+		onResetPoster?: () => void;
 		previewImageURL: (url: string | undefined) => string;
 	}
 
@@ -33,6 +34,7 @@
 		onOpenCoverViewer,
 		onOpenScreenshotViewer,
 		onUseScreenshotAsPoster,
+		onResetPoster,
 		previewImageURL
 	}: Props = $props();
 </script>
@@ -42,15 +44,29 @@
 		<Card class="p-4">
 			<div class="flex items-center justify-between gap-2 mb-3">
 				<h3 class="font-semibold text-sm">Poster{currentMovie.should_crop_poster ? ' (Cropped)' : ''}</h3>
-				<Button
-					size="sm"
-					variant="outline"
-					onclick={onOpenPosterCropModal}
-					disabled={!currentMovie.id}
-					class="text-xs"
-				>
-					{#snippet children()}Adjust Crop{/snippet}
-				</Button>
+				<div class="flex gap-1">
+					{#if onResetPoster}
+						<Button
+							size="sm"
+							variant="outline"
+							onclick={onResetPoster}
+							disabled={!currentMovie.id}
+							class="text-xs"
+							title="Reset to original scraped poster"
+						>
+							{#snippet children()}<RotateCcw class="h-3 w-3 mr-1" />Reset{/snippet}
+						</Button>
+					{/if}
+					<Button
+						size="sm"
+						variant="outline"
+						onclick={onOpenPosterCropModal}
+						disabled={!currentMovie.id}
+						class="text-xs"
+					>
+						{#snippet children()}Adjust Crop{/snippet}
+					</Button>
+				</div>
 			</div>
 			{#if displayPosterUrl}
 				<div class="w-full aspect-2/3 overflow-hidden rounded border relative">

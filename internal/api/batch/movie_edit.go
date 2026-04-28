@@ -2,11 +2,18 @@ package batch
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/downloader"
+	httpclientiface "github.com/javinizer/javinizer-go/internal/httpclient"
 	imageutil "github.com/javinizer/javinizer-go/internal/image"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -207,7 +214,7 @@ func updateBatchMoviePosterCrop(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		croppedURL := fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg", jobID, posterID)
+		croppedURL := fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg?v=%d", jobID, posterID, time.Now().UnixMilli())
 
 		// Keep job state consistent so response payloads always point to the latest temp crop.
 		for _, filePath := range filePaths {
@@ -215,6 +222,11 @@ func updateBatchMoviePosterCrop(deps *ServerDependencies) gin.HandlerFunc {
 				movie, ok := current.Data.(*models.Movie)
 				if !ok || movie == nil {
 					return current, nil
+				}
+				if movie.OriginalPosterURL == "" {
+					movie.OriginalPosterURL = movie.PosterURL
+					movie.OriginalCroppedPosterURL = movie.CroppedPosterURL
+					movie.OriginalShouldCropPoster = &movie.ShouldCropPoster
 				}
 				movie.CroppedPosterURL = croppedURL
 				movie.ShouldCropPoster = false
@@ -231,6 +243,207 @@ func updateBatchMoviePosterCrop(deps *ServerDependencies) gin.HandlerFunc {
 
 		c.JSON(200, PosterCropResponse{CroppedPosterURL: croppedURL})
 	}
+}
+
+func updateBatchMoviePosterFromURL(deps *ServerDependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		jobID := c.Param("id")
+		movieID := c.Param("movieId")
+
+		if movieID != filepath.Base(movieID) || movieID == "" || movieID == "." {
+			c.JSON(404, ErrorResponse{Error: "Movie not found in job"})
+			return
+		}
+
+		var req PosterFromURLRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		job, ok := deps.JobQueue.GetJobPointer(jobID)
+		if !ok {
+			c.JSON(404, ErrorResponse{Error: "Job not found"})
+			return
+		}
+
+		status := job.GetStatus()
+
+		var filePaths []string
+		for filePath, result := range status.Results {
+			if result.MovieID == movieID {
+				filePaths = append(filePaths, filePath)
+			}
+		}
+		if len(filePaths) == 0 {
+			for filePath, result := range status.Results {
+				if result.Data == nil {
+					continue
+				}
+				if m, ok := result.Data.(*models.Movie); ok && m.ID == movieID {
+					filePaths = append(filePaths, filePath)
+				}
+			}
+		}
+		if len(filePaths) == 0 {
+			c.JSON(404, ErrorResponse{Error: fmt.Sprintf("Movie %s not found in job", movieID)})
+			return
+		}
+
+		posterID := movieID
+		if firstResult, exists := status.Results[filePaths[0]]; exists && firstResult != nil && firstResult.Data != nil {
+			if m, ok := firstResult.Data.(*models.Movie); ok && m.ID != "" {
+				posterID = m.ID
+			}
+		}
+		if posterID != filepath.Base(posterID) || posterID == "" || posterID == "." {
+			c.JSON(400, ErrorResponse{Error: "Invalid movie ID for poster from URL"})
+			return
+		}
+
+		cfg := deps.GetConfig()
+		registry := deps.GetRegistry()
+
+		httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(cfg, registry)
+		if err != nil {
+			logging.Warnf("Failed to create HTTP client for poster download: %v", err)
+			c.JSON(500, ErrorResponse{Error: "Failed to create HTTP client"})
+			return
+		}
+
+		tempPosterDir := filepath.Join(cfg.System.TempDir, "posters", jobID)
+		if err := os.MkdirAll(tempPosterDir, config.DirPermTemp); err != nil {
+			c.JSON(500, ErrorResponse{Error: "Failed to create temp poster directory"})
+			return
+		}
+
+		tempFullPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
+		tempCroppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
+
+		cleanTempDir := filepath.Clean(tempPosterDir) + string(os.PathSeparator)
+		cleanFullPath := filepath.Clean(tempFullPath)
+		cleanCroppedPath := filepath.Clean(tempCroppedPath)
+		if !strings.HasPrefix(cleanFullPath, cleanTempDir) || !strings.HasPrefix(cleanCroppedPath, cleanTempDir) {
+			c.JSON(400, ErrorResponse{Error: "Invalid poster path"})
+			return
+		}
+
+		downloadReq, err := http.NewRequestWithContext(c.Request.Context(), "GET", req.URL, nil)
+		if err != nil {
+			c.JSON(400, ErrorResponse{Error: fmt.Sprintf("Invalid URL: %v", err)})
+			return
+		}
+		if cfg.Scrapers.UserAgent != "" {
+			downloadReq.Header.Set("User-Agent", cfg.Scrapers.UserAgent)
+		}
+		downloadReq.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+		if cfg.Scrapers.Referer != "" {
+			downloadReq.Header.Set("Referer", cfg.Scrapers.Referer)
+		} else if parsed, parseErr := url.Parse(req.URL); parseErr == nil && parsed.Host != "" {
+			downloadReq.Header.Set("Referer", parsed.Scheme+"://"+parsed.Host+"/")
+		}
+
+		resp, err := httpClient.Do(downloadReq)
+		if err != nil {
+			c.JSON(502, ErrorResponse{Error: fmt.Sprintf("Failed to download image: %v", err)})
+			return
+		}
+		defer func() { _ = httpclientiface.DrainAndClose(resp.Body) }()
+
+		if resp.StatusCode != http.StatusOK {
+			c.JSON(502, ErrorResponse{Error: fmt.Sprintf("Image download failed with status %d", resp.StatusCode)})
+			return
+		}
+
+		tmpDownload, err := os.CreateTemp(tempPosterDir, posterID+"-full-*.tmp")
+		if err != nil {
+			c.JSON(500, ErrorResponse{Error: "Failed to create temp file"})
+			return
+		}
+		tempDownloadPath := tmpDownload.Name()
+
+		_, err = io.Copy(tmpDownload, resp.Body)
+		_ = tmpDownload.Close()
+		if err != nil {
+			_ = os.Remove(tempDownloadPath)
+			c.JSON(500, ErrorResponse{Error: "Failed to write image"})
+			return
+		}
+
+		_ = os.Remove(tempFullPath)
+		if err := os.Rename(tempDownloadPath, tempFullPath); err != nil {
+			_ = os.Remove(tempDownloadPath)
+			c.JSON(500, ErrorResponse{Error: "Failed to finalize image download"})
+			return
+		}
+
+		if err := imageutil.CropPosterFromCover(afero.NewOsFs(), tempFullPath, tempCroppedPath); err != nil {
+			logging.Warnf("Failed to auto-crop poster from URL for %s: %v (using full image as fallback)", posterID, err)
+			_ = os.Remove(tempCroppedPath)
+			if copyErr := copyFile(tempFullPath, tempCroppedPath); copyErr != nil {
+				_ = os.Remove(tempFullPath)
+				c.JSON(500, ErrorResponse{Error: "Failed to create poster image"})
+				return
+			}
+		}
+
+		croppedURL := fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg?v=%d", jobID, posterID, time.Now().UnixMilli())
+
+		for _, filePath := range filePaths {
+			err := job.AtomicUpdateFileResult(filePath, func(current *worker.FileResult) (*worker.FileResult, error) {
+				movie, ok := current.Data.(*models.Movie)
+				if !ok || movie == nil {
+					return current, nil
+				}
+				if movie.OriginalPosterURL == "" {
+					movie.OriginalPosterURL = movie.PosterURL
+					movie.OriginalCroppedPosterURL = movie.CroppedPosterURL
+					movie.OriginalShouldCropPoster = &movie.ShouldCropPoster
+				}
+				movie.PosterURL = req.URL
+				movie.CroppedPosterURL = croppedURL
+				movie.ShouldCropPoster = false
+				current.Data = movie
+				current.MovieID = movie.ID
+				return current, nil
+			})
+			if err != nil {
+				logging.Errorf("Failed to update poster from URL in job state for %s: %v", filePath, err)
+				c.JSON(500, ErrorResponse{Error: fmt.Sprintf("Failed to update job state: %v", err)})
+				return
+			}
+		}
+
+		if _, err := deps.MovieRepo.Upsert(&models.Movie{
+			ID:               posterID,
+			PosterURL:        req.URL,
+			CroppedPosterURL: croppedURL,
+		}); err != nil {
+			logging.Warnf("Failed to update movie poster in database: %v", err)
+		}
+
+		c.JSON(200, PosterFromURLResponse{
+			CroppedPosterURL: croppedURL,
+			PosterURL:        req.URL,
+		})
+	}
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = out.Close() }()
+
+	_, err = io.Copy(out, in)
+	return err
 }
 
 // excludeBatchMovie godoc

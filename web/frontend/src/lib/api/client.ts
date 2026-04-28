@@ -23,6 +23,8 @@ import type {
 	BatchRescrapeResponse,
 	PosterCropRequest,
 	PosterCropResponse,
+	PosterFromURLRequest,
+	PosterFromURLResponse,
 	Config,
 	ProxyTestRequest,
 	ProxyTestResponse,
@@ -215,6 +217,13 @@ class APIClient {
 		return this.request<PosterCropResponse>(`/api/v1/batch/${jobId}/movies/${movieId}/poster-crop`, {
 			method: 'POST',
 			body: JSON.stringify(crop)
+		});
+	}
+
+	async updateBatchMoviePosterFromURL(jobId: string, movieId: string, request: PosterFromURLRequest): Promise<PosterFromURLResponse> {
+		return this.request<PosterFromURLResponse>(`/api/v1/batch/${jobId}/movies/${movieId}/poster-from-url`, {
+			method: 'POST',
+			body: JSON.stringify(request)
 		});
 	}
 

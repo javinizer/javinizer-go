@@ -390,7 +390,7 @@ func TestUpdateBatchMoviePosterCrop(t *testing.T) {
 
 		var resp PosterCropResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, "/api/v1/temp/posters/"+job.ID+"/IPX-535.jpg", resp.CroppedPosterURL)
+		assert.Contains(t, resp.CroppedPosterURL, "/api/v1/temp/posters/"+job.ID+"/IPX-535.jpg")
 
 		croppedPath := filepath.Join(posterDir, "IPX-535.jpg")
 		_, err = os.Stat(croppedPath)
