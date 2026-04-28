@@ -7,7 +7,7 @@
 	import Card from './ui/Card.svelte';
 	import ImageViewer from './ImageViewer.svelte';
 	import VideoModal from './VideoModal.svelte';
-	import { Plus, Trash2, Image as ImageIcon, Play, RotateCcw, Info, ChevronDown } from 'lucide-svelte';
+	import { Plus, Trash2, Image as ImageIcon, ImagePlus, Play, RotateCcw, Info, ChevronDown } from 'lucide-svelte';
 
 	interface Props {
 		movie: Movie;
@@ -80,6 +80,21 @@
 		screenshots = [];
 		showViewer = false;
 		viewerIndex = 0;
+	}
+
+	function useScreenshotAsPoster(url: string) {
+		const confirmed = typeof window === 'undefined'
+			? true
+			: window.confirm('Use this screenshot as the poster? This will replace the current poster image.');
+
+		if (!confirmed) return;
+
+		onUpdate({
+			...movie,
+			poster_url: url,
+			should_crop_poster: false,
+			cropped_poster_url: ''
+		});
 	}
 
 	function handleKeyPress(e: KeyboardEvent) {
@@ -378,10 +393,21 @@
 								}}
 							/>
 						</button>
-						<div class="mt-2 flex items-center justify-between gap-2">
+						<div class="mt-2 flex items-center gap-1">
 							<p class="text-xs text-muted-foreground truncate flex-1" title={url}>
 								Screenshot {index + 1}
 							</p>
+							<Button
+								variant="ghost"
+								size="sm"
+								onclick={() => useScreenshotAsPoster(url)}
+								title="Use as Poster"
+								class="p-1 h-auto"
+							>
+								{#snippet children()}
+									<ImagePlus class="h-3 w-3" />
+								{/snippet}
+							</Button>
 							<Button
 								variant="ghost"
 								size="sm"
