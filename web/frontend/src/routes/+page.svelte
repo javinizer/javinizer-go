@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { flip } from 'svelte/animate';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { cubicOut, quintOut } from 'svelte/easing';
 	import { fade, fly, scale } from 'svelte/transition';
+	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import {
 		Activity,
 		ArrowRight,
@@ -24,25 +24,101 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
-	import type { ActressListResponse, HealthResponse, HistoryRecord, HistoryStats } from '$lib/api/types';
+	import type { HealthResponse, HistoryRecord, HistoryStats } from '$lib/api/types';
 
 	const STORAGE_KEY_INPUT = 'javinizer_input_path';
 	const STORAGE_KEY_OUTPUT = 'javinizer_output_path';
 
-	let loading = $state(true);
-	let refreshing = $state(false);
-	let initialized = $state(false);
-	let dashboardError = $state<string | null>(null);
+	const queryClient = useQueryClient();
 
-	let health = $state<HealthResponse | null>(null);
-	let stats = $state<HistoryStats | null>(null);
-	let recentRuns = $state<HistoryRecord[]>([]);
-	let historyWindow = $state<HistoryRecord[]>([]);
-	let actressTotal = $state<number | null>(null);
-	let currentWorkingDirectory = $state('');
+	const healthQuery = createQuery(() => ({
+		queryKey: ['health'],
+		queryFn: () => apiClient.health()
+	}));
+
+	const statsQuery = createQuery(() => ({
+		queryKey: ['history', 'stats'],
+		queryFn: () => apiClient.getHistoryStats()
+	}));
+
+	const recentRunsQuery = createQuery(() => ({
+		queryKey: ['history', 'recent'],
+		queryFn: () => apiClient.getHistory({ limit: 8, offset: 0 })
+	}));
+
+	const historyWindowQuery = createQuery(() => ({
+		queryKey: ['history', 'window'],
+		queryFn: () => apiClient.getHistory({ limit: 200, offset: 0 })
+	}));
+
+	const actressCountQuery = createQuery(() => ({
+		queryKey: ['actresses', 'count'],
+		queryFn: () => apiClient.listActresses({ limit: 1, offset: 0 })
+	}));
+
+	const cwdQuery = createQuery(() => ({
+		queryKey: ['cwd'],
+		queryFn: () => apiClient.getCurrentWorkingDirectory()
+	}));
+
+	let health = $derived(healthQuery.data ?? null);
+	let stats = $derived(statsQuery.data ?? null);
+	let recentRuns = $derived(recentRunsQuery.data?.records ?? []);
+	let historyWindow = $derived(historyWindowQuery.data?.records ?? []);
+	let actressTotal = $derived(actressCountQuery.data?.total ?? null);
+	let currentWorkingDirectory = $derived(cwdQuery.data?.path ?? '');
+
 	let inputPath = $state('');
 	let outputPath = $state('');
 	let recentRenderVersion = $state(0);
+
+	let loading = $derived(
+		healthQuery.isPending &&
+			statsQuery.isPending &&
+			recentRunsQuery.isPending &&
+			historyWindowQuery.isPending &&
+			actressCountQuery.isPending &&
+			cwdQuery.isPending
+	);
+
+	let refreshing = $derived(
+		!loading &&
+			(healthQuery.isFetching ||
+				statsQuery.isFetching ||
+				recentRunsQuery.isFetching ||
+				historyWindowQuery.isFetching ||
+				actressCountQuery.isFetching ||
+				cwdQuery.isFetching)
+	);
+
+	let dashboardError = $derived.by(() => {
+		const errors = [
+			healthQuery.error,
+			statsQuery.error,
+			recentRunsQuery.error,
+			historyWindowQuery.error,
+			actressCountQuery.error,
+			cwdQuery.error
+		].filter(Boolean);
+		if (errors.length === 0) return null;
+		if (errors.length === 6) return 'Unable to load dashboard data.';
+		return `Loaded with ${errors.length} partial error${errors.length > 1 ? 's' : ''}.`;
+	});
+
+	$effect(() => {
+		const cwd = cwdQuery.data?.path;
+		if (!cwd || !browser) return;
+		const savedInput = localStorage.getItem(STORAGE_KEY_INPUT);
+		const savedOutput = localStorage.getItem(STORAGE_KEY_OUTPUT);
+		inputPath = savedInput || cwd;
+		outputPath = savedOutput || cwd;
+	});
+
+	$effect(() => {
+		if (recentRunsQuery.data) {
+			recentRenderVersion += 1;
+		}
+	});
 
 	const wsState = $derived($websocketStore);
 	const recentRunCount = $derived(recentRuns.length);
@@ -168,102 +244,9 @@
 		await goto('/docs');
 	}
 
-	async function loadDashboard() {
-		if (!initialized) {
-			loading = true;
-		} else {
-			refreshing = true;
-		}
-		dashboardError = null;
-
-		const [
-			healthResult,
-			statsResult,
-			recentResult,
-			windowResult,
-			actressResult,
-			cwdResult
-		] = await Promise.allSettled([
-			apiClient.health(),
-			apiClient.getHistoryStats(),
-			apiClient.getHistory({ limit: 8, offset: 0 }),
-			apiClient.getHistory({ limit: 200, offset: 0 }),
-			apiClient.listActresses({ limit: 1, offset: 0 }),
-			apiClient.getCurrentWorkingDirectory()
-		]);
-
-		let failedCalls = 0;
-
-		if (healthResult.status === 'fulfilled') {
-			health = healthResult.value;
-		} else {
-			failedCalls += 1;
-		}
-
-		if (statsResult.status === 'fulfilled') {
-			stats = statsResult.value;
-		} else {
-			failedCalls += 1;
-		}
-
-		if (recentResult.status === 'fulfilled') {
-			recentRuns = recentResult.value.records;
-			recentRenderVersion += 1;
-		} else {
-			failedCalls += 1;
-			if (!initialized) recentRuns = [];
-		}
-
-		if (windowResult.status === 'fulfilled') {
-			historyWindow = windowResult.value.records;
-		} else {
-			failedCalls += 1;
-			if (!initialized) historyWindow = [];
-		}
-
-		if (actressResult.status === 'fulfilled') {
-			const actressData: ActressListResponse = actressResult.value;
-			actressTotal = actressData.total;
-		} else {
-			failedCalls += 1;
-			if (!initialized) actressTotal = null;
-		}
-
-		if (cwdResult.status === 'fulfilled') {
-			currentWorkingDirectory = cwdResult.value.path;
-		} else {
-			failedCalls += 1;
-		}
-
-		if (browser) {
-			const savedInput = localStorage.getItem(STORAGE_KEY_INPUT);
-			const savedOutput = localStorage.getItem(STORAGE_KEY_OUTPUT);
-			inputPath = savedInput || currentWorkingDirectory;
-			outputPath = savedOutput || currentWorkingDirectory;
-		} else {
-			inputPath = currentWorkingDirectory;
-			outputPath = currentWorkingDirectory;
-		}
-
-		if (failedCalls > 0) {
-			dashboardError =
-				failedCalls === 6
-					? 'Unable to load dashboard data.'
-					: `Loaded with ${failedCalls} partial error${failedCalls > 1 ? 's' : ''}.`;
-		}
-
-		loading = false;
-		refreshing = false;
-		initialized = true;
-	}
-
 	function refreshDashboard() {
-		return loadDashboard();
+		void queryClient.invalidateQueries();
 	}
-
-	onMount(() => {
-		loadDashboard();
-	});
 </script>
 
 <div class="container mx-auto px-4 py-8">
@@ -401,7 +384,7 @@
 						<div class="text-sm text-muted-foreground">{recentRunCount} recent record(s)</div>
 					</div>
 
-					{#if loading && !initialized}
+					{#if loading}
 						<div class="text-sm text-muted-foreground py-10 text-center">Loading recent runs...</div>
 					{:else if recentRuns.length === 0}
 						<div class="text-sm text-muted-foreground py-10 text-center">No operations recorded yet.</div>
