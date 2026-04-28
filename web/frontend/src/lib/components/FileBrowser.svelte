@@ -83,12 +83,14 @@
 	let recursiveScan = $state(false);
 	let selectedFolders: string[] = $state([]);
 	let anchorFolderPath: string | null = $state(null);
+	let anchorFilePath: string | null = $state(null);
 	let selectedFoldersSet = $derived(new Set(selectedFolders));
 
 	// Sort state
 	type SortField = 'name' | 'mod_time' | 'size';
 	type SortDirection = 'asc' | 'desc';
 	const SORT_STORAGE_KEY = 'javinizer_filebrowser_sort';
+	const RECURSIVE_STORAGE_KEY = 'javinizer_filebrowser_recursive';
 	let sortField = $state<SortField>('name');
 	let sortDirection = $state<SortDirection>('asc');
 
@@ -114,6 +116,28 @@
 	}
 
 	loadSortFromStorage();
+
+	function loadRecursiveFromStorage() {
+		try {
+			const stored = sessionStorage.getItem(RECURSIVE_STORAGE_KEY);
+			if (stored === 'true') {
+				recursiveScan = true;
+			}
+		} catch {}
+	}
+
+	function saveRecursiveToStorage() {
+		try {
+			sessionStorage.setItem(RECURSIVE_STORAGE_KEY, String(recursiveScan));
+		} catch {}
+	}
+
+	loadRecursiveFromStorage();
+
+	$effect(() => {
+		recursiveScan;
+		saveRecursiveToStorage();
+	});
 
 	let currentPage = $state(1);
 	const PAGE_SIZE = 100;
@@ -320,6 +344,10 @@
 		return sortedAndFilteredItems().filter((i) => i.is_dir).map((i) => i.path);
 	}
 
+	function getFilePathsSorted(): string[] {
+		return sortedAndFilteredItems().filter((i) => !i.is_dir).map((i) => i.path);
+	}
+
 	function handleItemClick(item: FileInfo, event: MouseEvent) {
 		if (item.is_dir) {
 			if (event.shiftKey && anchorFolderPath !== null) {
@@ -350,7 +378,22 @@
 				browse(item.path);
 			}
 		} else if (!folderOnly) {
-			toggleFileSelection(item.path);
+			if (event.shiftKey && anchorFilePath !== null) {
+				const filePaths = getFilePathsSorted();
+				const anchorIdx = filePaths.indexOf(anchorFilePath);
+				const clickedIdx = filePaths.indexOf(item.path);
+				if (anchorIdx >= 0 && clickedIdx >= 0) {
+					const start = Math.min(anchorIdx, clickedIdx);
+					const end = Math.max(anchorIdx, clickedIdx);
+					const rangePaths = filePaths.slice(start, end + 1);
+					externalSelectedFiles = [...new Set([...externalSelectedFiles, ...rangePaths])];
+				} else {
+					toggleFileSelection(item.path);
+				}
+			} else {
+				toggleFileSelection(item.path);
+			}
+			anchorFilePath = item.path;
 		}
 	}
 
@@ -377,9 +420,11 @@
 	}
 
 	function selectAll() {
-		// Select all visible (filtered) files, merging with existing
 		const allFiles = sortedAndFilteredItems().filter((item) => !item.is_dir).map((item) => item.path);
 		externalSelectedFiles = [...new Set([...externalSelectedFiles, ...allFiles])];
+		if (allFiles.length > 0) {
+			anchorFilePath = allFiles[0];
+		}
 		onFileSelect?.(externalSelectedFiles);
 	}
 
@@ -391,11 +436,13 @@
 	}
 
 	function selectMatched() {
-		// Select all visible (filtered) matched files, merging with existing
 		const matchedFiles = sortedAndFilteredItems()
 			.filter((item) => !item.is_dir && item.matched)
 			.map((item) => item.path);
 		externalSelectedFiles = [...new Set([...externalSelectedFiles, ...matchedFiles])];
+		if (matchedFiles.length > 0) {
+			anchorFilePath = matchedFiles[0];
+		}
 		onFileSelect?.(externalSelectedFiles);
 	}
 
