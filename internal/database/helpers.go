@@ -33,15 +33,11 @@ func upsertMovieCore(tx *gorm.DB, db *DB, movie *models.Movie, translations []mo
 		return err
 	}
 
-	if len(movie.Genres) > 0 {
-		if err := tx.Model(movie).Association("Genres").Replace(movie.Genres); err != nil {
-			return err
-		}
+	if err := tx.Model(movie).Association("Genres").Replace(movie.Genres); err != nil {
+		return err
 	}
-	if len(movie.Actresses) > 0 {
-		if err := tx.Model(movie).Association("Actresses").Replace(movie.Actresses); err != nil {
-			return err
-		}
+	if err := tx.Model(movie).Association("Actresses").Replace(movie.Actresses); err != nil {
+		return err
 	}
 
 	translationRepo := NewMovieTranslationRepository(db)

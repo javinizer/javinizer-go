@@ -112,6 +112,104 @@ func TestUpsertMovieCore(t *testing.T) {
 		assert.Equal(t, "English Title", found.Translations[0].Title)
 	})
 
+	t.Run("clears actress associations when list is empty", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+
+		movie := createTestMovie("IPX-CLEAR-001")
+		movie.Genres = []models.Genre{{Name: "Action"}}
+		movie.Actresses = []models.Actress{{DMMID: 99901, JapaneseName: "ToRemove"}}
+		require.NoError(t, repo.Create(movie))
+
+		found, err := repo.FindByID("IPX-CLEAR-001")
+		require.NoError(t, err)
+		require.Len(t, found.Actresses, 1)
+		require.Len(t, found.Genres, 1)
+
+		movie.CreatedAt = found.CreatedAt
+		movie.Actresses = nil
+		movie.Genres = []models.Genre{{Name: "Action"}}
+
+		err = db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.ensureGenresExistTx(tx, movie.Genres); err != nil {
+				return err
+			}
+			translations := movie.Translations
+			movie.Translations = nil
+			return upsertMovieCore(tx, db, movie, translations)
+		})
+		require.NoError(t, err)
+
+		found, err = repo.FindByID("IPX-CLEAR-001")
+		require.NoError(t, err)
+		assert.Empty(t, found.Actresses, "actresses should be cleared when set to nil")
+		assert.Len(t, found.Genres, 1, "genres should remain unchanged")
+	})
+
+	t.Run("clears genre associations when list is empty", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+
+		movie := createTestMovie("IPX-CLEAR-002")
+		movie.Genres = []models.Genre{{Name: "Comedy"}, {Name: "Drama"}}
+		movie.Actresses = []models.Actress{{DMMID: 99902, JapaneseName: "KeepActress"}}
+		require.NoError(t, repo.Create(movie))
+
+		found, err := repo.FindByID("IPX-CLEAR-002")
+		require.NoError(t, err)
+		require.Len(t, found.Genres, 2)
+
+		movie.CreatedAt = found.CreatedAt
+		movie.Genres = nil
+		movie.Actresses = []models.Actress{{DMMID: 99902, JapaneseName: "KeepActress"}}
+
+		err = db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return err
+			}
+			translations := movie.Translations
+			movie.Translations = nil
+			return upsertMovieCore(tx, db, movie, translations)
+		})
+		require.NoError(t, err)
+
+		found, err = repo.FindByID("IPX-CLEAR-002")
+		require.NoError(t, err)
+		assert.Empty(t, found.Genres, "genres should be cleared when set to nil")
+		assert.Len(t, found.Actresses, 1, "actresses should remain unchanged")
+	})
+
+	t.Run("clears both associations when both lists are empty", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+
+		movie := createTestMovie("IPX-CLEAR-003")
+		movie.Genres = []models.Genre{{Name: "Horror"}}
+		movie.Actresses = []models.Actress{{DMMID: 99903, JapaneseName: "ToRemove"}}
+		require.NoError(t, repo.Create(movie))
+
+		found, err := repo.FindByID("IPX-CLEAR-003")
+		require.NoError(t, err)
+		require.Len(t, found.Genres, 1)
+		require.Len(t, found.Actresses, 1)
+
+		movie.CreatedAt = found.CreatedAt
+		movie.Genres = nil
+		movie.Actresses = nil
+
+		err = db.Transaction(func(tx *gorm.DB) error {
+			translations := movie.Translations
+			movie.Translations = nil
+			return upsertMovieCore(tx, db, movie, translations)
+		})
+		require.NoError(t, err)
+
+		found, err = repo.FindByID("IPX-CLEAR-003")
+		require.NoError(t, err)
+		assert.Empty(t, found.Genres, "genres should be cleared")
+		assert.Empty(t, found.Actresses, "actresses should be cleared")
+	})
+
 	t.Run("updates existing movie with associations", func(t *testing.T) {
 		db := newDatabaseTestDB(t)
 		repo := NewMovieRepository(db)
