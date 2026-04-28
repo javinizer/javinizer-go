@@ -7,7 +7,7 @@
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { apiClient } from '$lib/api/client';
 	import { createConfigQuery } from '$lib/query/queries';
-	import type { BatchJobResponse, FileResult, Movie, OrganizePreviewResponse, PosterCropResponse, PosterFromURLResponse, Scraper, UpdateRequest } from '$lib/api/types';
+	import type { BatchJobResponse, FileResult, Movie, PosterCropResponse, PosterFromURLResponse, Scraper, UpdateRequest } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
 	import { websocketStore } from '$lib/stores/websocket';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -220,9 +220,6 @@
 	let showDestinationBrowser = $state(false);
 	let tempDestinationPath = $state('');
 	let showTrailerModal = $state(false);
-	let preview: OrganizePreviewResponse | null = $state(null);
-	let previewNeedsDestination = $state(false);
-	let previewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function getEffectiveOperationMode(): string {
 		const configured = job?.operation_mode_override || config?.output?.operation_mode || 'organize';
@@ -409,70 +406,61 @@
 		})()
 	);
 
-	async function fetchPreview() {
-		if (!currentMovie) {
-			preview = null;
-			previewNeedsDestination = false;
-			return;
-		}
+	let editedMovieKey = $derived(() => {
+		const fp = currentResult?.file_path;
+		if (!fp || !editedMovies.has(fp)) return '';
+		const edited = editedMovies.get(fp);
+		return JSON.stringify(edited);
+	});
 
+	let previewEnabled = $derived(() => {
+		if (!currentMovie) return false;
+		if (organizeStatus === 'organizing') return false;
 		const operationMode = getEffectiveOperationMode();
-
-		// Only require destination for organize mode — in-place and metadata-only don't need it
 		const needsDestination = operationMode === 'organize';
-		if (needsDestination && !destinationPath.trim()) {
-			preview = null;
-			previewNeedsDestination = true;
-			return;
-		}
-		previewNeedsDestination = false;
+		return needsDestination ? destinationPath.trim() !== '' : true;
+	});
 
-		const copyOnly = organizeOperation !== 'move';
-		const linkMode = organizeOperation === 'hardlink'
-			? 'hard'
-			: organizeOperation === 'softlink'
-				? 'soft'
-				: undefined;
+	const previewQuery = createQuery(() => ({
+		queryKey: ['organize-preview', jobId, currentMovie?.id, destinationPath, organizeOperation, skipNfo, skipDownload, editedMovieKey()],
+		queryFn: () => {
+			const operationMode = getEffectiveOperationMode();
+			const copyOnly = organizeOperation !== 'move';
+			const linkMode = organizeOperation === 'hardlink'
+				? 'hard'
+				: organizeOperation === 'softlink'
+					? 'soft'
+					: undefined;
 
-		const isEdited = editedMovies.has(currentResult?.file_path ?? '');
-		let movieOverride: Movie | undefined;
-		if (isEdited) {
-			const edited = editedMovies.get(currentResult?.file_path ?? '');
-			movieOverride = edited ? { ...edited } : undefined;
-			if (movieOverride && movieOverride.display_title) {
-				movieOverride.title = movieOverride.display_title;
+			const fp = currentResult?.file_path ?? '';
+			const isEdited = editedMovies.has(fp);
+			let movieOverride: Movie | undefined;
+			if (isEdited) {
+				const edited = editedMovies.get(fp);
+				movieOverride = edited ? { ...edited } : undefined;
+				if (movieOverride && movieOverride.display_title) {
+					movieOverride.title = movieOverride.display_title;
+				}
 			}
-		}
 
-		try {
-			preview = await apiClient.previewOrganize(jobId, currentMovie.id, {
+			return apiClient.previewOrganize(jobId, currentMovie!.id, {
 				destination: destinationPath,
 				copy_only: copyOnly,
 				link_mode: linkMode,
 				operation_mode: operationMode as 'organize' | 'in-place' | 'in-place-norenamefolder' | 'metadata-only' | 'preview',
 				skip_nfo: skipNfo,
 				skip_download: skipDownload,
-				movie: movieOverride
+				movie: movieOverride,
 			});
-		} catch (e) {
-			console.error('Failed to fetch preview:', e);
-			preview = null;
-		}
-	}
+		},
+		enabled: previewEnabled(),
+		staleTime: 300,
+	}));
 
-	// Fetch preview when destination, operation mode, or current movie changes
-	$effect(() => {
-		const operationMode = job?.operation_mode_override || config?.output?.operation_mode;
-		const needsDestination = !operationMode || operationMode === 'organize';
-		void skipNfo;
-		void skipDownload;
-		if (organizeStatus !== 'organizing' && currentMovie && (needsDestination ? destinationPath : true)) {
-			if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
-			previewDebounceTimer = setTimeout(() => fetchPreview(), 300);
-		} else if (organizeStatus !== 'organizing') {
-			preview = null;
-		}
-	});
+	let preview = $derived(previewQuery.data ?? null);
+	let previewNeedsDestination = $derived(
+		!!currentMovie && getEffectiveOperationMode() === 'organize' && !destinationPath.trim()
+	);
 
 	// Reset full path display when navigating between movies
 	$effect(() => {
@@ -519,7 +507,6 @@
 			next.delete(currentResult.file_path);
 			editedMovies = next;
 		}
-		schedulePreviewRefresh();
 	}
 
 	function resetCurrentMovie() {
@@ -527,7 +514,6 @@
 		const next = new Map(editedMovies);
 		next.delete(currentResult.file_path);
 		editedMovies = next;
-		schedulePreviewRefresh();
 	}
 
 	function clearPosterPreviewOverride() {
@@ -571,11 +557,6 @@
 
 		clearPosterPreviewOverride();
 		applyPosterFromUrl(currentMovie.id, url);
-	}
-
-	function schedulePreviewRefresh() {
-		if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
-		previewDebounceTimer = setTimeout(() => fetchPreview(), 300);
 	}
 
 	async function saveAllEdits() {
@@ -821,7 +802,6 @@
 	onDestroy(() => {
 		organizeController.cleanup();
 		posterCropController.cleanup();
-		if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
 	});
 </script>
 
