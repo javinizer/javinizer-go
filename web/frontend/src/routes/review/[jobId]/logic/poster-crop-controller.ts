@@ -1,13 +1,11 @@
-import type { FileResult, Movie, PosterCropResponse } from '$lib/api/types';
+import type { FileResult, Movie } from '$lib/api/types';
 import {
 	clamp,
 	getDefaultPosterCropBox,
-	normalizeCropBox,
 	restoreCropBox,
 	type PosterCropBox,
 	type PosterCropMetrics,
-	type PosterCropState,
-	type PosterPreviewOverride
+	type PosterCropState
 } from '../review-utils';
 
 export interface PosterCropDragState {
@@ -24,8 +22,6 @@ interface PosterCropControllerDeps {
 	getCurrentResult: () => FileResult | undefined;
 	getShowPosterCropModal: () => boolean;
 	setShowPosterCropModal: (show: boolean) => void;
-	getPosterCropSaving: () => boolean;
-	setPosterCropSaving: (saving: boolean) => void;
 	setPosterCropLoadError: (error: string | null) => void;
 	getCropSourceURL: () => string;
 	setCropSourceURL: (url: string) => void;
@@ -37,19 +33,8 @@ interface PosterCropControllerDeps {
 	setCropBox: (box: PosterCropBox | null) => void;
 	getCropDragState: () => PosterCropDragState | null;
 	setCropDragState: (state: PosterCropDragState | null) => void;
-	getPosterPreviewOverrides: () => Map<string, PosterPreviewOverride>;
-	setPosterPreviewOverrides: (overrides: Map<string, PosterPreviewOverride>) => void;
 	getPosterCropStates: () => Map<string, PosterCropState>;
-	setPosterCropStates: (states: Map<string, PosterCropState>) => void;
-	toastSuccess: (message: string, duration?: number) => void;
-	toastError: (message: string, duration?: number) => void;
-	api: {
-		updateBatchMoviePosterCrop: (
-			jobId: string,
-			movieId: string,
-			crop: PosterCropBox
-		) => Promise<PosterCropResponse>;
-	};
+	mutatePosterCrop: (jobId: string, movieId: string, crop: PosterCropBox) => void;
 	now?: () => number;
 }
 
@@ -221,42 +206,13 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		return `left:${left}px;top:${top}px;width:${width}px;height:${height}px;box-shadow:0 0 0 9999px rgba(0,0,0,0.45);`;
 	}
 
-	async function applyPosterCrop() {
+	function applyPosterCrop() {
 		const currentMovie = deps.getCurrentMovie();
 		const currentResult = deps.getCurrentResult();
-		const cropBox = deps.getCropBox();
-		if (!currentMovie || !currentResult || !cropBox || deps.getPosterCropSaving()) return;
+		const cropBoxVal = deps.getCropBox();
+		if (!currentMovie || !currentResult || !cropBoxVal) return;
 
-		deps.setPosterCropSaving(true);
-		try {
-			const response = await deps.api.updateBatchMoviePosterCrop(
-				deps.getJobId(),
-				currentMovie.id,
-				cropBox
-			);
-
-			const nextOverrides = new Map(deps.getPosterPreviewOverrides());
-			nextOverrides.set(currentResult.file_path, {
-				url: response.cropped_poster_url,
-				version: now()
-			});
-			deps.setPosterPreviewOverrides(nextOverrides);
-
-			const cropMetrics = deps.getCropMetrics();
-			if (cropMetrics) {
-				const nextStates = new Map(deps.getPosterCropStates());
-				nextStates.set(currentResult.file_path, normalizeCropBox(cropBox, cropMetrics));
-				deps.setPosterCropStates(nextStates);
-			}
-
-			deps.toastSuccess('Poster crop updated');
-			closePosterCropModal();
-		} catch (e) {
-			const errorMessage = e instanceof Error ? e.message : 'Failed to update poster crop';
-			deps.toastError(errorMessage);
-		} finally {
-			deps.setPosterCropSaving(false);
-		}
+		deps.mutatePosterCrop(deps.getJobId(), currentMovie.id, cropBoxVal);
 	}
 
 	function handleWindowResize() {

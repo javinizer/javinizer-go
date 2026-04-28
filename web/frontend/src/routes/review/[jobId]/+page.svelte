@@ -42,6 +42,7 @@
 	} from './logic/poster-crop-controller';
 	import { createReviewPageController } from './logic/review-page-controller';
 	import {
+		normalizeCropBox,
 		type PosterCropBox,
 		type PosterCropMetrics,
 		type PosterCropState,
@@ -167,6 +168,40 @@
 			toastStore.error(`Failed to save edits: ${err.message}`);
 		}
 	}));
+
+	const posterCropMutation = createMutation(() => ({
+		mutationFn: async ({ jobId: mutationJobId, movieId, crop }: { jobId: string; movieId: string; crop: PosterCropBox }) => {
+			return apiClient.updateBatchMoviePosterCrop(mutationJobId, movieId, crop);
+		},
+		onSuccess: (response: PosterCropResponse, { movieId }) => {
+			const currentResultVal = currentResult;
+			if (currentResultVal) {
+				const nextOverrides = new Map(posterPreviewOverrides);
+				nextOverrides.set(currentResultVal.file_path, {
+					url: response.cropped_poster_url,
+					version: Date.now()
+				});
+				posterPreviewOverrides = nextOverrides;
+
+				const cropMetricsVal = cropMetrics;
+				const cropBoxVal = cropBox;
+				if (cropMetricsVal && cropBoxVal) {
+					const nextStates = new Map(posterCropStates);
+					nextStates.set(currentResultVal.file_path, normalizeCropBox(cropBoxVal, cropMetricsVal));
+					posterCropStates = nextStates;
+				}
+			}
+
+			toastStore.success('Poster crop updated');
+			showPosterCropModal = false;
+
+			void queryClient.invalidateQueries({ queryKey: ['batch-job', jobId] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || 'Failed to update poster crop');
+		}
+	}));
+
 	let currentMovieIndex = $state(0);
 	let editedMovies = $state<Map<string, Movie>>(new Map());
 	let originalPosterState = $state<Map<string, { poster_url: string; cropped_poster_url: string; should_crop_poster: boolean }>>(new Map());
@@ -247,7 +282,6 @@
 
 	// Manual poster crop state
 	let showPosterCropModal = $state(false);
-	let posterCropSaving = $state(false);
 	let posterCropLoadError = $state<string | null>(null);
 	let cropSourceURL = $state('');
 	let cropImageElement = $state<HTMLImageElement | null>(null);
@@ -664,10 +698,6 @@
 		setShowPosterCropModal: (show) => {
 			showPosterCropModal = show;
 		},
-		getPosterCropSaving: () => posterCropSaving,
-		setPosterCropSaving: (saving) => {
-			posterCropSaving = saving;
-		},
 		setPosterCropLoadError: (errorMessage) => {
 			posterCropLoadError = errorMessage;
 		},
@@ -691,19 +721,9 @@
 		setCropDragState: (state) => {
 			cropDragState = state;
 		},
-		getPosterPreviewOverrides: () => posterPreviewOverrides,
-		setPosterPreviewOverrides: (overrides) => {
-			posterPreviewOverrides = overrides;
-		},
 		getPosterCropStates: () => posterCropStates,
-		setPosterCropStates: (states) => {
-			posterCropStates = states;
-		},
-		toastSuccess: (message, duration) => toastStore.success(message, duration),
-		toastError: (message, duration) => toastStore.error(message, duration),
-		api: {
-			updateBatchMoviePosterCrop: (nextJobId, movieId, crop) =>
-				apiClient.updateBatchMoviePosterCrop(nextJobId, movieId, crop)
+		mutatePosterCrop: (mutationJobId, movieId, crop) => {
+			posterCropMutation.mutate({ jobId: mutationJobId, movieId, crop });
 		}
 	});
 
@@ -995,7 +1015,7 @@
 
 <PosterCropModal
 	bind:show={showPosterCropModal}
-	posterCropSaving={posterCropSaving}
+	posterCropSaving={posterCropMutation.isPending}
 	posterCropLoadError={posterCropLoadError}
 	cropSourceURL={cropSourceURL}
 	cropMetrics={cropMetrics}
