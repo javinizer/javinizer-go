@@ -23,6 +23,7 @@
 	import OrganizeStatusCard from './components/OrganizeStatusCard.svelte';
 	import PosterCropModal from './components/PosterCropModal.svelte';
 	import ReviewActionBar from './components/ReviewActionBar.svelte';
+	import ReviewGridCard from './components/ReviewGridCard.svelte';
 	import ReviewHeader from './components/ReviewHeader.svelte';
 	import ReviewMediaSidebar from './components/ReviewMediaSidebar.svelte';
 	import RescrapeModal from './components/RescrapeModal.svelte';
@@ -261,6 +262,8 @@
 	let isUpdateMode = $derived($page.url.searchParams.get('update') === 'true');
 	let showFieldScraperSources = $state(false);
 	const SHOW_FIELD_SCRAPER_SOURCES_KEY = 'javinizer.review.showFieldScraperSources';
+	const VIEW_MODE_KEY = 'javinizer.review.viewMode';
+	let viewMode = $state<'detail' | 'grid'>('detail');
 	let posterCropStatesStorageKey = $derived(`javinizer.review.posterCropStates.${jobId}`);
 
 	// Organize operation state
@@ -497,6 +500,11 @@
 			SHOW_FIELD_SCRAPER_SOURCES_KEY,
 			showFieldScraperSources ? 'true' : 'false'
 		);
+	});
+
+	$effect(() => {
+		if (!browser) return;
+		localStorage.setItem(VIEW_MODE_KEY, viewMode);
 	});
 
 	$effect(() => {
@@ -795,6 +803,7 @@
 		if (browser) {
 			showFieldScraperSources =
 				localStorage.getItem(SHOW_FIELD_SCRAPER_SOURCES_KEY) === 'true';
+			viewMode = localStorage.getItem(VIEW_MODE_KEY) === 'grid' ? 'grid' : 'detail';
 			const savedCrops = localStorage.getItem(posterCropStatesStorageKey);
 			if (savedCrops) {
 				try {
@@ -867,6 +876,7 @@
 				organizing={organizing}
 				movieResultsLength={movieResults.length}
 				destinationPath={destinationPath}
+				bind:viewMode={viewMode}
 				bind:forceOverwrite={forceOverwrite}
 				bind:preserveNfo={preserveNfo}
 				bind:skipNfo={skipNfo}
@@ -886,8 +896,35 @@
 				onContinue={() => goto('/browse')}
 			/>
 
-			{#key currentResult.file_path}
-				<div class="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6" in:fade|local={{ duration: 180 }}>
+			{#if viewMode === 'grid'}
+				<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+					{#each movieGroups as group, index}
+						<ReviewGridCard
+							movieGroup={group}
+							isSelected={index === currentMovieIndex}
+							isEdited={editedMovies.has(group.primaryResult.file_path)}
+							displayPosterUrl={(() => {
+								const movie = group.primaryResult.data;
+								if (!movie) return undefined;
+								const override = posterPreviewOverrides.get(group.primaryResult.file_path);
+								const baseURL = override?.url || movie.cropped_poster_url || movie.poster_url;
+								if (!baseURL) return undefined;
+								if (!override) return baseURL;
+								if (baseURL.includes('v=')) return baseURL;
+								const separator = baseURL.includes('?') ? '&' : '?';
+								return `${baseURL}${separator}v=${override.version}`;
+							})()}
+							previewImageURL={reviewPageController.previewImageURL}
+							onclick={() => {
+								currentMovieIndex = index;
+								viewMode = 'detail';
+							}}
+						/>
+					{/each}
+				</div>
+			{:else}
+				{#key currentResult.file_path}
+					<div class="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6" in:fade|local={{ duration: 180 }}>
 					<ReviewMediaSidebar
 						currentMovie={currentMovie}
 						displayPosterUrl={displayPosterUrl}
@@ -980,6 +1017,7 @@
 				</div>
 				</div>
 			{/key}
+			{/if}
 {/if}
 	</div>
 </div>
