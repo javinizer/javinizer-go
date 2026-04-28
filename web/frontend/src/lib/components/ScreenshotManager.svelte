@@ -46,6 +46,8 @@
 		trailerUrl = movie.trailer_url || '';
 	});
 
+	let clearCropState = $state(false);
+
 	// Update parent when data changes
 	$effect(() => {
 		onUpdate({
@@ -53,8 +55,10 @@
 			screenshot_urls: screenshots,
 			poster_url: posterUrl,
 			cover_url: coverUrl,
-			trailer_url: trailerUrl
+			trailer_url: trailerUrl,
+			...(clearCropState ? { should_crop_poster: false, cropped_poster_url: '' } : {})
 		});
+		clearCropState = false;
 	});
 
 	function addScreenshot() {
@@ -89,12 +93,8 @@
 
 		if (!confirmed) return;
 
-		onUpdate({
-			...movie,
-			poster_url: url,
-			should_crop_poster: false,
-			cropped_poster_url: ''
-		});
+		clearCropState = true;
+		posterUrl = url;
 	}
 
 	function handleKeyPress(e: KeyboardEvent) {
