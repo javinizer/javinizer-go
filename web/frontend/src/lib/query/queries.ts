@@ -16,3 +16,18 @@ export function createScrapersQuery() {
 		staleTime: 30_000
 	}));
 }
+
+export function createBatchJobPollingQuery(jobId: string) {
+	return createQuery(() => ({
+		queryKey: ['batch-job', jobId],
+		queryFn: () => apiClient.getBatchJob(jobId),
+		refetchInterval: (query) => {
+			const status = query.state.data?.status;
+			return status === 'completed' || status === 'failed' || status === 'cancelled'
+				? false
+				: 2000;
+		},
+		refetchIntervalInBackground: true,
+		staleTime: 0
+	}));
+}
