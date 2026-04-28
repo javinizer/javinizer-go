@@ -12,7 +12,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
-	import { Play, FolderOutput, FolderOpen, FileEdit, FileText, RotateCcw, LoaderCircle, RefreshCw, Settings, ChevronUp, ChevronDown, X } from 'lucide-svelte';
+	import { Play, FolderOutput, FolderOpen, FileEdit, FileText, RotateCcw, LoaderCircle, RefreshCw, Settings, ChevronUp, ChevronDown, X, Scan } from 'lucide-svelte';
 	import type { Scraper, FileInfo, Config } from '$lib/api/types';
 	import type { OperationMode } from '$lib/api/types';
 
@@ -24,6 +24,9 @@
 	let forceRefresh = $state(false);
 	let operationMode: BrowseMode = $state('scrape');
 	let scanning = $state(false);
+	let recursiveScan = $state(false);
+	let selectedFolders: string[] = $state([]);
+	let triggerScan = $state(0);
 	let initialPath = $state('');
 	let destinationPath = $state('');
 	let showDestinationBrowser = $state(false);
@@ -69,6 +72,21 @@
 	// localStorage keys
 	const STORAGE_KEY_INPUT = 'javinizer_input_path';
 	const STORAGE_KEY_OUTPUT = 'javinizer_output_path';
+	const STORAGE_KEY_RECURSIVE = 'javinizer_filebrowser_recursive';
+
+	// Load recursive scan from sessionStorage
+	try {
+		if (sessionStorage.getItem(STORAGE_KEY_RECURSIVE) === 'true') {
+			recursiveScan = true;
+		}
+	} catch {}
+
+	$effect(() => {
+		recursiveScan;
+		try {
+			sessionStorage.setItem(STORAGE_KEY_RECURSIVE, String(recursiveScan));
+		} catch {}
+	});
 
 	// Load current working directory and config on mount
 	onMount(async () => {
@@ -626,7 +644,9 @@
 			onPathChange={handleBrowserPathChange}
 			multiSelect={true}
 			onScan={handleScan}
-			scanLoading={scanning}
+			bind:recursiveScan={recursiveScan}
+			bind:selectedFolders={selectedFolders}
+			triggerScan={triggerScan}
 		/>
 
 		<!-- Help Text -->
@@ -725,8 +745,39 @@
 				{/if}
 			</div>
 
-			<!-- Right: Options toggle and action button -->
+			<!-- Right: Scan, options toggle and action button -->
 			<div class="flex items-center gap-3">
+				<!-- Recursive toggle + Scan -->
+				<div class="flex items-center gap-2">
+					<label class="flex items-center gap-1.5 text-xs cursor-pointer">
+						<input
+							type="checkbox"
+							bind:checked={recursiveScan}
+							class="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-1 focus:ring-primary"
+						/>
+						<span class="text-muted-foreground hidden sm:inline">Recursive</span>
+					</label>
+					<Button
+						variant="outline"
+						size="sm"
+						onclick={() => triggerScan++}
+						disabled={scanning}
+						title={recursiveScan ? "Scan all subfolders" : "Scan current folder only"}
+					>
+						{#snippet children()}
+							{#if scanning}
+								<LoaderCircle class="h-3.5 w-3.5 mr-1.5 animate-spin" />
+							{:else}
+								<Scan class="h-3.5 w-3.5 mr-1.5" />
+							{/if}
+							{scanning ? 'Scanning...' : 'Scan'}
+						{/snippet}
+					</Button>
+				</div>
+
+				<!-- Separator -->
+				<div class="h-6 w-px bg-border"></div>
+
 				<!-- Options toggle -->
 				<Button
 					variant="outline"

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { apiClient } from '$lib/api/client';
 	import { formatBytes } from '$lib/utils';
 	import { splitPath, buildPathUp, buildBreadcrumbPath, isRootPath } from '$lib/utils/path';
@@ -15,8 +16,6 @@
 		Check,
 		Search,
 		X,
-		LoaderCircle,
-		Scan,
 		ArrowUp,
 		ArrowDown,
 		Calendar,
@@ -35,7 +34,9 @@
 		multiSelect?: boolean;
 		folderOnly?: boolean;
 		onScan?: (path: string, recursive: boolean, visibleFiles: FileInfo[], filter: string, selectedFolders: string[]) => void;
-		scanLoading?: boolean;
+		recursiveScan?: boolean;
+		selectedFolders?: string[];
+		triggerScan?: number;
 	}
 
 	let {
@@ -46,7 +47,9 @@
 		multiSelect = true,
 		folderOnly = false,
 		onScan,
-		scanLoading = false
+		recursiveScan = $bindable(false),
+		selectedFolders: selectedFolders = $bindable([]),
+		triggerScan = 0
 	}: Props = $props();
 
 	let currentPath = $state('');
@@ -80,8 +83,6 @@
 	});
 
 	// Scan options
-	let recursiveScan = $state(false);
-	let selectedFolders: string[] = $state([]);
 	let anchorFolderPath: string | null = $state(null);
 	let anchorFilePath: string | null = $state(null);
 	let selectedFoldersSet = $derived(new Set(selectedFolders));
@@ -90,7 +91,6 @@
 	type SortField = 'name' | 'mod_time' | 'size';
 	type SortDirection = 'asc' | 'desc';
 	const SORT_STORAGE_KEY = 'javinizer_filebrowser_sort';
-	const RECURSIVE_STORAGE_KEY = 'javinizer_filebrowser_recursive';
 	let sortField = $state<SortField>('name');
 	let sortDirection = $state<SortDirection>('asc');
 
@@ -116,28 +116,6 @@
 	}
 
 	loadSortFromStorage();
-
-	function loadRecursiveFromStorage() {
-		try {
-			const stored = sessionStorage.getItem(RECURSIVE_STORAGE_KEY);
-			if (stored === 'true') {
-				recursiveScan = true;
-			}
-		} catch {}
-	}
-
-	function saveRecursiveToStorage() {
-		try {
-			sessionStorage.setItem(RECURSIVE_STORAGE_KEY, String(recursiveScan));
-		} catch {}
-	}
-
-	loadRecursiveFromStorage();
-
-	$effect(() => {
-		recursiveScan;
-		saveRecursiveToStorage();
-	});
 
 	let currentPage = $state(1);
 	const PAGE_SIZE = 100;
@@ -199,11 +177,16 @@
 		saveSortToStorage();
 	}
 
-	// Handle scan button click
 	function handleScan() {
 		const visibleFiles = sortedAndFilteredItems().filter((f) => !f.is_dir);
 		onScan?.(currentPath, recursiveScan, visibleFiles, filterText, selectedFolders);
 	}
+
+	$effect(() => {
+		if (triggerScan > 0) {
+			untrack(() => handleScan());
+		}
+	});
 
 	function clearPathSuggestions() {
 		autocompleteRequestToken += 1;
@@ -390,10 +373,14 @@
 				} else {
 					toggleFileSelection(item.path);
 				}
+				anchorFilePath = item.path;
+			} else if (event.ctrlKey || event.metaKey || event.altKey) {
+				toggleFileSelection(item.path);
+				anchorFilePath = item.path;
 			} else {
 				toggleFileSelection(item.path);
+				anchorFilePath = item.path;
 			}
-			anchorFilePath = item.path;
 		}
 	}
 
@@ -420,18 +407,25 @@
 	}
 
 	function selectAll() {
-		const allFiles = sortedAndFilteredItems().filter((item) => !item.is_dir).map((item) => item.path);
+		const allFiles = sortedAndFilteredItems().filter((item) => !item.is_dir && isVideoFile(item.name)).map((item) => item.path);
+		const allFolders = sortedAndFilteredItems().filter((item) => item.is_dir).map((item) => item.path);
 		externalSelectedFiles = [...new Set([...externalSelectedFiles, ...allFiles])];
+		selectedFolders = [...new Set([...selectedFolders, ...allFolders])];
 		if (allFiles.length > 0) {
 			anchorFilePath = allFiles[0];
+		}
+		if (allFolders.length > 0) {
+			anchorFolderPath = allFolders[0];
 		}
 		onFileSelect?.(externalSelectedFiles);
 	}
 
 	function selectNone() {
-		// Clear only files visible in current directory
-		const visiblePaths = new Set(sortedAndFilteredItems().filter((item) => !item.is_dir).map((item) => item.path));
+		const visiblePaths = new Set(sortedAndFilteredItems().filter((item) => !item.is_dir && isVideoFile(item.name)).map((item) => item.path));
 		externalSelectedFiles = externalSelectedFiles.filter(f => !visiblePaths.has(f));
+		selectedFolders = [];
+		anchorFolderPath = null;
+		anchorFilePath = null;
 		onFileSelect?.(externalSelectedFiles);
 	}
 
@@ -450,6 +444,25 @@
 	const fileCount = $derived(sortedAndFilteredItems().filter((item) => !item.is_dir).length);
 	const matchedCount = $derived(sortedAndFilteredItems().filter((item) => !item.is_dir && item.matched).length);
 	const folderCount = $derived(sortedAndFilteredItems().filter((item) => item.is_dir).length);
+	const VIDEO_EXTENSIONS = new Set([
+		'.mp4', '.mkv', '.avi', '.wmv', '.flv', '.mov',
+		'.m4v', '.webm', '.mpg', '.mpeg', '.m2ts', '.ts'
+	]);
+
+	function isVideoFile(name: string): boolean {
+		return VIDEO_EXTENSIONS.has(name.slice(name.lastIndexOf('.')).toLowerCase());
+	}
+
+	const selectableFileCount = $derived(sortedAndFilteredItems().filter((i) => !i.is_dir && isVideoFile(i.name)).length);
+
+	const visibleSelectedCount = $derived(
+		(() => {
+			const visible = sortedAndFilteredItems();
+			const filePaths = new Set(externalSelectedFiles);
+			const visibleFileSelected = visible.filter((i) => !i.is_dir && isVideoFile(i.name) && filePaths.has(i.path)).length;
+			return selectedFolders.length + visibleFileSelected;
+		})()
+	);
 
 	// Clear filter when navigating to a new directory
 	function clearFilter() {
@@ -634,88 +647,48 @@
 					</button>
 				</div>
 			</div>
-			<!-- Scan controls (only if onScan is provided) -->
-			{#if onScan}
-				<div class="flex items-center gap-3">
-					<label class="flex items-center gap-1.5 text-xs cursor-pointer">
-						<input
-							type="checkbox"
-							bind:checked={recursiveScan}
-							class="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-1 focus:ring-primary"
-						/>
-						<span class="text-muted-foreground">Recursive</span>
-					</label>
-					{#if selectedFolders.length > 0}
-						<span class="text-xs text-primary font-medium">{selectedFolders.length} folder{selectedFolders.length !== 1 ? 's' : ''} selected</span>
-						<button
-							onclick={clearFolderSelection}
-							class="text-xs text-muted-foreground hover:text-foreground transition-colors underline"
+			<!-- Selection controls -->
+			{#if !folderOnly && (selectableFileCount > 0 || folderCount > 0)}
+				<div class="flex items-center justify-between gap-3">
+					<div class="flex items-center gap-3">
+						{#if visibleSelectedCount > 0}
+							<span class="text-xs text-primary font-medium">{visibleSelectedCount} selected</span>
+						{/if}
+					</div>
+					<div class="flex items-center gap-2">
+						<Button variant="outline" size="sm" onclick={selectAll} disabled={selectableFileCount === 0 && folderCount === 0}>
+							{#snippet children()}
+								<CheckSquare class="h-3.5 w-3.5 mr-1.5" />
+								Select All
+							{/snippet}
+						</Button>
+						{#if matchedCount > 0}
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={selectMatched}
+								disabled={matchedCount === 0}
+							>
+								{#snippet children()}
+									<CheckCheck class="h-3.5 w-3.5 mr-1.5" />
+									Select Matched
+								{/snippet}
+							</Button>
+						{/if}
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={selectNone}
+							disabled={visibleSelectedCount === 0}
 						>
-							Clear
-						</button>
-					{/if}
-					<Button
-						variant="default"
-						size="sm"
-						onclick={handleScan}
-						disabled={scanLoading}
-						title={recursiveScan ? "Scan all subfolders" : "Scan current folder only"}
-					>
-						{#snippet children()}
-							{#if scanLoading}
-								<LoaderCircle class="h-3.5 w-3.5 mr-1.5 animate-spin" />
-							{:else}
-								<Scan class="h-3.5 w-3.5 mr-1.5" />
-							{/if}
-							{scanLoading ? 'Scanning...' : 'Scan'}
-						{/snippet}
-					</Button>
+							{#snippet children()}
+								<Square class="h-3.5 w-3.5 mr-1.5" />
+								Clear
+							{/snippet}
+						</Button>
+					</div>
 				</div>
 			{/if}
-		</div>
-	{/if}
-
-	<!-- Selection Controls (hidden in folderOnly mode) -->
-	{#if items.length > 0 && fileCount > 0 && !folderOnly}
-		<div class="mb-4 pb-4 border-b flex items-center justify-between gap-4">
-			<div class="flex items-center gap-2 text-sm text-muted-foreground">
-				<span class="font-medium">{fileCount} files</span>
-				{#if matchedCount > 0}
-					<span class="text-green-600">• {matchedCount} matched</span>
-				{/if}
-			</div>
-			<div class="flex items-center gap-2">
-				<Button variant="outline" size="sm" onclick={selectAll} disabled={fileCount === 0}>
-					{#snippet children()}
-						<CheckSquare class="h-3.5 w-3.5 mr-1.5" />
-						Select All
-					{/snippet}
-				</Button>
-				{#if matchedCount > 0}
-					<Button
-						variant="outline"
-						size="sm"
-						onclick={selectMatched}
-						disabled={matchedCount === 0}
-					>
-						{#snippet children()}
-							<CheckCheck class="h-3.5 w-3.5 mr-1.5" />
-							Select Matched
-						{/snippet}
-					</Button>
-				{/if}
-				<Button
-					variant="outline"
-					size="sm"
-					onclick={selectNone}
-					disabled={externalSelectedFiles.length === 0}
-				>
-					{#snippet children()}
-						<Square class="h-3.5 w-3.5 mr-1.5" />
-						Clear
-					{/snippet}
-				</Button>
-			</div>
 		</div>
 	{/if}
 
@@ -811,6 +784,7 @@
 						</div>
 					</div>
 					{:else}
+					{#if isVideoFile(item.name)}
 					<button
 						onclick={(e) => handleItemClick(item, e)}
 						class="group w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 cursor-pointer
@@ -818,15 +792,13 @@
 								? 'bg-primary/10 border-2 border-primary shadow-sm'
 								: 'border-2 border-transparent hover:border-accent hover:bg-accent/50 hover:shadow-md'}"
 					>
-						<!-- Checkbox for files -->
 						{#if selectedFilesSet.has(item.path)}
 							<CheckSquare class="h-5 w-5 text-primary shrink-0" />
 						{:else}
 							<Square class="h-5 w-5 text-muted-foreground shrink-0" />
 						{/if}
-						<!-- File icon -->
 						<File
-							class="h-5 w-5 transition-transform group-hover:scale-110 {item.matched ? 'text-green-500' : 'text-muted-foreground'}"
+							class="h-5 w-5 transition-transform group-hover:scale-110 text-green-500"
 						/>
 						<div class="flex-1 text-left">
 							<div class="font-medium">
@@ -840,6 +812,21 @@
 							</div>
 						</div>
 					</button>
+					{:else}
+					<div
+						class="w-full flex items-center gap-3 p-3 rounded-lg border-2 border-transparent opacity-50"
+					>
+						<File class="h-5 w-5 text-muted-foreground shrink-0" />
+						<div class="flex-1 text-left">
+							<div class="font-medium text-muted-foreground">
+								{item.name}
+							</div>
+							<div class="text-xs text-muted-foreground mt-0.5">
+								{formatBytes(item.size)} • {formatDate(item.mod_time)}
+							</div>
+						</div>
+					</div>
+					{/if}
 					{/if}
 				</div>
 			{/each}
