@@ -41,6 +41,14 @@ export function createJobOperationsQuery(jobId: string) {
 	}));
 }
 
+export function createGenreReplacementsQuery() {
+	return createQuery(() => ({
+		queryKey: ['genre-replacements'],
+		queryFn: () => apiClient.listGenreReplacements(),
+		staleTime: 30_000
+	}));
+}
+
 export function createBatchJobPollingQuery(jobId: string) {
 	return createQuery(() => ({
 		queryKey: ['batch-job', jobId],

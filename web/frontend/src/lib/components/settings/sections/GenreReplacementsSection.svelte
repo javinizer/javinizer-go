@@ -1,67 +1,61 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { apiClient } from '$lib/api/client';
 	import type { GenreReplacement } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import { Trash2, Plus, Loader2 } from 'lucide-svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import { createGenreReplacementsQuery } from '$lib/query/queries';
 
-	let replacements = $state<GenreReplacement[]>([]);
-	let loading = $state(true);
-	let error = $state<string | null>(null);
+	const queryClient = useQueryClient();
+
+	const replacementsQuery = createGenreReplacementsQuery();
+	let replacements = $derived<GenreReplacement[]>(replacementsQuery.data?.replacements ?? []);
+	let loading = $derived(replacementsQuery.isPending);
+	let error = $derived<string | null>(replacementsQuery.error?.message ?? null);
+
 	let newOriginal = $state('');
 	let newReplacement = $state('');
-	let adding = $state(false);
 
-	async function loadReplacements() {
-		try {
-			loading = true;
-			error = null;
-			const resp = await apiClient.listGenreReplacements();
-			replacements = resp.replacements;
-		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
-		} finally {
-			loading = false;
+	const addMutation = createMutation(() => ({
+		mutationFn: ({ original, replacement }: { original: string; replacement: string }) =>
+			apiClient.createGenreReplacement({ original, replacement }),
+		onSuccess: (_data, { original, replacement }) => {
+			newOriginal = '';
+			newReplacement = '';
+			toastStore.success(`Genre replacement "${original}" → "${replacement}" added`, 3000);
+			void queryClient.invalidateQueries({ queryKey: ['genre-replacements'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || 'Failed to add genre replacement', 4000);
 		}
-	}
+	}));
 
-	async function handleAdd() {
+	const deleteMutation = createMutation(() => ({
+		mutationFn: (original: string) => apiClient.deleteGenreReplacement(original),
+		onSuccess: (_, original) => {
+			toastStore.success(`Genre replacement "${original}" removed`, 3000);
+			void queryClient.invalidateQueries({ queryKey: ['genre-replacements'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || 'Failed to delete genre replacement', 4000);
+		}
+	}));
+
+	function handleAdd() {
 		const original = newOriginal.trim();
 		const replacement = newReplacement.trim();
 		if (!original || !replacement) {
 			toastStore.error('Both original and replacement fields are required', 4000);
 			return;
 		}
-
-		try {
-			adding = true;
-			await apiClient.createGenreReplacement({ original, replacement });
-			newOriginal = '';
-			newReplacement = '';
-			toastStore.success(`Genre replacement "${original}" → "${replacement}" added`, 3000);
-			await loadReplacements();
-		} catch (e) {
-			toastStore.error(e instanceof Error ? e.message : 'Failed to add genre replacement', 4000);
-		} finally {
-			adding = false;
-		}
+		addMutation.mutate({ original, replacement });
 	}
 
-	async function handleDelete(original: string) {
-		try {
-			await apiClient.deleteGenreReplacement(original);
-			toastStore.success(`Genre replacement "${original}" removed`, 3000);
-			await loadReplacements();
-		} catch (e) {
-			toastStore.error(e instanceof Error ? e.message : 'Failed to delete genre replacement', 4000);
-		}
+	function handleDelete(original: string) {
+		deleteMutation.mutate(original);
 	}
-
-	onMount(() => {
-		loadReplacements();
-	});
 </script>
 
 <SettingsSection
@@ -142,9 +136,9 @@
 					type="button"
 					size="sm"
 					onclick={handleAdd}
-					disabled={adding || !newOriginal.trim() || !newReplacement.trim()}
+					disabled={addMutation.isPending || !newOriginal.trim() || !newReplacement.trim()}
 				>
-					{#if adding}
+					{#if addMutation.isPending}
 						<Loader2 class="h-4 w-4 animate-spin mr-1" />
 					{:else}
 						<Plus class="h-4 w-4 mr-1" />
