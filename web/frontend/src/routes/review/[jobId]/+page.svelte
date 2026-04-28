@@ -730,11 +730,6 @@
 	const reviewPageController = createReviewPageController({
 		getJob: () => job,
 		getCurrentMovie: () => currentMovie,
-		getMovieResultsLength: () => movieResults.length,
-		getCurrentMovieIndex: () => currentMovieIndex,
-		setCurrentMovieIndex: (index) => {
-			currentMovieIndex = index;
-		},
 		getEditedMovies: () => editedMovies,
 		getDestinationPath: () => destinationPath,
 		setDestinationPath: (path) => {
@@ -759,10 +754,6 @@
 		setImageViewerTitle: (title) => {
 			imageViewerTitle = title;
 		},
-		refetchJob: fetchJob,
-		toastSuccess: (message, duration) => toastStore.success(message, duration),
-		toastError: (message, duration) => toastStore.error(message, duration),
-		navigateBatch: () => goto('/jobs'),
 		excludeMovie: (mutationJobId, movieId) => {
 			excludeMovieMutation.mutate({ jobId: mutationJobId, movieId });
 		},

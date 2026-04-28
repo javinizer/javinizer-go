@@ -3,9 +3,6 @@ import type { BatchJobResponse, Movie } from '$lib/api/types';
 interface ReviewPageControllerDeps {
 	getJob: () => BatchJobResponse | null;
 	getCurrentMovie: () => Movie | null;
-	getMovieResultsLength: () => number;
-	getCurrentMovieIndex: () => number;
-	setCurrentMovieIndex: (index: number) => void;
 	getEditedMovies: () => Map<string, Movie>;
 	getDestinationPath: () => string;
 	setDestinationPath: (destinationPath: string) => void;
@@ -16,10 +13,6 @@ interface ReviewPageControllerDeps {
 	setImageViewerImages: (images: string[]) => void;
 	setImageViewerIndex: (index: number) => void;
 	setImageViewerTitle: (title: string | undefined) => void;
-	refetchJob: () => Promise<void>;
-	toastSuccess: (message: string, duration?: number) => void;
-	toastError: (message: string, duration?: number) => void;
-	navigateBatch: () => void | Promise<void>;
 	excludeMovie: (jobId: string, movieId: string) => void;
 	api: {
 		getPreviewImageURL: (url: string) => string;
