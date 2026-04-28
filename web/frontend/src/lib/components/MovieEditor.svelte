@@ -116,7 +116,7 @@
 				type="text"
 				bind:value={editedMovie.id}
 				onchange={() => onUpdate(editedMovie)}
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -135,7 +135,7 @@
 				type="text"
 				bind:value={editedMovie.content_id}
 				onchange={() => onUpdate(editedMovie)}
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -154,7 +154,7 @@
 				type="text"
 				bind:value={editedMovie.display_title}
 				onchange={() => onUpdate(editedMovie)}
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -173,7 +173,7 @@
 				type="text"
 				bind:value={editedMovie.original_title}
 				onchange={() => onUpdate(editedMovie)}
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -192,7 +192,7 @@
 				bind:value={editedMovie.description}
 				onchange={() => onUpdate(editedMovie)}
 				rows="4"
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			></textarea>
 		</div>
 
@@ -211,7 +211,7 @@
 				type="date"
 				value={formattedDate}
 				onchange={handleDateChange}
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -231,7 +231,7 @@
 				bind:value={editedMovie.runtime}
 				onchange={() => onUpdate(editedMovie)}
 				min="0"
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -250,7 +250,7 @@
 				type="text"
 				bind:value={editedMovie.director}
 				onchange={() => onUpdate(editedMovie)}
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -269,7 +269,7 @@
 				type="text"
 				bind:value={editedMovie.maker}
 				onchange={() => onUpdate(editedMovie)}
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -288,7 +288,7 @@
 				type="text"
 				bind:value={editedMovie.label}
 				onchange={() => onUpdate(editedMovie)}
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -307,7 +307,7 @@
 				type="text"
 				bind:value={editedMovie.series}
 				onchange={() => onUpdate(editedMovie)}
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -330,7 +330,7 @@
 				max="10"
 				step="0.1"
 				placeholder="0.0"
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 			{#if editedMovie.rating_score !== undefined && editedMovie.rating_score !== null}
 				<p class="text-xs text-muted-foreground mt-1">
@@ -360,7 +360,7 @@
 				min="0"
 				step="1"
 				placeholder="0"
-				class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>
 		</div>
 
@@ -377,7 +377,7 @@
 			</label>
 
 			<!-- Cloud tags display -->
-			<div class="w-full px-3 py-2.5 border rounded-lg min-h-11.5 flex flex-wrap gap-2 items-center bg-white focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
+			<div class="w-full px-3 py-2.5 border rounded-lg min-h-11.5 flex flex-wrap gap-2 items-center bg-background focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
 				{#if editedMovie.genres && editedMovie.genres.length > 0}
 					{#each editedMovie.genres as genre}
 						<span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-linear-to-br from-primary/10 to-primary/5 text-primary rounded-full text-sm font-medium hover:from-primary/15 hover:to-primary/10 transition-all shadow-sm border border-primary/10">
@@ -401,7 +401,7 @@
 						bind:value={newGenreInput}
 						onkeydown={handleGenreKeydown}
 						placeholder={editedMovie.genres && editedMovie.genres.length > 0 ? "Add another..." : "Type a genre and press Enter"}
-						class="flex-1 outline-none bg-transparent text-sm min-w-0 placeholder:text-muted-foreground/60"
+						class="flex-1 outline-none bg-transparent text-foreground text-sm min-w-0 placeholder:text-muted-foreground/60"
 					/>
 					{#if newGenreInput.trim()}
 						<button

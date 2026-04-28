@@ -562,7 +562,7 @@
 								localStorage.setItem(STORAGE_KEY_OUTPUT, destinationPath);
 							}}
 							placeholder="Enter destination path (e.g., /path/to/output)"
-							class="flex-1 px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
+							class="flex-1 px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 						/>
 						<Button onclick={openDestinationBrowser}>
 							{#snippet children()}

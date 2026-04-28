@@ -80,7 +80,7 @@
 					type="text"
 					bind:value={destinationPath}
 					placeholder="Enter destination path (e.g., /path/to/output)"
-					class="flex-1 min-w-0 px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
+					class="flex-1 min-w-0 px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 					title={destinationPath}
 				/>
 				<Button onclick={onOpenDestinationBrowser} variant="outline">
@@ -102,7 +102,7 @@
 				<select
 					id="organizeOperation"
 					bind:value={organizeOperation}
-					class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all text-sm"
+					class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all text-sm"
 				>
 					<option value="move">Move files</option>
 					<option value="copy">Copy files</option>
@@ -139,7 +139,7 @@
 				<input
 					type="checkbox"
 					bind:checked={skipNfo}
-					class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+					class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 				/>
 				<div class="flex-1">
 					<span class="text-sm font-medium">Skip NFO Generation</span>
@@ -153,7 +153,7 @@
 				<input
 					type="checkbox"
 					bind:checked={skipDownload}
-					class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+					class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 				/>
 				<div class="flex-1">
 					<span class="text-sm font-medium">Skip Media Download</span>

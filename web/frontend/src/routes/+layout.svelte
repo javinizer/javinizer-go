@@ -11,6 +11,7 @@
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
 	import { getQueryClient } from '$lib/query/client';
+	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import '../app.css';
 
 	let { children } = $props();
@@ -121,6 +122,7 @@
 	}
 
 	onMount(() => {
+		getThemeStore().initTheme();
 		refreshAuthStatus();
 	});
 

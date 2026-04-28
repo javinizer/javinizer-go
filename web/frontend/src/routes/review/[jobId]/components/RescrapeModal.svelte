@@ -81,13 +81,13 @@
 						<div class="flex gap-2 mb-6 p-1 bg-accent rounded-lg">
 							<button
 								onclick={() => (manualSearchMode = false)}
-								class="flex-1 px-4 py-2 rounded transition-all {!manualSearchMode ? 'bg-white shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}"
+								class="flex-1 px-4 py-2 rounded transition-all {!manualSearchMode ? 'bg-card shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}"
 							>
 								Rescrape from File
 							</button>
 							<button
 								onclick={() => (manualSearchMode = true)}
-								class="flex-1 px-4 py-2 rounded transition-all {manualSearchMode ? 'bg-white shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}"
+								class="flex-1 px-4 py-2 rounded transition-all {manualSearchMode ? 'bg-card shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}"
 							>
 								Manual Search
 							</button>
@@ -104,7 +104,7 @@
 										type="text"
 										bind:value={manualSearchInput}
 										placeholder="e.g., IPX-123 or https://www.dmm.co.jp/..."
-										class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
+										class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 									/>
 									<p class="text-xs text-muted-foreground mt-2">
 										Enter a DVD ID (e.g., IPX-123), content ID (e.g., ipx00535), or a direct URL from DMM or R18.dev

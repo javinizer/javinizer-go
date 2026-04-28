@@ -46,7 +46,7 @@
 				<span>Progress</span>
 				<span>{Math.round(organizeProgress)}%</span>
 			</div>
-			<div class="w-full bg-gray-200 rounded-full h-2">
+			<div class="w-full bg-muted rounded-full h-2">
 				<div
 					class="bg-blue-600 h-2 rounded-full transition-all duration-300"
 					style="width: {organizeProgress}%"

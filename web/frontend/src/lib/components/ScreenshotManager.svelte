@@ -168,7 +168,7 @@
 					bind:value={posterUrl}
 					onchange={notifyParent}
 					placeholder="https://..."
-					class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
+					class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 				/>
 			</div>
 			<div>
@@ -237,7 +237,7 @@
 					bind:value={coverUrl}
 					onchange={notifyParent}
 					placeholder="https://..."
-					class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
+					class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 				/>
 			</div>
 			<div>
@@ -292,7 +292,7 @@
 					bind:value={trailerUrl}
 					onchange={notifyParent}
 					placeholder="https://..."
-					class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
+					class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 				/>
 			</div>
 			<div>
@@ -370,7 +370,7 @@
 				bind:value={newScreenshotUrl}
 				onkeypress={handleKeyPress}
 				placeholder="Enter screenshot URL and press Enter or click Add"
-				class="flex-1 px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
+				class="flex-1 px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 			/>
 			<Button onclick={addScreenshot} disabled={!newScreenshotUrl.trim()}>
 				{#snippet children()}

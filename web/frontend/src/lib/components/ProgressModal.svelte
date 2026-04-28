@@ -197,7 +197,7 @@
 							Failed
 						</span>
 					{:else if job.status === 'cancelled'}
-						<span class="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm">
+						<span class="inline-flex items-center gap-1 px-2 py-1 bg-muted text-muted-foreground rounded text-sm">
 							<CircleX class="h-4 w-4" />
 							Cancelled
 						</span>
@@ -244,23 +244,23 @@
 				<!-- Queued Files (Waiting) -->
 				{#if queuedFiles.length > 0}
 					<div class="space-y-3">
-						<h3 class="font-semibold text-gray-600 flex items-center gap-2">
-							<div class="h-5 w-5 rounded-full border-2 border-gray-400 flex items-center justify-center">
-								<div class="h-2 w-2 rounded-full bg-gray-400"></div>
+						<h3 class="font-semibold text-muted-foreground flex items-center gap-2">
+							<div class="h-5 w-5 rounded-full border-2 border-muted-foreground/40 flex items-center justify-center">
+								<div class="h-2 w-2 rounded-full bg-muted-foreground/40"></div>
 							</div>
 							Queued ({queuedFiles.length})
 						</h3>
 						<div class="space-y-1">
 							{#each queuedFiles.slice(0, 5) as filePath (filePath)}
-								<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-center gap-2 p-2 rounded bg-gray-50 text-sm">
-									<div class="h-2 w-2 rounded-full bg-gray-400 shrink-0"></div>
-									<div class="text-gray-700 truncate">
+								<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-center gap-2 p-2 rounded bg-muted text-sm">
+									<div class="h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0"></div>
+									<div class="text-foreground truncate">
 										{getFileDisplayName(filePath)}
 									</div>
 								</div>
 							{/each}
 							{#if queuedFiles.length > 5}
-								<div class="text-xs text-gray-500 pl-4 pt-1">
+								<div class="text-xs text-muted-foreground pl-4 pt-1">
 									and {queuedFiles.length - 5} more...
 								</div>
 							{/if}

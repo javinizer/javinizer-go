@@ -2,7 +2,9 @@
 	import { page } from '$app/stores';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
-	import { FolderOpen, Settings, Film, Users, LogOut, Activity, FileText, ChevronDown } from 'lucide-svelte';
+	import { FolderOpen, Settings, Film, Users, LogOut, Activity, FileText, ChevronDown, Sun, Moon, Monitor } from 'lucide-svelte';
+	import { getThemeStore } from '$lib/stores/theme.svelte';
+	import type { Theme } from '$lib/stores/theme.svelte';
 
 	interface Props {
 		authenticated?: boolean;
@@ -11,6 +13,8 @@
 	}
 
 	let { authenticated = false, username = '', onLogout }: Props = $props();
+
+	const themeStore = getThemeStore();
 
 	const navItems = [
 		{ href: '/browse', label: 'Scrape', icon: FolderOpen },
@@ -29,6 +33,14 @@
 
 	const isSubMenuActive = $derived(
 		subMenuItems.some((item) => currentPath === item.href || currentPath.startsWith(item.href + '/'))
+	);
+
+	const themeIcon = $derived(
+		themeStore.current === 'dark' ? Moon : themeStore.current === 'light' ? Sun : Monitor
+	);
+
+	const themeLabel = $derived(
+		themeStore.current === 'dark' ? 'Dark' : themeStore.current === 'light' ? 'Light' : 'System'
 	);
 
 	function toggleSubMenu() {
@@ -98,9 +110,20 @@
 
 					{#if subMenuOpen}
 						<div
-							class="absolute right-0 top-full mt-1 w-44 rounded-lg border bg-card p-1 shadow-lg"
+							class="absolute right-0 top-full mt-1 w-48 rounded-lg border bg-card p-1 shadow-lg"
 							in:fly={{ y: -4, duration: 120 }}
 						>
+							<button
+								type="button"
+								onclick={() => themeStore.cycleTheme()}
+								class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all duration-150 hover:bg-accent hover:translate-x-0.5 w-full"
+							>
+								<svelte:component this={themeIcon} class="h-4 w-4" />
+								<span>{themeLabel}</span>
+							</button>
+
+							<div class="my-1 border-t"></div>
+
 							{#each subMenuItems as item}
 								{@const Icon = item.icon}
 								<a

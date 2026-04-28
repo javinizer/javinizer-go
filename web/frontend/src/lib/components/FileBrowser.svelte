@@ -525,7 +525,7 @@
 						}, 120);
 					}}
 					placeholder="Enter path (e.g., /path/to/videos)"
-					class="w-full px-3 py-1.5 pr-9 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
+					class="w-full px-3 py-1.5 pr-9 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 				/>
 				{#if autocompleteLoading}
 					<div class="absolute inset-y-0 right-3 flex items-center text-muted-foreground">

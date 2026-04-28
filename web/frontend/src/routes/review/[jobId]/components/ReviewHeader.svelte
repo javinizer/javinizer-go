@@ -110,7 +110,7 @@
 					<input
 						type="checkbox"
 						bind:checked={forceOverwrite}
-						class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
 						<span class="text-sm font-medium">Force Overwrite</span>
@@ -124,7 +124,7 @@
 					<input
 						type="checkbox"
 						bind:checked={preserveNfo}
-						class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
 						<span class="text-sm font-medium">Preserve NFO</span>
@@ -138,7 +138,7 @@
 					<input
 						type="checkbox"
 						bind:checked={skipNfo}
-						class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
 						<span class="text-sm font-medium">Skip NFO</span>
@@ -152,7 +152,7 @@
 					<input
 						type="checkbox"
 						bind:checked={skipDownload}
-						class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary"
+						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
 						<span class="text-sm font-medium">Skip Download</span>

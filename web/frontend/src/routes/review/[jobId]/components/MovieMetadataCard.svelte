@@ -35,7 +35,7 @@
 					<input
 						type="checkbox"
 						bind:checked={showFieldScraperSources}
-						class="w-3.5 h-3.5 text-primary bg-gray-100 border-gray-300 rounded focus:ring-primary focus:ring-2"
+						class="w-3.5 h-3.5 text-primary bg-muted border-input rounded focus:ring-primary focus:ring-2"
 					/>
 					Show scraper per field
 				</label>

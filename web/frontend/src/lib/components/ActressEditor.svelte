@@ -315,7 +315,7 @@
 							onfocus={handleSearchFocus}
 							onblur={handleSearchBlur}
 							placeholder="Click to see all actresses or type to search..."
-							class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+							class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 						/>
 
 						{#if showSearchResults}
@@ -386,7 +386,7 @@
 								type="text"
 								bind:value={editingActress.first_name}
 								placeholder="e.g., Yume"
-								class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 							/>
 						</div>
 
@@ -397,7 +397,7 @@
 								type="text"
 								bind:value={editingActress.last_name}
 								placeholder="e.g., Nishimiya"
-								class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 							/>
 						</div>
 
@@ -408,7 +408,7 @@
 								type="text"
 								bind:value={editingActress.japanese_name}
 								placeholder="e.g., 西宮ゆめ"
-								class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 							/>
 						</div>
 
@@ -419,7 +419,7 @@
 								type="url"
 								bind:value={editingActress.thumb_url}
 								placeholder="https://..."
-								class="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
+								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 							/>
 						</div>
 					</div>

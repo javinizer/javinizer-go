@@ -3,6 +3,13 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<script>
+			(function(){
+				var t=localStorage.getItem('javinizer-theme');
+				var d=t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches);
+				if(d)document.documentElement.classList.add('dark');
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

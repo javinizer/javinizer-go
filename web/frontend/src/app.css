@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 @source inline("bg-red-100 bg-red-500 text-red-700 dark:bg-red-500/20 dark:text-red-300 bg-amber-100 bg-amber-500 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 bg-blue-100 bg-blue-500 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300 bg-violet-100 bg-violet-500 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-500/30 border-l-violet-500 bg-violet-500/[0.02] dark:bg-violet-500/[0.04] text-white");
 
 :root {
@@ -32,14 +33,14 @@
   --popover: 222.2 84% 4.9%;
   --popover-foreground: 210 40% 98%;
   --primary: 217.2 91.2% 59.8%;
-  --primary-foreground: 222.2 47.4% 11.2%;
+  --primary-foreground: 210 40% 98%;
   --secondary: 217.2 32.6% 17.5%;
   --secondary-foreground: 210 40% 98%;
   --muted: 217.2 32.6% 17.5%;
   --muted-foreground: 215 20.2% 65.1%;
   --accent: 217.2 32.6% 17.5%;
   --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
+  --destructive: 0 72.2% 50.6%;
   --destructive-foreground: 210 40% 98%;
   --border: 217.2 32.6% 17.5%;
   --input: 217.2 32.6% 17.5%;
@@ -81,3 +82,39 @@ body {
 
 .ring-offset-background { --tw-ring-offset-color: hsl(var(--background)); }
 .ring-ring { --tw-ring-color: hsl(var(--ring)); }
+
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+.dark select,
+.dark textarea {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--input));
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: hsl(var(--card));
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted));
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+.dark * {
+  scrollbar-color: hsl(var(--muted)) hsl(var(--card));
+  scrollbar-width: thin;
+}

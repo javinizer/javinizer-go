@@ -165,7 +165,7 @@
 
 											<!-- Arrow -->
 											<div class="flex items-center justify-center">
-												<ChevronRight class="h-6 w-6 text-gray-400" />
+												<ChevronRight class="h-6 w-6 text-muted-foreground" />
 											</div>
 
 											<!-- Scraped Value -->
@@ -280,7 +280,7 @@
 						</div>
 					{:else}
 						<div class="text-center py-12">
-							<CircleAlert class="h-12 w-12 mx-auto text-gray-400 mb-4" />
+							<CircleAlert class="h-12 w-12 mx-auto text-muted-foreground mb-4" />
 							<p class="text-lg font-medium text-foreground mb-2">
 								No Statistics Available
 							</p>
