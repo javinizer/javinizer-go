@@ -2,7 +2,7 @@
 	import type { Movie } from '$lib/api/types';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
-	import { Image as ImageIcon, Play } from 'lucide-svelte';
+	import { Image as ImageIcon, ImagePlus, Play } from 'lucide-svelte';
 
 	interface Props {
 		currentMovie: Movie;
@@ -16,6 +16,7 @@
 		onOpenPosterCropModal: () => void;
 		onOpenCoverViewer: () => void;
 		onOpenScreenshotViewer: (index: number) => void;
+		onUseScreenshotAsPoster: (url: string) => void;
 		previewImageURL: (url: string | undefined) => string;
 	}
 
@@ -31,6 +32,7 @@
 		onOpenPosterCropModal,
 		onOpenCoverViewer,
 		onOpenScreenshotViewer,
+		onUseScreenshotAsPoster,
 		previewImageURL
 	}: Props = $props();
 </script>
@@ -127,16 +129,25 @@
 			<h3 class="font-semibold mb-3 text-sm">Screenshots ({currentMovie.screenshot_urls.length})</h3>
 			<div class="grid grid-cols-2 gap-2">
 				{#each (showAllSidebarScreenshots ? currentMovie.screenshot_urls : currentMovie.screenshot_urls.slice(0, 4)) as url, index}
-					<button onclick={() => onOpenScreenshotViewer(index)} class="cursor-pointer hover:opacity-80 transition-opacity">
-						<img
-							src={previewImageURL(url)}
-							alt="Screenshot"
-							class="w-full aspect-video object-cover rounded border"
-							onerror={(e) => {
-								(e.currentTarget as HTMLImageElement).src = 'https://via.placeholder.com/400x225?text=Error';
-							}}
-						/>
-					</button>
+					<div class="relative group">
+						<button onclick={() => onOpenScreenshotViewer(index)} class="cursor-pointer hover:opacity-80 transition-opacity">
+							<img
+								src={previewImageURL(url)}
+								alt="Screenshot"
+								class="w-full aspect-video object-cover rounded border"
+								onerror={(e) => {
+									(e.currentTarget as HTMLImageElement).src = 'https://via.placeholder.com/400x225?text=Error';
+								}}
+							/>
+						</button>
+						<button
+							onclick={(e: MouseEvent) => { e.stopPropagation(); onUseScreenshotAsPoster(url); }}
+							title="Use as Poster"
+							class="absolute bottom-1 right-1 p-1 rounded-full bg-black/60 hover:bg-black/80 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+						>
+							<ImagePlus class="h-3 w-3" />
+						</button>
+					</div>
 				{/each}
 			</div>
 			{#if currentMovie.screenshot_urls.length > 4 && !showAllSidebarScreenshots}

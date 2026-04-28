@@ -374,6 +374,23 @@
 		schedulePreviewRefresh();
 	}
 
+	function useScreenshotAsPoster(url: string) {
+		if (!currentMovie) return;
+
+		const confirmed = typeof window === 'undefined'
+			? true
+			: window.confirm('Use this screenshot as the poster? This will replace the current poster image.');
+
+		if (!confirmed) return;
+
+		updateCurrentMovie({
+			...currentMovie,
+			poster_url: url,
+			should_crop_poster: false,
+			cropped_poster_url: ''
+		});
+	}
+
 	function schedulePreviewRefresh() {
 		if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
 		previewDebounceTimer = setTimeout(() => fetchPreview(), 300);
@@ -731,6 +748,7 @@
 						onOpenPosterCropModal={posterCropController.openPosterCropModal}
 						onOpenCoverViewer={reviewPageController.openCoverViewer}
 						onOpenScreenshotViewer={reviewPageController.openScreenshotViewer}
+						onUseScreenshotAsPoster={useScreenshotAsPoster}
 						previewImageURL={reviewPageController.previewImageURL}
 					/>
 
