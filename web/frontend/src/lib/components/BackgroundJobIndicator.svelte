@@ -1,9 +1,7 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
 	import { cubicOut } from 'svelte/easing';
 	import { fly, slide } from 'svelte/transition';
-	import { apiClient } from '$lib/api/client';
-	import type { BatchJobResponse } from '$lib/api/types';
+	import { createBatchJobPollingQuery } from '$lib/query/queries';
 	import { LoaderCircle, X, ChevronUp, ChevronDown } from 'lucide-svelte';
 
 	interface Props {
@@ -14,42 +12,15 @@
 
 	let { jobId, onReopen, onDismiss }: Props = $props();
 
-	let job: BatchJobResponse | null = $state(null);
-	let pollInterval: ReturnType<typeof setInterval> | null = null;
+	const jobQuery = createBatchJobPollingQuery(jobId);
+	let job = $derived(jobQuery.data ?? null);
 	let expanded = $state(false);
 
-	async function fetchJob() {
-		try {
-			job = await apiClient.getBatchJob(jobId);
-
-			// Stop polling if job is complete
-			if (
-				job &&
-				(job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled')
-			) {
-				if (pollInterval) {
-					clearInterval(pollInterval);
-					pollInterval = null;
-				}
-				// Auto-dismiss after 3 seconds when complete
-				setTimeout(() => {
-					onDismiss();
-				}, 3000);
-			}
-		} catch (e) {
-			console.error('Failed to fetch job status:', e);
-		}
-	}
-
-	onMount(() => {
-		fetchJob();
-		// Poll for updates every 2 seconds
-		pollInterval = setInterval(fetchJob, 2000);
-	});
-
-	onDestroy(() => {
-		if (pollInterval) {
-			clearInterval(pollInterval);
+	$effect(() => {
+		const status = jobQuery.data?.status;
+		if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+			const timer = setTimeout(() => onDismiss(), 3000);
+			return () => clearTimeout(timer);
 		}
 	});
 </script>
