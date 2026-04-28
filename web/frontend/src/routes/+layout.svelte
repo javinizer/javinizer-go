@@ -1,13 +1,16 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
+	import { QueryClientProvider } from '@tanstack/svelte-query';
 	import favicon from '$lib/assets/favicon.svg';
 	import Navigation from '$lib/components/Navigation.svelte';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
+	import { getQueryClient } from '$lib/query/client';
 	import '../app.css';
 
 	let { children } = $props();
@@ -281,20 +284,39 @@
 		</div>
 	</div>
 {:else}
-	<div class="min-h-screen bg-background">
-		<Navigation authenticated={authAuthenticated} username={authUsername} onLogout={handleLogout} />
-		<main class="route-container">
-			{#key page.url.pathname}
-				<div
-					class="route-content"
-					in:fly|local={{ y: 12, duration: 220, opacity: 0.15, easing: cubicOut }}
-				>
-					{@render children?.()}
-				</div>
-			{/key}
-		</main>
-		<ToastContainer />
-	</div>
+	{#if browser}
+		<QueryClientProvider client={getQueryClient()}>
+			<div class="min-h-screen bg-background">
+				<Navigation authenticated={authAuthenticated} username={authUsername} onLogout={handleLogout} />
+				<main class="route-container">
+					{#key page.url.pathname}
+						<div
+							class="route-content"
+							in:fly|local={{ y: 12, duration: 220, opacity: 0.15, easing: cubicOut }}
+						>
+							{@render children?.()}
+						</div>
+					{/key}
+				</main>
+				<ToastContainer />
+			</div>
+		</QueryClientProvider>
+	{:else}
+		<div class="min-h-screen bg-background">
+			<Navigation authenticated={authAuthenticated} username={authUsername} onLogout={handleLogout} />
+			<main class="route-container">
+				{#key page.url.pathname}
+					<div
+						class="route-content"
+						in:fly|local={{ y: 12, duration: 220, opacity: 0.15, easing: cubicOut }}
+					>
+						{@render children?.()}
+					</div>
+				{/key}
+			</main>
+			<ToastContainer />
+		</div>
+	{/if}
 {/if}
 
 <style>
