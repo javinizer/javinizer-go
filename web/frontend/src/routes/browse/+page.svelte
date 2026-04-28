@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { createQuery } from '@tanstack/svelte-query';
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
 	import { fade, scale, slide } from 'svelte/transition';
@@ -12,6 +12,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
+	import { createConfigQuery, createScrapersQuery } from '$lib/query/queries';
 	import { Play, FolderOutput, FolderOpen, FileEdit, FileText, RotateCcw, LoaderCircle, RefreshCw, Settings, ChevronUp, ChevronDown, X, Scan } from 'lucide-svelte';
 	import type { Scraper, FileInfo, Config } from '$lib/api/types';
 	import type { OperationMode } from '$lib/api/types';
@@ -32,10 +33,37 @@
 	let showDestinationBrowser = $state(false);
 	let tempDestinationPath = $state('');
 	let currentBrowserPath = $state('');
-	let availableScrapers: Scraper[] = $state([]);
+	const configQuery = createConfigQuery();
+	const scrapersQuery = createScrapersQuery();
+	const cwdQuery = createQuery(() => ({
+		queryKey: ['cwd'],
+		queryFn: () => apiClient.getCurrentWorkingDirectory(),
+	}));
+
+	let config = $derived(configQuery.data ?? null);
+	let availableScrapers = $derived(scrapersQuery.data ?? []);
 	let selectedScrapers: string[] = $state([]);
 	let showScraperSelector = $state(false);
-	let config: Config | null = $state(null);
+
+	$effect(() => {
+		const scrapers = scrapersQuery.data;
+		if (scrapers && scrapers.length > 0 && selectedScrapers.length === 0) {
+			selectedScrapers = scrapers.filter((s) => s.enabled).map((s) => s.name);
+		}
+	});
+
+	$effect(() => {
+		const cwd = cwdQuery.data?.path;
+		if (!cwd) return;
+		const savedInputPath = localStorage.getItem(STORAGE_KEY_INPUT);
+		if (!initialPath) {
+			initialPath = savedInputPath || cwd;
+		}
+		const savedOutputPath = localStorage.getItem(STORAGE_KEY_OUTPUT);
+		if (!destinationPath) {
+			destinationPath = savedOutputPath || initialPath;
+		}
+	});
 	type ScalarStrategy = 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
 	type ArrayStrategy = 'merge' | 'replace';
 
@@ -89,39 +117,8 @@
 		} catch {}
 	});
 
-	// Load current working directory and config on mount
-	onMount(async () => {
-		try {
-			const response = await apiClient.getCurrentWorkingDirectory();
-			// Load input path from localStorage, or fall back to working directory
-			const savedInputPath = localStorage.getItem(STORAGE_KEY_INPUT);
-			initialPath = savedInputPath || response.path;
-		} catch (error) {
-			console.error('Failed to get current working directory:', error);
-		}
 
-		// Load output path from localStorage, or fall back to initialPath
-		const savedOutputPath = localStorage.getItem(STORAGE_KEY_OUTPUT);
-		destinationPath = savedOutputPath || initialPath;
 
-		// Fetch available scrapers
-		try {
-			availableScrapers = await apiClient.getScrapers();
-			// Initialize with all enabled scrapers
-			selectedScrapers = availableScrapers
-				.filter((s) => s.enabled)
-				.map((s) => s.name);
-		} catch (error) {
-			console.error('Failed to fetch scrapers:', error);
-		}
-
-		// Load config for file operations settings
-		try {
-			config = await apiClient.getConfig();
-		} catch (error) {
-			console.error('Failed to load config:', error);
-		}
-	});
 
 	function handleFileSelect(files: string[]) {
 		selectedFiles = files;
