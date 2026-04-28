@@ -57,8 +57,6 @@
 	let form = $state<ActressForm>(emptyForm());
 	let formError = $state<string | null>(null);
 	let selectedIds = $state<number[]>([]);
-	let saving = $state(false);
-	let deletingId = $state<number | null>(null);
 
 	const actressesQuery = createQuery(() => ({
 		queryKey: ['actresses', { limit, offset, q: activeQuery, sort_by: sortBy, sort_order: sortOrder }],
@@ -77,6 +75,46 @@
 	let loading = $derived(actressesQuery.isPending && !actressesQuery.data);
 	let error = $derived(actressesQuery.error?.message ?? null);
 	let isRefreshing = $derived(actressesQuery.isFetching && !!actressesQuery.data);
+
+	const saveActressMutation = createMutation(() => ({
+		mutationFn: async (payload: ActressUpsertRequest) => {
+			if (editingId !== null) {
+				return apiClient.updateActress(editingId, payload);
+			}
+			return apiClient.createActress(payload);
+		},
+		onSuccess: () => {
+			if (editingId !== null) {
+				toastStore.success('Actress updated');
+			} else {
+				toastStore.success('Actress created');
+			}
+			queryClient.invalidateQueries({ queryKey: ['actresses'] });
+			resetForm();
+		},
+		onError: (err: Error) => {
+			formError = err.message;
+		}
+	}));
+
+	const deleteActressMutation = createMutation(() => ({
+		mutationFn: (id: number) => apiClient.deleteActress(id),
+		onSuccess: (_data, id) => {
+			toastStore.success('Actress deleted');
+			selectedIds = selectedIds.filter((sid) => sid !== id);
+			const currentActresses = actressesQuery.data?.actresses ?? [];
+			if (currentActresses.length === 1 && offset > 0) {
+				offset = Math.max(0, offset - limit);
+			}
+			if (editingId === id) {
+				resetForm();
+			}
+			queryClient.invalidateQueries({ queryKey: ['actresses'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message);
+		}
+	}));
 
 	$effect(() => {
 		const data = actressesQuery.data;
@@ -199,53 +237,17 @@
 		formError = null;
 	}
 
-	async function saveActress() {
+	function saveActress() {
 		formError = validateForm();
-		if (formError) {
-			return;
-		}
-
-		saving = true;
-		try {
-			const payload = toPayload();
-			if (editingId !== null) {
-				await apiClient.updateActress(editingId, payload);
-				toastStore.success('Actress updated');
-			} else {
-				await apiClient.createActress(payload);
-				toastStore.success('Actress created');
-			}
-			await queryClient.invalidateQueries({ queryKey: ['actresses'] });
-			resetForm();
-		} catch (e) {
-			formError = e instanceof Error ? e.message : 'Failed to save actress';
-		} finally {
-			saving = false;
-		}
+		if (formError) return;
+		saveActressMutation.mutate(toPayload());
 	}
 
-	async function removeActress(actress: Actress) {
+	function removeActress(actress: Actress) {
 		if (!actress.id) return;
 		const name = getDisplayName(actress);
 		if (!confirm(`Delete actress "${name}"?`)) return;
-
-		deletingId = actress.id;
-		try {
-			await apiClient.deleteActress(actress.id);
-			toastStore.success('Actress deleted');
-			selectedIds = selectedIds.filter((id) => id !== actress.id);
-			if (actresses.length === 1 && offset > 0) {
-				offset = Math.max(0, offset - limit);
-			}
-			if (editingId === actress.id) {
-				resetForm();
-			}
-			await queryClient.invalidateQueries({ queryKey: ['actresses'] });
-		} catch (e) {
-			toastStore.error(e instanceof Error ? e.message : 'Failed to delete actress');
-		} finally {
-			deletingId = null;
-		}
+		deleteActressMutation.mutate(actress.id);
 	}
 
 	function applySearch() {
@@ -528,11 +530,11 @@
 					</div>
 
 						<div class="flex items-center gap-2 pt-2">
-							<Button onclick={saveActress} disabled={saving}>
+							<Button onclick={saveActress} disabled={saveActressMutation.isPending}>
 								<Save class="h-4 w-4" />
-								{saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
+								{saveActressMutation.isPending ? 'Saving...' : editingId ? 'Update' : 'Create'}
 							</Button>
-							<Button variant="outline" onclick={resetForm} disabled={saving}>Clear</Button>
+							<Button variant="outline" onclick={resetForm} disabled={saveActressMutation.isPending}>Clear</Button>
 						</div>
 					</Card>
 				</div>
@@ -710,7 +712,7 @@
 																variant="outline"
 																size="sm"
 																onclick={() => removeActress(actress)}
-																disabled={deletingId === actress.id}
+																disabled={deleteActressMutation.isPending}
 																class="text-destructive hover:bg-destructive/10"
 															>
 																<Trash2 class="h-4 w-4" />
@@ -759,7 +761,7 @@
 															variant="outline"
 															size="sm"
 															onclick={() => removeActress(actress)}
-															disabled={deletingId === actress.id}
+															disabled={deleteActressMutation.isPending}
 															class="text-destructive hover:bg-destructive/10"
 														>
 															<Trash2 class="h-4 w-4" />
@@ -812,7 +814,7 @@
 																	variant="outline"
 																	size="sm"
 																	onclick={() => removeActress(actress)}
-																	disabled={deletingId === actress.id}
+																	disabled={deleteActressMutation.isPending}
 																	class="text-destructive hover:bg-destructive/10"
 																>
 																	<Trash2 class="h-4 w-4" />
