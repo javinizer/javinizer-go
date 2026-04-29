@@ -54,7 +54,6 @@ func init() {
 		ScraperPriority: 45,
 		ConfigType:      func() scraperutil.ScraperConfigInterface { return &AVEntertainmentConfig{} },
 		NewScraperFunc: func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-			_ = db
 			var globalProxy *config.ProxyConfig
 			var globalFlareSolverr config.FlareSolverrConfig
 			if globalConfig != nil {

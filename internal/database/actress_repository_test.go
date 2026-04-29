@@ -416,6 +416,97 @@ func TestActressRepository_Sorting(t *testing.T) {
 	})
 }
 
+func TestActressRepository_FindByDMMID(t *testing.T) {
+	cfg := &config.Config{
+		Database: config.DatabaseConfig{
+			Type: "sqlite",
+			DSN:  ":memory:",
+		},
+		Logging: config.LoggingConfig{
+			Level: "error",
+		},
+	}
+	db, err := New(cfg)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	require.NoError(t, db.AutoMigrate())
+	repo := NewActressRepository(db)
+
+	t.Run("FindByDMMID found", func(t *testing.T) {
+		actress := &models.Actress{
+			DMMID:        12345,
+			FirstName:    "Yui",
+			LastName:     "Hatano",
+			JapaneseName: "波多野結衣",
+			ThumbURL:     "http://example.com/thumb.jpg",
+		}
+		err := repo.Create(actress)
+		require.NoError(t, err)
+
+		found, err := repo.FindByDMMID(12345)
+		require.NoError(t, err)
+		assert.Equal(t, "波多野結衣", found.JapaneseName)
+		assert.Equal(t, "http://example.com/thumb.jpg", found.ThumbURL)
+	})
+
+	t.Run("FindByDMMID not found", func(t *testing.T) {
+		_, err := repo.FindByDMMID(99999)
+		require.Error(t, err)
+		assert.True(t, IsNotFound(err))
+	})
+
+	t.Run("FindByDMMID zero id returns not found", func(t *testing.T) {
+		_, err := repo.FindByDMMID(0)
+		require.Error(t, err)
+		assert.True(t, IsNotFound(err))
+	})
+
+	t.Run("FindByDMMID negative id returns invalid lookup", func(t *testing.T) {
+		_, err := repo.FindByDMMID(-1)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrInvalidLookup))
+	})
+}
+
+func TestActressRepository_FindByFirstNameLastName(t *testing.T) {
+	cfg := &config.Config{
+		Database: config.DatabaseConfig{
+			Type: "sqlite",
+			DSN:  ":memory:",
+		},
+		Logging: config.LoggingConfig{
+			Level: "error",
+		},
+	}
+	db, err := New(cfg)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	require.NoError(t, db.AutoMigrate())
+	repo := NewActressRepository(db)
+
+	t.Run("FindByFirstNameLastName found", func(t *testing.T) {
+		actress := &models.Actress{
+			DMMID:        44556,
+			FirstName:    "Yui",
+			LastName:     "Hatano",
+			JapaneseName: "波多野結衣",
+			ThumbURL:     "http://example.com/thumb-yui.jpg",
+		}
+		err := repo.Create(actress)
+		require.NoError(t, err)
+
+		found, err := repo.FindByFirstNameLastName("Yui", "Hatano")
+		require.NoError(t, err)
+		assert.Equal(t, "波多野結衣", found.JapaneseName)
+	})
+
+	t.Run("FindByFirstNameLastName not found", func(t *testing.T) {
+		_, err := repo.FindByFirstNameLastName("Nonexistent", "Person")
+		require.Error(t, err)
+		assert.True(t, IsNotFound(err))
+	})
+}
+
 // TestActressRepository_Search tests search operations
 func TestActressRepository_Search(t *testing.T) {
 	cfg := &config.Config{

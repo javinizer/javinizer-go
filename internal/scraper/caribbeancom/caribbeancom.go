@@ -180,13 +180,16 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	return "", false
 }
 
-// GetURL resolves detail URL for an ID.
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.getURLCtx(context.Background(), id)
+}
+
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
 	}
-	if isHTTPURL(id) {
+	if scraperutil.IsHTTPURL(id) {
 		return s.applyLanguage(id), nil
 	}
 
@@ -206,7 +209,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("caribbeancom scraper is disabled")
 	}
 
-	detailURL, err := s.GetURL(id)
+	detailURL, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -675,12 +678,4 @@ func decodeBody(resp *resty.Response) (string, error) {
 		return "", err
 	}
 	return string(decoded), nil
-}
-
-func isHTTPURL(v string) bool {
-	u, err := url.Parse(strings.TrimSpace(v))
-	if err != nil {
-		return false
-	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }

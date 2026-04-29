@@ -1010,7 +1010,7 @@ func LooksLikeTemplatedTitle(title, id string) bool {
 
 func (t *ScrapeTask) applyDisplayTitleFromConfig(ctx context.Context, movie *models.Movie) {
 	cfg := t.aggregator.Config()
-	if cfg == nil || cfg.Metadata.NFO.DisplayTitle == "" {
+	if cfg == nil {
 		if movie.DisplayTitle == "" {
 			movie.DisplayTitle = movie.Title
 		}
@@ -1020,10 +1020,5 @@ func (t *ScrapeTask) applyDisplayTitleFromConfig(ctx context.Context, movie *mod
 	if templateEngine == nil {
 		templateEngine = template.NewEngine()
 	}
-	tmplCtx := template.NewContextFromMovie(movie)
-	if displayName, err := templateEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, tmplCtx); err == nil {
-		movie.DisplayTitle = displayName
-	} else if movie.DisplayTitle == "" {
-		movie.DisplayTitle = movie.Title
-	}
+	ApplyDisplayTitle(ctx, movie, movie, cfg.Metadata.NFO.DisplayTitle, templateEngine)
 }

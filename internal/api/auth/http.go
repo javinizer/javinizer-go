@@ -69,6 +69,14 @@ func requireAuthenticated(deps *ServerDependencies) gin.HandlerFunc {
 	}
 }
 
+// getAuthStatus godoc
+// @Summary Get authentication status
+// @Description Check if authentication is initialized and if the current session is authenticated
+// @Tags auth
+// @Produce json
+// @Success 200 {object} AuthStatusResponse
+// @Failure 503 {object} ErrorResponse
+// @Router /api/v1/auth/status [get]
 func getAuthStatus(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps == nil || deps.Auth == nil {
@@ -187,6 +195,20 @@ func peerIP(remoteAddr string) string {
 	return ip
 }
 
+// setupAuth godoc
+// @Summary Initialize authentication
+// @Description Set up initial admin credentials. Only available from localhost or with bootstrap secret when auth is not yet initialized.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body AuthCredentialsRequest true "Admin credentials"
+// @Param X-Setup-Secret header string false "Bootstrap secret for remote setup"
+// @Success 200 {object} AuthStatusResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
+// @Router /api/v1/auth/setup [post]
 func setupAuth(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps == nil || deps.Auth == nil {
@@ -250,6 +272,19 @@ func setupAuth(deps *ServerDependencies) gin.HandlerFunc {
 	}
 }
 
+// loginAuth godoc
+// @Summary Login
+// @Description Authenticate with username and password to create a session
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body AuthCredentialsRequest true "Login credentials"
+// @Success 200 {object} AuthStatusResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 429 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
+// @Router /api/v1/auth/login [post]
 func loginAuth(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps == nil || deps.Auth == nil {
@@ -287,6 +322,13 @@ func loginAuth(deps *ServerDependencies) gin.HandlerFunc {
 	}
 }
 
+// logoutAuth godoc
+// @Summary Logout
+// @Description End the current authenticated session
+// @Tags auth
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Router /api/v1/auth/logout [post]
 func logoutAuth(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps != nil && deps.Auth != nil {

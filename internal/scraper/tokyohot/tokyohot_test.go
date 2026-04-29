@@ -212,7 +212,7 @@ func TestHelpers(t *testing.T) {
 	if got := scraperutil.ResolveURL("https://www.tokyo-hot.com/product/N1234/", "trailer.mp4"); got != "https://www.tokyo-hot.com/product/N1234/trailer.mp4" {
 		t.Fatalf("resolveURL = %q", got)
 	}
-	if !hasJapanese("花子") {
+	if !scraperutil.HasJapanese("花子") {
 		t.Fatal("expected Japanese text detection")
 	}
 }
@@ -507,7 +507,7 @@ func TestHasJapanese(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := hasJapanese(tt.input)
+			result := scraperutil.HasJapanese(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -629,7 +629,7 @@ func TestNormalizeIDEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := normalizeID(tt.input)
+			result := scraperutil.NormalizeID(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

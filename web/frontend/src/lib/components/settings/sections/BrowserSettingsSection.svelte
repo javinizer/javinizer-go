@@ -5,12 +5,12 @@
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
 	import FormNumberInput from '$lib/components/settings/FormNumberInput.svelte';
 	import FormTextInput from '$lib/components/settings/FormTextInput.svelte';
-	import type { BrowserConfig, ScrapersConfig, Config } from '$lib/api/types';
+	import type { BrowserConfig, ScrapersConfig, SettingsConfig } from '$lib/api/types';
 
 	interface Props {
-		config: Config;
+		config: SettingsConfig;
 		inputClass: string;
-		onChange: (path: string, value: any) => void;
+		onChange: (path: string, value: unknown) => void;
 	}
 
 	let { config, inputClass, onChange }: Props = $props();

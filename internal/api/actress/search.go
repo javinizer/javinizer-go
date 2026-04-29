@@ -13,7 +13,7 @@ import (
 // @Tags actress
 // @Produce json
 // @Param q query string true "Search query"
-// @Success 200 {array} models.Actress
+// @Success 200 {array} Actress
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/actresses/search [get]

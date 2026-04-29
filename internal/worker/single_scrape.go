@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,18 +12,12 @@ import (
 	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/downloader"
 	httpclientiface "github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/nfo"
-	"github.com/javinizer/javinizer-go/internal/scanner"
-	"github.com/javinizer/javinizer-go/internal/template"
-	"github.com/spf13/afero"
 )
 
-// processedMovieIDsMutex protects concurrent access to processedMovieIDs map
 var processedMovieIDsMutex sync.Mutex
 
 func safeSearch(ctx context.Context, scraper models.Scraper, id string) (result *models.ScraperResult, err error) {
@@ -105,36 +98,6 @@ func resolveScraperQueryForInputs(scraper models.Scraper, inputs ...string) (str
 	return "", false
 }
 
-// RunBatchScrapeOnce performs a single scrape operation for a file within a batch job context
-// This function extracts the core scraping logic that can be reused for both initial batch scraping
-// and rescraping operations.
-//
-// Parameters:
-//   - ctx: Context for cancellation support
-//   - job: Batch job for logging and state tracking
-//   - filePath: Path to the video file being scraped
-//   - fileIndex: Index of file in batch (for logging, can be 0 for rescrape)
-//   - queryOverride: If non-empty, use this as the search query instead of extracting from filename
-//   - registry: Scraper registry for querying scrapers
-//   - agg: Aggregator for merging scraper results
-//   - movieRepo: Movie repository for database operations
-//   - matcher: Matcher for extracting IDs from filenames
-//   - httpClient: Pre-configured HTTP client with proxy settings
-//   - userAgent: User-Agent header value from config
-//   - referer: Referer header value from config
-//   - force: If true, skip cache and delete existing data
-//   - updateMode: If true, merge scraped data with existing NFO file
-//   - selectedScrapers: If non-empty, use these scrapers instead of defaults
-//   - processedMovieIDs: Map to track which movie IDs have already had posters generated (pass nil to disable tracking)
-//   - cfg: Config for NFO path construction (required if updateMode is true)
-//
-// Returns:
-//   - movie: Successfully scraped and saved movie metadata
-//   - fileResult: FileResult object for updating job status
-//   - error: Any error encountered during scraping
-//
-// Note: This function does NOT call job.UpdateFileResult() - the caller should do that
-// to allow for custom timing or additional processing before updating the job state
 func RunBatchScrapeOnce(
 	ctx context.Context,
 	job *BatchJob,
@@ -162,492 +125,52 @@ func RunBatchScrapeOnce(
 
 	startTime := time.Now()
 
-	// Step 1: Determine the query (use queryOverride if provided, otherwise extract from filename)
-	var movieID string
-	var rawFilenameQuery string
-	var resolvedID string
-	var matchResultPtr *matcher.MatchResult // Store full match result for multi-part info
-	matcherMissFallback := false
-
-	if queryOverride != "" {
-		movieID = queryOverride
-		matchResultPtr = nil // No match result when using manual override
-		logging.Debugf("[Batch %s] File %d: Using manual search query: %s", job.ID, fileIndex, movieID)
-		if strings.HasPrefix(strings.ToLower(queryOverride), "http://") || strings.HasPrefix(strings.ToLower(queryOverride), "https://") {
-			extractedID := extractIDFromURL(queryOverride, registry)
-			if extractedID != "" {
-				logging.Debugf("[Batch %s] File %d: URL detected, extracted ID: %s (using for movieID and fallback search)", job.ID, fileIndex, extractedID)
-				movieID = extractedID
-			}
-		}
-	} else {
-		// Extract ID from filename using matcher
-		fileInfo := scanner.FileInfo{
-			Path:      filePath,
-			Name:      filepath.Base(filePath),
-			Extension: filepath.Ext(filePath),
-			Dir:       filepath.Dir(filePath),
-		}
-		rawFilenameQuery = strings.TrimSpace(strings.TrimSuffix(fileInfo.Name, fileInfo.Extension))
-
-		matchResults := fileMatcher.Match([]scanner.FileInfo{fileInfo})
-		if len(matchResults) == 0 {
-			// Matcher couldn't extract a standard ID. Fall back to using the raw
-			// filename (without extension) so scraper-specific query resolvers can
-			// route non-standard formats to the right scraper.
-			movieID = rawFilenameQuery
-			if movieID == "" {
-				errMsg := "could not extract movie ID from filename"
-				logging.Debugf("[Batch %s] File %d: %s", job.ID, fileIndex, errMsg)
-
-				return nil, &FileResult{
-					FilePath:  filePath,
-					Status:    JobStatusFailed,
-					Error:     errMsg,
-					StartedAt: startTime,
-				}, errors.New(errMsg)
-			}
-			matcherMissFallback = true
-			matchResultPtr = nil
-			logging.Debugf("[Batch %s] File %d: Matcher could not extract ID, using raw filename query: %s",
-				job.ID, fileIndex, movieID)
-		} else {
-			// Store pointer to match result for later use
-			matchResultPtr = &matchResults[0]
-			movieID = matchResultPtr.ID
-			logging.Debugf("[Batch %s] File %d: Extracted movie ID: %s", job.ID, fileIndex, movieID)
-		}
+	query, earlyResult, err := resolveScrapeQuery(ctx, job, filePath, fileIndex, queryOverride, registry, fileMatcher, startTime)
+	if earlyResult != nil {
+		return nil, earlyResult, err
 	}
 
-	// Step 2: Check cache (unless force or custom scrapers)
 	usingCustomScrapers := len(selectedScrapers) > 0
-	skipCache := force || usingCustomScrapers || matcherMissFallback
+	skipCache := force || usingCustomScrapers || query.matcherMissFallback
+
+	var actressRepo *database.ActressRepository
+	if cfg != nil && cfg.Metadata.ActressDatabase.Enabled {
+		actressRepo = database.NewActressRepository(movieRepo.GetDB())
+	}
 
 	if !skipCache {
-		logging.Debugf("[Batch %s] File %d: Checking cache for %s", job.ID, fileIndex, movieID)
-		cached, err := movieRepo.FindByID(movieID)
-		if err != nil {
-			if !database.IsNotFound(err) {
-				return nil, nil, fmt.Errorf("cache lookup failed for %s: %w", movieID, err)
-			}
-			logging.Debugf("[Batch %s] File %d: %s not found in cache, will scrape", job.ID, fileIndex, movieID)
-		} else {
-			logging.Debugf("[Batch %s] File %d: Found %s in cache (Title=%s, Maker=%s)",
-				job.ID, fileIndex, movieID, cached.Title, cached.Maker)
-
-			// IMPORTANT: Generate temp poster for review page even when using cache
-			// This ensures multi-part files (CD1/CD2/CD3) all have accessible posters
-			// Without this, cached results would have 404 poster URLs
-			var posterErr *string
-			if httpClient != nil {
-				shouldGenerate := true
-
-				// If processedMovieIDs tracking is enabled, check if we've already generated this poster
-				if processedMovieIDs != nil {
-					processedMovieIDsMutex.Lock()
-					shouldGenerate = !processedMovieIDs[cached.ID]
-					if shouldGenerate {
-						processedMovieIDs[cached.ID] = true
-					}
-					processedMovieIDsMutex.Unlock()
-				}
-
-				if shouldGenerate {
-					if tempPosterURL, err := GenerateTempPoster(ctx, job.ID, cached, httpClient, userAgent, referer, downloader.ResolveMediaReferer, cfg.System.TempDir); err != nil {
-						logging.Warnf("[Batch %s] File %d: Failed to create temp poster for cached movie: %v", job.ID, fileIndex, err)
-						errMsg := err.Error()
-						posterErr = &errMsg
-					} else {
-						cached.CroppedPosterURL = tempPosterURL
-					}
-				} else {
-					// Check if temp poster file exists (may have been cleaned up after previous job)
-					tempPosterPath := filepath.Join(cfg.System.TempDir, "posters", job.ID, cached.ID+".jpg")
-					if _, err := os.Stat(tempPosterPath); err != nil {
-						// Temp poster doesn't exist - regenerate it
-						logging.Debugf("[Batch %s] File %d: Temp poster missing for %s, regenerating", job.ID, fileIndex, cached.ID)
-						if tempPosterURL, err := GenerateTempPoster(ctx, job.ID, cached, httpClient, userAgent, referer, downloader.ResolveMediaReferer, cfg.System.TempDir); err != nil {
-							logging.Warnf("[Batch %s] File %d: Failed to regenerate temp poster: %v", job.ID, fileIndex, err)
-							errMsg := err.Error()
-							posterErr = &errMsg
-						} else {
-							cached.CroppedPosterURL = tempPosterURL
-						}
-					} else {
-						// Reuse already-generated temp poster URL for multi-part files
-						cached.CroppedPosterURL = fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg", job.ID, cached.ID)
-					}
-				}
-			}
-
-			movieToReturn := cached
-			fieldSources := buildFieldSourcesFromCachedMovie(cached)
-			actressSources := buildActressSourcesFromCachedMovie(cached)
-			displayTitleApplied := false
-			if updateMode && cfg != nil {
-				logging.Debugf("[Batch %s] File %d: Update mode enabled with cache hit, checking for existing NFO to merge", job.ID, fileIndex)
-
-				sourceDir := filepath.Dir(filePath)
-				isMultiPart := matchResultPtr != nil && matchResultPtr.IsMultiPart
-				var partSuffix string
-				if isMultiPart {
-					partSuffix = matchResultPtr.PartSuffix
-				}
-				nfoPath, legacyPaths := nfo.ResolveNFOPath(sourceDir, cached, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Metadata.NFO.PerFile, isMultiPart, partSuffix, filePath)
-
-				// Check if NFO exists
-				foundPath := ""
-				if _, err := os.Stat(nfoPath); err == nil {
-					foundPath = nfoPath
-				} else {
-					for _, legacyPath := range legacyPaths {
-						if _, err := os.Stat(legacyPath); err == nil {
-							foundPath = legacyPath
-							logging.Debugf("[Batch %s] File %d: Found NFO at legacy path: %s", job.ID, fileIndex, legacyPath)
-							break
-						}
-					}
-				}
-
-				if foundPath != "" {
-					// NFO exists - parse and merge with cached data
-					logging.Infof("[Batch %s] File %d: Found existing NFO, merging with cached data: %s", job.ID, fileIndex, foundPath)
-					logging.Infof("[Batch %s] File %d: *** DEBUG *** Scalar=%s Array=%s", job.ID, fileIndex, scalarStrategy, arrayStrategy)
-
-					parseResult, err := nfo.ParseNFO(afero.NewOsFs(), foundPath)
-					if err != nil {
-						logging.Warnf("[Batch %s] File %d: Failed to parse existing NFO %s: %v (will use cached data only)", job.ID, fileIndex, foundPath, err)
-					} else {
-						// Merge with user-selected strategies for Update Mode
-						scalar := nfo.ParseScalarStrategy(scalarStrategy)
-						mergeArrays := nfo.ParseArrayStrategy(arrayStrategy)
-						logging.Debugf("[Batch %s] File %d: Parsed scalar strategy: %v (from string: %s)", job.ID, fileIndex, scalar, scalarStrategy)
-						mergeResult, err := nfo.MergeMovieMetadataWithOptions(cached, parseResult.Movie, scalar, mergeArrays)
-						if err != nil {
-							logging.Warnf("[Batch %s] File %d: Failed to merge NFO data for %s: %v (using cached data only)", job.ID, fileIndex, cached.ID, err)
-						} else {
-							movieToReturn = mergeResult.Merged
-							fieldSources = applyNFOMergeProvenance(fieldSources, mergeResult.Provenance)
-							actressSources = applyActressMergeProvenance(actressSources, mergeResult.Provenance, movieToReturn.Actresses)
-							logging.Infof("[Batch %s] File %d: NFO merge complete for cached %s: %d from cache, %d from NFO, %d conflicts resolved",
-								job.ID, fileIndex, cached.ID, mergeResult.Stats.FromScraper, mergeResult.Stats.FromNFO, mergeResult.Stats.ConflictsResolved)
-
-							if cfg != nil && cfg.Metadata.NFO.DisplayTitle != "" {
-								displayTmplEngine := job.TemplateEngine()
-								displayCtx := template.NewContextFromMovie(movieToReturn)
-								displayCtx.Title = cached.Title
-								if displayName, err := displayTmplEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, displayCtx); err == nil {
-									movieToReturn.DisplayTitle = displayName
-								} else if movieToReturn.DisplayTitle == "" {
-									movieToReturn.DisplayTitle = movieToReturn.Title
-								}
-							} else if movieToReturn.DisplayTitle == "" {
-								movieToReturn.DisplayTitle = movieToReturn.Title
-							}
-							displayTitleApplied = true
-						}
-					}
-				} else {
-					logging.Debugf("[Batch %s] File %d: No existing NFO found, using cached data only", job.ID, fileIndex)
-				}
-			}
-
-			if !displayTitleApplied {
-				if cfg != nil && cfg.Metadata.NFO.DisplayTitle != "" {
-					displayTmplEngine := job.TemplateEngine()
-					displayCtx := template.NewContextFromMovie(cached)
-					if displayName, err := displayTmplEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, displayCtx); err == nil {
-						movieToReturn.DisplayTitle = displayName
-					} else if movieToReturn.DisplayTitle == "" {
-						movieToReturn.DisplayTitle = movieToReturn.Title
-					}
-				} else if movieToReturn.DisplayTitle == "" {
-					movieToReturn.DisplayTitle = movieToReturn.Title
-				}
-			}
-
-			now := time.Now()
-			fileResult := &FileResult{
-				FilePath:       filePath,
-				MovieID:        movieID,
-				Status:         JobStatusCompleted,
-				Data:           movieToReturn,
-				FieldSources:   fieldSources,
-				ActressSources: actressSources,
-				PosterError:    posterErr,
-				StartedAt:      startTime,
-				EndedAt:        &now,
-			}
-
-			// Populate multi-part fields (only valid if not using query override)
-			if matchResultPtr != nil {
-				fileResult.IsMultiPart = matchResultPtr.IsMultiPart
-				fileResult.PartNumber = matchResultPtr.PartNumber
-				fileResult.PartSuffix = matchResultPtr.PartSuffix
-			}
-
-			return movieToReturn, fileResult, nil
+		cachedMovie, cachedResult, cacheErr := handleCacheHit(ctx, job, filePath, fileIndex, query.movieID, query.matchResultPtr, movieRepo, actressRepo, httpClient, userAgent, referer, processedMovieIDs, cfg, updateMode, scalarStrategy, arrayStrategy, startTime)
+		if cachedResult != nil {
+			return cachedMovie, cachedResult, nil
 		}
-	} else if force {
-		// Clear cache if force refresh
-		logging.Debugf("[Batch %s] File %d: Force refresh enabled, clearing cache for %s", job.ID, fileIndex, movieID)
-		if err := movieRepo.Delete(movieID); err != nil {
-			logging.Debugf("[Batch %s] File %d: Cache delete failed (movie may not exist): %v", job.ID, fileIndex, err)
-		}
-	} else if usingCustomScrapers {
-		logging.Debugf("[Batch %s] File %d: Custom scrapers specified, bypassing cache", job.ID, fileIndex)
-	}
-
-	// Step 3: Perform DMM content-ID resolution (only if not using manual query)
-	shouldResolveDMMContentID := queryOverride == "" && !matcherMissFallback &&
-		(len(selectedScrapers) == 0 || scraperListContains(selectedScrapers, "dmm"))
-	if shouldResolveDMMContentID {
-		if dmmScraper, exists := registry.Get("dmm"); exists {
-			if !dmmScraper.IsEnabled() {
-				logging.Debugf("[Batch %s] File %d: DMM scraper disabled, skipping content-ID resolution", job.ID, fileIndex)
-				resolvedID = movieID
-			} else if resolver, ok := dmmScraper.(models.ContentIDResolver); ok {
-				contentID, err := resolver.ResolveContentID(movieID)
-				if err != nil {
-					logging.Debugf("[Batch %s] File %d: DMM content-ID resolution failed for %s: %v, using original ID",
-						job.ID, fileIndex, movieID, err)
-					resolvedID = movieID // Fallback to original ID
-				} else {
-					resolvedID = contentID
-					logging.Debugf("[Batch %s] File %d: Resolved content-ID for %s: %s",
-						job.ID, fileIndex, movieID, resolvedID)
-				}
-			} else {
-				logging.Debugf("[Batch %s] File %d: DMM scraper does not implement ContentIDResolver, using original ID", job.ID, fileIndex)
-				resolvedID = movieID
-			}
-		} else {
-			logging.Debugf("[Batch %s] File %d: DMM scraper not available, using original ID", job.ID, fileIndex)
-			resolvedID = movieID
+		if cacheErr != nil {
+			return nil, nil, cacheErr
 		}
 	} else {
-		// Manual query OR custom scraper set that does not include DMM.
-		if queryOverride == "" && len(selectedScrapers) > 0 && !scraperListContains(selectedScrapers, "dmm") {
-			logging.Debugf("[Batch %s] File %d: Skipping DMM content-ID resolution (DMM not selected in custom scrapers)", job.ID, fileIndex)
-		}
-		resolvedID = movieID
-	}
-
-	// Step 4: Query scrapers (use selectedScrapers if provided, otherwise use registry defaults)
-	results := make([]*models.ScraperResult, 0)
-	scraperFailures := make([]scraperFailure, 0)
-
-	// Determine scraper order for this run.
-	// - Custom mode: use user-selected scrapers (selectedScrapers)
-	// - Priority override mode: use scraperPriorityOverride (URL filtering, etc.)
-	// - Default mode: use configured global priority (cfg.Scrapers.Priority)
-	// - Fallback: use registry enabled order if config priority is unavailable
-	var scraperNames []string
-	if len(selectedScrapers) > 0 {
-		scraperNames = selectedScrapers
-		logging.Debugf("[Batch %s] File %d: Using custom scraper priority: %v", job.ID, fileIndex, selectedScrapers)
-	} else if len(scraperPriorityOverride) > 0 {
-		scraperNames = scraperPriorityOverride
-		logging.Debugf("[Batch %s] File %d: Using priority override (URL-filtered): %v", job.ID, fileIndex, scraperPriorityOverride)
-	} else {
-		if cfg != nil && len(cfg.Scrapers.Priority) > 0 {
-			scraperNames = cfg.Scrapers.Priority
-			logging.Debugf("[Batch %s] File %d: Using configured scraper priority: %v", job.ID, fileIndex, scraperNames)
-		} else {
-			scraperNames = nil // Explicitly pass nil to use registry defaults
-			logging.Debugf("[Batch %s] File %d: Using registry default scraper priority", job.ID, fileIndex)
+		clearCacheIfForced(job, fileIndex, query.movieID, force, movieRepo)
+		if usingCustomScrapers {
+			logging.Debugf("[Batch %s] File %d: Custom scrapers specified, bypassing cache", job.ID, fileIndex)
 		}
 	}
 
-	// GetByPriority returns all enabled scrapers when passed nil.
-	priorityInput := movieID
-	if rawFilenameQuery != "" {
-		priorityInput = rawFilenameQuery
-	}
-	scrapersToUse := registry.GetByPriorityForInput(scraperNames, priorityInput)
+	query.resolvedID = resolveDMMContentID(job, fileIndex, query.movieID, queryOverride, query.matcherMissFallback, selectedScrapers, registry, query)
 
-	// If matcher fallback is active, route only to scrapers that explicitly
-	// claim support for this input via ScraperQueryResolver.
-	if matcherMissFallback {
-		matchedScrapers := make([]models.Scraper, 0, len(scrapersToUse))
-		for _, scraper := range scrapersToUse {
-			if _, ok := resolveScraperQueryForInputs(scraper, rawFilenameQuery, movieID); ok {
-				matchedScrapers = append(matchedScrapers, scraper)
-			}
-		}
-
-		if len(matchedScrapers) == 0 {
-			errMsg := fmt.Sprintf("No scraper query resolver matched filename input: %s", movieID)
-			logging.Debugf("[Batch %s] File %d: %s", job.ID, fileIndex, errMsg)
-			now := time.Now()
-			return nil, &FileResult{
-				FilePath:  filePath,
-				MovieID:   movieID,
-				Status:    JobStatusFailed,
-				Error:     errMsg,
-				StartedAt: startTime,
-				EndedAt:   &now,
-			}, errors.New(errMsg)
-		}
-
-		scrapersToUse = matchedScrapers
-		logging.Debugf("[Batch %s] File %d: Routed filename input %s to resolver-matched scrapers: %d",
-			job.ID, fileIndex, movieID, len(scrapersToUse))
-	}
-	logging.Debugf("[Batch %s] File %d: Resolved to %d scrapers", job.ID, fileIndex, len(scrapersToUse))
-
-	for _, scraper := range scrapersToUse {
-		// Check for context cancellation
-		select {
-		case <-ctx.Done():
-			logging.Debugf("[Batch %s] File %d: Context cancelled", job.ID, fileIndex)
-			now := time.Now()
-			return nil, &FileResult{
-				FilePath:  filePath,
-				MovieID:   movieID,
-				Status:    JobStatusCancelled,
-				Error:     "Cancelled by user",
-				StartedAt: startTime,
-				EndedAt:   &now,
-			}, ctx.Err()
-		default:
-		}
-
-		// Step 4.5: Try direct URL scraping if input is a URL
-		// queryOverride contains the URL when user provides URL input
-		if queryOverride != "" {
-			// Check if this scraper can handle the URL and supports direct scraping
-			if handler, ok := scraper.(models.URLHandler); ok && handler.CanHandleURL(queryOverride) {
-				if directScraper, ok := scraper.(models.DirectURLScraper); ok {
-					logging.Debugf("[Batch %s] File %d: Trying direct URL scrape for %s",
-						job.ID, fileIndex, scraper.Name())
-
-					scraperResult, err := safeScrapeURL(ctx, directScraper, queryOverride)
-					if err == nil {
-						// Success - use direct scrape result
-						logging.Debugf("[Batch %s] File %d: Direct URL scrape succeeded for %s",
-							job.ID, fileIndex, scraper.Name())
-						results = append(results, scraperResult)
-						continue // Skip to next scraper
-					}
-
-					// Failed - classify error and log fallback reason
-					if scraperErr, ok := models.AsScraperError(err); ok {
-						if scraperErr.Kind == models.ScraperErrorKindNotFound {
-							logging.Debugf("[Batch %s] File %d: Direct URL not found, falling back to ID search",
-								job.ID, fileIndex)
-						} else {
-							logging.Debugf("[Batch %s] File %d: Direct URL scrape failed (%s), falling back to ID search",
-								job.ID, fileIndex, scraperErr.Kind)
-						}
-					} else {
-						logging.Debugf("[Batch %s] File %d: Direct URL scrape failed: %v, falling back to ID search",
-							job.ID, fileIndex, err)
-					}
-				}
-			}
-		}
-
-		scraperQuery := resolvedID
-		if mappedQuery, ok := resolveScraperQueryForInputs(scraper, rawFilenameQuery, movieID, resolvedID); ok {
-			scraperQuery = mappedQuery
-		}
-		if scraperQuery != movieID {
-			logging.Debugf("[Batch %s] File %d: Scraper %s using resolvedID %q instead of movieID %q",
-				job.ID, fileIndex, scraper.Name(), scraperQuery, movieID)
-		}
-
-		logging.Debugf("[Batch %s] File %d: Querying scraper %s for %s", job.ID, fileIndex, scraper.Name(), scraperQuery)
-		scraperResult, err := safeSearch(ctx, scraper, scraperQuery)
-		if err != nil {
-			// Check if error is due to context cancellation
-			if err == ctx.Err() {
-				logging.Debugf("[Batch %s] File %d: Context cancelled during scraper %s", job.ID, fileIndex, scraper.Name())
-				now := time.Now()
-				return nil, &FileResult{
-					FilePath:  filePath,
-					MovieID:   movieID,
-					Status:    JobStatusCancelled,
-					Error:     "Cancelled by user",
-					StartedAt: startTime,
-					EndedAt:   &now,
-				}, ctx.Err()
-			}
-
-			logging.Debugf("[Batch %s] File %d: Scraper %s failed: %v", job.ID, fileIndex, scraper.Name(), err)
-
-			// If scraping with resolved ID fails, try with original ID before giving up
-			// (but only if we're not using a manual query override)
-			if scraperQuery != movieID && queryOverride == "" {
-				logging.Debugf("[Batch %s] File %d: Retrying scraper %s with original ID: %s",
-					job.ID, fileIndex, scraper.Name(), movieID)
-				scraperResult, err = safeSearch(ctx, scraper, movieID)
-				if err != nil {
-					// Check if error is due to context cancellation
-					if err == ctx.Err() {
-						logging.Debugf("[Batch %s] File %d: Context cancelled during scraper %s retry", job.ID, fileIndex, scraper.Name())
-						now := time.Now()
-						return nil, &FileResult{
-							FilePath:  filePath,
-							MovieID:   movieID,
-							Status:    JobStatusCancelled,
-							Error:     "Cancelled by user",
-							StartedAt: startTime,
-							EndedAt:   &now,
-						}, ctx.Err()
-					}
-
-					logging.Debugf("[Batch %s] File %d: Scraper %s failed with original ID: %v",
-						job.ID, fileIndex, scraper.Name(), err)
-					scraperFailures = append(scraperFailures, scraperFailure{
-						Scraper: scraper.Name(),
-						Err:     err,
-					})
-					continue
-				}
-			} else {
-				scraperFailures = append(scraperFailures, scraperFailure{
-					Scraper: scraper.Name(),
-					Err:     err,
-				})
-				continue
-			}
-		}
-
-		logging.Debugf("[Batch %s] File %d: Scraper %s returned: Title=%s, Language=%s, Actresses=%d, Genres=%d",
-			job.ID, fileIndex, scraper.Name(), scraperResult.Title, scraperResult.Language,
-			len(scraperResult.Actresses), len(scraperResult.Genres))
-		results = append(results, scraperResult)
+	results, scraperFailures, cancelResult, queryErr := queryScrapers(ctx, job, filePath, fileIndex, query, queryOverride, registry, selectedScrapers, scraperPriorityOverride, cfg, startTime)
+	if cancelResult != nil {
+		return nil, cancelResult, queryErr
 	}
 
-	// Step 5: Check if any scrapers succeeded
 	if len(results) == 0 {
 		errMsg := buildScraperNoResultsError(scraperFailures)
-		logging.Debugf("[Batch %s] File %d: No results from any scraper for %s", job.ID, fileIndex, movieID)
-
-		now := time.Now()
-		return nil, &FileResult{
-			FilePath:  filePath,
-			MovieID:   movieID,
-			Status:    JobStatusFailed,
-			Error:     errMsg,
-			StartedAt: startTime,
-			EndedAt:   &now,
-		}, errors.New(errMsg)
+		logging.Debugf("[Batch %s] File %d: No results from any scraper for %s", job.ID, fileIndex, query.movieID)
+		return nil, newFailedFileResult(filePath, query.movieID, errMsg, startTime), errors.New(errMsg)
 	}
 
 	logging.Debugf("[Batch %s] File %d: Collected %d results from scrapers", job.ID, fileIndex, len(results))
 
-	// Step 6: Aggregate results
-	logging.Debugf("[Batch %s] File %d: Starting metadata aggregation", job.ID, fileIndex)
-
-	var (
-		movie              *models.Movie
-		translationWarning string
-		err                error
-	)
+	var movie *models.Movie
+	var translationWarning string
 	if usingCustomScrapers {
-		logging.Debugf("[Batch %s] File %d: Using custom scraper priority: %v", job.ID, fileIndex, selectedScrapers)
 		movie, translationWarning, err = agg.AggregateWithPriority(results, selectedScrapers)
 	} else {
 		movie, translationWarning, err = agg.Aggregate(results)
@@ -655,238 +178,38 @@ func RunBatchScrapeOnce(
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to aggregate: %v", err)
 		logging.Debugf("[Batch %s] File %d: Aggregation failed: %v", job.ID, fileIndex, err)
-
-		now := time.Now()
-		fileResult := &FileResult{
-			FilePath:  filePath,
-			MovieID:   movieID,
-			Status:    JobStatusFailed,
-			Error:     errMsg,
-			StartedAt: startTime,
-			EndedAt:   &now,
-		}
-		if translationWarning != "" {
-			fileResult.TranslationWarning = &translationWarning
-		}
-		return nil, fileResult, errors.New(errMsg)
+		return nil, newAggregationFailedResult(filePath, query.movieID, errMsg, translationWarning, startTime), errors.New(errMsg)
 	}
 
 	logging.Debugf("[Batch %s] File %d: Aggregation complete - Title: %s, Maker: %s, Actresses: %d, Genres: %d",
 		job.ID, fileIndex, movie.Title, movie.Maker, len(movie.Actresses), len(movie.Genres))
 
-	// ContentID fallback is applied post-aggregation because DMM-resolved ID
-	// is a synthetic value that should not influence field-level priority merging.
-	if movie.ContentID == "" && resolvedID != "" && resolvedID != movieID {
-		movie.ContentID = resolvedID
+	if movie.ContentID == "" && query.resolvedID != "" && query.resolvedID != query.movieID {
+		movie.ContentID = query.resolvedID
 		logging.Debugf("[Batch %s] File %d: Using DMM-resolved ContentID %q as fallback (aggregator produced empty ContentID)",
-			job.ID, fileIndex, resolvedID)
+			job.ID, fileIndex, query.resolvedID)
 	}
 
-	// Track which scraper won each field for frontend debugging display.
 	fieldSources := buildFieldSourcesFromScrapeResults(results, agg.GetResolvedPriorities(), selectedScrapers)
 	actressSources := buildActressSourcesFromScrapeResults(results, agg.GetResolvedPriorities(), selectedScrapers, movie.Actresses)
-
-	// Set original filename for tracking
 	movie.OriginalFileName = filepath.Base(filePath)
 
-	// Step 6.5: NFO Merge (if updateMode is true)
-	preMergeMovie := movie
+	if actressRepo != nil {
+		if enriched := EnrichActressesFromDB(movie, actressRepo, cfg); enriched > 0 {
+			logging.Debugf("[Batch %s] File %d: Enriched %d actresses from database after aggregation", job.ID, fileIndex, enriched)
+		}
+	}
+
 	if updateMode && cfg != nil {
-		logging.Debugf("[Batch %s] File %d: Update mode enabled, checking for existing NFO to merge", job.ID, fileIndex)
-
-		sourceDir := filepath.Dir(filePath)
-		isMultiPart := matchResultPtr != nil && matchResultPtr.IsMultiPart
-		var partSuffix string
-		if isMultiPart {
-			partSuffix = matchResultPtr.PartSuffix
-		}
-		nfoPath, legacyPaths := nfo.ResolveNFOPath(sourceDir, movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Metadata.NFO.PerFile, isMultiPart, partSuffix, filePath)
-
-		// Check if NFO exists (try template path first, then legacy)
-		foundPath := ""
-		if _, err := os.Stat(nfoPath); err == nil {
-			foundPath = nfoPath
-		} else {
-			for _, legacyPath := range legacyPaths {
-				if _, err := os.Stat(legacyPath); err == nil {
-					foundPath = legacyPath
-					logging.Debugf("[Batch %s] File %d: Found NFO at legacy path: %s", job.ID, fileIndex, legacyPath)
-					break
-				}
+		movie, fieldSources, actressSources = mergeScrapedNFO(ctx, job, fileIndex, filePath, movie, query.matchResultPtr, cfg, scalarStrategy, arrayStrategy, fieldSources, actressSources)
+		if actressRepo != nil {
+			if enriched := EnrichActressesFromDB(movie, actressRepo, cfg); enriched > 0 {
+				logging.Debugf("[Batch %s] File %d: Enriched %d actresses from database after NFO merge", job.ID, fileIndex, enriched)
 			}
-		}
-
-		if foundPath != "" {
-			// NFO exists - parse and merge
-			logging.Infof("[Batch %s] File %d: Found existing NFO, merging data: %s", job.ID, fileIndex, foundPath)
-
-			parseResult, err := nfo.ParseNFO(afero.NewOsFs(), foundPath)
-			if err != nil {
-				logging.Warnf("[Batch %s] File %d: Failed to parse existing NFO %s: %v (will use scraper data only)", job.ID, fileIndex, foundPath, err)
-			} else {
-				// Merge with user-selected strategies for Update Mode
-				scalar := nfo.ParseScalarStrategy(scalarStrategy)
-				mergeArrays := nfo.ParseArrayStrategy(arrayStrategy)
-				mergeResult, err := nfo.MergeMovieMetadataWithOptions(movie, parseResult.Movie, scalar, mergeArrays)
-				if err != nil {
-					logging.Warnf("[Batch %s] File %d: Failed to merge NFO data for %s: %v (using scraper data only)", job.ID, fileIndex, movie.ID, err)
-				} else {
-					movie = mergeResult.Merged
-					fieldSources = applyNFOMergeProvenance(fieldSources, mergeResult.Provenance)
-					actressSources = applyActressMergeProvenance(actressSources, mergeResult.Provenance, movie.Actresses)
-					logging.Infof("[Batch %s] File %d: NFO merge complete for %s: %d from scraper, %d from NFO, %d conflicts resolved",
-						job.ID, fileIndex, movie.ID, mergeResult.Stats.FromScraper, mergeResult.Stats.FromNFO, mergeResult.Stats.ConflictsResolved)
-
-					if cfg != nil && cfg.Metadata.NFO.DisplayTitle != "" {
-						displayTmplEngine := job.TemplateEngine()
-						displayCtx := template.NewContextFromMovie(movie)
-						displayCtx.Title = preMergeMovie.Title
-						if displayName, err := displayTmplEngine.ExecuteWithContext(ctx, cfg.Metadata.NFO.DisplayTitle, displayCtx); err == nil {
-							movie.DisplayTitle = displayName
-						} else if movie.DisplayTitle == "" {
-							movie.DisplayTitle = movie.Title
-						}
-					} else if movie.DisplayTitle == "" {
-						movie.DisplayTitle = movie.Title
-					}
-				}
-			}
-		} else {
-			logging.Debugf("[Batch %s] File %d: No existing NFO found, using scraper data only", job.ID, fileIndex)
 		}
 	}
 
-	// Step 7: Download and crop poster temporarily for review page
-	// Skip if we've already processed this movie ID (for multi-part files)
-	var posterErr *string
-	if httpClient != nil {
-		shouldGeneratePoster := true
+	posterErr := generateScrapedPoster(ctx, job, fileIndex, movie, httpClient, userAgent, referer, processedMovieIDs, cfg)
 
-		// Check if we've already generated a poster for this movie ID (thread-safe)
-		if processedMovieIDs != nil {
-			processedMovieIDsMutex.Lock()
-			if processedMovieIDs[movie.ID] {
-				shouldGeneratePoster = false
-				logging.Debugf("[Batch %s] File %d: Skipping poster generation for %s (already processed for multi-part file)",
-					job.ID, fileIndex, movie.ID)
-			} else {
-				// Mark this movie ID as processed
-				processedMovieIDs[movie.ID] = true
-			}
-			processedMovieIDsMutex.Unlock()
-		}
-
-		if shouldGeneratePoster {
-			if tempPosterURL, err := GenerateTempPoster(ctx, job.ID, movie, httpClient, userAgent, referer, downloader.ResolveMediaReferer, cfg.System.TempDir); err != nil {
-				logging.Warnf("[Batch %s] File %d: Failed to create temp poster: %v (continuing anyway)", job.ID, fileIndex, err)
-				errMsg := err.Error()
-				posterErr = &errMsg
-				// Continue - temp poster is optional for review
-			} else {
-				// Set the temp poster URL so frontend can display it
-				movie.CroppedPosterURL = tempPosterURL
-			}
-		} else {
-			// For multi-part files that skip generation, set the temp poster URL to the already-generated one
-			// This ensures all parts of a multi-part file show the same poster in the review page
-			movie.CroppedPosterURL = fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg", job.ID, movie.ID)
-		}
-	}
-
-	// Step 8: Save to database (KEEP THIS - Option A: maintain consistency with batch scraping)
-	// We save immediately even though organize hasn't happened yet
-	var finalMovie *models.Movie
-	if !usingCustomScrapers {
-		if movie.ID == "" && movie.ContentID == "" {
-			logging.Warnf("[Batch %s] File %d: Critical - aggregated movie has empty ID and ContentID (resolvedID=%q, movieID=%q, scraperResults=%d)",
-				job.ID, fileIndex, resolvedID, movieID, len(results))
-			for i, r := range results {
-				logging.Debugf("[Batch %s] File %d: Result[%d] source=%s, ID=%q, ContentID=%q, Title=%q",
-					job.ID, fileIndex, i, r.Source, r.ID, r.ContentID, r.Title)
-			}
-		}
-		if movie.Title == "" {
-			logging.Warnf("[Batch %s] File %d: Aggregated movie has empty Title (resolvedID=%q, movieID=%q, scraperResults=%d)",
-				job.ID, fileIndex, resolvedID, movieID, len(results))
-			for i, r := range results {
-				logging.Debugf("[Batch %s] File %d: Result[%d] source=%s, Title=%q, Maker=%q, Genres=%d",
-					job.ID, fileIndex, i, r.Source, r.Title, r.Maker, len(r.Genres))
-			}
-		}
-		logging.Debugf("[Batch %s] File %d: Saving metadata to database", job.ID, fileIndex)
-
-		// IMPORTANT: Don't save temp poster URLs to database
-		// Temp posters are ephemeral and cleaned up after job completion
-		// Only persistent poster URLs (created during organize workflow) should be stored in the database
-		tempPosterURL := movie.CroppedPosterURL
-		movie.CroppedPosterURL = "" // Clear temp URL before saving
-
-		savedMovie, err := movieRepo.Upsert(movie)
-		if err != nil {
-			logging.Errorf("[Batch %s] File %d: Database save failed: %v", job.ID, fileIndex, err)
-		} else {
-			logging.Debugf("[Batch %s] File %d: Successfully saved to database", job.ID, fileIndex)
-		}
-
-		// Restore temp URL for the FileResult (needed for review page display)
-		movie.CroppedPosterURL = tempPosterURL
-
-		// Step 9: Use the saved movie from Upsert (already has associations loaded)
-		if savedMovie != nil {
-			finalMovie = savedMovie
-			if movie.DisplayTitle != "" {
-				finalMovie.DisplayTitle = movie.DisplayTitle
-			}
-			finalMovie.CroppedPosterURL = movie.CroppedPosterURL
-			logging.Debugf("[Batch %s] File %d: Using saved movie from Upsert with associations", job.ID, fileIndex)
-		} else {
-			reloadedMovie, reloadErr := movieRepo.FindByID(movie.ID)
-			if reloadErr == nil {
-				finalMovie = reloadedMovie
-				if movie.DisplayTitle != "" {
-					finalMovie.DisplayTitle = movie.DisplayTitle
-				}
-				finalMovie.CroppedPosterURL = movie.CroppedPosterURL
-			} else {
-				logging.Debugf("[Batch %s] File %d: Failed to reload movie from database: %v", job.ID, fileIndex, reloadErr)
-				finalMovie = movie
-			}
-		}
-	} else {
-		// Custom scraper mode: Use aggregated movie directly without database reload.
-		// This is intentional - custom scraper results are temporary (not persisted to DB)
-		// and the Movie object contains all necessary data from the aggregator.
-		// Note: ORM associations (Actresses, Genres) won't be lazily loaded since the
-		// movie is not from the database, but all data is already populated by the aggregator.
-		finalMovie = movie
-	}
-
-	// Step 10: Create completed FileResult (caller will update job state)
-	now := time.Now()
-	fileResult := &FileResult{
-		FilePath:       filePath,
-		MovieID:        movieID,
-		Status:         JobStatusCompleted,
-		Data:           finalMovie,
-		FieldSources:   fieldSources,
-		ActressSources: actressSources,
-		PosterError:    posterErr,
-		StartedAt:      startTime,
-		EndedAt:        &now,
-	}
-
-	if translationWarning != "" {
-		fileResult.TranslationWarning = &translationWarning
-	}
-
-	// Populate multi-part fields (only valid if not using query override)
-	if matchResultPtr != nil {
-		fileResult.IsMultiPart = matchResultPtr.IsMultiPart
-		fileResult.PartNumber = matchResultPtr.PartNumber
-		fileResult.PartSuffix = matchResultPtr.PartSuffix
-	}
-
-	logging.Debugf("[Batch %s] File %d: Scrape completed successfully", job.ID, fileIndex)
-
-	return finalMovie, fileResult, nil
+	return saveScrapedResult(job, fileIndex, filePath, movie, query.movieID, query.resolvedID, results, usingCustomScrapers, movieRepo, fieldSources, actressSources, posterErr, translationWarning, query.matchResultPtr, startTime)
 }

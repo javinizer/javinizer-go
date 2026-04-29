@@ -23,7 +23,6 @@ import (
 const defaultBaseURL = "https://www.tokyo-hot.com"
 
 var (
-	nonAlphaNumRegex  = regexp.MustCompile(`[^a-z0-9]+`)
 	runtimeRegex      = regexp.MustCompile(`(\d{1,3})`)
 	timeRuntimeRegex  = regexp.MustCompile(`(\d{1,2}):(\d{2}):(\d{2})`)
 	dateRegex         = regexp.MustCompile(`(\d{4}/\d{2}/\d{2}|\d{4}-\d{2}-\d{2})`)
@@ -102,7 +101,7 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 		return "", false
 	}
 
-	if isHTTPURL(input) && s.CanHandleURL(input) {
+	if scraperutil.IsHTTPURL(input) && s.CanHandleURL(input) {
 		id, err := s.ExtractIDFromURL(input)
 		if err == nil && id != "" {
 			return id, true
@@ -203,15 +202,15 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 }
 
 func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLWithContext(context.Background(), id)
+	return s.getURLCtx(context.Background(), id)
 }
 
-func (s *Scraper) getURLWithContext(ctx context.Context, id string) (string, error) {
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
 	}
-	if isHTTPURL(id) {
+	if scraperutil.IsHTTPURL(id) {
 		return s.applyLanguage(id), nil
 	}
 
@@ -229,7 +228,7 @@ func (s *Scraper) getURLWithContext(ctx context.Context, id string) (string, err
 		return "", fmt.Errorf("failed to parse TokyoHot search page: %w", err)
 	}
 
-	targetID := normalizeID(id)
+	targetID := scraperutil.NormalizeID(id)
 	var found string
 	doc.Find("a[href*='/product/']").EachWithBreak(func(_ int, a *goquery.Selection) bool {
 		href := strings.TrimSpace(a.AttrOr("href", ""))
@@ -242,7 +241,7 @@ func (s *Scraper) getURLWithContext(ctx context.Context, id string) (string, err
 		if cand == "" {
 			cand = extractID(href)
 		}
-		if cand != "" && normalizeID(cand) == targetID {
+		if cand != "" && scraperutil.NormalizeID(cand) == targetID {
 			found = scraperutil.ResolveURL(s.baseURL, href)
 			return false
 		}
@@ -278,7 +277,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("TokyoHot scraper is disabled")
 	}
 
-	detailURL, err := s.getURLWithContext(ctx, id)
+	detailURL, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +444,7 @@ func extractActresses(doc *goquery.Document) []models.ActressInfo {
 			}
 			seen[name] = true
 			info := models.ActressInfo{}
-			if hasJapanese(name) {
+			if scraperutil.HasJapanese(name) {
 				info.JapaneseName = name
 			} else {
 				parts := strings.Fields(name)
@@ -616,32 +615,10 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 	return html, resp.StatusCode(), nil
 }
 
-func normalizeID(v string) string {
-	v = strings.ToLower(strings.TrimSpace(v))
-	return nonAlphaNumRegex.ReplaceAllString(v, "")
-}
-
 func extractID(v string) string {
 	m := regexp.MustCompile(`([A-Za-z]+-?\d+[A-Za-z]?)`).FindStringSubmatch(v)
 	if len(m) > 1 {
 		return strings.ToUpper(strings.ReplaceAll(m[1], "_", "-"))
 	}
 	return ""
-}
-
-func hasJapanese(v string) bool {
-	for _, r := range v {
-		if unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han) {
-			return true
-		}
-	}
-	return false
-}
-
-func isHTTPURL(v string) bool {
-	u, err := url.Parse(strings.TrimSpace(v))
-	if err != nil {
-		return false
-	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }

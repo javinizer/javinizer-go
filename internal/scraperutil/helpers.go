@@ -2,8 +2,10 @@ package scraperutil
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 func CleanString(v string) string {
@@ -44,6 +46,30 @@ func ParseDate(s string) *time.Time {
 }
 
 func IntPtr(i int) *int { return &i }
+
+var nonAlphaNumRegex = regexp.MustCompile(`[^a-z0-9]+`)
+
+func NormalizeID(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	return nonAlphaNumRegex.ReplaceAllString(v, "")
+}
+
+func HasJapanese(v string) bool {
+	for _, r := range v {
+		if unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsHTTPURL(v string) bool {
+	u, err := url.Parse(strings.TrimSpace(v))
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
 
 func ResolveURL(base, raw string) string {
 	raw = strings.TrimSpace(raw)

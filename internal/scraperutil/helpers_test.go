@@ -199,3 +199,75 @@ func datePtr(year int, month time.Month, day int) *time.Time {
 	t := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 	return &t
 }
+
+func TestNormalizeID(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"standard format", "IPX-123", "ipx123"},
+		{"with spaces and underscores", "  ABC_456  ", "abc456"},
+		{"empty string", "", ""},
+		{"whitespace only", "   ", ""},
+		{"mixed case with hyphens", "ABC-123-def", "abc123def"},
+		{"already normalized", "abc123", "abc123"},
+		{"special characters", "IPX!@#123", "ipx123"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := NormalizeID(tc.input)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestHasJapanese(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"english only", "hello", false},
+		{"hiragana", "こんにちは", true},
+		{"kanji", "漢字", true},
+		{"katakana", "カタカナ", true},
+		{"mixed japanese and english", "hello世界", true},
+		{"empty string", "", false},
+		{"numbers only", "12345", false},
+		{"latin with accents", "café", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := HasJapanese(tc.input)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestIsHTTPURL(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"https url", "https://example.com", true},
+		{"http url with path", "http://test.com/path", true},
+		{"ftp scheme", "ftp://bad.com", false},
+		{"not a url", "not a url", false},
+		{"empty string", "", false},
+		{"url with whitespace", "  https://example.com  ", true},
+		{"scheme only no host", "https://", false},
+		{"javascript scheme", "javascript:alert(1)", false},
+		{"url with query", "https://example.com?q=test", true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsHTTPURL(tc.input)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

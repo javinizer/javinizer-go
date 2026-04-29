@@ -79,11 +79,35 @@ func (r *ActressRepository) Count() (int64, error) {
 	return r.BaseRepository.Count()
 }
 
+func (r *ActressRepository) FindByDMMID(dmmID int) (*models.Actress, error) {
+	if dmmID < 0 {
+		return nil, wrapDBErr("find", fmt.Sprintf("actress by dmm_id %d", dmmID), ErrInvalidLookup)
+	}
+	if dmmID == 0 {
+		return nil, wrapDBErr("find", fmt.Sprintf("actress by dmm_id %d", dmmID), ErrNotFound)
+	}
+	var actress models.Actress
+	err := r.GetDB().First(&actress, "dmm_id = ?", dmmID).Error
+	if err != nil {
+		return nil, wrapDBErr("find", fmt.Sprintf("actress by dmm_id %d", dmmID), err)
+	}
+	return &actress, nil
+}
+
 func (r *ActressRepository) FindByJapaneseName(name string) (*models.Actress, error) {
 	var actress models.Actress
-	err := r.GetDB().First(&actress, "japanese_name = ?", name).Error
+	err := r.GetDB().Order("dmm_id DESC, id ASC").First(&actress, "japanese_name = ?", name).Error
 	if err != nil {
 		return nil, wrapDBErr("find", fmt.Sprintf("actress %s", name), err)
+	}
+	return &actress, nil
+}
+
+func (r *ActressRepository) FindByFirstNameLastName(firstName, lastName string) (*models.Actress, error) {
+	var actress models.Actress
+	err := r.GetDB().Order("dmm_id DESC, id ASC").First(&actress, "first_name = ? AND last_name = ?", firstName, lastName).Error
+	if err != nil {
+		return nil, wrapDBErr("find", fmt.Sprintf("actress %s %s", lastName, firstName), err)
 	}
 	return &actress, nil
 }

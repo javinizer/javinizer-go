@@ -8,10 +8,10 @@
 	import FormTextInput from '$lib/components/settings/FormTextInput.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
 	import { apiClient } from '$lib/api/client';
-	import type { DeepLUsageResponse } from '$lib/api/types';
+	import type { DeepLUsageResponse, SettingsConfig, TranslationConfig as TranslationConfigType, OpenAICompatibleTranslationConfig as OpenAICompatibleTranslationConfigType, AnthropicTranslationConfig as AnthropicTranslationConfigType, DeepLTranslationConfig as DeepLTranslationConfigType, GoogleTranslationConfig as GoogleTranslationConfigType, TranslationFieldsConfig as TranslationFieldsConfigType } from '$lib/api/types';
 
 	interface Props {
-		config: any;
+		config: SettingsConfig;
 		inputClass: string;
 		fetchTranslationModels: () => Promise<void>;
 		fetchingTranslationModels: boolean;
@@ -64,8 +64,8 @@
 				base_url: baseURL,
 				api_key: apiKey
 			});
-		} catch (err: any) {
-			deeplUsageError = err?.message || 'Failed to fetch usage data';
+		} catch (err: unknown) {
+			deeplUsageError = err instanceof Error ? err.message : 'Failed to fetch usage data';
 		} finally {
 			fetchingDeepLUsage = false;
 		}
@@ -79,15 +79,15 @@
 			description="Translate metadata after aggregation and before saving to database"
 			checked={config.metadata.translation?.enabled ?? false}
 			onchange={(val) => {
-				if (!config.metadata.translation) config.metadata.translation = {};
-				config.metadata.translation.enabled = val;
+				if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+				config.metadata.translation!.enabled = val;
 			}}
 		/>
 
 		<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
 			<div class="py-4 border-b border-border">
 				<label class="block text-sm font-medium mb-2" for="translation-provider">Provider</label>
-				<select id="translation-provider" bind:value={config.metadata.translation.provider} class={inputClass}>
+				<select id="translation-provider" bind:value={config.metadata.translation!.provider} class={inputClass}>
 					<option value="openai">OpenAI (ChatGPT)</option>
 					<option value="openai-compatible">OpenAI Compatible LLM (Ollama/vLLM/OpenRouter)</option>
 					<option value="anthropic">Anthropic (Claude)</option>
@@ -107,9 +107,9 @@
 					value={config.metadata.translation?.openai?.base_url ?? 'https://api.openai.com/v1'}
 					placeholder="https://api.openai.com/v1"
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation.openai) config.metadata.translation.openai = {};
-						config.metadata.translation.openai.base_url = val.trim();
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!.openai) config.metadata.translation!.openai = {};
+						config.metadata.translation!.openai.base_url = val.trim();
 					}}
 				/>
 
@@ -134,7 +134,7 @@
 					</div>
 
 					{#if translationModelOptions.length > 0}
-						<select id="translation-openai-model-select" bind:value={config.metadata.translation.openai.model} class={inputClass}>
+						<select id="translation-openai-model-select" bind:value={config.metadata.translation!.openai!.model} class={inputClass}>
 							{#each translationModelOptions as modelName}
 								<option value={modelName}>{modelName}</option>
 							{/each}
@@ -149,9 +149,9 @@
 						type="text"
 						value={config.metadata.translation?.openai?.model ?? 'gpt-4o-mini'}
 						oninput={(e) => {
-							if (!config.metadata.translation) config.metadata.translation = {};
-							if (!config.metadata.translation.openai) config.metadata.translation.openai = {};
-							config.metadata.translation.openai.model = e.currentTarget.value.trim();
+							if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+							if (!config.metadata.translation!.openai) config.metadata.translation!.openai = {};
+							config.metadata.translation!.openai.model = e.currentTarget.value.trim();
 						}}
 						class="{inputClass} mt-3"
 						placeholder="gpt-4o-mini"
@@ -164,9 +164,9 @@
 					description="OpenAI API key"
 					value={config.metadata.translation?.openai?.api_key ?? ''}
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation.openai) config.metadata.translation.openai = {};
-						config.metadata.translation.openai.api_key = val;
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!.openai) config.metadata.translation!.openai = {};
+						config.metadata.translation!.openai.api_key = val;
 					}}
 				/>
 			</fieldset>
@@ -180,9 +180,9 @@
 					value={config.metadata.translation?.['openai_compatible']?.base_url ?? 'http://localhost:11434/v1'}
 					placeholder="http://localhost:11434/v1"
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation['openai_compatible']) config.metadata.translation['openai_compatible'] = {};
-						config.metadata.translation['openai_compatible'].base_url = val.trim();
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!['openai_compatible']) config.metadata.translation!['openai_compatible'] = {} as OpenAICompatibleTranslationConfigType;
+						config.metadata.translation!['openai_compatible'].base_url = val.trim();
 					}}
 				/>
 
@@ -206,7 +206,7 @@
 					</div>
 
 					{#if translationModelOptions.length > 0}
-						<select id="translation-openai_compatible-model-select" bind:value={config.metadata.translation['openai_compatible'].model} class={inputClass}>
+						<select id="translation-openai_compatible-model-select" bind:value={config.metadata.translation!['openai_compatible']!.model} class={inputClass}>
 							{#each translationModelOptions as modelName}
 								<option value={modelName}>{modelName}</option>
 							{/each}
@@ -221,9 +221,9 @@
 						type="text"
 						value={config.metadata.translation?.['openai_compatible']?.model ?? ''}
 						oninput={(e) => {
-							if (!config.metadata.translation) config.metadata.translation = {};
-							if (!config.metadata.translation['openai_compatible']) config.metadata.translation['openai_compatible'] = {};
-							config.metadata.translation['openai_compatible'].model = e.currentTarget.value.trim();
+							if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+							if (!config.metadata.translation!['openai_compatible']) config.metadata.translation!['openai_compatible'] = {} as OpenAICompatibleTranslationConfigType;
+							config.metadata.translation!['openai_compatible'].model = e.currentTarget.value.trim();
 						}}
 						class="{inputClass} mt-3"
 						placeholder="llama3"
@@ -236,9 +236,9 @@
 					description="Not required for local endpoints like Ollama"
 					value={config.metadata.translation?.['openai_compatible']?.api_key ?? ''}
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation['openai_compatible']) config.metadata.translation['openai_compatible'] = {};
-						config.metadata.translation['openai_compatible'].api_key = val;
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!['openai_compatible']) config.metadata.translation!['openai_compatible'] = {} as OpenAICompatibleTranslationConfigType;
+						config.metadata.translation!['openai_compatible'].api_key = val;
 					}}
 				/>
 
@@ -247,9 +247,9 @@
 					description="Automatically maps to backend-specific reasoning controls for supported OpenAI-compatible engines like vLLM, Ollama, and llama.cpp"
 					checked={config.metadata.translation?.['openai_compatible']?.enable_thinking ?? false}
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation['openai_compatible']) config.metadata.translation['openai_compatible'] = {};
-						config.metadata.translation['openai_compatible'].enable_thinking = val;
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!['openai_compatible']) config.metadata.translation!['openai_compatible'] = {} as OpenAICompatibleTranslationConfigType;
+						config.metadata.translation!['openai_compatible'].enable_thinking = val;
 					}}
 				/>
 				
@@ -264,9 +264,9 @@
 					value={config.metadata.translation?.anthropic?.base_url ?? 'https://api.anthropic.com'}
 					placeholder="https://api.anthropic.com"
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation.anthropic) config.metadata.translation.anthropic = {};
-						config.metadata.translation.anthropic.base_url = val.trim();
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!.anthropic) config.metadata.translation!.anthropic = {} as AnthropicTranslationConfigType;
+						config.metadata.translation!.anthropic.base_url = val.trim();
 					}}
 				/>
 
@@ -291,7 +291,7 @@
 					</div>
 
 					{#if translationModelOptions.length > 0}
-						<select id="translation-anthropic-model-select" bind:value={config.metadata.translation.anthropic.model} class={inputClass}>
+						<select id="translation-anthropic-model-select" bind:value={config.metadata.translation!.anthropic!.model} class={inputClass}>
 							{#each translationModelOptions as modelName}
 								<option value={modelName}>{modelName}</option>
 							{/each}
@@ -306,9 +306,9 @@
 						type="text"
 						value={config.metadata.translation?.anthropic?.model ?? ''}
 						oninput={(e) => {
-							if (!config.metadata.translation) config.metadata.translation = {};
-							if (!config.metadata.translation.anthropic) config.metadata.translation.anthropic = {};
-							config.metadata.translation.anthropic.model = e.currentTarget.value.trim();
+							if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+							if (!config.metadata.translation!.anthropic) config.metadata.translation!.anthropic = {} as AnthropicTranslationConfigType;
+							config.metadata.translation!.anthropic.model = e.currentTarget.value.trim();
 						}}
 						class="{inputClass} mt-3"
 						placeholder="claude-sonnet-4-20250514"
@@ -321,9 +321,9 @@
 					description="Anthropic API key from console.anthropic.com"
 					value={config.metadata.translation?.anthropic?.api_key ?? ''}
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation.anthropic) config.metadata.translation.anthropic = {};
-						config.metadata.translation.anthropic.api_key = val;
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!.anthropic) config.metadata.translation!.anthropic = {} as AnthropicTranslationConfigType;
+						config.metadata.translation!.anthropic.api_key = val;
 					}}
 				/>
 			</fieldset>
@@ -333,7 +333,7 @@
 			<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
 				<div class="py-4 border-b border-border">
 					<label class="block text-sm font-medium mb-2" for="deepl-mode">Mode</label>
-					<select id="deepl-mode" bind:value={config.metadata.translation.deepl.mode} class={inputClass}>
+					<select id="deepl-mode" bind:value={config.metadata.translation!.deepl!.mode} class={inputClass}>
 						<option value="free">Free API</option>
 						<option value="pro">Pro API</option>
 					</select>
@@ -348,9 +348,9 @@
 					value={config.metadata.translation?.deepl?.base_url ?? ''}
 					placeholder="https://api-free.deepl.com"
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation.deepl) config.metadata.translation.deepl = {};
-						config.metadata.translation.deepl.base_url = val.trim();
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!.deepl) config.metadata.translation!.deepl = {} as DeepLTranslationConfigType;
+						config.metadata.translation!.deepl.base_url = val.trim();
 					}}
 				/>
 
@@ -359,9 +359,9 @@
 					description="DeepL API key (required for both free and pro API modes)"
 					value={config.metadata.translation?.deepl?.api_key ?? ''}
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation.deepl) config.metadata.translation.deepl = {};
-						config.metadata.translation.deepl.api_key = val;
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!.deepl) config.metadata.translation!.deepl = {} as DeepLTranslationConfigType;
+						config.metadata.translation!.deepl.api_key = val;
 					}}
 				/>
 
@@ -426,7 +426,7 @@
 			<fieldset disabled={!translationEnabled} class={`space-y-0 ${!translationEnabled ? 'opacity-60' : ''}`}>
 				<div class="py-4 border-b border-border">
 					<label class="block text-sm font-medium mb-2" for="google-mode">Mode</label>
-					<select id="google-mode" bind:value={config.metadata.translation.google.mode} class={inputClass}>
+					<select id="google-mode" bind:value={config.metadata.translation!.google!.mode} class={inputClass}>
 						<option value="free">Free (public endpoint)</option>
 						<option value="paid">Paid (Cloud Translation API)</option>
 					</select>
@@ -438,9 +438,9 @@
 					value={config.metadata.translation?.google?.base_url ?? ''}
 					placeholder="https://translation.googleapis.com"
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation.google) config.metadata.translation.google = {};
-						config.metadata.translation.google.base_url = val.trim();
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!.google) config.metadata.translation!.google = {} as GoogleTranslationConfigType;
+						config.metadata.translation!.google.base_url = val.trim();
 					}}
 				/>
 
@@ -450,9 +450,9 @@
 					value={config.metadata.translation?.google?.api_key ?? ''}
 					disabled={config.metadata.translation?.google?.mode !== 'paid'}
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						if (!config.metadata.translation.google) config.metadata.translation.google = {};
-						config.metadata.translation.google.api_key = val;
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!.google) config.metadata.translation!.google = {} as GoogleTranslationConfigType;
+						config.metadata.translation!.google.api_key = val;
 					}}
 				/>
 			</fieldset>
@@ -468,8 +468,8 @@
 					value={config.metadata.translation?.source_language ?? 'en'}
 					placeholder="en"
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						config.metadata.translation.source_language = val.trim();
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						config.metadata.translation!.source_language = val.trim();
 					}}
 				/>
 
@@ -479,8 +479,8 @@
 					value={config.metadata.translation?.target_language ?? 'ja'}
 					placeholder="ja"
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						config.metadata.translation.target_language = val.trim();
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						config.metadata.translation!.target_language = val.trim();
 					}}
 				/>
 
@@ -492,8 +492,8 @@
 					max={300}
 					unit="seconds"
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						config.metadata.translation.timeout_seconds = val;
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						config.metadata.translation!.timeout_seconds = val;
 					}}
 				/>
 
@@ -502,8 +502,8 @@
 					description="Replace primary movie fields with translated text"
 					checked={config.metadata.translation?.apply_to_primary ?? true}
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						config.metadata.translation.apply_to_primary = val;
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						config.metadata.translation!.apply_to_primary = val;
 					}}
 				/>
 
@@ -512,8 +512,8 @@
 					description="Overwrite target-language translation entries already returned by scrapers"
 					checked={config.metadata.translation?.overwrite_existing_target ?? true}
 					onchange={(val) => {
-						if (!config.metadata.translation) config.metadata.translation = {};
-						config.metadata.translation.overwrite_existing_target = val;
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						config.metadata.translation!.overwrite_existing_target = val;
 					}}
 				/>
 
@@ -537,9 +537,9 @@
 										type="checkbox"
 										checked={config.metadata.translation?.fields?.[field.key] !== false}
 										onchange={(e) => {
-											if (!config.metadata.translation) config.metadata.translation = {};
-											if (!config.metadata.translation.fields) config.metadata.translation.fields = {};
-											config.metadata.translation.fields[field.key] = e.currentTarget.checked;
+											if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+											if (!config.metadata.translation!.fields) config.metadata.translation!.fields = {};
+											config.metadata.translation!.fields[field.key] = e.currentTarget.checked;
 										}}
 										class="peer h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary disabled:opacity-50 cursor-pointer"
 									/>

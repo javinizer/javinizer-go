@@ -134,7 +134,7 @@ func TestHelpers(t *testing.T) {
 	if got := scraperutil.ResolveURL("https://dl.getchu.com/i/item12345", "/x/y.jpg"); got != "https://dl.getchu.com/x/y.jpg" {
 		t.Fatalf("resolveURL = %q", got)
 	}
-	if !isHTTPURL("https://dl.getchu.com/i/item12345") {
+	if !scraperutil.IsHTTPURL("https://dl.getchu.com/i/item12345") {
 		t.Fatal("expected HTTP URL")
 	}
 }
@@ -362,7 +362,7 @@ func TestIsHTTPURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isHTTPURL(tt.input)
+			result := scraperutil.IsHTTPURL(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

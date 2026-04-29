@@ -10,6 +10,21 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
+// rescrapeBatchMovie godoc
+// @Summary Rescrape movie in batch job
+// @Description Rescrape a specific movie within a batch job using selected scrapers or manual search input
+// @Tags web
+// @Accept json
+// @Produce json
+// @Param id path string true "Job ID"
+// @Param movieId path string true "Movie ID"
+// @Param request body BatchRescrapeRequest true "Rescrape options"
+// @Success 200 {object} BatchRescrapeResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 410 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/batch/{id}/movies/{movieId}/rescrape [post]
 func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jobID := c.Param("id")

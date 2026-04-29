@@ -175,14 +175,17 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	return canonicalFC2ID(articleID), true
 }
 
-// GetURL resolves the FC2 detail URL for an ID.
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.getURLCtx(context.Background(), id)
+}
+
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
 	}
 
-	if isHTTPURL(id) {
+	if scraperutil.IsHTTPURL(id) {
 		articleID := extractArticleID(id)
 		if articleID == "" {
 			return "", models.NewScraperNotFoundError("FC2", fmt.Sprintf("movie %s does not match FC2 ID format", id))
@@ -209,7 +212,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, models.NewScraperNotFoundError("FC2", fmt.Sprintf("movie %s does not match FC2 ID format", id))
 	}
 
-	detailURL, err := s.GetURL(id)
+	detailURL, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -600,14 +603,6 @@ func normalizeURL(raw, sourceURL string) string {
 		return ""
 	}
 	return base.ResolveReference(parsed).String()
-}
-
-func isHTTPURL(raw string) bool {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return false
-	}
-	return u.Scheme == "http" || u.Scheme == "https"
 }
 
 func (s *Scraper) buildArticleURL(articleID string) string {

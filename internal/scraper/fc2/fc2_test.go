@@ -451,7 +451,7 @@ func TestIsHTTPURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isHTTPURL(tt.input))
+			assert.Equal(t, tt.want, scraperutil.IsHTTPURL(tt.input))
 		})
 	}
 }

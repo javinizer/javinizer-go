@@ -5,6 +5,7 @@
 	import { ChevronDown, ChevronRight } from 'lucide-svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
+	import type { SettingsConfig, ScraperOption, ScraperSettings } from '$lib/api/types';
 
 	type ScraperProxyMode = 'direct' | 'inherit' | 'specific';
 
@@ -13,11 +14,11 @@
 		enabled: boolean;
 		displayName: string;
 		expanded: boolean;
-		options: any[];
+		options: ScraperOption[];
 	}
 
 	interface Props {
-		config: any;
+		config: SettingsConfig;
 		scrapers: ScraperItem[];
 		inputClass: string;
 		scraperHasOptions: (scraper: ScraperItem) => boolean;
@@ -32,10 +33,10 @@
 		getScraperProxyMode: (scraperName: string) => ScraperProxyMode;
 		setScraperProxyMode: (scraperName: string, mode: ScraperProxyMode) => void;
 		getProxyProfileNames: () => string[];
-		setOptionValue: (scraperName: string, optionKey: string, value: any) => void;
-		getRenderableScraperOptions: (scraper: ScraperItem) => any[];
+		setOptionValue: (scraperName: string, optionKey: string, value: string | number | boolean) => void;
+		getRenderableScraperOptions: (scraper: ScraperItem) => ScraperOption[];
 		isOptionDisabled: (scraperName: string, optionKey: string) => boolean;
-		getOptionValue: (scraperName: string, optionKey: string) => any;
+		getOptionValue: (scraperName: string, optionKey: string) => string | number | boolean | undefined;
 		parseOptionNumber: (value: string) => number | undefined;
 	}
 
@@ -167,7 +168,7 @@
 													<label class="block text-sm font-medium mb-1" for="proxy-profile-{scraper.name}">Scraper profile</label>
 													<select
 														id="proxy-profile-{scraper.name}"
-														value={config.scrapers?.[scraper.name]?.proxy?.profile ?? ''}
+														value={(config.scrapers?.[scraper.name] as ScraperSettings)?.proxy?.profile ?? ''}
 														disabled={getScraperProxyMode(scraper.name) !== 'specific'}
 														onchange={(e) => setOptionValue(scraper.name, 'proxy.profile', e.currentTarget.value)}
 														class="w-full px-3 py-2 border rounded-md transition-all text-sm {getScraperProxyMode(scraper.name) === 'specific' ? 'bg-background focus:ring-2 focus:ring-primary focus:border-primary' : 'bg-muted/70 text-muted-foreground border-border/60 cursor-not-allowed'}"
@@ -192,7 +193,7 @@
 												<label class="flex items-center gap-2">
 													<input
 														type="checkbox"
-														checked={getOptionValue(scraper.name, option.key)}
+														checked={!!getOptionValue(scraper.name, option.key)}
 														disabled={optionDisabled}
 														onchange={(e) => setOptionValue(scraper.name, option.key, e.currentTarget.checked)}
 														class="rounded"
@@ -249,7 +250,7 @@
 															type="number"
 															value={getOptionValue(scraper.name, option.key) ?? ''}
 															disabled={optionDisabled}
-															oninput={(e) => setOptionValue(scraper.name, option.key, parseOptionNumber(e.currentTarget.value))}
+															oninput={(e) => setOptionValue(scraper.name, option.key, parseOptionNumber(e.currentTarget.value) ?? 0)}
 															min={option.min || 0}
 															max={option.max || 999}
 															class="w-32 px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-background text-sm"

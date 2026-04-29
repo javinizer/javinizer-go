@@ -2,14 +2,15 @@
 	import { untrack } from 'svelte';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
-	import type { Config } from '$lib/api/types';
+	import type { SettingsConfig } from '$lib/api/types';
 
 	interface Props {
-		config: Config;
+		config: SettingsConfig;
 		inputClass: string;
 	}
 
 	let { config, inputClass }: Props = $props();
+	let logging = $derived(config.logging);
 
 	function coerceToInt(value: string | number): number {
 		if (typeof value === 'number') return value < 0 ? 0 : value;
@@ -18,7 +19,7 @@
 		return num;
 	}
 
-	function ensureLoggingDefaults(cfg: Config): void {
+	function ensureLoggingDefaults(cfg: SettingsConfig): void {
 		if (!cfg.logging) cfg.logging = {};
 		cfg.logging.level ??= 'info';
 		cfg.logging.format ??= 'text';
@@ -40,7 +41,7 @@
 	<div class="space-y-4">
 		<div>
 			<label class="block text-sm font-medium mb-2" for="log-level">Log Level</label>
-			<select id="log-level" bind:value={config.logging.level} class={inputClass}>
+			<select id="log-level" bind:value={logging.level} class={inputClass}>
 				<option value="debug">Debug</option>
 				<option value="info">Info</option>
 				<option value="warn">Warning</option>
@@ -50,7 +51,7 @@
 
 		<div>
 			<label class="block text-sm font-medium mb-2" for="log-format">Log Format</label>
-			<select id="log-format" bind:value={config.logging.format} class={inputClass}>
+			<select id="log-format" bind:value={logging.format} class={inputClass}>
 				<option value="text">Text</option>
 				<option value="json">JSON</option>
 			</select>
@@ -61,7 +62,7 @@
 			<input
 				id="log-output"
 				type="text"
-				bind:value={config.logging.output}
+				bind:value={logging.output}
 				class={inputClass}
 				placeholder="stdout or file path"
 			/>
@@ -77,8 +78,8 @@
 					<input
 						id="log-max-size"
 						type="number"
-						value={config.logging.max_size_mb}
-						oninput={(e) => { config.logging.max_size_mb = coerceToInt((e.target as HTMLInputElement).value); }}
+						value={logging.max_size_mb}
+						oninput={(e) => { logging.max_size_mb = coerceToInt((e.target as HTMLInputElement).value); }}
 						class={inputClass}
 						min="0"
 						placeholder="10"
@@ -93,8 +94,8 @@
 					<input
 						id="log-max-backups"
 						type="number"
-						value={config.logging.max_backups}
-						oninput={(e) => { config.logging.max_backups = coerceToInt((e.target as HTMLInputElement).value); }}
+						value={logging.max_backups}
+						oninput={(e) => { logging.max_backups = coerceToInt((e.target as HTMLInputElement).value); }}
 						class={inputClass}
 						min="0"
 						placeholder="5"
@@ -109,8 +110,8 @@
 					<input
 						id="log-max-age"
 						type="number"
-						value={config.logging.max_age_days}
-						oninput={(e) => { config.logging.max_age_days = coerceToInt((e.target as HTMLInputElement).value); }}
+						value={logging.max_age_days}
+						oninput={(e) => { logging.max_age_days = coerceToInt((e.target as HTMLInputElement).value); }}
 						class={inputClass}
 						min="0"
 						placeholder="0"
@@ -124,7 +125,7 @@
 					<input
 						id="log-compress"
 						type="checkbox"
-						bind:checked={config.logging.compress}
+						bind:checked={logging.compress}
 						class="w-4 h-4"
 					/>
 					<label class="text-sm font-medium" for="log-compress">Compress rotated files</label>

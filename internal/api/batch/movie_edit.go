@@ -245,6 +245,20 @@ func updateBatchMoviePosterCrop(deps *ServerDependencies) gin.HandlerFunc {
 	}
 }
 
+// updateBatchMoviePosterFromURL godoc
+// @Summary Download poster from URL
+// @Description Download a poster image from a URL and set it as the movie's poster in the batch job
+// @Tags web
+// @Accept json
+// @Produce json
+// @Param id path string true "Job ID"
+// @Param movieId path string true "Movie ID"
+// @Param request body PosterFromURLRequest true "Poster URL"
+// @Success 200 {object} PosterFromURLResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/batch/{id}/movies/{movieId}/poster-from-url [post]
 func updateBatchMoviePosterFromURL(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jobID := c.Param("id")
@@ -432,18 +446,21 @@ func updateBatchMoviePosterFromURL(deps *ServerDependencies) gin.HandlerFunc {
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open source file: %w", err)
 	}
 	defer func() { _ = in.Close() }()
 
 	out, err := os.Create(dst)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create destination file: %w", err)
 	}
 	defer func() { _ = out.Close() }()
 
 	_, err = io.Copy(out, in)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to copy file contents: %w", err)
+	}
+	return nil
 }
 
 // excludeBatchMovie godoc

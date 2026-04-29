@@ -8,7 +8,7 @@
 		type?: 'button' | 'submit' | 'reset';
 		class?: string;
 		onclick?: () => void;
-		children?: any;
+		children?: import('svelte').Snippet;
 		title?: string;
 		'aria-label'?: string;
 	}

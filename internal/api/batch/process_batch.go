@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/eventlog"
 	"github.com/javinizer/javinizer-go/internal/history"
+	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -20,12 +21,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
-// processBatchJob processes a batch scraping job (metadata only, no file organization)
-// using concurrent worker pool for improved performance.
-// If updateMode is true, will also download media files and generate NFOs in place without moving files.
-// scalarStrategy determines how to merge scalar fields (prefer-scraper, prefer-nfo)
-// arrayStrategy determines how to merge array fields (merge, replace)
-// operationModeOverride allows per-job operation mode override (organize, in-place, metadata-only, preview).
 type BatchProcessOptions struct {
 	Job                   *worker.BatchJob
 	JobQueue              *worker.JobQueue
@@ -46,26 +41,18 @@ type BatchProcessOptions struct {
 	Emitter               eventlog.EventEmitter
 }
 
-func processBatchJob(opts *BatchProcessOptions) {
-	defer func() {
-		if r := recover(); r != nil {
-			logging.Errorf("Batch job %s panicked: %v", opts.Job.ID, r)
-			opts.Job.MarkFailed()
-			if opts.JobQueue != nil {
-				opts.JobQueue.PersistJob(opts.Job)
-			}
-			broadcastProgress(&ws.ProgressMessage{
-				JobID:    opts.Job.ID,
-				Status:   "error",
-				Progress: 0,
-				Message:  fmt.Sprintf("Batch job panicked: %v", r),
-			})
-		}
-	}()
+type batchDependencies struct {
+	ctx             context.Context
+	cancel          context.CancelFunc
+	pool            *worker.Pool
+	progressTracker *worker.ProgressTracker
+	adapter         *realtime.ProgressAdapter
+	httpClient      httpclient.HTTPClient
+}
 
+func initBatchDependencies(opts *BatchProcessOptions) (*batchDependencies, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	opts.Job.SetCancelFunc(cancel)
-	defer cancel()
 
 	opts.Job.MarkStarted()
 	if opts.JobQueue != nil {
@@ -87,7 +74,6 @@ func processBatchJob(opts *BatchProcessOptions) {
 	adapter := realtime.NewProgressAdapter(opts.Job.ID, opts.Job, nil)
 	progressTracker := worker.NewProgressTracker(adapter.GetChannel())
 	adapter.Start()
-	defer adapter.Stop()
 
 	maxWorkers := opts.Cfg.Performance.MaxWorkers
 	if maxWorkers <= 0 {
@@ -100,7 +86,6 @@ func processBatchJob(opts *BatchProcessOptions) {
 	}
 
 	pool := worker.NewPoolWithContext(ctx, maxWorkers, timeout, progressTracker)
-	defer pool.Stop()
 
 	httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(opts.Cfg, opts.Registry)
 	if err != nil {
@@ -108,12 +93,26 @@ func processBatchJob(opts *BatchProcessOptions) {
 		httpClient = nil
 	}
 
-	processedMovieIDs := make(map[string]bool)
+	return &batchDependencies{
+		ctx:             ctx,
+		cancel:          cancel,
+		pool:            pool,
+		progressTracker: progressTracker,
+		adapter:         adapter,
+		httpClient:      httpClient,
+	}, nil
+}
+
+func submitBatchTasks(
+	deps *batchDependencies,
+	opts *BatchProcessOptions,
+	processedMovieIDs map[string]bool,
+) map[string]bool {
 	submitFailedFiles := make(map[string]bool)
 
 	for i, filePath := range opts.Job.GetFiles() {
 		select {
-		case <-ctx.Done():
+		case <-deps.ctx.Done():
 			opts.Job.MarkCancelled()
 			if opts.Emitter != nil {
 				if err := opts.Emitter.EmitSystemEvent("batch", fmt.Sprintf("Batch scrape job %s cancelled", opts.Job.ID), models.SeverityWarn, map[string]interface{}{"job_id": opts.Job.ID}); err != nil {
@@ -123,12 +122,12 @@ func processBatchJob(opts *BatchProcessOptions) {
 			if opts.JobQueue != nil {
 				opts.JobQueue.PersistJob(opts.Job)
 			}
-			return
+			return submitFailedFiles
 		default:
 		}
 
 		taskID := fmt.Sprintf("batch-scrape-%s-%d", opts.Job.ID, i)
-		adapter.RegisterTask(taskID, i, filePath)
+		deps.adapter.RegisterTask(taskID, i, filePath)
 
 		scrapersToUse := opts.SelectedScrapers
 		if len(opts.SelectedScrapers) == 0 {
@@ -144,11 +143,11 @@ func processBatchJob(opts *BatchProcessOptions) {
 			Aggregator:        opts.Aggregator,
 			MovieRepo:         opts.MovieRepo,
 			Matcher:           opts.Matcher,
-			ProgressTracker:   progressTracker,
+			ProgressTracker:   deps.progressTracker,
 			Force:             opts.Force,
 			UpdateMode:        opts.UpdateMode,
 			SelectedScrapers:  scrapersToUse,
-			HTTPClient:        httpClient,
+			HTTPClient:        deps.httpClient,
 			UserAgent:         opts.Cfg.Scrapers.UserAgent,
 			Referer:           opts.Cfg.Scrapers.Referer,
 			ProcessedMovieIDs: processedMovieIDs,
@@ -157,7 +156,7 @@ func processBatchJob(opts *BatchProcessOptions) {
 			ArrayStrategy:     opts.ArrayStrategy,
 		})
 
-		if err := pool.Submit(task); err != nil {
+		if err := deps.pool.Submit(task); err != nil {
 			logging.Errorf("Failed to submit task for %s: %v", filePath, err)
 			submitFailedFiles[filePath] = true
 			if opts.Emitter != nil {
@@ -180,27 +179,10 @@ func processBatchJob(opts *BatchProcessOptions) {
 		}
 	}
 
-	if err := pool.Wait(); err != nil {
-		logging.Warnf("Worker pool completed with task failures: %v", err)
-	}
+	return submitFailedFiles
+}
 
-	opts.Job.MarkCompleted()
-	if opts.JobQueue != nil {
-		opts.JobQueue.PersistJob(opts.Job)
-	}
-
-	if opts.Emitter != nil {
-		sev := models.SeverityInfo
-		if opts.Job.GetFailed() > 0 && opts.Job.GetCompleted() > 0 {
-			sev = models.SeverityWarn
-		} else if opts.Job.GetFailed() > 0 && opts.Job.GetCompleted() == 0 {
-			sev = models.SeverityError
-		}
-		if err := opts.Emitter.EmitSystemEvent("batch", fmt.Sprintf("Batch scrape job %s completed", opts.Job.ID), sev, map[string]interface{}{"job_id": opts.Job.ID, "completed": opts.Job.GetCompleted(), "failed": opts.Job.GetFailed()}); err != nil {
-			logging.Warnf("Failed to emit batch complete event: %v", err)
-		}
-	}
-
+func logBatchHistory(opts *BatchProcessOptions, submitFailedFiles map[string]bool) {
 	historyLogger := history.NewLogger(opts.DB)
 	status := opts.Job.GetStatus()
 	for filePath, fileResult := range status.Results {
@@ -226,6 +208,69 @@ func processBatchJob(opts *BatchProcessOptions) {
 			}
 		}
 	}
+}
+
+func processBatchJob(opts *BatchProcessOptions) {
+	defer func() {
+		if r := recover(); r != nil {
+			logging.Errorf("Batch job %s panicked: %v", opts.Job.ID, r)
+			opts.Job.MarkFailed()
+			if opts.JobQueue != nil {
+				opts.JobQueue.PersistJob(opts.Job)
+			}
+			broadcastProgress(&ws.ProgressMessage{
+				JobID:    opts.Job.ID,
+				Status:   "error",
+				Progress: 0,
+				Message:  fmt.Sprintf("Batch job panicked: %v", r),
+			})
+		}
+	}()
+
+	deps, err := initBatchDependencies(opts)
+	if err != nil {
+		logging.Errorf("Batch job %s failed to initialize: %v", opts.Job.ID, err)
+		opts.Job.MarkFailed()
+		if opts.JobQueue != nil {
+			opts.JobQueue.PersistJob(opts.Job)
+		}
+		broadcastProgress(&ws.ProgressMessage{
+			JobID:    opts.Job.ID,
+			Status:   "error",
+			Progress: 0,
+			Message:  fmt.Sprintf("Batch initialization failed: %v", err),
+		})
+		return
+	}
+	defer deps.cancel()
+	defer deps.adapter.Stop()
+	defer deps.pool.Stop()
+
+	processedMovieIDs := make(map[string]bool)
+	submitFailedFiles := submitBatchTasks(deps, opts, processedMovieIDs)
+
+	if err := deps.pool.Wait(); err != nil {
+		logging.Warnf("Worker pool completed with task failures: %v", err)
+	}
+
+	opts.Job.MarkCompleted()
+	if opts.JobQueue != nil {
+		opts.JobQueue.PersistJob(opts.Job)
+	}
+
+	if opts.Emitter != nil {
+		sev := models.SeverityInfo
+		if opts.Job.GetFailed() > 0 && opts.Job.GetCompleted() > 0 {
+			sev = models.SeverityWarn
+		} else if opts.Job.GetFailed() > 0 && opts.Job.GetCompleted() == 0 {
+			sev = models.SeverityError
+		}
+		if err := opts.Emitter.EmitSystemEvent("batch", fmt.Sprintf("Batch scrape job %s completed", opts.Job.ID), sev, map[string]interface{}{"job_id": opts.Job.ID, "completed": opts.Job.GetCompleted(), "failed": opts.Job.GetFailed()}); err != nil {
+			logging.Warnf("Failed to emit batch complete event: %v", err)
+		}
+	}
+
+	logBatchHistory(opts, submitFailedFiles)
 
 	broadcastProgress(&ws.ProgressMessage{
 		JobID:    opts.Job.ID,

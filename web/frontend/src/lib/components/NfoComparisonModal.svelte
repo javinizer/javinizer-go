@@ -34,7 +34,7 @@
 	}
 
 	// Format field value for display
-	function formatValue(value: any): string {
+	function formatValue(value: string | number | boolean | null | undefined): string {
 		if (value === null || value === undefined) return 'Empty';
 		if (typeof value === 'boolean') return value ? 'Yes' : 'No';
 		if (typeof value === 'object') return JSON.stringify(value, null, 2);

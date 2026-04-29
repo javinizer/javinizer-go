@@ -1,6 +1,235 @@
 version: "2"
 
-# Skip pre-existing broken scraper tests (Phase 1 API refactor removed getter methods)
-# These will be fixed in Phase 6. golangci-lint does not compile test files.
 run:
   tests: false
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - errname
+    - errorlint
+    - goconst
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - unconvert
+    - unparam
+    - revive
+  settings:
+    goconst:
+      min-len: 3
+      min-occurrences: 4
+    gosec:
+      excludes:
+        - G104
+    revive:
+      rules:
+        - name: blank-imports
+          disabled: true
+        - name: context-as-argument
+          disabled: true
+        - name: context-keys-type
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+          disabled: true
+        - name: increment-decrement
+          disabled: true
+        - name: var-naming
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: receiver-naming
+          disabled: true
+        - name: time-naming
+        - name: unexported-return
+          disabled: true
+        - name: indent-error-flow
+          disabled: true
+        - name: errorf
+        - name: unnecessary-stmt
+          disabled: true
+        - name: unused-parameter
+          disabled: true
+        - name: redefines-builtin-id
+          disabled: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+      - linters:
+          - errorlint
+        text: "non-wrapping format verb for fmt.Errorf"
+      - linters:
+          - errorlint
+        text: "comparing with == will fail on wrapped errors"
+      - linters:
+          - errorlint
+        text: "type assertion on error will fail on wrapped errors"
+      - linters:
+          - gosec
+        text: "G115:"
+      - linters:
+          - gosec
+        text: "G304:"
+      - linters:
+          - gosec
+        text: "G306:"
+      - linters:
+          - gosec
+        text: "G703:"
+      - linters:
+          - gosec
+        text: "G118:"
+      - path: internal/config/translation_config\.go
+        linters:
+          - goconst
+      - path: internal/config/storage\.go
+        linters:
+          - goconst
+      - path: internal/config/scrapers_config\.go
+        linters:
+          - goconst
+      - path: internal/database/actress_merge\.go
+        linters:
+          - goconst
+      - path: internal/tui/update\.go
+        linters:
+          - goconst
+      - path: internal/api/server/server\.go
+        linters:
+          - goconst
+      - path: internal/scraper/caribbeancom/caribbeancom\.go
+        linters:
+          - goconst
+          - unparam
+      - path: internal/scraper/javdb/javdb\.go
+        linters:
+          - goconst
+      - path: internal/api/batch/process_preview_helpers\.go
+        linters:
+          - goconst
+      - path: internal/api/core/path_validation\.go
+        linters:
+          - goconst
+      - path: internal/config/browser_discovery\.go
+        linters:
+          - goconst
+      - path: internal/config/config\.go
+        linters:
+          - goconst
+      - path: internal/history/logger\.go
+        linters:
+          - goconst
+      - path: internal/mediainfo/avi\.go
+        linters:
+          - goconst
+      - path: internal/template/engine\.go
+        linters:
+          - goconst
+      - path: internal/translation/service\.go
+        linters:
+          - goconst
+      - path: internal/worker/field_sources\.go
+        linters:
+          - goconst
+      - path: cmd/javinizer/commands/config/command\.go
+        linters:
+          - nilerr
+      - path: internal/mediainfo/flv\.go
+        linters:
+          - nilerr
+      - path: internal/database/migrations_hash\.go
+        linters:
+          - noctx
+      - path: internal/database/migrations_runner\.go
+        linters:
+          - gosec
+      - path: internal/mediainfo/cli\.go
+        linters:
+          - gosec
+      - path: internal/downloader/downloader\.go
+        linters:
+          - noctx
+      - path: internal/imageutil/poster\.go
+        linters:
+          - noctx
+      - path: internal/api/core/inode_unix\.go
+        linters:
+          - unconvert
+      - path: cmd/
+        linters:
+          - unparam
+      - path: internal/api/apperrors/handler\.go
+        linters:
+          - unparam
+      - path: internal/api/batch/process_batch\.go
+        linters:
+          - unparam
+      - path: internal/api/batch/process_media_helpers\.go
+        linters:
+          - unparam
+      - path: internal/api/batch/process_organize\.go
+        linters:
+          - unparam
+      - path: internal/api/batch/process_preview\.go
+        linters:
+          - unparam
+      - path: internal/api/batch/process_preview_helpers\.go
+        linters:
+          - unparam
+      - path: internal/api/batch/process_update\.go
+        linters:
+          - unparam
+      - path: internal/api/batch/rescrape_scrape\.go
+        linters:
+          - unparam
+      - path: internal/api/batch/rescrape_update\.go
+        linters:
+          - unparam
+      - path: internal/database/actress_merge\.go
+        linters:
+          - unparam
+      - path: internal/history/reverter\.go
+        linters:
+          - unparam
+      - path: internal/scraper/javdb/javdb\.go
+        linters:
+          - unparam
+      - path: internal/scraper/javlibrary/javlibrary\.go
+        linters:
+          - unparam
+      - path: internal/scraper/fc2/fc2\.go
+        linters:
+          - unparam
+      - path: internal/scraper/libredmm/libredmm\.go
+        linters:
+          - unparam
+      - path: internal/scraper/mgstage/mgstage\.go
+        linters:
+          - unparam
+      - path: internal/scraper/r18dev/r18dev\.go
+        linters:
+          - unparam
+      - path: internal/tui/update\.go
+        linters:
+          - unparam
+      - path: internal/tui/view\.go
+        linters:
+          - unparam
+      - path: internal/worker/scrape_nfo_merge\.go
+        linters:
+          - unparam
+      - path: internal/worker/scrape_query\.go
+        linters:
+          - unparam

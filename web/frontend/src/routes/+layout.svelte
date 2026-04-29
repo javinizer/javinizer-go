@@ -8,6 +8,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import Navigation from '$lib/components/Navigation.svelte';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
+	import DialogContainer from '$lib/components/ui/DialogContainer.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
 	import { getQueryClient } from '$lib/query/client';
@@ -301,8 +302,9 @@
 						</div>
 					{/key}
 				</main>
-				<ToastContainer />
-			</div>
+			<ToastContainer />
+			<DialogContainer />
+		</div>
 		</QueryClientProvider>
 	{:else}
 		<div class="min-h-screen bg-background">
@@ -318,6 +320,7 @@
 				{/key}
 			</main>
 			<ToastContainer />
+			<DialogContainer />
 		</div>
 	{/if}
 {/if}

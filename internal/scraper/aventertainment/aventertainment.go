@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
@@ -24,7 +23,6 @@ import (
 const defaultBaseURL = "https://www.aventertainments.com"
 
 var (
-	nonAlphaNumRegex = regexp.MustCompile(`[^a-z0-9]+`)
 	tokenSplitRegex  = regexp.MustCompile(`[^\w-]+`)
 	standardIDRegex  = regexp.MustCompile(`(?i)^([a-z]{2,12}[-_]\d{2,8}[a-z]?)$`)
 	compactIDRegex   = regexp.MustCompile(`(?i)^([a-z]{2,12}\d{2,8}[a-z]?)$`)
@@ -226,15 +224,15 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 
 // GetURL resolves a detail page URL from movie ID.
 func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLWithContext(context.Background(), id)
+	return s.getURLCtx(context.Background(), id)
 }
 
-func (s *Scraper) getURLWithContext(ctx context.Context, id string) (string, error) {
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
 	}
-	if isHTTPURL(id) {
+	if scraperutil.IsHTTPURL(id) {
 		return s.applyLanguage(id), nil
 	}
 
@@ -297,7 +295,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("AVEntertainment scraper is disabled")
 	}
 
-	detailURL, err := s.getURLWithContext(ctx, id)
+	detailURL, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -687,7 +685,7 @@ func extractActresses(scope *goquery.Selection) []models.ActressInfo {
 		}
 		seen[name] = true
 		info := models.ActressInfo{}
-		if hasJapanese(name) {
+		if scraperutil.HasJapanese(name) {
 			info.JapaneseName = name
 		} else {
 			parts := strings.Fields(name)
@@ -871,13 +869,8 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 	return html, resp.StatusCode(), nil
 }
 
-func normalizeID(v string) string {
-	v = strings.ToLower(strings.TrimSpace(v))
-	return nonAlphaNumRegex.ReplaceAllString(v, "")
-}
-
 func normalizeComparableID(v string) string {
-	v = normalizeID(v)
+	v = scraperutil.NormalizeID(v)
 	for _, prefix := range []string{"dl", "st"} {
 		if strings.HasPrefix(v, prefix) {
 			v = strings.TrimPrefix(v, prefix)
@@ -944,15 +937,6 @@ func extractID(v string) string {
 	return ""
 }
 
-func hasJapanese(v string) bool {
-	for _, r := range v {
-		if unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han) {
-			return true
-		}
-	}
-	return false
-}
-
 func stripSiteSuffix(v string) string {
 	v = scraperutil.CleanString(v)
 	for _, suffix := range []string{
@@ -968,14 +952,6 @@ func stripSiteSuffix(v string) string {
 		}
 	}
 	return scraperutil.CleanString(v)
-}
-
-func isHTTPURL(v string) bool {
-	u, err := url.Parse(strings.TrimSpace(v))
-	if err != nil {
-		return false
-	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 func normalizeResolverInput(input string) string {

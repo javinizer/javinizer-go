@@ -14,6 +14,7 @@ import (
 // @Router /ws/progress [get]
 // @Summary WebSocket progress updates
 // @Description WebSocket endpoint for real-time progress updates during batch operations. Connect to receive streaming updates for batch scrape jobs, file organization, and downloads. Message format: JSON with job_id, type (progress/complete/error/cancelled), file, progress (0.0-1.0), message, and bytes_processed fields.
+// @Tags realtime
 // @Success 101
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string

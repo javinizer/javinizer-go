@@ -49,7 +49,6 @@ func init() {
 		ScraperPriority: 50,
 		ConfigType:      func() scraperutil.ScraperConfigInterface { return &TokyoHotConfig{} },
 		NewScraperFunc: func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-			_ = db
 			var globalProxy *config.ProxyConfig
 			var globalFlareSolverr config.FlareSolverrConfig
 			if globalConfig != nil {

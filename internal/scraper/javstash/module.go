@@ -53,7 +53,6 @@ func init() {
 		ScraperPriority: 10,
 		ConfigType:      func() scraperutil.ScraperConfigInterface { return &JavstashConfig{} },
 		NewScraperFunc: func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-			_ = db
 			var globalProxy *config.ProxyConfig
 			var globalFlareSolverr config.FlareSolverrConfig
 			if globalConfig != nil {
