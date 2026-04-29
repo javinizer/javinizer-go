@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,12 +45,12 @@ func (p *ProxyConfig) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // ResolveScraperUserAgent resolves the effective User-Agent for a scraper.
-// If the scraper-specific userAgent is non-empty, it is used; otherwise DefaultFakeUserAgent is returned.
+// If the scraper-specific userAgent is non-empty, it is used; otherwise DefaultScraperUserAgent is returned.
 func ResolveScraperUserAgent(userAgent string) string {
 	if ua := strings.TrimSpace(userAgent); ua != "" {
 		return ua
 	}
-	return DefaultFakeUserAgent
+	return configutil.DefaultScraperUserAgent
 }
 
 // ResolveScraperProxy returns the effective proxy profile for a scraper based on

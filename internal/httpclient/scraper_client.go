@@ -13,7 +13,6 @@ type ScraperHTTPClientOption func(*scraperHTTPConfig)
 type scraperHTTPConfig struct {
 	headers   map[string]string
 	cookies   map[string]string
-	userAgent string
 	withProxy bool
 }
 
@@ -31,12 +30,6 @@ func WithScraperHeaders(headers map[string]string) ScraperHTTPClientOption {
 func WithScraperCookies(cookies map[string]string) ScraperHTTPClientOption {
 	return func(c *scraperHTTPConfig) {
 		c.cookies = cookies
-	}
-}
-
-func WithScraperUserAgent(ua string) ScraperHTTPClientOption {
-	return func(c *scraperHTTPConfig) {
-		c.userAgent = ua
 	}
 }
 
