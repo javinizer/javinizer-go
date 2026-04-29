@@ -2,11 +2,15 @@ package aggregator
 
 import (
 	"context"
+	"errors"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/translation"
+	"gorm.io/gorm"
 )
 
 func (a *Aggregator) ApplyConfiguredTranslation(movie *models.Movie) string {
@@ -83,15 +87,16 @@ func (a *Aggregator) applyGenreReplacement(original string) string {
 			Replacement: original,
 		}
 
-		// Try to create the replacement (will fail silently if already exists due to race condition)
-		if err := a.genreReplacementRepo.Create(genreReplacement); err == nil {
-			// Successfully added, update cache with write lock
-			a.genreCacheMutex.Lock()
-			a.genreReplacementCache[original] = original
-			a.genreCacheMutex.Unlock()
+		// Try to create the replacement (will fail on unique constraint if already exists)
+		a.genreCacheMutex.Lock()
+		a.genreReplacementCache[original] = original
+		a.genreCacheMutex.Unlock()
+		if err := a.genreReplacementRepo.Create(genreReplacement); err != nil {
+			// Best-effort: log non-unique-constraint errors
+			if !errors.Is(err, gorm.ErrDuplicatedKey) {
+				logging.Warnf("genre auto-add failed for %q: %v", original, err)
+			}
 		}
-		// If create failed due to unique constraint (race condition), ignore the error
-		// The genre is already in the database from another goroutine
 	}
 
 	// Return original if no replacement found
@@ -121,4 +126,86 @@ func (a *Aggregator) isGenreIgnored(genre string) bool {
 // ReloadGenreReplacements reloads the genre replacement cache from database
 func (a *Aggregator) ReloadGenreReplacements() {
 	a.loadGenreReplacementCache()
+}
+
+func (a *Aggregator) loadWordReplacementCache() {
+	if a.wordReplacementRepo == nil {
+		return
+	}
+
+	replacementMap, err := a.wordReplacementRepo.GetReplacementMap()
+	if err == nil {
+		// Pre-sort replacements: longest original first, then alphabetical
+		pairs := make([]struct{ orig, repl string }, 0, len(replacementMap))
+		for orig, repl := range replacementMap {
+			pairs = append(pairs, struct{ orig, repl string }{orig, repl})
+		}
+		sort.Slice(pairs, func(i, j int) bool {
+			if len(pairs[i].orig) != len(pairs[j].orig) {
+				return len(pairs[i].orig) > len(pairs[j].orig)
+			}
+			return pairs[i].orig < pairs[j].orig
+		})
+
+		a.wordCacheMutex.Lock()
+		a.wordReplacementCache = replacementMap
+		a.wordReplacementSorted = pairs
+		a.wordCacheMutex.Unlock()
+	}
+}
+
+func (a *Aggregator) ReloadWordReplacements() {
+	a.loadWordReplacementCache()
+}
+
+func (a *Aggregator) applyWordReplacement(text string) string {
+	if a == nil || a.config == nil || !a.config.Metadata.WordReplacement.Enabled {
+		return text
+	}
+
+	if text == "" {
+		return text
+	}
+
+	a.wordCacheMutex.RLock()
+	sorted := a.wordReplacementSorted
+	a.wordCacheMutex.RUnlock()
+
+	if len(sorted) == 0 {
+		return text
+	}
+
+	result := text
+	for _, p := range sorted {
+		if strings.Contains(result, p.orig) {
+			result = strings.ReplaceAll(result, p.orig, p.repl)
+		}
+	}
+
+	return result
+}
+
+func (a *Aggregator) applyWordReplacements(movie *models.Movie) {
+	if a == nil || a.config == nil || !a.config.Metadata.WordReplacement.Enabled {
+		return
+	}
+
+	movie.Title = a.applyWordReplacement(movie.Title)
+	movie.OriginalTitle = a.applyWordReplacement(movie.OriginalTitle)
+	movie.Description = a.applyWordReplacement(movie.Description)
+	movie.Director = a.applyWordReplacement(movie.Director)
+	movie.Maker = a.applyWordReplacement(movie.Maker)
+	movie.Label = a.applyWordReplacement(movie.Label)
+	movie.Series = a.applyWordReplacement(movie.Series)
+
+	for i := range movie.Translations {
+		t := &movie.Translations[i]
+		t.Title = a.applyWordReplacement(t.Title)
+		t.OriginalTitle = a.applyWordReplacement(t.OriginalTitle)
+		t.Description = a.applyWordReplacement(t.Description)
+		t.Director = a.applyWordReplacement(t.Director)
+		t.Maker = a.applyWordReplacement(t.Maker)
+		t.Label = a.applyWordReplacement(t.Label)
+		t.Series = a.applyWordReplacement(t.Series)
+	}
 }

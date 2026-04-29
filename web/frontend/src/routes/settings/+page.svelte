@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { portalToBody } from '$lib/actions/portal';
 	import { apiClient } from '$lib/api/client';
-	import { Save, RefreshCw, CircleAlert, ArrowLeft, X } from 'lucide-svelte';
+	import { Save, RefreshCw, CircleAlert, ArrowLeft, X, Tags, Type } from 'lucide-svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import { toastStore } from '$lib/stores/toast';
@@ -20,7 +20,6 @@
 	import LoggingSettingsSection from '$lib/components/settings/sections/LoggingSettingsSection.svelte';
 	import MediaInfoSettingsSection from '$lib/components/settings/sections/MediaInfoSettingsSection.svelte';
 	import BrowserSettingsSection from '$lib/components/settings/sections/BrowserSettingsSection.svelte';
-	import GenreReplacementsSection from '$lib/components/settings/sections/GenreReplacementsSection.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
 	import { createSettingsStore } from './stores/settings-store.svelte';
 	import { createProxyStore } from './stores/proxy-store.svelte';
@@ -194,7 +193,38 @@
 			<FileOperationsSettingsSection config={settings.settingsConfig} />
 			<OutputSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 			<DatabaseSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
-			<GenreReplacementsSection />
+			<SettingsSection title="Genre Replacements" description="Manage genre name replacements applied during scraping" defaultExpanded={false}>
+				<div class="flex items-center justify-between">
+					<p class="text-sm text-muted-foreground">
+						Manage genre name replacements that are applied during scraping.
+					</p>
+					<a href="/genres">
+						<Button variant="outline" size="sm">
+							{#snippet children()}
+								<Tags class="h-4 w-4 mr-1" />
+								Manage Genres
+							{/snippet}
+						</Button>
+					</a>
+				</div>
+			</SettingsSection>
+
+			<SettingsSection title="Word Replacements" description="Manage word uncensor rules applied during scraping" defaultExpanded={false}>
+				<div class="flex items-center justify-between">
+					<p class="text-sm text-muted-foreground">
+						Manage word replacements that uncensor asterisked text in scraped metadata.
+					</p>
+					<a href="/words">
+						<Button variant="outline" size="sm">
+							{#snippet children()}
+								<Type class="h-4 w-4 mr-1" />
+								Manage Words
+							{/snippet}
+						</Button>
+					</a>
+				</div>
+			</SettingsSection>
+
 			<TranslationSettingsSection
 				config={settings.settingsConfig}
 				inputClass={settings.inputClass}

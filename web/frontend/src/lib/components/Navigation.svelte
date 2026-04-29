@@ -2,7 +2,7 @@
 	import { page } from '$app/stores';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
-	import { FolderOpen, Settings, Film, Users, LogOut, Activity, FileText, ChevronDown, Sun, Moon, Monitor } from 'lucide-svelte';
+	import { FolderOpen, Settings, Film, Users, LogOut, Activity, FileText, ChevronDown, Sun, Moon, Monitor, Tags, Type } from 'lucide-svelte';
 	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import type { Theme } from '$lib/stores/theme.svelte';
 
@@ -19,7 +19,9 @@
 	const navItems = [
 		{ href: '/browse', label: 'Scrape', icon: FolderOpen },
 		{ href: '/jobs', label: 'Jobs', icon: Activity },
-		{ href: '/actresses', label: 'Actresses', icon: Users }
+		{ href: '/actresses', label: 'Actresses', icon: Users },
+		{ href: '/genres', label: 'Genres', icon: Tags },
+		{ href: '/words', label: 'Words', icon: Type }
 	];
 
 	const subMenuItems = [

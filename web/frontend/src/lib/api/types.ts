@@ -228,6 +228,37 @@ export interface GenreReplacementCreateRequest {
 	replacement: string;
 }
 
+export interface GenreReplacementUpdateRequest {
+	original: string;
+	replacement: string;
+}
+
+export interface WordReplacement {
+	id: number;
+	original: string;
+	replacement: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface WordReplacementListResponse {
+	replacements: WordReplacement[];
+	count: number;
+	total: number;
+	limit: number;
+	offset: number;
+}
+
+export interface WordReplacementCreateRequest {
+	original: string;
+	replacement: string;
+}
+
+export interface WordReplacementUpdateRequest {
+	original: string;
+	replacement: string;
+}
+
 export interface Movie {
 	id: string;
 	content_id?: string;
@@ -692,10 +723,15 @@ export interface TagDatabaseConfig {
 	enabled?: boolean;
 }
 
+export interface WordReplacementConfig {
+	enabled?: boolean;
+}
+
 export interface MetadataConfig {
 	priority?: Record<string, string[]>;
 	actress_database?: ActressDatabaseConfig;
 	genre_replacement?: GenreReplacementConfig;
+	word_replacement?: WordReplacementConfig;
 	tag_database?: TagDatabaseConfig;
 	translation?: TranslationConfig;
 	ignore_genres?: string[];

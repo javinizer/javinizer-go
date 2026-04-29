@@ -141,6 +141,8 @@ func (a *Aggregator) aggregateWithPriority(results []*models.ScraperResult, prio
 			preTranslationTitle, movie.Title, preTranslationMaker, movie.Maker, preTranslationContentID, movie.ContentID)
 	}
 
+	a.applyWordReplacements(movie)
+
 	if a.config.Metadata.NFO.DisplayTitle != "" {
 		ctx := template.NewContextFromMovie(movie)
 		displayTitle, err := a.templateEngine.Execute(a.config.Metadata.NFO.DisplayTitle, ctx)

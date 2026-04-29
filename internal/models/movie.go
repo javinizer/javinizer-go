@@ -109,6 +109,15 @@ type GenreReplacement struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// WordReplacement represents a user-defined text string mapping for uncensoring metadata
+type WordReplacement struct {
+	ID          uint      `json:"id" gorm:"primaryKey"`
+	Original    string    `json:"original" gorm:"uniqueIndex;not null"`
+	Replacement string    `json:"replacement" gorm:"not null"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 // ActressAlias represents an alternate name mapping for an actress
 // This allows users to consolidate multiple actress names into a canonical one
 type ActressAlias struct {

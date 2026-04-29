@@ -161,6 +161,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"DELETE /api/v1/events",
 		"DELETE /api/v1/genres/replacements",
 		"DELETE /api/v1/history",
+		"DELETE /api/v1/words/replacements",
 		"DELETE /api/v1/history/:id",
 		"GET /api/v1/actresses",
 		"GET /api/v1/actresses/:id",
@@ -174,6 +175,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"GET /api/v1/events/stats",
 		"GET /api/v1/genres/replacements",
 		"GET /api/v1/history",
+		"GET /api/v1/words/replacements",
 		"GET /api/v1/history/stats",
 		"GET /api/v1/jobs",
 		"GET /api/v1/jobs/:id",
@@ -211,6 +213,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"POST /api/v1/browse",
 		"POST /api/v1/genres/replacements",
 		"POST /api/v1/jobs/:id/operations/:movieId/revert",
+		"POST /api/v1/words/replacements",
 		"POST /api/v1/jobs/:id/revert",
 		"POST /api/v1/browse/autocomplete",
 		"POST /api/v1/movies/:id/compare-nfo",
@@ -223,6 +226,8 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"POST /api/v1/version/check",
 		"PUT /api/v1/actresses/:id",
 		"PUT /api/v1/config",
+		"PUT /api/v1/genres/replacements",
+		"PUT /api/v1/words/replacements",
 	}
 
 	optionalStaticRoutes := map[string]struct{}{

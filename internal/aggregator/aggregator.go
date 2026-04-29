@@ -36,6 +36,11 @@ type AggregatorOptions struct {
 	// If non-nil, actress aliases are loaded from the repository during initialization.
 	ActressAliasRepo database.ActressAliasRepositoryInterface
 
+	// WordReplacementRepo is an optional word replacement repository for tests.
+	// If nil, loadWordReplacementCache() is skipped (empty cache).
+	// If non-nil, word replacements are loaded from the repository during initialization.
+	WordReplacementRepo database.WordReplacementRepositoryInterface
+
 	// TemplateEngine is an optional template engine for tests.
 	// If nil, a real template.NewEngine() is created.
 	// If non-nil, the injected template engine is used.
@@ -45,6 +50,11 @@ type AggregatorOptions struct {
 	// If non-nil, this cache is used directly without loading from database.
 	// Takes precedence over GenreReplacementRepo if both are provided.
 	GenreCache map[string]string
+
+	// WordCache is an optional pre-populated word replacement cache for tests.
+	// If non-nil, this cache is used directly without loading from database.
+	// Takes precedence over WordReplacementRepo if both are provided.
+	WordCache map[string]string
 
 	// ActressCache is an optional pre-populated actress alias cache for tests.
 	// If non-nil, this cache is used directly without loading from database.
@@ -68,6 +78,10 @@ type Aggregator struct {
 	genreReplacementRepo  database.GenreReplacementRepositoryInterface
 	genreReplacementCache map[string]string
 	genreCacheMutex       sync.RWMutex // Protects genreReplacementCache from concurrent access
+	wordReplacementRepo   database.WordReplacementRepositoryInterface
+	wordReplacementCache  map[string]string
+	wordReplacementSorted []struct{ orig, repl string } // Pre-sorted longest-first
+	wordCacheMutex        sync.RWMutex                  // Protects wordReplacementCache and wordReplacementSorted from concurrent access
 	actressAliasRepo      database.ActressAliasRepositoryInterface
 	actressAliasCache     map[string]string   // Maps alias name to canonical name
 	aliasCacheMutex       sync.RWMutex        // Protects actressAliasCache from concurrent access
@@ -95,6 +109,7 @@ func New(cfg *config.Config) *Aggregator {
 		config:                cfg,
 		templateEngine:        template.NewEngine(),
 		genreReplacementCache: make(map[string]string),
+		wordReplacementCache:  make(map[string]string),
 		actressAliasCache:     make(map[string]string),
 	}
 	agg.resolvePriorities()
@@ -118,6 +133,7 @@ func NewWithOptions(cfg *config.Config, opts *AggregatorOptions) *Aggregator {
 		config:                cfg,
 		scrapers:              nil, // Default empty, populated below if provided
 		genreReplacementCache: make(map[string]string),
+		wordReplacementCache:  make(map[string]string),
 		actressAliasCache:     make(map[string]string),
 	}
 
@@ -143,6 +159,11 @@ func NewWithOptions(cfg *config.Config, opts *AggregatorOptions) *Aggregator {
 		agg.actressAliasRepo = opts.ActressAliasRepo
 	}
 
+	// Use injected word replacement repository or skip
+	if opts != nil && opts.WordReplacementRepo != nil {
+		agg.wordReplacementRepo = opts.WordReplacementRepo
+	}
+
 	// Use pre-populated genre cache if provided (for tests)
 	if opts != nil && opts.GenreCache != nil {
 		agg.genreCacheMutex.Lock()
@@ -151,6 +172,16 @@ func NewWithOptions(cfg *config.Config, opts *AggregatorOptions) *Aggregator {
 	} else if agg.genreReplacementRepo != nil && agg.config.Metadata.GenreReplacement.Enabled {
 		// Load from database if repository is available
 		agg.loadGenreReplacementCache()
+	}
+
+	// Use pre-populated word cache if provided (for tests)
+	if opts != nil && opts.WordCache != nil {
+		agg.wordCacheMutex.Lock()
+		agg.wordReplacementCache = opts.WordCache
+		agg.wordCacheMutex.Unlock()
+	} else if agg.wordReplacementRepo != nil && agg.config.Metadata.WordReplacement.Enabled {
+		// Load from database if repository is available
+		agg.loadWordReplacementCache()
 	}
 
 	// Use pre-populated actress cache if provided (for tests)
@@ -178,8 +209,9 @@ func NewWithOptions(cfg *config.Config, opts *AggregatorOptions) *Aggregator {
 func NewWithDatabase(cfg *config.Config, db *database.DB) *Aggregator {
 	return NewWithOptions(cfg, &AggregatorOptions{
 		GenreReplacementRepo: database.NewGenreReplacementRepository(db),
+		WordReplacementRepo:  database.NewWordReplacementRepository(db),
 		ActressAliasRepo:     database.NewActressAliasRepository(db),
-		TemplateEngine:       nil, // Use default template.NewEngine()
+		TemplateEngine:       nil,
 	})
 }
 

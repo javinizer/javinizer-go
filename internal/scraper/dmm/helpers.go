@@ -105,9 +105,10 @@ func extractContentIDCandidates(doc *goquery.Document, searchIDs []string) []con
 			return
 		}
 
-		if strings.Contains(href, "/rental/") {
-			urlCID = stripRentalSuffix(urlCID)
-		}
+		// Always strip rental 'r' suffix from content IDs regardless of URL path.
+		// DMM uses the 'r' suffix for rental content IDs across all URL types
+		// (digital, physical, streaming), not just /rental/ pages.
+		urlCID = stripRentalSuffix(urlCID)
 
 		// Clean the CID from URL using precompiled regex for consistency and performance
 		// Strips DMM prefixes: "9ipx535" -> "ipx535", "h_796san167" -> "san167"
