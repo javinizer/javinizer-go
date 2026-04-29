@@ -10,7 +10,7 @@
 	import { createBatchJobPollingQuery, createConfigQuery } from '$lib/query/queries';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import type { BatchJobResponse, ProgressMessage, FileResult } from '$lib/api/types';
-	import { X, CircleCheckBig, CircleX, LoaderCircle, ChevronDown, ChevronRight } from 'lucide-svelte';
+	import { X, CircleCheckBig, CircleX, ChevronDown, ChevronRight } from 'lucide-svelte';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
 
@@ -41,11 +41,9 @@
 	let countdownInterval: ReturnType<typeof setInterval> | null = null;
 	let cancelRedirect = $state(false);
 
-	// UI state for collapsible sections
 	let showCompleted = $state(false);
 	let showFailed = $state(false);
 
-	// WebSocket state
 	const wsState = $derived($websocketStore);
 	const progressMessages = $derived(
 		wsState.messages.filter((m: ProgressMessage) => m.job_id === jobId)
@@ -53,7 +51,6 @@
 	const messagesByFile = $derived(wsState.messagesByFile[jobId] || {});
 	const latestMessage = $derived(progressMessages[progressMessages.length - 1]);
 
-	// Categorize files by status
 	const activeFiles = $derived.by<FileResult[]>(() => {
 		if (!job?.results) return [];
 		return (Object.values(job.results) as FileResult[]).filter(r => r.status === 'running');
@@ -74,8 +71,6 @@
 		if (!job?.results) return [];
 		return (Object.values(job.results) as FileResult[]).filter(r => r.status === 'failed');
 	});
-
-	const activeWorkerCount = $derived(activeFiles.length);
 
 	$effect(() => {
 		const status = jobQuery.data?.status;
@@ -120,7 +115,6 @@
 	}
 
 	function getFileDisplayName(path: string): string {
-		// Handle both Unix (/) and Windows (\) path separators
 		const parts = path.split(/[\\/]/);
 		return parts[parts.length - 1] || path;
 	}
@@ -136,9 +130,9 @@
 				<h2 class="text-2xl font-semibold">Batch Scraping Progress</h2>
 				{#if job && job.status === 'running'}
 					<div class="flex items-center gap-2 px-3 py-1 bg-blue-100 dark:bg-blue-900/30 rounded-full text-sm">
-						<LoaderCircle class="h-4 w-4 animate-spin text-blue-600 dark:text-blue-400" />
+						<div class="h-2 w-2 rounded-full bg-blue-600 dark:bg-blue-400 animate-pulse"></div>
 						<span class="font-medium text-blue-700 dark:text-blue-300">
-							{activeWorkerCount} / {maxWorkers} workers active
+							{activeFiles.length} / {maxWorkers} workers
 						</span>
 					</div>
 				{/if}
@@ -149,12 +143,9 @@
 		</div>
 
 		<!-- Content -->
-		<div class="flex-1 overflow-y-auto p-6 space-y-6">
+		<div class="flex-1 overflow-y-auto p-6 space-y-5">
 			{#if loading}
-				<div class="text-center py-8">
-					<LoaderCircle class="h-8 w-8 animate-spin mx-auto mb-2" />
-					<p class="text-muted-foreground">Loading job status...</p>
-				</div>
+				<p class="text-sm text-muted-foreground text-center py-6">Loading job status...</p>
 			{:else if error}
 				<div class="bg-destructive/10 border border-destructive text-destructive px-4 py-3 rounded">
 					<p>{error}</p>
@@ -168,193 +159,124 @@
 							{job.completed + job.failed} / {job.total_files} files
 						</span>
 					</div>
-					<div class="h-4 bg-secondary rounded-full overflow-hidden">
+					<div class="h-3 bg-secondary rounded-full overflow-hidden">
 						<div
-							class="h-full bg-primary transition-all duration-300"
+							class="h-full bg-primary rounded-full transition-all duration-300"
 							style="width: {job.progress}%"
 						></div>
 					</div>
-					<div class="flex items-center justify-between text-sm text-muted-foreground">
+					<div class="flex items-center justify-between text-xs text-muted-foreground">
 						<span>{job.progress.toFixed(1)}%</span>
 						<span>
-							{job.completed} completed • {job.failed} failed
+							{#if completedFiles.length > 0}<span class="text-green-600 dark:text-green-400">{completedFiles.length} done</span> • {/if}{#if failedFiles.length > 0}<span class="text-red-600 dark:text-red-400">{failedFiles.length} failed</span> • {/if}{#if queuedFiles.length > 0}{queuedFiles.length} queued{/if}
 						</span>
 					</div>
 				</div>
 
-				<!-- Status Badge -->
-				<div class="flex items-center gap-2">
-					<span class="text-sm font-medium">Status:</span>
-					{#if job.status === 'completed'}
-						<span
-							class="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 rounded text-sm"
-						>
-							<CircleCheckBig class="h-4 w-4" />
-							Completed
-						</span>
-					{:else if job.status === 'failed'}
-						<span
-							class="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded text-sm"
-						>
-							<CircleX class="h-4 w-4" />
-							Failed
-						</span>
-					{:else if job.status === 'cancelled'}
-						<span class="inline-flex items-center gap-1 px-2 py-1 bg-muted text-muted-foreground rounded text-sm">
-							<CircleX class="h-4 w-4" />
-							Cancelled
-						</span>
-					{:else}
-						<span class="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded text-sm">
-							<LoaderCircle class="h-4 w-4 animate-spin" />
-							{job.status}
-						</span>
-					{/if}
-				</div>
-
-				<!-- Active Files (Processing NOW) -->
-				{#if activeFiles.length > 0}
-					<div class="space-y-3">
-						<h3 class="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-2 text-lg">
-							<LoaderCircle class="h-5 w-5 animate-spin" />
-							Processing ({activeFiles.length})
-						</h3>
-						<div class="space-y-2">
-							{#each activeFiles as result, index (result.file_path)}
-								<div animate:flip={{ duration: 220, easing: cubicOut }} class="active-file border-2 rounded-lg p-3 bg-blue-50/50 dark:bg-blue-900/20" style="animation-delay: {index * 0.2}s">
-									<div class="flex items-start gap-3">
-										<LoaderCircle class="h-5 w-5 text-blue-600 dark:text-blue-400 animate-spin mt-0.5 shrink-0" />
-										<div class="flex-1 min-w-0">
-											<div class="font-medium text-blue-900 dark:text-blue-100 truncate">
-												{result.movie_id || 'Processing...'}
-											</div>
-											<div class="text-sm text-blue-700/70 dark:text-blue-300/70 truncate">
-												{getFileDisplayName(result.file_path)}
-											</div>
-											{#if messagesByFile[result.file_path]}
-												<div class="text-xs text-blue-600 dark:text-blue-400 mt-1">
-													{messagesByFile[result.file_path].message}
-												</div>
-											{/if}
-										</div>
-									</div>
+				<!-- Unified File Feed -->
+				<div class="space-y-1.5">
+					<!-- Active Files -->
+					{#each activeFiles as result (result.file_path)}
+						<div animate:flip={{ duration: 220, easing: cubicOut }} class="active-file flex items-center gap-3 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/20 px-3 py-2.5">
+							<div class="h-2 w-2 rounded-full bg-blue-600 dark:bg-blue-400 shrink-0 animate-pulse"></div>
+							<div class="flex-1 min-w-0">
+								<div class="flex items-center gap-2">
+									<span class="font-medium text-sm text-blue-900 dark:text-blue-100 truncate">
+										{result.movie_id || 'Processing...'}
+									</span>
+									<span class="text-xs text-blue-600/60 dark:text-blue-400/60 truncate">
+										{getFileDisplayName(result.file_path)}
+									</span>
 								</div>
-							{/each}
-						</div>
-					</div>
-				{/if}
-
-				<!-- Queued Files (Waiting) -->
-				{#if queuedFiles.length > 0}
-					<div class="space-y-3">
-						<h3 class="font-semibold text-muted-foreground flex items-center gap-2">
-							<div class="h-5 w-5 rounded-full border-2 border-muted-foreground/40 flex items-center justify-center">
-								<div class="h-2 w-2 rounded-full bg-muted-foreground/40"></div>
+								{#if messagesByFile[result.file_path]}
+									<p class="text-xs text-blue-600 dark:text-blue-400 mt-0.5 truncate">
+										{messagesByFile[result.file_path].message}
+									</p>
+								{/if}
 							</div>
-							Queued ({queuedFiles.length})
-						</h3>
-						<div class="space-y-1">
-							{#each queuedFiles.slice(0, 5) as filePath (filePath)}
-								<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-center gap-2 p-2 rounded bg-muted text-sm">
-									<div class="h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0"></div>
-									<div class="text-foreground truncate">
-										{getFileDisplayName(filePath)}
-									</div>
-								</div>
-							{/each}
-							{#if queuedFiles.length > 5}
-								<div class="text-xs text-muted-foreground pl-4 pt-1">
-									and {queuedFiles.length - 5} more...
-								</div>
-							{/if}
 						</div>
-					</div>
-				{/if}
+					{/each}
 
-				<!-- Completed Files (Collapsible) -->
-				{#if completedFiles.length > 0}
-					<div class="space-y-2">
+					<!-- Queued Files (show first 3) -->
+					{#each queuedFiles.slice(0, 3) as filePath (filePath)}
+						<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-center gap-3 rounded-lg px-3 py-2 opacity-40">
+							<div class="h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0"></div>
+							<span class="text-sm text-muted-foreground truncate">
+								{getFileDisplayName(filePath)}
+							</span>
+						</div>
+					{/each}
+					{#if queuedFiles.length > 3}
+						<p class="text-xs text-muted-foreground pl-5">+{queuedFiles.length - 3} more queued</p>
+					{/if}
+
+					<!-- Completed Summary (collapsible) -->
+					{#if completedFiles.length > 0}
 						<button
 							onclick={() => showCompleted = !showCompleted}
-							class="w-full flex items-center justify-between p-3 rounded-lg bg-green-50 hover:bg-green-100 dark:bg-green-900/20 dark:hover:bg-green-900/30 transition-colors"
+							class="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent/50 transition-colors"
 						>
-							<div class="flex items-center gap-2">
-								<CircleCheckBig class="h-5 w-5 text-green-600 dark:text-green-400" />
-								<h3 class="font-semibold text-green-700 dark:text-green-300">
-									Completed ({completedFiles.length})
-								</h3>
-							</div>
+							<CircleCheckBig class="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+							<span class="text-sm font-medium text-green-700 dark:text-green-300">
+								{completedFiles.length} completed
+							</span>
 							{#if showCompleted}
-								<ChevronDown class="h-5 w-5 text-green-600 dark:text-green-400" />
+								<ChevronDown class="h-4 w-4 text-green-600 dark:text-green-400 ml-auto" />
 							{:else}
-								<ChevronRight class="h-5 w-5 text-green-600 dark:text-green-400" />
+								<ChevronRight class="h-4 w-4 text-green-600 dark:text-green-400 ml-auto" />
 							{/if}
 						</button>
 						{#if showCompleted}
-							<div class="space-y-1 pl-4 max-h-60 overflow-y-auto" transition:slide|local={{ duration: 180, easing: cubicOut }}>
+							<div class="space-y-1 pl-5" transition:slide|local={{ duration: 180, easing: cubicOut }}>
 								{#each completedFiles as result (result.file_path)}
-									<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-start gap-2 p-2 rounded bg-green-50/50 dark:bg-green-900/15 text-sm">
-										<CircleCheckBig class="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
-										<div class="flex-1 min-w-0">
-											<div class="font-medium text-green-900 dark:text-green-200 truncate">
-												{result.movie_id || 'Unknown'}
-											</div>
-											<div class="text-xs text-green-700/70 dark:text-green-300/70 truncate">
-												{getFileDisplayName(result.file_path)}
-											</div>
-										</div>
+									<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-center gap-3 px-3 py-1.5 text-sm">
+										<CircleCheckBig class="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" />
+										<span class="truncate text-green-900 dark:text-green-200">{result.movie_id || 'Unknown'}</span>
+										<span class="text-xs text-green-700/50 dark:text-green-300/50 truncate">{getFileDisplayName(result.file_path)}</span>
 									</div>
 								{/each}
 							</div>
 						{/if}
-					</div>
-				{/if}
+					{/if}
 
-				<!-- Failed Files (Collapsible) -->
-				{#if failedFiles.length > 0}
-					<div class="space-y-2">
+					<!-- Failed Summary (collapsible) -->
+					{#if failedFiles.length > 0}
 						<button
 							onclick={() => showFailed = !showFailed}
-							class="w-full flex items-center justify-between p-3 rounded-lg bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 transition-colors"
+							class="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent/50 transition-colors"
 						>
-							<div class="flex items-center gap-2">
-								<CircleX class="h-5 w-5 text-red-600 dark:text-red-400" />
-								<h3 class="font-semibold text-red-700 dark:text-red-300">
-									Failed ({failedFiles.length})
-								</h3>
-							</div>
+							<CircleX class="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" />
+							<span class="text-sm font-medium text-red-700 dark:text-red-300">
+								{failedFiles.length} failed
+							</span>
 							{#if showFailed}
-								<ChevronDown class="h-5 w-5 text-red-600 dark:text-red-400" />
+								<ChevronDown class="h-4 w-4 text-red-600 dark:text-red-400 ml-auto" />
 							{:else}
-								<ChevronRight class="h-5 w-5 text-red-600 dark:text-red-400" />
+								<ChevronRight class="h-4 w-4 text-red-600 dark:text-red-400 ml-auto" />
 							{/if}
 						</button>
 						{#if showFailed}
-							<div class="space-y-1 pl-4 max-h-60 overflow-y-auto" transition:slide|local={{ duration: 180, easing: cubicOut }}>
+							<div class="space-y-1 pl-5" transition:slide|local={{ duration: 180, easing: cubicOut }}>
 								{#each failedFiles as result (result.file_path)}
-									<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-start gap-2 p-2 rounded bg-red-50/50 dark:bg-red-900/15 text-sm">
-										<CircleX class="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+									<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-start gap-3 px-3 py-1.5 text-sm">
+										<CircleX class="h-3.5 w-3.5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
 										<div class="flex-1 min-w-0">
-											<div class="font-medium text-red-900 dark:text-red-200 truncate">
-												{result.movie_id || 'Unknown'}
-											</div>
-											<div class="text-xs text-red-700/70 dark:text-red-300/70 truncate">
-												{getFileDisplayName(result.file_path)}
+											<div class="flex items-center gap-2">
+												<span class="truncate text-red-900 dark:text-red-200">{result.movie_id || 'Unknown'}</span>
+												<span class="text-xs text-red-700/50 dark:text-red-300/50 truncate">{getFileDisplayName(result.file_path)}</span>
 											</div>
 											{#if result.error}
-												<div class="text-xs text-red-600 dark:text-red-400 mt-1 break-words">
-													{result.error}
-												</div>
+												<p class="text-xs text-red-600 dark:text-red-400 mt-0.5 break-words">{result.error}</p>
 											{/if}
 										</div>
 									</div>
 								{/each}
 							</div>
 						{/if}
-					</div>
-				{/if}
+					{/if}
+				</div>
 
-				<!-- Latest Progress Message (fallback for jobs without file tracking) -->
+				<!-- Latest Progress Message (fallback) -->
 				{#if latestMessage && activeFiles.length === 0 && completedFiles.length === 0}
 					<div class="bg-accent/50 rounded-lg p-4">
 						<p class="text-sm font-medium mb-1">Latest Update:</p>

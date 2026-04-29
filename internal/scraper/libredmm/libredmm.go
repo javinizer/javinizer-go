@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -194,7 +193,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 	if normalized, ok := normalizeMovieURL(urlStr, s.baseURL); ok {
 		targetURL = normalized
 	} else {
-		targetURL, err = s.GetURL(id)
+		targetURL, err = s.getURLCtx(ctx, id)
 		if err != nil {
 			return nil, fmt.Errorf("failed to normalize URL: %w", err)
 		}
@@ -230,7 +229,11 @@ func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 			if attempt == attempts {
 				return nil, fmt.Errorf("LibreDMM is still %s for %s", msg, id)
 			}
-			time.Sleep(s.pollInterval)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(s.pollInterval):
+			}
 		case 404:
 			return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
 		case 502:
@@ -287,8 +290,11 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	return normalized, true
 }
 
-// GetURL resolves a JSON movie endpoint for the provided input.
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.getURLCtx(context.Background(), id)
+}
+
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -298,8 +304,7 @@ func (s *Scraper) GetURL(id string) (string, error) {
 		return normalized, nil
 	}
 
-	// If a foreign URL is provided, extract a likely ID when possible.
-	if isHTTPURL(id) {
+	if scraperutil.IsHTTPURL(id) {
 		if extracted := extractIDFromURL(id); extracted != "" {
 			return buildSearchURL(s.baseURL, extracted), nil
 		}
@@ -314,7 +319,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("LibreDMM scraper is disabled")
 	}
 
-	targetURL, err := s.GetURL(id)
+	targetURL, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +354,11 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 			if attempt == attempts {
 				return nil, fmt.Errorf("LibreDMM is still %s for %s", msg, id)
 			}
-			time.Sleep(s.pollInterval)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(s.pollInterval):
+			}
 		case 404:
 			return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
 		case 502:
@@ -530,7 +539,7 @@ func parseActresses(entries []actressPayload, base string) []models.ActressInfo 
 		info := models.ActressInfo{
 			ThumbURL: toHTTPS(scraperutil.ResolveURL(base, actress.ImageURL)),
 		}
-		if hasJapanese(name) {
+		if scraperutil.HasJapanese(name) {
 			info.JapaneseName = name
 		} else {
 			parts := strings.Fields(name)
@@ -591,7 +600,7 @@ func firstNonEmpty(values []string) string {
 }
 
 func normalizeMovieURL(raw, base string) (string, bool) {
-	if !isHTTPURL(raw) {
+	if !scraperutil.IsHTTPURL(raw) {
 		return "", false
 	}
 
@@ -768,15 +777,6 @@ func stripJSONSuffix(raw string) string {
 	return parsed.String()
 }
 
-func hasJapanese(s string) bool {
-	for _, r := range s {
-		if unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana) {
-			return true
-		}
-	}
-	return false
-}
-
 func toHTTPS(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if strings.HasPrefix(raw, "http://") {
@@ -811,14 +811,6 @@ func stripANSICodes(s string) string {
 	}
 
 	return s
-}
-
-func isHTTPURL(v string) bool {
-	u, err := url.Parse(strings.TrimSpace(v))
-	if err != nil {
-		return false
-	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 func (s *Scraper) filterPlaceholderScreenshotsCtx(ctx context.Context, result *models.ScraperResult) {

@@ -4,9 +4,10 @@
 	import FormTemplateInput from '$lib/components/settings/FormTemplateInput.svelte';
 	import FormTextInput from '$lib/components/settings/FormTextInput.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
+	import type { SettingsConfig } from '$lib/api/types';
 
 	interface Props {
-		config: any;
+		config: SettingsConfig;
 	}
 
 	let { config }: Props = $props();
@@ -198,12 +199,15 @@
 			<FormTemplateInput
 				label="Tag template"
 				description="Template for custom tags in NFO files"
-				value={config.metadata.nfo?.tag ?? '<SET>'}
+				value={(Array.isArray(config.metadata.nfo?.tag) ? config.metadata.nfo.tag.join(', ') : config.metadata.nfo?.tag) ?? '<SET>'}
 				placeholder="<SET>"
 				showTagList={true}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
-					config.metadata.nfo.tag = val;
+					config.metadata.nfo.tag = val
+						.split(',')
+						.map((s) => s.trim())
+						.filter((s) => s.length > 0);
 				}}
 			/>
 

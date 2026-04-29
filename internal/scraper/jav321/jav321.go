@@ -28,7 +28,6 @@ var (
 	idRegex          = regexp.MustCompile(`([A-Za-z]+-?\d+[A-Za-z]?)`)
 	runtimeRegex     = regexp.MustCompile(`(\d+)\s*(?:minutes|min|分)?`)
 	releaseDateRegex = regexp.MustCompile(`(\d{4}-\d{2}-\d{2})`)
-	nonAlphaNum      = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
 // Scraper implements the Jav321 scraper.
@@ -106,16 +105,15 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 
 // GetURL returns the detail page URL for an ID.
 func (s *Scraper) GetURL(id string) (string, error) {
-	return s.GetURLCtx(context.Background(), id)
+	return s.getURLCtx(context.Background(), id)
 }
 
-// GetURLCtx returns the detail page URL for an ID with context support.
-func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
 	}
-	if isHTTPURL(id) {
+	if scraperutil.IsHTTPURL(id) {
 		return id, nil
 	}
 
@@ -148,7 +146,7 @@ func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
 		return "", fmt.Errorf("failed to parse Jav321 search page: %w", err)
 	}
 
-	target := normalizeID(id)
+	target := scraperutil.NormalizeID(id)
 	var found string
 	doc.Find("a[href*='/video/']").EachWithBreak(func(_ int, a *goquery.Selection) bool {
 		href := strings.TrimSpace(a.AttrOr("href", ""))
@@ -160,7 +158,7 @@ func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
 		if cand == "" {
 			cand = extractID(a.Text())
 		}
-		if cand != "" && normalizeID(cand) == target {
+		if cand != "" && scraperutil.NormalizeID(cand) == target {
 			found = scraperutil.ResolveURL(s.baseURL, href)
 			return false
 		}
@@ -251,7 +249,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("Jav321 scraper is disabled")
 	}
 
-	detailURL, err := s.GetURLCtx(ctx, id)
+	detailURL, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -440,7 +438,7 @@ func extractActresses(html string) []models.ActressInfo {
 		seen[name] = true
 
 		info := models.ActressInfo{}
-		if hasJapanese(name) {
+		if scraperutil.HasJapanese(name) {
 			info.JapaneseName = strings.ReplaceAll(name, "（", "(")
 		} else {
 			parts := strings.Fields(name)
@@ -589,11 +587,6 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 	return html, resp.StatusCode(), nil
 }
 
-func normalizeID(v string) string {
-	v = strings.ToLower(strings.TrimSpace(v))
-	return nonAlphaNum.ReplaceAllString(v, "")
-}
-
 func extractID(v string) string {
 	v = strings.TrimSpace(v)
 	if m := idRegex.FindStringSubmatch(v); len(m) > 1 {
@@ -619,21 +612,4 @@ func stripTrailingSiteName(v string) string {
 func stripTags(v string) string {
 	re := regexp.MustCompile(`(?s)<[^>]*>`) //nolint:gocritic
 	return re.ReplaceAllString(v, "")
-}
-
-func hasJapanese(v string) bool {
-	for _, r := range v {
-		if unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han) {
-			return true
-		}
-	}
-	return false
-}
-
-func isHTTPURL(v string) bool {
-	u, err := url.Parse(strings.TrimSpace(v))
-	if err != nil {
-		return false
-	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }

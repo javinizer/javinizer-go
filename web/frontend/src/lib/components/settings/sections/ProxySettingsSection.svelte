@@ -6,17 +6,17 @@
 	import FormNumberInput from '$lib/components/settings/FormNumberInput.svelte';
 	import FormTextInput from '$lib/components/settings/FormTextInput.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
+	import type { SettingsConfig, ProxyConfig as ProxyConfigType, FlareSolverrConfig as FlareSolverrConfigType } from '$lib/api/types';
 
-	// TestResult interface matching parent +page.svelte
 	interface TestResult {
 		success: boolean;
 		timestamp: number;
 		message?: string;
-		configSnapshot?: string; // JSON snapshot of config at test time for dirty detection
+		configSnapshot?: string;
 	}
 
 	interface Props {
-		config: any;
+		config: SettingsConfig;
 		inputClass: string;
 		testingProxy: boolean;
 		testingFlareSolverr: boolean;
@@ -81,7 +81,7 @@
 			description="Enable global fallback proxy. Scrapers set to 'Inherit Global Proxy' will use this."
 			checked={config.scrapers.proxy?.enabled ?? false}
 			onchange={(val) => {
-				if (!config.scrapers.proxy) config.scrapers.proxy = {};
+				if (!config.scrapers.proxy) config.scrapers.proxy = {} as ProxyConfigType;
 				config.scrapers.proxy.enabled = val;
 				invalidateGlobalProxyTest();
 			}}
@@ -95,7 +95,7 @@
 					class={inputClass}
 					value={config.scrapers.proxy?.default_profile ?? ''}
 					onchange={(e) => {
-						if (!config.scrapers.proxy) config.scrapers.proxy = {};
+						if (!config.scrapers.proxy) config.scrapers.proxy = {} as ProxyConfigType;
 						config.scrapers.proxy.default_profile = e.currentTarget.value;
 						invalidateGlobalProxyTest();
 					}}
@@ -251,7 +251,7 @@
 			description="Use FlareSolverr to bypass Cloudflare protection (required for JavLibrary). Run FlareSolverr via Docker: docker run -p 8191:8191 ghcr.io/flaresolverr/flaresolverr:latest"
 			checked={config.scrapers?.flaresolverr?.enabled ?? false}
 			onchange={(val) => {
-				if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {};
+				if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {} as FlareSolverrConfigType;
 				config.scrapers.flaresolverr.enabled = val;
 				invalidateGlobalFlareSolverrTest();
 			}}
@@ -264,7 +264,7 @@
 				value={config.scrapers?.flaresolverr?.url ?? 'http://localhost:8191/v1'}
 				placeholder="http://localhost:8191/v1"
 				onchange={(val) => {
-					if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {};
+					if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {} as FlareSolverrConfigType;
 					config.scrapers.flaresolverr.url = val;
 					invalidateGlobalFlareSolverrTest();
 				}}
@@ -278,7 +278,7 @@
 				max={300}
 				unit="seconds"
 				onchange={(val) => {
-					if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {};
+					if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {} as FlareSolverrConfigType;
 					config.scrapers.flaresolverr.timeout = val;
 					invalidateGlobalFlareSolverrTest();
 				}}
@@ -291,7 +291,7 @@
 				min={0}
 				max={10}
 				onchange={(val) => {
-					if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {};
+					if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {} as FlareSolverrConfigType;
 					config.scrapers.flaresolverr.max_retries = val;
 					invalidateGlobalFlareSolverrTest();
 				}}
@@ -305,7 +305,7 @@
 				max={3600}
 				unit="seconds"
 				onchange={(val) => {
-					if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {};
+					if (!config.scrapers.flaresolverr) config.scrapers.flaresolverr = {} as FlareSolverrConfigType;
 					config.scrapers.flaresolverr.session_ttl = val;
 					invalidateGlobalFlareSolverrTest();
 				}}

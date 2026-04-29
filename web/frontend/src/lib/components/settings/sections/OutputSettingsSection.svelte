@@ -5,9 +5,10 @@
 	import FormTemplateInput from '$lib/components/settings/FormTemplateInput.svelte';
 	import FormTextInput from '$lib/components/settings/FormTextInput.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
+	import type { SettingsConfig } from '$lib/api/types';
 
 	interface Props {
-		config: any;
+		config: SettingsConfig;
 		inputClass: string;
 	}
 

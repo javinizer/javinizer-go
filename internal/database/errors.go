@@ -6,7 +6,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrNotFound = errors.New("record not found")
+var (
+	ErrNotFound      = errors.New("record not found")
+	ErrInvalidLookup = errors.New("invalid lookup key")
+)
 
 func IsNotFound(err error) bool {
 	if err == nil {

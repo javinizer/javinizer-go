@@ -174,15 +174,15 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 }
 
 func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLWithContext(context.Background(), id)
+	return s.getURLCtx(context.Background(), id)
 }
 
-func (s *Scraper) getURLWithContext(ctx context.Context, id string) (string, error) {
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
 	}
-	if isHTTPURL(id) {
+	if scraperutil.IsHTTPURL(id) {
 		return id, nil
 	}
 
@@ -221,7 +221,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("DLgetchu scraper is disabled")
 	}
 
-	detailURL, err := s.getURLWithContext(ctx, id)
+	detailURL, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -424,12 +424,4 @@ func decodeBody(resp *resty.Response) (string, error) {
 func stripTags(v string) string {
 	re := regexp.MustCompile(`(?s)<[^>]*>`) //nolint:gocritic
 	return re.ReplaceAllString(v, "")
-}
-
-func isHTTPURL(v string) bool {
-	u, err := url.Parse(strings.TrimSpace(v))
-	if err != nil {
-		return false
-	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }

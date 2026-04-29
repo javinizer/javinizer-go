@@ -25,7 +25,7 @@ FAILED_JOBS=()
 
 # Job 1: Unit Tests & Coverage
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Job 1/5: Unit Tests & Coverage${NC}"
+echo -e "${BLUE}Job 1/7: Unit Tests & Coverage${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -70,7 +70,7 @@ echo ""
 
 # Job 2: Race Detector Tests
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Job 2/5: Race Detector Tests${NC}"
+echo -e "${BLUE}Job 2/7: Race Detector Tests${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -85,7 +85,7 @@ echo ""
 
 # Job 3: Linting & Code Quality
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Job 3/5: Linting & Code Quality${NC}"
+echo -e "${BLUE}Job 3/7: Linting & Code Quality${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -124,9 +124,60 @@ else
 fi
 echo ""
 
-# Job 4: Build Verification
+# Job 4: Vulnerability Scan
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Job 4/5: Build Verification${NC}"
+echo -e "${BLUE}Job 4/7: Vulnerability Scan${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+echo -e "${YELLOW}→ Running govulncheck...${NC}"
+if command -v govulncheck >/dev/null 2>&1; then
+    if govulncheck ./...; then
+        echo -e "${GREEN}✓ govulncheck passed — no known vulnerabilities${NC}"
+    else
+        echo -e "${RED}✗ govulncheck found vulnerabilities${NC}"
+        FAILED_JOBS+=("Vulnerability Scan")
+    fi
+elif go run golang.org/x/vuln/cmd/govulncheck@latest ./...; then
+    echo -e "${GREEN}✓ govulncheck passed — no known vulnerabilities${NC}"
+else
+    echo -e "${YELLOW}⚠ govulncheck unavailable (skipping vulnerability scan)${NC}"
+    echo -e "${YELLOW}  Install: go install golang.org/x/vuln/cmd/govulncheck@latest${NC}"
+fi
+echo ""
+
+# Job 5: Frontend Tests
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}Job 5/7: Frontend Tests${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+if command -v node >/dev/null 2>&1; then
+    echo -e "${YELLOW}→ Installing frontend dependencies...${NC}"
+    if cd web/frontend && npm ci && cd ../..; then
+        echo -e "${GREEN}✓ Frontend dependencies installed${NC}"
+    else
+        echo -e "${RED}✗ Failed to install frontend dependencies${NC}"
+        FAILED_JOBS+=("Frontend Tests - Dependencies")
+    fi
+    echo ""
+
+    echo -e "${YELLOW}→ Running frontend tests (vitest)...${NC}"
+    if cd web/frontend && npm run test && cd ../..; then
+        echo -e "${GREEN}✓ Frontend tests passed${NC}"
+    else
+        echo -e "${RED}✗ Frontend tests failed${NC}"
+        FAILED_JOBS+=("Frontend Tests")
+    fi
+    echo ""
+else
+    echo -e "${YELLOW}⚠ Node.js unavailable (skipping frontend tests)${NC}"
+    echo ""
+fi
+
+# Job 6: Build Verification
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}Job 6/7: Build Verification${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -146,9 +197,9 @@ else
 fi
 echo ""
 
-# Job 5: Docker Build Verification
+# Job 7: Docker Build Verification
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Job 5/5: Docker Build Verification${NC}"
+echo -e "${BLUE}Job 7/7: Docker Build Verification${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 

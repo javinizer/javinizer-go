@@ -277,6 +277,17 @@ func cancelBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 	}
 }
 
+// deleteBatchJob godoc
+// @Summary Delete batch job
+// @Description Delete a completed or cancelled batch job and its temp files. Running jobs must be cancelled first.
+// @Tags web
+// @Produce json
+// @Param id path string true "Job ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/batch/{id} [delete]
 func deleteBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jobID := c.Param("id")
@@ -306,6 +317,14 @@ func deleteBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 	}
 }
 
+// listBatchJobs godoc
+// @Summary List batch jobs
+// @Description Get a list of batch jobs with operation counts
+// @Tags web
+// @Produce json
+// @Success 200 {object} contracts.BatchJobListResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/batch [get]
 func listBatchJobs(deps *ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jobs, err := deps.JobRepo.List()

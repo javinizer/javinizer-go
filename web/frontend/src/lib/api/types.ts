@@ -127,9 +127,9 @@ export interface MergeStatistics {
 
 export interface FieldDifference {
 	field: string;
-	nfo_value?: any;
-	scraped_value?: any;
-	merged_value?: any;
+	nfo_value?: string | number | boolean | null;
+	scraped_value?: string | number | boolean | null;
+	merged_value?: string | number | boolean | null;
 	reason?: string;
 }
 
@@ -252,7 +252,7 @@ export interface Movie {
 	should_crop_poster?: boolean;
 	original_poster_url?: string;
 	original_cropped_poster_url?: string;
-	original_should_crop_poster?: boolean;
+	original_should_crop_poster?: boolean | null;
 	screenshot_urls?: string[];
 	trailer_url?: string;
 	original_filename?: string;
@@ -323,8 +323,8 @@ export interface ActressMergePreviewRequest {
 
 export interface ActressMergeConflict {
 	field: 'dmm_id' | 'first_name' | 'last_name' | 'japanese_name' | 'thumb_url';
-	target_value?: any;
-	source_value?: any;
+	target_value?: string | number | boolean | null;
+	source_value?: string | number | boolean | null;
 	default_resolution: ActressMergeResolution;
 }
 
@@ -429,7 +429,7 @@ export interface ScraperOption {
 	label: string;
 	description: string;
 	type: string; // 'boolean', 'string', 'number', etc.
-	default?: any; // Default value for this option
+	default?: string | number | boolean;
 	min?: number; // For number type
 	max?: number; // For number type
 	unit?: string; // For number type (e.g., 'seconds', 'MB')
@@ -447,7 +447,7 @@ export interface Scraper {
 	name: string;
 	display_title: string;
 	enabled: boolean;
-	options?: Record<string, any>;
+	options?: Record<string, string | number | boolean>;
 }
 
 export interface AvailableScrapersResponse {
@@ -456,8 +456,8 @@ export interface AvailableScrapersResponse {
 
 export interface ProxyTestRequest {
 	mode: 'direct' | 'flaresolverr';
-	proxy: any;
-	flaresolverr?: any;
+	proxy: ProxyConfig;
+	flaresolverr?: FlareSolverrConfig;
 	target_url?: string;
 }
 
@@ -488,7 +488,7 @@ export interface OpenAICompatibleTranslationConfig {
 	base_url: string;
 	api_key: string;
 	model: string;
-	enable_thinking?: boolean;
+	enable_thinking?: boolean | null;
 }
 
 export interface AnthropicTranslationConfig {
@@ -537,10 +537,233 @@ export interface BrowserConfig {
 	debug_visible: boolean;
 }
 
+export interface ServerConfig {
+	host: string;
+	port: number;
+}
+
+export interface RateLimitConfig {
+	requests_per_minute: number;
+}
+
+export interface SecurityConfig {
+	allowed_directories: string[];
+	denied_directories: string[];
+	max_files_per_scan: number;
+	scan_timeout_seconds: number;
+	allowed_origins: string[];
+	allow_unc: boolean;
+	allowed_unc_servers: string[];
+	rate_limit: RateLimitConfig;
+	trusted_proxies: string[];
+	force_secure_cookies: boolean;
+}
+
+export interface APIConfig {
+	security: SecurityConfig;
+}
+
+export interface SystemConfig {
+	umask: string;
+	version_check_enabled: boolean;
+	version_check_interval_hours: number;
+	temp_dir: string;
+}
+
+export interface ProxyProfile {
+	url: string;
+	username: string;
+	password: string;
+}
+
+export interface ProxyConfig {
+	enabled: boolean;
+	profile?: string;
+	default_profile?: string;
+	profiles?: Record<string, ProxyProfile>;
+}
+
+export interface FlareSolverrConfig {
+	enabled: boolean;
+	url: string;
+	timeout: number;
+	max_retries: number;
+	session_ttl: number;
+}
+
+export interface ScraperSettings {
+	enabled: boolean;
+	language: string;
+	timeout: number;
+	rate_limit: number;
+	retry_count: number;
+	user_agent: string;
+	proxy?: ProxyConfig;
+	download_proxy?: ProxyConfig;
+	base_url?: string;
+	use_flaresolverr: boolean;
+	use_browser: boolean;
+	scrape_actress?: boolean | null;
+	cookies?: Record<string, string>;
+	[key: string]: unknown | null;
+}
+
+export interface NFOConfig {
+	enabled?: boolean;
+	display_title?: string;
+	filename_template?: string;
+	first_name_order?: boolean;
+	actress_language_ja?: boolean;
+	per_file?: boolean;
+	unknown_actress_mode?: string;
+	unknown_actress_text?: string;
+	actress_as_tag?: boolean;
+	add_generic_role?: boolean;
+	alt_name_role?: boolean;
+	include_originalpath?: boolean;
+	include_stream_details?: boolean;
+	include_fanart?: boolean;
+	include_trailer?: boolean;
+	rating_source?: string;
+	tag?: string[];
+	tagline?: string;
+	credits?: string[];
+}
+
+export interface TranslationFieldsConfig {
+	title?: boolean;
+	original_title?: boolean;
+	description?: boolean;
+	director?: boolean;
+	maker?: boolean;
+	label?: boolean;
+	series?: boolean;
+	genres?: boolean;
+	actresses?: boolean;
+	[key: string]: boolean | undefined;
+}
+
+export interface OpenAITranslationConfig {
+	base_url?: string;
+	api_key?: string;
+	model?: string;
+}
+
+export interface DeepLTranslationConfig {
+	mode?: string;
+	base_url?: string;
+	api_key?: string;
+}
+
+export interface GoogleTranslationConfig {
+	mode?: string;
+	base_url?: string;
+	api_key?: string;
+}
+
+export interface TranslationConfig {
+	enabled?: boolean;
+	provider?: string;
+	source_language?: string;
+	target_language?: string;
+	timeout_seconds?: number;
+	apply_to_primary?: boolean;
+	overwrite_existing_target?: boolean;
+	fields?: TranslationFieldsConfig;
+	openai?: OpenAITranslationConfig;
+	deepl?: DeepLTranslationConfig;
+	google?: GoogleTranslationConfig;
+	openai_compatible?: OpenAICompatibleTranslationConfig;
+	anthropic?: AnthropicTranslationConfig;
+}
+
+export interface ActressDatabaseConfig {
+	enabled?: boolean;
+	auto_add?: boolean;
+	convert_alias?: boolean;
+}
+
+export interface GenreReplacementConfig {
+	enabled?: boolean;
+	auto_add?: boolean;
+}
+
+export interface TagDatabaseConfig {
+	enabled?: boolean;
+}
+
+export interface MetadataConfig {
+	priority?: Record<string, string[]>;
+	actress_database?: ActressDatabaseConfig;
+	genre_replacement?: GenreReplacementConfig;
+	tag_database?: TagDatabaseConfig;
+	translation?: TranslationConfig;
+	ignore_genres?: string[];
+	required_fields?: string[];
+	nfo?: NFOConfig;
+}
+
+export interface MatchingConfig {
+	extensions: string[];
+	min_size_mb: number;
+	exclude_patterns: string[];
+	regex_enabled: boolean;
+	regex_pattern: string;
+}
+
+export interface OutputConfig {
+	folder_format: string;
+	file_format: string;
+	subfolder_format: string[];
+	delimiter: string;
+	max_title_length: number;
+	max_path_length: number;
+	move_subtitles: boolean;
+	subtitle_extensions: string[];
+	operation_mode: OperationMode;
+	rename_file: boolean;
+	allow_revert: boolean;
+	group_actress: boolean;
+	poster_format: string;
+	fanart_format: string;
+	trailer_format: string;
+	screenshot_format: string;
+	screenshot_folder: string;
+	screenshot_padding: number;
+	actress_folder: string;
+	actress_format: string;
+	download_cover: boolean;
+	download_poster: boolean;
+	download_extrafanart: boolean;
+	download_trailer: boolean;
+	download_actress: boolean;
+	download_timeout: number;
+	download_proxy: ProxyConfig;
+}
+
+export interface DatabaseConfig {
+	type: string;
+	dsn: string;
+	log_level: string;
+}
+
+export interface MediaInfoConfig {
+	cli_enabled: boolean;
+	cli_path: string;
+	cli_timeout: number;
+}
+
 export interface ScrapersConfig {
-	browser?: BrowserConfig;
+	user_agent?: string;
+	referer?: string;
+	timeout_seconds?: number;
+	request_timeout_seconds?: number;
+	priority?: string[];
+	flaresolverr?: FlareSolverrConfig;
 	scrape_actress?: boolean;
-	[key: string]: any;
+	browser?: BrowserConfig;
+	proxy?: ProxyConfig;
+	[key: string]: ScraperSettings | string | number | boolean | null | string[] | FlareSolverrConfig | BrowserConfig | ProxyConfig | undefined;
 }
 
 // Config types
@@ -562,12 +785,33 @@ export interface LoggingConfig {
 }
 
 export interface Config {
-	performance: PerformanceConfig;
-	logging: LoggingConfig;
+	config_version?: number;
+	server?: ServerConfig;
+	api?: APIConfig;
+	system?: SystemConfig;
 	scrapers?: ScrapersConfig;
-	metadata?: Record<string, any>;
-	output?: Record<string, any>;
-	[key: string]: any;
+	metadata?: MetadataConfig;
+	file_matching?: MatchingConfig;
+	output?: OutputConfig;
+	database?: DatabaseConfig;
+	logging?: LoggingConfig;
+	performance?: PerformanceConfig;
+	mediainfo?: MediaInfoConfig;
+}
+
+export interface SettingsConfig {
+	config_version?: number;
+	server: ServerConfig;
+	api: APIConfig;
+	system: SystemConfig;
+	scrapers: ScrapersConfig;
+	metadata: MetadataConfig;
+	file_matching: MatchingConfig;
+	output: OutputConfig;
+	database: DatabaseConfig;
+	logging: LoggingConfig;
+	performance: PerformanceConfig;
+	mediainfo: MediaInfoConfig;
 }
 
 // History types

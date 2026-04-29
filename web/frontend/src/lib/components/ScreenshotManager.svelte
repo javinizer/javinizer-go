@@ -3,6 +3,7 @@
 	import { quintOut } from 'svelte/easing';
 	import type { Movie } from '$lib/api/types';
 	import { apiClient } from '$lib/api/client';
+	import { confirmDialog } from '$lib/stores/dialog.svelte';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
 	import ImageViewer from './ImageViewer.svelte';
@@ -74,14 +75,14 @@
 		notifyParent();
 	}
 
-	function removeAllScreenshots() {
+	async function removeAllScreenshots() {
 		if (screenshots.length === 0) return;
 
-		const confirmed = typeof window === 'undefined'
-			? true
-			: window.confirm(`Remove all ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}?`);
-
-		if (!confirmed) return;
+		if (!(await confirmDialog(
+			'Remove Screenshots',
+			`Remove all ${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'}?`,
+			{ variant: 'danger', confirmLabel: 'Remove All' }
+		))) return;
 
 		screenshots = [];
 		showViewer = false;
@@ -89,17 +90,13 @@
 		notifyParent();
 	}
 
-	function useScreenshotAsPoster(url: string) {
+	async function useScreenshotAsPoster(url: string) {
 		if (onUseScreenshotAsPoster) {
 			onUseScreenshotAsPoster(url);
 			return;
 		}
 
-		const confirmed = typeof window === 'undefined'
-			? true
-			: window.confirm('Use this screenshot as the poster? This will replace the current poster image.');
-
-		if (!confirmed) return;
+		if (!(await confirmDialog('Use as Poster', 'Use this screenshot as the poster? This will replace the current poster image.', { confirmLabel: 'Use as Poster' }))) return;
 
 		clearCropState = true;
 		posterUrl = url;

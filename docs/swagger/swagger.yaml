@@ -1,81 +1,57 @@
 basePath: /
 definitions:
-  actress.ActressMergePreviewRequest:
+  github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeConflict:
     properties:
-      source_id:
-        example: 34
-        type: integer
-      target_id:
-        example: 12
-        type: integer
-    required:
-    - source_id
-    - target_id
-    type: object
-  actress.ActressMergePreviewResponse:
-    properties:
-      conflicts:
-        items:
-          $ref: '#/definitions/contracts.ActressMergeConflict'
-        type: array
-      default_resolutions:
-        additionalProperties:
-          type: string
-        type: object
-      proposed_merged:
-        $ref: '#/definitions/models.Actress'
-      source:
-        $ref: '#/definitions/models.Actress'
-      target:
-        $ref: '#/definitions/models.Actress'
-    type: object
-  actress.ActressMergeRequest:
-    properties:
-      resolutions:
-        additionalProperties:
-          type: string
-        example:
-          dmm_id: target
-          japanese_name: source
-        type: object
-      source_id:
-        example: 34
-        type: integer
-      target_id:
-        example: 12
-        type: integer
-    required:
-    - source_id
-    - target_id
-    type: object
-  actress.ActressMergeResponse:
-    properties:
-      aliases_added:
-        example: 5
-        type: integer
-      conflicts_resolved:
-        example: 3
-        type: integer
-      merged_actress:
-        $ref: '#/definitions/models.Actress'
-      merged_from_id:
-        example: 34
-        type: integer
-      updated_movies:
-        example: 27
-        type: integer
-    type: object
-  actress.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
+      default_resolution:
+        example: target
         type: string
-      errors:
-        items:
+      field:
+        example: japanese_name
+        type: string
+      source_value: {}
+      target_value: {}
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BatchFileResult:
+    properties:
+      actress_sources:
+        additionalProperties:
           type: string
+        description: Actress-level source by scraper/NFO
+        type: object
+      data:
+        description: Movie data
+      ended_at:
+        type: string
+      error:
+        type: string
+      field_sources:
+        additionalProperties:
+          type: string
+        description: Field-level source by scraper/NFO
+        type: object
+      file_path:
+        type: string
+      is_multi_part:
+        type: boolean
+      movie_id:
+        type: string
+      part_number:
+        type: integer
+      part_suffix:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobListResponse:
+    properties:
+      jobs:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse'
         type: array
     type: object
-  batch.BatchJobResponse:
+  github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse:
     properties:
       completed:
         type: integer
@@ -101,7 +77,7 @@ definitions:
         type: number
       results:
         additionalProperties:
-          $ref: '#/definitions/contracts.BatchFileResult'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchFileResult'
         type: object
       reverted_count:
         type: integer
@@ -112,254 +88,268 @@ definitions:
       total_files:
         type: integer
     type: object
-  batch.BatchScrapeRequest:
+  github_com_javinizer_javinizer-go_internal_api_contracts.DataSource:
     properties:
-      array_strategy:
-        description: 'For Update mode: merge, replace'
-        example: merge
+      confidence:
+        description: Confidence score (0.0-1.0)
+        example: 0.9
+        type: number
+      last_updated:
+        description: ISO 8601 timestamp
+        example: "2024-01-15T10:30:00Z"
+        type: string
+      source:
+        description: '"scraper" or "nfo"'
+        example: nfo
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference:
+    properties:
+      field:
+        example: title
+        type: string
+      merged_value: {}
+      nfo_value: {}
+      reason:
+        example: NFO preferred by merge strategy
+        type: string
+      scraped_value: {}
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo:
+    properties:
+      is_dir:
+        example: false
+        type: boolean
+      is_multi_part:
+        example: true
+        type: boolean
+      matched:
+        example: true
+        type: boolean
+      mod_time:
+        example: "2024-01-15T10:30:00Z"
+        type: string
+      movie_id:
+        example: IPX-535
+        type: string
+      name:
+        example: video.mp4
+        type: string
+      part_number:
+        example: 1
+        type: integer
+      part_suffix:
+        example: -pt1
+        type: string
+      path:
+        example: /path/to/video.mp4
+        type: string
+      size:
+        example: 1024000000
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.JobListItem:
+    properties:
+      completed:
+        example: 9
+        type: integer
+      completed_at:
+        example: "2026-04-12T10:05:00Z"
         type: string
       destination:
         example: /path/to/output
         type: string
-      files:
-        items:
-          type: string
-        type: array
-      force:
-        example: false
-        type: boolean
-      operation_mode:
-        description: 'Override config.output.operation_mode: organize, in-place, in-place-norenamefolder,
-          metadata-only, preview'
-        example: organize
+      failed:
+        example: 1
+        type: integer
+      id:
+        example: 550e8400-e29b-41d4-a716-446655440000
         type: string
-      preset:
-        description: 'Merge strategy preset: conservative, gap-fill, aggressive (overrides
-          scalar/array strategies)'
-        example: conservative
+      operation_count:
+        example: 10
+        type: integer
+      organized_at:
+        example: "2026-04-12T10:05:00Z"
         type: string
-      scalar_strategy:
-        description: 'For Update mode: prefer-nfo, prefer-scraper, preserve-existing,
-          fill-missing-only'
-        example: prefer-nfo
+      progress:
+        example: 0.9
+        type: number
+      reverted_at:
+        example: "2026-04-12T11:00:00Z"
         type: string
-      selected_scrapers:
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-      strict:
-        example: false
-        type: boolean
-      update:
-        description: 'Update mode: only create/update metadata files without moving
-          video files'
-        example: false
-        type: boolean
-    required:
-    - files
+      reverted_count:
+        example: 7
+        type: integer
+      started_at:
+        example: "2026-04-12T10:00:00Z"
+        type: string
+      status:
+        example: organized
+        type: string
+      total_files:
+        example: 10
+        type: integer
     type: object
-  batch.BatchScrapeResponse:
+  github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics:
+    properties:
+      conflicts_resolved:
+        example: 5
+        type: integer
+      empty_fields:
+        example: 2
+        type: integer
+      from_nfo:
+        example: 3
+        type: integer
+      from_scraper:
+        example: 10
+        type: integer
+      merged_arrays:
+        example: 2
+        type: integer
+      total_fields:
+        example: 15
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.OperationItem:
+    properties:
+      created_at:
+        example: "2026-04-12T10:05:00Z"
+        type: string
+      id:
+        example: 1
+        type: integer
+      in_place_renamed:
+        example: false
+        type: boolean
+      movie_id:
+        example: ABC-123
+        type: string
+      new_path:
+        example: /dest/ABC-123 [Studio]/ABC-123.mp4
+        type: string
+      operation_type:
+        example: move
+        type: string
+      original_path:
+        example: /source/ABC-123.mp4
+        type: string
+      revert_status:
+        example: pending
+        type: string
+      reverted_at:
+        example: "2026-04-12T11:00:00Z"
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.OverlapInfo:
+    properties:
+      created_at:
+        example: "2026-04-12T12:00:00Z"
+        type: string
+      job_id:
+        example: 660e8400-e29b-41d4-a716-446655440001
+        type: string
+      operation_count:
+        example: 3
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteSuggestion:
+    properties:
+      is_dir:
+        example: true
+        type: boolean
+      name:
+        example: videos
+        type: string
+      path:
+        example: /path/to/videos
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.RevertCheckResponse:
     properties:
       job_id:
         example: 550e8400-e29b-41d4-a716-446655440000
         type: string
+      overlapping_batches:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OverlapInfo'
+        type: array
     type: object
-  batch.ErrorResponse:
+  github_com_javinizer_javinizer-go_internal_api_contracts.RevertFileError:
     properties:
       error:
-        example: Movie not found
+        example: file not found
         type: string
-      errors:
+      movie_id:
+        example: ABC-123
+        type: string
+      new_path:
+        example: /dest/ABC-123 [Studio]/ABC-123.mp4
+        type: string
+      operation_id:
+        example: 5
+        type: integer
+      original_path:
+        example: /source/ABC-123.mp4
+        type: string
+      outcome:
+        example: skipped
+        type: string
+      reason:
+        example: anchor_missing
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ScraperInfo:
+    properties:
+      display_title:
+        example: R18.dev
+        type: string
+      enabled:
+        example: true
+        type: boolean
+      name:
+        example: r18dev
+        type: string
+      options:
         items:
-          type: string
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScraperOption'
         type: array
     type: object
-  batch.MovieResponse:
+  github_com_javinizer_javinizer-go_internal_api_contracts.ScraperOption:
     properties:
-      merge_stats:
-        allOf:
-        - $ref: '#/definitions/contracts.MergeStatistics'
-        description: Merge statistics when NFO merging occurred
-      movie:
-        $ref: '#/definitions/models.Movie'
-      provenance:
-        additionalProperties:
-          $ref: '#/definitions/contracts.DataSource'
-        description: Field-level data source tracking
-        type: object
-    type: object
-  batch.OrganizePreviewRequest:
-    properties:
-      copy_only:
-        example: false
-        type: boolean
-      destination:
-        example: /path/to/output
-        type: string
-      link_mode:
-        enum:
-        - hard
-        - soft
-        example: hard
-        type: string
-      movie:
-        allOf:
-        - $ref: '#/definitions/models.Movie'
-        description: Optional movie override for previewing unsaved edits
-      operation_mode:
-        example: organize
-        type: string
-      skip_download:
-        type: boolean
-      skip_nfo:
-        type: boolean
-    required:
-    - destination
-    type: object
-  batch.OrganizePreviewResponse:
-    properties:
-      extrafanart_path:
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/extrafanart
-        type: string
-      fanart_path:
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-fanart.jpg
-        type: string
-      file_name:
-        example: IPX-535
-        type: string
-      folder_name:
-        example: IPX-535 [IdeaPocket] - Beautiful Woman (2021)
-        type: string
-      full_path:
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.mp4
-        type: string
-      nfo_path:
-        description: Single NFO (backward compatibility)
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.nfo
-        type: string
-      nfo_paths:
-        description: 'For per_file=true multi-part: all NFO file paths'
+      choices:
         items:
-          type: string
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ScraperChoice'
         type: array
-      operation_mode:
-        description: Which mode was used for preview
-        example: organize
+      default: {}
+      description:
+        example: Enable detailed actress data scraping from DMM (may be slower)
         type: string
-      poster_path:
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-poster.jpg
+      key:
+        example: scrape_actress
         type: string
-      screenshots:
-        example:
-        - fanart1.jpg
-        - fanart2.jpg
-        - fanart3.jpg
-        items:
-          type: string
-        type: array
-      source_path:
-        description: Original file path (for in-place modes)
-        example: /source/folder/ABC-123.mp4
+      label:
+        example: Scrape Actress Information
         type: string
-      subfolder_path:
-        description: Subfolder hierarchy relative to destination (e.g. "Studio/Year")
-        example: IdeaPocket/2025
-        type: string
-      video_files:
-        description: 'For multi-part files: all video file paths'
-        items:
-          type: string
-        type: array
-    type: object
-  batch.OrganizeRequest:
-    properties:
-      copy_only:
-        example: false
-        type: boolean
-      destination:
-        example: /path/to/output
-        type: string
-      link_mode:
-        enum:
-        - hard
-        - soft
-        example: hard
-        type: string
-      operation_mode:
-        example: organize
-        type: string
-      skip_download:
-        type: boolean
-      skip_nfo:
-        type: boolean
-    required:
-    - destination
-    type: object
-  batch.PosterCropRequest:
-    properties:
-      height:
-        minimum: 1
+      max:
+        example: 120
         type: integer
-      width:
-        minimum: 1
+      min:
+        example: 5
         type: integer
-      x:
-        minimum: 0
-        type: integer
-      "y":
-        minimum: 0
-        type: integer
-    type: object
-  batch.PosterCropResponse:
-    properties:
-      cropped_poster_url:
+      type:
+        example: boolean
+        type: string
+      unit:
+        example: seconds
         type: string
     type: object
-  batch.UpdateMovieRequest:
-    properties:
-      movie:
-        $ref: '#/definitions/models.Movie'
-    required:
-    - movie
-    type: object
-  batch.UpdateRequest:
-    properties:
-      array_strategy:
-        enum:
-        - merge
-        - replace
-        type: string
-      force_overwrite:
-        type: boolean
-      preserve_nfo:
-        type: boolean
-      preset:
-        enum:
-        - conservative
-        - gap-fill
-        - aggressive
-        type: string
-      scalar_strategy:
-        enum:
-        - prefer-scraper
-        - prefer-nfo
-        - preserve-existing
-        - fill-missing-only
-        type: string
-      skip_download:
-        type: boolean
-      skip_nfo:
-        type: boolean
-    type: object
-  config.APIConfig:
+  github_com_javinizer_javinizer-go_internal_config.APIConfig:
     properties:
       security:
-        $ref: '#/definitions/config.SecurityConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.SecurityConfig'
     type: object
-  config.ActressDatabaseConfig:
+  github_com_javinizer_javinizer-go_internal_config.ActressDatabaseConfig:
     properties:
       auto_add:
         description: Automatically add new actresses to database
@@ -371,7 +361,7 @@ definitions:
         description: Enable actress image lookup from database
         type: boolean
     type: object
-  config.AnthropicTranslationConfig:
+  github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig:
     properties:
       api_key:
         description: Required
@@ -383,7 +373,7 @@ definitions:
         description: e.g., claude-sonnet-4-20250514
         type: string
     type: object
-  config.BrowserConfig:
+  github_com_javinizer_javinizer-go_internal_config.BrowserConfig:
     properties:
       binary_path:
         description: Chrome/Chromium path (auto-discovered if empty)
@@ -425,7 +415,7 @@ definitions:
         description: 'Viewport width (default: 1920)'
         type: integer
     type: object
-  config.DatabaseConfig:
+  github_com_javinizer_javinizer-go_internal_config.DatabaseConfig:
     properties:
       dsn:
         description: Data Source Name
@@ -438,7 +428,7 @@ definitions:
         description: sqlite (currently only supported backend)
         type: string
     type: object
-  config.DeepLTranslationConfig:
+  github_com_javinizer_javinizer-go_internal_config.DeepLTranslationConfig:
     properties:
       api_key:
         description: DeepL API key
@@ -450,7 +440,7 @@ definitions:
         description: free or pro
         type: string
     type: object
-  config.FlareSolverrConfig:
+  github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig:
     properties:
       enabled:
         description: Enable FlareSolverr for bypassing Cloudflare
@@ -468,7 +458,7 @@ definitions:
         description: 'FlareSolverr endpoint (default: http://localhost:8191/v1)'
         type: string
     type: object
-  config.GenreReplacementConfig:
+  github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig:
     properties:
       auto_add:
         description: Automatically add new genres to database (identity mapping)
@@ -477,7 +467,7 @@ definitions:
         description: Enable genre replacement from database
         type: boolean
     type: object
-  config.GoogleTranslationConfig:
+  github_com_javinizer_javinizer-go_internal_config.GoogleTranslationConfig:
     properties:
       api_key:
         description: Required for paid mode
@@ -489,7 +479,7 @@ definitions:
         description: free or paid
         type: string
     type: object
-  config.LoggingConfig:
+  github_com_javinizer_javinizer-go_internal_config.LoggingConfig:
     properties:
       compress:
         description: Compress rotated files
@@ -513,7 +503,7 @@ definitions:
         description: stdout, file path
         type: string
     type: object
-  config.MatchingConfig:
+  github_com_javinizer_javinizer-go_internal_config.MatchingConfig:
     properties:
       exclude_patterns:
         items:
@@ -530,7 +520,7 @@ definitions:
       regex_pattern:
         type: string
     type: object
-  config.MediaInfoConfig:
+  github_com_javinizer_javinizer-go_internal_config.MediaInfoConfig:
     properties:
       cli_enabled:
         description: 'Enable MediaInfo CLI fallback (default: false)'
@@ -542,38 +532,38 @@ definitions:
         description: 'Timeout in seconds for CLI execution (default: 30)'
         type: integer
     type: object
-  config.MetadataConfig:
+  github_com_javinizer_javinizer-go_internal_config.MetadataConfig:
     properties:
       actress_database:
         allOf:
-        - $ref: '#/definitions/config.ActressDatabaseConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ActressDatabaseConfig'
         description: Actress image database (SQLite-backed)
       genre_replacement:
         allOf:
-        - $ref: '#/definitions/config.GenreReplacementConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig'
         description: Genre replacement/normalization (SQLite-backed)
       ignore_genres:
         items:
           type: string
         type: array
       nfo:
-        $ref: '#/definitions/config.NFOConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOConfig'
       priority:
-        $ref: '#/definitions/config.PriorityConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.PriorityConfig'
       required_fields:
         items:
           type: string
         type: array
       tag_database:
         allOf:
-        - $ref: '#/definitions/config.TagDatabaseConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.TagDatabaseConfig'
         description: Per-movie tag database (SQLite-backed)
       translation:
         allOf:
-        - $ref: '#/definitions/config.TranslationConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationConfig'
         description: Metadata translation pipeline
     type: object
-  config.NFOConfig:
+  github_com_javinizer_javinizer-go_internal_config.NFOConfig:
     properties:
       actress_as_tag:
         type: boolean
@@ -624,7 +614,7 @@ definitions:
         description: Text for fallback mode
         type: string
     type: object
-  config.OpenAICompatibleTranslationConfig:
+  github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig:
     properties:
       api_key:
         description: Optional for local endpoints
@@ -639,7 +629,7 @@ definitions:
         description: e.g., llama3.1
         type: string
     type: object
-  config.OpenAITranslationConfig:
+  github_com_javinizer_javinizer-go_internal_config.OpenAITranslationConfig:
     properties:
       api_key:
         description: API key for the provider
@@ -651,7 +641,7 @@ definitions:
         description: Model name (e.g., gpt-4o-mini)
         type: string
     type: object
-  config.OutputConfig:
+  github_com_javinizer_javinizer-go_internal_config.OutputConfig:
     properties:
       actress_folder:
         type: string
@@ -672,7 +662,7 @@ definitions:
         type: boolean
       download_proxy:
         allOf:
-        - $ref: '#/definitions/config.ProxyConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig'
         description: Separate proxy for downloads (optional)
       download_timeout:
         description: 'Timeout in seconds for HTTP downloads (default: 60)'
@@ -696,7 +686,7 @@ definitions:
       move_subtitles:
         type: boolean
       operation_mode:
-        $ref: '#/definitions/types.OperationMode'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_types.OperationMode'
       poster_format:
         type: string
       rename_file:
@@ -719,7 +709,7 @@ definitions:
       trailer_format:
         type: string
     type: object
-  config.PerformanceConfig:
+  github_com_javinizer_javinizer-go_internal_config.PerformanceConfig:
     properties:
       buffer_size:
         description: 'Channel buffer size (default: 100)'
@@ -734,7 +724,7 @@ definitions:
         description: 'Timeout per task in seconds (default: 300)'
         type: integer
     type: object
-  config.PriorityConfig:
+  github_com_javinizer_javinizer-go_internal_config.PriorityConfig:
     properties:
       priority:
         description: |-
@@ -745,7 +735,7 @@ definitions:
           type: string
         type: array
     type: object
-  config.ProxyConfig:
+  github_com_javinizer_javinizer-go_internal_config.ProxyConfig:
     properties:
       default_profile:
         description: Default profile name (for global scrapers.proxy)
@@ -758,11 +748,11 @@ definitions:
         type: string
       profiles:
         additionalProperties:
-          $ref: '#/definitions/config.ProxyProfile'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyProfile'
         description: Named proxy profiles (global scrapers.proxy)
         type: object
     type: object
-  config.ProxyProfile:
+  github_com_javinizer_javinizer-go_internal_config.ProxyProfile:
     properties:
       password:
         type: string
@@ -771,20 +761,20 @@ definitions:
       username:
         type: string
     type: object
-  config.RateLimitConfig:
+  github_com_javinizer_javinizer-go_internal_config.RateLimitConfig:
     properties:
       requests_per_minute:
         type: integer
     type: object
-  config.ScrapersConfig:
+  github_com_javinizer_javinizer-go_internal_config.ScrapersConfig:
     properties:
       browser:
         allOf:
-        - $ref: '#/definitions/config.BrowserConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.BrowserConfig'
         description: 'NEW: Global Browser configuration block'
       flaresolverr:
         allOf:
-        - $ref: '#/definitions/config.FlareSolverrConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig'
         description: Global FlareSolverr config for Cloudflare bypass
       priority:
         description: Global scraper priority order
@@ -793,7 +783,7 @@ definitions:
         type: array
       proxy:
         allOf:
-        - $ref: '#/definitions/config.ProxyConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig'
         description: Default HTTP/SOCKS5 proxy for scraper requests
       referer:
         description: 'Referer header for CDN compatibility (default: https://www.dmm.co.jp/)'
@@ -811,7 +801,7 @@ definitions:
       user_agent:
         type: string
     type: object
-  config.SecurityConfig:
+  github_com_javinizer_javinizer-go_internal_config.SecurityConfig:
     properties:
       allow_unc:
         type: boolean
@@ -836,7 +826,7 @@ definitions:
       max_files_per_scan:
         type: integer
       rate_limit:
-        $ref: '#/definitions/config.RateLimitConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.RateLimitConfig'
       scan_timeout_seconds:
         type: integer
       trusted_proxies:
@@ -844,14 +834,14 @@ definitions:
           type: string
         type: array
     type: object
-  config.ServerConfig:
+  github_com_javinizer_javinizer-go_internal_config.ServerConfig:
     properties:
       host:
         type: string
       port:
         type: integer
     type: object
-  config.SystemConfig:
+  github_com_javinizer_javinizer-go_internal_config.SystemConfig:
     properties:
       temp_dir:
         description: |-
@@ -872,43 +862,43 @@ definitions:
           in hours
         type: integer
     type: object
-  config.TagDatabaseConfig:
+  github_com_javinizer_javinizer-go_internal_config.TagDatabaseConfig:
     properties:
       enabled:
         description: Enable per-movie tag lookup from database
         type: boolean
     type: object
-  config.TranslationConfig:
+  github_com_javinizer_javinizer-go_internal_config.TranslationConfig:
     properties:
       anthropic:
         allOf:
-        - $ref: '#/definitions/config.AnthropicTranslationConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig'
         description: Anthropic (Claude) provider settings
       apply_to_primary:
         description: Replace primary movie metadata with translated text
         type: boolean
       deepl:
         allOf:
-        - $ref: '#/definitions/config.DeepLTranslationConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.DeepLTranslationConfig'
         description: DeepL provider settings
       enabled:
         description: Enable metadata translation after aggregation
         type: boolean
       fields:
         allOf:
-        - $ref: '#/definitions/config.TranslationFieldsConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationFieldsConfig'
         description: Per-field translation controls
       google:
         allOf:
-        - $ref: '#/definitions/config.GoogleTranslationConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.GoogleTranslationConfig'
         description: Google provider settings
       openai:
         allOf:
-        - $ref: '#/definitions/config.OpenAITranslationConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OpenAITranslationConfig'
         description: OpenAI/OpenAI-compatible provider settings
       openai_compatible:
         allOf:
-        - $ref: '#/definitions/config.OpenAICompatibleTranslationConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig'
         description: OpenAI-compatible (Ollama, vLLM, etc.) provider settings
       overwrite_existing_target:
         description: Overwrite target-language translation if already present
@@ -926,7 +916,7 @@ definitions:
         description: Request timeout in seconds
         type: integer
     type: object
-  config.TranslationFieldsConfig:
+  github_com_javinizer_javinizer-go_internal_config.TranslationFieldsConfig:
     properties:
       actresses:
         type: boolean
@@ -947,602 +937,7 @@ definitions:
       title:
         type: boolean
     type: object
-  contracts.ActressMergeConflict:
-    properties:
-      default_resolution:
-        example: target
-        type: string
-      field:
-        example: japanese_name
-        type: string
-      source_value: {}
-      target_value: {}
-    type: object
-  contracts.BatchFileResult:
-    properties:
-      actress_sources:
-        additionalProperties:
-          type: string
-        description: Actress-level source by scraper/NFO
-        type: object
-      data:
-        description: Movie data
-      ended_at:
-        type: string
-      error:
-        type: string
-      field_sources:
-        additionalProperties:
-          type: string
-        description: Field-level source by scraper/NFO
-        type: object
-      file_path:
-        type: string
-      is_multi_part:
-        type: boolean
-      movie_id:
-        type: string
-      part_number:
-        type: integer
-      part_suffix:
-        type: string
-      started_at:
-        type: string
-      status:
-        type: string
-    type: object
-  contracts.DataSource:
-    properties:
-      confidence:
-        description: Confidence score (0.0-1.0)
-        example: 0.9
-        type: number
-      last_updated:
-        description: ISO 8601 timestamp
-        example: "2024-01-15T10:30:00Z"
-        type: string
-      source:
-        description: '"scraper" or "nfo"'
-        example: nfo
-        type: string
-    type: object
-  contracts.FieldDifference:
-    properties:
-      field:
-        example: title
-        type: string
-      merged_value: {}
-      nfo_value: {}
-      reason:
-        example: NFO preferred by merge strategy
-        type: string
-      scraped_value: {}
-    type: object
-  contracts.FileInfo:
-    properties:
-      is_dir:
-        example: false
-        type: boolean
-      is_multi_part:
-        example: true
-        type: boolean
-      matched:
-        example: true
-        type: boolean
-      mod_time:
-        example: "2024-01-15T10:30:00Z"
-        type: string
-      movie_id:
-        example: IPX-535
-        type: string
-      name:
-        example: video.mp4
-        type: string
-      part_number:
-        example: 1
-        type: integer
-      part_suffix:
-        example: -pt1
-        type: string
-      path:
-        example: /path/to/video.mp4
-        type: string
-      size:
-        example: 1024000000
-        type: integer
-    type: object
-  contracts.JobListItem:
-    properties:
-      completed:
-        example: 9
-        type: integer
-      completed_at:
-        example: "2026-04-12T10:05:00Z"
-        type: string
-      destination:
-        example: /path/to/output
-        type: string
-      failed:
-        example: 1
-        type: integer
-      id:
-        example: 550e8400-e29b-41d4-a716-446655440000
-        type: string
-      operation_count:
-        example: 10
-        type: integer
-      organized_at:
-        example: "2026-04-12T10:05:00Z"
-        type: string
-      progress:
-        example: 0.9
-        type: number
-      reverted_at:
-        example: "2026-04-12T11:00:00Z"
-        type: string
-      reverted_count:
-        example: 7
-        type: integer
-      started_at:
-        example: "2026-04-12T10:00:00Z"
-        type: string
-      status:
-        example: organized
-        type: string
-      total_files:
-        example: 10
-        type: integer
-    type: object
-  contracts.MergeStatistics:
-    properties:
-      conflicts_resolved:
-        example: 5
-        type: integer
-      empty_fields:
-        example: 2
-        type: integer
-      from_nfo:
-        example: 3
-        type: integer
-      from_scraper:
-        example: 10
-        type: integer
-      merged_arrays:
-        example: 2
-        type: integer
-      total_fields:
-        example: 15
-        type: integer
-    type: object
-  contracts.OperationItem:
-    properties:
-      created_at:
-        example: "2026-04-12T10:05:00Z"
-        type: string
-      id:
-        example: 1
-        type: integer
-      in_place_renamed:
-        example: false
-        type: boolean
-      movie_id:
-        example: ABC-123
-        type: string
-      new_path:
-        example: /dest/ABC-123 [Studio]/ABC-123.mp4
-        type: string
-      operation_type:
-        example: move
-        type: string
-      original_path:
-        example: /source/ABC-123.mp4
-        type: string
-      revert_status:
-        example: pending
-        type: string
-      reverted_at:
-        example: "2026-04-12T11:00:00Z"
-        type: string
-    type: object
-  contracts.OverlapInfo:
-    properties:
-      created_at:
-        example: "2026-04-12T12:00:00Z"
-        type: string
-      job_id:
-        example: 660e8400-e29b-41d4-a716-446655440001
-        type: string
-      operation_count:
-        example: 3
-        type: integer
-    type: object
-  contracts.PathAutocompleteSuggestion:
-    properties:
-      is_dir:
-        example: true
-        type: boolean
-      name:
-        example: videos
-        type: string
-      path:
-        example: /path/to/videos
-        type: string
-    type: object
-  contracts.RevertCheckResponse:
-    properties:
-      job_id:
-        example: 550e8400-e29b-41d4-a716-446655440000
-        type: string
-      overlapping_batches:
-        items:
-          $ref: '#/definitions/contracts.OverlapInfo'
-        type: array
-    type: object
-  contracts.RevertFileError:
-    properties:
-      error:
-        example: file not found
-        type: string
-      movie_id:
-        example: ABC-123
-        type: string
-      new_path:
-        example: /dest/ABC-123 [Studio]/ABC-123.mp4
-        type: string
-      operation_id:
-        example: 5
-        type: integer
-      original_path:
-        example: /source/ABC-123.mp4
-        type: string
-      outcome:
-        example: skipped
-        type: string
-      reason:
-        example: anchor_missing
-        type: string
-    type: object
-  contracts.ScraperInfo:
-    properties:
-      display_title:
-        example: R18.dev
-        type: string
-      enabled:
-        example: true
-        type: boolean
-      name:
-        example: r18dev
-        type: string
-      options:
-        items:
-          $ref: '#/definitions/contracts.ScraperOption'
-        type: array
-    type: object
-  contracts.ScraperOption:
-    properties:
-      choices:
-        items:
-          $ref: '#/definitions/models.ScraperChoice'
-        type: array
-      default: {}
-      description:
-        example: Enable detailed actress data scraping from DMM (may be slower)
-        type: string
-      key:
-        example: scrape_actress
-        type: string
-      label:
-        example: Scrape Actress Information
-        type: string
-      max:
-        example: 120
-        type: integer
-      min:
-        example: 5
-        type: integer
-      type:
-        example: boolean
-        type: string
-      unit:
-        example: seconds
-        type: string
-    type: object
-  events.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  events.deleteEventsResponse:
-    properties:
-      deleted:
-        type: integer
-      message:
-        type: string
-    type: object
-  events.eventListResponse:
-    properties:
-      events:
-        items:
-          $ref: '#/definitions/models.Event'
-        type: array
-      total:
-        type: integer
-    type: object
-  events.eventStatsResponse:
-    properties:
-      by_severity:
-        additionalProperties:
-          format: int64
-          type: integer
-        type: object
-      by_source:
-        additionalProperties:
-          format: int64
-          type: integer
-        type: object
-      by_type:
-        additionalProperties:
-          format: int64
-          type: integer
-        type: object
-      total:
-        type: integer
-    type: object
-  file.BrowseRequest:
-    properties:
-      path:
-        example: /path/to/directory
-        type: string
-    type: object
-  file.BrowseResponse:
-    properties:
-      current_path:
-        example: /path/to/directory
-        type: string
-      items:
-        items:
-          $ref: '#/definitions/contracts.FileInfo'
-        type: array
-      parent_path:
-        example: /path/to
-        type: string
-    type: object
-  file.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  file.PathAutocompleteRequest:
-    properties:
-      limit:
-        example: 10
-        type: integer
-      path:
-        example: /path/to/vid
-        type: string
-    required:
-    - path
-    type: object
-  file.PathAutocompleteResponse:
-    properties:
-      base_path:
-        example: /path/to
-        type: string
-      input_path:
-        example: /path/to/vid
-        type: string
-      suggestions:
-        items:
-          $ref: '#/definitions/contracts.PathAutocompleteSuggestion'
-        type: array
-    type: object
-  file.ScanRequest:
-    properties:
-      filter:
-        description: Filter folder/file names (case-insensitive substring match)
-        example: STSK
-        type: string
-      path:
-        example: /path/to/videos
-        type: string
-      recursive:
-        example: true
-        type: boolean
-    required:
-    - path
-    type: object
-  file.ScanResponse:
-    properties:
-      count:
-        example: 10
-        type: integer
-      files:
-        items:
-          $ref: '#/definitions/contracts.FileInfo'
-        type: array
-      skipped:
-        items:
-          type: string
-        type: array
-    type: object
-  history.DeleteHistoryBulkResponse:
-    properties:
-      deleted:
-        type: integer
-    type: object
-  history.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  history.HistoryListResponse:
-    properties:
-      limit:
-        type: integer
-      offset:
-        type: integer
-      records:
-        items:
-          $ref: '#/definitions/history.HistoryRecord'
-        type: array
-      total:
-        type: integer
-    type: object
-  history.HistoryRecord:
-    properties:
-      created_at:
-        type: string
-      dry_run:
-        type: boolean
-      error_message:
-        type: string
-      id:
-        type: integer
-      metadata:
-        type: string
-      movie_id:
-        type: string
-      new_path:
-        type: string
-      operation:
-        type: string
-      original_path:
-        type: string
-      status:
-        type: string
-    type: object
-  history.HistoryStats:
-    properties:
-      by_operation:
-        additionalProperties:
-          format: int64
-          type: integer
-        type: object
-      failed:
-        type: integer
-      reverted:
-        type: integer
-      success:
-        type: integer
-      total:
-        type: integer
-    type: object
-  jobs.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  jobs.JobListItem:
-    properties:
-      completed:
-        example: 9
-        type: integer
-      completed_at:
-        example: "2026-04-12T10:05:00Z"
-        type: string
-      destination:
-        example: /path/to/output
-        type: string
-      failed:
-        example: 1
-        type: integer
-      id:
-        example: 550e8400-e29b-41d4-a716-446655440000
-        type: string
-      operation_count:
-        example: 10
-        type: integer
-      organized_at:
-        example: "2026-04-12T10:05:00Z"
-        type: string
-      progress:
-        example: 0.9
-        type: number
-      reverted_at:
-        example: "2026-04-12T11:00:00Z"
-        type: string
-      reverted_count:
-        example: 7
-        type: integer
-      started_at:
-        example: "2026-04-12T10:00:00Z"
-        type: string
-      status:
-        example: organized
-        type: string
-      total_files:
-        example: 10
-        type: integer
-    type: object
-  jobs.JobListResponse:
-    properties:
-      jobs:
-        items:
-          $ref: '#/definitions/contracts.JobListItem'
-        type: array
-    type: object
-  jobs.OperationListResponse:
-    properties:
-      job_id:
-        example: 550e8400-e29b-41d4-a716-446655440000
-        type: string
-      job_status:
-        example: organized
-        type: string
-      operations:
-        items:
-          $ref: '#/definitions/contracts.OperationItem'
-        type: array
-      total:
-        example: 10
-        type: integer
-    type: object
-  jobs.RevertResultResponse:
-    properties:
-      errors:
-        items:
-          $ref: '#/definitions/contracts.RevertFileError'
-        type: array
-      failed:
-        example: 1
-        type: integer
-      job_id:
-        example: 550e8400-e29b-41d4-a716-446655440000
-        type: string
-      skipped:
-        example: 1
-        type: integer
-      status:
-        example: reverted
-        type: string
-      succeeded:
-        example: 9
-        type: integer
-      total:
-        example: 10
-        type: integer
-    type: object
-  models.Actress:
+  github_com_javinizer_javinizer-go_internal_models.Actress:
     properties:
       aliases:
         description: Pipe-separated
@@ -1566,7 +961,7 @@ definitions:
       updated_at:
         type: string
     type: object
-  models.Event:
+  github_com_javinizer_javinizer-go_internal_models.Event:
     properties:
       context:
         description: JSON-encoded details
@@ -1584,19 +979,32 @@ definitions:
       source:
         type: string
     type: object
-  models.Genre:
+  github_com_javinizer_javinizer-go_internal_models.Genre:
     properties:
       id:
         type: integer
       name:
         type: string
     type: object
-  models.Movie:
+  github_com_javinizer_javinizer-go_internal_models.GenreReplacement:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      original:
+        type: string
+      replacement:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.Movie:
     properties:
       actresses:
         description: Relationships
         items:
-          $ref: '#/definitions/models.Actress'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
         type: array
       content_id:
         type: string
@@ -1616,7 +1024,7 @@ definitions:
         type: string
       genres:
         items:
-          $ref: '#/definitions/models.Genre'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre'
         type: array
       id:
         type: string
@@ -1673,12 +1081,12 @@ definitions:
       translations:
         description: Translations
         items:
-          $ref: '#/definitions/models.MovieTranslation'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation'
         type: array
       updated_at:
         type: string
     type: object
-  models.MovieTranslation:
+  github_com_javinizer_javinizer-go_internal_models.MovieTranslation:
     properties:
       created_at:
         type: string
@@ -1713,7 +1121,7 @@ definitions:
       updated_at:
         type: string
     type: object
-  models.ScraperChoice:
+  github_com_javinizer_javinizer-go_internal_models.ScraperChoice:
     properties:
       label:
         example: English
@@ -1722,7 +1130,110 @@ definitions:
         example: en
         type: string
     type: object
-  movie.ErrorResponse:
+  github_com_javinizer_javinizer-go_internal_types.OperationMode:
+    enum:
+    - organize
+    - in-place
+    - in-place-norenamefolder
+    - metadata-only
+    - preview
+    type: string
+    x-enum-varnames:
+    - OperationModeOrganize
+    - OperationModeInPlace
+    - OperationModeInPlaceNoRenameFolder
+    - OperationModeMetadataOnly
+    - OperationModePreview
+  internal_api_actress.Actress:
+    properties:
+      aliases:
+        description: Pipe-separated
+        type: string
+      created_at:
+        type: string
+      dmm_id:
+        description: Real DMM actress ID when available (unique only for values >
+          0)
+        type: integer
+      first_name:
+        type: string
+      id:
+        type: integer
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      thumb_url:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  internal_api_actress.ActressMergePreviewRequest:
+    properties:
+      source_id:
+        example: 34
+        type: integer
+      target_id:
+        example: 12
+        type: integer
+    required:
+    - source_id
+    - target_id
+    type: object
+  internal_api_actress.ActressMergePreviewResponse:
+    properties:
+      conflicts:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeConflict'
+        type: array
+      default_resolutions:
+        additionalProperties:
+          type: string
+        type: object
+      proposed_merged:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+      source:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+      target:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+    type: object
+  internal_api_actress.ActressMergeRequest:
+    properties:
+      resolutions:
+        additionalProperties:
+          type: string
+        example:
+          dmm_id: target
+          japanese_name: source
+        type: object
+      source_id:
+        example: 34
+        type: integer
+      target_id:
+        example: 12
+        type: integer
+    required:
+    - source_id
+    - target_id
+    type: object
+  internal_api_actress.ActressMergeResponse:
+    properties:
+      aliases_added:
+        example: 5
+        type: integer
+      conflicts_resolved:
+        example: 3
+        type: integer
+      merged_actress:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+      merged_from_id:
+        example: 34
+        type: integer
+      updated_movies:
+        example: 27
+        type: integer
+    type: object
+  internal_api_actress.ErrorResponse:
     properties:
       error:
         example: Movie not found
@@ -1732,31 +1243,784 @@ definitions:
           type: string
         type: array
     type: object
-  movie.MovieResponse:
+  internal_api_actress.actressRequest:
+    properties:
+      aliases:
+        type: string
+      dmm_id:
+        type: integer
+      first_name:
+        type: string
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      thumb_url:
+        type: string
+    type: object
+  internal_api_actress.actressesResponse:
+    properties:
+      actresses:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        type: array
+      count:
+        type: integer
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  internal_api_auth.AuthCredentialsRequest:
+    properties:
+      password:
+        example: your-password
+        type: string
+      remember_me:
+        example: true
+        type: boolean
+      username:
+        example: admin
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  internal_api_auth.AuthStatusResponse:
+    properties:
+      authenticated:
+        example: false
+        type: boolean
+      initialized:
+        example: true
+        type: boolean
+      username:
+        example: admin
+        type: string
+    type: object
+  internal_api_auth.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_batch.BatchJobResponse:
+    properties:
+      completed:
+        type: integer
+      completed_at:
+        type: string
+      destination:
+        type: string
+      excluded:
+        additionalProperties:
+          type: boolean
+        type: object
+      failed:
+        type: integer
+      id:
+        type: string
+      operation_count:
+        type: integer
+      operation_mode_override:
+        type: string
+      persist_error:
+        type: string
+      progress:
+        type: number
+      results:
+        additionalProperties:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchFileResult'
+        type: object
+      reverted_count:
+        type: integer
+      started_at:
+        type: string
+      status:
+        type: string
+      total_files:
+        type: integer
+    type: object
+  internal_api_batch.BatchRescrapeRequest:
+    properties:
+      array_strategy:
+        description: 'For Update mode: merge, replace'
+        example: merge
+        type: string
+      force:
+        example: false
+        type: boolean
+      manual_search_input:
+        example: IPX-535
+        type: string
+      preset:
+        description: 'Merge strategy preset: conservative, gap-fill, aggressive (overrides
+          scalar/array strategies)'
+        example: conservative
+        type: string
+      scalar_strategy:
+        description: 'For Update mode: prefer-nfo, prefer-scraper, preserve-existing,
+          fill-missing-only'
+        example: prefer-nfo
+        type: string
+      selected_scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_batch.BatchRescrapeResponse:
+    properties:
+      actress_sources:
+        additionalProperties:
+          type: string
+        type: object
+      field_sources:
+        additionalProperties:
+          type: string
+        type: object
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+    type: object
+  internal_api_batch.BatchScrapeRequest:
+    properties:
+      array_strategy:
+        description: 'For Update mode: merge, replace'
+        example: merge
+        type: string
+      destination:
+        example: /path/to/output
+        type: string
+      files:
+        items:
+          type: string
+        type: array
+      force:
+        example: false
+        type: boolean
+      operation_mode:
+        description: 'Override config.output.operation_mode: organize, in-place, in-place-norenamefolder,
+          metadata-only, preview'
+        example: organize
+        type: string
+      preset:
+        description: 'Merge strategy preset: conservative, gap-fill, aggressive (overrides
+          scalar/array strategies)'
+        example: conservative
+        type: string
+      scalar_strategy:
+        description: 'For Update mode: prefer-nfo, prefer-scraper, preserve-existing,
+          fill-missing-only'
+        example: prefer-nfo
+        type: string
+      selected_scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+      strict:
+        example: false
+        type: boolean
+      update:
+        description: 'Update mode: only create/update metadata files without moving
+          video files'
+        example: false
+        type: boolean
+    required:
+    - files
+    type: object
+  internal_api_batch.BatchScrapeResponse:
+    properties:
+      job_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+    type: object
+  internal_api_batch.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_batch.MovieResponse:
     properties:
       merge_stats:
         allOf:
-        - $ref: '#/definitions/contracts.MergeStatistics'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
         description: Merge statistics when NFO merging occurred
       movie:
-        $ref: '#/definitions/models.Movie'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
       provenance:
         additionalProperties:
-          $ref: '#/definitions/contracts.DataSource'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
         description: Field-level data source tracking
         type: object
     type: object
-  movie.MoviesResponse:
+  internal_api_batch.OrganizePreviewRequest:
+    properties:
+      copy_only:
+        example: false
+        type: boolean
+      destination:
+        example: /path/to/output
+        type: string
+      link_mode:
+        enum:
+        - hard
+        - soft
+        example: hard
+        type: string
+      movie:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        description: Optional movie override for previewing unsaved edits
+      operation_mode:
+        example: organize
+        type: string
+      skip_download:
+        type: boolean
+      skip_nfo:
+        type: boolean
+    required:
+    - destination
+    type: object
+  internal_api_batch.OrganizePreviewResponse:
+    properties:
+      extrafanart_path:
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/extrafanart
+        type: string
+      fanart_path:
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-fanart.jpg
+        type: string
+      file_name:
+        example: IPX-535
+        type: string
+      folder_name:
+        example: IPX-535 [IdeaPocket] - Beautiful Woman (2021)
+        type: string
+      full_path:
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.mp4
+        type: string
+      nfo_path:
+        description: Single NFO (backward compatibility)
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.nfo
+        type: string
+      nfo_paths:
+        description: 'For per_file=true multi-part: all NFO file paths'
+        items:
+          type: string
+        type: array
+      operation_mode:
+        description: Which mode was used for preview
+        example: organize
+        type: string
+      poster_path:
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-poster.jpg
+        type: string
+      screenshots:
+        example:
+        - fanart1.jpg
+        - fanart2.jpg
+        - fanart3.jpg
+        items:
+          type: string
+        type: array
+      source_path:
+        description: Original file path (for in-place modes)
+        example: /source/folder/ABC-123.mp4
+        type: string
+      subfolder_path:
+        description: Subfolder hierarchy relative to destination (e.g. "Studio/Year")
+        example: IdeaPocket/2025
+        type: string
+      video_files:
+        description: 'For multi-part files: all video file paths'
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_batch.OrganizeRequest:
+    properties:
+      copy_only:
+        example: false
+        type: boolean
+      destination:
+        example: /path/to/output
+        type: string
+      link_mode:
+        enum:
+        - hard
+        - soft
+        example: hard
+        type: string
+      operation_mode:
+        example: organize
+        type: string
+      skip_download:
+        type: boolean
+      skip_nfo:
+        type: boolean
+    required:
+    - destination
+    type: object
+  internal_api_batch.PosterCropRequest:
+    properties:
+      height:
+        minimum: 1
+        type: integer
+      width:
+        minimum: 1
+        type: integer
+      x:
+        minimum: 0
+        type: integer
+      "y":
+        minimum: 0
+        type: integer
+    type: object
+  internal_api_batch.PosterCropResponse:
+    properties:
+      cropped_poster_url:
+        type: string
+    type: object
+  internal_api_batch.PosterFromURLRequest:
+    properties:
+      url:
+        type: string
+    required:
+    - url
+    type: object
+  internal_api_batch.PosterFromURLResponse:
+    properties:
+      cropped_poster_url:
+        type: string
+      poster_url:
+        type: string
+    type: object
+  internal_api_batch.UpdateMovieRequest:
+    properties:
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+    required:
+    - movie
+    type: object
+  internal_api_batch.UpdateRequest:
+    properties:
+      array_strategy:
+        enum:
+        - merge
+        - replace
+        type: string
+      force_overwrite:
+        type: boolean
+      preserve_nfo:
+        type: boolean
+      preset:
+        enum:
+        - conservative
+        - gap-fill
+        - aggressive
+        type: string
+      scalar_strategy:
+        enum:
+        - prefer-scraper
+        - prefer-nfo
+        - preserve-existing
+        - fill-missing-only
+        type: string
+      skip_download:
+        type: boolean
+      skip_nfo:
+        type: boolean
+    type: object
+  internal_api_events.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_events.deleteEventsResponse:
+    properties:
+      deleted:
+        type: integer
+      message:
+        type: string
+    type: object
+  internal_api_events.eventListResponse:
+    properties:
+      events:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Event'
+        type: array
+      total:
+        type: integer
+    type: object
+  internal_api_events.eventStatsResponse:
+    properties:
+      by_severity:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      by_source:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      by_type:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      total:
+        type: integer
+    type: object
+  internal_api_file.BrowseRequest:
+    properties:
+      path:
+        example: /path/to/directory
+        type: string
+    type: object
+  internal_api_file.BrowseResponse:
+    properties:
+      current_path:
+        example: /path/to/directory
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo'
+        type: array
+      parent_path:
+        example: /path/to
+        type: string
+    type: object
+  internal_api_file.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_file.PathAutocompleteRequest:
+    properties:
+      limit:
+        example: 10
+        type: integer
+      path:
+        example: /path/to/vid
+        type: string
+    required:
+    - path
+    type: object
+  internal_api_file.PathAutocompleteResponse:
+    properties:
+      base_path:
+        example: /path/to
+        type: string
+      input_path:
+        example: /path/to/vid
+        type: string
+      suggestions:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteSuggestion'
+        type: array
+    type: object
+  internal_api_file.ScanRequest:
+    properties:
+      filter:
+        description: Filter folder/file names (case-insensitive substring match)
+        example: STSK
+        type: string
+      path:
+        example: /path/to/videos
+        type: string
+      recursive:
+        example: true
+        type: boolean
+    required:
+    - path
+    type: object
+  internal_api_file.ScanResponse:
+    properties:
+      count:
+        example: 10
+        type: integer
+      files:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo'
+        type: array
+      skipped:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_genre.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_genre.GenreReplacement:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      original:
+        type: string
+      replacement:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  internal_api_genre.genreReplacementCreateRequest:
+    properties:
+      original:
+        type: string
+      replacement:
+        type: string
+    type: object
+  internal_api_genre.genreReplacementListResponse:
+    properties:
+      count:
+        type: integer
+      limit:
+        type: integer
+      offset:
+        type: integer
+      replacements:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.GenreReplacement'
+        type: array
+      total:
+        type: integer
+    type: object
+  internal_api_history.DeleteHistoryBulkResponse:
+    properties:
+      deleted:
+        type: integer
+    type: object
+  internal_api_history.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_history.HistoryListResponse:
+    properties:
+      limit:
+        type: integer
+      offset:
+        type: integer
+      records:
+        items:
+          $ref: '#/definitions/internal_api_history.HistoryRecord'
+        type: array
+      total:
+        type: integer
+    type: object
+  internal_api_history.HistoryRecord:
+    properties:
+      created_at:
+        type: string
+      dry_run:
+        type: boolean
+      error_message:
+        type: string
+      id:
+        type: integer
+      metadata:
+        type: string
+      movie_id:
+        type: string
+      new_path:
+        type: string
+      operation:
+        type: string
+      original_path:
+        type: string
+      status:
+        type: string
+    type: object
+  internal_api_history.HistoryStats:
+    properties:
+      by_operation:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      failed:
+        type: integer
+      reverted:
+        type: integer
+      success:
+        type: integer
+      total:
+        type: integer
+    type: object
+  internal_api_jobs.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_jobs.JobListItem:
+    properties:
+      completed:
+        example: 9
+        type: integer
+      completed_at:
+        example: "2026-04-12T10:05:00Z"
+        type: string
+      destination:
+        example: /path/to/output
+        type: string
+      failed:
+        example: 1
+        type: integer
+      id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      operation_count:
+        example: 10
+        type: integer
+      organized_at:
+        example: "2026-04-12T10:05:00Z"
+        type: string
+      progress:
+        example: 0.9
+        type: number
+      reverted_at:
+        example: "2026-04-12T11:00:00Z"
+        type: string
+      reverted_count:
+        example: 7
+        type: integer
+      started_at:
+        example: "2026-04-12T10:00:00Z"
+        type: string
+      status:
+        example: organized
+        type: string
+      total_files:
+        example: 10
+        type: integer
+    type: object
+  internal_api_jobs.JobListResponse:
+    properties:
+      jobs:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.JobListItem'
+        type: array
+    type: object
+  internal_api_jobs.OperationListResponse:
+    properties:
+      job_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      job_status:
+        example: organized
+        type: string
+      operations:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OperationItem'
+        type: array
+      total:
+        example: 10
+        type: integer
+    type: object
+  internal_api_jobs.RevertResultResponse:
+    properties:
+      errors:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.RevertFileError'
+        type: array
+      failed:
+        example: 1
+        type: integer
+      job_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      skipped:
+        example: 1
+        type: integer
+      status:
+        example: reverted
+        type: string
+      succeeded:
+        example: 9
+        type: integer
+      total:
+        example: 10
+        type: integer
+    type: object
+  internal_api_movie.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_movie.MovieResponse:
+    properties:
+      merge_stats:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
+        description: Merge statistics when NFO merging occurred
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+      provenance:
+        additionalProperties:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
+        description: Field-level data source tracking
+        type: object
+    type: object
+  internal_api_movie.MoviesResponse:
     properties:
       count:
         example: 20
         type: integer
       movies:
         items:
-          $ref: '#/definitions/models.Movie'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
         type: array
     type: object
-  movie.NFOComparisonRequest:
+  internal_api_movie.NFOComparisonRequest:
     properties:
       array_strategy:
         description: 'Array field merge strategy: merge or replace'
@@ -1785,27 +2049,27 @@ definitions:
           type: string
         type: array
     type: object
-  movie.NFOComparisonResponse:
+  internal_api_movie.NFOComparisonResponse:
     properties:
       differences:
         description: List of fields that differ
         items:
-          $ref: '#/definitions/contracts.FieldDifference'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference'
         type: array
       merge_stats:
         allOf:
-        - $ref: '#/definitions/contracts.MergeStatistics'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
         description: Merge statistics
       merged_data:
         allOf:
-        - $ref: '#/definitions/models.Movie'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
         description: Result of merging
       movie_id:
         example: IPX-535
         type: string
       nfo_data:
         allOf:
-        - $ref: '#/definitions/models.Movie'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
         description: Data from NFO file
       nfo_exists:
         example: true
@@ -1816,15 +2080,15 @@ definitions:
         type: string
       provenance:
         additionalProperties:
-          $ref: '#/definitions/contracts.DataSource'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
         description: Field-level provenance
         type: object
       scraped_data:
         allOf:
-        - $ref: '#/definitions/models.Movie'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
         description: Fresh scraped data
     type: object
-  movie.RescrapeRequest:
+  internal_api_movie.RescrapeRequest:
     properties:
       force:
         example: false
@@ -1839,7 +2103,7 @@ definitions:
     required:
     - selected_scrapers
     type: object
-  movie.ScrapeRequest:
+  internal_api_movie.ScrapeRequest:
     properties:
       force:
         example: false
@@ -1857,7 +2121,7 @@ definitions:
     required:
     - id
     type: object
-  movie.ScrapeResponse:
+  internal_api_movie.ScrapeResponse:
     properties:
       cached:
         example: false
@@ -1867,19 +2131,19 @@ definitions:
           type: string
         type: array
       movie:
-        $ref: '#/definitions/models.Movie'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
       sources_used:
         example: 2
         type: integer
     type: object
-  system.AvailableScrapersResponse:
+  internal_api_system.AvailableScrapersResponse:
     properties:
       scrapers:
         items:
-          $ref: '#/definitions/contracts.ScraperInfo'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScraperInfo'
         type: array
     type: object
-  system.DeepLUsageRequest:
+  internal_api_system.DeepLUsageRequest:
     properties:
       api_key:
         type: string
@@ -1888,7 +2152,7 @@ definitions:
       mode:
         type: string
     type: object
-  system.DeepLUsageResponse:
+  internal_api_system.DeepLUsageResponse:
     properties:
       api_key_character_count:
         type: integer
@@ -1903,7 +2167,7 @@ definitions:
       start_time:
         type: string
     type: object
-  system.ErrorResponse:
+  internal_api_system.ErrorResponse:
     properties:
       error:
         example: Movie not found
@@ -1913,7 +2177,7 @@ definitions:
           type: string
         type: array
     type: object
-  system.HealthResponse:
+  internal_api_system.HealthResponse:
     properties:
       build_date:
         example: "2026-02-23T00:00:00Z"
@@ -1935,11 +2199,11 @@ definitions:
         example: v1.2.3
         type: string
     type: object
-  system.ProxyTestRequest:
+  internal_api_system.ProxyTestRequest:
     properties:
       flaresolverr:
         allOf:
-        - $ref: '#/definitions/config.FlareSolverrConfig'
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig'
         description: FlareSolverr config (separate from ProxyConfig)
       mode:
         description: direct or flaresolverr
@@ -1948,14 +2212,14 @@ definitions:
         - flaresolverr
         type: string
       proxy:
-        $ref: '#/definitions/config.ProxyConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig'
       target_url:
         description: Optional override target URL
         type: string
     required:
     - mode
     type: object
-  system.ProxyTestResponse:
+  internal_api_system.ProxyTestResponse:
     properties:
       duration_ms:
         type: integer
@@ -1982,7 +2246,7 @@ definitions:
         description: Token for save authorization
         type: string
     type: object
-  system.TranslationModelsRequest:
+  internal_api_system.TranslationModelsRequest:
     properties:
       api_key:
         description: Provider API key
@@ -1997,45 +2261,45 @@ definitions:
     - base_url
     - provider
     type: object
-  system.TranslationModelsResponse:
+  internal_api_system.TranslationModelsResponse:
     properties:
       models:
         items:
           type: string
         type: array
     type: object
-  system.UpdateConfigRequest:
+  internal_api_system.UpdateConfigRequest:
     properties:
       api:
-        $ref: '#/definitions/config.APIConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.APIConfig'
       config_version:
         type: integer
       database:
-        $ref: '#/definitions/config.DatabaseConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.DatabaseConfig'
       file_matching:
-        $ref: '#/definitions/config.MatchingConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.MatchingConfig'
       logging:
-        $ref: '#/definitions/config.LoggingConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.LoggingConfig'
       mediainfo:
-        $ref: '#/definitions/config.MediaInfoConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.MediaInfoConfig'
       metadata:
-        $ref: '#/definitions/config.MetadataConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.MetadataConfig'
       output:
-        $ref: '#/definitions/config.OutputConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OutputConfig'
       performance:
-        $ref: '#/definitions/config.PerformanceConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.PerformanceConfig'
       proxy_verification_tokens:
         additionalProperties:
           type: string
         type: object
       scrapers:
-        $ref: '#/definitions/config.ScrapersConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ScrapersConfig'
       server:
-        $ref: '#/definitions/config.ServerConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ServerConfig'
       system:
-        $ref: '#/definitions/config.SystemConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.SystemConfig'
     type: object
-  temp.ErrorResponse:
+  internal_api_temp.ErrorResponse:
     properties:
       error:
         example: Movie not found
@@ -2045,21 +2309,7 @@ definitions:
           type: string
         type: array
     type: object
-  types.OperationMode:
-    enum:
-    - organize
-    - in-place
-    - in-place-norenamefolder
-    - metadata-only
-    - preview
-    type: string
-    x-enum-varnames:
-    - OperationModeOrganize
-    - OperationModeInPlace
-    - OperationModeInPlaceNoRenameFolder
-    - OperationModeMetadataOnly
-    - OperationModePreview
-  version.VersionStatusResponse:
+  internal_api_version.VersionStatusResponse:
     properties:
       build_date:
         description: Build timestamp
@@ -2102,6 +2352,184 @@ info:
   title: Javinizer API
   version: "1.0"
 paths:
+  /api/v1/actresses:
+    get:
+      description: Get a paginated list of actresses with optional search query and
+        sorting
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - default: name
+        description: Sort column (id, dmm_id, japanese_name, first_name, last_name,
+          created_at, updated_at, name)
+        in: query
+        name: sort_by
+        type: string
+      - default: asc
+        description: Sort direction (asc, desc)
+        in: query
+        name: sort_order
+        type: string
+      - default: 50
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Skip results
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.actressesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+      summary: List actresses
+      tags:
+      - actress
+    post:
+      consumes:
+      - application/json
+      description: Create a new actress record with the provided details
+      parameters:
+      - description: Actress details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_actress.actressRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_api_actress.Actress'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+      summary: Create actress
+      tags:
+      - actress
+  /api/v1/actresses/{id}:
+    delete:
+      description: Delete an actress record by ID
+      parameters:
+      - description: Actress ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+      summary: Delete actress
+      tags:
+      - actress
+    get:
+      description: Retrieve a single actress by their database ID
+      parameters:
+      - description: Actress ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.Actress'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+      summary: Get actress by ID
+      tags:
+      - actress
+    put:
+      consumes:
+      - application/json
+      description: Update an existing actress record by ID
+      parameters:
+      - description: Actress ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Updated actress details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_actress.actressRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.Actress'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+      summary: Update actress
+      tags:
+      - actress
   /api/v1/actresses/merge:
     post:
       consumes:
@@ -2114,30 +2542,30 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/actress.ActressMergeRequest'
+          $ref: '#/definitions/internal_api_actress.ActressMergeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/actress.ActressMergeResponse'
+            $ref: '#/definitions/internal_api_actress.ActressMergeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/actress.ErrorResponse'
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/actress.ErrorResponse'
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/actress.ErrorResponse'
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/actress.ErrorResponse'
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
       summary: Merge duplicated actresses
       tags:
       - actress
@@ -2153,30 +2581,30 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/actress.ActressMergePreviewRequest'
+          $ref: '#/definitions/internal_api_actress.ActressMergePreviewRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/actress.ActressMergePreviewResponse'
+            $ref: '#/definitions/internal_api_actress.ActressMergePreviewResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/actress.ErrorResponse'
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/actress.ErrorResponse'
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/actress.ErrorResponse'
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/actress.ErrorResponse'
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
       summary: Preview actress merge
       tags:
       - actress
@@ -2196,20 +2624,184 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/models.Actress'
+              $ref: '#/definitions/internal_api_actress.Actress'
             type: array
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/actress.ErrorResponse'
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/actress.ErrorResponse'
+            $ref: '#/definitions/internal_api_actress.ErrorResponse'
       summary: Search actresses
       tags:
       - actress
+  /api/v1/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate with username and password to create a session
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_auth.AuthCredentialsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_auth.AuthStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+      summary: Login
+      tags:
+      - auth
+  /api/v1/auth/logout:
+    post:
+      description: End the current authenticated session
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Logout
+      tags:
+      - auth
+  /api/v1/auth/setup:
+    post:
+      consumes:
+      - application/json
+      description: Set up initial admin credentials. Only available from localhost
+        or with bootstrap secret when auth is not yet initialized.
+      parameters:
+      - description: Admin credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_auth.AuthCredentialsRequest'
+      - description: Bootstrap secret for remote setup
+        in: header
+        name: X-Setup-Secret
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_auth.AuthStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+      summary: Initialize authentication
+      tags:
+      - auth
+  /api/v1/auth/status:
+    get:
+      description: Check if authentication is initialized and if the current session
+        is authenticated
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_auth.AuthStatusResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+      summary: Get authentication status
+      tags:
+      - auth
+  /api/v1/batch:
+    get:
+      description: Get a list of batch jobs with operation counts
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+      summary: List batch jobs
+      tags:
+      - web
   /api/v1/batch/{id}:
+    delete:
+      description: Delete a completed or cancelled batch job and its temp files. Running
+        jobs must be cancelled first.
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+      summary: Delete batch job
+      tags:
+      - web
     get:
       description: Retrieve the status of a batch scraping job
       parameters:
@@ -2224,11 +2816,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/batch.BatchJobResponse'
+            $ref: '#/definitions/internal_api_batch.BatchJobResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
       summary: Get batch job status
       tags:
       - web
@@ -2253,7 +2845,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
       summary: Cancel batch job
       tags:
       - web
@@ -2278,22 +2870,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/batch.UpdateMovieRequest'
+          $ref: '#/definitions/internal_api_batch.UpdateMovieRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/batch.MovieResponse'
+            $ref: '#/definitions/internal_api_batch.MovieResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
       summary: Update movie in batch job
       tags:
       - web
@@ -2323,7 +2915,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
       summary: Exclude movie from batch organization
       tags:
       - web
@@ -2349,23 +2941,68 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/batch.PosterCropRequest'
+          $ref: '#/definitions/internal_api_batch.PosterCropRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/batch.PosterCropResponse'
+            $ref: '#/definitions/internal_api_batch.PosterCropResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
       summary: Update manual poster crop in batch job
+      tags:
+      - web
+  /api/v1/batch/{id}/movies/{movieId}/poster-from-url:
+    post:
+      consumes:
+      - application/json
+      description: Download a poster image from a URL and set it as the movie's poster
+        in the batch job
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Movie ID
+        in: path
+        name: movieId
+        required: true
+        type: string
+      - description: Poster URL
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_batch.PosterFromURLRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_batch.PosterFromURLResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+      summary: Download poster from URL
       tags:
       - web
   /api/v1/batch/{id}/movies/{movieId}/preview:
@@ -2389,23 +3026,72 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/batch.OrganizePreviewRequest'
+          $ref: '#/definitions/internal_api_batch.OrganizePreviewRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/batch.OrganizePreviewResponse'
+            $ref: '#/definitions/internal_api_batch.OrganizePreviewResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
       summary: Preview organize output
+      tags:
+      - web
+  /api/v1/batch/{id}/movies/{movieId}/rescrape:
+    post:
+      consumes:
+      - application/json
+      description: Rescrape a specific movie within a batch job using selected scrapers
+        or manual search input
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Movie ID
+        in: path
+        name: movieId
+        required: true
+        type: string
+      - description: Rescrape options
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_batch.BatchRescrapeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_batch.BatchRescrapeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+      summary: Rescrape movie in batch job
       tags:
       - web
   /api/v1/batch/{id}/organize:
@@ -2425,7 +3111,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/batch.OrganizeRequest'
+          $ref: '#/definitions/internal_api_batch.OrganizeRequest'
       produces:
       - application/json
       responses:
@@ -2438,11 +3124,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
       summary: Organize batch job files
       tags:
       - web
@@ -2462,7 +3148,7 @@ paths:
         in: body
         name: request
         schema:
-          $ref: '#/definitions/batch.UpdateRequest'
+          $ref: '#/definitions/internal_api_batch.UpdateRequest'
       produces:
       - application/json
       responses:
@@ -2475,11 +3161,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
       summary: Update batch job files
       tags:
       - web
@@ -2495,18 +3181,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/batch.BatchScrapeRequest'
+          $ref: '#/definitions/internal_api_batch.BatchScrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/batch.BatchScrapeResponse'
+            $ref: '#/definitions/internal_api_batch.BatchScrapeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/batch.ErrorResponse'
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
       summary: Batch scrape movies
       tags:
       - web
@@ -2521,18 +3207,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/file.BrowseRequest'
+          $ref: '#/definitions/internal_api_file.BrowseRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/file.BrowseResponse'
+            $ref: '#/definitions/internal_api_file.BrowseResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/file.ErrorResponse'
+            $ref: '#/definitions/internal_api_file.ErrorResponse'
       summary: Browse directory
       tags:
       - web
@@ -2547,18 +3233,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/file.PathAutocompleteRequest'
+          $ref: '#/definitions/internal_api_file.PathAutocompleteRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/file.PathAutocompleteResponse'
+            $ref: '#/definitions/internal_api_file.PathAutocompleteResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/file.ErrorResponse'
+            $ref: '#/definitions/internal_api_file.ErrorResponse'
       summary: Autocomplete directory path
       tags:
       - web
@@ -2578,7 +3264,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/system.ErrorResponse'
+            $ref: '#/definitions/internal_api_system.ErrorResponse'
       summary: Get configuration
       tags:
       - system
@@ -2593,7 +3279,7 @@ paths:
         name: config
         required: true
         schema:
-          $ref: '#/definitions/system.UpdateConfigRequest'
+          $ref: '#/definitions/internal_api_system.UpdateConfigRequest'
       produces:
       - application/json
       responses:
@@ -2605,11 +3291,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/system.ErrorResponse'
+            $ref: '#/definitions/internal_api_system.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/system.ErrorResponse'
+            $ref: '#/definitions/internal_api_system.ErrorResponse'
       summary: Update configuration
       tags:
       - system
@@ -2630,7 +3316,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/file.ErrorResponse'
+            $ref: '#/definitions/internal_api_file.ErrorResponse'
       summary: Get current working directory
       tags:
       - web
@@ -2649,15 +3335,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/events.deleteEventsResponse'
+            $ref: '#/definitions/internal_api_events.deleteEventsResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/events.ErrorResponse'
+            $ref: '#/definitions/internal_api_events.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/events.ErrorResponse'
+            $ref: '#/definitions/internal_api_events.ErrorResponse'
       summary: Delete old events
       tags:
       - events
@@ -2701,15 +3387,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/events.eventListResponse'
+            $ref: '#/definitions/internal_api_events.eventListResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/events.ErrorResponse'
+            $ref: '#/definitions/internal_api_events.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/events.ErrorResponse'
+            $ref: '#/definitions/internal_api_events.ErrorResponse'
       summary: List events
       tags:
       - events
@@ -2722,14 +3408,108 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/events.eventStatsResponse'
+            $ref: '#/definitions/internal_api_events.eventStatsResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/events.ErrorResponse'
+            $ref: '#/definitions/internal_api_events.ErrorResponse'
       summary: Get event statistics
       tags:
       - events
+  /api/v1/genres/replacements:
+    delete:
+      description: Delete a genre replacement rule by original genre name
+      parameters:
+      - description: Original genre name to delete
+        in: query
+        name: original
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+      summary: Delete genre replacement
+      tags:
+      - genres
+    get:
+      description: Get a paginated list of genre replacement rules
+      parameters:
+      - default: 50
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Skip results
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_genre.genreReplacementListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+      summary: List genre replacements
+      tags:
+      - genres
+    post:
+      consumes:
+      - application/json
+      description: Create a new genre replacement rule mapping an original genre to
+        a replacement
+      parameters:
+      - description: Genre replacement details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_genre.genreReplacementCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Already exists
+          schema:
+            $ref: '#/definitions/internal_api_genre.GenreReplacement'
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_api_genre.GenreReplacement'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+      summary: Create genre replacement
+      tags:
+      - genres
   /api/v1/history:
     delete:
       description: Delete multiple history records based on criteria
@@ -2748,15 +3528,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/history.DeleteHistoryBulkResponse'
+            $ref: '#/definitions/internal_api_history.DeleteHistoryBulkResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/history.ErrorResponse'
+            $ref: '#/definitions/internal_api_history.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/history.ErrorResponse'
+            $ref: '#/definitions/internal_api_history.ErrorResponse'
       summary: Delete history records in bulk
       tags:
       - history
@@ -2789,15 +3569,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/history.HistoryListResponse'
+            $ref: '#/definitions/internal_api_history.HistoryListResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/history.ErrorResponse'
+            $ref: '#/definitions/internal_api_history.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/history.ErrorResponse'
+            $ref: '#/definitions/internal_api_history.ErrorResponse'
       summary: List history records
       tags:
       - history
@@ -2822,15 +3602,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/history.ErrorResponse'
+            $ref: '#/definitions/internal_api_history.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/history.ErrorResponse'
+            $ref: '#/definitions/internal_api_history.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/history.ErrorResponse'
+            $ref: '#/definitions/internal_api_history.ErrorResponse'
       summary: Delete a history record
       tags:
       - history
@@ -2843,11 +3623,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/history.HistoryStats'
+            $ref: '#/definitions/internal_api_history.HistoryStats'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/history.ErrorResponse'
+            $ref: '#/definitions/internal_api_history.ErrorResponse'
       summary: Get history statistics
       tags:
       - history
@@ -2866,11 +3646,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/jobs.JobListResponse'
+            $ref: '#/definitions/internal_api_jobs.JobListResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
       summary: List batch jobs
       tags:
       - jobs
@@ -2889,15 +3669,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/jobs.JobListItem'
+            $ref: '#/definitions/internal_api_jobs.JobListItem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
       summary: Get a single batch job
       tags:
       - jobs
@@ -2917,15 +3697,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/jobs.OperationListResponse'
+            $ref: '#/definitions/internal_api_jobs.OperationListResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
       summary: List operations for a batch job
       tags:
       - jobs
@@ -2949,27 +3729,27 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/jobs.RevertResultResponse'
+            $ref: '#/definitions/internal_api_jobs.RevertResultResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "403":
           description: Revert is disabled
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
       summary: Revert a specific movie within a batch job
       tags:
       - jobs
@@ -2989,27 +3769,27 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/jobs.RevertResultResponse'
+            $ref: '#/definitions/internal_api_jobs.RevertResultResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "403":
           description: Revert is disabled
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
       summary: Revert a batch job
       tags:
       - jobs
@@ -3030,19 +3810,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/contracts.RevertCheckResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.RevertCheckResponse'
         "403":
           description: Revert is disabled
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/jobs.ErrorResponse'
+            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
       summary: Check for overlapping batches before revert
       tags:
       - jobs
@@ -3066,11 +3846,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/movie.MoviesResponse'
+            $ref: '#/definitions/internal_api_movie.MoviesResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
       summary: List cached movies
       tags:
       - movies
@@ -3094,11 +3874,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/movie.MovieResponse'
+            $ref: '#/definitions/internal_api_movie.MovieResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
       summary: Get movie by ID
       tags:
       - movies
@@ -3118,26 +3898,26 @@ paths:
         in: body
         name: request
         schema:
-          $ref: '#/definitions/movie.NFOComparisonRequest'
+          $ref: '#/definitions/internal_api_movie.NFOComparisonRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/movie.NFOComparisonResponse'
+            $ref: '#/definitions/internal_api_movie.NFOComparisonResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
       summary: Compare NFO with scraped data
       tags:
       - movies
@@ -3157,26 +3937,26 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/movie.RescrapeRequest'
+          $ref: '#/definitions/internal_api_movie.RescrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/movie.MovieResponse'
+            $ref: '#/definitions/internal_api_movie.MovieResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
       summary: Rescrape movie with specific scrapers
       tags:
       - movies
@@ -3198,8 +3978,10 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/temp.ErrorResponse'
+            $ref: '#/definitions/internal_api_temp.ErrorResponse'
       summary: Serve cropped poster image
+      tags:
+      - temp
   /api/v1/proxy/test:
     post:
       consumes:
@@ -3212,18 +3994,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/system.ProxyTestRequest'
+          $ref: '#/definitions/internal_api_system.ProxyTestRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/system.ProxyTestResponse'
+            $ref: '#/definitions/internal_api_system.ProxyTestResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/system.ErrorResponse'
+            $ref: '#/definitions/internal_api_system.ErrorResponse'
       summary: Test proxy connectivity
       tags:
       - system
@@ -3238,22 +4020,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/file.ScanRequest'
+          $ref: '#/definitions/internal_api_file.ScanRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/file.ScanResponse'
+            $ref: '#/definitions/internal_api_file.ScanResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/file.ErrorResponse'
+            $ref: '#/definitions/internal_api_file.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/file.ErrorResponse'
+            $ref: '#/definitions/internal_api_file.ErrorResponse'
       summary: Scan directory for video files
       tags:
       - web
@@ -3268,26 +4050,26 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/movie.ScrapeRequest'
+          $ref: '#/definitions/internal_api_movie.ScrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/movie.ScrapeResponse'
+            $ref: '#/definitions/internal_api_movie.ScrapeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/movie.ErrorResponse'
+            $ref: '#/definitions/internal_api_movie.ErrorResponse'
       summary: Scrape movie metadata
       tags:
       - movies
@@ -3301,11 +4083,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/system.AvailableScrapersResponse'
+            $ref: '#/definitions/internal_api_system.AvailableScrapersResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/system.ErrorResponse'
+            $ref: '#/definitions/internal_api_system.ErrorResponse'
       summary: Get available scrapers
       tags:
       - system
@@ -3327,12 +4109,14 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/temp.ErrorResponse'
+            $ref: '#/definitions/internal_api_temp.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/temp.ErrorResponse'
+            $ref: '#/definitions/internal_api_temp.ErrorResponse'
       summary: Proxy remote images
+      tags:
+      - temp
   /api/v1/temp/posters/{jobId}/{filename}:
     get:
       description: Serves temporarily cropped posters from batch jobs. These are ephemeral
@@ -3356,8 +4140,10 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/temp.ErrorResponse'
+            $ref: '#/definitions/internal_api_temp.ErrorResponse'
       summary: Serve temporary poster image
+      tags:
+      - temp
   /api/v1/translation/deepl/usage:
     post:
       consumes:
@@ -3369,22 +4155,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/system.DeepLUsageRequest'
+          $ref: '#/definitions/internal_api_system.DeepLUsageRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/system.DeepLUsageResponse'
+            $ref: '#/definitions/internal_api_system.DeepLUsageResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/system.ErrorResponse'
+            $ref: '#/definitions/internal_api_system.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/system.ErrorResponse'
+            $ref: '#/definitions/internal_api_system.ErrorResponse'
       summary: Get DeepL usage information
       tags:
       - system
@@ -3399,22 +4185,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/system.TranslationModelsRequest'
+          $ref: '#/definitions/internal_api_system.TranslationModelsRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/system.TranslationModelsResponse'
+            $ref: '#/definitions/internal_api_system.TranslationModelsResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/system.ErrorResponse'
+            $ref: '#/definitions/internal_api_system.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/system.ErrorResponse'
+            $ref: '#/definitions/internal_api_system.ErrorResponse'
       summary: Get translation models
       tags:
       - system
@@ -3428,7 +4214,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/version.VersionStatusResponse'
+            $ref: '#/definitions/internal_api_version.VersionStatusResponse'
       summary: Get version status
       tags:
       - system
@@ -3441,7 +4227,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/version.VersionStatusResponse'
+            $ref: '#/definitions/internal_api_version.VersionStatusResponse'
       summary: Force version check
       tags:
       - system
@@ -3455,7 +4241,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/system.HealthResponse'
+            $ref: '#/definitions/internal_api_system.HealthResponse'
       summary: Health check
       tags:
       - system
@@ -3481,6 +4267,8 @@ paths:
               type: string
             type: object
       summary: WebSocket progress updates
+      tags:
+      - realtime
 schemes:
 - http
 - https

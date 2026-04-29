@@ -21,6 +21,7 @@ import (
 // @Router /api/v1/temp/posters/{jobId}/{filename} [get]
 // @Summary Serve temporary poster image
 // @Description Serves temporarily cropped posters from batch jobs. These are ephemeral and preserved when organization fails for retry.
+// @Tags temp
 // @Param jobId path string true "Job ID"
 // @Param filename path string true "Filename"
 // @Success 200 {file} binary
@@ -88,6 +89,7 @@ func serveTempPoster(deps *ServerDependencies) gin.HandlerFunc {
 // @Router /api/v1/posters/{filename} [get]
 // @Summary Serve cropped poster image
 // @Description Serves persistent cropped posters from the database. These persist across scraping sessions.
+// @Tags temp
 // @Param filename path string true "Filename"
 // @Success 200 {file} binary
 // @Failure 404 {object} ErrorResponse
@@ -131,6 +133,7 @@ func serveCroppedPoster() gin.HandlerFunc {
 // @Router /api/v1/temp/image [get]
 // @Summary Proxy remote images
 // @Description Proxies remote images for preview UI, handling hotlink protection and CORS issues.
+// @Tags temp
 // @Param url query string true "Image URL"
 // @Success 200 {file} binary
 // @Failure 400 {object} ErrorResponse

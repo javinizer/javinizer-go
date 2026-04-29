@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
 import type { ProgressMessage } from '$lib/api/types';
+import { toastStore } from '$lib/stores/toast';
 
 // Build WebSocket URL dynamically from browser location
 // This works for both local dev (localhost:8080) and Docker (any host)
@@ -31,6 +32,7 @@ function createWebSocketStore() {
 	let ws: WebSocket | null = null;
 	let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 	let shouldReconnect = false;
+	let lastErrorToastTime = 0;
 
 	function connect() {
 		if (!browser) {
@@ -55,12 +57,10 @@ function createWebSocketStore() {
 			ws = new WebSocket(wsUrl);
 
 			ws.onopen = () => {
-				console.log('WebSocket connected to', wsUrl);
 				update((state) => ({ ...state, connected: true, error: undefined }));
 			};
 
 			ws.onclose = () => {
-				console.log('WebSocket disconnected');
 				update((state) => ({ ...state, connected: false }));
 				ws = null;
 
@@ -70,13 +70,17 @@ function createWebSocketStore() {
 
 				// Attempt to reconnect after 3 seconds
 				reconnectTimeout = setTimeout(() => {
-					console.log('Attempting to reconnect...');
 					connect();
 				}, 3000);
 			};
 
 			ws.onerror = (error) => {
 				console.error('WebSocket error:', error);
+				const now = Date.now();
+				if (now - lastErrorToastTime > 10000) {
+					toastStore.error('WebSocket connection error');
+					lastErrorToastTime = now;
+				}
 				update((state) => ({ ...state, error: 'WebSocket connection error' }));
 			};
 
@@ -100,10 +104,12 @@ function createWebSocketStore() {
 					});
 				} catch (error) {
 					console.error('Failed to parse WebSocket message:', error);
+					toastStore.error('Failed to process server message');
 				}
 			};
 		} catch (error) {
 			console.error('Failed to create WebSocket:', error);
+			toastStore.error('Failed to connect to server');
 			update((state) => ({ ...state, error: 'Failed to create WebSocket connection' }));
 		}
 	}

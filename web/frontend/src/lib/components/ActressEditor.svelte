@@ -3,6 +3,7 @@
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
 	import { fade, scale } from 'svelte/transition';
+	import { alertDialog, confirmDialog } from '$lib/stores/dialog.svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import { apiClient } from '$lib/api/client';
 	import type { Movie, Actress } from '$lib/api/types';
@@ -90,7 +91,7 @@
 
 	function saveActress() {
 		if (!editingActress.first_name?.trim() && !editingActress.japanese_name?.trim()) {
-			alert('At least first name or Japanese name is required');
+			void alertDialog('Validation Error', 'At least first name or Japanese name is required');
 			return;
 		}
 
@@ -104,8 +105,8 @@
 		notifyParent();
 	}
 
-	function removeActress(index: number) {
-		if (confirm('Remove this actress?')) {
+	async function removeActress(index: number) {
+		if (await confirmDialog('Remove Actress', 'Remove this actress?', { variant: 'danger', confirmLabel: 'Remove' })) {
 			actresses = actresses.filter((_, i) => i !== index);
 			notifyParent();
 		}

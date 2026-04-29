@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
@@ -29,9 +28,8 @@ const (
 )
 
 var (
-	nonAlphaNumRegex = regexp.MustCompile(`[^a-z0-9]+`)
-	titleRegex       = regexp.MustCompile(`(?i)^([a-z0-9_-]+)\s+(.*?)\s*-\s*javbus`)
-	runtimeRegex     = regexp.MustCompile(`(\d+)`)
+	titleRegex   = regexp.MustCompile(`(?i)^([a-z0-9_-]+)\s+(.*?)\s*-\s*javbus`)
+	runtimeRegex = regexp.MustCompile(`(\d+)`)
 )
 
 // Scraper implements the JavBus scraper.
@@ -214,16 +212,16 @@ func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 }
 
 func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLWithContext(context.Background(), id)
+	return s.getURLCtx(context.Background(), id)
 }
 
-func (s *Scraper) getURLWithContext(ctx context.Context, id string) (string, error) {
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
 	}
 
-	if isHTTPURL(id) {
+	if scraperutil.IsHTTPURL(id) {
 		return s.applyLanguageToURL(id), nil
 	}
 
@@ -267,7 +265,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("JavBus scraper is disabled")
 	}
 
-	detailURL, err := s.getURLWithContext(ctx, id)
+	detailURL, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +388,7 @@ func (s *Scraper) findDetailURL(html, base, id string) string {
 		return ""
 	}
 
-	targetID := normalizeID(id)
+	targetID := scraperutil.NormalizeID(id)
 	var found string
 
 	doc.Find("a.movie-box[href]").EachWithBreak(func(_ int, sel *goquery.Selection) bool {
@@ -503,7 +501,7 @@ func extractActresses(doc *goquery.Document) []models.ActressInfo {
 		seen[name] = true
 
 		info := models.ActressInfo{ThumbURL: scraperutil.CleanString(thumb)}
-		if hasJapanese(name) {
+		if scraperutil.HasJapanese(name) {
 			info.JapaneseName = name
 		} else {
 			parts := strings.Fields(name)
@@ -710,34 +708,12 @@ func (s *Scraper) applyLanguageToURL(rawURL string) string {
 	return u.String()
 }
 
-func normalizeID(v string) string {
-	v = strings.ToLower(strings.TrimSpace(v))
-	return nonAlphaNumRegex.ReplaceAllString(v, "")
-}
-
 func idsMatch(candidate, targetNormalized string) bool {
 	if targetNormalized == "" {
 		return false
 	}
-	c := normalizeID(candidate)
+	c := scraperutil.NormalizeID(candidate)
 	return c != "" && (c == targetNormalized || strings.Contains(c, targetNormalized) || strings.Contains(targetNormalized, c))
-}
-
-func hasJapanese(v string) bool {
-	for _, r := range v {
-		if unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han) {
-			return true
-		}
-	}
-	return false
-}
-
-func isHTTPURL(v string) bool {
-	u, err := url.Parse(strings.TrimSpace(v))
-	if err != nil {
-		return false
-	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 func isLikelyImageURL(raw string) bool {

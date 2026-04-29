@@ -214,6 +214,10 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 }
 
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.getURLCtx(context.Background(), id)
+}
+
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	return fmt.Sprintf("%s/%s/vl_searchbyid.php?keyword=%s", s.baseURL, s.language, url.QueryEscape(id)), nil
 }
 
@@ -223,7 +227,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("JavLibrary scraper is disabled")
 	}
 
-	searchURL, err := s.GetURL(id)
+	searchURL, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}

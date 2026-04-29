@@ -3,9 +3,10 @@
 	import FormNumberInput from '$lib/components/settings/FormNumberInput.svelte';
 	import FormTextInput from '$lib/components/settings/FormTextInput.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
+	import type { SettingsConfig, MediaInfoConfig } from '$lib/api/types';
 
 	interface Props {
-		config: any;
+		config: SettingsConfig;
 	}
 
 	let { config }: Props = $props();
@@ -19,7 +20,7 @@
 			description="Enable MediaInfo CLI fallback when library-based parsing fails"
 			checked={config.mediainfo?.cli_enabled ?? false}
 			onchange={(val) => {
-				if (!config.mediainfo) config.mediainfo = {};
+				if (!config.mediainfo) config.mediainfo = {} as MediaInfoConfig;
 				config.mediainfo.cli_enabled = val;
 			}}
 		/>
@@ -31,7 +32,7 @@
 				value={config.mediainfo?.cli_path ?? 'mediainfo'}
 				placeholder="mediainfo"
 				onchange={(val) => {
-					if (!config.mediainfo) config.mediainfo = {};
+					if (!config.mediainfo) config.mediainfo = {} as MediaInfoConfig;
 					config.mediainfo.cli_path = val;
 				}}
 			/>
@@ -44,7 +45,7 @@
 				max={120}
 				unit="seconds"
 				onchange={(val) => {
-					if (!config.mediainfo) config.mediainfo = {};
+					if (!config.mediainfo) config.mediainfo = {} as MediaInfoConfig;
 					config.mediainfo.cli_timeout = val;
 				}}
 			/>

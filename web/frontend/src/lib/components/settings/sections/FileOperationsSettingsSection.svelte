@@ -4,10 +4,10 @@
 	import FormTextInput from '$lib/components/settings/FormTextInput.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
 	import { FolderOutput, FolderOpen, FileText, FileEdit } from 'lucide-svelte';
-	import type { OperationMode } from '$lib/api/types';
+	import type { OperationMode, SettingsConfig } from '$lib/api/types';
 
 	interface Props {
-		config: any;
+		config: SettingsConfig;
 	}
 
 	let { config }: Props = $props();

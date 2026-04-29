@@ -195,7 +195,7 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	}
 
 	// Accept plain MGStage-style IDs (e.g., "GANA-2850", "SIRO-5615") so the
-	// scraper can handle prefix expansion internally via GetURLCtx.
+	// scraper can handle prefix expansion internally via getURLCtx.
 	if normalized, ok := normalizeMGStageIDToken(input); ok {
 		return normalized, true
 	}
@@ -205,11 +205,10 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 
 // GetURL attempts to find the URL for a given movie ID using MGStage search
 func (s *Scraper) GetURL(id string) (string, error) {
-	return s.GetURLCtx(context.Background(), id)
+	return s.getURLCtx(context.Background(), id)
 }
 
-// GetURLCtx attempts to find the URL for a given movie ID using MGStage search with context support
-func (s *Scraper) GetURLCtx(ctx context.Context, id string) (string, error) {
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	foundURL, err := s.searchByID(ctx, id)
 	if err == nil && foundURL != "" {
 		return foundURL, nil
@@ -318,7 +317,7 @@ func (s *Scraper) checkDirectURL(ctx context.Context, directURL string) bool {
 
 // Search searches for and scrapes metadata for a given movie ID with context support
 func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
-	url, err := s.GetURLCtx(ctx, id)
+	url, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}

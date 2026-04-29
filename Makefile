@@ -1,6 +1,6 @@
-.PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder
-.PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci config-drift simulate-ci
-.PHONY: fmt lint vet swagger docs mocks
+.PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder web-test
+.PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci ci-full config-drift simulate-ci
+.PHONY: fmt lint vet vuln swagger docs mocks
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
 .PHONY: docker-build docker-build-no-cache docker-run docker-stop docker-clean docker-push docker-test docker-logs docker-help
@@ -37,17 +37,20 @@ help:
 	@echo "  make fmt                - Format code with go fmt"
 	@echo "  make vet                - Run go vet"
 	@echo "  make lint               - Run golangci-lint"
+	@echo "  make vuln               - Run govulncheck vulnerability scan"
 	@echo "  make swagger            - Generate Swagger API documentation"
 	@echo "  make check-swagger      - Check if Swagger docs are up to date"
 	@echo "  make mocks              - Generate mocks from interfaces (mockery v3)"
 	@echo ""
 	@echo "CI/CD:"
 	@echo "  make ci                 - Run full CI suite (vet + lint + coverage + race + drift)"
+	@echo "  make ci-full            - Run full CI suite including frontend tests"
 	@echo "  make config-drift       - Validate config synchronization (no hardcoded values)"
 	@echo "  make simulate-ci        - Simulate GitHub Actions CI locally"
 	@echo ""
 	@echo "Web Frontend:"
 	@echo "  make web-install        - Install npm dependencies"
+	@echo "  make web-test           - Run frontend tests (vitest)"
 	@echo "  make web-dev            - Start dev server with hot reload"
 	@echo "  make web-build          - Build frontend bundle"
 	@echo "  make web-restore-placeholder - Restore tracked web/dist placeholder files"
@@ -173,8 +176,12 @@ config-drift:
 	@./scripts/validate-config-sync.sh
 
 # Run full CI test suite
-ci: vet lint coverage-check test-race config-drift
+ci: vet lint vuln coverage-check test-race config-drift
 	@echo "All CI checks passed!"
+
+# Run full CI suite including frontend tests
+ci-full: ci web-test
+	@echo "All CI checks (including frontend) passed!"
 
 # Simulate GitHub Actions CI locally (with pretty output)
 simulate-ci:
@@ -216,10 +223,14 @@ vet:
 lint:
 	golangci-lint run
 
+vuln:
+	@echo "Running govulncheck..."
+	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
 # Generate Swagger API documentation
 swagger:
 	@echo "Generating Swagger documentation..."
-	@export PATH=$$PATH:$$(go env GOPATH)/bin && swag init -g cmd/javinizer/commands/api/command.go -o docs/swagger
+	@export PATH=$$PATH:$$(go env GOPATH)/bin && swag init -g cmd/javinizer/commands/api/command.go -o docs/swagger --parseDependency --parseInternal
 	@echo "✅ Swagger documentation generated"
 	@echo "   - docs/swagger/swagger.json ($(shell wc -l < docs/swagger/swagger.json) lines)"
 	@echo "   - docs/swagger/swagger.yaml ($(shell wc -l < docs/swagger/swagger.yaml) lines)"
@@ -228,7 +239,7 @@ swagger:
 # Check if swagger documentation is up to date
 check-swagger:
 	@echo "Checking Swagger documentation..."
-	@export PATH=$$PATH:$$(go env GOPATH)/bin && swag init -g cmd/javinizer/commands/api/command.go -o docs/swagger
+	@export PATH=$$PATH:$$(go env GOPATH)/bin && swag init -g cmd/javinizer/commands/api/command.go -o docs/swagger --parseDependency --parseInternal
 	@if ! git diff --quiet -- docs/swagger/; then \
 		echo "❌ Swagger documentation is out of date"; \
 		echo "Run 'make swagger' and commit the changes"; \
@@ -273,6 +284,9 @@ web-preview:
 
 web-install:
 	cd web/frontend && npm install
+
+web-test:
+	cd web/frontend && npm run test
 
 web-clean:
 	rm -rf web/frontend/node_modules web/frontend/.svelte-kit web/frontend/build

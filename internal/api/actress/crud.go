@@ -82,7 +82,20 @@ func parseActressID(c *gin.Context) (uint, bool) {
 	return uint(id), true
 }
 
-// listActresses handles GET /api/v1/actresses.
+// listActresses godoc
+// @Summary List actresses
+// @Description Get a paginated list of actresses with optional search query and sorting
+// @Tags actress
+// @Produce json
+// @Param q query string false "Search query"
+// @Param sort_by query string false "Sort column (id, dmm_id, japanese_name, first_name, last_name, created_at, updated_at, name)" default(name)
+// @Param sort_order query string false "Sort direction (asc, desc)" default(asc)
+// @Param limit query int false "Max results" default(50)
+// @Param offset query int false "Skip results" default(0)
+// @Success 200 {object} actressesResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/actresses [get]
 func listActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit, offset := core.ParsePagination(c, 50, 500)
@@ -132,7 +145,17 @@ func listActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	}
 }
 
-// getActress handles GET /api/v1/actresses/:id.
+// getActress godoc
+// @Summary Get actress by ID
+// @Description Retrieve a single actress by their database ID
+// @Tags actress
+// @Produce json
+// @Param id path uint true "Actress ID"
+// @Success 200 {object} Actress
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/actresses/{id} [get]
 func getActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseActressID(c)
@@ -154,7 +177,17 @@ func getActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	}
 }
 
-// createActress handles POST /api/v1/actresses.
+// createActress godoc
+// @Summary Create actress
+// @Description Create a new actress record with the provided details
+// @Tags actress
+// @Accept json
+// @Produce json
+// @Param request body actressRequest true "Actress details"
+// @Success 201 {object} Actress
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/actresses [post]
 func createActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req actressRequest
@@ -187,7 +220,19 @@ func createActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	}
 }
 
-// updateActress handles PUT /api/v1/actresses/:id.
+// updateActress godoc
+// @Summary Update actress
+// @Description Update an existing actress record by ID
+// @Tags actress
+// @Accept json
+// @Produce json
+// @Param id path uint true "Actress ID"
+// @Param request body actressRequest true "Updated actress details"
+// @Success 200 {object} Actress
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/actresses/{id} [put]
 func updateActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseActressID(c)
@@ -233,7 +278,17 @@ func updateActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	}
 }
 
-// deleteActress handles DELETE /api/v1/actresses/:id.
+// deleteActress godoc
+// @Summary Delete actress
+// @Description Delete an actress record by ID
+// @Tags actress
+// @Produce json
+// @Param id path uint true "Actress ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/actresses/{id} [delete]
 func deleteActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseActressID(c)

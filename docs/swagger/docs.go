@@ -23,6 +23,118 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/actresses": {
+            "get": {
+                "description": "Get a paginated list of actresses with optional search query and sorting",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "List actresses",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "name",
+                        "description": "Sort column (id, dmm_id, japanese_name, first_name, last_name, created_at, updated_at, name)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "asc",
+                        "description": "Sort direction (asc, desc)",
+                        "name": "sort_order",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Skip results",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.actressesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a new actress record with the provided details",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "Create actress",
+                "parameters": [
+                    {
+                        "description": "Actress details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.actressRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.Actress"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/actresses/merge": {
             "post": {
                 "description": "Merge a source actress into a target actress with field-level target/source resolutions.",
@@ -43,7 +155,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/actress.ActressMergeRequest"
+                            "$ref": "#/definitions/internal_api_actress.ActressMergeRequest"
                         }
                     }
                 ],
@@ -51,31 +163,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/actress.ActressMergeResponse"
+                            "$ref": "#/definitions/internal_api_actress.ActressMergeResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/actress.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/actress.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/actress.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/actress.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
                         }
                     }
                 }
@@ -101,7 +213,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/actress.ActressMergePreviewRequest"
+                            "$ref": "#/definitions/internal_api_actress.ActressMergePreviewRequest"
                         }
                     }
                 ],
@@ -109,31 +221,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/actress.ActressMergePreviewResponse"
+                            "$ref": "#/definitions/internal_api_actress.ActressMergePreviewResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/actress.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/actress.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/actress.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/actress.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
                         }
                     }
                 }
@@ -164,20 +276,369 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/models.Actress"
+                                "$ref": "#/definitions/internal_api_actress.Actress"
                             }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/actress.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/actress.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/{id}": {
+            "get": {
+                "description": "Retrieve a single actress by their database ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "Get actress by ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Actress ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.Actress"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update an existing actress record by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "Update actress",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Actress ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated actress details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.actressRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.Actress"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete an actress record by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "Delete actress",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Actress ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/login": {
+            "post": {
+                "description": "Authenticate with username and password to create a session",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Login",
+                "parameters": [
+                    {
+                        "description": "Login credentials",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.AuthCredentialsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.AuthStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/logout": {
+            "post": {
+                "description": "End the current authenticated session",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Logout",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/setup": {
+            "post": {
+                "description": "Set up initial admin credentials. Only available from localhost or with bootstrap secret when auth is not yet initialized.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Initialize authentication",
+                "parameters": [
+                    {
+                        "description": "Admin credentials",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.AuthCredentialsRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bootstrap secret for remote setup",
+                        "name": "X-Setup-Secret",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.AuthStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/status": {
+            "get": {
+                "description": "Check if authentication is initialized and if the current session is authenticated",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get authentication status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.AuthStatusResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/batch": {
+            "get": {
+                "description": "Get a list of batch jobs with operation counts",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "List batch jobs",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     }
                 }
@@ -203,7 +664,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/batch.BatchScrapeRequest"
+                            "$ref": "#/definitions/internal_api_batch.BatchScrapeRequest"
                         }
                     }
                 ],
@@ -211,13 +672,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/batch.BatchScrapeResponse"
+                            "$ref": "#/definitions/internal_api_batch.BatchScrapeResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     }
                 }
@@ -246,13 +707,61 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/batch.BatchJobResponse"
+                            "$ref": "#/definitions/internal_api_batch.BatchJobResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a completed or cancelled batch job and its temp files. Running jobs must be cancelled first.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "Delete batch job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     }
                 }
@@ -290,7 +799,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     }
                 }
@@ -330,7 +839,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/batch.UpdateMovieRequest"
+                            "$ref": "#/definitions/internal_api_batch.UpdateMovieRequest"
                         }
                     }
                 ],
@@ -338,19 +847,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/batch.MovieResponse"
+                            "$ref": "#/definitions/internal_api_batch.MovieResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     }
                 }
@@ -395,7 +904,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     }
                 }
@@ -435,7 +944,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/batch.PosterCropRequest"
+                            "$ref": "#/definitions/internal_api_batch.PosterCropRequest"
                         }
                     }
                 ],
@@ -443,19 +952,85 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/batch.PosterCropResponse"
+                            "$ref": "#/definitions/internal_api_batch.PosterCropResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/batch/{id}/movies/{movieId}/poster-from-url": {
+            "post": {
+                "description": "Download a poster image from a URL and set it as the movie's poster in the batch job",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "Download poster from URL",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Movie ID",
+                        "name": "movieId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Poster URL",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.PosterFromURLRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.PosterFromURLResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     }
                 }
@@ -495,7 +1070,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/batch.OrganizePreviewRequest"
+                            "$ref": "#/definitions/internal_api_batch.OrganizePreviewRequest"
                         }
                     }
                 ],
@@ -503,19 +1078,91 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/batch.OrganizePreviewResponse"
+                            "$ref": "#/definitions/internal_api_batch.OrganizePreviewResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/batch/{id}/movies/{movieId}/rescrape": {
+            "post": {
+                "description": "Rescrape a specific movie within a batch job using selected scrapers or manual search input",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "Rescrape movie in batch job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Movie ID",
+                        "name": "movieId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Rescrape options",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.BatchRescrapeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.BatchRescrapeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "Gone",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     }
                 }
@@ -548,7 +1195,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/batch.OrganizeRequest"
+                            "$ref": "#/definitions/internal_api_batch.OrganizeRequest"
                         }
                     }
                 ],
@@ -565,13 +1212,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     }
                 }
@@ -603,7 +1250,7 @@ const docTemplate = `{
                         "name": "request",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/batch.UpdateRequest"
+                            "$ref": "#/definitions/internal_api_batch.UpdateRequest"
                         }
                     }
                 ],
@@ -620,13 +1267,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/batch.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
                         }
                     }
                 }
@@ -652,7 +1299,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/file.BrowseRequest"
+                            "$ref": "#/definitions/internal_api_file.BrowseRequest"
                         }
                     }
                 ],
@@ -660,13 +1307,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/file.BrowseResponse"
+                            "$ref": "#/definitions/internal_api_file.BrowseResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/file.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_file.ErrorResponse"
                         }
                     }
                 }
@@ -692,7 +1339,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/file.PathAutocompleteRequest"
+                            "$ref": "#/definitions/internal_api_file.PathAutocompleteRequest"
                         }
                     }
                 ],
@@ -700,13 +1347,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/file.PathAutocompleteResponse"
+                            "$ref": "#/definitions/internal_api_file.PathAutocompleteResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/file.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_file.ErrorResponse"
                         }
                     }
                 }
@@ -733,7 +1380,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/system.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_system.ErrorResponse"
                         }
                     }
                 }
@@ -757,7 +1404,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/system.UpdateConfigRequest"
+                            "$ref": "#/definitions/internal_api_system.UpdateConfigRequest"
                         }
                     }
                 ],
@@ -772,13 +1419,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/system.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_system.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/system.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_system.ErrorResponse"
                         }
                     }
                 }
@@ -807,7 +1454,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/file.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_file.ErrorResponse"
                         }
                     }
                 }
@@ -873,19 +1520,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/events.eventListResponse"
+                            "$ref": "#/definitions/internal_api_events.eventListResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/events.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_events.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/events.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_events.ErrorResponse"
                         }
                     }
                 }
@@ -912,19 +1559,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/events.deleteEventsResponse"
+                            "$ref": "#/definitions/internal_api_events.deleteEventsResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/events.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_events.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/events.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_events.ErrorResponse"
                         }
                     }
                 }
@@ -944,13 +1591,153 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/events.eventStatsResponse"
+                            "$ref": "#/definitions/internal_api_events.eventStatsResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/events.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_events.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/genres/replacements": {
+            "get": {
+                "description": "Get a paginated list of genre replacement rules",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "genres"
+                ],
+                "summary": "List genre replacements",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Skip results",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_genre.genreReplacementListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_genre.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a new genre replacement rule mapping an original genre to a replacement",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "genres"
+                ],
+                "summary": "Create genre replacement",
+                "parameters": [
+                    {
+                        "description": "Genre replacement details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_genre.genreReplacementCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Already exists",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_genre.GenreReplacement"
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_genre.GenreReplacement"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_genre.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_genre.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a genre replacement rule by original genre name",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "genres"
+                ],
+                "summary": "Delete genre replacement",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Original genre name to delete",
+                        "name": "original",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_genre.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_genre.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_genre.ErrorResponse"
                         }
                     }
                 }
@@ -1002,19 +1789,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/history.HistoryListResponse"
+                            "$ref": "#/definitions/internal_api_history.HistoryListResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/history.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_history.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/history.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_history.ErrorResponse"
                         }
                     }
                 }
@@ -1046,19 +1833,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/history.DeleteHistoryBulkResponse"
+                            "$ref": "#/definitions/internal_api_history.DeleteHistoryBulkResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/history.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_history.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/history.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_history.ErrorResponse"
                         }
                     }
                 }
@@ -1078,13 +1865,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/history.HistoryStats"
+                            "$ref": "#/definitions/internal_api_history.HistoryStats"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/history.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_history.ErrorResponse"
                         }
                     }
                 }
@@ -1122,19 +1909,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/history.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_history.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/history.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_history.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/history.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_history.ErrorResponse"
                         }
                     }
                 }
@@ -1162,13 +1949,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/jobs.JobListResponse"
+                            "$ref": "#/definitions/internal_api_jobs.JobListResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     }
                 }
@@ -1197,19 +1984,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/jobs.JobListItem"
+                            "$ref": "#/definitions/internal_api_jobs.JobListItem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     }
                 }
@@ -1238,19 +2025,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/jobs.OperationListResponse"
+                            "$ref": "#/definitions/internal_api_jobs.OperationListResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     }
                 }
@@ -1286,37 +2073,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/jobs.RevertResultResponse"
+                            "$ref": "#/definitions/internal_api_jobs.RevertResultResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Revert is disabled",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     }
                 }
@@ -1345,37 +2132,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/jobs.RevertResultResponse"
+                            "$ref": "#/definitions/internal_api_jobs.RevertResultResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Revert is disabled",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     }
                 }
@@ -1404,25 +2191,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/contracts.RevertCheckResponse"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.RevertCheckResponse"
                         }
                     },
                     "403": {
                         "description": "Revert is disabled",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/jobs.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_jobs.ErrorResponse"
                         }
                     }
                 }
@@ -1456,13 +2243,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/movie.MoviesResponse"
+                            "$ref": "#/definitions/internal_api_movie.MoviesResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     }
                 }
@@ -1497,13 +2284,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/movie.MovieResponse"
+                            "$ref": "#/definitions/internal_api_movie.MovieResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     }
                 }
@@ -1535,7 +2322,7 @@ const docTemplate = `{
                         "name": "request",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/movie.NFOComparisonRequest"
+                            "$ref": "#/definitions/internal_api_movie.NFOComparisonRequest"
                         }
                     }
                 ],
@@ -1543,25 +2330,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/movie.NFOComparisonResponse"
+                            "$ref": "#/definitions/internal_api_movie.NFOComparisonResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     }
                 }
@@ -1594,7 +2381,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/movie.RescrapeRequest"
+                            "$ref": "#/definitions/internal_api_movie.RescrapeRequest"
                         }
                     }
                 ],
@@ -1602,25 +2389,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/movie.MovieResponse"
+                            "$ref": "#/definitions/internal_api_movie.MovieResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     }
                 }
@@ -1629,6 +2416,9 @@ const docTemplate = `{
         "/api/v1/posters/{filename}": {
             "get": {
                 "description": "Serves persistent cropped posters from the database. These persist across scraping sessions.",
+                "tags": [
+                    "temp"
+                ],
                 "summary": "Serve cropped poster image",
                 "parameters": [
                     {
@@ -1649,7 +2439,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/temp.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_temp.ErrorResponse"
                         }
                     }
                 }
@@ -1675,7 +2465,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/system.ProxyTestRequest"
+                            "$ref": "#/definitions/internal_api_system.ProxyTestRequest"
                         }
                     }
                 ],
@@ -1683,13 +2473,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/system.ProxyTestResponse"
+                            "$ref": "#/definitions/internal_api_system.ProxyTestResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/system.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_system.ErrorResponse"
                         }
                     }
                 }
@@ -1715,7 +2505,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/file.ScanRequest"
+                            "$ref": "#/definitions/internal_api_file.ScanRequest"
                         }
                     }
                 ],
@@ -1723,19 +2513,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/file.ScanResponse"
+                            "$ref": "#/definitions/internal_api_file.ScanResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/file.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_file.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/file.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_file.ErrorResponse"
                         }
                     }
                 }
@@ -1761,7 +2551,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/movie.ScrapeRequest"
+                            "$ref": "#/definitions/internal_api_movie.ScrapeRequest"
                         }
                     }
                 ],
@@ -1769,25 +2559,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/movie.ScrapeResponse"
+                            "$ref": "#/definitions/internal_api_movie.ScrapeResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/movie.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_movie.ErrorResponse"
                         }
                     }
                 }
@@ -1807,13 +2597,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/system.AvailableScrapersResponse"
+                            "$ref": "#/definitions/internal_api_system.AvailableScrapersResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/system.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_system.ErrorResponse"
                         }
                     }
                 }
@@ -1822,6 +2612,9 @@ const docTemplate = `{
         "/api/v1/temp/image": {
             "get": {
                 "description": "Proxies remote images for preview UI, handling hotlink protection and CORS issues.",
+                "tags": [
+                    "temp"
+                ],
                 "summary": "Proxy remote images",
                 "parameters": [
                     {
@@ -1842,13 +2635,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/temp.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_temp.ErrorResponse"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/temp.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_temp.ErrorResponse"
                         }
                     }
                 }
@@ -1857,6 +2650,9 @@ const docTemplate = `{
         "/api/v1/temp/posters/{jobId}/{filename}": {
             "get": {
                 "description": "Serves temporarily cropped posters from batch jobs. These are ephemeral and preserved when organization fails for retry.",
+                "tags": [
+                    "temp"
+                ],
                 "summary": "Serve temporary poster image",
                 "parameters": [
                     {
@@ -1884,7 +2680,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/temp.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_temp.ErrorResponse"
                         }
                     }
                 }
@@ -1910,7 +2706,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/system.DeepLUsageRequest"
+                            "$ref": "#/definitions/internal_api_system.DeepLUsageRequest"
                         }
                     }
                 ],
@@ -1918,19 +2714,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/system.DeepLUsageResponse"
+                            "$ref": "#/definitions/internal_api_system.DeepLUsageResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/system.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_system.ErrorResponse"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/system.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_system.ErrorResponse"
                         }
                     }
                 }
@@ -1956,7 +2752,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/system.TranslationModelsRequest"
+                            "$ref": "#/definitions/internal_api_system.TranslationModelsRequest"
                         }
                     }
                 ],
@@ -1964,19 +2760,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/system.TranslationModelsResponse"
+                            "$ref": "#/definitions/internal_api_system.TranslationModelsResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/system.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_system.ErrorResponse"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/system.ErrorResponse"
+                            "$ref": "#/definitions/internal_api_system.ErrorResponse"
                         }
                     }
                 }
@@ -1996,7 +2792,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/version.VersionStatusResponse"
+                            "$ref": "#/definitions/internal_api_version.VersionStatusResponse"
                         }
                     }
                 }
@@ -2016,7 +2812,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/version.VersionStatusResponse"
+                            "$ref": "#/definitions/internal_api_version.VersionStatusResponse"
                         }
                     }
                 }
@@ -2036,7 +2832,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/system.HealthResponse"
+                            "$ref": "#/definitions/internal_api_system.HealthResponse"
                         }
                     }
                 }
@@ -2045,6 +2841,9 @@ const docTemplate = `{
         "/ws/progress": {
             "get": {
                 "description": "WebSocket endpoint for real-time progress updates during batch operations. Connect to receive streaming updates for batch scrape jobs, file organization, and downloads. Message format: JSON with job_id, type (progress/complete/error/cancelled), file, progress (0.0-1.0), message, and bytes_processed fields.",
+                "tags": [
+                    "realtime"
+                ],
                 "summary": "WebSocket progress updates",
                 "responses": {
                     "101": {
@@ -2073,116 +2872,82 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "actress.ActressMergePreviewRequest": {
-            "type": "object",
-            "required": [
-                "source_id",
-                "target_id"
-            ],
-            "properties": {
-                "source_id": {
-                    "type": "integer",
-                    "example": 34
-                },
-                "target_id": {
-                    "type": "integer",
-                    "example": 12
-                }
-            }
-        },
-        "actress.ActressMergePreviewResponse": {
+        "github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeConflict": {
             "type": "object",
             "properties": {
-                "conflicts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/contracts.ActressMergeConflict"
-                    }
-                },
-                "default_resolutions": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "proposed_merged": {
-                    "$ref": "#/definitions/models.Actress"
-                },
-                "source": {
-                    "$ref": "#/definitions/models.Actress"
-                },
-                "target": {
-                    "$ref": "#/definitions/models.Actress"
-                }
-            }
-        },
-        "actress.ActressMergeRequest": {
-            "type": "object",
-            "required": [
-                "source_id",
-                "target_id"
-            ],
-            "properties": {
-                "resolutions": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    },
-                    "example": {
-                        "dmm_id": "target",
-                        "japanese_name": "source"
-                    }
-                },
-                "source_id": {
-                    "type": "integer",
-                    "example": 34
-                },
-                "target_id": {
-                    "type": "integer",
-                    "example": 12
-                }
-            }
-        },
-        "actress.ActressMergeResponse": {
-            "type": "object",
-            "properties": {
-                "aliases_added": {
-                    "type": "integer",
-                    "example": 5
-                },
-                "conflicts_resolved": {
-                    "type": "integer",
-                    "example": 3
-                },
-                "merged_actress": {
-                    "$ref": "#/definitions/models.Actress"
-                },
-                "merged_from_id": {
-                    "type": "integer",
-                    "example": 34
-                },
-                "updated_movies": {
-                    "type": "integer",
-                    "example": 27
-                }
-            }
-        },
-        "actress.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
+                "default_resolution": {
                     "type": "string",
-                    "example": "Movie not found"
+                    "example": "target"
                 },
-                "errors": {
+                "field": {
+                    "type": "string",
+                    "example": "japanese_name"
+                },
+                "source_value": {},
+                "target_value": {}
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.BatchFileResult": {
+            "type": "object",
+            "properties": {
+                "actress_sources": {
+                    "description": "Actress-level source by scraper/NFO",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "data": {
+                    "description": "Movie data"
+                },
+                "ended_at": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "field_sources": {
+                    "description": "Field-level source by scraper/NFO",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "file_path": {
+                    "type": "string"
+                },
+                "is_multi_part": {
+                    "type": "boolean"
+                },
+                "movie_id": {
+                    "type": "string"
+                },
+                "part_number": {
+                    "type": "integer"
+                },
+                "part_suffix": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobListResponse": {
+            "type": "object",
+            "properties": {
+                "jobs": {
                     "type": "array",
                     "items": {
-                        "type": "string"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse"
                     }
                 }
             }
         },
-        "batch.BatchJobResponse": {
+        "github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse": {
             "type": "object",
             "properties": {
                 "completed": {
@@ -2221,7 +2986,7 @@ const docTemplate = `{
                 "results": {
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/contracts.BatchFileResult"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchFileResult"
                     }
                 },
                 "reverted_count": {
@@ -2238,354 +3003,368 @@ const docTemplate = `{
                 }
             }
         },
-        "batch.BatchScrapeRequest": {
+        "github_com_javinizer_javinizer-go_internal_api_contracts.DataSource": {
             "type": "object",
-            "required": [
-                "files"
-            ],
             "properties": {
-                "array_strategy": {
-                    "description": "For Update mode: merge, replace",
+                "confidence": {
+                    "description": "Confidence score (0.0-1.0)",
+                    "type": "number",
+                    "example": 0.9
+                },
+                "last_updated": {
+                    "description": "ISO 8601 timestamp",
                     "type": "string",
-                    "example": "merge"
+                    "example": "2024-01-15T10:30:00Z"
+                },
+                "source": {
+                    "description": "\"scraper\" or \"nfo\"",
+                    "type": "string",
+                    "example": "nfo"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string",
+                    "example": "title"
+                },
+                "merged_value": {},
+                "nfo_value": {},
+                "reason": {
+                    "type": "string",
+                    "example": "NFO preferred by merge strategy"
+                },
+                "scraped_value": {}
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo": {
+            "type": "object",
+            "properties": {
+                "is_dir": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "is_multi_part": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "matched": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "mod_time": {
+                    "type": "string",
+                    "example": "2024-01-15T10:30:00Z"
+                },
+                "movie_id": {
+                    "type": "string",
+                    "example": "IPX-535"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "video.mp4"
+                },
+                "part_number": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "part_suffix": {
+                    "type": "string",
+                    "example": "-pt1"
+                },
+                "path": {
+                    "type": "string",
+                    "example": "/path/to/video.mp4"
+                },
+                "size": {
+                    "type": "integer",
+                    "example": 1024000000
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.JobListItem": {
+            "type": "object",
+            "properties": {
+                "completed": {
+                    "type": "integer",
+                    "example": 9
+                },
+                "completed_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:05:00Z"
                 },
                 "destination": {
                     "type": "string",
                     "example": "/path/to/output"
                 },
-                "files": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "failed": {
+                    "type": "integer",
+                    "example": 1
                 },
-                "force": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "operation_mode": {
-                    "description": "Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-only, preview",
+                "id": {
                     "type": "string",
-                    "example": "organize"
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
                 },
-                "preset": {
-                    "description": "Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)",
+                "operation_count": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "organized_at": {
                     "type": "string",
-                    "example": "conservative"
+                    "example": "2026-04-12T10:05:00Z"
                 },
-                "scalar_strategy": {
-                    "description": "For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only",
+                "progress": {
+                    "type": "number",
+                    "example": 0.9
+                },
+                "reverted_at": {
                     "type": "string",
-                    "example": "prefer-nfo"
+                    "example": "2026-04-12T11:00:00Z"
                 },
-                "selected_scrapers": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "r18dev",
-                        "dmm"
-                    ]
+                "reverted_count": {
+                    "type": "integer",
+                    "example": 7
                 },
-                "strict": {
-                    "type": "boolean",
-                    "example": false
+                "started_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:00:00Z"
                 },
-                "update": {
-                    "description": "Update mode: only create/update metadata files without moving video files",
-                    "type": "boolean",
-                    "example": false
+                "status": {
+                    "type": "string",
+                    "example": "organized"
+                },
+                "total_files": {
+                    "type": "integer",
+                    "example": 10
                 }
             }
         },
-        "batch.BatchScrapeResponse": {
+        "github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics": {
+            "type": "object",
+            "properties": {
+                "conflicts_resolved": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "empty_fields": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "from_nfo": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "from_scraper": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "merged_arrays": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "total_fields": {
+                    "type": "integer",
+                    "example": 15
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.OperationItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:05:00Z"
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "in_place_renamed": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "movie_id": {
+                    "type": "string",
+                    "example": "ABC-123"
+                },
+                "new_path": {
+                    "type": "string",
+                    "example": "/dest/ABC-123 [Studio]/ABC-123.mp4"
+                },
+                "operation_type": {
+                    "type": "string",
+                    "example": "move"
+                },
+                "original_path": {
+                    "type": "string",
+                    "example": "/source/ABC-123.mp4"
+                },
+                "revert_status": {
+                    "type": "string",
+                    "example": "pending"
+                },
+                "reverted_at": {
+                    "type": "string",
+                    "example": "2026-04-12T11:00:00Z"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.OverlapInfo": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-04-12T12:00:00Z"
+                },
+                "job_id": {
+                    "type": "string",
+                    "example": "660e8400-e29b-41d4-a716-446655440001"
+                },
+                "operation_count": {
+                    "type": "integer",
+                    "example": 3
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteSuggestion": {
+            "type": "object",
+            "properties": {
+                "is_dir": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "name": {
+                    "type": "string",
+                    "example": "videos"
+                },
+                "path": {
+                    "type": "string",
+                    "example": "/path/to/videos"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.RevertCheckResponse": {
             "type": "object",
             "properties": {
                 "job_id": {
                     "type": "string",
                     "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "overlapping_batches": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OverlapInfo"
+                    }
                 }
             }
         },
-        "batch.ErrorResponse": {
+        "github_com_javinizer_javinizer-go_internal_api_contracts.RevertFileError": {
             "type": "object",
             "properties": {
                 "error": {
                     "type": "string",
-                    "example": "Movie not found"
+                    "example": "file not found"
                 },
-                "errors": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "movie_id": {
+                    "type": "string",
+                    "example": "ABC-123"
+                },
+                "new_path": {
+                    "type": "string",
+                    "example": "/dest/ABC-123 [Studio]/ABC-123.mp4"
+                },
+                "operation_id": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "original_path": {
+                    "type": "string",
+                    "example": "/source/ABC-123.mp4"
+                },
+                "outcome": {
+                    "type": "string",
+                    "example": "skipped"
+                },
+                "reason": {
+                    "type": "string",
+                    "example": "anchor_missing"
                 }
             }
         },
-        "batch.MovieResponse": {
+        "github_com_javinizer_javinizer-go_internal_api_contracts.ScraperInfo": {
             "type": "object",
             "properties": {
-                "merge_stats": {
-                    "description": "Merge statistics when NFO merging occurred",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/contracts.MergeStatistics"
-                        }
-                    ]
+                "display_title": {
+                    "type": "string",
+                    "example": "R18.dev"
                 },
-                "movie": {
-                    "$ref": "#/definitions/models.Movie"
-                },
-                "provenance": {
-                    "description": "Field-level data source tracking",
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/contracts.DataSource"
-                    }
-                }
-            }
-        },
-        "batch.OrganizePreviewRequest": {
-            "type": "object",
-            "required": [
-                "destination"
-            ],
-            "properties": {
-                "copy_only": {
+                "enabled": {
                     "type": "boolean",
-                    "example": false
+                    "example": true
                 },
-                "destination": {
+                "name": {
                     "type": "string",
-                    "example": "/path/to/output"
+                    "example": "r18dev"
                 },
-                "link_mode": {
-                    "type": "string",
-                    "enum": [
-                        "hard",
-                        "soft"
-                    ],
-                    "example": "hard"
-                },
-                "movie": {
-                    "description": "Optional movie override for previewing unsaved edits",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/models.Movie"
-                        }
-                    ]
-                },
-                "operation_mode": {
-                    "type": "string",
-                    "example": "organize"
-                },
-                "skip_download": {
-                    "type": "boolean"
-                },
-                "skip_nfo": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "batch.OrganizePreviewResponse": {
-            "type": "object",
-            "properties": {
-                "extrafanart_path": {
-                    "type": "string",
-                    "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/extrafanart"
-                },
-                "fanart_path": {
-                    "type": "string",
-                    "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-fanart.jpg"
-                },
-                "file_name": {
-                    "type": "string",
-                    "example": "IPX-535"
-                },
-                "folder_name": {
-                    "type": "string",
-                    "example": "IPX-535 [IdeaPocket] - Beautiful Woman (2021)"
-                },
-                "full_path": {
-                    "type": "string",
-                    "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.mp4"
-                },
-                "nfo_path": {
-                    "description": "Single NFO (backward compatibility)",
-                    "type": "string",
-                    "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.nfo"
-                },
-                "nfo_paths": {
-                    "description": "For per_file=true multi-part: all NFO file paths",
+                "options": {
                     "type": "array",
                     "items": {
-                        "type": "string"
-                    }
-                },
-                "operation_mode": {
-                    "description": "Which mode was used for preview",
-                    "type": "string",
-                    "example": "organize"
-                },
-                "poster_path": {
-                    "type": "string",
-                    "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-poster.jpg"
-                },
-                "screenshots": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "fanart1.jpg",
-                        "fanart2.jpg",
-                        "fanart3.jpg"
-                    ]
-                },
-                "source_path": {
-                    "description": "Original file path (for in-place modes)",
-                    "type": "string",
-                    "example": "/source/folder/ABC-123.mp4"
-                },
-                "subfolder_path": {
-                    "description": "Subfolder hierarchy relative to destination (e.g. \"Studio/Year\")",
-                    "type": "string",
-                    "example": "IdeaPocket/2025"
-                },
-                "video_files": {
-                    "description": "For multi-part files: all video file paths",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScraperOption"
                     }
                 }
             }
         },
-        "batch.OrganizeRequest": {
-            "type": "object",
-            "required": [
-                "destination"
-            ],
-            "properties": {
-                "copy_only": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "destination": {
-                    "type": "string",
-                    "example": "/path/to/output"
-                },
-                "link_mode": {
-                    "type": "string",
-                    "enum": [
-                        "hard",
-                        "soft"
-                    ],
-                    "example": "hard"
-                },
-                "operation_mode": {
-                    "type": "string",
-                    "example": "organize"
-                },
-                "skip_download": {
-                    "type": "boolean"
-                },
-                "skip_nfo": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "batch.PosterCropRequest": {
+        "github_com_javinizer_javinizer-go_internal_api_contracts.ScraperOption": {
             "type": "object",
             "properties": {
-                "height": {
+                "choices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.ScraperChoice"
+                    }
+                },
+                "default": {},
+                "description": {
+                    "type": "string",
+                    "example": "Enable detailed actress data scraping from DMM (may be slower)"
+                },
+                "key": {
+                    "type": "string",
+                    "example": "scrape_actress"
+                },
+                "label": {
+                    "type": "string",
+                    "example": "Scrape Actress Information"
+                },
+                "max": {
                     "type": "integer",
-                    "minimum": 1
+                    "example": 120
                 },
-                "width": {
+                "min": {
                     "type": "integer",
-                    "minimum": 1
+                    "example": 5
                 },
-                "x": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "y": {
-                    "type": "integer",
-                    "minimum": 0
-                }
-            }
-        },
-        "batch.PosterCropResponse": {
-            "type": "object",
-            "properties": {
-                "cropped_poster_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "batch.UpdateMovieRequest": {
-            "type": "object",
-            "required": [
-                "movie"
-            ],
-            "properties": {
-                "movie": {
-                    "$ref": "#/definitions/models.Movie"
-                }
-            }
-        },
-        "batch.UpdateRequest": {
-            "type": "object",
-            "properties": {
-                "array_strategy": {
+                "type": {
                     "type": "string",
-                    "enum": [
-                        "merge",
-                        "replace"
-                    ]
+                    "example": "boolean"
                 },
-                "force_overwrite": {
-                    "type": "boolean"
-                },
-                "preserve_nfo": {
-                    "type": "boolean"
-                },
-                "preset": {
+                "unit": {
                     "type": "string",
-                    "enum": [
-                        "conservative",
-                        "gap-fill",
-                        "aggressive"
-                    ]
-                },
-                "scalar_strategy": {
-                    "type": "string",
-                    "enum": [
-                        "prefer-scraper",
-                        "prefer-nfo",
-                        "preserve-existing",
-                        "fill-missing-only"
-                    ]
-                },
-                "skip_download": {
-                    "type": "boolean"
-                },
-                "skip_nfo": {
-                    "type": "boolean"
+                    "example": "seconds"
                 }
             }
         },
-        "config.APIConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.APIConfig": {
             "type": "object",
             "properties": {
                 "security": {
-                    "$ref": "#/definitions/config.SecurityConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.SecurityConfig"
                 }
             }
         },
-        "config.ActressDatabaseConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.ActressDatabaseConfig": {
             "type": "object",
             "properties": {
                 "auto_add": {
@@ -2602,7 +3381,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.AnthropicTranslationConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -2619,7 +3398,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.BrowserConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.BrowserConfig": {
             "type": "object",
             "properties": {
                 "binary_path": {
@@ -2676,7 +3455,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.DatabaseConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.DatabaseConfig": {
             "type": "object",
             "properties": {
                 "dsn": {
@@ -2693,7 +3472,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.DeepLTranslationConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.DeepLTranslationConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -2710,7 +3489,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.FlareSolverrConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig": {
             "type": "object",
             "properties": {
                 "enabled": {
@@ -2735,7 +3514,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.GenreReplacementConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig": {
             "type": "object",
             "properties": {
                 "auto_add": {
@@ -2748,7 +3527,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.GoogleTranslationConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.GoogleTranslationConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -2765,7 +3544,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.LoggingConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.LoggingConfig": {
             "type": "object",
             "properties": {
                 "compress": {
@@ -2798,7 +3577,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.MatchingConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.MatchingConfig": {
             "type": "object",
             "properties": {
                 "exclude_patterns": {
@@ -2824,7 +3603,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.MediaInfoConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.MediaInfoConfig": {
             "type": "object",
             "properties": {
                 "cli_enabled": {
@@ -2841,14 +3620,14 @@ const docTemplate = `{
                 }
             }
         },
-        "config.MetadataConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.MetadataConfig": {
             "type": "object",
             "properties": {
                 "actress_database": {
                     "description": "Actress image database (SQLite-backed)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.ActressDatabaseConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ActressDatabaseConfig"
                         }
                     ]
                 },
@@ -2856,7 +3635,7 @@ const docTemplate = `{
                     "description": "Genre replacement/normalization (SQLite-backed)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.GenreReplacementConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig"
                         }
                     ]
                 },
@@ -2867,10 +3646,10 @@ const docTemplate = `{
                     }
                 },
                 "nfo": {
-                    "$ref": "#/definitions/config.NFOConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOConfig"
                 },
                 "priority": {
-                    "$ref": "#/definitions/config.PriorityConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.PriorityConfig"
                 },
                 "required_fields": {
                     "type": "array",
@@ -2882,7 +3661,7 @@ const docTemplate = `{
                     "description": "Per-movie tag database (SQLite-backed)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.TagDatabaseConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.TagDatabaseConfig"
                         }
                     ]
                 },
@@ -2890,13 +3669,13 @@ const docTemplate = `{
                     "description": "Metadata translation pipeline",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.TranslationConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationConfig"
                         }
                     ]
                 }
             }
         },
-        "config.NFOConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.NFOConfig": {
             "type": "object",
             "properties": {
                 "actress_as_tag": {
@@ -2970,7 +3749,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.OpenAICompatibleTranslationConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -2991,7 +3770,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.OpenAITranslationConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.OpenAITranslationConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -3008,7 +3787,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.OutputConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.OutputConfig": {
             "type": "object",
             "properties": {
                 "actress_folder": {
@@ -3040,7 +3819,7 @@ const docTemplate = `{
                     "description": "Separate proxy for downloads (optional)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.ProxyConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig"
                         }
                     ]
                 },
@@ -3074,7 +3853,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "operation_mode": {
-                    "$ref": "#/definitions/types.OperationMode"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_types.OperationMode"
                 },
                 "poster_format": {
                     "type": "string"
@@ -3109,7 +3888,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.PerformanceConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.PerformanceConfig": {
             "type": "object",
             "properties": {
                 "buffer_size": {
@@ -3130,7 +3909,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.PriorityConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.PriorityConfig": {
             "type": "object",
             "properties": {
                 "priority": {
@@ -3142,7 +3921,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.ProxyConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.ProxyConfig": {
             "type": "object",
             "properties": {
                 "default_profile": {
@@ -3161,12 +3940,12 @@ const docTemplate = `{
                     "description": "Named proxy profiles (global scrapers.proxy)",
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/config.ProxyProfile"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyProfile"
                     }
                 }
             }
         },
-        "config.ProxyProfile": {
+        "github_com_javinizer_javinizer-go_internal_config.ProxyProfile": {
             "type": "object",
             "properties": {
                 "password": {
@@ -3180,7 +3959,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.RateLimitConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.RateLimitConfig": {
             "type": "object",
             "properties": {
                 "requests_per_minute": {
@@ -3188,14 +3967,14 @@ const docTemplate = `{
                 }
             }
         },
-        "config.ScrapersConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.ScrapersConfig": {
             "type": "object",
             "properties": {
                 "browser": {
                     "description": "NEW: Global Browser configuration block",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.BrowserConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.BrowserConfig"
                         }
                     ]
                 },
@@ -3203,7 +3982,7 @@ const docTemplate = `{
                     "description": "Global FlareSolverr config for Cloudflare bypass",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.FlareSolverrConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig"
                         }
                     ]
                 },
@@ -3218,7 +3997,7 @@ const docTemplate = `{
                     "description": "Default HTTP/SOCKS5 proxy for scraper requests",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.ProxyConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig"
                         }
                     ]
                 },
@@ -3243,7 +4022,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.SecurityConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.SecurityConfig": {
             "type": "object",
             "properties": {
                 "allow_unc": {
@@ -3280,7 +4059,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "rate_limit": {
-                    "$ref": "#/definitions/config.RateLimitConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.RateLimitConfig"
                 },
                 "scan_timeout_seconds": {
                     "type": "integer"
@@ -3293,7 +4072,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.ServerConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.ServerConfig": {
             "type": "object",
             "properties": {
                 "host": {
@@ -3304,7 +4083,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.SystemConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.SystemConfig": {
             "type": "object",
             "properties": {
                 "temp_dir": {
@@ -3325,7 +4104,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.TagDatabaseConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.TagDatabaseConfig": {
             "type": "object",
             "properties": {
                 "enabled": {
@@ -3334,14 +4113,14 @@ const docTemplate = `{
                 }
             }
         },
-        "config.TranslationConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.TranslationConfig": {
             "type": "object",
             "properties": {
                 "anthropic": {
                     "description": "Anthropic (Claude) provider settings",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.AnthropicTranslationConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig"
                         }
                     ]
                 },
@@ -3353,7 +4132,7 @@ const docTemplate = `{
                     "description": "DeepL provider settings",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.DeepLTranslationConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.DeepLTranslationConfig"
                         }
                     ]
                 },
@@ -3365,7 +4144,7 @@ const docTemplate = `{
                     "description": "Per-field translation controls",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.TranslationFieldsConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationFieldsConfig"
                         }
                     ]
                 },
@@ -3373,7 +4152,7 @@ const docTemplate = `{
                     "description": "Google provider settings",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.GoogleTranslationConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.GoogleTranslationConfig"
                         }
                     ]
                 },
@@ -3381,7 +4160,7 @@ const docTemplate = `{
                     "description": "OpenAI/OpenAI-compatible provider settings",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.OpenAITranslationConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.OpenAITranslationConfig"
                         }
                     ]
                 },
@@ -3389,7 +4168,7 @@ const docTemplate = `{
                     "description": "OpenAI-compatible (Ollama, vLLM, etc.) provider settings",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.OpenAICompatibleTranslationConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig"
                         }
                     ]
                 },
@@ -3415,7 +4194,7 @@ const docTemplate = `{
                 }
             }
         },
-        "config.TranslationFieldsConfig": {
+        "github_com_javinizer_javinizer-go_internal_config.TranslationFieldsConfig": {
             "type": "object",
             "properties": {
                 "actresses": {
@@ -3447,856 +4226,7 @@ const docTemplate = `{
                 }
             }
         },
-        "contracts.ActressMergeConflict": {
-            "type": "object",
-            "properties": {
-                "default_resolution": {
-                    "type": "string",
-                    "example": "target"
-                },
-                "field": {
-                    "type": "string",
-                    "example": "japanese_name"
-                },
-                "source_value": {},
-                "target_value": {}
-            }
-        },
-        "contracts.BatchFileResult": {
-            "type": "object",
-            "properties": {
-                "actress_sources": {
-                    "description": "Actress-level source by scraper/NFO",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "data": {
-                    "description": "Movie data"
-                },
-                "ended_at": {
-                    "type": "string"
-                },
-                "error": {
-                    "type": "string"
-                },
-                "field_sources": {
-                    "description": "Field-level source by scraper/NFO",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "file_path": {
-                    "type": "string"
-                },
-                "is_multi_part": {
-                    "type": "boolean"
-                },
-                "movie_id": {
-                    "type": "string"
-                },
-                "part_number": {
-                    "type": "integer"
-                },
-                "part_suffix": {
-                    "type": "string"
-                },
-                "started_at": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "contracts.DataSource": {
-            "type": "object",
-            "properties": {
-                "confidence": {
-                    "description": "Confidence score (0.0-1.0)",
-                    "type": "number",
-                    "example": 0.9
-                },
-                "last_updated": {
-                    "description": "ISO 8601 timestamp",
-                    "type": "string",
-                    "example": "2024-01-15T10:30:00Z"
-                },
-                "source": {
-                    "description": "\"scraper\" or \"nfo\"",
-                    "type": "string",
-                    "example": "nfo"
-                }
-            }
-        },
-        "contracts.FieldDifference": {
-            "type": "object",
-            "properties": {
-                "field": {
-                    "type": "string",
-                    "example": "title"
-                },
-                "merged_value": {},
-                "nfo_value": {},
-                "reason": {
-                    "type": "string",
-                    "example": "NFO preferred by merge strategy"
-                },
-                "scraped_value": {}
-            }
-        },
-        "contracts.FileInfo": {
-            "type": "object",
-            "properties": {
-                "is_dir": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "is_multi_part": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "matched": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "mod_time": {
-                    "type": "string",
-                    "example": "2024-01-15T10:30:00Z"
-                },
-                "movie_id": {
-                    "type": "string",
-                    "example": "IPX-535"
-                },
-                "name": {
-                    "type": "string",
-                    "example": "video.mp4"
-                },
-                "part_number": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "part_suffix": {
-                    "type": "string",
-                    "example": "-pt1"
-                },
-                "path": {
-                    "type": "string",
-                    "example": "/path/to/video.mp4"
-                },
-                "size": {
-                    "type": "integer",
-                    "example": 1024000000
-                }
-            }
-        },
-        "contracts.JobListItem": {
-            "type": "object",
-            "properties": {
-                "completed": {
-                    "type": "integer",
-                    "example": 9
-                },
-                "completed_at": {
-                    "type": "string",
-                    "example": "2026-04-12T10:05:00Z"
-                },
-                "destination": {
-                    "type": "string",
-                    "example": "/path/to/output"
-                },
-                "failed": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "id": {
-                    "type": "string",
-                    "example": "550e8400-e29b-41d4-a716-446655440000"
-                },
-                "operation_count": {
-                    "type": "integer",
-                    "example": 10
-                },
-                "organized_at": {
-                    "type": "string",
-                    "example": "2026-04-12T10:05:00Z"
-                },
-                "progress": {
-                    "type": "number",
-                    "example": 0.9
-                },
-                "reverted_at": {
-                    "type": "string",
-                    "example": "2026-04-12T11:00:00Z"
-                },
-                "reverted_count": {
-                    "type": "integer",
-                    "example": 7
-                },
-                "started_at": {
-                    "type": "string",
-                    "example": "2026-04-12T10:00:00Z"
-                },
-                "status": {
-                    "type": "string",
-                    "example": "organized"
-                },
-                "total_files": {
-                    "type": "integer",
-                    "example": 10
-                }
-            }
-        },
-        "contracts.MergeStatistics": {
-            "type": "object",
-            "properties": {
-                "conflicts_resolved": {
-                    "type": "integer",
-                    "example": 5
-                },
-                "empty_fields": {
-                    "type": "integer",
-                    "example": 2
-                },
-                "from_nfo": {
-                    "type": "integer",
-                    "example": 3
-                },
-                "from_scraper": {
-                    "type": "integer",
-                    "example": 10
-                },
-                "merged_arrays": {
-                    "type": "integer",
-                    "example": 2
-                },
-                "total_fields": {
-                    "type": "integer",
-                    "example": 15
-                }
-            }
-        },
-        "contracts.OperationItem": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string",
-                    "example": "2026-04-12T10:05:00Z"
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "in_place_renamed": {
-                    "type": "boolean",
-                    "example": false
-                },
-                "movie_id": {
-                    "type": "string",
-                    "example": "ABC-123"
-                },
-                "new_path": {
-                    "type": "string",
-                    "example": "/dest/ABC-123 [Studio]/ABC-123.mp4"
-                },
-                "operation_type": {
-                    "type": "string",
-                    "example": "move"
-                },
-                "original_path": {
-                    "type": "string",
-                    "example": "/source/ABC-123.mp4"
-                },
-                "revert_status": {
-                    "type": "string",
-                    "example": "pending"
-                },
-                "reverted_at": {
-                    "type": "string",
-                    "example": "2026-04-12T11:00:00Z"
-                }
-            }
-        },
-        "contracts.OverlapInfo": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string",
-                    "example": "2026-04-12T12:00:00Z"
-                },
-                "job_id": {
-                    "type": "string",
-                    "example": "660e8400-e29b-41d4-a716-446655440001"
-                },
-                "operation_count": {
-                    "type": "integer",
-                    "example": 3
-                }
-            }
-        },
-        "contracts.PathAutocompleteSuggestion": {
-            "type": "object",
-            "properties": {
-                "is_dir": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "name": {
-                    "type": "string",
-                    "example": "videos"
-                },
-                "path": {
-                    "type": "string",
-                    "example": "/path/to/videos"
-                }
-            }
-        },
-        "contracts.RevertCheckResponse": {
-            "type": "object",
-            "properties": {
-                "job_id": {
-                    "type": "string",
-                    "example": "550e8400-e29b-41d4-a716-446655440000"
-                },
-                "overlapping_batches": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/contracts.OverlapInfo"
-                    }
-                }
-            }
-        },
-        "contracts.RevertFileError": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string",
-                    "example": "file not found"
-                },
-                "movie_id": {
-                    "type": "string",
-                    "example": "ABC-123"
-                },
-                "new_path": {
-                    "type": "string",
-                    "example": "/dest/ABC-123 [Studio]/ABC-123.mp4"
-                },
-                "operation_id": {
-                    "type": "integer",
-                    "example": 5
-                },
-                "original_path": {
-                    "type": "string",
-                    "example": "/source/ABC-123.mp4"
-                },
-                "outcome": {
-                    "type": "string",
-                    "example": "skipped"
-                },
-                "reason": {
-                    "type": "string",
-                    "example": "anchor_missing"
-                }
-            }
-        },
-        "contracts.ScraperInfo": {
-            "type": "object",
-            "properties": {
-                "display_title": {
-                    "type": "string",
-                    "example": "R18.dev"
-                },
-                "enabled": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "name": {
-                    "type": "string",
-                    "example": "r18dev"
-                },
-                "options": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/contracts.ScraperOption"
-                    }
-                }
-            }
-        },
-        "contracts.ScraperOption": {
-            "type": "object",
-            "properties": {
-                "choices": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.ScraperChoice"
-                    }
-                },
-                "default": {},
-                "description": {
-                    "type": "string",
-                    "example": "Enable detailed actress data scraping from DMM (may be slower)"
-                },
-                "key": {
-                    "type": "string",
-                    "example": "scrape_actress"
-                },
-                "label": {
-                    "type": "string",
-                    "example": "Scrape Actress Information"
-                },
-                "max": {
-                    "type": "integer",
-                    "example": 120
-                },
-                "min": {
-                    "type": "integer",
-                    "example": 5
-                },
-                "type": {
-                    "type": "string",
-                    "example": "boolean"
-                },
-                "unit": {
-                    "type": "string",
-                    "example": "seconds"
-                }
-            }
-        },
-        "events.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string",
-                    "example": "Movie not found"
-                },
-                "errors": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "events.deleteEventsResponse": {
-            "type": "object",
-            "properties": {
-                "deleted": {
-                    "type": "integer"
-                },
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "events.eventListResponse": {
-            "type": "object",
-            "properties": {
-                "events": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.Event"
-                    }
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "events.eventStatsResponse": {
-            "type": "object",
-            "properties": {
-                "by_severity": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
-                    }
-                },
-                "by_source": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
-                    }
-                },
-                "by_type": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
-                    }
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "file.BrowseRequest": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "example": "/path/to/directory"
-                }
-            }
-        },
-        "file.BrowseResponse": {
-            "type": "object",
-            "properties": {
-                "current_path": {
-                    "type": "string",
-                    "example": "/path/to/directory"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/contracts.FileInfo"
-                    }
-                },
-                "parent_path": {
-                    "type": "string",
-                    "example": "/path/to"
-                }
-            }
-        },
-        "file.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string",
-                    "example": "Movie not found"
-                },
-                "errors": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "file.PathAutocompleteRequest": {
-            "type": "object",
-            "required": [
-                "path"
-            ],
-            "properties": {
-                "limit": {
-                    "type": "integer",
-                    "example": 10
-                },
-                "path": {
-                    "type": "string",
-                    "example": "/path/to/vid"
-                }
-            }
-        },
-        "file.PathAutocompleteResponse": {
-            "type": "object",
-            "properties": {
-                "base_path": {
-                    "type": "string",
-                    "example": "/path/to"
-                },
-                "input_path": {
-                    "type": "string",
-                    "example": "/path/to/vid"
-                },
-                "suggestions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/contracts.PathAutocompleteSuggestion"
-                    }
-                }
-            }
-        },
-        "file.ScanRequest": {
-            "type": "object",
-            "required": [
-                "path"
-            ],
-            "properties": {
-                "filter": {
-                    "description": "Filter folder/file names (case-insensitive substring match)",
-                    "type": "string",
-                    "example": "STSK"
-                },
-                "path": {
-                    "type": "string",
-                    "example": "/path/to/videos"
-                },
-                "recursive": {
-                    "type": "boolean",
-                    "example": true
-                }
-            }
-        },
-        "file.ScanResponse": {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer",
-                    "example": 10
-                },
-                "files": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/contracts.FileInfo"
-                    }
-                },
-                "skipped": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "history.DeleteHistoryBulkResponse": {
-            "type": "object",
-            "properties": {
-                "deleted": {
-                    "type": "integer"
-                }
-            }
-        },
-        "history.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string",
-                    "example": "Movie not found"
-                },
-                "errors": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "history.HistoryListResponse": {
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "records": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/history.HistoryRecord"
-                    }
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "history.HistoryRecord": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "dry_run": {
-                    "type": "boolean"
-                },
-                "error_message": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "metadata": {
-                    "type": "string"
-                },
-                "movie_id": {
-                    "type": "string"
-                },
-                "new_path": {
-                    "type": "string"
-                },
-                "operation": {
-                    "type": "string"
-                },
-                "original_path": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "history.HistoryStats": {
-            "type": "object",
-            "properties": {
-                "by_operation": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
-                    }
-                },
-                "failed": {
-                    "type": "integer"
-                },
-                "reverted": {
-                    "type": "integer"
-                },
-                "success": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "jobs.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string",
-                    "example": "Movie not found"
-                },
-                "errors": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "jobs.JobListItem": {
-            "type": "object",
-            "properties": {
-                "completed": {
-                    "type": "integer",
-                    "example": 9
-                },
-                "completed_at": {
-                    "type": "string",
-                    "example": "2026-04-12T10:05:00Z"
-                },
-                "destination": {
-                    "type": "string",
-                    "example": "/path/to/output"
-                },
-                "failed": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "id": {
-                    "type": "string",
-                    "example": "550e8400-e29b-41d4-a716-446655440000"
-                },
-                "operation_count": {
-                    "type": "integer",
-                    "example": 10
-                },
-                "organized_at": {
-                    "type": "string",
-                    "example": "2026-04-12T10:05:00Z"
-                },
-                "progress": {
-                    "type": "number",
-                    "example": 0.9
-                },
-                "reverted_at": {
-                    "type": "string",
-                    "example": "2026-04-12T11:00:00Z"
-                },
-                "reverted_count": {
-                    "type": "integer",
-                    "example": 7
-                },
-                "started_at": {
-                    "type": "string",
-                    "example": "2026-04-12T10:00:00Z"
-                },
-                "status": {
-                    "type": "string",
-                    "example": "organized"
-                },
-                "total_files": {
-                    "type": "integer",
-                    "example": 10
-                }
-            }
-        },
-        "jobs.JobListResponse": {
-            "type": "object",
-            "properties": {
-                "jobs": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/contracts.JobListItem"
-                    }
-                }
-            }
-        },
-        "jobs.OperationListResponse": {
-            "type": "object",
-            "properties": {
-                "job_id": {
-                    "type": "string",
-                    "example": "550e8400-e29b-41d4-a716-446655440000"
-                },
-                "job_status": {
-                    "type": "string",
-                    "example": "organized"
-                },
-                "operations": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/contracts.OperationItem"
-                    }
-                },
-                "total": {
-                    "type": "integer",
-                    "example": 10
-                }
-            }
-        },
-        "jobs.RevertResultResponse": {
-            "type": "object",
-            "properties": {
-                "errors": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/contracts.RevertFileError"
-                    }
-                },
-                "failed": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "job_id": {
-                    "type": "string",
-                    "example": "550e8400-e29b-41d4-a716-446655440000"
-                },
-                "skipped": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "status": {
-                    "type": "string",
-                    "example": "reverted"
-                },
-                "succeeded": {
-                    "type": "integer",
-                    "example": 9
-                },
-                "total": {
-                    "type": "integer",
-                    "example": 10
-                }
-            }
-        },
-        "models.Actress": {
+        "github_com_javinizer_javinizer-go_internal_models.Actress": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -4330,7 +4260,7 @@ const docTemplate = `{
                 }
             }
         },
-        "models.Event": {
+        "github_com_javinizer_javinizer-go_internal_models.Event": {
             "type": "object",
             "properties": {
                 "context": {
@@ -4357,7 +4287,7 @@ const docTemplate = `{
                 }
             }
         },
-        "models.Genre": {
+        "github_com_javinizer_javinizer-go_internal_models.Genre": {
             "type": "object",
             "properties": {
                 "id": {
@@ -4368,14 +4298,34 @@ const docTemplate = `{
                 }
             }
         },
-        "models.Movie": {
+        "github_com_javinizer_javinizer-go_internal_models.GenreReplacement": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "original": {
+                    "type": "string"
+                },
+                "replacement": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.Movie": {
             "type": "object",
             "properties": {
                 "actresses": {
                     "description": "Relationships",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.Actress"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
                     }
                 },
                 "content_id": {
@@ -4404,7 +4354,7 @@ const docTemplate = `{
                 "genres": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.Genre"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre"
                     }
                 },
                 "id": {
@@ -4485,7 +4435,7 @@ const docTemplate = `{
                     "description": "Translations",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.MovieTranslation"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation"
                     }
                 },
                 "updated_at": {
@@ -4493,7 +4443,7 @@ const docTemplate = `{
                 }
             }
         },
-        "models.MovieTranslation": {
+        "github_com_javinizer_javinizer-go_internal_models.MovieTranslation": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -4544,7 +4494,7 @@ const docTemplate = `{
                 }
             }
         },
-        "models.ScraperChoice": {
+        "github_com_javinizer_javinizer-go_internal_models.ScraperChoice": {
             "type": "object",
             "properties": {
                 "label": {
@@ -4557,7 +4507,152 @@ const docTemplate = `{
                 }
             }
         },
-        "movie.ErrorResponse": {
+        "github_com_javinizer_javinizer-go_internal_types.OperationMode": {
+            "type": "string",
+            "enum": [
+                "organize",
+                "in-place",
+                "in-place-norenamefolder",
+                "metadata-only",
+                "preview"
+            ],
+            "x-enum-varnames": [
+                "OperationModeOrganize",
+                "OperationModeInPlace",
+                "OperationModeInPlaceNoRenameFolder",
+                "OperationModeMetadataOnly",
+                "OperationModePreview"
+            ]
+        },
+        "internal_api_actress.Actress": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "description": "Pipe-separated",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "dmm_id": {
+                    "description": "Real DMM actress ID when available (unique only for values \u003e 0)",
+                    "type": "integer"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "thumb_url": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_actress.ActressMergePreviewRequest": {
+            "type": "object",
+            "required": [
+                "source_id",
+                "target_id"
+            ],
+            "properties": {
+                "source_id": {
+                    "type": "integer",
+                    "example": 34
+                },
+                "target_id": {
+                    "type": "integer",
+                    "example": 12
+                }
+            }
+        },
+        "internal_api_actress.ActressMergePreviewResponse": {
+            "type": "object",
+            "properties": {
+                "conflicts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeConflict"
+                    }
+                },
+                "default_resolutions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "proposed_merged": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                },
+                "source": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                },
+                "target": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                }
+            }
+        },
+        "internal_api_actress.ActressMergeRequest": {
+            "type": "object",
+            "required": [
+                "source_id",
+                "target_id"
+            ],
+            "properties": {
+                "resolutions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "example": {
+                        "dmm_id": "target",
+                        "japanese_name": "source"
+                    }
+                },
+                "source_id": {
+                    "type": "integer",
+                    "example": 34
+                },
+                "target_id": {
+                    "type": "integer",
+                    "example": 12
+                }
+            }
+        },
+        "internal_api_actress.ActressMergeResponse": {
+            "type": "object",
+            "properties": {
+                "aliases_added": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "conflicts_resolved": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "merged_actress": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                },
+                "merged_from_id": {
+                    "type": "integer",
+                    "example": 34
+                },
+                "updated_movies": {
+                    "type": "integer",
+                    "example": 27
+                }
+            }
+        },
+        "internal_api_actress.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
@@ -4572,30 +4667,1120 @@ const docTemplate = `{
                 }
             }
         },
-        "movie.MovieResponse": {
+        "internal_api_actress.actressRequest": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "type": "string"
+                },
+                "dmm_id": {
+                    "type": "integer"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "thumb_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_actress.actressesResponse": {
+            "type": "object",
+            "properties": {
+                "actresses": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                    }
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_auth.AuthCredentialsRequest": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "example": "your-password"
+                },
+                "remember_me": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "username": {
+                    "type": "string",
+                    "example": "admin"
+                }
+            }
+        },
+        "internal_api_auth.AuthStatusResponse": {
+            "type": "object",
+            "properties": {
+                "authenticated": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "initialized": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "username": {
+                    "type": "string",
+                    "example": "admin"
+                }
+            }
+        },
+        "internal_api_auth.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_batch.BatchJobResponse": {
+            "type": "object",
+            "properties": {
+                "completed": {
+                    "type": "integer"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "destination": {
+                    "type": "string"
+                },
+                "excluded": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    }
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "operation_count": {
+                    "type": "integer"
+                },
+                "operation_mode_override": {
+                    "type": "string"
+                },
+                "persist_error": {
+                    "type": "string"
+                },
+                "progress": {
+                    "type": "number"
+                },
+                "results": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchFileResult"
+                    }
+                },
+                "reverted_count": {
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "total_files": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_batch.BatchRescrapeRequest": {
+            "type": "object",
+            "properties": {
+                "array_strategy": {
+                    "description": "For Update mode: merge, replace",
+                    "type": "string",
+                    "example": "merge"
+                },
+                "force": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "manual_search_input": {
+                    "type": "string",
+                    "example": "IPX-535"
+                },
+                "preset": {
+                    "description": "Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)",
+                    "type": "string",
+                    "example": "conservative"
+                },
+                "scalar_strategy": {
+                    "description": "For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only",
+                    "type": "string",
+                    "example": "prefer-nfo"
+                },
+                "selected_scrapers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "r18dev",
+                        "dmm"
+                    ]
+                }
+            }
+        },
+        "internal_api_batch.BatchRescrapeResponse": {
+            "type": "object",
+            "properties": {
+                "actress_sources": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "field_sources": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "movie": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                }
+            }
+        },
+        "internal_api_batch.BatchScrapeRequest": {
+            "type": "object",
+            "required": [
+                "files"
+            ],
+            "properties": {
+                "array_strategy": {
+                    "description": "For Update mode: merge, replace",
+                    "type": "string",
+                    "example": "merge"
+                },
+                "destination": {
+                    "type": "string",
+                    "example": "/path/to/output"
+                },
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "force": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "operation_mode": {
+                    "description": "Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-only, preview",
+                    "type": "string",
+                    "example": "organize"
+                },
+                "preset": {
+                    "description": "Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)",
+                    "type": "string",
+                    "example": "conservative"
+                },
+                "scalar_strategy": {
+                    "description": "For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only",
+                    "type": "string",
+                    "example": "prefer-nfo"
+                },
+                "selected_scrapers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "r18dev",
+                        "dmm"
+                    ]
+                },
+                "strict": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "update": {
+                    "description": "Update mode: only create/update metadata files without moving video files",
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
+        "internal_api_batch.BatchScrapeResponse": {
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                }
+            }
+        },
+        "internal_api_batch.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_batch.MovieResponse": {
             "type": "object",
             "properties": {
                 "merge_stats": {
                     "description": "Merge statistics when NFO merging occurred",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/contracts.MergeStatistics"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics"
                         }
                     ]
                 },
                 "movie": {
-                    "$ref": "#/definitions/models.Movie"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
                 },
                 "provenance": {
                     "description": "Field-level data source tracking",
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/contracts.DataSource"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource"
                     }
                 }
             }
         },
-        "movie.MoviesResponse": {
+        "internal_api_batch.OrganizePreviewRequest": {
+            "type": "object",
+            "required": [
+                "destination"
+            ],
+            "properties": {
+                "copy_only": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "destination": {
+                    "type": "string",
+                    "example": "/path/to/output"
+                },
+                "link_mode": {
+                    "type": "string",
+                    "enum": [
+                        "hard",
+                        "soft"
+                    ],
+                    "example": "hard"
+                },
+                "movie": {
+                    "description": "Optional movie override for previewing unsaved edits",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                        }
+                    ]
+                },
+                "operation_mode": {
+                    "type": "string",
+                    "example": "organize"
+                },
+                "skip_download": {
+                    "type": "boolean"
+                },
+                "skip_nfo": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_api_batch.OrganizePreviewResponse": {
+            "type": "object",
+            "properties": {
+                "extrafanart_path": {
+                    "type": "string",
+                    "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/extrafanart"
+                },
+                "fanart_path": {
+                    "type": "string",
+                    "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-fanart.jpg"
+                },
+                "file_name": {
+                    "type": "string",
+                    "example": "IPX-535"
+                },
+                "folder_name": {
+                    "type": "string",
+                    "example": "IPX-535 [IdeaPocket] - Beautiful Woman (2021)"
+                },
+                "full_path": {
+                    "type": "string",
+                    "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.mp4"
+                },
+                "nfo_path": {
+                    "description": "Single NFO (backward compatibility)",
+                    "type": "string",
+                    "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.nfo"
+                },
+                "nfo_paths": {
+                    "description": "For per_file=true multi-part: all NFO file paths",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "operation_mode": {
+                    "description": "Which mode was used for preview",
+                    "type": "string",
+                    "example": "organize"
+                },
+                "poster_path": {
+                    "type": "string",
+                    "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-poster.jpg"
+                },
+                "screenshots": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "fanart1.jpg",
+                        "fanart2.jpg",
+                        "fanart3.jpg"
+                    ]
+                },
+                "source_path": {
+                    "description": "Original file path (for in-place modes)",
+                    "type": "string",
+                    "example": "/source/folder/ABC-123.mp4"
+                },
+                "subfolder_path": {
+                    "description": "Subfolder hierarchy relative to destination (e.g. \"Studio/Year\")",
+                    "type": "string",
+                    "example": "IdeaPocket/2025"
+                },
+                "video_files": {
+                    "description": "For multi-part files: all video file paths",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_batch.OrganizeRequest": {
+            "type": "object",
+            "required": [
+                "destination"
+            ],
+            "properties": {
+                "copy_only": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "destination": {
+                    "type": "string",
+                    "example": "/path/to/output"
+                },
+                "link_mode": {
+                    "type": "string",
+                    "enum": [
+                        "hard",
+                        "soft"
+                    ],
+                    "example": "hard"
+                },
+                "operation_mode": {
+                    "type": "string",
+                    "example": "organize"
+                },
+                "skip_download": {
+                    "type": "boolean"
+                },
+                "skip_nfo": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_api_batch.PosterCropRequest": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "width": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "x": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "y": {
+                    "type": "integer",
+                    "minimum": 0
+                }
+            }
+        },
+        "internal_api_batch.PosterCropResponse": {
+            "type": "object",
+            "properties": {
+                "cropped_poster_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_batch.PosterFromURLRequest": {
+            "type": "object",
+            "required": [
+                "url"
+            ],
+            "properties": {
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_batch.PosterFromURLResponse": {
+            "type": "object",
+            "properties": {
+                "cropped_poster_url": {
+                    "type": "string"
+                },
+                "poster_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_batch.UpdateMovieRequest": {
+            "type": "object",
+            "required": [
+                "movie"
+            ],
+            "properties": {
+                "movie": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                }
+            }
+        },
+        "internal_api_batch.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "array_strategy": {
+                    "type": "string",
+                    "enum": [
+                        "merge",
+                        "replace"
+                    ]
+                },
+                "force_overwrite": {
+                    "type": "boolean"
+                },
+                "preserve_nfo": {
+                    "type": "boolean"
+                },
+                "preset": {
+                    "type": "string",
+                    "enum": [
+                        "conservative",
+                        "gap-fill",
+                        "aggressive"
+                    ]
+                },
+                "scalar_strategy": {
+                    "type": "string",
+                    "enum": [
+                        "prefer-scraper",
+                        "prefer-nfo",
+                        "preserve-existing",
+                        "fill-missing-only"
+                    ]
+                },
+                "skip_download": {
+                    "type": "boolean"
+                },
+                "skip_nfo": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_api_events.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_events.deleteEventsResponse": {
+            "type": "object",
+            "properties": {
+                "deleted": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_events.eventListResponse": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Event"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_events.eventStatsResponse": {
+            "type": "object",
+            "properties": {
+                "by_severity": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "by_source": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "by_type": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_file.BrowseRequest": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "example": "/path/to/directory"
+                }
+            }
+        },
+        "internal_api_file.BrowseResponse": {
+            "type": "object",
+            "properties": {
+                "current_path": {
+                    "type": "string",
+                    "example": "/path/to/directory"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo"
+                    }
+                },
+                "parent_path": {
+                    "type": "string",
+                    "example": "/path/to"
+                }
+            }
+        },
+        "internal_api_file.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_file.PathAutocompleteRequest": {
+            "type": "object",
+            "required": [
+                "path"
+            ],
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "path": {
+                    "type": "string",
+                    "example": "/path/to/vid"
+                }
+            }
+        },
+        "internal_api_file.PathAutocompleteResponse": {
+            "type": "object",
+            "properties": {
+                "base_path": {
+                    "type": "string",
+                    "example": "/path/to"
+                },
+                "input_path": {
+                    "type": "string",
+                    "example": "/path/to/vid"
+                },
+                "suggestions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteSuggestion"
+                    }
+                }
+            }
+        },
+        "internal_api_file.ScanRequest": {
+            "type": "object",
+            "required": [
+                "path"
+            ],
+            "properties": {
+                "filter": {
+                    "description": "Filter folder/file names (case-insensitive substring match)",
+                    "type": "string",
+                    "example": "STSK"
+                },
+                "path": {
+                    "type": "string",
+                    "example": "/path/to/videos"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "internal_api_file.ScanResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo"
+                    }
+                },
+                "skipped": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_genre.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_genre.GenreReplacement": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "original": {
+                    "type": "string"
+                },
+                "replacement": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_genre.genreReplacementCreateRequest": {
+            "type": "object",
+            "properties": {
+                "original": {
+                    "type": "string"
+                },
+                "replacement": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_genre.genreReplacementListResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "replacements": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.GenreReplacement"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_history.DeleteHistoryBulkResponse": {
+            "type": "object",
+            "properties": {
+                "deleted": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_history.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_history.HistoryListResponse": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "records": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api_history.HistoryRecord"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_history.HistoryRecord": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "dry_run": {
+                    "type": "boolean"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "metadata": {
+                    "type": "string"
+                },
+                "movie_id": {
+                    "type": "string"
+                },
+                "new_path": {
+                    "type": "string"
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "original_path": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_history.HistoryStats": {
+            "type": "object",
+            "properties": {
+                "by_operation": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "reverted": {
+                    "type": "integer"
+                },
+                "success": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_jobs.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_jobs.JobListItem": {
+            "type": "object",
+            "properties": {
+                "completed": {
+                    "type": "integer",
+                    "example": 9
+                },
+                "completed_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:05:00Z"
+                },
+                "destination": {
+                    "type": "string",
+                    "example": "/path/to/output"
+                },
+                "failed": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "operation_count": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "organized_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:05:00Z"
+                },
+                "progress": {
+                    "type": "number",
+                    "example": 0.9
+                },
+                "reverted_at": {
+                    "type": "string",
+                    "example": "2026-04-12T11:00:00Z"
+                },
+                "reverted_count": {
+                    "type": "integer",
+                    "example": 7
+                },
+                "started_at": {
+                    "type": "string",
+                    "example": "2026-04-12T10:00:00Z"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "organized"
+                },
+                "total_files": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
+        "internal_api_jobs.JobListResponse": {
+            "type": "object",
+            "properties": {
+                "jobs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.JobListItem"
+                    }
+                }
+            }
+        },
+        "internal_api_jobs.OperationListResponse": {
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "job_status": {
+                    "type": "string",
+                    "example": "organized"
+                },
+                "operations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OperationItem"
+                    }
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
+        "internal_api_jobs.RevertResultResponse": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.RevertFileError"
+                    }
+                },
+                "failed": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "job_id": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "skipped": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "status": {
+                    "type": "string",
+                    "example": "reverted"
+                },
+                "succeeded": {
+                    "type": "integer",
+                    "example": 9
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
+        "internal_api_movie.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_movie.MovieResponse": {
+            "type": "object",
+            "properties": {
+                "merge_stats": {
+                    "description": "Merge statistics when NFO merging occurred",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics"
+                        }
+                    ]
+                },
+                "movie": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                },
+                "provenance": {
+                    "description": "Field-level data source tracking",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource"
+                    }
+                }
+            }
+        },
+        "internal_api_movie.MoviesResponse": {
             "type": "object",
             "properties": {
                 "count": {
@@ -4605,12 +5790,12 @@ const docTemplate = `{
                 "movies": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.Movie"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
                     }
                 }
             }
         },
-        "movie.NFOComparisonRequest": {
+        "internal_api_movie.NFOComparisonRequest": {
             "type": "object",
             "properties": {
                 "array_strategy": {
@@ -4646,21 +5831,21 @@ const docTemplate = `{
                 }
             }
         },
-        "movie.NFOComparisonResponse": {
+        "internal_api_movie.NFOComparisonResponse": {
             "type": "object",
             "properties": {
                 "differences": {
                     "description": "List of fields that differ",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/contracts.FieldDifference"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference"
                     }
                 },
                 "merge_stats": {
                     "description": "Merge statistics",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/contracts.MergeStatistics"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics"
                         }
                     ]
                 },
@@ -4668,7 +5853,7 @@ const docTemplate = `{
                     "description": "Result of merging",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/models.Movie"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
                         }
                     ]
                 },
@@ -4680,7 +5865,7 @@ const docTemplate = `{
                     "description": "Data from NFO file",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/models.Movie"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
                         }
                     ]
                 },
@@ -4697,20 +5882,20 @@ const docTemplate = `{
                     "description": "Field-level provenance",
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/contracts.DataSource"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource"
                     }
                 },
                 "scraped_data": {
                     "description": "Fresh scraped data",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/models.Movie"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
                         }
                     ]
                 }
             }
         },
-        "movie.RescrapeRequest": {
+        "internal_api_movie.RescrapeRequest": {
             "type": "object",
             "required": [
                 "selected_scrapers"
@@ -4732,7 +5917,7 @@ const docTemplate = `{
                 }
             }
         },
-        "movie.ScrapeRequest": {
+        "internal_api_movie.ScrapeRequest": {
             "type": "object",
             "required": [
                 "id"
@@ -4758,7 +5943,7 @@ const docTemplate = `{
                 }
             }
         },
-        "movie.ScrapeResponse": {
+        "internal_api_movie.ScrapeResponse": {
             "type": "object",
             "properties": {
                 "cached": {
@@ -4772,7 +5957,7 @@ const docTemplate = `{
                     }
                 },
                 "movie": {
-                    "$ref": "#/definitions/models.Movie"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
                 },
                 "sources_used": {
                     "type": "integer",
@@ -4780,18 +5965,18 @@ const docTemplate = `{
                 }
             }
         },
-        "system.AvailableScrapersResponse": {
+        "internal_api_system.AvailableScrapersResponse": {
             "type": "object",
             "properties": {
                 "scrapers": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/contracts.ScraperInfo"
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScraperInfo"
                     }
                 }
             }
         },
-        "system.DeepLUsageRequest": {
+        "internal_api_system.DeepLUsageRequest": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -4805,7 +5990,7 @@ const docTemplate = `{
                 }
             }
         },
-        "system.DeepLUsageResponse": {
+        "internal_api_system.DeepLUsageResponse": {
             "type": "object",
             "properties": {
                 "api_key_character_count": {
@@ -4828,7 +6013,7 @@ const docTemplate = `{
                 }
             }
         },
-        "system.ErrorResponse": {
+        "internal_api_system.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
@@ -4843,7 +6028,7 @@ const docTemplate = `{
                 }
             }
         },
-        "system.HealthResponse": {
+        "internal_api_system.HealthResponse": {
             "type": "object",
             "properties": {
                 "build_date": {
@@ -4874,7 +6059,7 @@ const docTemplate = `{
                 }
             }
         },
-        "system.ProxyTestRequest": {
+        "internal_api_system.ProxyTestRequest": {
             "type": "object",
             "required": [
                 "mode"
@@ -4884,7 +6069,7 @@ const docTemplate = `{
                     "description": "FlareSolverr config (separate from ProxyConfig)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/config.FlareSolverrConfig"
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig"
                         }
                     ]
                 },
@@ -4897,7 +6082,7 @@ const docTemplate = `{
                     ]
                 },
                 "proxy": {
-                    "$ref": "#/definitions/config.ProxyConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig"
                 },
                 "target_url": {
                     "description": "Optional override target URL",
@@ -4905,7 +6090,7 @@ const docTemplate = `{
                 }
             }
         },
-        "system.ProxyTestResponse": {
+        "internal_api_system.ProxyTestResponse": {
             "type": "object",
             "properties": {
                 "duration_ms": {
@@ -4944,7 +6129,7 @@ const docTemplate = `{
                 }
             }
         },
-        "system.TranslationModelsRequest": {
+        "internal_api_system.TranslationModelsRequest": {
             "type": "object",
             "required": [
                 "base_url",
@@ -4965,7 +6150,7 @@ const docTemplate = `{
                 }
             }
         },
-        "system.TranslationModelsResponse": {
+        "internal_api_system.TranslationModelsResponse": {
             "type": "object",
             "properties": {
                 "models": {
@@ -4976,35 +6161,35 @@ const docTemplate = `{
                 }
             }
         },
-        "system.UpdateConfigRequest": {
+        "internal_api_system.UpdateConfigRequest": {
             "type": "object",
             "properties": {
                 "api": {
-                    "$ref": "#/definitions/config.APIConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.APIConfig"
                 },
                 "config_version": {
                     "type": "integer"
                 },
                 "database": {
-                    "$ref": "#/definitions/config.DatabaseConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.DatabaseConfig"
                 },
                 "file_matching": {
-                    "$ref": "#/definitions/config.MatchingConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.MatchingConfig"
                 },
                 "logging": {
-                    "$ref": "#/definitions/config.LoggingConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.LoggingConfig"
                 },
                 "mediainfo": {
-                    "$ref": "#/definitions/config.MediaInfoConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.MediaInfoConfig"
                 },
                 "metadata": {
-                    "$ref": "#/definitions/config.MetadataConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.MetadataConfig"
                 },
                 "output": {
-                    "$ref": "#/definitions/config.OutputConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.OutputConfig"
                 },
                 "performance": {
-                    "$ref": "#/definitions/config.PerformanceConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.PerformanceConfig"
                 },
                 "proxy_verification_tokens": {
                     "type": "object",
@@ -5013,17 +6198,17 @@ const docTemplate = `{
                     }
                 },
                 "scrapers": {
-                    "$ref": "#/definitions/config.ScrapersConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ScrapersConfig"
                 },
                 "server": {
-                    "$ref": "#/definitions/config.ServerConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ServerConfig"
                 },
                 "system": {
-                    "$ref": "#/definitions/config.SystemConfig"
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.SystemConfig"
                 }
             }
         },
-        "temp.ErrorResponse": {
+        "internal_api_temp.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
@@ -5038,24 +6223,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.OperationMode": {
-            "type": "string",
-            "enum": [
-                "organize",
-                "in-place",
-                "in-place-norenamefolder",
-                "metadata-only",
-                "preview"
-            ],
-            "x-enum-varnames": [
-                "OperationModeOrganize",
-                "OperationModeInPlace",
-                "OperationModeInPlaceNoRenameFolder",
-                "OperationModeMetadataOnly",
-                "OperationModePreview"
-            ]
-        },
-        "version.VersionStatusResponse": {
+        "internal_api_version.VersionStatusResponse": {
             "type": "object",
             "properties": {
                 "build_date": {

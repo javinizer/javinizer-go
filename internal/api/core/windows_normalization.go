@@ -8,6 +8,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/apperrors"
 )
 
+const osWindows = "windows"
+
 var windowsReservedNames = []string{
 	"CON", "PRN", "AUX", "NUL",
 	"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
@@ -15,7 +17,7 @@ var windowsReservedNames = []string{
 }
 
 func isReservedDeviceName(component string) bool {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != osWindows {
 		return false
 	}
 
@@ -42,7 +44,7 @@ func isReservedDeviceName(component string) bool {
 }
 
 func stripTrailingChars(path string) string {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != osWindows {
 		return path
 	}
 
@@ -86,7 +88,7 @@ func isUNCPath(path string) bool {
 }
 
 func normalizeUNCPath(path string, allowUNC bool, allowedUNCServers []string) (string, error) {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != osWindows {
 		return path, nil
 	}
 
@@ -123,7 +125,7 @@ func normalizeUNCPath(path string, allowUNC bool, allowedUNCServers []string) (s
 }
 
 func normalizePathForPlatform(path string) string {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != osWindows {
 		return path
 	}
 

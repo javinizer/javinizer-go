@@ -248,8 +248,11 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 	return nil, nil, false
 }
 
-// GetURL returns JavDB search URL for a given ID.
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.getURLCtx(context.Background(), id)
+}
+
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	if strings.TrimSpace(id) == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
 	}
@@ -345,7 +348,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 }
 
 func (s *Scraper) findDetailURLCtx(ctx context.Context, id string) (string, error) {
-	searchURL, err := s.GetURL(id)
+	searchURL, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return "", err
 	}

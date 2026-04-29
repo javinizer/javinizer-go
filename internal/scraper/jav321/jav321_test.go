@@ -229,7 +229,7 @@ func TestHelpers(t *testing.T) {
 	if got := stripTrailingSiteName("Great Movie - JAV321"); got != "Great Movie" {
 		t.Fatalf("stripTrailingSiteName = %q, want Great Movie", got)
 	}
-	if got := normalizeID(" ABC-123 "); got != "abc123" {
+	if got := scraperutil.NormalizeID(" ABC-123 "); got != "abc123" {
 		t.Fatalf("normalizeID = %q, want abc123", got)
 	}
 }

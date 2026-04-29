@@ -4,10 +4,10 @@
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
-	import type { VersionStatusResponse } from '$lib/api/types';
+	import type { VersionStatusResponse, SettingsConfig } from '$lib/api/types';
 
 	interface Props {
-		config: any;
+		config: SettingsConfig;
 		inputClass: string;
 	}
 

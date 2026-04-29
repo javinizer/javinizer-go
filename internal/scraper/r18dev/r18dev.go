@@ -228,8 +228,11 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 	return nil, nil, false
 }
 
-// GetURL constructs the URL for a given movie ID
 func (s *Scraper) GetURL(id string) (string, error) {
+	return s.getURLCtx(context.Background(), id)
+}
+
+func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	normalized := normalizeID(id)
 	return fmt.Sprintf(apiURL, normalized), nil
 }
@@ -271,7 +274,11 @@ func (s *Scraper) doRequestWithRetryCtx(ctx context.Context, url string) (*resty
 				}
 
 				logging.Warnf("R18: Rate limited (429), retrying in %v (attempt %d/%d)", waitTime, attempt+1, s.maxRetries)
-				time.Sleep(waitTime)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(waitTime):
+				}
 				continue
 			}
 
@@ -367,7 +374,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		logging.Debugf("R18: Using resolved content-id URL: %s", finalURL)
 	} else {
 		// Fall back to using the normalized ID directly
-		finalURL, err = s.GetURL(id)
+		finalURL, err = s.getURLCtx(ctx, id)
 		if err != nil {
 			return nil, err
 		}

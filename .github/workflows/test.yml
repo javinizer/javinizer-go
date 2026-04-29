@@ -137,6 +137,26 @@ jobs:
           exit 1
         fi
 
+  vuln:
+    name: Vulnerability Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: ${{ env.GO_VERSION_FILE }}
+        cache: true
+
+    - name: Install govulncheck
+      run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+    - name: Run govulncheck
+      run: govulncheck ./...
+
   # Job 4: Windows tests (catches Windows-specific path bugs)
   test-windows:
     name: Unit Tests (Windows)
@@ -158,7 +178,29 @@ jobs:
     - name: Run unit tests
       run: go test -short ./...
 
-  # Job 5: Build verification
+  # Job 5: Frontend Tests
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: web/frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      run: npm ci --prefix web/frontend
+
+    - name: Run frontend tests
+      run: npm run test --prefix web/frontend
+
+  # Job 6: Build verification
   build:
     name: Build Verification
     runs-on: ubuntu-latest

@@ -1,8 +1,9 @@
 <script lang="ts">
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
+	import type { SettingsConfig } from '$lib/api/types';
 
 	interface Props {
-		config: any;
+		config: SettingsConfig;
 		inputClass: string;
 	}
 

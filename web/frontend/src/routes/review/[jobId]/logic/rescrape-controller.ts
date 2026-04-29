@@ -15,7 +15,6 @@ interface RescrapeControllerDeps {
 	getJob: () => BatchJobResponse | null;
 	setJob: (job: BatchJobResponse) => void;
 	getEditedMovies: () => Map<string, Movie>;
-	setEditedMovies: (movies: Map<string, Movie>) => void;
 	getAvailableScrapers: () => Scraper[];
 	setAvailableScrapers: (scrapers: Scraper[]) => void;
 	getRescrapeMovieId: () => string;
@@ -34,7 +33,6 @@ interface RescrapeControllerDeps {
 	getRescrapeArrayStrategy: () => ArrayStrategy;
 	setRescrapeArrayStrategy: (strategy: ArrayStrategy) => void;
 	getRescrapingStates: () => Map<string, boolean>;
-	setRescrapingStates: (states: Map<string, boolean>) => void;
 	toastSuccess: (message: string, duration?: number) => void;
 	toastError: (message: string, duration?: number) => void;
 	api: {
@@ -55,13 +53,12 @@ interface RescrapeControllerDeps {
 }
 
 function setRescrapingState(deps: RescrapeControllerDeps, movieId: string, value: boolean) {
-	const next = new Map(deps.getRescrapingStates());
+	const states = deps.getRescrapingStates();
 	if (value) {
-		next.set(movieId, true);
+		states.set(movieId, true);
 	} else {
-		next.delete(movieId);
+		states.delete(movieId);
 	}
-	deps.setRescrapingStates(next);
 }
 
 export function createRescrapeController(deps: RescrapeControllerDeps) {
@@ -88,7 +85,6 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 			try {
 				deps.setAvailableScrapers(await deps.api.getScrapers());
 			} catch (error) {
-				console.error('Failed to fetch scrapers:', error);
 				deps.toastError('Failed to load scrapers');
 				return;
 			}
@@ -174,10 +170,9 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 				}
 			}
 
-			const editedMovies = new Map(deps.getEditedMovies());
+			const editedMovies = deps.getEditedMovies();
 			if (editedMovies.has(currentResult.file_path)) {
 				editedMovies.delete(currentResult.file_path);
-				deps.setEditedMovies(editedMovies);
 			}
 
 			deps.toastSuccess(
@@ -187,11 +182,13 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 			);
 			deps.setShowRescrapeModal(false);
 		} catch (error) {
-			console.error(effectiveManualSearchMode ? 'Manual search failed' : 'Rescrape failed', ':', error);
 			const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
 			deps.toastError((effectiveManualSearchMode ? 'Manual search failed: ' : 'Rescrape failed: ') + errorMessage);
 		} finally {
-			setRescrapingState(deps, rescrapeMovieId, false);
+			if (deps.getRescrapeMovieId() !== rescrapeMovieId) {
+				setRescrapingState(deps, rescrapeMovieId, false);
+			}
+			setRescrapingState(deps, deps.getRescrapeMovieId(), false);
 		}
 	}
 

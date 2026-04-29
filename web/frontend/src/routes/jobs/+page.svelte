@@ -2,10 +2,13 @@
 	import { goto } from '$app/navigation';
 	import { fade, fly } from 'svelte/transition';
 	import { page } from '$app/stores';
+	import { confirmDialog } from '$lib/stores/dialog.svelte';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import {
 		Activity,
 		ArrowRight,
+		ChevronLeft,
+		ChevronRight,
 		CircleX,
 		Clock,
 		RefreshCw,
@@ -43,6 +46,8 @@
 	let isCleaningHistory = $state(false);
 	let isCleaningEvents = $state(false);
 	let activeFilter = $state<string>('all');
+	let currentPage = $state(1);
+	const pageSize = 10;
 
 	let revertModalOpen = $state(false);
 	let revertTargetId = $state('');
@@ -110,12 +115,19 @@
 		return getJobsByStatus(activeFilter);
 	});
 
+	let totalPages = $derived(Math.max(1, Math.ceil(filteredJobs.length / pageSize)));
+	let paginatedJobs = $derived(filteredJobs.slice((currentPage - 1) * pageSize, currentPage * pageSize));
+
+	$effect(() => {
+		activeFilter;
+		currentPage = 1;
+	});
+
 	async function clearAllJobs() {
 		const clearableJobs = jobs.filter(job => job.status.toLowerCase() !== 'running');
 		if (clearableJobs.length === 0) return;
 
-		const confirmed = confirm(`Clear all non-running jobs? This will remove ${clearableJobs.length} job(s).`);
-		if (!confirmed) return;
+		if (!(await confirmDialog('Clear Jobs', `Clear all non-running jobs? This will remove ${clearableJobs.length} job(s).`, { variant: 'danger', confirmLabel: 'Clear All' }))) return;
 
 		isClearing = true;
 		let failedCount = 0;
@@ -259,7 +271,7 @@
 					Refresh
 				</Button>
 				<Button
-					variant="outline"
+					variant="destructive"
 					size="sm"
 					onclick={clearAllJobs}
 					disabled={isClearing || jobs.length === 0 || jobs.every(j => j.status.toLowerCase() === 'running')}
@@ -287,8 +299,8 @@
 			/>
 			<span class="text-sm text-muted-foreground">days</span>
 			<div class="flex items-center gap-2 ml-2">
-				<Button
-					variant="outline"
+								<Button
+					variant="destructive"
 					size="sm"
 					onclick={cleanHistory}
 					disabled={isCleaningHistory || isCleaningEvents || olderThanDays < 1}
@@ -296,7 +308,7 @@
 					{isCleaningHistory ? 'Cleaning...' : 'Clean History'}
 				</Button>
 				<Button
-					variant="outline"
+					variant="destructive"
 					size="sm"
 					onclick={cleanEvents}
 					disabled={isCleaningHistory || isCleaningEvents || olderThanDays < 1}
@@ -355,7 +367,7 @@
 			</Card>
 		{:else}
 			<div class="space-y-3" in:fade={{ duration: 150 }}>
-					{#each filteredJobs as job, index (job.id)}
+					{#each paginatedJobs as job, index (job.id)}
 						{@const statusConfig = getStatusConfig(job.status)}
 						{@const poster = getFirstPoster(job)}
 						<div
@@ -419,7 +431,7 @@
 
 									<div class="flex items-center gap-1.5 flex-shrink-0">
 										{#if job.status.toLowerCase() === 'running'}
-											<Button variant="outline" size="sm" onclick={() => cancelJobMutation.mutate(job.id)} disabled={cancelJobMutation.isPending}>
+											<Button variant="destructive" size="sm" onclick={() => cancelJobMutation.mutate(job.id)} disabled={cancelJobMutation.isPending}>
 												Cancel
 											</Button>
 											<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
@@ -434,21 +446,23 @@
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{:else if job.status.toLowerCase() === 'organized'}
-											<Button variant="default" size="sm" onclick={() => goto(`/jobs/${job.id}`)}>
+											<Button variant="secondary" size="sm" onclick={() => goto(`/jobs/${job.id}`)}>
 												<ArrowRight class="h-4 w-4 mr-1" />
 												View Details
 											</Button>
 											{#if config?.output?.allow_revert}
 											<Button
-												variant="outline"
+												variant="destructive"
 												size="sm"
-												class="text-destructive hover:bg-destructive/10"
 												onclick={() => openRevertModal(job.id, getRevertableCount(job))}
 											>
 												<Undo2 class="h-4 w-4 mr-1" />
 												Revert
 											</Button>
 											{/if}
+											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
+												<Trash2 class="h-4 w-4 text-muted-foreground" />
+											</Button>
 										{:else if job.status.toLowerCase() === 'failed'}
 											<Button variant="outline" size="sm" onclick={() => goto(`/review/${job.id}`)}>
 												<Eye class="h-4 w-4 mr-1" />
@@ -468,6 +482,31 @@
 						</div>
 					{/each}
 				</div>
+
+			{#if totalPages > 1}
+				<div class="flex items-center justify-between mt-4 px-1">
+					<p class="text-sm text-muted-foreground">
+						Showing {(currentPage - 1) * pageSize + 1}&ndash;{Math.min(currentPage * pageSize, filteredJobs.length)} of {filteredJobs.length}
+					</p>
+					<div class="flex items-center gap-1">
+						<Button variant="outline" size="sm" onclick={() => currentPage--} disabled={currentPage <= 1}>
+							<ChevronLeft class="h-4 w-4" />
+						</Button>
+						{#each Array.from({ length: totalPages }, (_, i) => i + 1) as pageNum}
+							<Button
+								variant={pageNum === currentPage ? 'default' : 'ghost'}
+								size="sm"
+								onclick={() => currentPage = pageNum}
+							>
+								{pageNum}
+							</Button>
+						{/each}
+						<Button variant="outline" size="sm" onclick={() => currentPage++} disabled={currentPage >= totalPages}>
+							<ChevronRight class="h-4 w-4" />
+						</Button>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </div>

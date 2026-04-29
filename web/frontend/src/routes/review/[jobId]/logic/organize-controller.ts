@@ -23,7 +23,6 @@ interface OrganizeControllerDeps {
 	setOrganizing: (organizing: boolean) => void;
 	setOrganizeProgress: (progress: number) => void;
 	getFileStatuses: () => Map<string, FileStatus>;
-	setFileStatuses: (statuses: Map<string, FileStatus>) => void;
 	getExpectedOrganizeFilePaths: () => string[];
 	setExpectedOrganizeFilePaths: (paths: string[]) => void;
 	clearWebSocketMessages: () => void;
@@ -76,6 +75,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 	let organizePollTimer: ReturnType<typeof setTimeout> | null = null;
 	let organizeCompletionTimer: ReturnType<typeof setTimeout> | null = null;
+	let organizeRedirectTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function clearOrganizePollTimer() {
 		if (organizePollTimer !== null) {
@@ -89,12 +89,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			clearTimeout(organizeCompletionTimer);
 			organizeCompletionTimer = null;
 		}
+		if (organizeRedirectTimer !== null) {
+			clearTimeout(organizeRedirectTimer);
+			organizeRedirectTimer = null;
+		}
 	}
 
 	function updateFileStatus(filePath: string, status: FileStatus) {
-		const next = new Map(deps.getFileStatuses());
-		next.set(filePath, status);
-		deps.setFileStatuses(next);
+		deps.getFileStatuses().set(filePath, status);
 	}
 
 	function finalizeOrganizeSuccess(message?: string) {
@@ -113,18 +115,17 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			deps.setOrganizing(false);
 
 			if (deps.getFileStatuses().size === 0 && deps.getExpectedOrganizeFilePaths().length > 0) {
-				const synthesized = new Map<string, FileStatus>();
+				const statuses = deps.getFileStatuses();
 				for (const filePath of deps.getExpectedOrganizeFilePaths()) {
-					synthesized.set(filePath, { status: 'success' });
+					statuses.set(filePath, { status: 'success' });
 				}
-				deps.setFileStatuses(synthesized);
 			}
 
 			const failures = Array.from(deps.getFileStatuses().values()).filter((s) => s.status === 'failed').length;
 			if (failures === 0) {
 				const action = deps.getIsUpdateMode() ? 'updated' : 'organized';
 				deps.toastSuccess(message || `All files ${action} successfully! Redirecting in 5 seconds...`, 8000);
-				setTimeout(() => deps.navigateBrowse(), redirectDelayMs);
+				organizeRedirectTimer = setTimeout(() => deps.navigateBrowse(), redirectDelayMs);
 			}
 		}, completionDelayMs);
 	}
@@ -142,6 +143,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	function startOrganizeCompletionPolling() {
 		clearOrganizePollTimer();
 		const startedAt = Date.now();
+		let lastPollError: string | null = null;
 
 		const pollOnce = async () => {
 			if (deps.getOrganizeStatus() !== 'organizing') {
@@ -152,6 +154,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			try {
 				const latestJob = await deps.api.getBatchJob(deps.getJobId(), true);
 				deps.setJob(latestJob);
+				lastPollError = null;
 
 				if (latestJob.status === 'completed') {
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
@@ -171,12 +174,13 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					return;
 				}
 			} catch (e) {
-				console.warn('Failed to poll batch job status:', e);
+				lastPollError = e instanceof Error ? e.message : String(e);
 			}
 
 			if (Date.now() - startedAt >= pollTimeoutMs) {
 				const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
-				finalizeOrganizeFailure(`${action} timed out while waiting for completion.`);
+				const detail = lastPollError ? ` Last error: ${lastPollError}` : '';
+				finalizeOrganizeFailure(`${action} timed out while waiting for completion.${detail}`);
 				return;
 			}
 
@@ -193,7 +197,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		deps.setOrganizeStatus('organizing');
 		deps.setOrganizing(true);
 		deps.setOrganizeProgress(0);
-		deps.setFileStatuses(new Map());
+		deps.getFileStatuses().clear();
 		deps.setExpectedOrganizeFilePaths(getOrganizeEligibleFilePaths(deps.getJob()));
 		clearOrganizePollTimer();
 		clearOrganizeCompletionTimer();

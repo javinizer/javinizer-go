@@ -22,6 +22,16 @@ type genreReplacementListResponse struct {
 	Offset       int                       `json:"offset"`
 }
 
+// listGenreReplacements godoc
+// @Summary List genre replacements
+// @Description Get a paginated list of genre replacement rules
+// @Tags genres
+// @Produce json
+// @Param limit query int false "Max results" default(50)
+// @Param offset query int false "Skip results" default(0)
+// @Success 200 {object} genreReplacementListResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/genres/replacements [get]
 func listGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit, offset := core.ParsePagination(c, 50, 500)
@@ -54,6 +64,18 @@ func listGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 	}
 }
 
+// createGenreReplacement godoc
+// @Summary Create genre replacement
+// @Description Create a new genre replacement rule mapping an original genre to a replacement
+// @Tags genres
+// @Accept json
+// @Produce json
+// @Param request body genreReplacementCreateRequest true "Genre replacement details"
+// @Success 201 {object} GenreReplacement
+// @Success 200 {object} GenreReplacement "Already exists"
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/genres/replacements [post]
 func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req genreReplacementCreateRequest
@@ -94,6 +116,17 @@ func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 	}
 }
 
+// deleteGenreReplacement godoc
+// @Summary Delete genre replacement
+// @Description Delete a genre replacement rule by original genre name
+// @Tags genres
+// @Produce json
+// @Param original query string true "Original genre name to delete"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/genres/replacements [delete]
 func deleteGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		original := c.Query("original")

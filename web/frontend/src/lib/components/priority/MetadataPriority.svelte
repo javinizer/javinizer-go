@@ -3,14 +3,16 @@
 	import { fade, fly, slide } from 'svelte/transition';
 	import { X, Info } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
+	import { confirmDialog } from '$lib/stores/dialog.svelte';
 	import Card from '../ui/Card.svelte';
 	import Button from '../ui/Button.svelte';
 	import DraggableList from './DraggableList.svelte';
 	import FieldRow from './FieldRow.svelte';
+	import type { SettingsConfig, ScraperSettings } from '$lib/api/types';
 
 	interface Props {
-		config: any;
-		onUpdate: (config: any) => void;
+		config: SettingsConfig;
+		onUpdate: (config: SettingsConfig) => void;
 		onScraperUsageQuery?: (scraperName: string) => { count: number; fields: string[] };
 	}
 
@@ -125,14 +127,16 @@
 	function getEnabledScrapers(): string[] {
 		const allScrapers = getGlobalPriority();
 		return allScrapers.filter((scraperName) => {
-			return config?.scrapers?.[scraperName]?.enabled !== false;
+			const scraperCfg = config?.scrapers?.[scraperName];
+			return (scraperCfg as ScraperSettings)?.enabled !== false;
 		});
 	}
 
 	// Filter priority list to only include enabled scrapers
 	function filterEnabledScrapers(priority: string[]): string[] {
 		return priority.filter((scraperName) => {
-			return config?.scrapers?.[scraperName]?.enabled !== false;
+			const scraperCfg = config?.scrapers?.[scraperName];
+			return (scraperCfg as ScraperSettings)?.enabled !== false;
 		});
 	}
 
@@ -196,13 +200,13 @@
 	}
 
 	// Switch to Simple mode warning
-	function switchToSimple() {
+	async function switchToSimple() {
 		const overrideCount = getOverrideCount();
 		if (overrideCount > 0) {
-			const confirmed = confirm(
+			if (!(await confirmDialog(
+				'Switch to Simple Mode',
 				`You have ${overrideCount} field override(s). Switching to Simple mode will hide these settings but not delete them. Continue?`
-			);
-			if (!confirmed) return;
+			))) return;
 		}
 		mode = 'simple';
 	}
