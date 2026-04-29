@@ -114,7 +114,6 @@ func TestScraperClientBuilder_BuildWithFlareSolverr(t *testing.T) {
 			MaxRetries: 3,
 		}
 
-		// Note: This will fail if FlareSolverr is not running, so we check error handling
 		client, fs, err := NewScraperClientBuilder().
 			Apply(
 				WithFlareSolverr(true),
@@ -124,8 +123,64 @@ func TestScraperClientBuilder_BuildWithFlareSolverr(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NotNil(t, client)
-		// fs may be nil if FlareSolverr server is not running
 		_ = fs
+	})
+
+	t.Run("direct proxy mode does not leak global proxy to FlareSolverr", func(t *testing.T) {
+		globalProxy := config.ProxyConfig{
+			Enabled: true,
+			Profiles: map[string]config.ProxyProfile{
+				"default": {URL: "http://proxy.example.com:8080"},
+			},
+			DefaultProfile: "default",
+		}
+		scraperDirectProxy := &config.ProxyConfig{
+			Enabled: false,
+		}
+		fsCfg := config.FlareSolverrConfig{
+			Enabled:    true,
+			URL:        "http://localhost:8191/v1",
+			Timeout:    30,
+			MaxRetries: 3,
+		}
+
+		sc, err := FromScraperSettings(&config.ScraperSettings{
+			UseFlareSolverr: true,
+			Proxy:           scraperDirectProxy,
+		}, &globalProxy, fsCfg).Build()
+
+		require.NoError(t, err)
+		require.NotNil(t, sc)
+		require.NotNil(t, sc.FlareSolverr)
+		assert.Nil(t, sc.FlareSolverr.requestProxy,
+			"FlareSolverr requestProxy should be nil when scraper uses direct proxy mode")
+	})
+
+	t.Run("inherit proxy mode passes global proxy to FlareSolverr", func(t *testing.T) {
+		globalProxy := config.ProxyConfig{
+			Enabled: true,
+			Profiles: map[string]config.ProxyProfile{
+				"default": {URL: "http://proxy.example.com:8080"},
+			},
+			DefaultProfile: "default",
+		}
+		fsCfg := config.FlareSolverrConfig{
+			Enabled:    true,
+			URL:        "http://localhost:8191/v1",
+			Timeout:    30,
+			MaxRetries: 3,
+		}
+
+		sc, err := FromScraperSettings(&config.ScraperSettings{
+			UseFlareSolverr: true,
+		}, &globalProxy, fsCfg).Build()
+
+		require.NoError(t, err)
+		require.NotNil(t, sc)
+		require.NotNil(t, sc.FlareSolverr)
+		require.NotNil(t, sc.FlareSolverr.requestProxy,
+			"FlareSolverr requestProxy should be set when scraper inherits global proxy")
+		assert.Equal(t, "http://proxy.example.com:8080", sc.FlareSolverr.requestProxy.URL)
 	})
 }
 

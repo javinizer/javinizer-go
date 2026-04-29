@@ -75,6 +75,89 @@ func TestParseDetailPage(t *testing.T) {
 	}
 }
 
+func TestSearch_SearchResultFlow_VideoThumbList(t *testing.T) {
+	searchHTML := `<html><body><div class="videothumblist"><div class="videos">
+<div class="video" id="vid_javliat76u"><a href="./javliat76u.html" title="ONED-025 Play Erotic Woman"><div class="id">ONED-025</div><div class="title">Play Erotic Woman</div></a></div>
+<div class="video" id="vid_javliaze24"><a href="./javliaze24.html" title="ONED-250 Other"><div class="id">ONED-250</div><div class="title">Other</div></a></div>
+</div></div></body></html>`
+
+	detailHTML := `<html><head><title>ONED-025 Play Erotic Woman - JAVLibrary</title></head><body>
+<div id="video_info"></div>
+<img id="video_jacket_img" src="https://pics.dmm.co.jp/mono/movie/adult/oned025/oned025pl.jpg">
+<div id="video_date"><td class="text">2005-01-11</td></div>
+<div id="video_length"><span class="text">130</span> min</div>
+<div id="video_maker"><a href="/maker/s1">S1 NO.1 STYLE</a></div>
+<span class="genre"><a href="/genres/test">Test Genre</a></span>
+</body></html>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/en/vl_searchbyid.php":
+			_, _ = fmt.Fprint(w, searchHTML)
+		case r.URL.Path == "/en/" && r.URL.Query().Get("v") == "javliat76u":
+			_, _ = fmt.Fprint(w, detailHTML)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	settings := config.ScraperSettings{
+		Enabled:  true,
+		Language: "en",
+		BaseURL:  server.URL,
+	}
+	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+
+	result, err := s.Search(context.Background(), "ONED-025")
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+
+	if result.SourceURL != server.URL+"/en/?v=javliat76u" {
+		t.Fatalf("SourceURL = %q", result.SourceURL)
+	}
+	if result.ID != "ONED-025" {
+		t.Fatalf("ID = %q", result.ID)
+	}
+	if result.Title != "Play Erotic Woman" {
+		t.Fatalf("Title = %q", result.Title)
+	}
+}
+
+func TestSearch_LegacyHrefWithLanguagePrefix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/en/vl_searchbyid.php":
+			_, _ = fmt.Fprint(w, `<html><body><a href="/en/?v=javli43uqe">result</a></body></html>`)
+		case r.URL.Path == "/en/" && r.URL.Query().Get("v") == "javli43uqe":
+			_, _ = fmt.Fprint(w, `<html><head><title>IPX-123 Legacy Title - JAVLibrary</title></head><body>
+<div id="video_info"></div>
+<div id="video_maker"><a href="/maker/test">Maker Test</a></div>
+</body></html>`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	settings := config.ScraperSettings{
+		Enabled:  true,
+		Language: "en",
+		BaseURL:  server.URL,
+	}
+	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+
+	result, err := s.Search(context.Background(), "IPX-123")
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+
+	if result.SourceURL != server.URL+"/en/?v=javli43uqe" {
+		t.Fatalf("SourceURL = %q, want no double language segment", result.SourceURL)
+	}
+}
+
 func TestSearch_SearchResultFlow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -133,11 +216,47 @@ func TestHelpers(t *testing.T) {
 	}
 	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
 
-	if got := s.extractMovieURLFromHTML(`<a href="/en/?v=javli43uqe">match</a>`); got != "/en/?v=javli43uqe" {
+	if got := s.extractMovieURLFromHTML(`<a href="/en/?v=javli43uqe">match</a>`, "IPX-123"); got != "/en/?v=javli43uqe" {
 		t.Fatalf("extractMovieURLFromHTML absolute = %q", got)
 	}
-	if got := s.extractMovieURLFromHTML(`<a href="?v=javli43uqe">match</a>`); got != "?v=javli43uqe" {
+	if got := s.extractMovieURLFromHTML(`<a href="?v=javli43uqe">match</a>`, "IPX-123"); got != "?v=javli43uqe" {
 		t.Fatalf("extractMovieURLFromHTML relative = %q", got)
+	}
+	if got := s.extractMovieURLFromHTML(
+		`<div class="video" id="vid_javliat76u"><a href="./javliat76u.html" title="ONED-025 Play Erotic Woman"><div class="id">ONED-025</div><div class="title">Play Erotic Woman</div></a></div>`,
+		"ONED-025",
+	); got != "?v=javliat76u" {
+		t.Fatalf("extractMovieURLFromHTML videothumblist = %q", got)
+	}
+	if got := s.extractMovieURLFromHTML(
+		`<div class="video" id="vid_javmeza76q"><a href="./javmeza76q.html" title="IPX-535 Title"><div class="id">IPX-535</div></a></div><div class="video" id="vid_javmeza7s4"><a href="./javmeza7s4.html" title="IPX-530 Other"><div class="id">IPX-530</div></a></div>`,
+		"IPX-535",
+	); got != "?v=javmeza76q" {
+		t.Fatalf("extractMovieURLFromHTML multiple results = %q", got)
+	}
+	if got := s.extractMovieURLFromHTML(
+		"<div class=\"video\" id=\"vid_javliat76u\">\n<a href=\"./javliat76u.html\" title=\"ONED-025\">\n<div class=\"id\">ONED-025</div>\n</a>\n</div>",
+		"ONED-025",
+	); got != "?v=javliat76u" {
+		t.Fatalf("extractMovieURLFromHTML multiline = %q", got)
+	}
+	if got := s.extractMovieURLFromHTML(
+		`<div id="vid_javliat76u" class="video"><a href="./javliat76u.html"><div class="id">ONED-025</div></a></div>`,
+		"ONED-025",
+	); got != "?v=javliat76u" {
+		t.Fatalf("extractMovieURLFromHTML reordered attrs = %q", got)
+	}
+	if got := s.extractMovieURLFromHTML(
+		`<div class="no-video"><a href="./other.html"><div class="id">FAKE-001</div></a></div><a href="?v=javli43uqe">legacy link</a>`,
+		"IPX-123",
+	); got != "?v=javli43uqe" {
+		t.Fatalf("extractMovieURLFromHTML pattern1 fallback to pattern2 = %q", got)
+	}
+	if got := s.extractMovieURLFromHTML(
+		`<div class="video" id="vid_javliat76u"><a href="./javliat76u.html"><div class="id">ONED-025</div></a></div>`,
+		"IPX-999",
+	); got != "?v=javliat76u" {
+		t.Fatalf("extractMovieURLFromHTML no match returns first = %q", got)
 	}
 	if got := s.extractReleaseDate(`Release Date: 2026-02-18`); got == nil || !got.Equal(time.Date(2026, 2, 18, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("extractReleaseDate fallback = %v", got)

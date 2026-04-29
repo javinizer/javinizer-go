@@ -177,16 +177,8 @@ func (b *ScraperClientBuilder) build(returnProxyProfile bool) (*ScraperClient, e
 	var err error
 
 	if cfg.flareSolverr && cfg.globalFlareSolverr.Enabled {
-		proxyForFS := proxyProfile
-		if proxyProfile.URL == "" {
-			globalProfile := config.ResolveGlobalProxy(cfg.globalProxy)
-			if globalProfile != nil && globalProfile.URL != "" {
-				proxyForFS = globalProfile
-			}
-		}
-
 		client, fs, err = NewRestyClientWithFlareSolverr(
-			proxyForFS,
+			proxyProfile,
 			cfg.globalFlareSolverr,
 			timeout,
 			retryCount,

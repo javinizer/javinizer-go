@@ -195,7 +195,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		}
 	}
 	if detailURL == "" {
-		detailURL = fmt.Sprintf("%s/%s/?v=%s", s.baseURL, s.language, id)
+		detailURL = fmt.Sprintf("%s/%s/?v=%s", s.baseURL, s.language, url.QueryEscape(id))
 	}
 	if resultLanguage == "" {
 		resultLanguage = s.language
@@ -214,10 +214,9 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 }
 
 func (s *Scraper) GetURL(id string) (string, error) {
-	return fmt.Sprintf("%s/%s/vl_searchbyid.php?keyword=%s", s.baseURL, s.language, id), nil
+	return fmt.Sprintf("%s/%s/vl_searchbyid.php?keyword=%s", s.baseURL, s.language, url.QueryEscape(id)), nil
 }
 
-// Search searches for a movie by ID
 // Search searches for a movie by ID with context support.
 func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
@@ -242,7 +241,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	}
 
 	// Otherwise, look for a movie link in search results
-	detailPath := s.extractMovieURLFromHTML(html)
+	detailPath := s.extractMovieURLFromHTML(html, id)
 	if detailPath == "" {
 		return nil, models.NewScraperNotFoundError("JavLibrary", fmt.Sprintf("movie %s not found on JavLibrary", id))
 	}
@@ -250,7 +249,12 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// Build full detail URL
 	detailURL := detailPath
 	if !strings.HasPrefix(detailPath, "http") {
-		detailURL = s.baseURL + "/" + s.language + "/" + strings.TrimPrefix(detailPath, "/")
+		trimmed := strings.TrimPrefix(detailPath, "/")
+		if strings.HasPrefix(trimmed, s.language+"/") || strings.HasPrefix(trimmed, s.language+"?") {
+			detailURL = s.baseURL + "/" + trimmed
+		} else {
+			detailURL = s.baseURL + "/" + s.language + "/" + trimmed
+		}
 	}
 
 	logging.Debugf("JavLibrary: Fetching detail page: %s", detailURL)
@@ -262,7 +266,6 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	return s.parseDetailPage(detailHTML, id, detailURL, s.language)
 }
 
-// fetchPage fetches a page via FlareSolverr (if enabled) or direct HTTP
 // fetchPageCtx fetches a page via FlareSolverr (if enabled) or direct HTTP with context support.
 func (s *Scraper) fetchPageCtx(ctx context.Context, url string) (string, error) {
 	// Rate limit before fetching
@@ -369,9 +372,8 @@ func (s *Scraper) parseDetailPage(html string, id string, sourceURL string, lang
 			if ss == result.CoverURL {
 				continue
 			}
-			// Skip if screenshot URL is the same as cover with different extension
-			// (e.g., cover has pl.jpg and screenshot has ps.jpg of same ID)
-			if strings.Contains(result.CoverURL, "pl.jpg") && strings.Contains(ss, strings.Replace(result.CoverURL, "pl.jpg", "", 1)) {
+			posterVariant := strings.Replace(result.CoverURL, "pl.jpg", "ps.jpg", 1)
+			if ss == posterVariant {
 				continue
 			}
 			filtered = append(filtered, ss)
@@ -802,20 +804,55 @@ func (s *Scraper) extractTrailerURL(html string) string {
 	return ""
 }
 
+// Compiled regexes for extracting video entries from JavLibrary search result pages.
+var reVideoThumbDiv = regexp.MustCompile(`<div[^>]*class="video"[^>]*>[\s\S]*?<div class="id">([^<]+)</div>`)
+var reVideoThumbID = regexp.MustCompile(`id="vid_([a-zA-Z0-9]+)"`)
+var reLegacyHrefLang = regexp.MustCompile(`href="(/?(?:en|ja|cn|tw)/\?v=[a-zA-Z0-9]+)"`)
+var reLegacyHrefQuery = regexp.MustCompile(`href="(\?v=[a-zA-Z0-9]+)"`)
+
 // extractMovieURLFromHTML extracts the movie detail link from search results
-func (s *Scraper) extractMovieURLFromHTML(html string) string {
-	// Search results contain links like: href="?v=javli43uqe" or href="/en/?v=javli43uqe"
-	re := regexp.MustCompile(`href="(/?\w{2}/\?v=[a-zA-Z0-9]+)"`)
-	matches := re.FindStringSubmatch(html)
-	if len(matches) > 1 {
-		return matches[1]
+func (s *Scraper) extractMovieURLFromHTML(html string, searchID string) string {
+	// Pattern 1: Current JavLibrary format uses relative HTML links
+	// e.g., <div class="video" id="vid_javliat76u"> with <div class="id">ONED-025</div>
+	matches := reVideoThumbDiv.FindAllStringSubmatch(html, -1)
+
+	firstVidID := ""
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		displayID := strings.ToUpper(strings.ReplaceAll(m[1], "-", ""))
+		normalizedSearch := strings.ToUpper(strings.ReplaceAll(searchID, "-", ""))
+
+		// Extract vid_ ID from the full match (order-independent)
+		vidMatch := reVideoThumbID.FindStringSubmatch(m[0])
+		if len(vidMatch) < 2 {
+			continue
+		}
+		vidID := vidMatch[1]
+
+		if displayID == normalizedSearch {
+			return "?v=" + vidID
+		}
+		if firstVidID == "" {
+			firstVidID = vidID
+		}
 	}
 
-	// Also try relative format: href="?v=..."
-	re = regexp.MustCompile(`href="(\?v=[a-zA-Z0-9]+)"`)
-	matches = re.FindStringSubmatch(html)
-	if len(matches) > 1 {
-		return matches[1]
+	if firstVidID != "" {
+		logging.Debugf("JavLibrary: No exact match for %s, using first result vid=%s", searchID, firstVidID)
+		return "?v=" + firstVidID
+	}
+
+	// Pattern 2: Legacy format with ?v= query parameter
+	matches2 := reLegacyHrefLang.FindStringSubmatch(html)
+	if len(matches2) > 1 {
+		return matches2[1]
+	}
+
+	matches2 = reLegacyHrefQuery.FindStringSubmatch(html)
+	if len(matches2) > 1 {
+		return matches2[1]
 	}
 	return ""
 }
