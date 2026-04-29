@@ -54,6 +54,11 @@ import type {
 	GenreReplacement,
 	GenreReplacementListResponse,
 	GenreReplacementCreateRequest,
+	GenreReplacementUpdateRequest,
+	WordReplacement,
+	WordReplacementListResponse,
+	WordReplacementCreateRequest,
+	WordReplacementUpdateRequest,
 	AuthCredentialsRequest,
 	AuthStatusResponse,
 	EventListResponse,
@@ -427,6 +432,45 @@ class APIClient {
 	// Delete a genre replacement by original genre name
 	async deleteGenreReplacement(original: string): Promise<void> {
 		await this.request(`/api/v1/genres/replacements?original=${encodeURIComponent(original)}`, {
+			method: 'DELETE'
+		});
+	}
+	// Update a genre replacement
+	async updateGenreReplacement(request: GenreReplacementUpdateRequest): Promise<GenreReplacement> {
+		return this.request<GenreReplacement>('/api/v1/genres/replacements', {
+			method: 'PUT',
+			body: JSON.stringify(request)
+		});
+	}
+
+	// List word replacements with pagination
+	async listWordReplacements(params?: { limit?: number; offset?: number }): Promise<WordReplacementListResponse> {
+		const queryParams = new URLSearchParams();
+		if (params?.limit) queryParams.set('limit', params.limit.toString());
+		if (params?.offset) queryParams.set('offset', params.offset.toString());
+		const query = queryParams.toString() ? `?${queryParams}` : '';
+		return this.request<WordReplacementListResponse>(`/api/v1/words/replacements${query}`);
+	}
+
+	// Create a word replacement (idempotent)
+	async createWordReplacement(request: WordReplacementCreateRequest): Promise<WordReplacement> {
+		return this.request<WordReplacement>('/api/v1/words/replacements', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		});
+	}
+
+	// Update a word replacement
+	async updateWordReplacement(request: WordReplacementUpdateRequest): Promise<WordReplacement> {
+		return this.request<WordReplacement>('/api/v1/words/replacements', {
+			method: 'PUT',
+			body: JSON.stringify(request)
+		});
+	}
+
+	// Delete a word replacement by original text
+	async deleteWordReplacement(original: string): Promise<void> {
+		await this.request(`/api/v1/words/replacements?original=${encodeURIComponent(original)}`, {
 			method: 'DELETE'
 		});
 	}

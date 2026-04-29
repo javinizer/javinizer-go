@@ -180,9 +180,8 @@ func (s *Scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 			priority := urlPriority(directURL)
 
 			extractedID := extractContentIDFromURL(directURL)
-			if strings.Contains(directURL, "/rental/") {
-				extractedID = stripRentalSuffix(extractedID)
-			}
+			// Always strip rental 'r' suffix - DMM uses it across all URL types, not just /rental/
+			extractedID = stripRentalSuffix(extractedID)
 			idLen := len(extractedID)
 			logging.Debugf("DMM: ✓ Found direct URL (priority %d, ID: %s, len: %d): %s", priority, extractedID, idLen, directURL)
 			candidates = append(candidates, urlCandidate{

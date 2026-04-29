@@ -77,6 +77,16 @@ type ActressAliasRepositoryInterface interface {
 	GetAliasMap() (map[string]string, error)
 }
 
+// WordReplacementRepositoryInterface defines the contract for word replacement operations
+type WordReplacementRepositoryInterface interface {
+	Create(replacement *models.WordReplacement) error
+	Upsert(replacement *models.WordReplacement) error
+	FindByOriginal(original string) (*models.WordReplacement, error)
+	List() ([]models.WordReplacement, error)
+	Delete(original string) error
+	GetReplacementMap() (map[string]string, error)
+}
+
 // MovieTagRepositoryInterface defines the contract for movie tag operations
 type MovieTagRepositoryInterface interface {
 	AddTag(movieID, tag string) error

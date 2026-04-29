@@ -23,6 +23,7 @@ type MetadataConfig struct {
 	Priority         PriorityConfig         `yaml:"priority" json:"priority"`
 	ActressDatabase  ActressDatabaseConfig  `yaml:"actress_database" json:"actress_database"`   // Actress image database (SQLite-backed)
 	GenreReplacement GenreReplacementConfig `yaml:"genre_replacement" json:"genre_replacement"` // Genre replacement/normalization (SQLite-backed)
+	WordReplacement  WordReplacementConfig  `yaml:"word_replacement" json:"word_replacement"`   // Word uncensor/text replacement (SQLite-backed)
 	TagDatabase      TagDatabaseConfig      `yaml:"tag_database" json:"tag_database"`           // Per-movie tag database (SQLite-backed)
 	Translation      TranslationConfig      `yaml:"translation" json:"translation"`             // Metadata translation pipeline
 	IgnoreGenres     []string               `yaml:"ignore_genres" json:"ignore_genres"`
@@ -238,6 +239,11 @@ type ActressDatabaseConfig struct {
 type GenreReplacementConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`   // Enable genre replacement from database
 	AutoAdd bool `yaml:"auto_add" json:"auto_add"` // Automatically add new genres to database (identity mapping)
+}
+
+// WordReplacementConfig holds word uncensor/text replacement configuration
+type WordReplacementConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"` // Enable word replacement from database
 }
 
 // TagDatabaseConfig holds per-movie tag database configuration

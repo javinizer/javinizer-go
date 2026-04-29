@@ -50,6 +50,7 @@ type ServerDependencies struct {
 	Runtime              *RuntimeState
 	TokenStore           *TokenStore
 	GenreReplacementRepo *database.GenreReplacementRepository
+	WordReplacementRepo  *database.WordReplacementRepository
 }
 
 // EnsureRuntime initializes runtime state when absent.

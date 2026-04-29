@@ -32,9 +32,9 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 	}
 
 	if cid := extractContentIDFromURL(sourceURL); cid != "" {
-		if strings.Contains(sourceURL, "/rental/") {
-			cid = stripRentalSuffix(cid)
-		}
+		// Always strip rental 'r' suffix from content IDs regardless of URL path.
+		// DMM uses 'r' suffix for rental content IDs across all URL types, not just /rental/ pages.
+		cid = stripRentalSuffix(cid)
 		if cleaned := cleanPrefixRegex.ReplaceAllString(strings.ToLower(cid), "$1"); cleaned != "" {
 			cid = cleaned
 		}

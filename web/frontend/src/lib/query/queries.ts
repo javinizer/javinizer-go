@@ -41,10 +41,18 @@ export function createJobOperationsQuery(jobId: string) {
 	}));
 }
 
-export function createGenreReplacementsQuery() {
+export function createGenreReplacementsQuery(opts?: { limit?: number }) {
 	return createQuery(() => ({
 		queryKey: ['genre-replacements'],
-		queryFn: () => apiClient.listGenreReplacements(),
+		queryFn: () => apiClient.listGenreReplacements({ limit: opts?.limit ?? 500 }),
+		staleTime: 30_000
+	}));
+}
+
+export function createWordReplacementsQuery(opts?: { limit?: number }) {
+	return createQuery(() => ({
+		queryKey: ['word-replacements'],
+		queryFn: () => apiClient.listWordReplacements({ limit: opts?.limit ?? 200 }),
 		staleTime: 30_000
 	}));
 }

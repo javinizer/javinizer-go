@@ -562,6 +562,10 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationConfig'
         description: Metadata translation pipeline
+      word_replacement:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig'
+        description: Word uncensor/text replacement (SQLite-backed)
     type: object
   github_com_javinizer_javinizer-go_internal_config.NFOConfig:
     properties:
@@ -935,6 +939,12 @@ definitions:
       series:
         type: boolean
       title:
+        type: boolean
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig:
+    properties:
+      enabled:
+        description: Enable word replacement from database
         type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_models.Actress:

@@ -123,6 +123,9 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 	movieRepo := database.NewMovieRepository(db)
 	actressRepo := database.NewActressRepository(db)
 	genreReplacementRepo := database.NewGenreReplacementRepository(db)
+	wordReplacementRepo := database.NewWordReplacementRepository(db)
+
+	database.SeedDefaultWordReplacements(wordReplacementRepo)
 
 	// Initialize scrapers using centralized registry
 	registry, err := scraper.NewDefaultScraperRegistry(cfg, db)
@@ -178,6 +181,7 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 		Auth:                 authManager,
 		TokenStore:           apicore.NewTokenStore(),
 		GenreReplacementRepo: genreReplacementRepo,
+		WordReplacementRepo:  wordReplacementRepo,
 	}
 	// Initialize atomic config pointer
 	apiDeps.SetConfig(cfg)

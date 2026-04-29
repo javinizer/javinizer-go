@@ -3672,6 +3672,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationConfig"
                         }
                     ]
+                },
+                "word_replacement": {
+                    "description": "Word uncensor/text replacement (SQLite-backed)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig"
+                        }
+                    ]
                 }
             }
         },
@@ -4222,6 +4230,15 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "title": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enable word replacement from database",
                     "type": "boolean"
                 }
             }
