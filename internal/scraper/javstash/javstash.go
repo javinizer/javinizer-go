@@ -293,7 +293,7 @@ func (s *Scraper) parseScene(scene *Scene, searchID string) (*models.ScraperResu
 		ContentID:   scene.Code,
 		Title:       scraperutil.CleanString(scene.Title),
 		Description: scraperutil.CleanString(scene.Details),
-		Runtime:     scene.Duration,
+		Runtime:     scene.Duration / 60,
 		Director:    scraperutil.CleanString(scene.Director),
 	}
 

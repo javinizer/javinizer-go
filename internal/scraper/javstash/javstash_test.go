@@ -204,7 +204,7 @@ func TestScraper_Search_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "javstash", result.Source)
 	assert.Equal(t, "Test Movie Title", result.Title)
-	assert.Equal(t, 120, result.Runtime)
+	assert.Equal(t, 2, result.Runtime)
 	assert.Equal(t, "Test Director", result.Director)
 	assert.Equal(t, "Test description", result.Description)
 	assert.Equal(t, "Test Studio", result.Maker)
