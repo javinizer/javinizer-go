@@ -439,9 +439,11 @@
 												View
 											</Button>
 										{:else if job.status.toLowerCase() === 'completed'}
-											<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
-												Review & Organize
-											</Button>
+											{#if job.completed > 0}
+												<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+													Review & Organize
+												</Button>
+											{/if}
 											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
@@ -464,10 +466,12 @@
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{:else if job.status.toLowerCase() === 'failed'}
-											<Button variant="outline" size="sm" onclick={() => goto(`/review/${job.id}`)}>
-												<Eye class="h-4 w-4 mr-1" />
-												Review
-											</Button>
+											{#if job.completed > 0}
+												<Button variant="outline" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+													<Eye class="h-4 w-4 mr-1" />
+													Review
+												</Button>
+											{/if}
 											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
