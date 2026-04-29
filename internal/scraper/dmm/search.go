@@ -12,6 +12,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+var stripNumericPrefixRegex = regexp.MustCompile(`^\d+`)
+
 func (s *Scraper) GetURL(id string) (string, error) {
 	return s.getURLCtx(context.Background(), id)
 }
@@ -89,6 +91,11 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	}
 
 	if len(allCandidates) == 0 {
+		logging.Debugf("DMM: No candidates from search, trying direct URL construction for %s", contentID)
+		allCandidates = s.tryDirectURLs(ctx, contentID)
+	}
+
+	if len(allCandidates) == 0 {
 		return "", fmt.Errorf("no scrapable URL found for movie on DMM")
 	}
 
@@ -100,65 +107,85 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	})
 
 	if allCandidates[0].priority < 2 {
-		baseID := regexp.MustCompile(`^\d+`).ReplaceAllString(contentID, "")
-		baseID = strings.ToLower(baseID)
-
-		directURLs := []string{
-			fmt.Sprintf(physicalURL, baseID),
-			fmt.Sprintf(digitalURL, baseID),
-			fmt.Sprintf(physicalURL, contentID),
-			fmt.Sprintf(digitalURL, contentID),
-			fmt.Sprintf(newDigitalURL, baseID),
-			fmt.Sprintf(newAmateurURL, baseID),
-		}
-
-		logging.Debugf("DMM: Best candidate has low priority (%d), trying direct URLs for %s", allCandidates[0].priority, baseID)
-
-		for _, directURL := range directURLs {
-			if err := s.rateLimiter.Wait(ctx); err != nil {
-				logging.Debugf("DMM: Rate limit wait failed for direct URL: %v", err)
-				continue
-			}
-
-			resp, err := s.client.R().
-				SetDoNotParseResponse(true).
-				Get(directURL)
-			if err == nil && (resp.StatusCode() == 200 || resp.StatusCode() == 302) {
-				priority := 0
-				if strings.Contains(directURL, "/mono/dvd/") {
-					priority = 6
-				} else if strings.Contains(directURL, "/digital/videoa/") {
-					priority = 5
-				} else if strings.Contains(directURL, "video.dmm.co.jp/amateur/content/") {
-					priority = 4
-				} else if strings.Contains(directURL, "video.dmm.co.jp/av/content/") {
-					priority = 3
+		logging.Debugf("DMM: Best candidate has low priority (%d), trying direct URLs for %s", allCandidates[0].priority, contentID)
+		directCandidates := s.tryDirectURLs(ctx, contentID)
+		if len(directCandidates) > 0 {
+			allCandidates = append(allCandidates, directCandidates...)
+			sort.Slice(allCandidates, func(i, j int) bool {
+				if allCandidates[i].priority != allCandidates[j].priority {
+					return allCandidates[i].priority > allCandidates[j].priority
 				}
-
-				extractedID := extractContentIDFromURL(directURL)
-				idLen := len(extractedID)
-				logging.Debugf("DMM: ✓ Found direct URL (priority %d, ID: %s, len: %d): %s", priority, extractedID, idLen, directURL)
-				allCandidates = append(allCandidates, urlCandidate{
-					url:       directURL,
-					priority:  priority,
-					contentID: extractedID,
-					idLength:  idLen,
-				})
-
-				sort.Slice(allCandidates, func(i, j int) bool {
-					if allCandidates[i].priority != allCandidates[j].priority {
-						return allCandidates[i].priority > allCandidates[j].priority
-					}
-					return allCandidates[i].idLength < allCandidates[j].idLength
-				})
-				break
-			}
+				return allCandidates[i].idLength < allCandidates[j].idLength
+			})
 		}
 	}
 
 	foundURL := allCandidates[0].url
 	logging.Debugf("DMM: Selected URL for %s (priority %d): %s", id, allCandidates[0].priority, foundURL)
 	return foundURL, nil
+}
+
+func (s *Scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCandidate {
+	strippedID := stripNumericPrefixRegex.ReplaceAllString(contentID, "")
+	strippedID = strings.ToLower(strippedID)
+
+	directURLs := []string{
+		fmt.Sprintf(physicalURL, strippedID),
+		fmt.Sprintf(digitalURL, strippedID),
+		fmt.Sprintf(physicalURL, contentID),
+		fmt.Sprintf(digitalURL, contentID),
+		fmt.Sprintf(newDigitalURL, strippedID),
+		fmt.Sprintf(newAmateurURL, strippedID),
+	}
+
+	var candidates []urlCandidate
+	for _, directURL := range directURLs {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
+			logging.Debugf("DMM: Rate limit wait failed for direct URL: %v", err)
+			continue
+		}
+
+		resp, err := s.client.R().
+			SetDoNotParseResponse(true).
+			Get(directURL)
+		if err != nil {
+			logging.Debugf("DMM: Direct URL %s request failed: %v", directURL, err)
+			continue
+		}
+		if resp == nil {
+			logging.Debugf("DMM: Direct URL %s returned nil response", directURL)
+			continue
+		}
+		if resp.StatusCode() == 200 || resp.StatusCode() == 302 {
+			priority := urlPriority(directURL)
+
+			extractedID := extractContentIDFromURL(directURL)
+			idLen := len(extractedID)
+			logging.Debugf("DMM: ✓ Found direct URL (priority %d, ID: %s, len: %d): %s", priority, extractedID, idLen, directURL)
+			candidates = append(candidates, urlCandidate{
+				url:       directURL,
+				priority:  priority,
+				contentID: extractedID,
+				idLength:  idLen,
+			})
+			break
+		}
+		logging.Debugf("DMM: Direct URL %s returned status %d", directURL, resp.StatusCode())
+	}
+	return candidates
+}
+
+func urlPriority(rawURL string) int {
+	if strings.Contains(rawURL, "/mono/dvd/") {
+		return 6
+	} else if strings.Contains(rawURL, "/digital/videoa/") {
+		return 5
+	} else if strings.Contains(rawURL, "video.dmm.co.jp/amateur/content/") {
+		return 4
+	} else if strings.Contains(rawURL, "video.dmm.co.jp/av/content/") {
+		return 3
+	}
+	return 0
 }
 
 func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {

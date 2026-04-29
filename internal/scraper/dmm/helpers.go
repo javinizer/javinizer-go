@@ -100,6 +100,10 @@ func extractContentIDCandidates(doc *goquery.Document, searchIDs []string) []con
 			return
 		}
 
+		if strings.Contains(href, "/rental/") && strings.HasSuffix(strings.ToLower(urlCID), "r") {
+			urlCID = urlCID[:len(urlCID)-1]
+		}
+
 		// Clean the CID from URL using precompiled regex for consistency and performance
 		// Strips DMM prefixes: "9ipx535" -> "ipx535", "h_796san167" -> "san167"
 		// Normalize to lowercase and remove hyphens before regex (cleanPrefixRegex expects lowercase)

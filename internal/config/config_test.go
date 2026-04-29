@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/configutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -180,7 +181,7 @@ func TestResolveScraperUserAgent(t *testing.T) {
 		{
 			name:       "default fake user-agent when scraper UA empty",
 			userAgent:  "",
-			expectedUA: DefaultFakeUserAgent,
+			expectedUA: configutil.DefaultScraperUserAgent,
 		},
 	}
 

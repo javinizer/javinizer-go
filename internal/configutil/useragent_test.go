@@ -206,7 +206,7 @@ func TestUserAgentString_Scan(t *testing.T) {
 
 func TestDefaultUserAgentConstants(t *testing.T) {
 	assert.Equal(t, "Javinizer (+https://github.com/javinizer/Javinizer)", DefaultUserAgent)
-	assert.Equal(t, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36", DefaultFakeUserAgent)
+	assert.Equal(t, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36", DefaultScraperUserAgent)
 }
 
 func TestUserAgentString_JSONRoundTrip(t *testing.T) {

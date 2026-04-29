@@ -12,7 +12,7 @@ type ScraperSettings struct {
 	Timeout         int          `yaml:"timeout" json:"timeout"`                                   // HTTP client timeout in seconds
 	RateLimit       int          `yaml:"rate_limit" json:"rate_limit"`                             // Request delay in milliseconds (mirrors RequestDelay)
 	RetryCount      int          `yaml:"retry_count" json:"retry_count"`                           // Max retries (mirrors MaxRetries)
-	UserAgent       string       `yaml:"user_agent" json:"user_agent"`                             // Custom User-Agent; if empty, DefaultFakeUserAgent is used
+	UserAgent       string       `yaml:"user_agent" json:"user_agent"`                             // Custom User-Agent; if empty, configutil.DefaultScraperUserAgent is used
 	Proxy           *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`                   // Optional scraper-specific proxy override
 	DownloadProxy   *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"` // Optional scraper-specific download proxy override
 	BaseURL         string       `yaml:"base_url,omitempty" json:"base_url,omitempty"`             // Base URL for the scraper
