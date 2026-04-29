@@ -2,7 +2,6 @@ package dmm
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -13,15 +12,8 @@ import (
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
-
-// basicAuth creates a Basic Authentication header value
-func basicAuth(username, password string) string {
-	auth := username + ":" + password
-	return base64.StdEncoding.EncodeToString([]byte(auth))
-}
 
 func validateBrowserURL(rawURL string) error {
 	if rawURL == "" {
@@ -121,9 +113,16 @@ func FetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyP
 
 	// Add proxy if configured (ProxyProfile has URL, no Enabled field)
 	if proxyProfile != nil && proxyProfile.URL != "" {
-		sanitizedURL := httpclient.SanitizeProxyURL(proxyProfile.URL)
-		logging.Debugf("DMM Browser: Using proxy %s", sanitizedURL)
-		opts = append(opts, chromedp.ProxyServer(proxyProfile.URL))
+		proxyURL := proxyProfile.URL
+		if proxyProfile.Username != "" && proxyProfile.Password != "" {
+			if idx := strings.Index(proxyURL, "://"); idx != -1 {
+				proxyURL = proxyURL[:idx+3] + proxyProfile.Username + ":" + proxyProfile.Password + "@" + proxyURL[idx+3:]
+			} else {
+				logging.Warnf("DMM Browser: Cannot embed proxy credentials — URL missing scheme: %s", proxyURL[:strings.IndexByte(proxyURL, ':')+1])
+			}
+		}
+		logging.Debugf("DMM Browser: Using proxy (credentials embedded if configured)")
+		opts = append(opts, chromedp.ProxyServer(proxyURL))
 	}
 
 	// Create context with custom allocator
@@ -153,21 +152,6 @@ func FetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyP
 				WithDomain(".dmm.co.jp")
 			if err := expr.Do(ctx); err != nil {
 				return fmt.Errorf("failed to set cklg cookie: %w", err)
-			}
-
-			// Set proxy authentication if proxy is configured and credentials are provided
-			if proxyProfile != nil && proxyProfile.URL != "" &&
-				proxyProfile.Username != "" && proxyProfile.Password != "" {
-				logging.Debug("DMM Browser: Setting proxy authentication credentials")
-				// Use CDP Network domain to set proxy auth credentials
-				// Note: This only works for HTTP/HTTPS proxies with Basic auth
-				// SOCKS5 proxies authenticate during handshake (not supported via headers)
-				err := network.SetExtraHTTPHeaders(network.Headers{
-					"Proxy-Authorization": "Basic " + basicAuth(proxyProfile.Username, proxyProfile.Password),
-				}).Do(ctx)
-				if err != nil {
-					return fmt.Errorf("failed to set proxy authentication: %w", err)
-				}
 			}
 			return nil
 		}),

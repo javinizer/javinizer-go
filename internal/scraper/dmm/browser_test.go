@@ -63,53 +63,6 @@ func TestIsRunningInContainer(t *testing.T) {
 	}
 }
 
-// TestBasicAuth verifies Basic Authentication header generation
-func TestBasicAuth(t *testing.T) {
-	tests := []struct {
-		name        string
-		username    string
-		password    string
-		expected    string
-		description string
-	}{
-		{
-			name:        "simple credentials",
-			username:    "user",
-			password:    "pass",
-			expected:    "dXNlcjpwYXNz", // base64("user:pass")
-			description: "Should encode simple credentials correctly",
-		},
-		{
-			name:        "empty credentials",
-			username:    "",
-			password:    "",
-			expected:    "Og==", // base64(":")
-			description: "Should handle empty credentials",
-		},
-		{
-			name:        "special characters in password",
-			username:    "admin",
-			password:    "p@ssw0rd!",
-			expected:    "YWRtaW46cEBzc3cwcmQh", // base64("admin:p@ssw0rd!")
-			description: "Should handle special characters in password",
-		},
-		{
-			name:        "unicode characters",
-			username:    "用户",
-			password:    "密码",
-			expected:    "55So5oi3OuWvhueggQ==", // base64("用户:密码")
-			description: "Should handle unicode characters",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := basicAuth(tt.username, tt.password)
-			assert.Equal(t, tt.expected, result, tt.description)
-		})
-	}
-}
-
 func TestValidateBrowserURL(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -1,7 +1,6 @@
 package dmm
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -45,6 +44,16 @@ func normalizedContentIDWithoutPadding(contentID string) string {
 	return contentIDUnpadRegex.ReplaceAllString(contentID, "$1$2")
 }
 
+func stripRentalSuffix(cid string) string {
+	if len(cid) >= 2 && strings.HasSuffix(strings.ToLower(cid), "r") {
+		beforeR := cid[len(cid)-2]
+		if beforeR >= '0' && beforeR <= '9' {
+			return cid[:len(cid)-1]
+		}
+	}
+	return cid
+}
+
 func uniqueNonEmptyStrings(values []string) []string {
 	uniqueValues := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))
@@ -81,16 +90,12 @@ func extractContentIDCandidates(doc *goquery.Document, searchIDs []string) []con
 		// 3. Monthly subscription: /monthly/standard/-/detail/=/cid=XXX
 		// 4. Video streaming: video.dmm.co.jp/av/content/?id=XXX
 		if strings.Contains(href, "cid=") {
-			// Extract CID from www.dmm.co.jp links
-			cidRegex := regexp.MustCompile(`cid=([^/?&]+)`)
-			matches := cidRegex.FindStringSubmatch(href)
+			matches := dmmCIDRegex.FindStringSubmatch(href)
 			if len(matches) > 1 {
 				urlCID = matches[1]
 			}
 		} else if strings.Contains(href, "video.dmm.co.jp") && strings.Contains(href, "id=") {
-			// Extract ID from video.dmm.co.jp links
-			idRegex := regexp.MustCompile(`id=([^/?&]+)`)
-			matches := idRegex.FindStringSubmatch(href)
+			matches := dmmIDRegex.FindStringSubmatch(href)
 			if len(matches) > 1 {
 				urlCID = matches[1]
 			}
@@ -100,8 +105,8 @@ func extractContentIDCandidates(doc *goquery.Document, searchIDs []string) []con
 			return
 		}
 
-		if strings.Contains(href, "/rental/") && strings.HasSuffix(strings.ToLower(urlCID), "r") {
-			urlCID = urlCID[:len(urlCID)-1]
+		if strings.Contains(href, "/rental/") {
+			urlCID = stripRentalSuffix(urlCID)
 		}
 
 		// Clean the CID from URL using precompiled regex for consistency and performance
@@ -139,7 +144,7 @@ func (s *Scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 
 	// URL patterns to exclude (unsupported page structures)
 	excludePatterns := []string{
-		"/rental/",             // Rental pages
+		"/rental/-/search/",    // Rental search pages (not product pages)
 		"/search/",             // Search results pages
 		"/list/",               // List/search pages
 		"/-/search/",           // Mono search pages
@@ -162,6 +167,7 @@ func (s *Scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 	// 3. video.dmm.co.jp/av/ (digital streaming video pages)
 	// 2. /monthly/premium/ (monthly premium - LIMITED metadata, no actress data)
 	// 1. /monthly/standard/ (monthly standard - LIMITED metadata, no actress data)
+	// 0. /rental/ (rental pages - LIMITED metadata, last resort when nothing else available)
 
 	// Extract canonical base ID by stripping DMM prefixes (leading digits OR h_<digits>)
 	// Examples: "4sone860" -> "sone860", "61mdb087" -> "mdb087", "h_1472smkcx003" -> "smkcx003"
@@ -215,24 +221,13 @@ func (s *Scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 			return
 		}
 
-		// Assign priority
-		priority := 0
-		if strings.Contains(fullURL, "/mono/dvd/") {
-			priority = 6 // Highest: physical DVD pages with full metadata including actress data
-		} else if strings.Contains(fullURL, "/digital/videoa/") || strings.Contains(fullURL, "/digital/videoc/") {
-			priority = 5 // Digital video DVD with full metadata
-		} else if strings.Contains(fullURL, "video.dmm.co.jp/amateur/") {
-			priority = 4 // Amateur pages
-		} else if strings.Contains(fullURL, "video.dmm.co.jp") {
-			priority = 3 // Digital streaming video (av pages)
-		} else if strings.Contains(fullURL, "/monthly/premium/") {
-			priority = 2 // Monthly premium - LIMITED metadata, no actress data
-		} else if strings.Contains(fullURL, "/monthly/standard/") {
-			priority = 1 // Lowest: monthly standard - LIMITED metadata, no actress data
-		}
+		priority := urlPriority(fullURL)
 
 		// Extract content ID from URL for comparison
 		extractedID := extractContentIDFromURL(fullURL)
+		if strings.Contains(fullURL, "/rental/") {
+			extractedID = stripRentalSuffix(extractedID)
+		}
 		idLen := len(extractedID)
 
 		candidates = append(candidates, urlCandidate{
@@ -376,16 +371,12 @@ func normalizeID(contentID string) string {
 // extractContentIDFromURL extracts content ID from DMM URL
 // Supports both www.dmm.co.jp (cid=) and video.dmm.co.jp (id=) formats
 func extractContentIDFromURL(url string) string {
-	// Try cid= format first (www.dmm.co.jp)
-	cidRegex := regexp.MustCompile(`cid=([^/?&]+)`)
-	matches := cidRegex.FindStringSubmatch(url)
+	matches := dmmCIDRegex.FindStringSubmatch(url)
 	if len(matches) > 1 {
 		return matches[1]
 	}
 
-	// Try id= format (video.dmm.co.jp)
-	idRegex := regexp.MustCompile(`[?&]id=([^/?&]+)`)
-	matches = idRegex.FindStringSubmatch(url)
+	matches = dmmIDRegex.FindStringSubmatch(url)
 	if len(matches) > 1 {
 		return matches[1]
 	}

@@ -265,6 +265,30 @@ func TestNormalizeID(t *testing.T) {
 	}
 }
 
+func TestStripRentalSuffix(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"standard rental ID", "1mdb087r", "1mdb087"},
+		{"r after letter not stripped", "abcr", "abcr"},
+		{"single char r", "r", "r"},
+		{"empty string", "", ""},
+		{"already stripped", "mdb087", "mdb087"},
+		{"multiple trailing r", "1mdb087rr", "1mdb087rr"},
+		{"uppercase R", "1MDB087R", "1MDB087"},
+		{"r after zero", "1mdb080r", "1mdb080"},
+		{"two char ID ending in r", "0r", "0"},
+		{"just digit then r", "5r", "5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, stripRentalSuffix(tt.input))
+		})
+	}
+}
+
 // TestExtractContentIDFromURL verifies content ID extraction from URLs
 func TestExtractContentIDFromURL(t *testing.T) {
 	tests := []struct {
@@ -1395,9 +1419,9 @@ func TestExtractCandidateURLs_Priorities(t *testing.T) {
 				<a href="https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/">Monthly Standard</a>
 			`,
 			contentID:        "sone860",
-			expectedPriority: 6,
+			expectedPriority: 350,
 			expectedURL:      "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=sone860/",
-			description:      "/mono/dvd/ should have priority 6 (highest - full metadata)",
+			description:      "/mono/dvd/ should have priority 350 (highest - full metadata)",
 		},
 		{
 			name: "Digital video has second priority",
@@ -1406,9 +1430,9 @@ func TestExtractCandidateURLs_Priorities(t *testing.T) {
 				<a href="https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/">Monthly Standard</a>
 			`,
 			contentID:        "mdb087",
-			expectedPriority: 5,
+			expectedPriority: 300,
 			expectedURL:      "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=mdb087/",
-			description:      "/digital/videoa/ should have priority 5 (full metadata)",
+			description:      "/digital/videoa/ should have priority 300 (full metadata)",
 		},
 		{
 			name: "Streaming video has third priority",
@@ -1417,9 +1441,9 @@ func TestExtractCandidateURLs_Priorities(t *testing.T) {
 				<a href="https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/">Monthly Standard</a>
 			`,
 			contentID:        "61mdb087",
-			expectedPriority: 3,
+			expectedPriority: 200,
 			expectedURL:      "https://video.dmm.co.jp/av/content/?id=61mdb087",
-			description:      "video.dmm.co.jp/av/ should have priority 3",
+			description:      "video.dmm.co.jp/av/ should have priority 200",
 		},
 		{
 			name: "Monthly premium has fourth priority",
@@ -1428,9 +1452,9 @@ func TestExtractCandidateURLs_Priorities(t *testing.T) {
 				<a href="https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=mdb087/">Monthly Standard</a>
 			`,
 			contentID:        "61mdb087",
-			expectedPriority: 2,
+			expectedPriority: 150,
 			expectedURL:      "https://www.dmm.co.jp/monthly/premium/-/detail/=/cid=61mdb087/",
-			description:      "/monthly/premium/ should have priority 2 (limited metadata)",
+			description:      "/monthly/premium/ should have priority 150 (limited metadata)",
 		},
 		{
 			name: "Monthly standard has lowest priority",
@@ -1438,9 +1462,9 @@ func TestExtractCandidateURLs_Priorities(t *testing.T) {
 				<a href="https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/">Monthly Standard</a>
 			`,
 			contentID:        "61mdb087",
-			expectedPriority: 1,
+			expectedPriority: 100,
 			expectedURL:      "https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/",
-			description:      "/monthly/standard/ should have priority 1 (lowest - limited metadata)",
+			description:      "/monthly/standard/ should have priority 100 (limited metadata)",
 		},
 	}
 
@@ -1547,14 +1571,24 @@ func TestExtractCandidateURLs_ExcludePatterns(t *testing.T) {
 		description      string
 	}{
 		{
-			name: "Rental pages excluded",
+			name: "Rental product pages included as last resort",
 			html: `
 				<a href="https://www.dmm.co.jp/rental/-/detail/=/cid=mdb087/">Rental</a>
 			`,
 			contentID:        "mdb087",
 			enableBrowser:    false,
+			shouldBeExcluded: false,
+			description:      "/rental/ product page URLs should be included as last resort",
+		},
+		{
+			name: "Rental search pages excluded",
+			html: `
+				<a href="https://www.dmm.co.jp/rental/-/search/=/searchstr=mdb087/">Rental Search</a>
+			`,
+			contentID:        "mdb087",
+			enableBrowser:    false,
 			shouldBeExcluded: true,
-			description:      "/rental/ URLs should be excluded",
+			description:      "/rental/-/search/ URLs should be excluded",
 		},
 		{
 			name: "Streaming excluded when browser mode disabled",
@@ -1616,6 +1650,7 @@ func TestExtractCandidateURLs_PriorityOrder(t *testing.T) {
 		<a href="https://video.dmm.co.jp/av/content/?id=61mdb087">Streaming (Priority 3)</a>
 		<a href="https://www.dmm.co.jp/monthly/premium/-/detail/=/cid=61mdb087/">Monthly Premium (Priority 2 - limited metadata)</a>
 		<a href="https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/">Monthly Standard (Priority 1 - limited metadata)</a>
+		<a href="https://www.dmm.co.jp/rental/ppr/-/detail/=/cid=1mdb087r/">Rental (Priority 0 - last resort)</a>
 	`
 
 	settings := createTestSettings(true, nil)
@@ -1626,19 +1661,25 @@ func TestExtractCandidateURLs_PriorityOrder(t *testing.T) {
 	require.NoError(t, err)
 
 	candidates := scraper.extractCandidateURLs(doc, "61mdb087")
-	require.Len(t, candidates, 5, "Should extract all 5 URL types")
+	require.Len(t, candidates, 6, "Should extract all 6 URL types")
 
-	// Verify priorities are assigned correctly
 	priorityMap := make(map[int]string)
 	for _, c := range candidates {
 		priorityMap[c.priority] = c.url
 	}
 
-	assert.Contains(t, priorityMap[6], "/mono/dvd/", "Priority 6 should be physical DVD (highest - full metadata)")
-	assert.Contains(t, priorityMap[5], "/digital/videoa/", "Priority 5 should be digital video (full metadata)")
-	assert.Contains(t, priorityMap[3], "video.dmm.co.jp", "Priority 3 should be streaming")
-	assert.Contains(t, priorityMap[2], "/monthly/premium/", "Priority 2 should be monthly premium (limited metadata)")
-	assert.Contains(t, priorityMap[1], "/monthly/standard/", "Priority 1 should be monthly standard (lowest - limited metadata)")
+	assert.Contains(t, priorityMap[350], "/mono/dvd/", "Priority 350 should be physical DVD (highest - full metadata)")
+	assert.Contains(t, priorityMap[300], "/digital/videoa/", "Priority 300 should be digital video (full metadata)")
+	assert.Contains(t, priorityMap[200], "video.dmm.co.jp", "Priority 200 should be streaming")
+	assert.Contains(t, priorityMap[150], "/monthly/premium/", "Priority 150 should be monthly premium (limited metadata)")
+	assert.Contains(t, priorityMap[100], "/monthly/standard/", "Priority 100 should be monthly standard (limited metadata)")
+	assert.Contains(t, priorityMap[0], "/rental/", "Priority 0 should be rental (last resort)")
+
+	for _, c := range candidates {
+		if c.priority == 0 {
+			assert.NotContains(t, c.contentID, "r", "Rental candidate contentID should have 'r' suffix stripped")
+		}
+	}
 }
 
 // TestResolveContentID_NoRepository verifies error when repository is nil

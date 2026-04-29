@@ -14,6 +14,16 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
+var (
+	dateRegex      = regexp.MustCompile(`\d{4}/\d{2}/\d{2}`)
+	runtimeRegex   = regexp.MustCompile(`(\d{2,3})\s?(?:minutes|分)`)
+	directorRegex  = regexp.MustCompile(`<a.*?href="[^"]*\?director=(\d+)".*?>([^<]+)</a>`)
+	seriesRegex    = regexp.MustCompile(`<a href="(?:/digital/videoa/|(?:/en)?/mono/dvd/)-/list/=/article=series/id=\d*/"[^>]*?>(.*)</a></td>`)
+	ratingRegex    = regexp.MustCompile(`<strong>(.*)\s?(?:points|点)</strong>`)
+	votesRegex     = regexp.MustCompile(`<p class="d-review__evaluates">.*?<strong>(\d+)</strong>`)
+	genreNameRegex = regexp.MustCompile(`>([^<]+)</a>`)
+)
+
 func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:    s.Name(),
@@ -22,6 +32,12 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 	}
 
 	if cid := extractContentIDFromURL(sourceURL); cid != "" {
+		if strings.Contains(sourceURL, "/rental/") {
+			cid = stripRentalSuffix(cid)
+		}
+		if cleaned := cleanPrefixRegex.ReplaceAllString(strings.ToLower(cid), "$1"); cleaned != "" {
+			cid = cleaned
+		}
 		result.ContentID = cid
 		result.ID = normalizeID(cid)
 	}
@@ -191,7 +207,6 @@ func (s *Scraper) extractDescription(doc *goquery.Document, isNewSite bool) stri
 }
 
 func (s *Scraper) extractReleaseDate(doc *goquery.Document) *time.Time {
-	dateRegex := regexp.MustCompile(`\d{4}/\d{2}/\d{2}`)
 	dateStr := dateRegex.FindString(doc.Text())
 
 	if dateStr != "" {
@@ -204,7 +219,6 @@ func (s *Scraper) extractReleaseDate(doc *goquery.Document) *time.Time {
 }
 
 func (s *Scraper) extractRuntime(doc *goquery.Document) int {
-	runtimeRegex := regexp.MustCompile(`(\d{2,3})\s?(?:minutes|分)`)
 	matches := runtimeRegex.FindStringSubmatch(doc.Text())
 
 	if len(matches) > 1 {
@@ -215,7 +229,6 @@ func (s *Scraper) extractRuntime(doc *goquery.Document) int {
 }
 
 func (s *Scraper) extractDirector(doc *goquery.Document) string {
-	directorRegex := regexp.MustCompile(`<a.*?href="[^"]*\?director=(\d+)".*?>([^<]+)</a>`)
 	html, _ := doc.Html()
 	matches := directorRegex.FindStringSubmatch(html)
 
@@ -254,7 +267,6 @@ func (s *Scraper) extractSeries(doc *goquery.Document, isNewSite bool) string {
 		return s.extractSeriesNewSite(doc)
 	}
 
-	seriesRegex := regexp.MustCompile(`<a href="(?:/digital/videoa/|(?:/en)?/mono/dvd/)-/list/=/article=series/id=\d*/"[^>]*?>(.*)</a></td>`)
 	html, _ := doc.Html()
 	matches := seriesRegex.FindStringSubmatch(html)
 
@@ -276,7 +288,6 @@ func (s *Scraper) extractRating(doc *goquery.Document, isNewSite bool) *models.R
 		return nil
 	}
 
-	ratingRegex := regexp.MustCompile(`<strong>(.*)\s?(?:points|点)</strong>`)
 	html, _ := doc.Html()
 	matches := ratingRegex.FindStringSubmatch(html)
 
@@ -300,7 +311,6 @@ func (s *Scraper) extractRating(doc *goquery.Document, isNewSite bool) *models.R
 
 		rating = rating * 2
 
-		votesRegex := regexp.MustCompile(`<p class="d-review__evaluates">.*?<strong>(\d+)</strong>`)
 		votesMatches := votesRegex.FindStringSubmatch(html)
 		votes := 0
 		if len(votesMatches) > 1 {
@@ -335,7 +345,6 @@ func (s *Scraper) extractGenres(doc *goquery.Document) []string {
 			}
 		}
 
-		genreNameRegex := regexp.MustCompile(`>([^<]+)</a>`)
 		matches := genreNameRegex.FindAllStringSubmatch(genreSection, -1)
 
 		for _, match := range matches {

@@ -344,7 +344,7 @@ func (s *Scraper) tryActressThumbURLs(ctx context.Context, firstName, lastName s
 
 	testClient, err := httpclient.NewRestyClient(s.proxyProfile, 5*time.Second, 0)
 	if err != nil {
-		logging.Debugf("DMM: Failed to create thumbnail probe client with scraper proxy: %v, using explicit no-proxy fallback", err)
+		logging.Warnf("DMM: Failed to create thumbnail probe client with scraper proxy: %v, using explicit no-proxy fallback", err)
 		testClient = httpclient.NewRestyClientNoProxy(5*time.Second, 0)
 	}
 	testClient.SetRedirectPolicy(resty.NoRedirectPolicy())

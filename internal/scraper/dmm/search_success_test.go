@@ -191,7 +191,7 @@ func TestSearch_ReturnsStatusErrorForDetailPage(t *testing.T) {
 	assert.Equal(t, http.StatusBadGateway, scraperErr.StatusCode)
 }
 
-func TestGetURL_PrefersWorkingDirectURLOverLowPrioritySearchResult(t *testing.T) {
+func TestGetURL_PrefersSearchResultOverDirectURL(t *testing.T) {
 	repo := newDMMTestRepo(t)
 	require.NoError(t, repo.Create(&models.ContentIDMapping{
 		SearchID:  "MDB-087",
@@ -201,26 +201,23 @@ func TestGetURL_PrefersWorkingDirectURLOverLowPrioritySearchResult(t *testing.T)
 
 	settings := config.ScraperSettings{
 		Enabled: true,
-		// Note: scrape_actress was previously in Extra, now in DMMConfig
 	}
 	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), repo)
 
 	searchPage := `<html><body>
 		<a href="/monthly/standard/-/detail/=/cid=61mdb087/">Low priority monthly result</a>
 	</body></html>`
-	detailPage := `
+	monthlyPage := `
 <!DOCTYPE html>
 <html>
 <body>
-	<h1 id="title" class="item">MDB-087 Direct URL Winner</h1>
-	<div class="mg-b20 lh4"><p class="mg-b20">Resolved through direct URL fallback.</p></div>
+	<h1 id="title" class="item">MDB-087 Monthly Result</h1>
+	<div class="mg-b20 lh4"><p class="mg-b20">Found through search.</p></div>
 	<table>
 		<tr><td>Release: 2024/04/05</td></tr>
 		<tr><td>Runtime: 140 minutes</td></tr>
-		<tr><td>Actress:</td><td><a href="?actress=111">Fallback Actress</a></td></tr>
 	</table>
-	<a href="?maker=456">Fallback Maker</a>
-	<img src="https://pics.dmm.co.jp/digital/video/mdb087/mdb087ps.jpg" />
+	<a href="?maker=456">Monthly Maker</a>
 </body>
 </html>`
 
@@ -233,9 +230,13 @@ func TestGetURL_PrefersWorkingDirectURLOverLowPrioritySearchResult(t *testing.T)
 				status: http.StatusOK,
 				body:   searchPage,
 			},
-			physicalURLFor("mdb087"): {
+			searchURLFor("61mdb087"): {
 				status: http.StatusOK,
-				body:   detailPage,
+				body:   searchPage,
+			},
+			"https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/": {
+				status: http.StatusOK,
+				body:   monthlyPage,
 			},
 		},
 	}
@@ -243,14 +244,14 @@ func TestGetURL_PrefersWorkingDirectURLOverLowPrioritySearchResult(t *testing.T)
 
 	foundURL, err := scraper.GetURL("MDB-087")
 	require.NoError(t, err)
-	assert.Equal(t, physicalURLFor("mdb087"), foundURL)
+	assert.Equal(t, "https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/", foundURL)
 
 	result, err := scraper.Search(context.Background(), "MDB-087")
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	assert.Equal(t, "MDB-087 Direct URL Winner", result.Title)
-	assert.Equal(t, "Fallback Maker", result.Maker)
-	assert.Equal(t, "Resolved through direct URL fallback.", result.Description)
+	assert.Equal(t, "MDB-087 Monthly Result", result.Title)
+	assert.Equal(t, "Monthly Maker", result.Maker)
+	assert.Equal(t, "Found through search.", result.Description)
 }
 
 func searchURLFor(query string) string {
@@ -263,4 +264,69 @@ func digitalURLFor(contentID string) string {
 
 func physicalURLFor(contentID string) string {
 	return "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=" + contentID + "/"
+}
+
+func rentalURLFor(contentID string) string {
+	return "https://www.dmm.co.jp/rental/ppr/-/detail/=/cid=" + contentID + "/"
+}
+
+func TestTryDirectURLs_RentalOnly(t *testing.T) {
+	repo := newDMMTestRepo(t)
+	require.NoError(t, repo.Create(&models.ContentIDMapping{
+		SearchID:  "FSDSS-879",
+		ContentID: "fsdss879",
+		Source:    "dmm",
+	}))
+
+	settings := config.ScraperSettings{Enabled: true}
+	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), repo)
+
+	transport := &dmmSearchSuccessRoundTripper{
+		responses: map[string]struct {
+			status int
+			body   string
+		}{
+			searchURLFor("fsdss879"):   {status: http.StatusOK, body: "<html><body>no results</body></html>"},
+			searchURLFor("fsdss-879"):  {status: http.StatusOK, body: "<html><body>no results</body></html>"},
+			physicalURLFor("fsdss879"): {status: http.StatusNotFound, body: ""},
+			digitalURLFor("fsdss879"):  {status: http.StatusNotFound, body: ""},
+			rentalURLFor("1fsdss879r"): {status: http.StatusOK, body: "<html><body>rental page</body></html>"},
+		},
+	}
+	scraper.client.SetTransport(transport)
+
+	foundURL, err := scraper.GetURL("FSDSS-879")
+	require.NoError(t, err)
+	assert.Equal(t, rentalURLFor("1fsdss879r"), foundURL)
+}
+
+func TestTryDirectURLs_NonRentalPriority(t *testing.T) {
+	repo := newDMMTestRepo(t)
+	require.NoError(t, repo.Create(&models.ContentIDMapping{
+		SearchID:  "IPX-535",
+		ContentID: "ipx00535",
+		Source:    "dmm",
+	}))
+
+	settings := config.ScraperSettings{Enabled: true}
+	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), repo)
+
+	transport := &dmmSearchSuccessRoundTripper{
+		responses: map[string]struct {
+			status int
+			body   string
+		}{
+			searchURLFor("ipx535"):     {status: http.StatusOK, body: "<html><body>no results</body></html>"},
+			searchURLFor("ipx-535"):    {status: http.StatusOK, body: "<html><body>no results</body></html>"},
+			searchURLFor("ipx00535"):   {status: http.StatusOK, body: "<html><body>no results</body></html>"},
+			physicalURLFor("ipx00535"): {status: http.StatusNotFound, body: ""},
+			digitalURLFor("ipx00535"):  {status: http.StatusOK, body: "<html><body>digital page</body></html>"},
+			rentalURLFor("1ipx00535r"): {status: http.StatusOK, body: "<html><body>rental page</body></html>"},
+		},
+	}
+	scraper.client.SetTransport(transport)
+
+	foundURL, err := scraper.GetURL("IPX-535")
+	require.NoError(t, err)
+	assert.Equal(t, digitalURLFor("ipx00535"), foundURL)
 }

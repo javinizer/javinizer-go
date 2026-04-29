@@ -10,19 +10,31 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scraper/image/placeholder"
 )
 
+var coverPsRegex = regexp.MustCompile(`"(https://pics\.dmm\.co\.jp/[^"'\x60]+ps\.jpg)"`)
+
 func (s *Scraper) extractCoverURL(doc *goquery.Document, isNewSite bool, contentID string) string {
 	if isNewSite {
 		return s.extractCoverURLNewSite(doc, contentID)
 	}
 
-	coverRegex := regexp.MustCompile(`(https://pics\.dmm\.co\.jp/(?:mono/movie/adult|digital/(?:video|amateur))/(.*)/(.*).jpg)`)
-	html, _ := doc.Html()
-	matches := coverRegex.FindStringSubmatch(html)
-
-	if len(matches) > 1 {
-		return strings.Replace(matches[1], "ps.jpg", "pl.jpg", 1)
+	coverURL, exists := doc.Find(`meta[property="og:image"]`).Attr("content")
+	if !exists || coverURL == "" {
+		html, _ := doc.Html()
+		matches := coverPsRegex.FindStringSubmatch(html)
+		if len(matches) > 1 {
+			return strings.Replace(matches[1], "ps.jpg", "pl.jpg", 1)
+		}
+		return ""
 	}
-	return ""
+	coverURL = strings.Replace(coverURL, "awsimgsrc.dmm.co.jp/pics_dig", "pics.dmm.co.jp", 1)
+	coverURL = strings.Replace(coverURL, "ps.jpg", "pl.jpg", 1)
+	if !strings.Contains(coverURL, "/amateur/") {
+		coverURL = strings.Replace(coverURL, "jp.jpg", "pl.jpg", 1)
+	}
+	if idx := strings.Index(coverURL, "?"); idx != -1 {
+		coverURL = coverURL[:idx]
+	}
+	return coverURL
 }
 
 func (s *Scraper) extractScreenshots(doc *goquery.Document, isNewSite bool) []string {
@@ -33,7 +45,12 @@ func (s *Scraper) extractScreenshots(doc *goquery.Document, isNewSite bool) []st
 	screenshots := make([]string, 0)
 
 	doc.Find("a[name='sample-image']").Each(func(i int, sel *goquery.Selection) {
-		if imgSrc, exists := sel.Find("img").Attr("data-lazy"); exists {
+		imgSel := sel.Find("img")
+		imgSrc, exists := imgSel.Attr("data-lazy")
+		if !exists {
+			imgSrc, exists = imgSel.Attr("src")
+		}
+		if exists && imgSrc != "" {
 			imgSrc = strings.Replace(imgSrc, "-", "jp-", 1)
 			screenshots = append(screenshots, imgSrc)
 		}

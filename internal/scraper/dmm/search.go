@@ -3,7 +3,6 @@ package dmm
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -12,7 +11,24 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-var stripNumericPrefixRegex = regexp.MustCompile(`^\d+`)
+func maxPriority(candidates []urlCandidate) int {
+	best := 0
+	for _, c := range candidates {
+		if c.priority > best {
+			best = c.priority
+		}
+	}
+	return best
+}
+
+func sortCandidates(candidates []urlCandidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority > candidates[j].priority
+		}
+		return candidates[i].idLength < candidates[j].idLength
+	})
+}
 
 func (s *Scraper) GetURL(id string) (string, error) {
 	return s.getURLCtx(context.Background(), id)
@@ -55,13 +71,21 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 		logging.Debugf("DMM: HTTP client transport proxy setting: %v", s.client.GetClient().Transport != nil)
 
 		if err := s.rateLimiter.Wait(ctx); err != nil {
+			if ctx.Err() != nil {
+				logging.Debugf("DMM: Context cancelled before search query '%s'", searchQuery)
+				return "", fmt.Errorf("DMM search cancelled: %w", ctx.Err())
+			}
 			logging.Debugf("DMM: Rate limit wait failed for query '%s': %v", searchQuery, err)
 			continue
 		}
 
 		resp, err := s.client.R().SetContext(ctx).Get(searchURLFormatted)
-		if err != nil || resp.StatusCode() != 200 {
-			logging.Debugf("DMM: Search failed for query '%s': status=%d, err=%v", searchQuery, resp.StatusCode(), err)
+		if err != nil {
+			logging.Debugf("DMM: Search request failed for query '%s': err=%v", searchQuery, err)
+			continue
+		}
+		if resp.StatusCode() != 200 {
+			logging.Debugf("DMM: Search failed for query '%s': status=%d", searchQuery, resp.StatusCode())
 			continue
 		}
 
@@ -93,32 +117,17 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	if len(allCandidates) == 0 {
 		logging.Debugf("DMM: No candidates from search, trying direct URL construction for %s", contentID)
 		allCandidates = s.tryDirectURLs(ctx, contentID)
+	} else if maxPriority(allCandidates) < 200 {
+		logging.Debugf("DMM: Best search candidate has low priority, trying direct URLs for %s", contentID)
+		directCandidates := s.tryDirectURLs(ctx, contentID)
+		allCandidates = append(allCandidates, directCandidates...)
 	}
 
 	if len(allCandidates) == 0 {
 		return "", fmt.Errorf("no scrapable URL found for movie on DMM")
 	}
 
-	sort.Slice(allCandidates, func(i, j int) bool {
-		if allCandidates[i].priority != allCandidates[j].priority {
-			return allCandidates[i].priority > allCandidates[j].priority
-		}
-		return allCandidates[i].idLength < allCandidates[j].idLength
-	})
-
-	if allCandidates[0].priority < 2 {
-		logging.Debugf("DMM: Best candidate has low priority (%d), trying direct URLs for %s", allCandidates[0].priority, contentID)
-		directCandidates := s.tryDirectURLs(ctx, contentID)
-		if len(directCandidates) > 0 {
-			allCandidates = append(allCandidates, directCandidates...)
-			sort.Slice(allCandidates, func(i, j int) bool {
-				if allCandidates[i].priority != allCandidates[j].priority {
-					return allCandidates[i].priority > allCandidates[j].priority
-				}
-				return allCandidates[i].idLength < allCandidates[j].idLength
-			})
-		}
-	}
+	sortCandidates(allCandidates)
 
 	foundURL := allCandidates[0].url
 	logging.Debugf("DMM: Selected URL for %s (priority %d): %s", id, allCandidates[0].priority, foundURL)
@@ -126,8 +135,14 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 }
 
 func (s *Scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCandidate {
-	strippedID := stripNumericPrefixRegex.ReplaceAllString(contentID, "")
-	strippedID = strings.ToLower(strippedID)
+	strippedID := cleanPrefixRegex.ReplaceAllString(strings.ToLower(contentID), "$1")
+
+	// DMM rental PPR catalog prefixes: 1=general, 2=genre, 4=HD, 5=download. Prefix 3 not used for rental.
+	rentalPrefixes := []string{"1", "2", "4", "5"}
+	var rentalURLs []string
+	for _, prefix := range rentalPrefixes {
+		rentalURLs = append(rentalURLs, fmt.Sprintf(rentalURL, prefix+strippedID+"r"))
+	}
 
 	directURLs := []string{
 		fmt.Sprintf(physicalURL, strippedID),
@@ -137,10 +152,15 @@ func (s *Scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 		fmt.Sprintf(newDigitalURL, strippedID),
 		fmt.Sprintf(newAmateurURL, strippedID),
 	}
+	directURLs = append(directURLs, rentalURLs...)
 
 	var candidates []urlCandidate
 	for _, directURL := range directURLs {
 		if err := s.rateLimiter.Wait(ctx); err != nil {
+			if ctx.Err() != nil {
+				logging.Debugf("DMM: Context cancelled trying direct URL")
+				return candidates
+			}
 			logging.Debugf("DMM: Rate limit wait failed for direct URL: %v", err)
 			continue
 		}
@@ -160,6 +180,9 @@ func (s *Scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 			priority := urlPriority(directURL)
 
 			extractedID := extractContentIDFromURL(directURL)
+			if strings.Contains(directURL, "/rental/") {
+				extractedID = stripRentalSuffix(extractedID)
+			}
 			idLen := len(extractedID)
 			logging.Debugf("DMM: ✓ Found direct URL (priority %d, ID: %s, len: %d): %s", priority, extractedID, idLen, directURL)
 			candidates = append(candidates, urlCandidate{
@@ -168,7 +191,6 @@ func (s *Scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 				contentID: extractedID,
 				idLength:  idLen,
 			})
-			break
 		}
 		logging.Debugf("DMM: Direct URL %s returned status %d", directURL, resp.StatusCode())
 	}
@@ -177,13 +199,19 @@ func (s *Scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 
 func urlPriority(rawURL string) int {
 	if strings.Contains(rawURL, "/mono/dvd/") {
-		return 6
-	} else if strings.Contains(rawURL, "/digital/videoa/") {
-		return 5
+		return 350
+	} else if strings.Contains(rawURL, "/digital/videoa/") || strings.Contains(rawURL, "/digital/videoc/") {
+		return 300
 	} else if strings.Contains(rawURL, "video.dmm.co.jp/amateur/content/") {
-		return 4
+		return 250
 	} else if strings.Contains(rawURL, "video.dmm.co.jp/av/content/") {
-		return 3
+		return 200
+	} else if strings.Contains(rawURL, "/monthly/premium/") {
+		return 150
+	} else if strings.Contains(rawURL, "/monthly/standard/") {
+		return 100
+	} else if strings.Contains(rawURL, "/rental/") {
+		return 0
 	}
 	return 0
 }

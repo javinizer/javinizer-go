@@ -1,7 +1,7 @@
 package dmm
 
 import (
-	"strconv"
+	"encoding/json"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -145,85 +145,39 @@ func (s *Scraper) extractScreenshotsNewSite(doc *goquery.Document) []string {
 
 	// Strategy 1: Try to extract from JSON-LD structured data (highest quality)
 	// JSON-LD contains an "image" array with high-quality screenshot URLs
-	// Example: "image": ["https://pics.dmm.co.jp/.../xxx-jp-001.jpg", "https://pics.dmm.co.jp/.../xxx-jp-002.jpg"]
 	doc.Find(`script[type="application/ld+json"]`).Each(func(i int, sel *goquery.Selection) {
 		jsonText := sel.Text()
 
-		// Check if this JSON contains an image array
-		if !strings.Contains(jsonText, `"image"`) {
+		// Use proper JSON parsing instead of manual string scanning
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonText), &data); err != nil {
 			return
 		}
 
-		// Extract the image array
-		// Look for pattern: "image":[...]
-		if idx := strings.Index(jsonText, `"image":`); idx != -1 {
-			start := idx + len(`"image":`)
-			remaining := jsonText[start:]
-
-			// Skip whitespace
-			for len(remaining) > 0 && (remaining[0] == ' ' || remaining[0] == '\n' || remaining[0] == '\t') {
-				remaining = remaining[1:]
-			}
-
-			// Check if it's an array
-			if len(remaining) > 0 && remaining[0] == '[' {
-				// Find the closing bracket
-				bracketCount := 0
-				arrayEnd := -1
-				for i, ch := range remaining {
-					if ch == '[' {
-						bracketCount++
-					} else if ch == ']' {
-						bracketCount--
-						if bracketCount == 0 {
-							arrayEnd = i
-							break
-						}
+		if imageData, ok := data["image"]; ok {
+			var imageStrs []string
+			switch v := imageData.(type) {
+			case string:
+				imageStrs = []string{v}
+			case []interface{}:
+				for _, item := range v {
+					if s, ok := item.(string); ok {
+						imageStrs = append(imageStrs, s)
 					}
 				}
+			}
 
-				if arrayEnd > 0 {
-					arrayContent := remaining[1:arrayEnd] // Skip opening [ and closing ]
-
-					// Extract individual image URLs from the array
-					// Pattern: "https://pics.dmm.co.jp/.../xxx-jp-001.jpg"
-					urlStart := 0
-					for {
-						// Find next quote
-						quoteIdx := strings.Index(arrayContent[urlStart:], `"`)
-						if quoteIdx == -1 {
-							break
-						}
-						quoteIdx += urlStart
-						urlStart = quoteIdx + 1
-
-						// Find the closing quote
-						closeQuoteIdx := strings.Index(arrayContent[urlStart:], `"`)
-						if closeQuoteIdx == -1 {
-							break
-						}
-
-						imageURL := arrayContent[urlStart : urlStart+closeQuoteIdx]
-						urlStart = urlStart + closeQuoteIdx + 1
-
-						// Check if this is a valid image URL
-						if strings.HasPrefix(imageURL, "http") && strings.Contains(imageURL, "pics.dmm.co.jp") {
-							// Unescape if needed
-							imageURL = strings.ReplaceAll(imageURL, `\/`, `/`)
-
-							// Remove query parameters
-							if qIdx := strings.Index(imageURL, "?"); qIdx != -1 {
-								imageURL = imageURL[:qIdx]
-							}
-
-							// Add to screenshots if not seen
-							if !seen[imageURL] {
-								seen[imageURL] = true
-								screenshots = append(screenshots, imageURL)
-								logging.Debugf("DMM Streaming: Extracted screenshot from JSON-LD: %s", imageURL)
-							}
-						}
-					}
+			for _, rawURL := range imageStrs {
+				if !strings.HasPrefix(rawURL, "http") || !strings.Contains(rawURL, "pics.dmm.co.jp") {
+					continue
+				}
+				imageURL := normalizeImageURL(rawURL)
+				if qIdx := strings.Index(imageURL, "?"); qIdx != -1 {
+					imageURL = imageURL[:qIdx]
+				}
+				if !seen[imageURL] {
+					seen[imageURL] = true
+					screenshots = append(screenshots, imageURL)
 				}
 			}
 		}
@@ -308,52 +262,34 @@ func (s *Scraper) extractMakerNewSite(doc *goquery.Document) string {
 	return scraperutil.CleanString(maker)
 }
 
-// extractRatingNewSite extracts rating from video.dmm.co.jp JSON-LD data
 func (s *Scraper) extractRatingNewSite(doc *goquery.Document) (float64, int) {
 	var rating float64
 	var votes int
 
-	// Extract from JSON-LD structured data
 	doc.Find(`script[type="application/ld+json"]`).Each(func(i int, sel *goquery.Selection) {
 		jsonText := sel.Text()
 
-		// Look for aggregateRating
-		if strings.Contains(jsonText, `"aggregateRating"`) {
-			// Extract ratingValue
-			if idx := strings.Index(jsonText, `"ratingValue":`); idx != -1 {
-				start := idx + len(`"ratingValue":`)
-				remaining := jsonText[start:]
-				var ratingStr strings.Builder
-				for _, ch := range remaining {
-					if ch == ',' || ch == '}' {
-						break
-					}
-					if ch != ' ' {
-						ratingStr.WriteRune(ch)
-					}
-				}
-				ratingVal := strings.TrimSpace(ratingStr.String())
-				if parsedRating, err := strconv.ParseFloat(ratingVal, 64); err == nil {
-					rating = parsedRating * 2 // Convert 5-point scale to 10-point scale
-				}
+		var data map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(jsonText), &data); err != nil {
+			return
+		}
+
+		if rawRating, ok := data["aggregateRating"]; ok {
+			var aggRating map[string]json.RawMessage
+			if err := json.Unmarshal(rawRating, &aggRating); err != nil {
+				return
 			}
 
-			// Extract ratingCount
-			if idx := strings.Index(jsonText, `"ratingCount":`); idx != -1 {
-				start := idx + len(`"ratingCount":`)
-				remaining := jsonText[start:]
-				var votesStr strings.Builder
-				for _, ch := range remaining {
-					if ch == ',' || ch == '}' {
-						break
-					}
-					if ch != ' ' {
-						votesStr.WriteRune(ch)
-					}
+			if rawVal, ok := aggRating["ratingValue"]; ok {
+				var val float64
+				if err := json.Unmarshal(rawVal, &val); err == nil {
+					rating = val * 2
 				}
-				votesVal := strings.TrimSpace(votesStr.String())
-				if parsedVotes, err := strconv.Atoi(votesVal); err == nil {
-					votes = parsedVotes
+			}
+			if rawCount, ok := aggRating["ratingCount"]; ok {
+				var count int
+				if err := json.Unmarshal(rawCount, &count); err == nil {
+					votes = count
 				}
 			}
 		}

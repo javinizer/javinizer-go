@@ -20,6 +20,7 @@ const (
 	searchURL           = baseURL + "/search/=/searchstr=%s/"
 	digitalURL          = baseURL + "/digital/videoa/-/detail/=/cid=%s/"
 	physicalURL         = baseURL + "/mono/dvd/-/detail/=/cid=%s/"
+	rentalURL           = baseURL + "/rental/ppr/-/detail/=/cid=%s/"
 	newDigitalURL       = newBaseURL + "/av/content/?id=%s"
 	newAmateurURL       = newBaseURL + "/amateur/content/?id=%s"
 	actressLinkSelector = `a[href*='?actress='], a[href*='&actress='], a[href*='/article=actress/id=']`
