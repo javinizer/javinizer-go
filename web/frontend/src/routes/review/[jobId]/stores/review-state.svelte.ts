@@ -8,6 +8,7 @@ import { apiClient } from '$lib/api/client';
 import { createConfigQuery } from '$lib/query/queries';
 import type { BatchJobResponse, FileResult, Movie, Scraper, UpdateRequest } from '$lib/api/types';
 import { toastStore } from '$lib/stores/toast';
+import { confirmDialog } from '$lib/stores/dialog.svelte';
 import { websocketStore } from '$lib/stores/websocket';
 import { createOrganizeController, type FileStatus, type OrganizeOperation } from '../logic/organize-controller';
 import { createRescrapeController, type ArrayStrategy, type ScalarStrategy } from '../logic/rescrape-controller';
@@ -361,12 +362,10 @@ export function createReviewState(pageStore: Page) {
 		}
 	}
 
-	function useScreenshotAsPoster(url: string) {
+	async function useScreenshotAsPoster(url: string) {
 		if (!currentMovie || !currentResult) return;
 
-		const confirmed = typeof window === 'undefined'
-			? true
-			: window.confirm('Use this screenshot as the poster? This will replace the current poster image.');
+		const confirmed = await confirmDialog('Set as Poster', 'Use this screenshot as the poster? This will replace the current poster image.');
 
 		if (!confirmed) return;
 

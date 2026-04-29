@@ -5,6 +5,7 @@ import {
 	useQueryClient
 } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
+import { confirmDialog } from '$lib/stores/dialog.svelte';
 import { toastStore } from '$lib/stores/toast';
 import type {
 	Actress,
@@ -290,10 +291,10 @@ export function createActressStore() {
 		saveActressMutation.mutate(toPayload());
 	}
 
-	function removeActress(actress: Actress) {
+	async function removeActress(actress: Actress) {
 		if (!actress.id) return;
 		const name = getDisplayName(actress);
-		if (!confirm(`Delete actress "${name}"?`)) return;
+		if (!(await confirmDialog('Delete Actress', `Delete actress "${name}"?`, { variant: 'danger', confirmLabel: 'Delete' }))) return;
 		deleteActressMutation.mutate(actress.id);
 	}
 
