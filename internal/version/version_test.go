@@ -309,6 +309,38 @@ func TestApplyTrackedVersion(t *testing.T) {
 	})
 }
 
+func TestIsPseudoVersion(t *testing.T) {
+	tests := []struct {
+		v    string
+		want bool
+	}{
+		{"v0.0.0-20260101120000-abcdef123456", true},
+		{"v1.2.3+dirty", true},
+		{"v1.2.3", false},
+		{"v0.0.0", false},
+		{"(devel)", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.v, func(t *testing.T) {
+			assert.Equal(t, tt.want, isPseudoVersion(tt.v))
+		})
+	}
+}
+
+func TestApplyBuildInfo_SkipsPseudoVersion(t *testing.T) {
+	origVersion := Version
+	defer func() { Version = origVersion }()
+
+	Version = "dev"
+	info := &debug.BuildInfo{
+		Main: debug.Module{Version: "v0.0.0-20260101120000-abcdef123456"},
+	}
+	applyBuildInfo(info)
+
+	assert.Equal(t, "dev", Version)
+}
+
 func TestIsPrerelease(t *testing.T) {
 	tests := []struct {
 		version  string
