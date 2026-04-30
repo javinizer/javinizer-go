@@ -2267,13 +2267,79 @@ func TestReloadWordReplacements(t *testing.T) {
 
 	agg.wordCacheMutex.RLock()
 	cache := agg.wordReplacementCache
+	sorted := agg.wordReplacementSorted
 	agg.wordCacheMutex.RUnlock()
 
 	assert.Equal(t, "bar", cache["foo"])
+	assert.Len(t, sorted, 1)
+}
+
+func TestLoadWordReplacementCache_NilRepo(t *testing.T) {
+	agg := &Aggregator{wordReplacementRepo: nil}
+	agg.loadWordReplacementCache()
+
+	agg.wordCacheMutex.RLock()
+	cache := agg.wordReplacementCache
+	agg.wordCacheMutex.RUnlock()
+
+	assert.Nil(t, cache)
+}
+
+func TestLoadWordReplacementCache_Error(t *testing.T) {
+	mockRepo := &mockWordRepo{err: fmt.Errorf("db error")}
+	agg := &Aggregator{wordReplacementRepo: mockRepo}
+	agg.loadWordReplacementCache()
+
+	agg.wordCacheMutex.RLock()
+	cache := agg.wordReplacementCache
+	agg.wordCacheMutex.RUnlock()
+
+	assert.Nil(t, cache)
+}
+
+func TestLoadWordReplacementCache_SortOrder(t *testing.T) {
+	mockRepo := &mockWordRepo{replacements: map[string]string{
+		"aa":  "1",
+		"bbb": "2",
+		"cc":  "3",
+	}}
+	agg := &Aggregator{wordReplacementRepo: mockRepo}
+	agg.loadWordReplacementCache()
+
+	agg.wordCacheMutex.RLock()
+	sorted := agg.wordReplacementSorted
+	agg.wordCacheMutex.RUnlock()
+
+	require.Len(t, sorted, 3)
+	assert.Equal(t, "bbb", sorted[0].orig)
+}
+
+func TestApplyWordReplacement_EmptyText(t *testing.T) {
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			WordReplacement: config.WordReplacementConfig{Enabled: true},
+		},
+	}
+	agg := &Aggregator{config: cfg, wordReplacementCache: map[string]string{"foo": "bar"}}
+	agg.wordReplacementSorted = []struct{ orig, repl string }{{"foo", "bar"}}
+
+	assert.Equal(t, "", agg.applyWordReplacement(""))
+}
+
+func TestApplyWordReplacement_EmptySorted(t *testing.T) {
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			WordReplacement: config.WordReplacementConfig{Enabled: true},
+		},
+	}
+	agg := &Aggregator{config: cfg}
+
+	assert.Equal(t, "hello", agg.applyWordReplacement("hello"))
 }
 
 type mockWordRepo struct {
 	replacements map[string]string
+	err          error
 }
 
 func (m *mockWordRepo) Create(_ *models.WordReplacement) error { return nil }
@@ -2284,5 +2350,8 @@ func (m *mockWordRepo) FindByOriginal(_ string) (*models.WordReplacement, error)
 func (m *mockWordRepo) List() ([]models.WordReplacement, error) { return nil, nil }
 func (m *mockWordRepo) Delete(_ string) error                   { return nil }
 func (m *mockWordRepo) GetReplacementMap() (map[string]string, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
 	return m.replacements, nil
 }
