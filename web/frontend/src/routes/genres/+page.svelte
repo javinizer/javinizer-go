@@ -3,9 +3,9 @@
 	import { fade, fly } from 'svelte/transition';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { apiClient } from '$lib/api/client';
-	import type { GenreReplacement, GenreReplacementUpdateRequest } from '$lib/api/types';
+	import type { GenreReplacement, GenreReplacementUpdateRequest, ImportResponse } from '$lib/api/types';
 	import { toastStore } from '$lib/stores/toast';
-	import { Trash2, Plus, Loader2, Search, X, Check, Pencil, ArrowDownUp, ChevronsDownUp, ArrowLeft, Tags } from 'lucide-svelte';
+	import { Trash2, Plus, Loader2, Search, X, Check, Pencil, ArrowDownUp, ChevronsDownUp, ArrowLeft, Tags, Download, Upload } from 'lucide-svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import { createGenreReplacementsQuery } from '$lib/query/queries';
@@ -21,6 +21,7 @@
 	let newReplacement = $state('');
 	let searchQuery = $state('');
 	let sortDirection = $state<'asc' | 'desc'>('asc');
+	let importFile = $state<HTMLInputElement | null>(null);
 
 	let filteredAndSorted = $derived.by(() => {
 		let result = replacements;
@@ -76,6 +77,37 @@
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || 'Failed to delete genre replacement', 4000);
+		}
+	}));
+
+	const exportMutation = createMutation(() => ({
+		mutationFn: () => apiClient.exportGenreReplacements(),
+		onSuccess: async (data) => {
+			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = 'genre-replacements.json';
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+			toastStore.success(`Exported ${data.length} genre replacement(s)`, 3000);
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || 'Failed to export genre replacements', 4000);
+		}
+	}));
+
+	const importMutation = createMutation(() => ({
+		mutationFn: (payload: { replacements: { original: string; replacement: string }[] }) =>
+			apiClient.importGenreReplacements(payload),
+		onSuccess: (res: ImportResponse) => {
+			toastStore.success(`Import complete — Imported: ${res.imported}, Skipped: ${res.skipped}, Errors: ${res.errors}`, 5000);
+			void queryClient.invalidateQueries({ queryKey: ['genre-replacements'] });
+		},
+		onError: (err: Error) => {
+			toastStore.error(err.message || 'Failed to import genre replacements', 4000);
 		}
 	}));
 
@@ -138,6 +170,43 @@
 			cancelEdit();
 		}
 	}
+
+	function handleExport() {
+		exportMutation.mutate();
+	}
+
+	function handleImportClick() {
+		importFile?.click();
+	}
+
+	async function handleImportChange(e: Event) {
+		const target = e.target as HTMLInputElement;
+		const file = target.files?.[0];
+		if (!file) return;
+
+		try {
+			const text = await file.text();
+			const parsed: GenreReplacement[] = JSON.parse(text);
+			if (!Array.isArray(parsed)) throw new Error('Expected a JSON array');
+
+			const replacements = parsed
+				.filter(r => r.original && r.original.trim())
+				.map(r => ({ original: r.original.trim(), replacement: (r.replacement || '').trim() }));
+
+			if (replacements.length === 0) {
+				toastStore.error('No valid replacements in file', 4000);
+				return;
+			}
+
+			if (!confirm(`Import ${replacements.length} genre replacement(s)?`)) return;
+
+			importMutation.mutate({ replacements });
+		} catch (err) {
+			toastStore.error(`Invalid JSON file: ${err instanceof Error ? err.message : String(err)}`, 4000);
+		}
+
+		target.value = '';
+	}
 </script>
 
 <div class="container mx-auto px-4 py-8">
@@ -163,6 +232,41 @@
 						Manage genre name replacements applied during scraping
 					</p>
 				</div>
+			</div>
+			<div class="flex items-center gap-2">
+				<input
+					type="file"
+					accept=".json"
+					bind:this={importFile}
+					onchange={handleImportChange}
+					class="hidden"
+				/>
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={handleExport}
+					disabled={exportMutation.isPending}
+				>
+					{#if exportMutation.isPending}
+						<Loader2 class="h-4 w-4 animate-spin mr-1" />
+					{:else}
+						<Download class="h-4 w-4 mr-1" />
+					{/if}
+					Export
+				</Button>
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={handleImportClick}
+					disabled={importMutation.isPending}
+				>
+					{#if importMutation.isPending}
+						<Loader2 class="h-4 w-4 animate-spin mr-1" />
+					{:else}
+						<Upload class="h-4 w-4 mr-1" />
+					{/if}
+					Import
+				</Button>
 			</div>
 		</div>
 
