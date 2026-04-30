@@ -2,10 +2,9 @@ package mediainfo
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
-
-	"github.com/at-wat/ebml-go"
 )
 
 const (
@@ -21,163 +20,361 @@ const (
 
 type MKVProber struct{}
 
-// NewMKVProber creates a new MKV prober
 func NewMKVProber() *MKVProber {
 	return &MKVProber{}
 }
 
-// Name returns the prober identifier
 func (p *MKVProber) Name() string {
 	return "mkv"
 }
 
-// CanProbe checks if this prober can handle the file based on header
 func (p *MKVProber) CanProbe(header []byte) bool {
-	// MKV/WebM: EBML header starts with 0x1A 0x45 0xDF 0xA3
 	if len(header) >= 4 {
 		return header[0] == 0x1A && header[1] == 0x45 && header[2] == 0xDF && header[3] == 0xA3
 	}
 	return false
 }
 
-// Probe extracts metadata from the MKV file
 func (p *MKVProber) Probe(f *os.File) (*VideoInfo, error) {
 	return analyzeMKV(f)
 }
 
-// Matroska track types
 const (
 	trackTypeVideo    = 1
 	trackTypeAudio    = 2
 	trackTypeSubtitle = 17
 )
 
-// analyzeMKV extracts metadata from MKV/WebM files
+const (
+	elemEBML          uint32 = 0x1A45DFA3
+	elemSegment       uint32 = 0x18538067
+	elemInfo          uint32 = 0x1549A966
+	elemTimecodeScale uint32 = 0x2AD7B1
+	elemDuration      uint32 = 0x4489
+	elemTracks        uint32 = 0x1654AE6B
+	elemTrackEntry    uint32 = 0xAE
+	elemTrackNumber   uint32 = 0xD7
+	elemTrackType     uint32 = 0x83
+	elemCodecID       uint32 = 0x86
+	elemVideo         uint32 = 0xE0
+	elemPixelWidth    uint32 = 0xB0
+	elemPixelHeight   uint32 = 0xBA
+	elemAudio         uint32 = 0xE1
+	elemSamplingFreq  uint32 = 0xB5
+	elemChannels      uint32 = 0x9F
+	elemCluster       uint32 = 0x1F43B675
+	elemCues          uint32 = 0x1C53BB6B
+)
+
 func analyzeMKV(f *os.File) (*VideoInfo, error) {
 	info := &VideoInfo{
 		Container: "mkv",
 	}
 
-	// Get file size for bitrate calculation
 	stat, _ := f.Stat()
 	fileSize := stat.Size()
 
-	// Parse EBML structure
-	var ebmlDoc struct {
-		Header struct {
-			DocType        string `ebml:"DocType"`
-			DocTypeVersion uint64 `ebml:"DocTypeVersion"`
-		} `ebml:"EBML"`
-		Segment []struct {
-			Info struct {
-				TimecodeScale uint64  `ebml:"TimecodeScale,omitempty"`
-				Duration      float64 `ebml:"Duration,omitempty"`
-				Title         string  `ebml:"Title,omitempty"`
-			} `ebml:"Info,omitempty"`
-			Tracks struct {
-				TrackEntry []struct {
-					TrackNumber uint64 `ebml:"TrackNumber"`
-					TrackType   uint64 `ebml:"TrackType"`
-					CodecID     string `ebml:"CodecID,omitempty"`
-					Video       struct {
-						PixelWidth  uint64 `ebml:"PixelWidth,omitempty"`
-						PixelHeight uint64 `ebml:"PixelHeight,omitempty"`
-					} `ebml:"Video,omitempty"`
-					Audio struct {
-						SamplingFrequency float64 `ebml:"SamplingFrequency,omitempty"`
-						Channels          uint64  `ebml:"Channels,omitempty"`
-					} `ebml:"Audio,omitempty"`
-				} `ebml:"TrackEntry"`
-			} `ebml:"Tracks,omitempty"`
-		} `ebml:"Segment"`
-	}
+	_, _ = f.Seek(0, io.SeekStart)
 
-	// Unmarshal EBML
-	if err := ebml.Unmarshal(f, &ebmlDoc); err != nil {
-		// Try to extract partial information even if full parse fails
-		return extractMKVPartial(f, info, fileSize)
-	}
+	er := newEBMLReader(f)
 
-	// Extract segment information
-	if len(ebmlDoc.Segment) > 0 {
-		seg := ebmlDoc.Segment[0]
-
-		// Extract duration
-		if seg.Info.Duration > 0 {
-			// Duration is in timecode scale units (nanoseconds by default)
-			timecodeScale := seg.Info.TimecodeScale
-			if timecodeScale == 0 {
-				timecodeScale = 1000000 // Default: 1ms
+	for {
+		elem, err := er.readElement()
+		if err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				break
 			}
-			// Convert to seconds
-			info.Duration = seg.Info.Duration * float64(timecodeScale) / 1000000000.0
+			break
 		}
 
-		// Extract track information
-		for _, track := range seg.Tracks.TrackEntry {
-			switch track.TrackType {
-			case trackTypeVideo:
-				// Video track
-				info.VideoCodec = mapMKVVideoCodec(track.CodecID)
-				info.Width = int(track.Video.PixelWidth)
-				info.Height = int(track.Video.PixelHeight)
+		switch elem.id {
+		case elemEBML:
+			parseEBMLHeader(er, elem.size)
 
-			case trackTypeAudio:
-				// Audio track (take first audio track)
-				if info.AudioCodec == "" {
-					info.AudioCodec = mapMKVAudioCodec(track.CodecID)
-					info.SampleRate = int(track.Audio.SamplingFrequency)
-					info.AudioChannels = int(track.Audio.Channels)
-					if info.AudioChannels == 0 {
-						info.AudioChannels = 2 // Default to stereo if not specified
-					}
+		case elemSegment:
+			parseSegment(er, elem.size, info)
+
+		case elemCluster, elemCues:
+			if elem.size > 0 {
+				if err := er.skipBytes(elem.size); err != nil {
+					goto done
+				}
+			}
+
+		default:
+			if elem.size > 0 && elem.data == nil {
+				if err := er.skipBytes(elem.size); err != nil {
+					goto done
 				}
 			}
 		}
 	}
 
-	// Calculate bitrate
-	if info.Duration > 0 && fileSize > 0 {
-		info.Bitrate = int((float64(fileSize) * 8) / info.Duration / 1000) // kbps
-	}
-
-	// Calculate aspect ratio
-	if info.Width > 0 && info.Height > 0 {
-		info.AspectRatio = float64(info.Width) / float64(info.Height)
-	}
-
-	return info, nil
-}
-
-// extractMKVPartial attempts to extract partial information if full EBML parse fails
-func extractMKVPartial(f *os.File, info *VideoInfo, fileSize int64) (*VideoInfo, error) {
-	// Reset file pointer
-	_, _ = f.Seek(0, 0)
-
-	// If full parse failed, we can't easily do partial parsing with ebml-go
-	// Return basic error - users should use properly formatted MKV files
-	// In future, could implement manual EBML element parsing here
-
-	if info.Width == 0 && info.Height == 0 {
-		return nil, fmt.Errorf("failed to extract MKV metadata: file may be corrupted or using unsupported features")
-	}
-
-	// Calculate bitrate if we have partial data
+done:
 	if info.Duration > 0 && fileSize > 0 {
 		info.Bitrate = int((float64(fileSize) * 8) / info.Duration / 1000)
 	}
 
-	// Calculate aspect ratio
 	if info.Width > 0 && info.Height > 0 {
 		info.AspectRatio = float64(info.Width) / float64(info.Height)
+	}
+
+	if info.VideoCodec == "" && info.Width == 0 && info.Height == 0 && info.Duration == 0 {
+		return nil, fmt.Errorf("failed to extract MKV metadata: no usable data found")
 	}
 
 	return info, nil
 }
 
-// mapMKVVideoCodec maps Matroska video codec ID to human-readable name
+func parseEBMLHeader(er *ebmlReader, size int64) {
+	if size <= 0 {
+		return
+	}
+
+	limitReader := io.LimitReader(er.r, size)
+	subER := newEBMLReader(limitReader)
+
+	for {
+		elem, err := subER.readElement()
+		if err != nil {
+			return
+		}
+		_ = elem
+	}
+}
+
+func parseSegment(er *ebmlReader, size int64, info *VideoInfo) {
+	var limitReader io.Reader
+	if size > 0 {
+		limitReader = io.LimitReader(er.r, size)
+	} else {
+		limitReader = er.r
+	}
+
+	subER := newEBMLReader(limitReader)
+
+	for {
+		elem, err := subER.readElement()
+		if err != nil {
+			return
+		}
+
+		switch elem.id {
+		case elemInfo:
+			parseSegmentInfo(subER, elem.size, info)
+
+		case elemTracks:
+			parseTracks(subER, elem.size, info)
+
+		case elemCluster, elemCues:
+			if elem.size > 0 {
+				if err := subER.skipBytes(elem.size); err != nil {
+					return
+				}
+			}
+
+		default:
+			if elem.size > 0 && elem.data == nil {
+				if err := subER.skipBytes(elem.size); err != nil {
+					return
+				}
+			}
+		}
+	}
+}
+
+func parseSegmentInfo(er *ebmlReader, size int64, info *VideoInfo) {
+	if size <= 0 {
+		return
+	}
+
+	limitReader := io.LimitReader(er.r, size)
+	subER := newEBMLReader(limitReader)
+
+	var timecodeScale uint64 = 1000000
+
+	for {
+		elem, err := subER.readElement()
+		if err != nil {
+			break
+		}
+
+		switch elem.id {
+		case elemTimecodeScale:
+			if elem.data != nil {
+				timecodeScale = parseUint(elem.data)
+			}
+		case elemDuration:
+			if elem.data != nil {
+				duration := parseFloatEBML(elem.data)
+				if duration > 0 {
+					info.Duration = duration * float64(timecodeScale) / 1000000000.0
+				}
+			}
+		default:
+			if elem.size > 0 && elem.data == nil {
+				if err := subER.skipBytes(elem.size); err != nil {
+					return
+				}
+			}
+		}
+	}
+}
+
+func parseTracks(er *ebmlReader, size int64, info *VideoInfo) {
+	if size <= 0 {
+		return
+	}
+
+	limitReader := io.LimitReader(er.r, size)
+	subER := newEBMLReader(limitReader)
+
+	for {
+		elem, err := subER.readElement()
+		if err != nil {
+			return
+		}
+
+		switch elem.id {
+		case elemTrackEntry:
+			parseTrackEntry(subER, elem.size, info)
+
+		default:
+			if elem.size > 0 && elem.data == nil {
+				if err := subER.skipBytes(elem.size); err != nil {
+					return
+				}
+			}
+		}
+	}
+}
+
+func parseTrackEntry(er *ebmlReader, size int64, info *VideoInfo) {
+	if size <= 0 {
+		return
+	}
+
+	limitReader := io.LimitReader(er.r, size)
+	subER := newEBMLReader(limitReader)
+
+	var trackType uint64
+	var codecID string
+	var pixelWidth, pixelHeight uint64
+	var samplingFreq float64
+	var channels uint64
+
+	for {
+		elem, err := subER.readElement()
+		if err != nil {
+			break
+		}
+
+		switch elem.id {
+		case elemTrackType:
+			if elem.data != nil {
+				trackType = parseUint(elem.data)
+			}
+		case elemCodecID:
+			if elem.data != nil {
+				codecID = parseString(elem.data)
+			}
+		case elemVideo:
+			parseVideoElement(subER, elem.size, &pixelWidth, &pixelHeight)
+		case elemAudio:
+			parseAudioElement(subER, elem.size, &samplingFreq, &channels)
+		default:
+			if elem.size > 0 && elem.data == nil {
+				if err := subER.skipBytes(elem.size); err != nil {
+					break
+				}
+			}
+		}
+	}
+
+	switch trackType {
+	case trackTypeVideo:
+		info.VideoCodec = mapMKVVideoCodec(codecID)
+		info.Width = int(pixelWidth)
+		info.Height = int(pixelHeight)
+	case trackTypeAudio:
+		if info.AudioCodec == "" {
+			info.AudioCodec = mapMKVAudioCodec(codecID)
+			info.SampleRate = int(samplingFreq)
+			info.AudioChannels = int(channels)
+			if info.AudioChannels == 0 {
+				info.AudioChannels = 2
+			}
+		}
+	}
+}
+
+func parseVideoElement(er *ebmlReader, size int64, pixelWidth, pixelHeight *uint64) {
+	if size <= 0 {
+		return
+	}
+
+	limitReader := io.LimitReader(er.r, size)
+	subER := newEBMLReader(limitReader)
+
+	for {
+		elem, err := subER.readElement()
+		if err != nil {
+			return
+		}
+
+		switch elem.id {
+		case elemPixelWidth:
+			if elem.data != nil {
+				*pixelWidth = parseUint(elem.data)
+			}
+		case elemPixelHeight:
+			if elem.data != nil {
+				*pixelHeight = parseUint(elem.data)
+			}
+		default:
+			if elem.size > 0 && elem.data == nil {
+				if err := subER.skipBytes(elem.size); err != nil {
+					return
+				}
+			}
+		}
+	}
+}
+
+func parseAudioElement(er *ebmlReader, size int64, samplingFreq *float64, channels *uint64) {
+	if size <= 0 {
+		return
+	}
+
+	limitReader := io.LimitReader(er.r, size)
+	subER := newEBMLReader(limitReader)
+
+	for {
+		elem, err := subER.readElement()
+		if err != nil {
+			return
+		}
+
+		switch elem.id {
+		case elemSamplingFreq:
+			if elem.data != nil {
+				*samplingFreq = parseFloatEBML(elem.data)
+			}
+		case elemChannels:
+			if elem.data != nil {
+				*channels = parseUint(elem.data)
+			}
+		default:
+			if elem.size > 0 && elem.data == nil {
+				if err := subER.skipBytes(elem.size); err != nil {
+					return
+				}
+			}
+		}
+	}
+}
+
 func mapMKVVideoCodec(codecID string) string {
-	// Matroska codec IDs are like "V_MPEG4/ISO/AVC", "V_MPEGH/ISO/HEVC", etc.
 	codecID = strings.ToUpper(codecID)
 
 	if strings.Contains(codecID, "AVC") || strings.Contains(codecID, "H264") {
@@ -235,7 +432,9 @@ func mapMKVAudioCodec(codecID string) string {
 	if strings.Contains(codecID, "PCM") {
 		return "pcm"
 	}
+	if strings.Contains(codecID, "MS/ACM") || strings.Contains(codecID, "WMA") {
+		return "wma"
+	}
 
-	// Return the codec ID itself if we can't map it
 	return strings.TrimPrefix(codecID, "A_")
 }

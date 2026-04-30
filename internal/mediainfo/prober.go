@@ -40,7 +40,6 @@ func NewProberRegistry(cfg *MediaInfoConfig) *ProberRegistry {
 	registry.Register(NewMP4Prober())
 	registry.Register(NewMKVProber())
 	registry.Register(NewAVIProber())
-	registry.Register(NewFLVProber())
 
 	// Register CLI fallback if enabled
 	if registry.cliEnabled && cfg != nil {

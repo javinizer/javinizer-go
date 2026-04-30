@@ -28,7 +28,7 @@ type VideoInfo struct {
 }
 
 // Analyze extracts metadata from a video file using the ProberRegistry
-// Supports: MP4, MKV, MOV, AVI, FLV
+// Supports: MP4, MKV, MOV, AVI
 // Falls back to MediaInfo CLI if enabled and native parsers fail
 // Returns partial info if some fields are unavailable
 func Analyze(filePath string) (*VideoInfo, error) {
@@ -78,13 +78,6 @@ func detectContainer(header []byte) string {
 	if len(header) >= 4 {
 		if header[0] == 0x1A && header[1] == 0x45 && header[2] == 0xDF && header[3] == 0xA3 {
 			return "mkv"
-		}
-	}
-
-	// FLV: starts with "FLV"
-	if len(header) >= 3 {
-		if header[0] == 'F' && header[1] == 'L' && header[2] == 'V' {
-			return "flv"
 		}
 	}
 

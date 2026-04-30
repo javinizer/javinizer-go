@@ -124,7 +124,6 @@ func analyzeAVI(f *os.File) (*VideoInfo, error) {
 
 		switch fourCC {
 		case "LIST":
-			// Read list type
 			var listType [4]byte
 			if err := binary.Read(f, binary.LittleEndian, &listType); err != nil {
 				return nil, fmt.Errorf("failed to read list type: %w", err)
@@ -134,9 +133,11 @@ func analyzeAVI(f *os.File) (*VideoInfo, error) {
 
 			switch listTypeStr {
 			case "hdrl":
-				// Header list - contains avih
-				if err := parseHdrlList(f, info, currentPos+4, chunk.Size-4); err != nil {
+				if err := parseHdrlList(f, info, currentPos+4, chunk.Size-4, &videoStreamFound, &audioStreamFound); err != nil {
 					return nil, err
+				}
+				if _, err := f.Seek(currentPos+int64(chunk.Size), io.SeekStart); err != nil {
+					return nil, fmt.Errorf("failed to seek to end of hdrl list: %w", err)
 				}
 			case "strl":
 				// Stream list - contains strh and strf
@@ -224,7 +225,7 @@ type streamInfo struct {
 }
 
 // parseHdrlList parses the hdrl LIST chunk
-func parseHdrlList(f *os.File, info *VideoInfo, startPos int64, size uint32) error {
+func parseHdrlList(f *os.File, info *VideoInfo, startPos int64, size uint32, videoStreamFound, audioStreamFound *bool) error {
 	endPos := startPos + int64(size)
 
 	for {
@@ -243,7 +244,8 @@ func parseHdrlList(f *os.File, info *VideoInfo, startPos int64, size uint32) err
 
 		fourCC := string(chunk.FourCC[:])
 
-		if fourCC == "avih" {
+		switch fourCC {
+		case "avih":
 			var mainHeader aviMainHeader
 			if err := binary.Read(f, binary.LittleEndian, &mainHeader); err != nil {
 				return fmt.Errorf("failed to read avih: %w", err)
@@ -251,14 +253,40 @@ func parseHdrlList(f *os.File, info *VideoInfo, startPos int64, size uint32) err
 
 			info.Width = int(mainHeader.Width)
 			info.Height = int(mainHeader.Height)
-			// Cast to uint64 before multiplication to avoid overflow for long videos
 			info.Duration = float64(uint64(mainHeader.TotalFrames)*uint64(mainHeader.MicroSecPerFrame)) / 1000000.0
 
 			if mainHeader.MicroSecPerFrame > 0 {
 				info.FrameRate = 1000000.0 / float64(mainHeader.MicroSecPerFrame)
 			}
-		} else {
-			// Skip chunk
+
+		case "LIST":
+			var listType [4]byte
+			if err := binary.Read(f, binary.LittleEndian, &listType); err != nil {
+				return fmt.Errorf("failed to read strl list type: %w", err)
+			}
+			if string(listType[:]) == "strl" {
+				streamInfo, err := parseStrlList(f, currentPos+4, chunk.Size-4)
+				if err != nil {
+					return err
+				}
+				if streamInfo.isVideo && !*videoStreamFound {
+					info.VideoCodec = streamInfo.codec
+					info.Width = streamInfo.width
+					info.Height = streamInfo.height
+					info.FrameRate = streamInfo.frameRate
+					*videoStreamFound = true
+				} else if streamInfo.isAudio && !*audioStreamFound {
+					info.AudioCodec = streamInfo.codec
+					info.AudioChannels = streamInfo.audioChannels
+					info.SampleRate = streamInfo.audioSampleRate
+					*audioStreamFound = true
+				}
+			}
+			if _, err := f.Seek(currentPos+int64(chunk.Size), io.SeekStart); err != nil {
+				return fmt.Errorf("failed to seek to end of list: %w", err)
+			}
+
+		default:
 			currentPos, _ := f.Seek(0, io.SeekCurrent)
 			_, _ = f.Seek(currentPos+int64(chunk.Size), io.SeekStart)
 		}

@@ -388,7 +388,7 @@ func TestParseHdrlList(t *testing.T) {
 	// Skip LIST header and list type
 	_, _ = f.Seek(12, 0) // Skip "LIST" + size + "hdrl"
 
-	err = parseHdrlList(f, info, 12, 80)
+	err = parseHdrlList(f, info, 12, 80, &[]bool{false}[0], &[]bool{false}[0])
 	require.NoError(t, err)
 
 	assert.Equal(t, 1920, info.Width)
@@ -422,7 +422,7 @@ func TestParseHdrlList_InvalidChunkSize(t *testing.T) {
 	_, _ = f.Seek(8, 0)
 
 	// Should handle gracefully without crashing
-	err = parseHdrlList(f, info, 8, 100)
+	err = parseHdrlList(f, info, 8, 100, &[]bool{false}[0], &[]bool{false}[0])
 	assert.NoError(t, err)
 }
 

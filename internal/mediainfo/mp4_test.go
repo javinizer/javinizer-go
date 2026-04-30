@@ -133,7 +133,6 @@ func TestMP4Prober_Probe_InvalidFile(t *testing.T) {
 
 	// Should fail to parse MP4 structure
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to parse MP4 file")
 }
 
 // TestMP4Prober_Probe_SmallFile tests handling of files too small for MP4
@@ -532,4 +531,108 @@ func TestAnalyzeMP4_WithFtypOnly(t *testing.T) {
 func TestMOVProber_Name(t *testing.T) {
 	prober := NewMOVProber()
 	assert.Equal(t, "mov", prober.Name())
+}
+
+func TestCalcMP4FrameRate(t *testing.T) {
+	tests := []struct {
+		name         string
+		sampleCounts []uint32
+		sampleDeltas []uint32
+		timescale    uint32
+		wantFPS      float64
+	}{
+		{"24fps", []uint32{1000}, []uint32{1000}, 24000, 24.0},
+		{"30fps", []uint32{1000}, []uint32{1000}, 30000, 30.0},
+		{"29.97fps", []uint32{1000}, []uint32{1001}, 30000, 29.97},
+		{"25fps", []uint32{1000}, []uint32{1000}, 25000, 25.0},
+		{"mixed deltas", []uint32{500, 500}, []uint32{1001, 2002}, 30000, 19.98},
+		{"zero timescale", []uint32{1000}, []uint32{1000}, 0, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			trak := createTrakWithStts(t, tt.sampleCounts, tt.sampleDeltas, tt.timescale)
+			fps := calcMP4FrameRate(trak)
+			if tt.wantFPS == 0 {
+				assert.Equal(t, 0.0, fps)
+			} else {
+				assert.InDelta(t, tt.wantFPS, fps, 0.1)
+			}
+		})
+	}
+}
+
+func TestCalcMP4FrameRate_FieldBased(t *testing.T) {
+	trak := createTrakWithStts(t, []uint32{2000}, []uint32{1001}, 60000)
+	fps := calcMP4FrameRate(trak)
+	assert.InDelta(t, 29.97, fps, 0.1)
+}
+
+func TestCalcMP4FrameRate_NilStts(t *testing.T) {
+	trak := mp4.NewTrakBox()
+	mdia := mp4.NewMdiaBox()
+	hdlr, err := mp4.CreateHdlr("vide")
+	require.NoError(t, err)
+	mdia.Hdlr = hdlr
+	mdia.AddChild(hdlr)
+	trak.Mdia = mdia
+	trak.AddChild(mdia)
+	assert.Equal(t, 0.0, calcMP4FrameRate(trak))
+}
+
+func TestIsFieldBasedStream(t *testing.T) {
+	tests := []struct {
+		name         string
+		sampleCounts []uint32
+		sampleDeltas []uint32
+		timescale    uint32
+		want         bool
+	}{
+		{"59.94 field", []uint32{1000}, []uint32{1001}, 60000, true},
+		{"60 field", []uint32{1000}, []uint32{1000}, 60000, true},
+		{"50 field", []uint32{1000}, []uint32{960}, 48000, true},
+		{"24 progressive", []uint32{1000}, []uint32{1000}, 24000, false},
+		{"30 progressive", []uint32{1000}, []uint32{1001}, 30000, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			trak := createTrakWithStts(t, tt.sampleCounts, tt.sampleDeltas, tt.timescale)
+			stts := trak.Mdia.Minf.Stbl.Stts
+			result := isFieldBasedStream(stts, tt.timescale)
+			assert.Equal(t, tt.want, result)
+		})
+	}
+}
+
+func createTrakWithStts(t *testing.T, sampleCounts, sampleDeltas []uint32, timescale uint32) *mp4.TrakBox {
+	t.Helper()
+	trak := mp4.NewTrakBox()
+	mdia := mp4.NewMdiaBox()
+	hdlr, err := mp4.CreateHdlr("vide")
+	require.NoError(t, err)
+	mdia.Hdlr = hdlr
+	mdia.AddChild(hdlr)
+
+	minf := mp4.NewMinfBox()
+	stbl := mp4.NewStblBox()
+
+	stts := &mp4.SttsBox{
+		SampleCount:     sampleCounts,
+		SampleTimeDelta: sampleDeltas,
+	}
+	stbl.Stts = stts
+	stbl.AddChild(stts)
+
+	mdhd := &mp4.MdhdBox{Timescale: timescale}
+	mdia.Mdhd = mdhd
+	mdia.AddChild(mdhd)
+
+	minf.Stbl = stbl
+	minf.AddChild(stbl)
+	mdia.Minf = minf
+	mdia.AddChild(minf)
+	trak.Mdia = mdia
+	trak.AddChild(mdia)
+	return trak
 }

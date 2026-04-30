@@ -108,9 +108,8 @@ func TestMKVProber_Probe_EmptyFile(t *testing.T) {
 	prober := NewMKVProber()
 	_, err = prober.Probe(f)
 
-	// Empty file may return error or partial info - either is acceptable
-	// The important thing is it doesn't crash
-	assert.Nil(t, err) // Empty files may return nil with empty info
+	// Empty file should return an error since no usable data can be extracted
+	assert.Error(t, err)
 }
 
 // TestMKVProber_Probe_SmallFile tests that small file is handled gracefully
@@ -133,90 +132,6 @@ func TestMKVProber_Probe_SmallFile(t *testing.T) {
 	// Small files with valid MKV magic may still fail during parsing
 	// This is acceptable behavior
 	assert.Error(t, err)
-}
-
-// TestExtractMKVPartial tests the fallback extraction function
-func TestExtractMKVPartial(t *testing.T) {
-	tmpDir := t.TempDir()
-	tmpPath := filepath.Join(tmpDir, "partial.mkv")
-
-	// Create a minimal EBML structure
-	err := os.WriteFile(tmpPath, []byte{0x1A, 0x45, 0xDF, 0xA3, 0x01, 0x02, 0x03, 0x04}, 0644)
-	require.NoError(t, err)
-
-	f, err := os.Open(tmpPath)
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-
-	info := &VideoInfo{
-		Width:    1920,
-		Height:   1080,
-		Duration: 120.5,
-	}
-	fileSize := int64(1000000)
-
-	result, err := extractMKVPartial(f, info, fileSize)
-
-	// extractMKVPartial preserves the input container type from VideoInfo
-	assert.NoError(t, err)
-	assert.Equal(t, 1920, result.Width)
-	assert.Equal(t, 1080, result.Height)
-	assert.InDelta(t, 120.5, result.Duration, 0.001)
-
-	// Calculate expected bitrate: (1000000 * 8) / 120.5 / 1000 = 66.39...
-	expectedBitrate := int((float64(fileSize) * 8) / 120.5 / 1000)
-	assert.InDelta(t, expectedBitrate, result.Bitrate, 0.1)
-
-	// Calculate expected aspect ratio: 1920 / 1080 = 1.777...
-	assert.InDelta(t, 1920.0/1080.0, result.AspectRatio, 0.001)
-}
-
-// TestExtractMKVPartial_UnknownContainer tests fallback with unknown container
-func TestExtractMKVPartial_UnknownContainer(t *testing.T) {
-	tmpDir := t.TempDir()
-	tmpPath := filepath.Join(tmpDir, "unknown.mkv")
-
-	err := os.WriteFile(tmpPath, []byte{0x1A, 0x45, 0xDF, 0xA3}, 0644)
-	require.NoError(t, err)
-
-	f, err := os.Open(tmpPath)
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-
-	info := &VideoInfo{}
-	fileSize := int64(1000)
-
-	_, err = extractMKVPartial(f, info, fileSize)
-
-	// Should return error when no valid data is extracted
-	assert.Error(t, err)
-}
-
-// TestExtractMKVPartial_OnlyDimensions tests partial extraction with only dimensions
-func TestExtractMKVPartial_OnlyDimensions(t *testing.T) {
-	tmpDir := t.TempDir()
-	tmpPath := filepath.Join(tmpDir, "dims.mkv")
-
-	err := os.WriteFile(tmpPath, []byte("test content"), 0644)
-	require.NoError(t, err)
-
-	f, err := os.Open(tmpPath)
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-
-	info := &VideoInfo{
-		Width:  1280,
-		Height: 720,
-	}
-	fileSize := int64(500000)
-
-	result, err := extractMKVPartial(f, info, fileSize)
-
-	assert.NoError(t, err)
-	assert.Equal(t, 1280, result.Width)
-	assert.Equal(t, 720, result.Height)
-	// Duration should remain unchanged (0)
-	assert.Equal(t, 0.0, result.Duration)
 }
 
 // TestAnalyzeMKV tests the main MKV analysis function with error cases
@@ -254,12 +169,9 @@ func TestAnalyzeMKV_EmptyFile(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	// ebml-go library may not return an error for empty files
-	// This test ensures the function handles empty files gracefully (no crash)
 	_, err = analyzeMKV(f)
 
-	// Accept either nil or error - what matters is no crash
-	assert.True(t, err == nil || err.Error() != "", "analyzeMKV should not panic on empty file")
+	assert.Error(t, err)
 }
 
 // TestAnalyzeMKV_SmallFile tests error handling for small files
@@ -339,27 +251,4 @@ func TestMapMKVAudioCodec_Extended(t *testing.T) {
 func TestMKVProber_Name(t *testing.T) {
 	prober := NewMKVProber()
 	assert.Equal(t, "mkv", prober.Name())
-}
-
-func TestExtractMKVPartial_WithBitrateAndAspect(t *testing.T) {
-	tmpDir := t.TempDir()
-	tmpPath := filepath.Join(tmpDir, "partial.mkv")
-	require.NoError(t, os.WriteFile(tmpPath, []byte{0x1A, 0x45, 0xDF, 0xA3}, 0644))
-
-	f, err := os.Open(tmpPath)
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-
-	info := &VideoInfo{
-		Width:    3840,
-		Height:   2160,
-		Duration: 60.0,
-	}
-
-	result, err := extractMKVPartial(f, info, 5000000)
-	require.NoError(t, err)
-	assert.Equal(t, 3840, result.Width)
-	assert.Equal(t, 2160, result.Height)
-	assert.Greater(t, result.Bitrate, 0)
-	assert.InDelta(t, 3840.0/2160.0, result.AspectRatio, 0.001)
 }

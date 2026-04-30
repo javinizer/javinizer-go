@@ -29,14 +29,6 @@ func TestDetectContainer(t *testing.T) {
 			expected: "mkv",
 		},
 		{
-			name: "FLV container",
-			header: []byte{
-				'F', 'L', 'V', 0x01, 0x05, 0x00, 0x00, 0x00,
-				0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			},
-			expected: "flv",
-		},
-		{
 			name: "AVI container",
 			header: []byte{
 				'R', 'I', 'F', 'F', 0x00, 0x00, 0x00, 0x00,
@@ -134,31 +126,26 @@ func TestAnalyze_TooSmallFile(t *testing.T) {
 
 // TestAnalyzeWithConfig_CustomConfig tests with custom MediaInfoConfig
 func TestAnalyzeWithConfig_CustomConfig(t *testing.T) {
-	// Arrange: Create temp video file with valid FLV header
+	// Arrange: Create temp video file with valid MKV header
 	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "custom_config.flv")
+	tmpFile := filepath.Join(tmpDir, "custom_config.mkv")
 
-	// Create valid FLV header
 	header := []byte{
-		'F', 'L', 'V', 0x01, 0x05, 0x00, 0x00, 0x00,
-		0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x1A, 0x45, 0xDF, 0xA3, 0x01, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x1F, 0x42, 0x86, 0x81, 0x01,
 	}
 	if err := os.WriteFile(tmpFile, header, 0644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Custom config with CLI disabled
 	cfg := &MediaInfoConfig{
 		CLIEnabled: false,
 		CLIPath:    "mediainfo",
 		CLITimeout: 30,
 	}
 
-	// Act: Call AnalyzeWithConfig
 	info, err := AnalyzeWithConfig(tmpFile, cfg)
 
-	// Assert: Returns VideoInfo (may have partial data) or error
-	// FLV prober should handle this
 	if err != nil {
 		t.Logf("AnalyzeWithConfig returned error (acceptable for minimal header): %v", err)
 		return
@@ -168,15 +155,14 @@ func TestAnalyzeWithConfig_CustomConfig(t *testing.T) {
 		t.Fatal("AnalyzeWithConfig returned nil info without error")
 	}
 
-	// Verify container is detected
-	if info.Container != "flv" {
-		t.Errorf("Expected container 'flv', got %q", info.Container)
+	if info.Container != "mkv" {
+		t.Errorf("Expected container 'mkv', got %q", info.Container)
 	}
 }
 
 // TestProbeWithFallback_NoProberFound tests unsupported format detection
 func TestProbeWithFallback_NoProberFound(t *testing.T) {
-	// Arrange: Create file with unknown header (not MP4/MKV/AVI/FLV/MOV)
+	// Arrange: Create file with unknown header (not MP4/MKV/AVI/MOV)
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "unsupported.bin")
 
@@ -209,25 +195,21 @@ func TestProbeWithFallback_NoProberFound(t *testing.T) {
 
 // TestProbeWithFallback_NativeProberSuccess tests successful native prober selection
 func TestProbeWithFallback_NativeProberSuccess(t *testing.T) {
-	// Arrange: Create valid FLV file header (FLV prober has 85%+ coverage already)
+	// Arrange: Create valid MKV file header
 	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "native_success.flv")
+	tmpFile := filepath.Join(tmpDir, "native_success.mkv")
 
-	// Create valid FLV header
-	flvHeader := []byte{
-		'F', 'L', 'V', 0x01, 0x05, 0x00, 0x00, 0x00,
-		0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	header := []byte{
+		0x1A, 0x45, 0xDF, 0xA3, 0x01, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x1F, 0x42, 0x86, 0x81, 0x01,
 	}
-	if err := os.WriteFile(tmpFile, flvHeader, 0644); err != nil {
+	if err := os.WriteFile(tmpFile, header, 0644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Act: Call AnalyzeWithConfig (or Analyze)
 	info, err := Analyze(tmpFile)
 
-	// Assert: Returns VideoInfo without errors (may have partial data for minimal file)
 	if err != nil {
-		// It's acceptable for native prober to fail on minimal header and fallback
 		t.Logf("Native prober failed on minimal file (acceptable): %v", err)
 		return
 	}
@@ -236,30 +218,27 @@ func TestProbeWithFallback_NativeProberSuccess(t *testing.T) {
 		t.Fatal("Analyze returned nil info without error")
 	}
 
-	// Verify FLV container is detected
-	if info.Container != "flv" {
-		t.Errorf("Expected container 'flv', got %q", info.Container)
+	if info.Container != "mkv" {
+		t.Errorf("Expected container 'mkv', got %q", info.Container)
 	}
 }
 
 // TestAnalyzeWithConfig_DefaultConfig tests that nil config uses defaults
 func TestAnalyzeWithConfig_DefaultConfig(t *testing.T) {
-	// Arrange: Create valid FLV file
+	// Arrange: Create valid MKV file
 	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "default_config.flv")
+	tmpFile := filepath.Join(tmpDir, "default_config.mkv")
 
-	flvHeader := []byte{
-		'F', 'L', 'V', 0x01, 0x05, 0x00, 0x00, 0x00,
-		0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	header := []byte{
+		0x1A, 0x45, 0xDF, 0xA3, 0x01, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x1F, 0x42, 0x86, 0x81, 0x01,
 	}
-	if err := os.WriteFile(tmpFile, flvHeader, 0644); err != nil {
+	if err := os.WriteFile(tmpFile, header, 0644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Act: Call with nil config (should use defaults)
 	info, err := AnalyzeWithConfig(tmpFile, nil)
 
-	// Assert: Should use default config and attempt to analyze
 	if err != nil {
 		t.Logf("AnalyzeWithConfig with nil config returned error (acceptable for minimal file): %v", err)
 		return

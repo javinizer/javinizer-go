@@ -41,9 +41,10 @@ func analyzeMP4(f *os.File) (*VideoInfo, error) {
 	}
 
 	// Parse MP4 file
-	mp4File, err := mp4.DecodeFile(f)
+	mp4File, err := mp4.DecodeFile(f, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse MP4 file: %w", err)
+		_, _ = f.Seek(0, 0)
+		return analyzeMP4Fallback(f)
 	}
 
 	// Get file size for bitrate calculation
@@ -70,13 +71,15 @@ func analyzeMP4(f *os.File) (*VideoInfo, error) {
 			// Video track
 			if handlerType == "vide" {
 				if err := extractMP4VideoInfo(trak, info); err == nil {
-					// Calculate duration from track if not set
 					if trak.Mdia.Mdhd != nil && info.Duration == 0 {
 						trackDuration := trak.Mdia.Mdhd.Duration
 						trackTimescale := trak.Mdia.Mdhd.Timescale
 						if trackTimescale > 0 {
 							info.Duration = float64(trackDuration) / float64(trackTimescale)
 						}
+					}
+					if trak.Mdia.Mdhd != nil && info.FrameRate == 0 {
+						info.FrameRate = calcMP4FrameRate(trak)
 					}
 				}
 			}
@@ -104,6 +107,56 @@ func analyzeMP4(f *os.File) (*VideoInfo, error) {
 	}
 
 	return info, nil
+}
+
+func calcMP4FrameRate(trak *mp4.TrakBox) float64 {
+	if trak.Mdia == nil || trak.Mdia.Minf == nil || trak.Mdia.Minf.Stbl == nil {
+		return 0
+	}
+	stts := trak.Mdia.Minf.Stbl.Stts
+	if stts == nil || len(stts.SampleCount) == 0 {
+		return 0
+	}
+
+	var totalSamples uint32
+	var totalDelta uint64
+	for i := range stts.SampleCount {
+		totalSamples += stts.SampleCount[i]
+		totalDelta += uint64(stts.SampleCount[i]) * uint64(stts.SampleTimeDelta[i])
+	}
+
+	if totalDelta == 0 {
+		return 0
+	}
+
+	timescale := trak.Mdia.Mdhd.Timescale
+	if timescale == 0 {
+		return 0
+	}
+
+	fps := float64(totalSamples) * float64(timescale) / float64(totalDelta)
+
+	if isFieldBasedStream(stts, timescale) {
+		fps /= 2
+	}
+
+	return fps
+}
+
+func isFieldBasedStream(stts *mp4.SttsBox, timescale uint32) bool {
+	var totalSamples uint32
+	for i := range stts.SampleCount {
+		totalSamples += stts.SampleCount[i]
+	}
+	if totalSamples == 0 {
+		return false
+	}
+	var totalDelta uint64
+	for i := range stts.SampleCount {
+		totalDelta += uint64(stts.SampleCount[i]) * uint64(stts.SampleTimeDelta[i])
+	}
+	avgDelta := float64(totalDelta) / float64(totalSamples)
+	return isFieldBasedDelta(avgDelta, float64(timescale))
 }
 
 // extractMP4VideoInfo extracts video information from a video track

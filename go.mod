@@ -1,11 +1,10 @@
 module github.com/javinizer/javinizer-go
 
-go 1.25.0
+go 1.26.2
 
 require (
-	github.com/Eyevinn/mp4ff v0.50.0
+	github.com/Eyevinn/mp4ff v0.51.0
 	github.com/PuerkitoBio/goquery v1.8.1
-	github.com/at-wat/ebml-go v0.17.2
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0

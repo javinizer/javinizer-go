@@ -9,7 +9,7 @@ func TestProberRegistry_Register(t *testing.T) {
 	registry := NewProberRegistry(cfg)
 
 	// Should have all native probers registered
-	expectedCount := 5 // MP4, MKV, MOV, AVI, FLV
+	expectedCount := 4 // MP4, MKV, MOV, AVI
 	if len(registry.probers) != expectedCount {
 		t.Errorf("Expected %d probers, got %d", expectedCount, len(registry.probers))
 	}
@@ -43,11 +43,6 @@ func TestProberRegistry_FindProber(t *testing.T) {
 			name:     "AVI header",
 			header:   []byte{'R', 'I', 'F', 'F', 0x00, 0x00, 0x00, 0x00, 'A', 'V', 'I', ' '},
 			expected: "avi",
-		},
-		{
-			name:     "FLV header",
-			header:   []byte{'F', 'L', 'V', 0x01, 0x05, 0x00, 0x00, 0x00},
-			expected: "flv",
 		},
 		{
 			name:     "Unknown header",
@@ -214,6 +209,6 @@ func TestMOVProber_CanProbe(t *testing.T) {
 	}
 }
 
-// Note: TestAVIProber_CanProbe, TestFLVProber_CanProbe, TestCLIProber_CanProbe,
+// Note: TestAVIProber_CanProbe, TestCLIProber_CanProbe,
 // and TestDefaultMediaInfoConfig are in their respective dedicated test files:
-// avi_test.go, flv_test.go, and cli_test.go
+// avi_test.go, and cli_test.go
