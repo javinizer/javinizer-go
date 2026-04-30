@@ -48,10 +48,10 @@ func (s *Service) TranslateMovie(ctx context.Context, movie *models.Movie, setti
 		return nil, "", fmt.Errorf("target language is required")
 	}
 	if sourceLang == "" {
-		sourceLang = "auto"
+		sourceLang = sourceLangAuto
 	}
 
-	if sourceLang != "auto" && sourceLang == targetLang {
+	if sourceLang != sourceLangAuto && sourceLang == targetLang {
 		return nil, "", nil
 	}
 

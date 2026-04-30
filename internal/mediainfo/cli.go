@@ -211,9 +211,9 @@ func normalizeCodecName(codec string) string {
 	// Common mappings
 	switch {
 	case strings.Contains(codec, "avc"):
-		return "h264"
+		return codecH264
 	case strings.Contains(codec, "hevc"):
-		return "h265"
+		return codecH265
 	case strings.Contains(codec, "mpeg-4_visual"):
 		return "mpeg4"
 	case strings.Contains(codec, "mpeg_video"):

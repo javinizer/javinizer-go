@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+const sourceLangAuto = "auto"
+
 type deepLTranslateResponse struct {
 	Translations []struct {
 		Text string `json:"text"`
@@ -46,7 +48,7 @@ func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang
 		Text:       texts,
 		TargetLang: strings.ToUpper(targetLang),
 	}
-	if sourceLang != "" && sourceLang != "auto" {
+	if sourceLang != "" && sourceLang != sourceLangAuto {
 		reqBody.SourceLang = strings.ToUpper(sourceLang)
 	}
 

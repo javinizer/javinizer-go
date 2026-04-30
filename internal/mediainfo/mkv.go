@@ -8,7 +8,17 @@ import (
 	"github.com/at-wat/ebml-go"
 )
 
-// MKVProber implements the Prober interface for MKV/WebM containers
+const (
+	codecH264  = "h264"
+	codecHEVC  = "hevc"
+	codecH265  = "h265"
+	codecVP9   = "vp9"
+	codecMPEG4 = "mpeg4"
+	codecAAC   = "aac"
+	codecMP3   = "mp3"
+	codecOPUS  = "opus"
+)
+
 type MKVProber struct{}
 
 // NewMKVProber creates a new MKV prober
@@ -171,13 +181,13 @@ func mapMKVVideoCodec(codecID string) string {
 	codecID = strings.ToUpper(codecID)
 
 	if strings.Contains(codecID, "AVC") || strings.Contains(codecID, "H264") {
-		return "h264"
+		return codecH264
 	}
 	if strings.Contains(codecID, "HEVC") || strings.Contains(codecID, "H265") {
-		return "hevc"
+		return codecHEVC
 	}
 	if strings.Contains(codecID, "VP9") {
-		return "vp9"
+		return codecVP9
 	}
 	if strings.Contains(codecID, "VP8") {
 		return "vp8"
@@ -186,26 +196,23 @@ func mapMKVVideoCodec(codecID string) string {
 		return "av1"
 	}
 	if strings.Contains(codecID, "MPEG4") {
-		return "mpeg4"
+		return codecMPEG4
 	}
 	if strings.Contains(codecID, "THEORA") {
 		return "theora"
 	}
 
-	// Return the codec ID itself if we can't map it
 	return strings.TrimPrefix(codecID, "V_")
 }
 
-// mapMKVAudioCodec maps Matroska audio codec ID to human-readable name
 func mapMKVAudioCodec(codecID string) string {
-	// Matroska audio codec IDs are like "A_AAC", "A_MPEG/L3" (MP3), "A_AC3", etc.
 	codecID = strings.ToUpper(codecID)
 
 	if strings.Contains(codecID, "AAC") {
-		return "aac"
+		return codecAAC
 	}
 	if strings.Contains(codecID, "MP3") || strings.Contains(codecID, "MPEG/L3") {
-		return "mp3"
+		return codecMP3
 	}
 	if strings.Contains(codecID, "AC3") && !strings.Contains(codecID, "EAC3") {
 		return "ac3"
@@ -217,7 +224,7 @@ func mapMKVAudioCodec(codecID string) string {
 		return "dts"
 	}
 	if strings.Contains(codecID, "OPUS") {
-		return "opus"
+		return codecOPUS
 	}
 	if strings.Contains(codecID, "VORBIS") {
 		return "vorbis"

@@ -5,6 +5,8 @@ import (
 	"os"
 )
 
+const codecUnknown = "unknown"
+
 // VideoInfo contains metadata extracted from a video file
 type VideoInfo struct {
 	// Video properties
@@ -94,7 +96,7 @@ func detectContainer(header []byte) string {
 		}
 	}
 
-	return "unknown"
+	return codecUnknown
 }
 
 // GetResolution returns human-readable resolution string

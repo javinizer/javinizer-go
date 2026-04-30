@@ -61,7 +61,7 @@ func (s *Service) translateWithGooglePaid(ctx context.Context, sourceLang, targe
 		Target: targetLang,
 		Format: "text",
 	}
-	if sourceLang != "" && sourceLang != "auto" {
+	if sourceLang != "" && sourceLang != sourceLangAuto {
 		requestBody.Source = sourceLang
 	}
 
@@ -122,7 +122,7 @@ func (s *Service) translateWithGoogleFree(ctx context.Context, sourceLang, targe
 
 	sl := sourceLang
 	if sl == "" {
-		sl = "auto"
+		sl = sourceLangAuto
 	}
 
 	maxWorkers := 5

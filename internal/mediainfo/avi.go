@@ -346,7 +346,7 @@ func parseStrlList(f *os.File, startPos int64, size uint32) (*streamInfo, error)
 
 				// Update codec from compression field if available
 				compressionCodec := mapAVIVideoCodec(string(bitmapHeader.Compression[:]))
-				if compressionCodec != "unknown" {
+				if compressionCodec != codecUnknown {
 					stream.codec = compressionCodec
 				}
 
@@ -398,9 +398,9 @@ func mapAVIVideoCodec(fourCC string) string {
 
 	switch codec {
 	case "H264", "h264", "X264", "x264", "AVC1", "avc1":
-		return "h264"
+		return codecH264
 	case "H265", "h265", "HEVC", "hevc", "HVC1", "hvc1":
-		return "h265"
+		return codecH265
 	case "XVID", "xvid":
 		return "xvid"
 	case "DIVX", "divx", "DX50":
@@ -427,7 +427,7 @@ func mapAVIVideoCodec(fourCC string) string {
 		return "ffv1"
 	default:
 		if codec == "" {
-			return "unknown"
+			return codecUnknown
 		}
 		return codec // Return as-is if no mapping
 	}
@@ -465,6 +465,6 @@ func mapAVIAudioCodec(formatTag uint16) string {
 	case 0xF1AC:
 		return "flac"
 	default:
-		return "unknown"
+		return codecUnknown
 	}
 }

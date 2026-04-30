@@ -378,13 +378,13 @@ func applyFLVMetadata(info *VideoInfo, metadata map[string]interface{}) {
 	}
 	if videoCodec, ok := metadata["videocodecid"].(float64); ok {
 		codec := mapFLVVideoCodec(uint8(videoCodec))
-		if codec != "unknown" {
+		if codec != codecUnknown {
 			info.VideoCodec = codec
 		}
 	}
 	if audioCodec, ok := metadata["audiocodecid"].(float64); ok {
 		codec := mapFLVAudioCodec(uint8(audioCodec))
-		if codec != "unknown" {
+		if codec != codecUnknown {
 			info.AudioCodec = codec
 		}
 	}
@@ -410,11 +410,11 @@ func mapFLVVideoCodec(codecID uint8) string {
 	case 6:
 		return "screen_video_v2"
 	case 7:
-		return "h264" // AVC
+		return codecH264 // AVC
 	case 12:
-		return "h265" // HEVC (newer FLV extensions)
+		return codecH265 // HEVC (newer FLV extensions)
 	default:
-		return "unknown"
+		return codecUnknown
 	}
 }
 
@@ -440,7 +440,7 @@ func mapFLVAudioCodec(codecID uint8) string {
 	case 8:
 		return "g711_mulaw"
 	case 10:
-		return "aac"
+		return codecAAC
 	case 11:
 		return "speex"
 	case 14:
@@ -448,7 +448,7 @@ func mapFLVAudioCodec(codecID uint8) string {
 	case 15:
 		return "device_specific"
 	default:
-		return "unknown"
+		return codecUnknown
 	}
 }
 
