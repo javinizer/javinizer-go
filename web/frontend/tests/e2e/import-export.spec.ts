@@ -1,3 +1,4 @@
+import type { APIRequestContext, Page, Response } from '@playwright/test';
 import { test, expect } from '@playwright/test';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +9,7 @@ const fixturesDir = join(__dirname, '..', 'fixtures');
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
-async function ensureAuthenticated(request: any, page: any) {
+async function ensureAuthenticated(request: APIRequestContext, page: Page | null) {
 	const username = process.env.E2E_AUTH_USERNAME || 'admin';
 	const password = process.env.E2E_AUTH_PASSWORD || 'adminpassword123';
 
@@ -46,14 +47,14 @@ async function ensureAuthenticated(request: any, page: any) {
 			await page.locator('input[type="password"]').first().fill(password);
 			await page.locator('input[type="password"]').nth(1).fill(password);
 			await Promise.all([
-				page.waitForResponse(res => res.url().includes('/auth/setup')),
+				page.waitForResponse((res: Response) => res.url().includes('/auth/setup')),
 				page.locator('button').filter({ hasText: /create/i }).click()
 			]);
 		} else if (await loginUsername.isVisible().catch(() => false)) {
 			await loginUsername.fill(username);
 			await page.locator('#login-password').fill(password);
 			await Promise.all([
-				page.waitForResponse(res => res.url().includes('/auth/login')),
+				page.waitForResponse((res: Response) => res.url().includes('/auth/login')),
 				page.locator('button').filter({ hasText: /sign|login/i }).click()
 			]);
 		}
