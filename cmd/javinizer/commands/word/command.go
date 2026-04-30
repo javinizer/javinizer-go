@@ -14,78 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var defaultWordReplacements = map[string]bool{
-	"[Recommended For Smartphones] ": true,
-	"A*****t":                        true,
-	"A*****ted":                      true,
-	"A****p":                         true,
-	"A***e":                          true,
-	"B***d":                          true,
-	"B**d":                           true,
-	"C***d":                          true,
-	"D******ed":                      true,
-	"D******eful":                    true,
-	"D***k":                          true,
-	"D***king":                       true,
-	"D**g":                           true,
-	"D**gged":                        true,
-	"F***":                           true,
-	"F*****g":                        true,
-	"F***e":                          true,
-	"G*********d":                    true,
-	"G*******g":                      true,
-	"G******g":                       true,
-	"H*********n":                    true,
-	"H*******ed":                     true,
-	"H*******m":                      true,
-	"I****t":                         true,
-	"I****tuous":                     true,
-	"K****p":                         true,
-	"K**l":                           true,
-	"K**ler":                         true,
-	"K*d":                            true,
-	"Ko**ji":                         true,
-	"Lo**ta":                         true,
-	"M******r":                       true,
-	"M****t":                         true,
-	"M****ted":                       true,
-	"M****ter":                       true,
-	"M****ting":                      true,
-	"P****h":                         true,
-	"P****hment":                     true,
-	"P*A":                            true,
-	"R****g":                         true,
-	"R**e":                           true,
-	"R**ed":                          true,
-	"R*pe":                           true,
-	"S*********l":                    true,
-	"S*********ls":                   true,
-	"S********l":                     true,
-	"S********n":                     true,
-	"S******g":                       true,
-	"S*****t":                        true,
-	"S***e":                          true,
-	"S***p":                          true,
-	"S**t":                           true,
-	"Sch**l":                         true,
-	"Sch**lgirl":                     true,
-	"Sch**lgirls":                    true,
-	"SK**lful":                       true,
-	"SK**ls":                         true,
-	"StepB****************r":         true,
-	"StepM************n":             true,
-	"StumB**d":                       true,
-	"T*****e":                        true,
-	"U*********sly":                  true,
-	"U**verse":                       true,
-	"V*****e":                        true,
-	"V*****ed":                       true,
-	"V*****es":                       true,
-	"V*****t":                        true,
-	"Y********l":                     true,
-	"D******e":                       true,
-}
-
 // NewCommand creates the word command
 func NewCommand() *cobra.Command {
 	wordCmd := &cobra.Command{
@@ -320,7 +248,7 @@ func runWordImport(cmd *cobra.Command, args []string, configFile string) error {
 	for i := range replacements {
 		r := &replacements[i]
 
-		if !includeDefaults && defaultWordReplacements[r.Original] {
+		if !includeDefaults && database.IsDefaultWordReplacement(r.Original) {
 			skipped++
 			continue
 		}

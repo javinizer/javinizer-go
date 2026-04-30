@@ -348,6 +348,8 @@ func exportActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 
 func importActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
+
 		var req actressesImportRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
@@ -368,8 +370,13 @@ func importActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 				continue
 			}
 
+			if item.DMMID < 0 {
+				errorsCount++
+				continue
+			}
+
 			existing, err := actressRepo.FindByJapaneseNameAndDMMID(japaneseName, item.DMMID)
-			if err != nil {
+			if err != nil && !database.IsNotFound(err) && !errors.Is(err, database.ErrInvalidLookup) {
 				errorsCount++
 				continue
 			}

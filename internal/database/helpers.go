@@ -3,8 +3,10 @@ package database
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 )
 
@@ -13,6 +15,28 @@ func wrapDBErr(op, entity string, err error) error {
 		return nil
 	}
 	return fmt.Errorf("%s %s: %w", op, entity, err)
+}
+
+func isLocked(err error) bool {
+	var sqliteErr *sqlite3.Error
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr.Code == sqlite3.ErrBusy || sqliteErr.Code == sqlite3.ErrLocked
+	}
+	return false
+}
+
+const defaultLockRetries = 5
+
+func retryOnLocked(fn func() error) error {
+	var err error
+	for i := 0; i < defaultLockRetries; i++ {
+		err = fn()
+		if err == nil || !isLocked(err) {
+			return err
+		}
+		time.Sleep(time.Duration(50*(i+1)) * time.Millisecond)
+	}
+	return err
 }
 
 func raceRetryCreate(tx *gorm.DB, entity interface{}, findExisting func(tx *gorm.DB) error) error {

@@ -75,90 +75,110 @@ func (r *WordReplacementRepository) GetReplacementMap() (map[string]string, erro
 	return result, nil
 }
 
+// DefaultWordReplacements returns the full list of default uncensor replacements.
+// This is the single source of truth for default word replacement data.
+func DefaultWordReplacements() []models.WordReplacement {
+	dst := make([]models.WordReplacement, len(defaultWordReplacements))
+	copy(dst, defaultWordReplacements)
+	return dst
+}
+
+// IsDefaultWordReplacement returns true if the given original string matches
+// one of the default uncensor replacements.
+func IsDefaultWordReplacement(original string) bool {
+	_, ok := defaultOrigins[original]
+	return ok
+}
+
+var defaultOrigins map[string]struct{}
+var defaultWordReplacements []models.WordReplacement
+
+func init() {
+	defaultWordReplacements = []models.WordReplacement{
+		{Original: "[Recommended For Smartphones] ", Replacement: ""},
+		{Original: "A*****t", Replacement: "Assault"},
+		{Original: "A*****ted", Replacement: "Assaulted"},
+		{Original: "A****p", Replacement: "Asleep"},
+		{Original: "A***e", Replacement: "Abuse"},
+		{Original: "B***d", Replacement: "Blood"},
+		{Original: "B**d", Replacement: "Bled"},
+		{Original: "C***d", Replacement: "Child"},
+		{Original: "D******ed", Replacement: "Destroyed"},
+		{Original: "D******eful", Replacement: "Shameful"},
+		{Original: "D***k", Replacement: "Drunk"},
+		{Original: "D***king", Replacement: "Drinking"},
+		{Original: "D**g", Replacement: "Drug"},
+		{Original: "D**gged", Replacement: "Drugged"},
+		{Original: "F***", Replacement: "Fuck"},
+		{Original: "F*****g", Replacement: "Forcing"},
+		{Original: "F***e", Replacement: "Force"},
+		{Original: "G*********d", Replacement: "Gang Banged"},
+		{Original: "G*******g", Replacement: "Gang bang"},
+		{Original: "G******g", Replacement: "Gangbang"},
+		{Original: "H*********n", Replacement: "Humiliation"},
+		{Original: "H*******ed", Replacement: "Hypnotized"},
+		{Original: "H*******m", Replacement: "Hypnotism"},
+		{Original: "I****t", Replacement: "Incest"},
+		{Original: "I****tuous", Replacement: "Incestuous"},
+		{Original: "K****p", Replacement: "Kidnap"},
+		{Original: "K**l", Replacement: "Kill"},
+		{Original: "K**ler", Replacement: "Killer"},
+		{Original: "K*d", Replacement: "Kid"},
+		{Original: "Ko**ji", Replacement: "Komyo-ji"},
+		{Original: "Lo**ta", Replacement: "Lolita"},
+		{Original: "M******r", Replacement: "Molester"},
+		{Original: "M****t", Replacement: "Molest"},
+		{Original: "M****ted", Replacement: "Molested"},
+		{Original: "M****ter", Replacement: "Molester"},
+		{Original: "M****ting", Replacement: "Molesting"},
+		{Original: "P****h", Replacement: "Punish"},
+		{Original: "P****hment", Replacement: "Punishment"},
+		{Original: "P*A", Replacement: "PTA"},
+		{Original: "R****g", Replacement: "Raping"},
+		{Original: "R**e", Replacement: "Rape"},
+		{Original: "R**ed", Replacement: "Raped"},
+		{Original: "R*pe", Replacement: "Rape"},
+		{Original: "S*********l", Replacement: "School Girl"},
+		{Original: "S*********ls", Replacement: "School Girls"},
+		{Original: "S********l", Replacement: "Schoolgirl"},
+		{Original: "S********n", Replacement: "Submission"},
+		{Original: "S******g", Replacement: "Sleeping"},
+		{Original: "S*****t", Replacement: "Student"},
+		{Original: "S***e", Replacement: "Slave"},
+		{Original: "S***p", Replacement: "Sleep"},
+		{Original: "S**t", Replacement: "Shit"},
+		{Original: "Sch**l", Replacement: "School"},
+		{Original: "Sch**lgirl", Replacement: "Schoolgirl"},
+		{Original: "Sch**lgirls", Replacement: "Schoolgirls"},
+		{Original: "SK**lful", Replacement: "Skillful"},
+		{Original: "SK**ls", Replacement: "Skills"},
+		{Original: "StepB****************r", Replacement: "Stepbrother and Sister"},
+		{Original: "StepM************n", Replacement: "Stepmother and Son"},
+		{Original: "StumB**d", Replacement: "Stumbled"},
+		{Original: "T*****e", Replacement: "Torture"},
+		{Original: "U*********sly", Replacement: "Unconsciously"},
+		{Original: "U**verse", Replacement: "Universe"},
+		{Original: "V*****e", Replacement: "Violate"},
+		{Original: "V*****ed", Replacement: "Violated"},
+		{Original: "V*****es", Replacement: "Violates"},
+		{Original: "V*****t", Replacement: "Violent"},
+		{Original: "Y********l", Replacement: "Young Girl"},
+		{Original: "D******e", Replacement: "Disgrace"},
+	}
+
+	defaultOrigins = make(map[string]struct{}, len(defaultWordReplacements))
+	for i := range defaultWordReplacements {
+		defaultOrigins[defaultWordReplacements[i].Original] = struct{}{}
+	}
+}
+
 // SeedDefaultWordReplacements populates the word replacement table with uncensor defaults.
 // Each rule is upserted, so existing entries are preserved across restarts.
 func SeedDefaultWordReplacements(repo *WordReplacementRepository) {
-	defaults := []struct {
-		Original    string
-		Replacement string
-	}{
-		{"[Recommended For Smartphones] ", ""},
-		{"A*****t", "Assault"},
-		{"A*****ted", "Assaulted"},
-		{"A****p", "Asleep"},
-		{"A***e", "Abuse"},
-		{"B***d", "Blood"},
-		{"B**d", "Bled"},
-		{"C***d", "Child"},
-		{"D******ed", "Destroyed"},
-		{"D******eful", "Shameful"},
-		{"D***k", "Drunk"},
-		{"D***king", "Drinking"},
-		{"D**g", "Drug"},
-		{"D**gged", "Drugged"},
-		{"F***", "Fuck"},
-		{"F*****g", "Forcing"},
-		{"F***e", "Force"},
-		{"G*********d", "Gang Banged"},
-		{"G*******g", "Gang bang"},
-		{"G******g", "Gangbang"},
-		{"H*********n", "Humiliation"},
-		{"H*******ed", "Hypnotized"},
-		{"H*******m", "Hypnotism"},
-		{"I****t", "Incest"},
-		{"I****tuous", "Incestuous"},
-		{"K****p", "Kidnap"},
-		{"K**l", "Kill"},
-		{"K**ler", "Killer"},
-		{"K*d", "Kid"},
-		{"Ko**ji", "Komyo-ji"},
-		{"Lo**ta", "Lolita"},
-		{"M******r", "Molester"},
-		{"M****t", "Molest"},
-		{"M****ted", "Molested"},
-		{"M****ter", "Molester"},
-		{"M****ting", "Molesting"},
-		{"P****h", "Punish"},
-		{"P****hment", "Punishment"},
-		{"P*A", "PTA"},
-		{"R****g", "Raping"},
-		{"R**e", "Rape"},
-		{"R**ed", "Raped"},
-		{"R*pe", "Rape"},
-		{"S*********l", "School Girl"},
-		{"S*********ls", "School Girls"},
-		{"S********l", "Schoolgirl"},
-		{"S********n", "Submission"},
-		{"S******g", "Sleeping"},
-		{"S*****t", "Student"},
-		{"S***e", "Slave"},
-		{"S***p", "Sleep"},
-		{"S**t", "Shit"},
-		{"Sch**l", "School"},
-		{"Sch**lgirl", "Schoolgirl"},
-		{"Sch**lgirls", "Schoolgirls"},
-		{"SK**lful", "Skillful"},
-		{"SK**ls", "Skills"},
-		{"StepB****************r", "Stepbrother and Sister"},
-		{"StepM************n", "Stepmother and Son"},
-		{"StumB**d", "Stumbled"},
-		{"T*****e", "Torture"},
-		{"U*********sly", "Unconsciously"},
-		{"U**verse", "Universe"},
-		{"V*****e", "Violate"},
-		{"V*****ed", "Violated"},
-		{"V*****es", "Violates"},
-		{"V*****t", "Violent"},
-		{"Y********l", "Young Girl"},
-		{"D******e", "Disgrace"},
-	}
-
-	for _, d := range defaults {
-		if err := repo.Upsert(&models.WordReplacement{
-			Original:    d.Original,
-			Replacement: d.Replacement,
-		}); err != nil {
-			logging.Warnf("failed to seed word replacement %q: %v", d.Original, err)
+	for i := range defaultWordReplacements {
+		r := defaultWordReplacements[i]
+		if err := repo.Upsert(&r); err != nil {
+			logging.Warnf("failed to seed word replacement %q: %v", r.Original, err)
 		}
 	}
 }

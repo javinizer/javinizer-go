@@ -69,6 +69,7 @@ func New(cfg *config.Config) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
+
 	return &DB{
 		DB:  db,
 		dsn: cfg.Database.DSN,
@@ -99,7 +100,7 @@ func normalizeSQLiteDSN(dsn string) string {
 	// `:memory:` is scoped per SQLite connection. Goose migration checks and applies
 	// can use multiple connections, so convert to a unique shared-cache memory URI.
 	next := sqliteMemoryDSNCounter.Add(1)
-	return fmt.Sprintf("file:javinizer_mem_%d_%d?mode=memory&cache=shared", time.Now().UnixNano(), next)
+	return fmt.Sprintf("file:javinizer_mem_%d_%d?mode=memory&cache=shared&_busy_timeout=5000", time.Now().UnixNano(), next)
 }
 
 // Close closes the database connection

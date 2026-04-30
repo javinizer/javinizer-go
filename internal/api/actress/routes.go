@@ -14,6 +14,6 @@ func RegisterRoutes(protected *gin.RouterGroup, deps *core.ServerDependencies) {
 	protected.GET("/actresses/search", searchActresses(deps.ActressRepo))
 	protected.POST("/actresses/merge/preview", previewActressMerge(deps.ActressRepo))
 	protected.POST("/actresses/merge", mergeActresses(deps.ActressRepo))
-	protected.POST("/actresses/export", exportActresses(deps.ActressRepo))
+	protected.GET("/actresses/export", exportActresses(deps.ActressRepo))
 	protected.POST("/actresses/import", importActresses(deps.ActressRepo))
 }

@@ -11,7 +11,7 @@ func RegisterRoutes(protected *gin.RouterGroup, deps *core.ServerDependencies) {
 	replacements.POST("", createGenreReplacement(deps))
 	replacements.PUT("", updateGenreReplacement(deps))
 	replacements.DELETE("", deleteGenreReplacement(deps))
-	replacements.POST("/export", exportGenreReplacements(deps))
+	replacements.GET("/export", exportGenreReplacements(deps))
 	replacements.POST("/import", importGenreReplacements(deps))
 
 	wordReplacements := protected.Group("/words/replacements")
@@ -19,6 +19,6 @@ func RegisterRoutes(protected *gin.RouterGroup, deps *core.ServerDependencies) {
 	wordReplacements.POST("", createWordReplacement(deps))
 	wordReplacements.PUT("", updateWordReplacement(deps))
 	wordReplacements.DELETE("", deleteWordReplacement(deps))
-	wordReplacements.POST("/export", exportWordReplacements(deps))
+	wordReplacements.GET("/export", exportWordReplacements(deps))
 	wordReplacements.POST("/import", importWordReplacements(deps))
 }

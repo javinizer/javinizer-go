@@ -1,14 +1,13 @@
 package genre
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"gorm.io/gorm"
 )
 
 type genreReplacementCreateRequest struct {
@@ -88,7 +87,13 @@ func updateGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 		}
 
 		existing, err := deps.GenreReplacementRepo.FindByOriginal(req.Original)
-		if err != nil || existing == nil {
+		if err != nil {
+			if !database.IsNotFound(err) {
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				return
+			}
+		}
+		if existing == nil {
 			c.JSON(http.StatusNotFound, ErrorResponse{Error: "genre replacement not found"})
 			return
 		}
@@ -133,7 +138,11 @@ func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 		}
 
 		existing, err := deps.GenreReplacementRepo.FindByOriginal(req.Original)
-		if err == nil && existing != nil {
+		if err != nil && !database.IsNotFound(err) {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			return
+		}
+		if existing != nil {
 			c.JSON(http.StatusOK, existing)
 			return
 		}
@@ -165,14 +174,14 @@ func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 // @Router /api/v1/genres/replacements [delete]
 func deleteGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		original := c.Query("original")
+		original := strings.TrimSpace(c.Query("original"))
 		if original == "" {
 			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "original query parameter is required"})
 			return
 		}
 
 		existing, err := deps.GenreReplacementRepo.FindByOriginal(original)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err != nil && !database.IsNotFound(err) {
 			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 			return
 		}
@@ -214,26 +223,28 @@ func exportGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 
 func importGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
+
 		var req genreReplacementImportRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		var imported, skipped, errors int
+		var imported, skipped, errorsCount int
 
 		for _, item := range req.Replacements {
 			orig := strings.TrimSpace(item.Original)
 			repl := strings.TrimSpace(item.Replacement)
 
 			if orig == "" {
-				errors++
+				errorsCount++
 				continue
 			}
 
 			existing, err := deps.GenreReplacementRepo.FindByOriginal(orig)
-			if err != nil {
-				errors++
+			if err != nil && !database.IsNotFound(err) {
+				errorsCount++
 				continue
 			}
 
@@ -245,14 +256,14 @@ func importGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 					Replacement: repl,
 				}
 				if err := deps.GenreReplacementRepo.Create(replacement); err != nil {
-					errors++
+					errorsCount++
 					continue
 				}
 				changed = true
 			} else if existing.Replacement != repl {
 				existing.Replacement = repl
 				if err := deps.GenreReplacementRepo.Upsert(existing); err != nil {
-					errors++
+					errorsCount++
 					continue
 				}
 				changed = true
@@ -268,7 +279,7 @@ func importGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 		c.JSON(http.StatusOK, importSummaryResponse{
 			Imported: imported,
 			Skipped:  skipped,
-			Errors:   errors,
+			Errors:   errorsCount,
 		})
 	}
 }

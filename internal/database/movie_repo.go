@@ -43,73 +43,100 @@ func (r *MovieRepository) Update(movie *models.Movie) error {
 
 func (r *MovieRepository) Upsert(movie *models.Movie) (*models.Movie, error) {
 	var result *models.Movie
-	err := r.GetDB().Transaction(func(tx *gorm.DB) error {
-		if strings.TrimSpace(movie.ContentID) == "" {
-			if strings.TrimSpace(movie.ID) == "" {
-				return fmt.Errorf("content_id is required when using ContentID as primary key")
+	movie.Actresses = filterIdentifiableActresses(movie.Actresses)
+	savedTranslations := make([]models.MovieTranslation, len(movie.Translations))
+	copy(savedTranslations, movie.Translations)
+	savedActresses := make([]models.Actress, len(movie.Actresses))
+	copy(savedActresses, movie.Actresses)
+	savedGenres := make([]models.Genre, len(movie.Genres))
+	copy(savedGenres, movie.Genres)
+	savedContentID := movie.ContentID
+	savedCreatedAt := movie.CreatedAt
+	err := retryOnLocked(func() error {
+		movie.Translations = make([]models.MovieTranslation, len(savedTranslations))
+		copy(movie.Translations, savedTranslations)
+		movie.Actresses = make([]models.Actress, len(savedActresses))
+		copy(movie.Actresses, savedActresses)
+		movie.Genres = make([]models.Genre, len(savedGenres))
+		copy(movie.Genres, savedGenres)
+		movie.ContentID = savedContentID
+		movie.CreatedAt = savedCreatedAt
+		return r.GetDB().Transaction(func(tx *gorm.DB) error {
+			if strings.TrimSpace(movie.ContentID) == "" {
+				if strings.TrimSpace(movie.ID) == "" {
+					return fmt.Errorf("content_id is required when using ContentID as primary key")
+				}
+				movie.ContentID = strings.ToLower(strings.ReplaceAll(movie.ID, "-", ""))
 			}
-			movie.ContentID = strings.ToLower(strings.ReplaceAll(movie.ID, "-", ""))
-		}
 
-		movie.Actresses = filterIdentifiableActresses(movie.Actresses)
-
-		var existing models.Movie
-		var existingFound bool
-		if movie.ContentID != "" {
-			err := tx.Select("content_id", "created_at").First(&existing, "content_id = ?", movie.ContentID).Error
-			if err == nil {
-				existingFound = true
-			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return wrapDBErr("find", fmt.Sprintf("movie %s", movie.ContentID), err)
+			var existing models.Movie
+			var existingFound bool
+			if movie.ContentID != "" {
+				err := tx.Select("content_id", "created_at").First(&existing, "content_id = ?", movie.ContentID).Error
+				if err == nil {
+					existingFound = true
+				} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return wrapDBErr("find", fmt.Sprintf("movie %s", movie.ContentID), err)
+				}
 			}
-		}
-		if !existingFound && movie.ID != "" {
-			err := tx.Select("content_id", "created_at").First(&existing, "id = ?", movie.ID).Error
-			if err == nil {
-				existingFound = true
-				movie.ContentID = existing.ContentID
-			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return wrapDBErr("find", fmt.Sprintf("movie %s", movie.ID), err)
+			if !existingFound && movie.ID != "" {
+				err := tx.Select("content_id", "created_at").First(&existing, "id = ?", movie.ID).Error
+				if err == nil {
+					existingFound = true
+					movie.ContentID = existing.ContentID
+				} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return wrapDBErr("find", fmt.Sprintf("movie %s", movie.ID), err)
+				}
 			}
-		}
 
-		if !existingFound {
-			if err := tx.Omit("Actresses", "Genres").Create(movie).Error; err != nil {
-				if errors.Is(err, gorm.ErrDuplicatedKey) {
-					var existingMovie models.Movie
-					if loadErr := tx.Select("created_at").First(&existingMovie, "content_id = ?", movie.ContentID).Error; loadErr == nil {
-						movie.CreatedAt = existingMovie.CreatedAt
+			if !existingFound {
+				if err := tx.Omit("Actresses", "Genres").Create(movie).Error; err != nil {
+					if errors.Is(err, gorm.ErrDuplicatedKey) {
+						var existingMovie models.Movie
+						loadErr := tx.Select("created_at").First(&existingMovie, "content_id = ?", movie.ContentID).Error
+						if loadErr != nil {
+							if !errors.Is(loadErr, gorm.ErrRecordNotFound) {
+								return wrapDBErr("find duplicate", fmt.Sprintf("movie %s", movie.ContentID), loadErr)
+							}
+						} else {
+							movie.CreatedAt = existingMovie.CreatedAt
+						}
 						if err := r.saveMovieWithAssociations(tx, movie); err != nil {
 							return wrapDBErr("save duplicate", fmt.Sprintf("movie %s", movie.ContentID), err)
 						}
+						var loaded models.Movie
+						if err := tx.Preload("Actresses").Preload("Genres").Preload("Translations", func(db *gorm.DB) *gorm.DB { return db.Order("language ASC") }).First(&loaded, "content_id = ?", movie.ContentID).Error; err != nil {
+							return wrapDBErr("reload", fmt.Sprintf("movie %s", movie.ContentID), err)
+						}
+						result = &loaded
 						return nil
 					}
+					return wrapDBErr("create", fmt.Sprintf("movie %s", movie.ContentID), err)
 				}
-				return wrapDBErr("create", fmt.Sprintf("movie %s", movie.ContentID), err)
+			} else {
+				movie.CreatedAt = existing.CreatedAt
 			}
-		} else {
-			movie.CreatedAt = existing.CreatedAt
-		}
 
-		if err := r.ensureGenresExistTx(tx, movie.Genres); err != nil {
-			return wrapDBErr("ensure genres", fmt.Sprintf("for movie %s", movie.ContentID), err)
-		}
-		if err := r.ensureActressesExistTx(tx, movie.Actresses); err != nil {
-			return wrapDBErr("ensure actresses", fmt.Sprintf("for movie %s", movie.ContentID), err)
-		}
+			if err := r.ensureGenresExistTx(tx, movie.Genres); err != nil {
+				return wrapDBErr("ensure genres", fmt.Sprintf("for movie %s", movie.ContentID), err)
+			}
+			if err := r.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return wrapDBErr("ensure actresses", fmt.Sprintf("for movie %s", movie.ContentID), err)
+			}
 
-		translations := movie.Translations
-		movie.Translations = nil
-		if err := upsertMovieCore(tx, r.GetDB(), movie, translations); err != nil {
-			return wrapDBErr("save", fmt.Sprintf("movie %s", movie.ContentID), err)
-		}
+			translations := movie.Translations
+			movie.Translations = nil
+			if err := upsertMovieCore(tx, r.GetDB(), movie, translations); err != nil {
+				return wrapDBErr("save", fmt.Sprintf("movie %s", movie.ContentID), err)
+			}
 
-		var loaded models.Movie
-		if err := tx.Preload("Actresses").Preload("Genres").Preload("Translations", func(db *gorm.DB) *gorm.DB { return db.Order("language ASC") }).First(&loaded, "content_id = ?", movie.ContentID).Error; err != nil {
-			return wrapDBErr("reload", fmt.Sprintf("movie %s", movie.ContentID), err)
-		}
-		result = &loaded
-		return nil
+			var loaded models.Movie
+			if err := tx.Preload("Actresses").Preload("Genres").Preload("Translations", func(db *gorm.DB) *gorm.DB { return db.Order("language ASC") }).First(&loaded, "content_id = ?", movie.ContentID).Error; err != nil {
+				return wrapDBErr("reload", fmt.Sprintf("movie %s", movie.ContentID), err)
+			}
+			result = &loaded
+			return nil
+		})
 	})
 	return result, err
 }
