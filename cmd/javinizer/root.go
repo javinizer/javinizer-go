@@ -21,6 +21,7 @@ import (
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/tui"
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/update"
 	versioncmd "github.com/javinizer/javinizer-go/cmd/javinizer/commands/version"
+	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/word"
 	"github.com/javinizer/javinizer-go/internal/config"
 	_ "github.com/javinizer/javinizer-go/internal/config/migrations"
 	"github.com/javinizer/javinizer-go/internal/configutil"
@@ -74,6 +75,7 @@ func init() {
 		tag.NewCommand(),
 		tui.NewCommand(),
 		update.NewCommand(),
+		word.NewCommand(),
 		versioncmd.NewCommand(),
 	)
 }
