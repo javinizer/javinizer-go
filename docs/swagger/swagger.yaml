@@ -1,5 +1,608 @@
 basePath: /
 definitions:
+  config.APIConfig:
+    properties:
+      security:
+        $ref: '#/definitions/config.SecurityConfig'
+    type: object
+  config.ActressDatabaseConfig:
+    properties:
+      auto_add:
+        description: Automatically add new actresses to database
+        type: boolean
+      convert_alias:
+        description: Convert actress names using alias database
+        type: boolean
+      enabled:
+        description: Enable actress image lookup from database
+        type: boolean
+    type: object
+  config.AnthropicTranslationConfig:
+    properties:
+      api_key:
+        description: Required
+        type: string
+      base_url:
+        description: e.g., https://api.anthropic.com
+        type: string
+      model:
+        description: e.g., claude-sonnet-4-20250514
+        type: string
+    type: object
+  config.BrowserConfig:
+    properties:
+      binary_path:
+        description: Chrome/Chromium path (auto-discovered if empty)
+        type: string
+      block_css:
+        description: 'Block CSS for speed (default: false)'
+        type: boolean
+      block_images:
+        description: 'Block images for speed (default: true)'
+        type: boolean
+      debug_visible:
+        description: 'Show browser window for debugging (default: false)'
+        type: boolean
+      enabled:
+        description: 'Master kill-switch (default: false)'
+        type: boolean
+      headless:
+        description: 'Run headless (default: true)'
+        type: boolean
+      max_retries:
+        description: 'Retry attempts (default: 3)'
+        type: integer
+      slow_mo:
+        description: 'Slow motion delay ms (default: 0)'
+        type: integer
+      stealth_mode:
+        description: 'Anti-detection measures (default: true)'
+        type: boolean
+      timeout:
+        description: 'Operation timeout in seconds (default: 30)'
+        type: integer
+      user_agent:
+        description: Override UA (empty = use scraper's)
+        type: string
+      window_height:
+        description: 'Viewport height (default: 1080)'
+        type: integer
+      window_width:
+        description: 'Viewport width (default: 1920)'
+        type: integer
+    type: object
+  config.DatabaseConfig:
+    properties:
+      dsn:
+        description: Data Source Name
+        type: string
+      log_level:
+        description: 'Database query logging: silent, error, warn, info (default:
+          silent)'
+        type: string
+      type:
+        description: sqlite (currently only supported backend)
+        type: string
+    type: object
+  config.DeepLTranslationConfig:
+    properties:
+      api_key:
+        description: DeepL API key
+        type: string
+      base_url:
+        description: Optional override (defaults to mode-specific endpoint)
+        type: string
+      mode:
+        description: free or pro
+        type: string
+    type: object
+  config.FlareSolverrConfig:
+    properties:
+      enabled:
+        description: Enable FlareSolverr for bypassing Cloudflare
+        type: boolean
+      max_retries:
+        description: 'Max retry attempts for FlareSolverr calls (default: 3)'
+        type: integer
+      session_ttl:
+        description: 'Session TTL in seconds (default: 300)'
+        type: integer
+      timeout:
+        description: 'Request timeout in seconds (default: 30)'
+        type: integer
+      url:
+        description: 'FlareSolverr endpoint (default: http://localhost:8191/v1)'
+        type: string
+    type: object
+  config.GenreReplacementConfig:
+    properties:
+      auto_add:
+        description: Automatically add new genres to database (identity mapping)
+        type: boolean
+      enabled:
+        description: Enable genre replacement from database
+        type: boolean
+    type: object
+  config.GoogleTranslationConfig:
+    properties:
+      api_key:
+        description: Required for paid mode
+        type: string
+      base_url:
+        description: Optional override
+        type: string
+      mode:
+        description: free or paid
+        type: string
+    type: object
+  config.LoggingConfig:
+    properties:
+      compress:
+        description: Compress rotated files
+        type: boolean
+      format:
+        description: json, text
+        type: string
+      level:
+        description: debug, info, warn, error
+        type: string
+      max_age_days:
+        description: Max age in days to keep log files (0 = no limit)
+        type: integer
+      max_backups:
+        description: Max number of old log files to keep (0 = unlimited)
+        type: integer
+      max_size_mb:
+        description: Max size in MB before rotation (0 = no rotation)
+        type: integer
+      output:
+        description: stdout, file path
+        type: string
+    type: object
+  config.MatchingConfig:
+    properties:
+      exclude_patterns:
+        items:
+          type: string
+        type: array
+      extensions:
+        items:
+          type: string
+        type: array
+      min_size_mb:
+        type: integer
+      regex_enabled:
+        type: boolean
+      regex_pattern:
+        type: string
+    type: object
+  config.MediaInfoConfig:
+    properties:
+      cli_enabled:
+        description: 'Enable MediaInfo CLI fallback (default: false)'
+        type: boolean
+      cli_path:
+        description: 'Path to mediainfo binary (default: "mediainfo")'
+        type: string
+      cli_timeout:
+        description: 'Timeout in seconds for CLI execution (default: 30)'
+        type: integer
+    type: object
+  config.MetadataConfig:
+    properties:
+      actress_database:
+        allOf:
+        - $ref: '#/definitions/config.ActressDatabaseConfig'
+        description: Actress image database (SQLite-backed)
+      genre_replacement:
+        allOf:
+        - $ref: '#/definitions/config.GenreReplacementConfig'
+        description: Genre replacement/normalization (SQLite-backed)
+      ignore_genres:
+        items:
+          type: string
+        type: array
+      nfo:
+        $ref: '#/definitions/config.NFOConfig'
+      priority:
+        $ref: '#/definitions/config.PriorityConfig'
+      required_fields:
+        items:
+          type: string
+        type: array
+      tag_database:
+        allOf:
+        - $ref: '#/definitions/config.TagDatabaseConfig'
+        description: Per-movie tag database (SQLite-backed)
+      translation:
+        allOf:
+        - $ref: '#/definitions/config.TranslationConfig'
+        description: Metadata translation pipeline
+      word_replacement:
+        allOf:
+        - $ref: '#/definitions/config.WordReplacementConfig'
+        description: Word uncensor/text replacement (SQLite-backed)
+    type: object
+  config.NFOConfig:
+    properties:
+      actress_as_tag:
+        type: boolean
+      actress_language_ja:
+        type: boolean
+      add_generic_role:
+        description: Add generic "Actress" role to all actresses
+        type: boolean
+      alt_name_role:
+        description: Use alternate name (Japanese) in role field
+        type: boolean
+      credits:
+        items:
+          type: string
+        type: array
+      display_title:
+        type: string
+      enabled:
+        type: boolean
+      filename_template:
+        type: string
+      first_name_order:
+        type: boolean
+      include_fanart:
+        type: boolean
+      include_originalpath:
+        description: Include source filename in NFO
+        type: boolean
+      include_stream_details:
+        type: boolean
+      include_trailer:
+        type: boolean
+      per_file:
+        description: Create separate NFO for each multi-part file
+        type: boolean
+      rating_source:
+        type: string
+      tag:
+        items:
+          type: string
+        type: array
+      tagline:
+        type: string
+      unknown_actress_mode:
+        description: skip (default) or fallback
+        type: string
+      unknown_actress_text:
+        description: Text for fallback mode
+        type: string
+    type: object
+  config.OpenAICompatibleTranslationConfig:
+    properties:
+      api_key:
+        description: Optional for local endpoints
+        type: string
+      base_url:
+        description: e.g., http://localhost:11434/v1
+        type: string
+      enable_thinking:
+        description: Toggle reasoning/thinking when supported by the backend
+        type: boolean
+      model:
+        description: e.g., llama3.1
+        type: string
+    type: object
+  config.OpenAITranslationConfig:
+    properties:
+      api_key:
+        description: API key for the provider
+        type: string
+      base_url:
+        description: OpenAI-compatible base URL (e.g., https://api.openai.com/v1)
+        type: string
+      model:
+        description: Model name (e.g., gpt-4o-mini)
+        type: string
+    type: object
+  config.OutputConfig:
+    properties:
+      actress_folder:
+        type: string
+      actress_format:
+        type: string
+      allow_revert:
+        description: 'Enable revert operations (default: false — opt-in for safety)'
+        type: boolean
+      delimiter:
+        type: string
+      download_actress:
+        type: boolean
+      download_cover:
+        type: boolean
+      download_extrafanart:
+        type: boolean
+      download_poster:
+        type: boolean
+      download_proxy:
+        allOf:
+        - $ref: '#/definitions/config.ProxyConfig'
+        description: Separate proxy for downloads (optional)
+      download_timeout:
+        description: 'Timeout in seconds for HTTP downloads (default: 60)'
+        type: integer
+      download_trailer:
+        type: boolean
+      fanart_format:
+        type: string
+      file_format:
+        type: string
+      folder_format:
+        type: string
+      group_actress:
+        description: 'Replace multiple actresses with "@Group" in templates (default:
+          false)'
+        type: boolean
+      max_path_length:
+        type: integer
+      max_title_length:
+        type: integer
+      move_subtitles:
+        type: boolean
+      operation_mode:
+        type: string
+      poster_format:
+        type: string
+      rename_file:
+        description: 'Rename files using file_format template (default: true)'
+        type: boolean
+      screenshot_folder:
+        type: string
+      screenshot_format:
+        type: string
+      screenshot_padding:
+        type: integer
+      subfolder_format:
+        items:
+          type: string
+        type: array
+      subtitle_extensions:
+        items:
+          type: string
+        type: array
+      trailer_format:
+        type: string
+    type: object
+  config.PerformanceConfig:
+    properties:
+      buffer_size:
+        description: 'Channel buffer size (default: 100)'
+        type: integer
+      max_workers:
+        description: 'Maximum concurrent workers (default: 5)'
+        type: integer
+      update_interval:
+        description: 'UI update interval in milliseconds (default: 100)'
+        type: integer
+      worker_timeout:
+        description: 'Timeout per task in seconds (default: 300)'
+        type: integer
+    type: object
+  config.PriorityConfig:
+    properties:
+      priority:
+        description: |-
+          Priority is the global scraper execution order.
+          If empty, derived from registered scraper priorities at initialization.
+          If set, used directly for all metadata fields that lack a Fields override.
+        items:
+          type: string
+        type: array
+    type: object
+  config.ProxyConfig:
+    properties:
+      default_profile:
+        description: Default profile name (for global scrapers.proxy)
+        type: string
+      enabled:
+        description: Enable proxy for HTTP requests
+        type: boolean
+      profile:
+        description: Named profile to use (for scraper-specific overrides)
+        type: string
+      profiles:
+        additionalProperties:
+          $ref: '#/definitions/config.ProxyProfile'
+        description: Named proxy profiles (global scrapers.proxy)
+        type: object
+    type: object
+  config.ProxyProfile:
+    properties:
+      password:
+        type: string
+      url:
+        type: string
+      username:
+        type: string
+    type: object
+  config.RateLimitConfig:
+    properties:
+      requests_per_minute:
+        type: integer
+    type: object
+  config.ScrapersConfig:
+    properties:
+      browser:
+        allOf:
+        - $ref: '#/definitions/config.BrowserConfig'
+        description: 'NEW: Global Browser configuration block'
+      flaresolverr:
+        allOf:
+        - $ref: '#/definitions/config.FlareSolverrConfig'
+        description: Global FlareSolverr config for Cloudflare bypass
+      priority:
+        description: Global scraper priority order
+        items:
+          type: string
+        type: array
+      proxy:
+        allOf:
+        - $ref: '#/definitions/config.ProxyConfig'
+        description: Default HTTP/SOCKS5 proxy for scraper requests
+      referer:
+        description: 'Referer header for CDN compatibility (default: https://www.dmm.co.jp/)'
+        type: string
+      request_timeout_seconds:
+        description: 'Overall request timeout in seconds (default: 60)'
+        type: integer
+      scrape_actress:
+        description: 'NEW: Global scrape_actress default (opt-out behavior, default:
+          true)'
+        type: boolean
+      timeout_seconds:
+        description: 'HTTP client timeout in seconds (default: 30)'
+        type: integer
+      user_agent:
+        type: string
+    type: object
+  config.SecurityConfig:
+    properties:
+      allow_unc:
+        type: boolean
+      allowed_directories:
+        items:
+          type: string
+        type: array
+      allowed_origins:
+        items:
+          type: string
+        type: array
+      allowed_unc_servers:
+        items:
+          type: string
+        type: array
+      denied_directories:
+        items:
+          type: string
+        type: array
+      force_secure_cookies:
+        type: boolean
+      max_files_per_scan:
+        type: integer
+      rate_limit:
+        $ref: '#/definitions/config.RateLimitConfig'
+      scan_timeout_seconds:
+        type: integer
+      trusted_proxies:
+        items:
+          type: string
+        type: array
+    type: object
+  config.ServerConfig:
+    properties:
+      host:
+        type: string
+      port:
+        type: integer
+    type: object
+  config.SystemConfig:
+    properties:
+      temp_dir:
+        description: |-
+          TempDir is the base directory for temporary files (default: "data/temp").
+          Can be overridden with JAVINIZER_TEMP_DIR environment variable.
+          Subdirectory "posters/{jobID}" is created for batch job temp posters.
+        type: string
+      umask:
+        description: |-
+          Umask for file creation (e.g., "002" for rwxrwxr-x)
+          Can be overridden with UMASK environment variable
+        type: string
+      version_check_enabled:
+        description: VersionCheckEnabled enables checking for new releases
+        type: boolean
+      version_check_interval_hours:
+        description: VersionCheckIntervalHours is the interval between version checks
+          in hours
+        type: integer
+    type: object
+  config.TagDatabaseConfig:
+    properties:
+      enabled:
+        description: Enable per-movie tag lookup from database
+        type: boolean
+    type: object
+  config.TranslationConfig:
+    properties:
+      anthropic:
+        allOf:
+        - $ref: '#/definitions/config.AnthropicTranslationConfig'
+        description: Anthropic (Claude) provider settings
+      apply_to_primary:
+        description: Replace primary movie metadata with translated text
+        type: boolean
+      deepl:
+        allOf:
+        - $ref: '#/definitions/config.DeepLTranslationConfig'
+        description: DeepL provider settings
+      enabled:
+        description: Enable metadata translation after aggregation
+        type: boolean
+      fields:
+        allOf:
+        - $ref: '#/definitions/config.TranslationFieldsConfig'
+        description: Per-field translation controls
+      google:
+        allOf:
+        - $ref: '#/definitions/config.GoogleTranslationConfig'
+        description: Google provider settings
+      openai:
+        allOf:
+        - $ref: '#/definitions/config.OpenAITranslationConfig'
+        description: OpenAI/OpenAI-compatible provider settings
+      openai_compatible:
+        allOf:
+        - $ref: '#/definitions/config.OpenAICompatibleTranslationConfig'
+        description: OpenAI-compatible (Ollama, vLLM, etc.) provider settings
+      overwrite_existing_target:
+        description: Overwrite target-language translation if already present
+        type: boolean
+      provider:
+        description: openai, openai-compatible, anthropic, deepl, google
+        type: string
+      source_language:
+        description: Source language code (e.g., en, ja, auto)
+        type: string
+      target_language:
+        description: Target language code (e.g., en, ja, zh)
+        type: string
+      timeout_seconds:
+        description: Request timeout in seconds
+        type: integer
+    type: object
+  config.TranslationFieldsConfig:
+    properties:
+      actresses:
+        type: boolean
+      description:
+        type: boolean
+      director:
+        type: boolean
+      genres:
+        type: boolean
+      label:
+        type: boolean
+      maker:
+        type: boolean
+      original_title:
+        type: boolean
+      series:
+        type: boolean
+      title:
+        type: boolean
+    type: object
+  config.WordReplacementConfig:
+    properties:
+      enabled:
+        description: Enable word replacement from database
+        type: boolean
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeConflict:
     properties:
       default_resolution:
@@ -319,7 +922,7 @@ definitions:
     properties:
       choices:
         items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ScraperChoice'
+          $ref: '#/definitions/models.ScraperChoice'
         type: array
       default: {}
       description:
@@ -344,816 +947,6 @@ definitions:
         example: seconds
         type: string
     type: object
-  github_com_javinizer_javinizer-go_internal_config.APIConfig:
-    properties:
-      security:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.SecurityConfig'
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.ActressDatabaseConfig:
-    properties:
-      auto_add:
-        description: Automatically add new actresses to database
-        type: boolean
-      convert_alias:
-        description: Convert actress names using alias database
-        type: boolean
-      enabled:
-        description: Enable actress image lookup from database
-        type: boolean
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig:
-    properties:
-      api_key:
-        description: Required
-        type: string
-      base_url:
-        description: e.g., https://api.anthropic.com
-        type: string
-      model:
-        description: e.g., claude-sonnet-4-20250514
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.BrowserConfig:
-    properties:
-      binary_path:
-        description: Chrome/Chromium path (auto-discovered if empty)
-        type: string
-      block_css:
-        description: 'Block CSS for speed (default: false)'
-        type: boolean
-      block_images:
-        description: 'Block images for speed (default: true)'
-        type: boolean
-      debug_visible:
-        description: 'Show browser window for debugging (default: false)'
-        type: boolean
-      enabled:
-        description: 'Master kill-switch (default: false)'
-        type: boolean
-      headless:
-        description: 'Run headless (default: true)'
-        type: boolean
-      max_retries:
-        description: 'Retry attempts (default: 3)'
-        type: integer
-      slow_mo:
-        description: 'Slow motion delay ms (default: 0)'
-        type: integer
-      stealth_mode:
-        description: 'Anti-detection measures (default: true)'
-        type: boolean
-      timeout:
-        description: 'Operation timeout in seconds (default: 30)'
-        type: integer
-      user_agent:
-        description: Override UA (empty = use scraper's)
-        type: string
-      window_height:
-        description: 'Viewport height (default: 1080)'
-        type: integer
-      window_width:
-        description: 'Viewport width (default: 1920)'
-        type: integer
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.DatabaseConfig:
-    properties:
-      dsn:
-        description: Data Source Name
-        type: string
-      log_level:
-        description: 'Database query logging: silent, error, warn, info (default:
-          silent)'
-        type: string
-      type:
-        description: sqlite (currently only supported backend)
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.DeepLTranslationConfig:
-    properties:
-      api_key:
-        description: DeepL API key
-        type: string
-      base_url:
-        description: Optional override (defaults to mode-specific endpoint)
-        type: string
-      mode:
-        description: free or pro
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig:
-    properties:
-      enabled:
-        description: Enable FlareSolverr for bypassing Cloudflare
-        type: boolean
-      max_retries:
-        description: 'Max retry attempts for FlareSolverr calls (default: 3)'
-        type: integer
-      session_ttl:
-        description: 'Session TTL in seconds (default: 300)'
-        type: integer
-      timeout:
-        description: 'Request timeout in seconds (default: 30)'
-        type: integer
-      url:
-        description: 'FlareSolverr endpoint (default: http://localhost:8191/v1)'
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig:
-    properties:
-      auto_add:
-        description: Automatically add new genres to database (identity mapping)
-        type: boolean
-      enabled:
-        description: Enable genre replacement from database
-        type: boolean
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.GoogleTranslationConfig:
-    properties:
-      api_key:
-        description: Required for paid mode
-        type: string
-      base_url:
-        description: Optional override
-        type: string
-      mode:
-        description: free or paid
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.LoggingConfig:
-    properties:
-      compress:
-        description: Compress rotated files
-        type: boolean
-      format:
-        description: json, text
-        type: string
-      level:
-        description: debug, info, warn, error
-        type: string
-      max_age_days:
-        description: Max age in days to keep log files (0 = no limit)
-        type: integer
-      max_backups:
-        description: Max number of old log files to keep (0 = unlimited)
-        type: integer
-      max_size_mb:
-        description: Max size in MB before rotation (0 = no rotation)
-        type: integer
-      output:
-        description: stdout, file path
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.MatchingConfig:
-    properties:
-      exclude_patterns:
-        items:
-          type: string
-        type: array
-      extensions:
-        items:
-          type: string
-        type: array
-      min_size_mb:
-        type: integer
-      regex_enabled:
-        type: boolean
-      regex_pattern:
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.MediaInfoConfig:
-    properties:
-      cli_enabled:
-        description: 'Enable MediaInfo CLI fallback (default: false)'
-        type: boolean
-      cli_path:
-        description: 'Path to mediainfo binary (default: "mediainfo")'
-        type: string
-      cli_timeout:
-        description: 'Timeout in seconds for CLI execution (default: 30)'
-        type: integer
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.MetadataConfig:
-    properties:
-      actress_database:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ActressDatabaseConfig'
-        description: Actress image database (SQLite-backed)
-      genre_replacement:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig'
-        description: Genre replacement/normalization (SQLite-backed)
-      ignore_genres:
-        items:
-          type: string
-        type: array
-      nfo:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOConfig'
-      priority:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.PriorityConfig'
-      required_fields:
-        items:
-          type: string
-        type: array
-      tag_database:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.TagDatabaseConfig'
-        description: Per-movie tag database (SQLite-backed)
-      translation:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationConfig'
-        description: Metadata translation pipeline
-      word_replacement:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig'
-        description: Word uncensor/text replacement (SQLite-backed)
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.NFOConfig:
-    properties:
-      actress_as_tag:
-        type: boolean
-      actress_language_ja:
-        type: boolean
-      add_generic_role:
-        description: Add generic "Actress" role to all actresses
-        type: boolean
-      alt_name_role:
-        description: Use alternate name (Japanese) in role field
-        type: boolean
-      credits:
-        items:
-          type: string
-        type: array
-      display_title:
-        type: string
-      enabled:
-        type: boolean
-      filename_template:
-        type: string
-      first_name_order:
-        type: boolean
-      include_fanart:
-        type: boolean
-      include_originalpath:
-        description: Include source filename in NFO
-        type: boolean
-      include_stream_details:
-        type: boolean
-      include_trailer:
-        type: boolean
-      per_file:
-        description: Create separate NFO for each multi-part file
-        type: boolean
-      rating_source:
-        type: string
-      tag:
-        items:
-          type: string
-        type: array
-      tagline:
-        type: string
-      unknown_actress_mode:
-        description: skip (default) or fallback
-        type: string
-      unknown_actress_text:
-        description: Text for fallback mode
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig:
-    properties:
-      api_key:
-        description: Optional for local endpoints
-        type: string
-      base_url:
-        description: e.g., http://localhost:11434/v1
-        type: string
-      enable_thinking:
-        description: Toggle reasoning/thinking when supported by the backend
-        type: boolean
-      model:
-        description: e.g., llama3.1
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.OpenAITranslationConfig:
-    properties:
-      api_key:
-        description: API key for the provider
-        type: string
-      base_url:
-        description: OpenAI-compatible base URL (e.g., https://api.openai.com/v1)
-        type: string
-      model:
-        description: Model name (e.g., gpt-4o-mini)
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.OutputConfig:
-    properties:
-      actress_folder:
-        type: string
-      actress_format:
-        type: string
-      allow_revert:
-        description: 'Enable revert operations (default: false — opt-in for safety)'
-        type: boolean
-      delimiter:
-        type: string
-      download_actress:
-        type: boolean
-      download_cover:
-        type: boolean
-      download_extrafanart:
-        type: boolean
-      download_poster:
-        type: boolean
-      download_proxy:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig'
-        description: Separate proxy for downloads (optional)
-      download_timeout:
-        description: 'Timeout in seconds for HTTP downloads (default: 60)'
-        type: integer
-      download_trailer:
-        type: boolean
-      fanart_format:
-        type: string
-      file_format:
-        type: string
-      folder_format:
-        type: string
-      group_actress:
-        description: 'Replace multiple actresses with "@Group" in templates (default:
-          false)'
-        type: boolean
-      max_path_length:
-        type: integer
-      max_title_length:
-        type: integer
-      move_subtitles:
-        type: boolean
-      operation_mode:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_types.OperationMode'
-      poster_format:
-        type: string
-      rename_file:
-        description: 'Rename files using file_format template (default: true)'
-        type: boolean
-      screenshot_folder:
-        type: string
-      screenshot_format:
-        type: string
-      screenshot_padding:
-        type: integer
-      subfolder_format:
-        items:
-          type: string
-        type: array
-      subtitle_extensions:
-        items:
-          type: string
-        type: array
-      trailer_format:
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.PerformanceConfig:
-    properties:
-      buffer_size:
-        description: 'Channel buffer size (default: 100)'
-        type: integer
-      max_workers:
-        description: 'Maximum concurrent workers (default: 5)'
-        type: integer
-      update_interval:
-        description: 'UI update interval in milliseconds (default: 100)'
-        type: integer
-      worker_timeout:
-        description: 'Timeout per task in seconds (default: 300)'
-        type: integer
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.PriorityConfig:
-    properties:
-      priority:
-        description: |-
-          Priority is the global scraper execution order.
-          If empty, derived from registered scraper priorities at initialization.
-          If set, used directly for all metadata fields that lack a Fields override.
-        items:
-          type: string
-        type: array
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.ProxyConfig:
-    properties:
-      default_profile:
-        description: Default profile name (for global scrapers.proxy)
-        type: string
-      enabled:
-        description: Enable proxy for HTTP requests
-        type: boolean
-      profile:
-        description: Named profile to use (for scraper-specific overrides)
-        type: string
-      profiles:
-        additionalProperties:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyProfile'
-        description: Named proxy profiles (global scrapers.proxy)
-        type: object
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.ProxyProfile:
-    properties:
-      password:
-        type: string
-      url:
-        type: string
-      username:
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.RateLimitConfig:
-    properties:
-      requests_per_minute:
-        type: integer
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.ScrapersConfig:
-    properties:
-      browser:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.BrowserConfig'
-        description: 'NEW: Global Browser configuration block'
-      flaresolverr:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig'
-        description: Global FlareSolverr config for Cloudflare bypass
-      priority:
-        description: Global scraper priority order
-        items:
-          type: string
-        type: array
-      proxy:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig'
-        description: Default HTTP/SOCKS5 proxy for scraper requests
-      referer:
-        description: 'Referer header for CDN compatibility (default: https://www.dmm.co.jp/)'
-        type: string
-      request_timeout_seconds:
-        description: 'Overall request timeout in seconds (default: 60)'
-        type: integer
-      scrape_actress:
-        description: 'NEW: Global scrape_actress default (opt-out behavior, default:
-          true)'
-        type: boolean
-      timeout_seconds:
-        description: 'HTTP client timeout in seconds (default: 30)'
-        type: integer
-      user_agent:
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.SecurityConfig:
-    properties:
-      allow_unc:
-        type: boolean
-      allowed_directories:
-        items:
-          type: string
-        type: array
-      allowed_origins:
-        items:
-          type: string
-        type: array
-      allowed_unc_servers:
-        items:
-          type: string
-        type: array
-      denied_directories:
-        items:
-          type: string
-        type: array
-      force_secure_cookies:
-        type: boolean
-      max_files_per_scan:
-        type: integer
-      rate_limit:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.RateLimitConfig'
-      scan_timeout_seconds:
-        type: integer
-      trusted_proxies:
-        items:
-          type: string
-        type: array
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.ServerConfig:
-    properties:
-      host:
-        type: string
-      port:
-        type: integer
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.SystemConfig:
-    properties:
-      temp_dir:
-        description: |-
-          TempDir is the base directory for temporary files (default: "data/temp").
-          Can be overridden with JAVINIZER_TEMP_DIR environment variable.
-          Subdirectory "posters/{jobID}" is created for batch job temp posters.
-        type: string
-      umask:
-        description: |-
-          Umask for file creation (e.g., "002" for rwxrwxr-x)
-          Can be overridden with UMASK environment variable
-        type: string
-      version_check_enabled:
-        description: VersionCheckEnabled enables checking for new releases
-        type: boolean
-      version_check_interval_hours:
-        description: VersionCheckIntervalHours is the interval between version checks
-          in hours
-        type: integer
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.TagDatabaseConfig:
-    properties:
-      enabled:
-        description: Enable per-movie tag lookup from database
-        type: boolean
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.TranslationConfig:
-    properties:
-      anthropic:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig'
-        description: Anthropic (Claude) provider settings
-      apply_to_primary:
-        description: Replace primary movie metadata with translated text
-        type: boolean
-      deepl:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.DeepLTranslationConfig'
-        description: DeepL provider settings
-      enabled:
-        description: Enable metadata translation after aggregation
-        type: boolean
-      fields:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationFieldsConfig'
-        description: Per-field translation controls
-      google:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.GoogleTranslationConfig'
-        description: Google provider settings
-      openai:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OpenAITranslationConfig'
-        description: OpenAI/OpenAI-compatible provider settings
-      openai_compatible:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig'
-        description: OpenAI-compatible (Ollama, vLLM, etc.) provider settings
-      overwrite_existing_target:
-        description: Overwrite target-language translation if already present
-        type: boolean
-      provider:
-        description: openai, openai-compatible, anthropic, deepl, google
-        type: string
-      source_language:
-        description: Source language code (e.g., en, ja, auto)
-        type: string
-      target_language:
-        description: Target language code (e.g., en, ja, zh)
-        type: string
-      timeout_seconds:
-        description: Request timeout in seconds
-        type: integer
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.TranslationFieldsConfig:
-    properties:
-      actresses:
-        type: boolean
-      description:
-        type: boolean
-      director:
-        type: boolean
-      genres:
-        type: boolean
-      label:
-        type: boolean
-      maker:
-        type: boolean
-      original_title:
-        type: boolean
-      series:
-        type: boolean
-      title:
-        type: boolean
-    type: object
-  github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig:
-    properties:
-      enabled:
-        description: Enable word replacement from database
-        type: boolean
-    type: object
-  github_com_javinizer_javinizer-go_internal_models.Actress:
-    properties:
-      aliases:
-        description: Pipe-separated
-        type: string
-      created_at:
-        type: string
-      dmm_id:
-        description: Real DMM actress ID when available (unique only for values >
-          0)
-        type: integer
-      first_name:
-        type: string
-      id:
-        type: integer
-      japanese_name:
-        type: string
-      last_name:
-        type: string
-      thumb_url:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_models.Event:
-    properties:
-      context:
-        description: JSON-encoded details
-        type: string
-      created_at:
-        type: string
-      event_type:
-        type: string
-      id:
-        type: integer
-      message:
-        type: string
-      severity:
-        type: string
-      source:
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_models.Genre:
-    properties:
-      id:
-        type: integer
-      name:
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_models.GenreReplacement:
-    properties:
-      created_at:
-        type: string
-      id:
-        type: integer
-      original:
-        type: string
-      replacement:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_models.Movie:
-    properties:
-      actresses:
-        description: Relationships
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
-        type: array
-      content_id:
-        type: string
-      cover_url:
-        description: Landscape/fanart image
-        type: string
-      created_at:
-        type: string
-      cropped_poster_url:
-        description: URL to the cropped poster (persisted)
-        type: string
-      description:
-        type: string
-      director:
-        type: string
-      display_title:
-        type: string
-      genres:
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre'
-        type: array
-      id:
-        type: string
-      label:
-        description: Sub-label
-        type: string
-      maker:
-        description: Studio/maker
-        type: string
-      original_cropped_poster_url:
-        type: string
-      original_filename:
-        type: string
-      original_poster_url:
-        type: string
-      original_should_crop_poster:
-        type: boolean
-      original_title:
-        description: Japanese/original language title
-        type: string
-      poster_url:
-        description: Portrait/box art image
-        type: string
-      rating_score:
-        type: number
-      rating_votes:
-        type: integer
-      release_date:
-        type: string
-      release_year:
-        type: integer
-      runtime:
-        description: in minutes
-        type: integer
-      screenshot_urls:
-        items:
-          type: string
-        type: array
-      series:
-        description: Series name
-        type: string
-      should_crop_poster:
-        description: Whether poster needs cropping from cover
-        type: boolean
-      source_name:
-        description: Metadata
-        type: string
-      source_url:
-        type: string
-      title:
-        type: string
-      trailer_url:
-        type: string
-      translations:
-        description: Translations
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation'
-        type: array
-      updated_at:
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_models.MovieTranslation:
-    properties:
-      created_at:
-        type: string
-      description:
-        type: string
-      director:
-        type: string
-      id:
-        type: integer
-      label:
-        type: string
-      language:
-        description: 'ISO 639-1: en, ja, zh, etc.'
-        type: string
-      maker:
-        type: string
-      movie_id:
-        type: string
-      original_title:
-        description: Japanese/original language title
-        type: string
-      series:
-        type: string
-      settings_hash:
-        description: Hash of translation settings used
-        type: string
-      source_name:
-        description: Which scraper provided this translation
-        type: string
-      title:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_models.ScraperChoice:
-    properties:
-      label:
-        example: English
-        type: string
-      value:
-        example: en
-        type: string
-    type: object
-  github_com_javinizer_javinizer-go_internal_types.OperationMode:
-    enum:
-    - organize
-    - in-place
-    - in-place-norenamefolder
-    - metadata-only
-    - preview
-    type: string
-    x-enum-varnames:
-    - OperationModeOrganize
-    - OperationModeInPlace
-    - OperationModeInPlaceNoRenameFolder
-    - OperationModeMetadataOnly
-    - OperationModePreview
   internal_api_actress.Actress:
     properties:
       aliases:
@@ -1201,11 +994,11 @@ definitions:
           type: string
         type: object
       proposed_merged:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        $ref: '#/definitions/models.Actress'
       source:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        $ref: '#/definitions/models.Actress'
       target:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        $ref: '#/definitions/models.Actress'
     type: object
   internal_api_actress.ActressMergeRequest:
     properties:
@@ -1235,7 +1028,7 @@ definitions:
         example: 3
         type: integer
       merged_actress:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        $ref: '#/definitions/models.Actress'
       merged_from_id:
         example: 34
         type: integer
@@ -1272,7 +1065,7 @@ definitions:
     properties:
       actresses:
         items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+          $ref: '#/definitions/models.Actress'
         type: array
       count:
         type: integer
@@ -1398,7 +1191,7 @@ definitions:
           type: string
         type: object
       movie:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        $ref: '#/definitions/models.Movie'
     type: object
   internal_api_batch.BatchScrapeRequest:
     properties:
@@ -1472,7 +1265,7 @@ definitions:
         - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
         description: Merge statistics when NFO merging occurred
       movie:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        $ref: '#/definitions/models.Movie'
       provenance:
         additionalProperties:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
@@ -1495,7 +1288,7 @@ definitions:
         type: string
       movie:
         allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        - $ref: '#/definitions/models.Movie'
         description: Optional movie override for previewing unsaved edits
       operation_mode:
         example: organize
@@ -1623,7 +1416,7 @@ definitions:
   internal_api_batch.UpdateMovieRequest:
     properties:
       movie:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        $ref: '#/definitions/models.Movie'
     required:
     - movie
     type: object
@@ -1677,7 +1470,7 @@ definitions:
     properties:
       events:
         items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Event'
+          $ref: '#/definitions/models.Event'
         type: array
       total:
         type: integer
@@ -1824,7 +1617,7 @@ definitions:
         type: integer
       replacements:
         items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.GenreReplacement'
+          $ref: '#/definitions/models.GenreReplacement'
         type: array
       total:
         type: integer
@@ -2013,7 +1806,7 @@ definitions:
         - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
         description: Merge statistics when NFO merging occurred
       movie:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        $ref: '#/definitions/models.Movie'
       provenance:
         additionalProperties:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
@@ -2027,7 +1820,7 @@ definitions:
         type: integer
       movies:
         items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+          $ref: '#/definitions/models.Movie'
         type: array
     type: object
   internal_api_movie.NFOComparisonRequest:
@@ -2072,14 +1865,14 @@ definitions:
         description: Merge statistics
       merged_data:
         allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        - $ref: '#/definitions/models.Movie'
         description: Result of merging
       movie_id:
         example: IPX-535
         type: string
       nfo_data:
         allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        - $ref: '#/definitions/models.Movie'
         description: Data from NFO file
       nfo_exists:
         example: true
@@ -2095,7 +1888,7 @@ definitions:
         type: object
       scraped_data:
         allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        - $ref: '#/definitions/models.Movie'
         description: Fresh scraped data
     type: object
   internal_api_movie.RescrapeRequest:
@@ -2141,7 +1934,7 @@ definitions:
           type: string
         type: array
       movie:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie'
+        $ref: '#/definitions/models.Movie'
       sources_used:
         example: 2
         type: integer
@@ -2213,7 +2006,7 @@ definitions:
     properties:
       flaresolverr:
         allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig'
+        - $ref: '#/definitions/config.FlareSolverrConfig'
         description: FlareSolverr config (separate from ProxyConfig)
       mode:
         description: direct or flaresolverr
@@ -2222,7 +2015,7 @@ definitions:
         - flaresolverr
         type: string
       proxy:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig'
+        $ref: '#/definitions/config.ProxyConfig'
       target_url:
         description: Optional override target URL
         type: string
@@ -2281,33 +2074,33 @@ definitions:
   internal_api_system.UpdateConfigRequest:
     properties:
       api:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.APIConfig'
+        $ref: '#/definitions/config.APIConfig'
       config_version:
         type: integer
       database:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.DatabaseConfig'
+        $ref: '#/definitions/config.DatabaseConfig'
       file_matching:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.MatchingConfig'
+        $ref: '#/definitions/config.MatchingConfig'
       logging:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.LoggingConfig'
+        $ref: '#/definitions/config.LoggingConfig'
       mediainfo:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.MediaInfoConfig'
+        $ref: '#/definitions/config.MediaInfoConfig'
       metadata:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.MetadataConfig'
+        $ref: '#/definitions/config.MetadataConfig'
       output:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OutputConfig'
+        $ref: '#/definitions/config.OutputConfig'
       performance:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.PerformanceConfig'
+        $ref: '#/definitions/config.PerformanceConfig'
       proxy_verification_tokens:
         additionalProperties:
           type: string
         type: object
       scrapers:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ScrapersConfig'
+        $ref: '#/definitions/config.ScrapersConfig'
       server:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ServerConfig'
+        $ref: '#/definitions/config.ServerConfig'
       system:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.SystemConfig'
+        $ref: '#/definitions/config.SystemConfig'
     type: object
   internal_api_temp.ErrorResponse:
     properties:
@@ -2348,6 +2141,199 @@ definitions:
       update_available:
         description: Whether an update is available
         type: boolean
+    type: object
+  models.Actress:
+    properties:
+      aliases:
+        description: Pipe-separated
+        type: string
+      created_at:
+        type: string
+      dmm_id:
+        description: Real DMM actress ID when available (unique only for values >
+          0)
+        type: integer
+      first_name:
+        type: string
+      id:
+        type: integer
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      thumb_url:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.Event:
+    properties:
+      context:
+        description: JSON-encoded details
+        type: string
+      created_at:
+        type: string
+      event_type:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+      severity:
+        type: string
+      source:
+        type: string
+    type: object
+  models.Genre:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+    type: object
+  models.GenreReplacement:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      original:
+        type: string
+      replacement:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.Movie:
+    properties:
+      actresses:
+        description: Relationships
+        items:
+          $ref: '#/definitions/models.Actress'
+        type: array
+      content_id:
+        type: string
+      cover_url:
+        description: Landscape/fanart image
+        type: string
+      created_at:
+        type: string
+      cropped_poster_url:
+        description: URL to the cropped poster (persisted)
+        type: string
+      description:
+        type: string
+      director:
+        type: string
+      display_title:
+        type: string
+      genres:
+        items:
+          $ref: '#/definitions/models.Genre'
+        type: array
+      id:
+        type: string
+      label:
+        description: Sub-label
+        type: string
+      maker:
+        description: Studio/maker
+        type: string
+      original_cropped_poster_url:
+        type: string
+      original_filename:
+        type: string
+      original_poster_url:
+        type: string
+      original_should_crop_poster:
+        type: boolean
+      original_title:
+        description: Japanese/original language title
+        type: string
+      poster_url:
+        description: Portrait/box art image
+        type: string
+      rating_score:
+        type: number
+      rating_votes:
+        type: integer
+      release_date:
+        type: string
+      release_year:
+        type: integer
+      runtime:
+        description: in minutes
+        type: integer
+      screenshot_urls:
+        items:
+          type: string
+        type: array
+      series:
+        description: Series name
+        type: string
+      should_crop_poster:
+        description: Whether poster needs cropping from cover
+        type: boolean
+      source_name:
+        description: Metadata
+        type: string
+      source_url:
+        type: string
+      title:
+        type: string
+      trailer_url:
+        type: string
+      translations:
+        description: Translations
+        items:
+          $ref: '#/definitions/models.MovieTranslation'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  models.MovieTranslation:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      director:
+        type: string
+      id:
+        type: integer
+      label:
+        type: string
+      language:
+        description: 'ISO 639-1: en, ja, zh, etc.'
+        type: string
+      maker:
+        type: string
+      movie_id:
+        type: string
+      original_title:
+        description: Japanese/original language title
+        type: string
+      series:
+        type: string
+      settings_hash:
+        description: Hash of translation settings used
+        type: string
+      source_name:
+        description: Which scraper provided this translation
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.ScraperChoice:
+    properties:
+      label:
+        example: English
+        type: string
+      value:
+        example: en
+        type: string
     type: object
 host: localhost:8080
 info:

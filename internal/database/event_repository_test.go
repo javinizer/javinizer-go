@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -586,6 +587,114 @@ func TestEventRepository_CountFiltered(t *testing.T) {
 	r18devInfoCount, err := repo.CountFiltered(EventFilter{Source: "r18dev", Severity: models.SeverityInfo})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), r18devInfoCount)
+}
+
+func TestEventRepository_List(t *testing.T) {
+	t.Parallel()
+	db := newDatabaseTestDB(t)
+	repo := NewEventRepository(db)
+
+	for i := 0; i < 5; i++ {
+		require.NoError(t, repo.Create(&models.Event{
+			EventType: models.EventCategorySystem,
+			Severity:  models.SeverityInfo,
+			Message:   fmt.Sprintf("event %d", i),
+			Source:    "test",
+			CreatedAt: time.Now().UTC(),
+		}))
+	}
+
+	events, err := repo.List(3, 0)
+	require.NoError(t, err)
+	assert.Len(t, events, 3)
+
+	all, err := repo.List(10, 0)
+	require.NoError(t, err)
+	assert.Len(t, all, 5)
+}
+
+func TestEventRepository_CountByTypeAndSeverity(t *testing.T) {
+	t.Parallel()
+	db := newDatabaseTestDB(t)
+	repo := NewEventRepository(db)
+
+	require.NoError(t, repo.Create(&models.Event{
+		EventType: models.EventCategoryScraper, Severity: models.SeverityInfo, Message: "s1", Source: "test", CreatedAt: time.Now().UTC(),
+	}))
+	require.NoError(t, repo.Create(&models.Event{
+		EventType: models.EventCategoryScraper, Severity: models.SeverityError, Message: "s2", Source: "test", CreatedAt: time.Now().UTC(),
+	}))
+	require.NoError(t, repo.Create(&models.Event{
+		EventType: models.EventCategoryScraper, Severity: models.SeverityInfo, Message: "s3", Source: "test", CreatedAt: time.Now().UTC(),
+	}))
+
+	scraperInfo, err := repo.CountByTypeAndSeverity(models.EventCategoryScraper, models.SeverityInfo)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), scraperInfo)
+
+	scraperError, err := repo.CountByTypeAndSeverity(models.EventCategoryScraper, models.SeverityError)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), scraperError)
+
+	noMatch, err := repo.CountByTypeAndSeverity(models.EventCategoryOrganize, models.SeverityInfo)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), noMatch)
+}
+
+func TestEventRepository_CountByDateRange(t *testing.T) {
+	t.Parallel()
+	db := newDatabaseTestDB(t)
+	repo := NewEventRepository(db)
+
+	now := time.Now().UTC()
+
+	require.NoError(t, repo.Create(&models.Event{
+		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "old", Source: "test", CreatedAt: now.Add(-48 * time.Hour),
+	}))
+	require.NoError(t, repo.Create(&models.Event{
+		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "recent", Source: "test", CreatedAt: now.Add(-1 * time.Hour),
+	}))
+	require.NoError(t, repo.Create(&models.Event{
+		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "now", Source: "test", CreatedAt: now,
+	}))
+
+	start := now.Add(-2 * time.Hour)
+	end := now.Add(1 * time.Minute)
+	count, err := repo.CountByDateRange(start, end)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	oldStart := now.Add(-72 * time.Hour)
+	oldEnd := now.Add(-24 * time.Hour)
+	oldCount, err := repo.CountByDateRange(oldStart, oldEnd)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), oldCount)
+}
+
+func TestEventRepository_FindFiltered_WithDateRange(t *testing.T) {
+	t.Parallel()
+	db := newDatabaseTestDB(t)
+	repo := NewEventRepository(db)
+
+	now := time.Now().UTC()
+
+	require.NoError(t, repo.Create(&models.Event{
+		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "past", Source: "test", CreatedAt: now.Add(-48 * time.Hour),
+	}))
+	require.NoError(t, repo.Create(&models.Event{
+		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "recent", Source: "test", CreatedAt: now.Add(-1 * time.Hour),
+	}))
+
+	past := now.Add(-2 * time.Hour)
+	found, err := repo.FindFiltered(EventFilter{Start: &past}, 10, 0)
+	require.NoError(t, err)
+	assert.Len(t, found, 1)
+	assert.Equal(t, "recent", found[0].Message)
+
+	end := now.Add(-30 * time.Minute)
+	beforeNow, err := repo.FindFiltered(EventFilter{End: &end}, 10, 0)
+	require.NoError(t, err)
+	assert.Len(t, beforeNow, 2)
 }
 
 func TestEventRepository_OrderByCreatedAtDesc(t *testing.T) {
