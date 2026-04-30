@@ -1,7 +1,10 @@
 package genre
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
@@ -48,7 +51,27 @@ func NewCommand() *cobra.Command {
 		},
 	}
 
-	genreCmd.AddCommand(genreAddCmd, genreListCmd, genreRemoveCmd)
+	genreExportCmd := &cobra.Command{
+		Use:   "export [output.json]",
+		Short: "Export genre replacements",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configFile, _ := cmd.Flags().GetString("config")
+			return runGenreExport(cmd, args, configFile)
+		},
+	}
+
+	genreImportCmd := &cobra.Command{
+		Use:   "import <input.json>",
+		Short: "Import genre replacements from JSON",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configFile, _ := cmd.Flags().GetString("config")
+			return runGenreImport(cmd, args, configFile)
+		},
+	}
+
+	genreCmd.AddCommand(genreAddCmd, genreListCmd, genreRemoveCmd, genreExportCmd, genreImportCmd)
 	return genreCmd
 }
 
@@ -147,6 +170,102 @@ func runRemove(cmd *cobra.Command, args []string, configFile string) error {
 	}
 
 	fmt.Printf("✅ Genre replacement removed: '%s'\n", original)
+
+	return nil
+}
+
+func runGenreExport(cmd *cobra.Command, args []string, configFile string) error {
+	cfg, err := config.LoadOrCreate(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	deps, err := commandutil.NewDependencies(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize dependencies: %w", err)
+	}
+	defer func() { _ = deps.Close() }()
+
+	repo := database.NewGenreReplacementRepository(deps.DB)
+
+	replacements, err := repo.List()
+	if err != nil {
+		return fmt.Errorf("failed to list genre replacements: %v", err)
+	}
+
+	sort.Slice(replacements, func(i, j int) bool {
+		return replacements[i].Original < replacements[j].Original
+	})
+
+	data, err := json.MarshalIndent(replacements, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %v", err)
+	}
+
+	if len(args) == 0 {
+		_, _ = cmd.OutOrStdout().Write(data)
+		_, _ = cmd.OutOrStdout().Write([]byte("\n"))
+		fmt.Printf("Exported %d genre replacement(s) to stdout\n", len(replacements))
+	} else {
+		if err := os.WriteFile(args[0], data, 0644); err != nil {
+			return fmt.Errorf("failed to write file: %v", err)
+		}
+		fmt.Printf("Exported %d genre replacement(s) to %s\n", len(replacements), args[0])
+	}
+
+	return nil
+}
+
+func runGenreImport(cmd *cobra.Command, args []string, configFile string) error {
+	fileData, err := os.ReadFile(args[0])
+	if err != nil {
+		return fmt.Errorf("failed to read file: %v", err)
+	}
+
+	var replacements []models.GenreReplacement
+	if err := json.Unmarshal(fileData, &replacements); err != nil {
+		return fmt.Errorf("failed to parse JSON: %v", err)
+	}
+
+	if len(replacements) == 0 {
+		return fmt.Errorf("no genre replacements found in import file")
+	}
+
+	cfg, err := config.LoadOrCreate(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	deps, err := commandutil.NewDependencies(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize dependencies: %w", err)
+	}
+	defer func() { _ = deps.Close() }()
+
+	repo := database.NewGenreReplacementRepository(deps.DB)
+
+	imported := 0
+	skipped := 0
+	errorsCount := 0
+
+	for i := range replacements {
+		r := &replacements[i]
+		existing, err := repo.FindByOriginal(r.Original)
+		if err == nil {
+			if existing.Replacement == r.Replacement {
+				skipped++
+				continue
+			}
+		}
+
+		if err := repo.Upsert(r); err != nil {
+			errorsCount++
+			continue
+		}
+		imported++
+	}
+
+	fmt.Printf("Imported: %d, Skipped: %d, Errors: %d\n", imported, skipped, errorsCount)
 
 	return nil
 }

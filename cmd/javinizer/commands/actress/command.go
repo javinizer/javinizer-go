@@ -2,12 +2,15 @@ package actress
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +40,27 @@ func NewCommand() *cobra.Command {
 	_ = mergeCmd.MarkFlagRequired("target")
 	_ = mergeCmd.MarkFlagRequired("source")
 
-	actressCmd.AddCommand(mergeCmd)
+	exportCmd := &cobra.Command{
+		Use:   "export [output.json]",
+		Short: "Export actresses",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configFile, _ := cmd.Flags().GetString("config")
+			return runActressExport(cmd, args, configFile)
+		},
+	}
+
+	importCmd := &cobra.Command{
+		Use:   "import <input.json>",
+		Short: "Import actresses from JSON",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configFile, _ := cmd.Flags().GetString("config")
+			return runActressImport(cmd, args, configFile)
+		},
+	}
+
+	actressCmd.AddCommand(mergeCmd, exportCmd, importCmd)
 	return actressCmd
 }
 
@@ -148,4 +171,130 @@ func promptConfirmation(cmd *cobra.Command) bool {
 	}
 	line = strings.ToLower(strings.TrimSpace(line))
 	return line == "y" || line == "yes"
+}
+
+func runActressExport(cmd *cobra.Command, args []string, configFile string) error {
+	cfg, err := config.LoadOrCreate(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	deps, err := commandutil.NewDependencies(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize dependencies: %w", err)
+	}
+	defer func() { _ = deps.Close() }()
+
+	repo := database.NewActressRepository(deps.GetDB())
+	actresses, err := repo.List(0, 0)
+	if err != nil {
+		return fmt.Errorf("failed to list actresses: %v", err)
+	}
+
+	data, err := json.MarshalIndent(actresses, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %v", err)
+	}
+
+	if len(args) == 0 {
+		_, _ = cmd.OutOrStdout().Write(data)
+		_, _ = cmd.OutOrStdout().Write([]byte("\n"))
+		_, _ = fmt.Printf("Exported %d actress(es) to stdout\n", len(actresses))
+	} else {
+		if err := os.WriteFile(args[0], data, 0644); err != nil {
+			return fmt.Errorf("failed to write file: %v", err)
+		}
+		fmt.Printf("Exported %d actress(es) to %s\n", len(actresses), args[0])
+	}
+
+	return nil
+}
+
+func runActressImport(cmd *cobra.Command, args []string, configFile string) error {
+	fileData, err := os.ReadFile(args[0])
+	if err != nil {
+		return fmt.Errorf("failed to read file: %v", err)
+	}
+
+	var actresses []models.Actress
+	if err := json.Unmarshal(fileData, &actresses); err != nil {
+		return fmt.Errorf("failed to parse JSON: %v", err)
+	}
+
+	if len(actresses) == 0 {
+		return fmt.Errorf("no actresses found in import file")
+	}
+
+	cfg, err := config.LoadOrCreate(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	deps, err := commandutil.NewDependencies(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize dependencies: %w", err)
+	}
+	defer func() { _ = deps.Close() }()
+
+	repo := database.NewActressRepository(deps.GetDB())
+	imported := 0
+	skipped := 0
+	errorsCount := 0
+
+	for i := range actresses {
+		a := &actresses[i]
+		if a.ID > 0 {
+			existing, err := repo.FindByID(a.ID)
+			if err == nil {
+				if existing.FirstName == a.FirstName && existing.LastName == a.LastName &&
+					existing.JapaneseName == a.JapaneseName && existing.ThumbURL == a.ThumbURL &&
+					existing.Aliases == a.Aliases && existing.DMMID == a.DMMID {
+					skipped++
+					continue
+				}
+				a.UpdatedAt = existing.UpdatedAt
+				if err := repo.Update(a); err != nil {
+					errorsCount++
+					continue
+				}
+				imported++
+				continue
+			}
+			if err := repo.Create(a); err != nil {
+				errorsCount++
+				continue
+			}
+			imported++
+		} else {
+			var existing *models.Actress
+			if a.JapaneseName != "" {
+				existing, err = repo.FindByJapaneseName(a.JapaneseName)
+				if err == nil {
+					if existing.FirstName == a.FirstName && existing.LastName == a.LastName &&
+						existing.ThumbURL == a.ThumbURL && existing.Aliases == a.Aliases &&
+						existing.DMMID == a.DMMID {
+						skipped++
+						continue
+					}
+					a.ID = existing.ID
+					a.CreatedAt = existing.CreatedAt
+					if err := repo.Update(a); err != nil {
+						errorsCount++
+						continue
+					}
+					imported++
+					continue
+				}
+			}
+			if err := repo.Create(a); err != nil {
+				errorsCount++
+				continue
+			}
+			imported++
+		}
+	}
+
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Imported: %d, Skipped: %d, Errors: %d\n", imported, skipped, errorsCount)
+
+	return nil
 }
