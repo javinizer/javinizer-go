@@ -1,0 +1,4 @@
+[
+  {"original": "E2E-blur-word", "replacement": "E2E-clear-word"},
+  {"original": "E2E-XXX-word", "replacement": "E2E-redacted"}
+]
