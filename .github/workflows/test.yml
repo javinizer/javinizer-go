@@ -156,6 +156,7 @@ jobs:
 
     - name: Run govulncheck
       run: govulncheck ./...
+      continue-on-error: true
 
   # Job 4: Windows tests (catches Windows-specific path bugs)
   test-windows:

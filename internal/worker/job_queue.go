@@ -229,12 +229,13 @@ type BatchJobSlim struct {
 type fileResultAlias FileResult
 
 func (fr *FileResult) MarshalJSON() ([]byte, error) {
+	alias := fileResultAlias(*fr)
 	if fr.Data != nil {
 		if _, ok := fr.Data.(*models.Movie); ok {
-			fr.DataType = DataTypeMovie
+			alias.DataType = DataTypeMovie
 		}
 	}
-	return json.Marshal(fileResultAlias(*fr))
+	return json.Marshal(alias)
 }
 
 func (fr *FileResult) UnmarshalJSON(data []byte) error {
