@@ -18,6 +18,8 @@ javinizer-go
 /web/frontend/node_modules/
 /web/frontend/.svelte-kit/
 /web/frontend/build/
+/web/frontend/test-results/
+/web/frontend/tests/e2e/auth-state.json
 /web/dist/*
 !/web/dist/robots.txt
 !/web/dist/index.html
