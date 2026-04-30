@@ -57,6 +57,26 @@ func TestIsLocked_IgnoresNonLockErrors(t *testing.T) {
 	assert.False(t, isLocked(fmt.Errorf("plain error")))
 }
 
+func TestIsLocked_StringFallbackDatabaseIsLocked(t *testing.T) {
+	assert.True(t, isLocked(fmt.Errorf("create movie IPX-001: database is locked")))
+	assert.True(t, isLocked(fmt.Errorf("save movie: database table is locked")))
+	assert.False(t, isLocked(fmt.Errorf("create movie: connection refused")))
+	assert.False(t, isLocked(fmt.Errorf("random database error")))
+}
+
+func TestRetryOnLocked_RetriesOnStringMatchLockError(t *testing.T) {
+	var attempts int
+	err := retryOnLocked(func() error {
+		attempts++
+		if attempts < 2 {
+			return fmt.Errorf("create movie X: database is locked")
+		}
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 2, attempts)
+}
+
 func TestRetryOnLocked_NoRetryOnSuccess(t *testing.T) {
 	var attempts int
 	err := retryOnLocked(func() error {

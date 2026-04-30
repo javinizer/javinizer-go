@@ -3,6 +3,7 @@ package database
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -22,10 +23,10 @@ func isLocked(err error) bool {
 	if errors.As(err, &sqliteErr) {
 		return sqliteErr.Code == sqlite3.ErrBusy || sqliteErr.Code == sqlite3.ErrLocked
 	}
-	return false
+	return err != nil && (strings.Contains(err.Error(), "database is locked") || strings.Contains(err.Error(), "database table is locked"))
 }
 
-const defaultLockRetries = 5
+const defaultLockRetries = 10
 
 func retryOnLocked(fn func() error) error {
 	var err error
@@ -34,7 +35,7 @@ func retryOnLocked(fn func() error) error {
 		if err == nil || !isLocked(err) {
 			return err
 		}
-		time.Sleep(time.Duration(50*(i+1)) * time.Millisecond)
+		time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
 	}
 	return err
 }
