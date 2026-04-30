@@ -326,7 +326,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// Try each variation until we find a match
 	for _, idVariation := range uniqueVariations {
 		dvdIDURL := fmt.Sprintf("%s/videos/vod/movies/detail/-/dvd_id=%s/json", baseURL, idVariation)
-		logging.Debugf("R18: Trying dvd_id lookup: %s", idVariation)
+		logging.Debugf("R18: Trying dvd_id lookup: %s (%s)", idVariation, dvdIDURL)
 
 		resp, err := s.doRequestWithRetryCtx(ctx, dvdIDURL)
 		if err != nil {
@@ -410,7 +410,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 			if altResp.StatusCode() == 200 {
 				contentType := altResp.Header().Get("Content-Type")
 				if !strings.Contains(contentType, "text/html") {
-					logging.Debugf("R18: ✓ Alternate content-id %s worked", altID)
+					logging.Debugf("R18: ✓ Alternate content-id %s worked (%s)", altID, altURL)
 					resp = altResp
 					finalURL = altURL
 					foundValid = true
@@ -438,7 +438,6 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 
 	var data R18Response
 	if err := json.Unmarshal(resp.Body(), &data); err != nil {
-		// Log first 200 chars for debugging
 		bodyPreview := string(resp.Body())
 		if len(bodyPreview) > 200 {
 			bodyPreview = bodyPreview[:200]
