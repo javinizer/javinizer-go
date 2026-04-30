@@ -118,7 +118,7 @@ func mapMOVVideoCodec(codec string) string {
 	case "SVQ3":
 		return "sorenson_video_3"
 	case "mp4v":
-		return "mpeg4"
+		return codecMPEG4
 	default:
 		return codec // Return as-is if no mapping found
 	}
