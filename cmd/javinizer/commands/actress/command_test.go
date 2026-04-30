@@ -177,3 +177,205 @@ func TestActressCommand_MergeInteractive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Source", merged.FirstName)
 }
+
+func TestActressExport_WithData(t *testing.T) {
+	configPath, _ := setupActressTestDB(t)
+	a1 := &models.Actress{DMMID: 90001, FirstName: "Aki", LastName: "Toyoda", JapaneseName: "豊田あき"}
+	a2 := &models.Actress{DMMID: 90002, FirstName: "Hina", LastName: "Sato", JapaneseName: "さとはな"}
+	seedActresses(t, configPath, a1, a2)
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	rootCmd.AddCommand(actress.NewCommand())
+	rootCmd.SetArgs([]string{"actress", "export"})
+
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, `"first_name": "Aki"`)
+	assert.Contains(t, stdout, `"last_name": "Toyoda"`)
+	assert.Contains(t, stdout, `"first_name": "Hina"`)
+	assert.Contains(t, stdout, "Exported 2 actress(es)")
+}
+
+func TestActressExport_Empty(t *testing.T) {
+	configPath, _ := setupActressTestDB(t)
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	rootCmd.AddCommand(actress.NewCommand())
+	rootCmd.SetArgs([]string{"actress", "export"})
+
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, "[]")
+	assert.Contains(t, stdout, "Exported 0 actress(es)")
+}
+
+func TestActressExport_ToFile(t *testing.T) {
+	configPath, _ := setupActressTestDB(t)
+	a1 := &models.Actress{DMMID: 90010, FirstName: "Moe", LastName: "Kawasaki", JapaneseName: "川崎萌"}
+	seedActresses(t, configPath, a1)
+
+	tmpDir := t.TempDir()
+	exportPath := filepath.Join(tmpDir, "actresses.json")
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	rootCmd.AddCommand(actress.NewCommand())
+	rootCmd.SetArgs([]string{"actress", "export", exportPath})
+
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, "Exported 1 actress(es) to")
+	assert.Contains(t, stdout, exportPath)
+
+	fileData, err := os.ReadFile(exportPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(fileData), `"first_name": "Moe"`)
+}
+
+func TestActressImport_WithIDs(t *testing.T) {
+	configPath, _ := setupActressTestDB(t)
+	a1 := &models.Actress{DMMID: 90100, ID: 1, FirstName: "Original", LastName: "Actress", JapaneseName: "オリジナル"}
+	seedActresses(t, configPath, a1)
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "actresses.json")
+	importData := []byte(`[
+		{"id": 1, "first_name": "Updated", "last_name": "Actress", "japanese_name": "オリジナル更新", "dmm_id": 90100},
+		{"id": 0, "first_name": "New", "last_name": "Star", "japanese_name": "新星", "dmm_id": 90200}
+	]`)
+	require.NoError(t, os.WriteFile(importPath, importData, 0644))
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	rootCmd.AddCommand(actress.NewCommand())
+	rootCmd.SetArgs([]string{"actress", "import", importPath})
+
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, "Imported: 2")
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+	db, err := database.New(cfg)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	repo := database.NewActressRepository(db)
+
+	updated, err := repo.FindByID(1)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated", updated.FirstName)
+	assert.Equal(t, "オリジナル更新", updated.JapaneseName)
+}
+
+func TestActressImport_WithoutIDs(t *testing.T) {
+	configPath, _ := setupActressTestDB(t)
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "actresses.json")
+	importData := []byte(`[
+		{"id": 0, "first_name": "Created", "last_name": "Actress", "japanese_name": "創作物", "dmm_id": 90300}
+	]`)
+	require.NoError(t, os.WriteFile(importPath, importData, 0644))
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	rootCmd.AddCommand(actress.NewCommand())
+	rootCmd.SetArgs([]string{"actress", "import", importPath})
+
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, "Imported: 1")
+	assert.Contains(t, stdout, "Skipped: 0")
+	assert.Contains(t, stdout, "Errors: 0")
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+	db, err := database.New(cfg)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	var count int64
+	db.DB.Model(&models.Actress{}).Count(&count)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestActressImport_InvalidJSON(t *testing.T) {
+	configPath, _ := setupActressTestDB(t)
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "bad.json")
+	require.NoError(t, os.WriteFile(importPath, []byte(`{bad}`), 0644))
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	rootCmd.AddCommand(actress.NewCommand())
+	rootCmd.SetArgs([]string{"actress", "import", importPath})
+
+	captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse JSON")
+	})
+}
+
+func TestActressImport_EmptyArray(t *testing.T) {
+	configPath, _ := setupActressTestDB(t)
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "empty.json")
+	require.NoError(t, os.WriteFile(importPath, []byte(`[]`), 0644))
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	rootCmd.AddCommand(actress.NewCommand())
+	rootCmd.SetArgs([]string{"actress", "import", importPath})
+
+	captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no actresses found")
+	})
+}
+
+func TestActressImport_SkipsIdentical(t *testing.T) {
+	configPath, _ := setupActressTestDB(t)
+	a1 := &models.Actress{DMMID: 90400, FirstName: "Aki", LastName: "Toyoda", JapaneseName: "豊田あき"}
+	seedActresses(t, configPath, a1)
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "same.json")
+	importData := []byte(`[
+		{"id": ` + strconv.FormatUint(uint64(a1.ID), 10) + `, "first_name": "Aki", "last_name": "Toyoda", "japanese_name": "豊田あき", "dmm_id": 90400}
+	]`)
+	require.NoError(t, os.WriteFile(importPath, importData, 0644))
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	rootCmd.AddCommand(actress.NewCommand())
+	rootCmd.SetArgs([]string{"actress", "import", importPath})
+
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, "Imported: 0")
+	assert.Contains(t, stdout, "Skipped: 1")
+}

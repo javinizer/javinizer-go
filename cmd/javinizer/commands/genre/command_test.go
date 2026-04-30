@@ -368,3 +368,298 @@ func TestRunGenreRemove_Success(t *testing.T) {
 	err = db.DB.Where("original = ?", "ドラマ").First(&replacement).Error
 	assert.Error(t, err, "should not find removed replacement")
 }
+
+func TestRunGenreExport_WithData(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	cmd := genre.NewCommand()
+	rootCmd.AddCommand(cmd)
+
+	rootCmd.SetArgs([]string{"genre", "add", "ドラマ", "Drama"})
+	captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	rootCmd2 := &cobra.Command{Use: "root"}
+	rootCmd2.PersistentFlags().String("config", configPath, "config file")
+	cmd2 := genre.NewCommand()
+	rootCmd2.AddCommand(cmd2)
+
+	rootCmd2.SetArgs([]string{"genre", "add", "アクション", "Action"})
+	captureOutput(t, func() {
+		err := rootCmd2.Execute()
+		require.NoError(t, err)
+	})
+
+	rootCmd3 := &cobra.Command{Use: "root"}
+	rootCmd3.PersistentFlags().String("config", configPath, "config file")
+	cmd3 := genre.NewCommand()
+	rootCmd3.AddCommand(cmd3)
+
+	rootCmd3.SetArgs([]string{"genre", "export"})
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd3.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, `"original": "アクション"`)
+	assert.Contains(t, stdout, `"replacement": "Action"`)
+	assert.Contains(t, stdout, `"original": "ドラマ"`)
+	assert.Contains(t, stdout, `"replacement": "Drama"`)
+	assert.Contains(t, stdout, "Exported 2 genre replacement(s)")
+}
+
+func TestRunGenreExport_Empty(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	cmd := genre.NewCommand()
+	rootCmd.AddCommand(cmd)
+
+	rootCmd.SetArgs([]string{"genre", "export"})
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, "[]")
+	assert.Contains(t, stdout, "Exported 0 genre replacement(s)")
+}
+
+func TestRunGenreExport_ToFile(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	cmd := genre.NewCommand()
+	rootCmd.AddCommand(cmd)
+
+	rootCmd.SetArgs([]string{"genre", "add", "ドラマ", "Drama"})
+	captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	tmpDir := t.TempDir()
+	exportPath := filepath.Join(tmpDir, "genres.json")
+
+	rootCmd2 := &cobra.Command{Use: "root"}
+	rootCmd2.PersistentFlags().String("config", configPath, "config file")
+	cmd2 := genre.NewCommand()
+	rootCmd2.AddCommand(cmd2)
+
+	rootCmd2.SetArgs([]string{"genre", "export", exportPath})
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd2.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, "Exported 1 genre replacement(s) to")
+	assert.Contains(t, stdout, exportPath)
+
+	fileData, err := os.ReadFile(exportPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(fileData), `"original": "ドラマ"`)
+	assert.Contains(t, string(fileData), `"replacement": "Drama"`)
+}
+
+func TestRunGenreImport_Valid(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "genres.json")
+	importData := []byte(`[
+		{"original": "アニメ", "replacement": "Anime"},
+		{"original": "ホラー", "replacement": "Horror"}
+	]`)
+	require.NoError(t, os.WriteFile(importPath, importData, 0644))
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	cmd := genre.NewCommand()
+	rootCmd.AddCommand(cmd)
+
+	rootCmd.SetArgs([]string{"genre", "import", importPath})
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, "Imported: 2")
+	assert.Contains(t, stdout, "Skipped: 0")
+	assert.Contains(t, stdout, "Errors: 0")
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+	db, err := database.New(cfg)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	repo := database.NewGenreReplacementRepository(db)
+	replacements, err := repo.List()
+	require.NoError(t, err)
+	assert.Equal(t, 2, len(replacements))
+}
+
+func TestRunGenreImport_InvalidJSON(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "invalid.json")
+	require.NoError(t, os.WriteFile(importPath, []byte(`{bad json}`), 0644))
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	cmd := genre.NewCommand()
+	rootCmd.AddCommand(cmd)
+
+	rootCmd.SetArgs([]string{"genre", "import", importPath})
+
+	captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse JSON")
+	})
+}
+
+func TestRunGenreImport_EmptyArray(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "empty.json")
+	require.NoError(t, os.WriteFile(importPath, []byte(`[]`), 0644))
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	cmd := genre.NewCommand()
+	rootCmd.AddCommand(cmd)
+
+	rootCmd.SetArgs([]string{"genre", "import", importPath})
+
+	captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no genre replacements found")
+	})
+}
+
+func TestRunGenreImport_UpsertsExisting(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	cmd := genre.NewCommand()
+	rootCmd.AddCommand(cmd)
+
+	rootCmd.SetArgs([]string{"genre", "add", "Drama", "Drama"})
+	captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "update.json")
+	importData := []byte(`[
+		{"original": "Drama", "replacement": "Drama Updated"},
+		{"original": "New", "replacement": "New Genre"}
+	]`)
+	require.NoError(t, os.WriteFile(importPath, importData, 0644))
+
+	rootCmd2 := &cobra.Command{Use: "root"}
+	rootCmd2.PersistentFlags().String("config", configPath, "config file")
+	cmd2 := genre.NewCommand()
+	rootCmd2.AddCommand(cmd2)
+
+	rootCmd2.SetArgs([]string{"genre", "import", importPath})
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd2.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, "Imported: 2")
+	assert.Contains(t, stdout, "Skipped: 0")
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+	db, err := database.New(cfg)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	updated, err := database.NewGenreReplacementRepository(db).FindByOriginal("Drama")
+	require.NoError(t, err)
+	assert.Equal(t, "Drama Updated", updated.Replacement)
+}
+
+func TestRunGenreImport_SkipsIdentical(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	cmd := genre.NewCommand()
+	rootCmd.AddCommand(cmd)
+
+	rootCmd.SetArgs([]string{"genre", "add", "Drama", "Drama"})
+	captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "same.json")
+	importData := []byte(`[
+		{"original": "Drama", "replacement": "Drama"}
+	]`)
+	require.NoError(t, os.WriteFile(importPath, importData, 0644))
+
+	rootCmd2 := &cobra.Command{Use: "root"}
+	rootCmd2.PersistentFlags().String("config", configPath, "config file")
+	cmd2 := genre.NewCommand()
+	rootCmd2.AddCommand(cmd2)
+
+	rootCmd2.SetArgs([]string{"genre", "import", importPath})
+	stdout, _ := captureOutput(t, func() {
+		err := rootCmd2.Execute()
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stdout, "Imported: 0")
+	assert.Contains(t, stdout, "Skipped: 1")
+}
+
+func TestGenreExportImport_Roundtrip(t *testing.T) {
+	configPath, _ := setupGenreTestDB(t)
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	cmd := genre.NewCommand()
+	rootCmd.AddCommand(cmd)
+
+	rootCmd.SetArgs([]string{"genre", "add", "アクション", "Action"})
+	captureOutput(t, func() {
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+
+	tmpDir := t.TempDir()
+	exportPath := filepath.Join(tmpDir, "export.json")
+
+	rootCmd2 := &cobra.Command{Use: "root"}
+	rootCmd2.PersistentFlags().String("config", configPath, "config file")
+	cmd2 := genre.NewCommand()
+	rootCmd2.AddCommand(cmd2)
+
+	rootCmd2.SetArgs([]string{"genre", "export", exportPath})
+	captureOutput(t, func() {
+		err := rootCmd2.Execute()
+		require.NoError(t, err)
+	})
+
+	importData, err := os.ReadFile(exportPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(importData), `"original": "アクション"`)
+	assert.Contains(t, string(importData), `"replacement": "Action"`)
+}
