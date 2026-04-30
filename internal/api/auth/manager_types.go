@@ -3,7 +3,9 @@ package auth
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -99,6 +101,15 @@ type AuthManager struct {
 	failedLoginCount       int
 	failedLoginWindowStart time.Time
 	loginBlockedUntil      time.Time
+	disableRateLimit       bool
+}
+
+// SetDisableRateLimit enables or disables rate limiting on login attempts.
+// Used for e2e testing where rate limiting would interfere with automated logins.
+func (m *AuthManager) SetDisableRateLimit(disabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.disableRateLimit = disabled
 }
 
 // CredentialPathForConfig returns the auth credential file path next to config.
@@ -130,6 +141,21 @@ func NewAuthManager(configFile string, sessionTTL time.Duration) (*AuthManager, 
 	}
 
 	manager.loadSessionsFromDisk()
+
+	e2eAuth, e2eEnabled := os.LookupEnv("JAVINIZER_E2E_AUTH")
+	if e2eEnabled && e2eAuth == "true" && manager.credentials == nil {
+		username := os.Getenv("JAVINIZER_E2E_USERNAME")
+		if username == "" {
+			username = "admin"
+		}
+		password := os.Getenv("JAVINIZER_E2E_PASSWORD")
+		if password == "" {
+			password = "adminpassword123"
+		}
+		if err := manager.Setup(username, password); err != nil {
+			return nil, fmt.Errorf("e2e auth auto-setup failed: %w", err)
+		}
+	}
 
 	return manager, nil
 }
