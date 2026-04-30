@@ -93,10 +93,10 @@
 		}
 	}));
 
-	const deleteMutation = createMutation(() => ({
-		mutationFn: (original: string) => apiClient.deleteWordReplacement(original),
-		onSuccess: (_, original) => {
-			toastStore.success(`Word replacement "${original}" removed`, 3000);
+		const deleteMutation = createMutation(() => ({
+		mutationFn: (id: number) => apiClient.deleteWordReplacement(id),
+		onSuccess: () => {
+			toastStore.success('Word replacement removed', 3000);
 			void queryClient.invalidateQueries({ queryKey: ['word-replacements'] });
 		},
 		onError: (err: Error) => {
@@ -145,8 +145,8 @@
 		addMutation.mutate({ original, replacement });
 	}
 
-	function handleDelete(original: string) {
-		deleteMutation.mutate(original);
+	function handleDelete(id: number) {
+		deleteMutation.mutate(id);
 	}
 
 	function startEdit(rep: WordReplacement) {
@@ -472,7 +472,7 @@
 														type="button"
 														class="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
 														title="Delete"
-														onclick={() => handleDelete(rep.original)}
+																				onclick={() => handleDelete(rep.id)}
 													>
 														<Trash2 class="h-4 w-4" />
 													</button>

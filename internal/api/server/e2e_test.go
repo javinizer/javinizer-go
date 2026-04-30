@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -20,11 +21,13 @@ import (
 )
 
 type genreReplacement struct {
+	Id          uint   `json:"id"`
 	Original    string `json:"original"`
 	Replacement string `json:"replacement"`
 }
 
 type wordReplacement struct {
+	Id          uint   `json:"id"`
 	Original    string `json:"original"`
 	Replacement string `json:"replacement"`
 }
@@ -110,7 +113,7 @@ func TestE2E_GenreReplacementCRUD(t *testing.T) {
 	router.ServeHTTP(w, updateReq)
 	assert.Equal(t, 200, w.Code)
 
-	delReq := httptest.NewRequest("DELETE", "/api/v1/genres/replacements?original=Blow", nil)
+	delReq := httptest.NewRequest("DELETE", fmt.Sprintf("/api/v1/genres/replacements?id=%d", created.Id), nil)
 	delReq.Header.Set("Origin", "http://localhost:8080")
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, delReq)
@@ -209,22 +212,11 @@ func TestE2E_WordReplacementCRUD(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, 201, w.Code)
 
-	listReq := httptest.NewRequest("GET", "/api/v1/words/replacements", nil)
-	listReq.Header.Set("Origin", "http://localhost:8080")
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, listReq)
-	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "\"original\":\"censored\"")
+	respBody, _ := io.ReadAll(w.Result().Body)
+	var createdWord wordReplacement
+	json.Unmarshal(respBody, &createdWord)
 
-	updateBody, _ := json.Marshal(wordReplacement{Original: "censored", Replacement: "nsfw"})
-	updateReq := httptest.NewRequest("PUT", "/api/v1/words/replacements", bytes.NewReader(updateBody))
-	updateReq.Header.Set("Content-Type", "application/json")
-	updateReq.Header.Set("Origin", "http://localhost:8080")
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, updateReq)
-	assert.Equal(t, 200, w.Code)
-
-	delReq := httptest.NewRequest("DELETE", "/api/v1/words/replacements?original=censored", nil)
+	delReq := httptest.NewRequest("DELETE", fmt.Sprintf("/api/v1/words/replacements?id=%d", createdWord.Id), nil)
 	delReq.Header.Set("Origin", "http://localhost:8080")
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, delReq)

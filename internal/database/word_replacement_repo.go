@@ -55,6 +55,14 @@ func (r *WordReplacementRepository) List() ([]models.WordReplacement, error) {
 	return r.ListAll()
 }
 
+func (r *WordReplacementRepository) FindByID(id uint) (*models.WordReplacement, error) {
+	return r.BaseRepository.FindByID(id)
+}
+
+func (r *WordReplacementRepository) DeleteByID(id uint) error {
+	return r.BaseRepository.Delete(id)
+}
+
 func (r *WordReplacementRepository) Delete(original string) error {
 	if err := r.GetDB().Delete(&models.WordReplacement{}, "original = ?", original).Error; err != nil {
 		return wrapDBErr("delete", fmt.Sprintf("word replacement %s", original), err)

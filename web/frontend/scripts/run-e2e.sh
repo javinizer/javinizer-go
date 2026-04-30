@@ -26,8 +26,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Check if port 8080 is available
-if lsof -ti:$PORT >/dev/null 2>&1; then
+# Check if port 8080 is available (exclude CLOSE_WAIT connections)
+if lsof -ti:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
   echo "[e2e-runner] ERROR: Port $PORT is already in use."
   echo "[e2e-runner] Stop your dev backend first (kill Air or stop your javinizer api process)."
   echo "[e2e-runner] Running on port $PORT: $(lsof -ti:$PORT | xargs ps -p 2>/dev/null | head -3)"

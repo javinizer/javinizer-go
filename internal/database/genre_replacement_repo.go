@@ -54,6 +54,14 @@ func (r *GenreReplacementRepository) List() ([]models.GenreReplacement, error) {
 	return r.ListAll()
 }
 
+func (r *GenreReplacementRepository) FindByID(id uint) (*models.GenreReplacement, error) {
+	return r.BaseRepository.FindByID(id)
+}
+
+func (r *GenreReplacementRepository) DeleteByID(id uint) error {
+	return r.BaseRepository.Delete(id)
+}
+
 func (r *GenreReplacementRepository) Delete(original string) error {
 	if err := r.GetDB().Delete(&models.GenreReplacement{}, "original = ?", original).Error; err != nil {
 		return wrapDBErr("delete", fmt.Sprintf("genre replacement %s", original), err)

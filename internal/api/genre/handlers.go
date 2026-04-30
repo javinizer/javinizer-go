@@ -1,6 +1,7 @@
 package genre
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -174,28 +175,34 @@ func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 // @Router /api/v1/genres/replacements [delete]
 func deleteGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		original := strings.TrimSpace(c.Query("original"))
-		if original == "" {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "original query parameter is required"})
+		idStr := c.Query("id")
+		if idStr == "" {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id query parameter is required"})
 			return
 		}
 
-		existing, err := deps.GenreReplacementRepo.FindByOriginal(original)
-		if err != nil && !database.IsNotFound(err) {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		var id uint64
+		if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id must be a number"})
 			return
 		}
+
+		replacement, err := deps.GenreReplacementRepo.FindByID(uint(id))
 		if err != nil {
-			c.JSON(http.StatusNotFound, ErrorResponse{Error: "genre replacement not found"})
-			return
-		}
-
-		if err := deps.GenreReplacementRepo.Delete(original); err != nil {
+			if database.IsNotFound(err) {
+				c.JSON(http.StatusNotFound, ErrorResponse{Error: "genre replacement not found"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"message": "genre replacement deleted", "original": existing.Original})
+		if err := deps.GenreReplacementRepo.DeleteByID(uint(id)); err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "genre replacement deleted", "original": replacement.Original})
 	}
 }
 

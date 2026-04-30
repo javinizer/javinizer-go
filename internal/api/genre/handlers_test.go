@@ -3,6 +3,7 @@ package genre
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -118,11 +119,12 @@ func TestGenreReplacementCreateIdempotent(t *testing.T) {
 func TestGenreReplacementDelete(t *testing.T) {
 	deps := newTestDeps(t)
 	repo := deps.GenreReplacementRepo
-	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
+	entity := models.GenreReplacement{Original: "HD", Replacement: "High Definition"}
+	require.NoError(t, repo.Create(&entity))
 
 	router := setupRouter(deps)
 
-	req := httptest.NewRequest("DELETE", "/genres/replacements?original=HD", nil)
+	req := httptest.NewRequest("DELETE", fmt.Sprintf("/genres/replacements?id=%d", entity.ID), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -138,7 +140,7 @@ func TestGenreReplacementDeleteNotFound(t *testing.T) {
 	deps := newTestDeps(t)
 	router := setupRouter(deps)
 
-	req := httptest.NewRequest("DELETE", "/genres/replacements?original=nonexistent", nil)
+	req := httptest.NewRequest("DELETE", "/genres/replacements?id=9999", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -148,11 +150,12 @@ func TestGenreReplacementDeleteNotFound(t *testing.T) {
 func TestGenreReplacementDeleteWithSpecialCharacters(t *testing.T) {
 	deps := newTestDeps(t)
 	repo := deps.GenreReplacementRepo
-	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "Threesome / Foursome", Replacement: "Group"}))
+	entity := models.GenreReplacement{Original: "Threesome / Foursome", Replacement: "Group"}
+	require.NoError(t, repo.Create(&entity))
 
 	router := setupRouter(deps)
 
-	req := httptest.NewRequest("DELETE", "/genres/replacements?original=Threesome+%2F+Foursome", nil)
+	req := httptest.NewRequest("DELETE", fmt.Sprintf("/genres/replacements?id=%d", entity.ID), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 

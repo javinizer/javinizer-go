@@ -104,18 +104,16 @@ test.describe('Genre Replacement Import/Export (UI)', () => {
     const exportBtn = page.getByRole('button', { name: 'Export' }).first();
     if (await exportBtn.isVisible().catch(() => false)) {
       const [download] = await Promise.all([
-        page.waitForEvent('download').catch(() => null),
+        page.waitForEvent('download'),
         exportBtn.click()
       ]);
 
-      if (download) {
-        const fileName = download.suggestedFilename();
-        expect(fileName).toMatch(/genre/);
+      const fileName = download.suggestedFilename();
+      expect(fileName).toMatch(/genre/);
 
-        const content = await downloadContent(download);
-        const data = JSON.parse((content as any).read().toString());
-        expect(Array.isArray(data)).toBeTruthy();
-      }
+      const content = await downloadContent(download);
+      const data = JSON.parse((content as any).read().toString());
+      expect(Array.isArray(data)).toBeTruthy();
     }
   });
 });
@@ -175,18 +173,16 @@ test.describe('Actress Import/Export via UI', () => {
     const exportBtn = page.getByRole('button', { name: 'Export' }).first();
     if (await exportBtn.isVisible().catch(() => false)) {
       const [download] = await Promise.all([
-        page.waitForEvent('download').catch(() => null),
+        page.waitForEvent('download'),
         exportBtn.click()
       ]);
 
-      if (download) {
-        const fileName = download.suggestedFilename();
-        expect(fileName).toMatch(/actresses/);
+      const fileName = download.suggestedFilename();
+      expect(fileName).toMatch(/actresses/);
 
-        const content = await downloadContent(download);
-        const data = JSON.parse((content as any).read().toString());
-        expect(Array.isArray(data)).toBeTruthy();
-      }
+      const content = await downloadContent(download);
+      const data = JSON.parse((content as any).read().toString());
+      expect(Array.isArray(data)).toBeTruthy();
     }
   });
 });
@@ -244,18 +240,16 @@ test.describe('Word Replacement Import/Export via UI', () => {
     const exportBtn = page.getByRole('button', { name: 'Export' }).first();
     if (await exportBtn.isVisible().catch(() => false)) {
       const [download] = await Promise.all([
-        page.waitForEvent('download').catch(() => null),
+        page.waitForEvent('download'),
         exportBtn.click()
       ]);
 
-      if (download) {
-        const fileName = download.suggestedFilename();
-        expect(fileName).toMatch(/word/);
+      const fileName = download.suggestedFilename();
+      expect(fileName).toMatch(/word/);
 
-        const content = await downloadContent(download);
-        const data = JSON.parse((content as any).read().toString());
-        expect(Array.isArray(data)).toBeTruthy();
-      }
+      const content = await downloadContent(download);
+      const data = JSON.parse((content as any).read().toString());
+      expect(Array.isArray(data)).toBeTruthy();
     }
   });
 });

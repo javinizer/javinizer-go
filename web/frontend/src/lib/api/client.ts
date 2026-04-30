@@ -433,9 +433,9 @@ class APIClient {
 		});
 	}
 
-	// Delete a genre replacement by original genre name
-	async deleteGenreReplacement(original: string): Promise<void> {
-		await this.request(`/api/v1/genres/replacements?original=${encodeURIComponent(original)}`, {
+	// Delete a genre replacement by id
+	async deleteGenreReplacement(id: number): Promise<void> {
+		await this.request(`/api/v1/genres/replacements?id=${id}`, {
 			method: 'DELETE'
 		});
 	}
@@ -472,9 +472,9 @@ class APIClient {
 		});
 	}
 
-	// Delete a word replacement by original text
-	async deleteWordReplacement(original: string): Promise<void> {
-		await this.request(`/api/v1/words/replacements?original=${encodeURIComponent(original)}`, {
+	// Delete a word replacement by id
+	async deleteWordReplacement(id: number): Promise<void> {
+		await this.request(`/api/v1/words/replacements?id=${id}`, {
 			method: 'DELETE'
 		});
 	}
@@ -482,7 +482,7 @@ class APIClient {
 	// Export genre replacements as JSON array
 	async exportGenreReplacements(): Promise<GenreReplacement[]> {
 		return this.request<GenreReplacement[]>('/api/v1/genres/replacements/export', {
-			method: 'POST'
+			method: 'GET'
 		});
 	}
 
@@ -497,7 +497,7 @@ class APIClient {
 	// Export word replacements as JSON array
 	async exportWordReplacements(): Promise<WordReplacement[]> {
 		return this.request<WordReplacement[]>('/api/v1/words/replacements/export', {
-			method: 'POST'
+			method: 'GET'
 		});
 	}
 
@@ -512,7 +512,7 @@ class APIClient {
 	// Export actresses as JSON array
 	async exportActresses(): Promise<Actress[]> {
 		return this.request<Actress[]>('/api/v1/actresses/export', {
-			method: 'POST'
+			method: 'GET'
 		});
 	}
 
