@@ -42,7 +42,8 @@ func applyBuildInfo(info *debug.BuildInfo) {
 
 	if (Version == "" || Version == "dev") &&
 		info.Main.Version != "" &&
-		info.Main.Version != "(devel)" {
+		info.Main.Version != "(devel)" &&
+		!isPseudoVersion(info.Main.Version) {
 		Version = info.Main.Version
 	}
 
@@ -63,6 +64,10 @@ func applyBuildInfo(info *debug.BuildInfo) {
 		!strings.HasSuffix(Commit, "-dirty") {
 		Commit += "-dirty"
 	}
+}
+
+func isPseudoVersion(v string) bool {
+	return strings.HasPrefix(v, "v0.0.0-") || strings.Contains(v, "+dirty")
 }
 
 func applyTrackedVersion() {

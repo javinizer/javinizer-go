@@ -5,7 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.3.0-alpha] - 2026-04-29
+## [v0.3.1-alpha] - 2026-04-30
+
+### Added
+
+- Word replacement (uncensor) system with database-backed replacements and API endpoints
+- Import/export API endpoints for genres, actresses, and word replacements
+- Frontend types and API client methods for import/export
+- Import/export UI to genres, words, and actresses pages
+- CLI word command with list/add/remove/export/import subcommands
+- Import/export subcommands to genre and actress CLI commands
+- Playwright e2e test infrastructure
+- E2e tests for import/export with fixtures
+- E2e auth mode with rate limit bypass
+- E2e tests for import/export across all three features
+- Support both id and original query params for genre/word deletion endpoints
+
+### Fixed
+
+- R18.dev scraper reliability — rental ID handling, direct URL fallback, alternate content IDs, nil guards, regex dedup
+- DMM scraper hardening — priority scaling, cover extraction, proxy auth, JSON parsing, nil guards
+- Replace remaining native confirm() with confirmDialog
+- Hide Review & Organize button when no files completed successfully
+- Address code review findings on import/export and Upsert paths
+- TypeScript type errors in e2e tests
+- SQLite lock detection — add string-based fallback for database is locked errors in retryOnLocked
+- E2e runner port check to only match LISTEN state
+- Export endpoints to use GET instead of POST
+
+### Changed
+
+- Switch genre/word replacement deletion from original-key to ID-based (both id and original params supported)
+- Gitignore Playwright test artifacts (test-results/, auth-state.json)
 
 ### Added
 

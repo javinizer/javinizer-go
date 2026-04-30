@@ -66,11 +66,11 @@
 				<div class="flex items-center gap-2">
 					<span class="text-sm font-medium">Version</span>
 					{#if versionStatus}
-						<span class="text-sm text-muted-foreground">v{versionStatus.current}</span>
+						<span class="text-sm text-muted-foreground">{versionStatus.current}</span>
 						{#if versionStatus.update_available}
 							<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-600">
 								<ArrowUpCircle class="h-3 w-3" />
-								Update available: v{versionStatus.latest}
+								Update available: {versionStatus.latest}
 							</span>
 						{/if}
 					{:else}
