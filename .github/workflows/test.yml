@@ -233,7 +233,7 @@ jobs:
       run: make build
 
     - name: Install swag
-      run: go install github.com/swaggo/swag/cmd/swag@latest
+      run: go install github.com/swaggo/swag/cmd/swag@v1.16.6
 
     - name: Generate Swagger documentation
       run: export PATH=$PATH:$(go env GOPATH)/bin && make swagger
