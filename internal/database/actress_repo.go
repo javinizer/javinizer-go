@@ -112,6 +112,26 @@ func (r *ActressRepository) FindByFirstNameLastName(firstName, lastName string) 
 	return &actress, nil
 }
 
+func (r *ActressRepository) FindByJapaneseNameAndDMMID(name string, dmmID int) (*models.Actress, error) {
+	var actress models.Actress
+	if name != "" && dmmID > 0 {
+		err := r.GetDB().First(&actress, "japanese_name = ? AND dmm_id = ?", name, dmmID).Error
+		if err != nil {
+			return nil, wrapDBErr("find", fmt.Sprintf("actress %s dmm_id %d", name, dmmID), err)
+		}
+		return &actress, nil
+	} else if name != "" {
+		return r.FindByJapaneseName(name)
+	} else if dmmID > 0 {
+		return r.FindByDMMID(dmmID)
+	}
+	return nil, wrapDBErr("find", "actress by japanese_name and dmm_id", ErrInvalidLookup)
+}
+
+func (r *ActressRepository) ListAll() ([]models.Actress, error) {
+	return r.BaseRepository.ListAll()
+}
+
 func (r *ActressRepository) FindOrCreate(actress *models.Actress) error {
 	if actress.JapaneseName != "" {
 		existing, err := r.FindByJapaneseName(actress.JapaneseName)
