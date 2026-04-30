@@ -314,3 +314,107 @@ func deleteActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"message": "actress deleted", "id": existing.ID})
 	}
 }
+
+type actressesImportRequest struct {
+	Actresses []actressImportItem `json:"actresses"`
+}
+
+type actressImportItem struct {
+	DMMID        int    `json:"dmm_id"`
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name"`
+	JapaneseName string `json:"japanese_name"`
+	ThumbURL     string `json:"thumb_url"`
+	Aliases      string `json:"aliases"`
+}
+
+type importSummaryResponse struct {
+	Imported int `json:"imported"`
+	Skipped  int `json:"skipped"`
+	Errors   int `json:"errors"`
+}
+
+func exportActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		all, err := actressRepo.ListAll()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, all)
+	}
+}
+
+func importActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req actressesImportRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		var imported, skipped, errorsCount int
+
+		for _, item := range req.Actresses {
+			firstName := strings.TrimSpace(item.FirstName)
+			lastName := strings.TrimSpace(item.LastName)
+			japaneseName := strings.TrimSpace(item.JapaneseName)
+			thumbURL := strings.TrimSpace(item.ThumbURL)
+			aliases := strings.TrimSpace(item.Aliases)
+
+			if firstName == "" && japaneseName == "" {
+				errorsCount++
+				continue
+			}
+
+			existing, err := actressRepo.FindByJapaneseNameAndDMMID(japaneseName, item.DMMID)
+			if err != nil {
+				errorsCount++
+				continue
+			}
+
+			if existing == nil {
+				actress := &models.Actress{
+					DMMID:        item.DMMID,
+					FirstName:    firstName,
+					LastName:     lastName,
+					JapaneseName: japaneseName,
+					ThumbURL:     thumbURL,
+					Aliases:      aliases,
+				}
+				if err := actressRepo.Create(actress); err != nil {
+					errorsCount++
+					continue
+				}
+				imported++
+			} else {
+				changed := existing.FirstName != firstName ||
+					existing.LastName != lastName ||
+					existing.ThumbURL != thumbURL ||
+					existing.Aliases != aliases
+
+				if changed {
+					existing.FirstName = firstName
+					existing.LastName = lastName
+					existing.ThumbURL = thumbURL
+					existing.Aliases = aliases
+
+					if err := actressRepo.Update(existing); err != nil {
+						errorsCount++
+						continue
+					}
+					imported++
+				} else {
+					skipped++
+				}
+			}
+		}
+
+		c.JSON(http.StatusOK, importSummaryResponse{
+			Imported: imported,
+			Skipped:  skipped,
+			Errors:   errorsCount,
+		})
+	}
+}

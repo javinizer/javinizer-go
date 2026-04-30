@@ -156,3 +156,116 @@ func deleteWordReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"message": "word replacement deleted", "original": existing.Original})
 	}
 }
+
+type wordReplacementImportRequest struct {
+	Replacements   []wordReplacementCreateRequest `json:"replacements"`
+	IncludeDefaults bool                           `json:"includeDefaults"`
+}
+
+var defaultWordReplacements = map[string]bool{
+	"[Recommended For Smartphones] ": true,
+	"A*****t": true, "A*****ted": true, "A****p": true, "A***e": true,
+	"B***d": true, "B**d": true, "C***d": true,
+	"D******ed": true, "D******eful": true, "D***k": true,
+	"D***king": true, "D**g": true, "D**gged": true,
+	"F***": true, "F*****g": true, "F***e": true,
+	"G*********d": true, "G*******g": true, "G******g": true,
+	"H*********n": true, "H*******ed": true, "H*******m": true,
+	"I****t": true, "I****tuous": true,
+	"K****p": true, "K**l": true, "K**ler": true, "K*d": true,
+	"Ko**ji": true, "Lo**ta": true,
+	"M******r": true, "M****t": true, "M****ted": true, "M****ter": true, "M****ting": true,
+	"P****h": true, "P****hment": true,
+	"P*A": true,
+	"R****g": true, "R**e": true, "R**ed": true, "R*pe": true,
+	"S*********l": true, "S*********ls": true, "S********l": true,
+	"S********n": true, "S******g": true, "S*****t": true,
+	"S***e": true, "S***p": true, "S**t": true,
+	"Sch**l": true, "Sch**lgirl": true, "Sch**lgirls": true,
+	"SK**lful": true, "SK**ls": true,
+	"StepB****************r": true, "StepM************n": true,
+	"StumB**d": true,
+	"T*****e": true,
+	"U*********sly": true, "U**verse": true,
+	"V*****e": true, "V*****ed": true, "V*****es": true, "V*****t": true,
+	"Y********l": true,
+	"D******e": true,
+}
+
+func exportWordReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		replacements, err := deps.WordReplacementRepo.List()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, replacements)
+	}
+}
+
+func importWordReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req wordReplacementImportRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		var imported, skipped, errors int
+
+		for _, item := range req.Replacements {
+			orig := strings.TrimSpace(item.Original)
+			repl := strings.TrimSpace(item.Replacement)
+
+			if orig == "" {
+				errors++
+				continue
+			}
+
+			if !req.IncludeDefaults && defaultWordReplacements[orig] {
+				skipped++
+				continue
+			}
+
+			existing, err := deps.WordReplacementRepo.FindByOriginal(orig)
+			if err != nil {
+				errors++
+				continue
+			}
+
+			var changed bool
+
+			if existing == nil {
+				replacement := &models.WordReplacement{
+					Original:    orig,
+					Replacement: repl,
+				}
+				if err := deps.WordReplacementRepo.Create(replacement); err != nil {
+					errors++
+					continue
+				}
+				changed = true
+			} else if existing.Replacement != repl {
+				existing.Replacement = repl
+				if err := deps.WordReplacementRepo.Upsert(existing); err != nil {
+					errors++
+					continue
+				}
+				changed = true
+			}
+
+			if changed {
+				imported++
+			} else {
+				skipped++
+			}
+		}
+
+		c.JSON(http.StatusOK, importSummaryResponse{
+			Imported: imported,
+			Skipped:  skipped,
+			Errors:   errors,
+		})
+	}
+}

@@ -189,3 +189,86 @@ func deleteGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"message": "genre replacement deleted", "original": existing.Original})
 	}
 }
+
+type genreReplacementImportRequest struct {
+	Replacements []genreReplacementCreateRequest `json:"replacements"`
+}
+
+type importSummaryResponse struct {
+	Imported int `json:"imported"`
+	Skipped  int `json:"skipped"`
+	Errors   int `json:"errors"`
+}
+
+func exportGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		replacements, err := deps.GenreReplacementRepo.List()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, replacements)
+	}
+}
+
+func importGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req genreReplacementImportRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		var imported, skipped, errors int
+
+		for _, item := range req.Replacements {
+			orig := strings.TrimSpace(item.Original)
+			repl := strings.TrimSpace(item.Replacement)
+
+			if orig == "" {
+				errors++
+				continue
+			}
+
+			existing, err := deps.GenreReplacementRepo.FindByOriginal(orig)
+			if err != nil {
+				errors++
+				continue
+			}
+
+			var changed bool
+
+			if existing == nil {
+				replacement := &models.GenreReplacement{
+					Original:    orig,
+					Replacement: repl,
+				}
+				if err := deps.GenreReplacementRepo.Create(replacement); err != nil {
+					errors++
+					continue
+				}
+				changed = true
+			} else if existing.Replacement != repl {
+				existing.Replacement = repl
+				if err := deps.GenreReplacementRepo.Upsert(existing); err != nil {
+					errors++
+					continue
+				}
+				changed = true
+			}
+
+			if changed {
+				imported++
+			} else {
+				skipped++
+			}
+		}
+
+		c.JSON(http.StatusOK, importSummaryResponse{
+			Imported: imported,
+			Skipped:  skipped,
+			Errors:   errors,
+		})
+	}
+}
