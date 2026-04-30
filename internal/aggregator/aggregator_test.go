@@ -2146,3 +2146,98 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		assert.Equal(t, "r18dev", translations[0].SourceName)
 	})
 }
+
+func TestApplyWordReplacement(t *testing.T) {
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			WordReplacement: config.WordReplacementConfig{
+				Enabled: true,
+			},
+		},
+	}
+
+	agg := &Aggregator{
+		config:               cfg,
+		wordReplacementCache: map[string]string{"foo": "bar", "baz": "qux"},
+	}
+	agg.wordReplacementSorted = []struct{ orig, repl string }{
+		{"baz", "qux"},
+		{"foo", "bar"},
+	}
+
+	assert.Equal(t, "bar qux", agg.applyWordReplacement("foo baz"))
+	assert.Equal(t, "hello", agg.applyWordReplacement("hello"))
+}
+
+func TestApplyWordReplacement_Disabled(t *testing.T) {
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			WordReplacement: config.WordReplacementConfig{Enabled: false},
+		},
+	}
+
+	agg := &Aggregator{config: cfg, wordReplacementCache: map[string]string{"foo": "bar"}}
+	assert.Equal(t, "foo", agg.applyWordReplacement("foo"))
+}
+
+func TestLoadWordReplacementCache(t *testing.T) {
+	mockRepo := &mockWordRepo{replacements: map[string]string{"old": "new"}}
+
+	agg := &Aggregator{wordReplacementRepo: mockRepo}
+	agg.loadWordReplacementCache()
+
+	agg.wordCacheMutex.RLock()
+	cache := agg.wordReplacementCache
+	agg.wordCacheMutex.RUnlock()
+
+	assert.Equal(t, "new", cache["old"])
+}
+
+func TestApplyWordReplacements(t *testing.T) {
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			WordReplacement: config.WordReplacementConfig{Enabled: true},
+		},
+	}
+
+	agg := &Aggregator{
+		config:               cfg,
+		wordReplacementCache: map[string]string{"bad": "good"},
+	}
+	agg.wordReplacementSorted = []struct{ orig, repl string }{{"bad", "good"}}
+
+	movie := &models.Movie{
+		Title:         "bad title",
+		OriginalTitle: "bad orig",
+		Description:   "bad desc",
+		Director:      "bad dir",
+		Maker:         "bad maker",
+		Label:         "bad label",
+		Series:        "bad series",
+	}
+
+	agg.applyWordReplacements(movie)
+
+	assert.Equal(t, "good title", movie.Title)
+	assert.Equal(t, "good orig", movie.OriginalTitle)
+	assert.Equal(t, "good desc", movie.Description)
+	assert.Equal(t, "good dir", movie.Director)
+	assert.Equal(t, "good maker", movie.Maker)
+	assert.Equal(t, "good label", movie.Label)
+	assert.Equal(t, "good series", movie.Series)
+}
+
+type mockWordRepo struct {
+	replacements map[string]string
+}
+
+func (m *mockWordRepo) Create(_ *models.WordReplacement) error { return nil }
+func (m *mockWordRepo) Upsert(_ *models.WordReplacement) error { return nil }
+func (m *mockWordRepo) FindByOriginal(_ string) (*models.WordReplacement, error) {
+	return nil, nil
+}
+func (m *mockWordRepo) List() ([]models.WordReplacement, error) { return nil, nil }
+func (m *mockWordRepo) Delete(_ string) error                   { return nil }
+func (m *mockWordRepo) GetReplacementMap() (map[string]string, error) {
+	return m.replacements, nil
+}
