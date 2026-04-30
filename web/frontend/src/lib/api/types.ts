@@ -1010,3 +1010,23 @@ export interface VersionStatusResponse {
 	source: string;
 	error?: string;
 }
+
+// Import/Export types
+export interface ImportResponse {
+	imported: number;
+	skipped: number;
+	errors: number;
+}
+
+export interface GenreReplacementsImportRequest {
+	replacements: { original: string; replacement: string }[];
+}
+
+export interface WordReplacementsImportRequest {
+	replacements: { original: string; replacement: string }[];
+	includeDefaults?: boolean;
+}
+
+export interface ActressesImportRequest {
+	actresses: ActressUpsertRequest[];
+}

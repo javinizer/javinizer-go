@@ -61,6 +61,10 @@ import type {
 	WordReplacementUpdateRequest,
 	AuthCredentialsRequest,
 	AuthStatusResponse,
+	ImportResponse,
+	GenreReplacementsImportRequest,
+	WordReplacementsImportRequest,
+	ActressesImportRequest,
 	EventListResponse,
 	EventListParams,
 	EventStatsResponse,
@@ -472,6 +476,51 @@ class APIClient {
 	async deleteWordReplacement(original: string): Promise<void> {
 		await this.request(`/api/v1/words/replacements?original=${encodeURIComponent(original)}`, {
 			method: 'DELETE'
+		});
+	}
+
+	// Export genre replacements as JSON array
+	async exportGenreReplacements(): Promise<GenreReplacement[]> {
+		return this.request<GenreReplacement[]>('/api/v1/genres/replacements/export', {
+			method: 'POST'
+		});
+	}
+
+	// Import genre replacements from JSON
+	async importGenreReplacements(request: GenreReplacementsImportRequest): Promise<ImportResponse> {
+		return this.request<ImportResponse>('/api/v1/genres/replacements/import', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		});
+	}
+
+	// Export word replacements as JSON array
+	async exportWordReplacements(): Promise<WordReplacement[]> {
+		return this.request<WordReplacement[]>('/api/v1/words/replacements/export', {
+			method: 'POST'
+		});
+	}
+
+	// Import word replacements from JSON
+	async importWordReplacements(request: WordReplacementsImportRequest): Promise<ImportResponse> {
+		return this.request<ImportResponse>('/api/v1/words/replacements/import', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		});
+	}
+
+	// Export actresses as JSON array
+	async exportActresses(): Promise<Actress[]> {
+		return this.request<Actress[]>('/api/v1/actresses/export', {
+			method: 'POST'
+		});
+	}
+
+	// Import actresses from JSON
+	async importActresses(request: ActressesImportRequest): Promise<ImportResponse> {
+		return this.request<ImportResponse>('/api/v1/actresses/import', {
+			method: 'POST',
+			body: JSON.stringify(request)
 		});
 	}
 
