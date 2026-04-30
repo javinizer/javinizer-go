@@ -167,7 +167,8 @@ func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 // @Description Delete a genre replacement rule by original genre name
 // @Tags genres
 // @Produce json
-// @Param original query string true "Original genre name to delete"
+// @Param id query int false "Replacement ID to delete"
+// @Param original query string false "Original genre name to delete (alternative to id)"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -176,33 +177,55 @@ func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 func deleteGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Query("id")
-		if idStr == "" {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id query parameter is required"})
-			return
-		}
+		original := strings.TrimSpace(c.Query("original"))
 
-		var id uint64
-		if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id must be a number"})
-			return
-		}
-
-		replacement, err := deps.GenreReplacementRepo.FindByID(uint(id))
-		if err != nil {
-			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, ErrorResponse{Error: "genre replacement not found"})
+		if idStr != "" {
+			var id uint64
+			if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+				c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id must be a number"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+
+			replacement, err := deps.GenreReplacementRepo.FindByID(uint(id))
+			if err != nil {
+				if database.IsNotFound(err) {
+					c.JSON(http.StatusNotFound, ErrorResponse{Error: "genre replacement not found"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				return
+			}
+
+			if err := deps.GenreReplacementRepo.DeleteByID(uint(id)); err != nil {
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"message": "genre replacement deleted", "original": replacement.Original})
 			return
 		}
 
-		if err := deps.GenreReplacementRepo.DeleteByID(uint(id)); err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		if original != "" {
+			existing, err := deps.GenreReplacementRepo.FindByOriginal(original)
+			if err != nil {
+				if database.IsNotFound(err) {
+					c.JSON(http.StatusNotFound, ErrorResponse{Error: "genre replacement not found"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				return
+			}
+
+			if err := deps.GenreReplacementRepo.Delete(original); err != nil {
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"message": "genre replacement deleted", "original": existing.Original})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"message": "genre replacement deleted", "original": replacement.Original})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id or original query parameter is required"})
 	}
 }
 

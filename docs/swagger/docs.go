@@ -1705,11 +1705,16 @@ const docTemplate = `{
                 "summary": "Delete genre replacement",
                 "parameters": [
                     {
+                        "type": "integer",
+                        "description": "Replacement ID to delete",
+                        "name": "id",
+                        "in": "query"
+                    },
+                    {
                         "type": "string",
-                        "description": "Original genre name to delete",
+                        "description": "Original genre name to delete (alternative to id)",
                         "name": "original",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     }
                 ],
                 "responses": {

@@ -178,6 +178,36 @@ func TestGenreReplacementDeleteMissingOriginal(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestGenreReplacementDeleteByOriginal(t *testing.T) {
+	deps := newTestDeps(t)
+	repo := deps.GenreReplacementRepo
+	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
+
+	router := setupRouter(deps)
+
+	req := httptest.NewRequest("DELETE", "/genres/replacements?original=HD", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "genre replacement deleted", resp["message"])
+	assert.Equal(t, "HD", resp["original"])
+}
+
+func TestGenreReplacementDeleteByOriginalNotFound(t *testing.T) {
+	deps := newTestDeps(t)
+	router := setupRouter(deps)
+
+	req := httptest.NewRequest("DELETE", "/genres/replacements?original=nonexistent", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
 func TestGenreReplacementCreateEmptyOriginal(t *testing.T) {
 	deps := newTestDeps(t)
 	router := setupRouter(deps)

@@ -145,33 +145,55 @@ func updateWordReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 func deleteWordReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Query("id")
-		if idStr == "" {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id query parameter is required"})
-			return
-		}
+		original := strings.TrimSpace(c.Query("original"))
 
-		var id uint64
-		if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id must be a number"})
-			return
-		}
-
-		replacement, err := deps.WordReplacementRepo.FindByID(uint(id))
-		if err != nil {
-			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, ErrorResponse{Error: "word replacement not found"})
+		if idStr != "" {
+			var id uint64
+			if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+				c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id must be a number"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+
+			replacement, err := deps.WordReplacementRepo.FindByID(uint(id))
+			if err != nil {
+				if database.IsNotFound(err) {
+					c.JSON(http.StatusNotFound, ErrorResponse{Error: "word replacement not found"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				return
+			}
+
+			if err := deps.WordReplacementRepo.DeleteByID(uint(id)); err != nil {
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"message": "word replacement deleted", "original": replacement.Original})
 			return
 		}
 
-		if err := deps.WordReplacementRepo.DeleteByID(uint(id)); err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		if original != "" {
+			existing, err := deps.WordReplacementRepo.FindByOriginal(original)
+			if err != nil {
+				if database.IsNotFound(err) {
+					c.JSON(http.StatusNotFound, ErrorResponse{Error: "word replacement not found"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				return
+			}
+
+			if err := deps.WordReplacementRepo.Delete(original); err != nil {
+				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"message": "word replacement deleted", "original": existing.Original})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"message": "word replacement deleted", "original": replacement.Original})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id or original query parameter is required"})
 	}
 }
 
