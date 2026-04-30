@@ -563,6 +563,8 @@ jobs:
     needs: [prepare-release, build-linux, build-darwin, build-windows-amd64, build-docker]
     if: needs.prepare-release.outputs.create_release == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
