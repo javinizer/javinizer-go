@@ -2227,6 +2227,51 @@ func TestApplyWordReplacements(t *testing.T) {
 	assert.Equal(t, "good series", movie.Series)
 }
 
+func TestApplyWordReplacements_WithTranslations(t *testing.T) {
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{
+			WordReplacement: config.WordReplacementConfig{Enabled: true},
+		},
+	}
+
+	agg := &Aggregator{
+		config:               cfg,
+		wordReplacementCache: map[string]string{"bad": "good"},
+	}
+	agg.wordReplacementSorted = []struct{ orig, repl string }{{"bad", "good"}}
+
+	movie := &models.Movie{
+		Title:  "bad title",
+		Series: "bad series",
+		Translations: []models.MovieTranslation{
+			{Title: "bad trans", OriginalTitle: "bad orig", Description: "bad desc", Director: "bad dir", Maker: "bad maker", Label: "bad label", Series: "bad series"},
+		},
+	}
+
+	agg.applyWordReplacements(movie)
+
+	assert.Equal(t, "good title", movie.Title)
+	assert.Equal(t, "good trans", movie.Translations[0].Title)
+	assert.Equal(t, "good orig", movie.Translations[0].OriginalTitle)
+	assert.Equal(t, "good desc", movie.Translations[0].Description)
+	assert.Equal(t, "good dir", movie.Translations[0].Director)
+	assert.Equal(t, "good maker", movie.Translations[0].Maker)
+	assert.Equal(t, "good label", movie.Translations[0].Label)
+	assert.Equal(t, "good series", movie.Translations[0].Series)
+}
+
+func TestReloadWordReplacements(t *testing.T) {
+	mockRepo := &mockWordRepo{replacements: map[string]string{"foo": "bar"}}
+	agg := &Aggregator{wordReplacementRepo: mockRepo}
+	agg.ReloadWordReplacements()
+
+	agg.wordCacheMutex.RLock()
+	cache := agg.wordReplacementCache
+	agg.wordCacheMutex.RUnlock()
+
+	assert.Equal(t, "bar", cache["foo"])
+}
+
 type mockWordRepo struct {
 	replacements map[string]string
 }
