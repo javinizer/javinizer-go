@@ -75,7 +75,7 @@ func (m *AuthManager) Login(username, password string, rememberMe bool) (string,
 
 	now := m.nowFn()
 	m.pruneExpiredSessionsLocked(now)
-	if now.Before(m.loginBlockedUntil) {
+	if !m.disableRateLimit && now.Before(m.loginBlockedUntil) {
 		return "", ErrLoginRateLimited
 	}
 

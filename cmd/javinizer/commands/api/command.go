@@ -99,6 +99,12 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 		return nil, fmt.Errorf("failed to initialize authentication: %w", err)
 	}
 
+	// E2E test mode: disable rate limiting for automated login
+	e2eAuth, e2eEnabled := os.LookupEnv("JAVINIZER_E2E_AUTH")
+	if e2eEnabled && e2eAuth == "true" {
+		authManager.SetDisableRateLimit(true)
+	}
+
 	// Ensure data directory exists
 	dataDir := filepath.Dir(cfg.Database.DSN)
 	if err := os.MkdirAll(dataDir, config.DirPerm); err != nil {
