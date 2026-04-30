@@ -73,8 +73,8 @@ test.describe('Genre Replacement Import/Export (API)', () => {
 	const original2 = 'E2E-Drama-Genre';
 
 	test.afterEach(async ({ request }) => {
-		try { await request.delete(`/api/v1/genres/replacements?original=${encodeURIComponent(original1)}`); } catch { /* ignore */ }
-		try { await request.delete(`/api/v1/genres/replacements?original=${encodeURIComponent(original2)}`); } catch { /* ignore */ }
+		try { await request.delete(`/api/v1/genres/replacements?original=${encodeURIComponent(original1)}`); } catch { 0; }
+		try { await request.delete(`/api/v1/genres/replacements?original=${encodeURIComponent(original2)}`); } catch { 0; }
 	});
 
 	test('import-export roundtrip preserves data integrity', async ({ request }) => {
@@ -151,9 +151,7 @@ test.describe('Actress Import/Export via UI', () => {
 			if (count > 0) {
 				await deleteBtns.first().click();
 			}
-		} catch {
-			// Cleanup best-effort
-		}
+		} catch { 0; }
 	});
 
 	test('export triggers download', async ({ page }) => {
@@ -203,7 +201,7 @@ test.describe('Actress Import/Export via UI', () => {
 					await deleteBtns.click();
 				}
 			}
-		} catch { /* ignore */ }
+		} catch { 0; }
 	});
 });
 
@@ -246,7 +244,7 @@ test.describe('Word Replacement Import/Export via UI', () => {
 		for (const original of wordOriginals) {
 			try {
 				await request.delete(`/api/v1/words/replacements?original=${encodeURIComponent(original)}`);
-			} catch { /* ignore */ }
+			} catch { 0; }
 		}
 	});
 
@@ -289,7 +287,7 @@ test.describe('Word Replacement Import/Export via UI', () => {
 		for (const original of wordOriginals) {
 			try {
 				await request.delete(`/api/v1/words/replacements?original=${encodeURIComponent(original)}`);
-			} catch { /* ignore */ }
+			} catch { 0; }
 		}
 	});
 });
