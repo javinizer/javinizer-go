@@ -228,6 +228,12 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"PUT /api/v1/config",
 		"PUT /api/v1/genres/replacements",
 		"PUT /api/v1/words/replacements",
+		"POST /api/v1/genres/replacements/export",
+		"POST /api/v1/genres/replacements/import",
+		"POST /api/v1/words/replacements/export",
+		"POST /api/v1/words/replacements/import",
+		"POST /api/v1/actresses/export",
+		"POST /api/v1/actresses/import",
 	}
 
 	optionalStaticRoutes := map[string]struct{}{
