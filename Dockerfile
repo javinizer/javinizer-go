@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/root/.npm \
 # ==============================================================================
 # Stage 2: Build Go Binary
 # ==============================================================================
-FROM golang:1.25-alpine AS go-builder
+FROM golang:1.26-alpine AS go-builder
 
 WORKDIR /build
 

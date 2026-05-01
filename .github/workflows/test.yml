@@ -124,9 +124,9 @@ jobs:
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
-        # Go 1.25 in go.mod requires a golangci-lint binary built with Go 1.25+.
-        # v2.4.0+ satisfies this; pin to avoid v1 fallback from older action versions.
-        version: v2.4.0
+        # Go 1.26 in go.mod requires a golangci-lint binary built with Go 1.26+.
+        # v2.9.0+ satisfies this; pin to avoid version skew.
+        version: v2.9.0
         args: --timeout=5m
 
     - name: Check formatting
