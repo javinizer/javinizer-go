@@ -64,15 +64,9 @@ func organizeJob(deps *ServerDependencies) gin.HandlerFunc {
 			effectiveMode = parsed
 		}
 
-		// Allow organize for organize and in-place modes only
 		// Preview mode should use the preview endpoint, not organize
-		// Metadata-only mode does not perform file operations
 		if effectiveMode == types.OperationModePreview {
 			c.JSON(400, ErrorResponse{Error: "Preview mode should use the preview endpoint, not organize"})
-			return
-		}
-		if effectiveMode == types.OperationModeMetadataOnly {
-			c.JSON(400, ErrorResponse{Error: "Organize not available in metadata-only mode"})
 			return
 		}
 

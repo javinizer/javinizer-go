@@ -1,6 +1,7 @@
 import { createQuery } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
 import { listTokens } from '$lib/api/tokens';
+import { isTerminalStatus } from '$lib/utils/job-progress';
 
 export function createConfigQuery() {
 	return createQuery(() => ({
@@ -72,7 +73,7 @@ export function createBatchJobPollingQuery(jobId: string) {
 		queryFn: () => apiClient.getBatchJob(jobId),
 		refetchInterval: (query) => {
 			const status = query.state.data?.status;
-			return status === 'completed' || status === 'failed' || status === 'cancelled'
+			return isTerminalStatus(status)
 				? false
 				: 2000;
 		},

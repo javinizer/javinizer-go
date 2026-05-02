@@ -256,3 +256,109 @@ func TestRejectUnknownProxyFields(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateBrowserConfig(t *testing.T) {
+	t.Run("disabled is valid", func(t *testing.T) {
+		assert.NoError(t, validateBrowserConfig("browser", BrowserConfig{Enabled: false}))
+	})
+
+	t.Run("enabled with valid fields", func(t *testing.T) {
+		cfg := BrowserConfig{
+			Enabled:      true,
+			Timeout:      30,
+			MaxRetries:   3,
+			WindowWidth:  1280,
+			WindowHeight: 720,
+			SlowMo:       100,
+		}
+		assert.NoError(t, validateBrowserConfig("browser", cfg))
+	})
+
+	t.Run("timeout 0 returns error", func(t *testing.T) {
+		cfg := BrowserConfig{Enabled: true, Timeout: 0, MaxRetries: 3, WindowWidth: 1280, WindowHeight: 720}
+		err := validateBrowserConfig("browser", cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "timeout")
+	})
+
+	t.Run("timeout 301 returns error", func(t *testing.T) {
+		cfg := BrowserConfig{Enabled: true, Timeout: 301, MaxRetries: 3, WindowWidth: 1280, WindowHeight: 720}
+		err := validateBrowserConfig("browser", cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "timeout")
+	})
+
+	t.Run("max_retries -1 returns error", func(t *testing.T) {
+		cfg := BrowserConfig{Enabled: true, Timeout: 30, MaxRetries: -1, WindowWidth: 1280, WindowHeight: 720}
+		err := validateBrowserConfig("browser", cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "max_retries")
+	})
+
+	t.Run("max_retries 11 returns error", func(t *testing.T) {
+		cfg := BrowserConfig{Enabled: true, Timeout: 30, MaxRetries: 11, WindowWidth: 1280, WindowHeight: 720}
+		err := validateBrowserConfig("browser", cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "max_retries")
+	})
+
+	t.Run("window_width 639 returns error", func(t *testing.T) {
+		cfg := BrowserConfig{Enabled: true, Timeout: 30, MaxRetries: 3, WindowWidth: 639, WindowHeight: 720}
+		err := validateBrowserConfig("browser", cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "window_width")
+	})
+
+	t.Run("window_height 479 returns error", func(t *testing.T) {
+		cfg := BrowserConfig{Enabled: true, Timeout: 30, MaxRetries: 3, WindowWidth: 1280, WindowHeight: 479}
+		err := validateBrowserConfig("browser", cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "window_height")
+	})
+
+	t.Run("slow_mo 5001 returns error", func(t *testing.T) {
+		cfg := BrowserConfig{Enabled: true, Timeout: 30, MaxRetries: 3, WindowWidth: 1280, WindowHeight: 720, SlowMo: 5001}
+		err := validateBrowserConfig("browser", cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "slow_mo")
+	})
+
+	t.Run("binary_path nonexistent returns error", func(t *testing.T) {
+		cfg := BrowserConfig{Enabled: true, Timeout: 30, MaxRetries: 3, WindowWidth: 1280, WindowHeight: 720, BinaryPath: "/nonexistent/browser"}
+		err := validateBrowserConfig("browser", cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "binary_path")
+	})
+}
+
+func TestValidateProxyProfileRef(t *testing.T) {
+	profiles := map[string]ProxyProfile{
+		"main": {URL: "http://proxy:8080"},
+	}
+
+	t.Run("nil proxy config is valid", func(t *testing.T) {
+		assert.NoError(t, validateProxyProfileRef("test.proxy", nil, profiles))
+	})
+
+	t.Run("disabled proxy is valid", func(t *testing.T) {
+		cfg := &ProxyConfig{Enabled: false}
+		assert.NoError(t, validateProxyProfileRef("test.proxy", cfg, profiles))
+	})
+
+	t.Run("enabled with valid profile is valid", func(t *testing.T) {
+		cfg := &ProxyConfig{Enabled: true, Profile: "main"}
+		assert.NoError(t, validateProxyProfileRef("test.proxy", cfg, profiles))
+	})
+
+	t.Run("enabled with unknown profile returns error", func(t *testing.T) {
+		cfg := &ProxyConfig{Enabled: true, Profile: "nonexistent"}
+		err := validateProxyProfileRef("test.proxy", cfg, profiles)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown profile")
+	})
+
+	t.Run("enabled with empty profile is valid (inherit mode)", func(t *testing.T) {
+		cfg := &ProxyConfig{Enabled: true, Profile: ""}
+		assert.NoError(t, validateProxyProfileRef("test.proxy", cfg, profiles))
+	})
+}

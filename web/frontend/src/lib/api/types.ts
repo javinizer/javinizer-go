@@ -55,7 +55,7 @@ export interface ScrapeRequest {
 	selected_scrapers?: string[];
 }
 
-export type OperationMode = 'organize' | 'in-place' | 'in-place-norenamefolder' | 'metadata-only' | 'preview';
+export type OperationMode = 'organize' | 'in-place' | 'in-place-norenamefolder' | 'metadata-artwork' | 'preview';
 
 export interface BatchScrapeRequest {
 	files: string[];
@@ -108,6 +108,29 @@ export interface BatchRescrapeResponse {
 	movie: Movie;
 	field_sources?: Record<string, string>;
 	actress_sources?: Record<string, string>;
+}
+
+export interface BulkRescrapeRequest {
+	movie_ids: string[];
+	selected_scrapers?: string[];
+	force?: boolean;
+	preset?: 'conservative' | 'gap-fill' | 'aggressive';
+	scalar_strategy?: 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
+	array_strategy?: 'merge' | 'replace';
+}
+
+export interface BulkRescrapeMovieResult {
+	movie_id: string;
+	status: 'success' | 'failed';
+	error?: string;
+	movie?: Movie;
+}
+
+export interface BulkRescrapeResponse {
+	results: BulkRescrapeMovieResult[];
+	succeeded: number;
+	failed: number;
+	job: BatchJobResponse;
 }
 
 export interface DataSource {
@@ -190,6 +213,7 @@ export interface BatchJobResponse {
 	started_at: string;
 	completed_at?: string;
 	operation_mode_override?: string;
+	update: boolean;
 }
 
 export interface ProgressMessage {
@@ -727,6 +751,22 @@ export interface WordReplacementConfig {
 	enabled?: boolean;
 }
 
+export interface CompletenessTierDefinition {
+    weight: number;
+    fields: string[];
+}
+
+export interface CompletenessTierConfig {
+    essential: CompletenessTierDefinition;
+    important: CompletenessTierDefinition;
+    nice_to_have: CompletenessTierDefinition;
+}
+
+export interface CompletenessConfig {
+    enabled: boolean;
+    tiers: CompletenessTierConfig;
+}
+
 export interface MetadataConfig {
 	priority?: Record<string, string[]>;
 	actress_database?: ActressDatabaseConfig;
@@ -737,6 +777,7 @@ export interface MetadataConfig {
 	ignore_genres?: string[];
 	required_fields?: string[];
 	nfo?: NFOConfig;
+	completeness?: CompletenessConfig;
 }
 
 export interface MatchingConfig {
@@ -789,6 +830,10 @@ export interface MediaInfoConfig {
 	cli_timeout: number;
 }
 
+export interface WebUIConfig {
+	default_review_view?: string;
+}
+
 export interface ScrapersConfig {
 	user_agent?: string;
 	referer?: string;
@@ -833,6 +878,7 @@ export interface Config {
 	logging?: LoggingConfig;
 	performance?: PerformanceConfig;
 	mediainfo?: MediaInfoConfig;
+	webui?: WebUIConfig;
 }
 
 export interface SettingsConfig {
@@ -848,6 +894,7 @@ export interface SettingsConfig {
 	logging: LoggingConfig;
 	performance: PerformanceConfig;
 	mediainfo: MediaInfoConfig;
+	webui: WebUIConfig;
 }
 
 // History types
@@ -1029,4 +1076,19 @@ export interface WordReplacementsImportRequest {
 
 export interface ActressesImportRequest {
 	actresses: ActressUpsertRequest[];
+}
+
+export interface BatchExcludeRequest {
+	movie_ids: string[];
+}
+
+export interface BatchExcludeFailed {
+	movie_id: string;
+	error: string;
+}
+
+export interface BatchExcludeResponse {
+	excluded: string[];
+	failed: BatchExcludeFailed[];
+	job: BatchJobResponse;
 }

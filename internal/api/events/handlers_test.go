@@ -302,6 +302,58 @@ func TestEventStats(t *testing.T) {
 	}
 }
 
+func TestEventStats_ByType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	deps, db := setupEventsTestDeps(t)
+	defer func() { _ = db.Close() }()
+
+	require.NoError(t, deps.EventRepo.Create(&models.Event{
+		EventType: models.EventCategoryScraper, Severity: models.SeverityInfo, Message: "scrape 1", Source: "r18dev", CreatedAt: time.Now(),
+	}))
+	require.NoError(t, deps.EventRepo.Create(&models.Event{
+		EventType: models.EventCategoryScraper, Severity: models.SeverityError, Message: "scrape 2", Source: "dmm", CreatedAt: time.Now(),
+	}))
+	require.NoError(t, deps.EventRepo.Create(&models.Event{
+		EventType: models.EventCategoryOrganize, Severity: models.SeverityWarn, Message: "organize 1", Source: "organizer", CreatedAt: time.Now(),
+	}))
+	require.NoError(t, deps.EventRepo.Create(&models.Event{
+		EventType: models.EventCategorySystem, Severity: models.SeverityDebug, Message: "system 1", Source: "server", CreatedAt: time.Now(),
+	}))
+
+	router := gin.New()
+	router.GET("/api/v1/events/stats", eventStats(deps))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stats", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp eventStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, int64(4), resp.Total)
+	assert.Equal(t, int64(2), resp.ByType[models.EventCategoryScraper])
+	assert.Equal(t, int64(1), resp.ByType[models.EventCategoryOrganize])
+	assert.Equal(t, int64(1), resp.ByType[models.EventCategorySystem])
+}
+
+func TestListEvents_InvalidDateFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	deps, db := setupEventsTestDeps(t)
+	defer func() { _ = db.Close() }()
+
+	router := gin.New()
+	router.GET("/api/v1/events", listEvents(deps))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events?start=invalid-date", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestDeleteEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

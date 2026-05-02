@@ -382,3 +382,86 @@ func TestScraperClientBuilder_ApplyChain(t *testing.T) {
 	assert.Equal(t, "1", client.Client.Header.Get("X-First"))
 	assert.Equal(t, "2", client.Client.Header.Get("X-Second"))
 }
+
+func TestIsValidCookieName(t *testing.T) {
+	t.Run("empty name is invalid", func(t *testing.T) {
+		assert.False(t, IsValidCookieName(""))
+	})
+
+	t.Run("alphanumeric name is valid", func(t *testing.T) {
+		assert.True(t, IsValidCookieName("session_id"))
+	})
+
+	t.Run("special token chars are valid", func(t *testing.T) {
+		assert.True(t, IsValidCookieName("my-cookie!"))
+	})
+
+	t.Run("space is invalid", func(t *testing.T) {
+		assert.False(t, IsValidCookieName("my cookie"))
+	})
+
+	t.Run("semicolon is invalid", func(t *testing.T) {
+		assert.False(t, IsValidCookieName("my;cookie"))
+	})
+
+	t.Run("unicode is invalid", func(t *testing.T) {
+		assert.False(t, IsValidCookieName("クッキー"))
+	})
+}
+
+func TestSanitizeCookieValue(t *testing.T) {
+	t.Run("normal value unchanged", func(t *testing.T) {
+		assert.Equal(t, "abc123", SanitizeCookieValue("abc123"))
+	})
+
+	t.Run("removes semicolons", func(t *testing.T) {
+		assert.Equal(t, "abc", SanitizeCookieValue("a;b;c"))
+	})
+
+	t.Run("removes quotes", func(t *testing.T) {
+		assert.Equal(t, "abc", SanitizeCookieValue(`a"b"c`))
+	})
+
+	t.Run("removes backslashes", func(t *testing.T) {
+		assert.Equal(t, "abc", SanitizeCookieValue(`a\b\c`))
+	})
+
+	t.Run("removes newlines", func(t *testing.T) {
+		assert.Equal(t, "abc", SanitizeCookieValue("a\nb\nc"))
+	})
+
+	t.Run("removes carriage returns", func(t *testing.T) {
+		assert.Equal(t, "abc", SanitizeCookieValue("a\rb\rc"))
+	})
+
+	t.Run("removes control characters", func(t *testing.T) {
+		assert.Equal(t, "abc", SanitizeCookieValue("a\x00b\x01c"))
+	})
+}
+
+func TestBuildCookieHeader(t *testing.T) {
+	builder := NewScraperClientBuilder()
+
+	t.Run("builds valid cookie header", func(t *testing.T) {
+		result := builder.buildCookieHeader(map[string]string{
+			"session": "abc123",
+			"lang":    "en",
+		})
+		assert.Contains(t, result, "session=abc123")
+		assert.Contains(t, result, "lang=en")
+	})
+
+	t.Run("skips invalid cookie names", func(t *testing.T) {
+		result := builder.buildCookieHeader(map[string]string{
+			"valid":    "yes",
+			"inva lid": "no",
+		})
+		assert.Contains(t, result, "valid=yes")
+		assert.NotContains(t, result, "inva lid")
+	})
+
+	t.Run("empty cookies returns empty string", func(t *testing.T) {
+		result := builder.buildCookieHeader(map[string]string{})
+		assert.Equal(t, "", result)
+	})
+}

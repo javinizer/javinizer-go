@@ -11,6 +11,7 @@
 		children?: import('svelte').Snippet;
 		title?: string;
 		'aria-label'?: string;
+		'aria-pressed'?: boolean;
 	}
 
 	let {
@@ -22,7 +23,8 @@
 		onclick,
 		children,
 		title,
-		'aria-label': ariaLabel
+		'aria-label': ariaLabel,
+		'aria-pressed': ariaPressed
 	}: Props = $props();
 
 	const variants = {
@@ -48,6 +50,7 @@
 	{disabled}
 	{title}
 	aria-label={ariaLabel}
+	{...(ariaPressed !== undefined ? { 'aria-pressed': ariaPressed } : {})}
 	onclick={onclick}
 	class={cn(
 		'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',

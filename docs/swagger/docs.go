@@ -805,6 +805,59 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/batch/{id}/movies/batch-exclude": {
+            "post": {
+                "description": "Exclude multiple movies from a batch job in a single request. Best-effort: excludes as many as possible and returns per-movie failures.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "Bulk exclude movies from batch organization",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Movie IDs to exclude",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.BatchExcludeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.BatchExcludeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_batch.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/batch/{id}/movies/{movieId}": {
             "patch": {
                 "description": "Update a movie's metadata within a batch job's results",
@@ -3125,6 +3178,47 @@ const docTemplate = `{
                 }
             }
         },
+        "config.CompletenessConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "tiers": {
+                    "$ref": "#/definitions/config.CompletenessTierConfig"
+                }
+            }
+        },
+        "config.CompletenessTierConfig": {
+            "type": "object",
+            "properties": {
+                "essential": {
+                    "$ref": "#/definitions/config.CompletenessTierDefinition"
+                },
+                "important": {
+                    "$ref": "#/definitions/config.CompletenessTierDefinition"
+                },
+                "nice_to_have": {
+                    "$ref": "#/definitions/config.CompletenessTierDefinition"
+                }
+            }
+        },
+        "config.CompletenessTierDefinition": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "description": "Movie field names assigned to this tier",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "weight": {
+                    "description": "Percentage weight (0-100, must sum to 100 across tiers)",
+                    "type": "integer"
+                }
+            }
+        },
         "config.DatabaseConfig": {
             "type": "object",
             "properties": {
@@ -3298,6 +3392,14 @@ const docTemplate = `{
                     "allOf": [
                         {
                             "$ref": "#/definitions/config.ActressDatabaseConfig"
+                        }
+                    ]
+                },
+                "completeness": {
+                    "description": "Completeness scoring configuration",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.CompletenessConfig"
                         }
                     ]
                 },
@@ -3904,6 +4006,14 @@ const docTemplate = `{
                 }
             }
         },
+        "config.WebUIConfig": {
+            "type": "object",
+            "properties": {
+                "default_review_view": {
+                    "type": "string"
+                }
+            }
+        },
         "config.WordReplacementConfig": {
             "type": "object",
             "properties": {
@@ -3926,6 +4036,19 @@ const docTemplate = `{
                 },
                 "source_value": {},
                 "target_value": {}
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeFailed": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Movie not found in job"
+                },
+                "movie_id": {
+                    "type": "string",
+                    "example": "IPX-535"
+                }
             }
         },
         "github_com_javinizer_javinizer-go_internal_api_contracts.BatchFileResult": {
@@ -4041,6 +4164,9 @@ const docTemplate = `{
                 },
                 "total_files": {
                     "type": "integer"
+                },
+                "update": {
+                    "type": "boolean"
                 }
             }
         },
@@ -4639,6 +4765,44 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api_batch.BatchExcludeRequest": {
+            "type": "object",
+            "required": [
+                "movie_ids"
+            ],
+            "properties": {
+                "movie_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "IPX-535",
+                        "ABC-123"
+                    ]
+                }
+            }
+        },
+        "internal_api_batch.BatchExcludeResponse": {
+            "type": "object",
+            "properties": {
+                "excluded": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "failed": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeFailed"
+                    }
+                },
+                "job": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse"
+                }
+            }
+        },
         "internal_api_batch.BatchJobResponse": {
             "type": "object",
             "properties": {
@@ -4692,6 +4856,9 @@ const docTemplate = `{
                 },
                 "total_files": {
                     "type": "integer"
+                },
+                "update": {
+                    "type": "boolean"
                 }
             }
         },
@@ -4779,7 +4946,7 @@ const docTemplate = `{
                     "example": false
                 },
                 "operation_mode": {
-                    "description": "Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-only, preview",
+                    "description": "Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-artwork, preview",
                     "type": "string",
                     "example": "organize"
                 },
@@ -6078,6 +6245,9 @@ const docTemplate = `{
                 },
                 "system": {
                     "$ref": "#/definitions/config.SystemConfig"
+                },
+                "webui": {
+                    "$ref": "#/definitions/config.WebUIConfig"
                 }
             }
         },

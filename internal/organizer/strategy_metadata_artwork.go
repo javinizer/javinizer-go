@@ -10,22 +10,22 @@ import (
 	"github.com/spf13/afero"
 )
 
-type MetadataOnlyStrategy struct {
+type MetadataArtworkStrategy struct {
 	fs     afero.Fs
 	config *config.OutputConfig
 }
 
-var _ OperationStrategy = (*MetadataOnlyStrategy)(nil)
+var _ OperationStrategy = (*MetadataArtworkStrategy)(nil)
 
-func NewMetadataOnlyStrategy(fs afero.Fs, cfg *config.OutputConfig) *MetadataOnlyStrategy {
-	return &MetadataOnlyStrategy{
+func NewMetadataArtworkStrategy(fs afero.Fs, cfg *config.OutputConfig) *MetadataArtworkStrategy {
+	return &MetadataArtworkStrategy{
 		fs:     fs,
 		config: cfg,
 	}
 }
 
-func (s *MetadataOnlyStrategy) Plan(match matcher.MatchResult, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
-	// Metadata-only mode never renames files — preserve the original filename
+func (s *MetadataArtworkStrategy) Plan(match matcher.MatchResult, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
+	// Metadata-artwork mode never renames files — preserve the original filename
 	fileName := match.File.Name
 	if fileName == "" && match.File.Path != "" {
 		fileName = filepath.Base(match.File.Path)
@@ -45,16 +45,16 @@ func (s *MetadataOnlyStrategy) Plan(match matcher.MatchResult, movie *models.Mov
 		InPlace:           false,
 		OldDir:            "",
 		IsDedicated:       false,
-		SkipInPlaceReason: "metadata-only mode",
+		SkipInPlaceReason: "metadata-artwork mode",
 		FolderName:        "",
 		SubfolderPath:     "",
 		BaseFileName:      strings.TrimSuffix(fileName, match.File.Extension),
-		Strategy:          StrategyTypeMetadataOnly,
+		Strategy:          StrategyTypeMetadataArtwork,
 		executeStrategy:   s,
 	}, nil
 }
 
-func (s *MetadataOnlyStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
+func (s *MetadataArtworkStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	return &OrganizeResult{
 		OriginalPath:           plan.SourcePath,
 		NewPath:                plan.TargetPath,

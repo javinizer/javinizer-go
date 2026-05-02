@@ -1,6 +1,7 @@
 package nfo
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func actressKey(actress models.Actress) string {
+	japaneseName := strings.ToLower(strings.TrimSpace(actress.JapaneseName))
+	if japaneseName != "" {
+		return fmt.Sprintf("jp:%s", japaneseName)
+	}
+
+	if actress.DMMID > 0 {
+		return fmt.Sprintf("dmm:%d", actress.DMMID)
+	}
+
+	firstName := strings.ToLower(strings.TrimSpace(actress.FirstName))
+	lastName := strings.ToLower(strings.TrimSpace(actress.LastName))
+	if firstName != "" || lastName != "" {
+		return fmt.Sprintf("name:%s|%s", firstName, lastName)
+	}
+
+	return ""
+}
 
 func TestActressKey(t *testing.T) {
 	tests := []struct {

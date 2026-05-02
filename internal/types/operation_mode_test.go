@@ -33,9 +33,9 @@ func TestParseOperationMode(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "metadata-only mode",
-			input:   "metadata-only",
-			want:    OperationModeMetadataOnly,
+			name:    "metadata-artwork mode",
+			input:   "metadata-artwork",
+			want:    OperationModeMetadataArtwork,
 			wantErr: false,
 		},
 		{
@@ -108,8 +108,8 @@ func TestOperationMode_IsValid(t *testing.T) {
 			valid: true,
 		},
 		{
-			name:  "metadata-only is valid",
-			mode:  OperationModeMetadataOnly,
+			name:  "metadata-artwork is valid",
+			mode:  OperationModeMetadataArtwork,
 			valid: true,
 		},
 		{
@@ -159,9 +159,9 @@ func TestOperationMode_Constants(t *testing.T) {
 			want:     "in-place-norenamefolder",
 		},
 		{
-			name:     "metadata-only constant value",
-			constant: OperationModeMetadataOnly,
-			want:     "metadata-only",
+			name:     "metadata-artwork constant value",
+			constant: OperationModeMetadataArtwork,
+			want:     "metadata-artwork",
 		},
 		{
 			name:     "preview constant value",
@@ -199,8 +199,8 @@ func TestIsValidOperationMode(t *testing.T) {
 			want:  true,
 		},
 		{
-			name:  "metadata-only is valid",
-			input: "metadata-only",
+			name:  "metadata-artwork is valid",
+			input: "metadata-artwork",
 			want:  true,
 		},
 		{

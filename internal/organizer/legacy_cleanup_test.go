@@ -38,14 +38,14 @@ func TestResolveStrategy_UsesOperationModeExclusively(t *testing.T) {
 			expectedType:  StrategyTypeInPlaceNoRenameFolder,
 		},
 		{
-			name:          "metadata-only mode selects MetadataOnlyStrategy",
-			operationMode: types.OperationModeMetadataOnly,
-			expectedType:  StrategyTypeMetadataOnly,
+			name:          "metadata-artwork mode selects MetadataArtworkStrategy",
+			operationMode: types.OperationModeMetadataArtwork,
+			expectedType:  StrategyTypeMetadataArtwork,
 		},
 		{
-			name:          "preview mode selects MetadataOnlyStrategy",
+			name:          "preview mode selects MetadataArtworkStrategy",
 			operationMode: types.OperationModePreview,
-			expectedType:  StrategyTypeMetadataOnly,
+			expectedType:  StrategyTypeMetadataArtwork,
 		},
 	}
 

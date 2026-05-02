@@ -32,21 +32,40 @@
 
 	// Autocomplete state
 	let searchQuery = $state('');
-	let allActresses = $state<Actress[]>([]);
+	let searchResults = $state<Actress[]>([]);
 	let showSearchResults = $state(false);
 	let isSearchFocused = $state(false);
+	let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+	let searchRequestId = 0;
 
-	// Filtered results based on search query (client-side filtering)
-	const filteredActresses = $derived.by(() => {
-		if (!searchQuery || searchQuery.trim().length === 0) {
-			return allActresses;
+	async function searchActresses(query: string) {
+		const requestId = ++searchRequestId;
+		try {
+			const q = query.trim();
+			const url = q ? `/api/v1/actresses/search?q=${encodeURIComponent(q)}` : '/api/v1/actresses/search?q=';
+			const results = await apiClient.request<Actress[]>(url);
+			if (requestId === searchRequestId) {
+				searchResults = results;
+			}
+		} catch (error) {
+			if (requestId === searchRequestId) {
+				console.error('Failed to search actresses:', error);
+				searchResults = [];
+			}
 		}
-		const query = searchQuery.toLowerCase();
-		return allActresses.filter(actress => {
-			const fullName = getFullName(actress).toLowerCase();
-			const japaneseName = (actress.japanese_name || '').toLowerCase();
-			return fullName.includes(query) || japaneseName.includes(query);
-		});
+	}
+
+	function handleSearchInput() {
+		if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null; }
+		searchDebounceTimer = setTimeout(() => {
+			searchActresses(searchQuery);
+		}, 200);
+	}
+
+	$effect(() => {
+		return () => {
+			if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null; }
+		};
 	});
 
 	// Sync actresses when movie prop changes
@@ -114,19 +133,15 @@
 
 	function cancelEdit() {
 		showEditModal = false;
-		// Reset search state when closing modal
+		if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null; }
 		searchQuery = '';
 		showSearchResults = false;
+		searchResults = [];
 	}
 
 	// Load all actresses on modal open
 	async function loadAllActresses() {
-		try {
-			allActresses = await apiClient.request<Actress[]>('/api/v1/actresses/search?q=');
-		} catch (error) {
-			console.error('Failed to load actresses:', error);
-			allActresses = [];
-		}
+		await searchActresses('');
 	}
 
 	// Select an actress from search results
@@ -139,6 +154,8 @@
 	// Handle input focus
 	function handleSearchFocus() {
 		showSearchResults = true;
+		if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null; }
+		searchActresses(searchQuery);
 	}
 
 	// Handle input blur (with delay to allow click on dropdown)
@@ -315,14 +332,15 @@
 							bind:value={searchQuery}
 							onfocus={handleSearchFocus}
 							onblur={handleSearchBlur}
-							placeholder="Click to see all actresses or type to search..."
+							oninput={handleSearchInput}
+							placeholder="Type to search actresses..."
 							class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 						/>
 
 						{#if showSearchResults}
-							{#if filteredActresses.length > 0}
+							{#if searchResults.length > 0}
 								<div class="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg max-h-64 overflow-y-auto">
-									{#each filteredActresses as actress}
+									{#each searchResults as actress}
 										<button
 											type="button"
 											onclick={() => selectActressFromSearch(actress)}
@@ -348,9 +366,9 @@
 										</button>
 									{/each}
 								</div>
-							{:else if allActresses.length === 0}
+							{:else if searchQuery.trim().length === 0}
 								<div class="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
-									No actresses in database yet. Add your first one below!
+									No actresses in database yet
 								</div>
 							{:else}
 								<div class="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
@@ -360,11 +378,7 @@
 						{/if}
 					</div>
 					<p class="text-xs text-muted-foreground">
-						{#if allActresses.length > 0}
-							{allActresses.length} actress{allActresses.length === 1 ? '' : 'es'} in database - select from dropdown or enter details manually below
-						{:else}
-							Enter actress details manually below
-						{/if}
+						Type to search actresses or enter details manually below
 					</p>
 				</div>
 

@@ -220,7 +220,7 @@ const (
 	StrategyTypeOrganize StrategyType = iota
 	StrategyTypeInPlace
 	StrategyTypeInPlaceNoRenameFolder
-	StrategyTypeMetadataOnly
+	StrategyTypeMetadataArtwork
 )
 
 type OrganizePlan struct {
@@ -253,8 +253,8 @@ func (o *Organizer) resolveStrategy() OperationStrategy {
 		return NewInPlaceStrategy(o.fs, o.config, o.matcher, o.templateEngine)
 	case "in-place-norenamefolder":
 		return NewInPlaceNoRenameFolderStrategy(o.fs, o.config, o.matcher, o.templateEngine)
-	case "metadata-only", "preview":
-		return NewMetadataOnlyStrategy(o.fs, o.config)
+	case "metadata-artwork", "preview":
+		return NewMetadataArtworkStrategy(o.fs, o.config)
 	default:
 		return NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
 	}
@@ -301,8 +301,8 @@ func (o *Organizer) Execute(plan *OrganizePlan, dryRun bool) (*OrganizeResult, e
 			strategy = NewInPlaceStrategy(o.fs, o.config, o.matcher, o.templateEngine)
 		case StrategyTypeInPlaceNoRenameFolder:
 			strategy = NewInPlaceNoRenameFolderStrategy(o.fs, o.config, o.matcher, o.templateEngine)
-		case StrategyTypeMetadataOnly:
-			strategy = NewMetadataOnlyStrategy(o.fs, o.config)
+		case StrategyTypeMetadataArtwork:
+			strategy = NewMetadataArtworkStrategy(o.fs, o.config)
 		default:
 			strategy = NewOrganizeStrategy(o.fs, o.config, o.templateEngine)
 		}

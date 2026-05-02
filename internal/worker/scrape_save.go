@@ -18,7 +18,6 @@ func saveScrapedResult(
 	movieID string,
 	resolvedID string,
 	results []*models.ScraperResult,
-	usingCustomScrapers bool,
 	movieRepo *database.MovieRepository,
 	fieldSources map[string]string,
 	actressSources map[string]string,
@@ -28,59 +27,55 @@ func saveScrapedResult(
 	startTime time.Time,
 ) (*models.Movie, *FileResult, error) {
 	var finalMovie *models.Movie
-	if !usingCustomScrapers {
-		if movie.ID == "" && movie.ContentID == "" {
-			logging.Warnf("[Batch %s] File %d: Critical - aggregated movie has empty ID and ContentID (resolvedID=%q, movieID=%q, scraperResults=%d)",
-				job.ID, fileIndex, resolvedID, movieID, len(results))
-			for i, r := range results {
-				logging.Debugf("[Batch %s] File %d: Result[%d] source=%s, ID=%q, ContentID=%q, Title=%q",
-					job.ID, fileIndex, i, r.Source, r.ID, r.ContentID, r.Title)
-			}
+
+	if movie.ID == "" && movie.ContentID == "" {
+		logging.Warnf("[Batch %s] File %d: Critical - aggregated movie has empty ID and ContentID (resolvedID=%q, movieID=%q, scraperResults=%d)",
+			job.ID, fileIndex, resolvedID, movieID, len(results))
+		for i, r := range results {
+			logging.Debugf("[Batch %s] File %d: Result[%d] source=%s, ID=%q, ContentID=%q, Title=%q",
+				job.ID, fileIndex, i, r.Source, r.ID, r.ContentID, r.Title)
 		}
-		if movie.Title == "" {
-			logging.Warnf("[Batch %s] File %d: Aggregated movie has empty Title (resolvedID=%q, movieID=%q, scraperResults=%d)",
-				job.ID, fileIndex, resolvedID, movieID, len(results))
-			for i, r := range results {
-				logging.Debugf("[Batch %s] File %d: Result[%d] source=%s, Title=%q, Maker=%q, Genres=%d",
-					job.ID, fileIndex, i, r.Source, r.Title, r.Maker, len(r.Genres))
-			}
+	}
+	if movie.Title == "" {
+		logging.Warnf("[Batch %s] File %d: Aggregated movie has empty Title (resolvedID=%q, movieID=%q, scraperResults=%d)",
+			job.ID, fileIndex, resolvedID, movieID, len(results))
+		for i, r := range results {
+			logging.Debugf("[Batch %s] File %d: Result[%d] source=%s, Title=%q, Maker=%q, Genres=%d",
+				job.ID, fileIndex, i, r.Source, r.Title, r.Maker, len(r.Genres))
 		}
-		logging.Debugf("[Batch %s] File %d: Saving metadata to database", job.ID, fileIndex)
+	}
+	logging.Debugf("[Batch %s] File %d: Saving metadata to database", job.ID, fileIndex)
 
-		tempPosterURL := movie.CroppedPosterURL
-		movie.CroppedPosterURL = ""
+	tempPosterURL := movie.CroppedPosterURL
+	movie.CroppedPosterURL = ""
 
-		savedMovie, err := movieRepo.Upsert(movie)
-		if err != nil {
-			return nil, nil, fmt.Errorf("database save failed for %s: %w", movie.ID, err)
-		} else {
-			logging.Debugf("[Batch %s] File %d: Successfully saved to database", job.ID, fileIndex)
+	savedMovie, err := movieRepo.Upsert(movie)
+	if err != nil {
+		return nil, nil, fmt.Errorf("database save failed for %s: %w", movie.ID, err)
+	}
+	logging.Debugf("[Batch %s] File %d: Successfully saved to database", job.ID, fileIndex)
+
+	movie.CroppedPosterURL = tempPosterURL
+
+	if savedMovie != nil {
+		finalMovie = savedMovie
+		if movie.DisplayTitle != "" {
+			finalMovie.DisplayTitle = movie.DisplayTitle
 		}
-
-		movie.CroppedPosterURL = tempPosterURL
-
-		if savedMovie != nil {
-			finalMovie = savedMovie
+		finalMovie.CroppedPosterURL = movie.CroppedPosterURL
+		logging.Debugf("[Batch %s] File %d: Using saved movie from Upsert with associations", job.ID, fileIndex)
+	} else {
+		reloadedMovie, reloadErr := movieRepo.FindByID(movie.ID)
+		if reloadErr == nil {
+			finalMovie = reloadedMovie
 			if movie.DisplayTitle != "" {
 				finalMovie.DisplayTitle = movie.DisplayTitle
 			}
 			finalMovie.CroppedPosterURL = movie.CroppedPosterURL
-			logging.Debugf("[Batch %s] File %d: Using saved movie from Upsert with associations", job.ID, fileIndex)
 		} else {
-			reloadedMovie, reloadErr := movieRepo.FindByID(movie.ID)
-			if reloadErr == nil {
-				finalMovie = reloadedMovie
-				if movie.DisplayTitle != "" {
-					finalMovie.DisplayTitle = movie.DisplayTitle
-				}
-				finalMovie.CroppedPosterURL = movie.CroppedPosterURL
-			} else {
-				logging.Debugf("[Batch %s] File %d: Failed to reload movie from database: %v", job.ID, fileIndex, reloadErr)
-				finalMovie = movie
-			}
+			logging.Debugf("[Batch %s] File %d: Failed to reload movie from database: %v", job.ID, fileIndex, reloadErr)
+			finalMovie = movie
 		}
-	} else {
-		finalMovie = movie
 	}
 
 	now := time.Now()

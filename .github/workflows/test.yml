@@ -209,6 +209,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
 
     - name: Set up Go
       uses: actions/setup-go@v6
@@ -288,13 +290,15 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
 
-    - name: Resolve tracked version
+    - name: Resolve version
       id: version
       run: |
-        version="$(tr -d '[:space:]' < internal/version/version.txt)"
+        version="$(./scripts/version.sh)"
         if [ -z "$version" ]; then
-          echo "Tracked version file is empty"
+          echo "Failed to resolve version"
           exit 1
         fi
         echo "value=$version" >> "$GITHUB_OUTPUT"

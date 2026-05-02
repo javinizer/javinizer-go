@@ -2062,3 +2062,61 @@ func TestFilterPlaceholderScreenshots(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractActressID(t *testing.T) {
+	t.Run("extracts from actress query param", func(t *testing.T) {
+		id := extractActressID("/list/?actress=12345")
+		assert.Equal(t, 12345, id)
+	})
+
+	t.Run("extracts from article URL", func(t *testing.T) {
+		id := extractActressID("/article=actress/id=67890/")
+		assert.Equal(t, 67890, id)
+	})
+
+	t.Run("returns 0 for no match", func(t *testing.T) {
+		id := extractActressID("/some/other/path/")
+		assert.Equal(t, 0, id)
+	})
+
+	t.Run("returns 0 for empty string", func(t *testing.T) {
+		id := extractActressID("")
+		assert.Equal(t, 0, id)
+	})
+}
+
+func TestCleanActressName(t *testing.T) {
+	t.Run("trims whitespace", func(t *testing.T) {
+		assert.Equal(t, "Test Actress", cleanActressName("  Test Actress  "))
+	})
+
+	t.Run("removes parenthetical content", func(t *testing.T) {
+		assert.Equal(t, "Actress", cleanActressName("Actress(ABC)"))
+	})
+
+	t.Run("handles empty string", func(t *testing.T) {
+		assert.Equal(t, "", cleanActressName(""))
+	})
+}
+
+func TestShouldSkipActressName(t *testing.T) {
+	t.Run("empty name is skipped", func(t *testing.T) {
+		assert.True(t, shouldSkipActressName(""))
+	})
+
+	t.Run("purchase warning is skipped", func(t *testing.T) {
+		assert.True(t, shouldSkipActressName("購入前"))
+	})
+
+	t.Run("review text is skipped", func(t *testing.T) {
+		assert.True(t, shouldSkipActressName("レビュー"))
+	})
+
+	t.Run("points text is skipped", func(t *testing.T) {
+		assert.True(t, shouldSkipActressName("ポイント"))
+	})
+
+	t.Run("normal name is not skipped", func(t *testing.T) {
+		assert.False(t, shouldSkipActressName("波多野結衣"))
+	})
+}

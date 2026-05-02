@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -525,6 +526,92 @@ func TestDeleteHistoryBulk(t *testing.T) {
 	}
 }
 
+func TestGetHistory_WithDateFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db, repo := setupHistoryTestDB(t)
+	defer func() { _ = db.Close() }()
+
+	now := time.Now()
+	twoHoursAgo := now.Add(-2 * time.Hour)
+	oneHourAgo := now.Add(-1 * time.Hour)
+
+	require.NoError(t, repo.Create(&models.History{
+		MovieID: "OLD-001", Operation: "scrape", Status: "success", CreatedAt: twoHoursAgo,
+	}))
+	require.NoError(t, repo.Create(&models.History{
+		MovieID: "NEW-001", Operation: "scrape", Status: "success", CreatedAt: oneHourAgo,
+	}))
+
+	router := gin.New()
+	router.GET("/api/v1/history", getHistory(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/history?operation=scrape", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp HistoryListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, int64(2), resp.Total)
+}
+
+func TestGetHistoryStats_ByOperationType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db, repo := setupHistoryTestDB(t)
+	defer func() { _ = db.Close() }()
+
+	require.NoError(t, repo.Create(&models.History{MovieID: "A-001", Operation: "scrape", Status: "success"}))
+	require.NoError(t, repo.Create(&models.History{MovieID: "A-002", Operation: "scrape", Status: "failed"}))
+	require.NoError(t, repo.Create(&models.History{MovieID: "A-003", Operation: "organize", Status: "success"}))
+	require.NoError(t, repo.Create(&models.History{MovieID: "A-004", Operation: "download", Status: "success"}))
+	require.NoError(t, repo.Create(&models.History{MovieID: "A-005", Operation: "nfo", Status: "reverted"}))
+
+	router := gin.New()
+	router.GET("/api/v1/history/stats", getHistoryStats(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/history/stats", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp HistoryStats
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, int64(5), resp.Total)
+	assert.Equal(t, int64(3), resp.Success)
+	assert.Equal(t, int64(1), resp.Failed)
+	assert.Equal(t, int64(1), resp.Reverted)
+	assert.Equal(t, int64(2), resp.ByOperation["scrape"])
+	assert.Equal(t, int64(1), resp.ByOperation["organize"])
+	assert.Equal(t, int64(1), resp.ByOperation["download"])
+	assert.Equal(t, int64(1), resp.ByOperation["nfo"])
+}
+
+func TestDeleteHistoryBulk_ByOperationType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db, repo := setupHistoryTestDB(t)
+	defer func() { _ = db.Close() }()
+
+	seedHistoryData(t, repo)
+
+	router := gin.New()
+	router.DELETE("/api/v1/history", deleteHistoryBulk(repo))
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/history?movie_id=IPX-001", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp DeleteHistoryBulkResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, int64(3), resp.Deleted)
+}
+
 func TestHistoryRecordFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -620,4 +707,55 @@ func TestHistoryPaginationEdgeCases(t *testing.T) {
 			assert.Len(t, resp.Records, tt.expectedCount)
 		})
 	}
+}
+
+func TestGetHistory_StatusFailed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db, repo := setupHistoryTestDB(t)
+	defer func() { _ = db.Close() }()
+
+	require.NoError(t, repo.Create(&models.History{MovieID: "A-001", Operation: "scrape", Status: "success"}))
+	require.NoError(t, repo.Create(&models.History{MovieID: "A-002", Operation: "scrape", Status: "failed"}))
+	require.NoError(t, repo.Create(&models.History{MovieID: "A-003", Operation: "organize", Status: "failed"}))
+
+	router := gin.New()
+	router.GET("/api/v1/history", getHistory(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/history?status=failed", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp HistoryListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, int64(2), resp.Total)
+	for _, r := range resp.Records {
+		assert.Equal(t, "failed", r.Status)
+	}
+}
+
+func TestGetHistory_DefaultList(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db, repo := setupHistoryTestDB(t)
+	defer func() { _ = db.Close() }()
+
+	require.NoError(t, repo.Create(&models.History{MovieID: "A-001", Operation: "scrape", Status: "success"}))
+	require.NoError(t, repo.Create(&models.History{MovieID: "A-002", Operation: "organize", Status: "success"}))
+
+	router := gin.New()
+	router.GET("/api/v1/history", getHistory(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/history", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp HistoryListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, int64(2), resp.Total)
+	assert.Len(t, resp.Records, 2)
 }

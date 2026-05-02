@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -249,5 +250,187 @@ func TestUpsertMovieCore(t *testing.T) {
 		assert.Equal(t, "Thriller", found.Genres[0].Name)
 		assert.Len(t, found.Actresses, 1)
 		assert.Len(t, found.Translations, 1)
+	})
+
+	t.Run("preserves existing translations when incoming list is empty", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+
+		movie := createTestMovie("IPX-TRANS-PRES-001")
+		movie.Actresses = []models.Actress{{DMMID: 88890, JapaneseName: "Pres Actress"}}
+		movie.Translations = []models.MovieTranslation{
+			{Language: "en", Title: "English Title"},
+			{Language: "zh", Title: "Chinese Title"},
+		}
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return err
+			}
+			translations := movie.Translations
+			movie.Translations = nil
+			return upsertMovieCore(tx, db, movie, translations)
+		})
+		require.NoError(t, err)
+
+		existing, err := repo.FindByID("IPX-TRANS-PRES-001")
+		require.NoError(t, err)
+		movie.CreatedAt = existing.CreatedAt
+		movie.Translations = nil
+		movie.Actresses = []models.Actress{{DMMID: 88890, JapaneseName: "Pres Actress"}}
+		err = db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return err
+			}
+			return upsertMovieCore(tx, db, movie, nil)
+		})
+		require.NoError(t, err)
+
+		found, err := repo.FindByID("IPX-TRANS-PRES-001")
+		require.NoError(t, err)
+		assert.Len(t, found.Translations, 2, "existing translations should be preserved when incoming list is empty")
+		assert.Equal(t, "English Title", found.Translations[0].Title)
+		assert.Equal(t, "Chinese Title", found.Translations[1].Title)
+	})
+
+	t.Run("removes stale translations when incoming list has partial overlap", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+
+		movie := createTestMovie("IPX-TRANS-STALE-001")
+		movie.Actresses = []models.Actress{{DMMID: 88891, JapaneseName: "Stale Actress"}}
+		movie.Translations = []models.MovieTranslation{
+			{Language: "en", Title: "English Title"},
+			{Language: "ja", Title: "Japanese Title"},
+			{Language: "zh", Title: "Chinese Title"},
+		}
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return err
+			}
+			translations := movie.Translations
+			movie.Translations = nil
+			return upsertMovieCore(tx, db, movie, translations)
+		})
+		require.NoError(t, err)
+
+		existing, err := repo.FindByID("IPX-TRANS-STALE-001")
+		require.NoError(t, err)
+		movie.CreatedAt = existing.CreatedAt
+		err = db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return err
+			}
+			translations := []models.MovieTranslation{
+				{Language: "en", Title: "Updated English"},
+			}
+			return upsertMovieCore(tx, db, movie, translations)
+		})
+		require.NoError(t, err)
+
+		found, err := repo.FindByID("IPX-TRANS-STALE-001")
+		require.NoError(t, err)
+		assert.Len(t, found.Translations, 1, "stale translations should be removed")
+		assert.Equal(t, "en", found.Translations[0].Language)
+		assert.Equal(t, "Updated English", found.Translations[0].Title)
+	})
+
+	t.Run("no-op when incoming translations match existing exactly", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+
+		movie := createTestMovie("IPX-TRANS-NOOP-001")
+		movie.Actresses = []models.Actress{{DMMID: 88892, JapaneseName: "Noop Actress"}}
+		movie.Translations = []models.MovieTranslation{
+			{Language: "en", Title: "English Title"},
+			{Language: "zh", Title: "Chinese Title"},
+		}
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return err
+			}
+			translations := movie.Translations
+			movie.Translations = nil
+			return upsertMovieCore(tx, db, movie, translations)
+		})
+		require.NoError(t, err)
+
+		existing, err := repo.FindByID("IPX-TRANS-NOOP-001")
+		require.NoError(t, err)
+		movie.CreatedAt = existing.CreatedAt
+		err = db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return err
+			}
+			translations := []models.MovieTranslation{
+				{Language: "en", Title: "English Title"},
+				{Language: "zh", Title: "Chinese Title"},
+			}
+			return upsertMovieCore(tx, db, movie, translations)
+		})
+		require.NoError(t, err)
+
+		found, err := repo.FindByID("IPX-TRANS-NOOP-001")
+		require.NoError(t, err)
+		assert.Len(t, found.Translations, 2)
+		assert.Equal(t, "English Title", found.Translations[0].Title)
+		assert.Equal(t, "Chinese Title", found.Translations[1].Title)
+	})
+}
+
+func TestWrapDBErr(t *testing.T) {
+	t.Run("nil error returns nil", func(t *testing.T) {
+		assert.Nil(t, wrapDBErr("create", "genre", nil))
+	})
+
+	t.Run("wraps error with operation and entity", func(t *testing.T) {
+		err := fmt.Errorf("duplicate key")
+		result := wrapDBErr("create", "genre", err)
+		require.Error(t, result)
+		assert.Contains(t, result.Error(), "create genre")
+		assert.ErrorIs(t, result, err)
+	})
+}
+
+func TestIsLocked(t *testing.T) {
+	t.Run("nil error returns false", func(t *testing.T) {
+		assert.False(t, isLocked(nil))
+	})
+
+	t.Run("generic locked message returns true", func(t *testing.T) {
+		assert.True(t, isLocked(fmt.Errorf("database is locked")))
+	})
+
+	t.Run("table locked message returns true", func(t *testing.T) {
+		assert.True(t, isLocked(fmt.Errorf("database table is locked")))
+	})
+
+	t.Run("unrelated error returns false", func(t *testing.T) {
+		assert.False(t, isLocked(fmt.Errorf("no such table")))
+	})
+}
+
+func TestRetryOnLocked(t *testing.T) {
+	t.Run("succeeds immediately", func(t *testing.T) {
+		err := retryOnLocked(func() error { return nil })
+		assert.NoError(t, err)
+	})
+
+	t.Run("retries on locked then succeeds", func(t *testing.T) {
+		callCount := 0
+		err := retryOnLocked(func() error {
+			callCount++
+			if callCount < 3 {
+				return fmt.Errorf("database is locked")
+			}
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 3, callCount)
+	})
+
+	t.Run("returns non-locked error immediately", func(t *testing.T) {
+		expectedErr := fmt.Errorf("no such table")
+		err := retryOnLocked(func() error { return expectedErr })
+		assert.ErrorIs(t, err, expectedErr)
 	})
 }

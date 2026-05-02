@@ -13,28 +13,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewMetadataOnlyStrategy(t *testing.T) {
+func TestNewMetadataArtworkStrategy(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	strategy := NewMetadataOnlyStrategy(fs, cfg)
+	strategy := NewMetadataArtworkStrategy(fs, cfg)
 	assert.NotNil(t, strategy)
 	assert.NotNil(t, strategy.fs)
 	assert.NotNil(t, strategy.config)
 }
 
-func TestMetadataOnlyStrategy_ImplementsInterface(t *testing.T) {
+func TestMetadataArtworkStrategy_ImplementsInterface(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	var _ OperationStrategy = NewMetadataOnlyStrategy(fs, cfg)
+	var _ OperationStrategy = NewMetadataArtworkStrategy(fs, cfg)
 }
 
-func TestMetadataOnlyStrategy_Plan(t *testing.T) {
+func TestMetadataArtworkStrategy_Plan(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{
 		FileFormat: "<ID>",
 		RenameFile: true,
 	}
-	strategy := NewMetadataOnlyStrategy(fs, cfg)
+	strategy := NewMetadataArtworkStrategy(fs, cfg)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -53,18 +53,18 @@ func TestMetadataOnlyStrategy_Plan(t *testing.T) {
 	assert.NotNil(t, plan)
 	assert.Equal(t, filepath.ToSlash("/source"), filepath.ToSlash(plan.TargetDir), "Should keep file in source directory")
 	assert.Equal(t, filepath.ToSlash("/source/ABC-123.mp4"), filepath.ToSlash(plan.TargetPath), "Should preserve original filename even with RenameFile=true")
-	assert.False(t, plan.WillMove, "Metadata-only mode should never set WillMove=true")
-	assert.False(t, plan.InPlace, "MetadataOnlyStrategy should never set InPlace=true")
-	assert.False(t, plan.IsDedicated, "MetadataOnlyStrategy should never set IsDedicated=true")
-	assert.Contains(t, plan.SkipInPlaceReason, "metadata-only")
+	assert.False(t, plan.WillMove, "Metadata-artwork mode should never set WillMove=true")
+	assert.False(t, plan.InPlace, "MetadataArtworkStrategy should never set InPlace=true")
+	assert.False(t, plan.IsDedicated, "MetadataArtworkStrategy should never set IsDedicated=true")
+	assert.Contains(t, plan.SkipInPlaceReason, "metadata-artwork")
 }
 
-func TestMetadataOnlyStrategy_Plan_NoRename(t *testing.T) {
+func TestMetadataArtworkStrategy_Plan_NoRename(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{
 		RenameFile: false,
 	}
-	strategy := NewMetadataOnlyStrategy(fs, cfg)
+	strategy := NewMetadataArtworkStrategy(fs, cfg)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -81,16 +81,16 @@ func TestMetadataOnlyStrategy_Plan_NoRename(t *testing.T) {
 	plan, err := strategy.Plan(match, movie, "/dest", false)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.ToSlash("/source/original-name.mp4"), filepath.ToSlash(plan.TargetPath))
-	assert.False(t, plan.WillMove, "Metadata-only mode should never set WillMove=true")
+	assert.False(t, plan.WillMove, "Metadata-artwork mode should never set WillMove=true")
 }
 
-func TestMetadataOnlyStrategy_Plan_IgnoresRenameFile(t *testing.T) {
+func TestMetadataArtworkStrategy_Plan_IgnoresRenameFile(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{
 		FileFormat: "<ID> <TITLE>",
 		RenameFile: true,
 	}
-	strategy := NewMetadataOnlyStrategy(fs, cfg)
+	strategy := NewMetadataArtworkStrategy(fs, cfg)
 
 	match := matcher.MatchResult{
 		ID: "ABC-123",
@@ -107,15 +107,15 @@ func TestMetadataOnlyStrategy_Plan_IgnoresRenameFile(t *testing.T) {
 
 	plan, err := strategy.Plan(match, movie, "/dest", false)
 	require.NoError(t, err)
-	assert.Equal(t, filepath.ToSlash("/source/original-name.mp4"), filepath.ToSlash(plan.TargetPath), "Metadata-only mode should preserve original filename even with RenameFile=true")
-	assert.False(t, plan.WillMove, "Metadata-only mode should never set WillMove=true")
+	assert.Equal(t, filepath.ToSlash("/source/original-name.mp4"), filepath.ToSlash(plan.TargetPath), "Metadata-artwork mode should preserve original filename even with RenameFile=true")
+	assert.False(t, plan.WillMove, "Metadata-artwork mode should never set WillMove=true")
 	assert.Equal(t, filepath.ToSlash("/source"), filepath.ToSlash(plan.TargetDir))
 }
 
-func TestMetadataOnlyStrategy_Execute_NoMove(t *testing.T) {
+func TestMetadataArtworkStrategy_Execute_NoMove(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	strategy := NewMetadataOnlyStrategy(fs, cfg)
+	strategy := NewMetadataArtworkStrategy(fs, cfg)
 
 	plan := &OrganizePlan{
 		SourcePath: "/source/ABC-123.mp4",
@@ -128,14 +128,14 @@ func TestMetadataOnlyStrategy_Execute_NoMove(t *testing.T) {
 
 	result, err := strategy.Execute(plan)
 	require.NoError(t, err)
-	assert.False(t, result.Moved, "Metadata-only should not move files")
+	assert.False(t, result.Moved, "Metadata-artwork should not move files")
 	assert.Equal(t, filepath.ToSlash("/source/ABC-123.mp4"), filepath.ToSlash(result.NewPath))
 }
 
-func TestMetadataOnlyStrategy_Execute_NoMoveNoError(t *testing.T) {
+func TestMetadataArtworkStrategy_Execute_NoMoveNoError(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{}
-	strategy := NewMetadataOnlyStrategy(fs, cfg)
+	strategy := NewMetadataArtworkStrategy(fs, cfg)
 
 	plan := &OrganizePlan{
 		SourcePath: "/source/ABC-123.mp4",
@@ -148,17 +148,17 @@ func TestMetadataOnlyStrategy_Execute_NoMoveNoError(t *testing.T) {
 
 	result, err := strategy.Execute(plan)
 	require.NoError(t, err)
-	assert.False(t, result.Moved, "Metadata-only should not move files")
+	assert.False(t, result.Moved, "Metadata-artwork should not move files")
 	assert.Equal(t, filepath.ToSlash("/source/ABC-123.mp4"), filepath.ToSlash(result.NewPath))
 	assert.Equal(t, filepath.ToSlash("/source/ABC-123.mp4"), filepath.ToSlash(result.OriginalPath))
 }
 
-func TestMetadataOnlyStrategy_Plan_AlwaysNoConflicts(t *testing.T) {
+func TestMetadataArtworkStrategy_Plan_AlwaysNoConflicts(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &config.OutputConfig{
 		RenameFile: true,
 	}
-	strategy := NewMetadataOnlyStrategy(fs, cfg)
+	strategy := NewMetadataArtworkStrategy(fs, cfg)
 
 	_ = fs.MkdirAll("/source", 0777)
 	_ = afero.WriteFile(fs, "/source/ABC-123.mp4", []byte("existing"), 0644)
@@ -177,10 +177,10 @@ func TestMetadataOnlyStrategy_Plan_AlwaysNoConflicts(t *testing.T) {
 
 	plan, err := strategy.Plan(match, movie, "/dest", false)
 	require.NoError(t, err)
-	assert.Nil(t, plan.Conflicts, "Metadata-only mode should never produce conflicts since it never renames")
+	assert.Nil(t, plan.Conflicts, "Metadata-artwork mode should never produce conflicts since it never renames")
 	assert.False(t, plan.WillMove)
 
 	planWithForce, err := strategy.Plan(match, movie, "/dest", true)
 	require.NoError(t, err)
-	assert.Nil(t, planWithForce.Conflicts, "ForceUpdate should also have no conflicts in metadata-only mode")
+	assert.Nil(t, planWithForce.Conflicts, "ForceUpdate should also have no conflicts in metadata-artwork mode")
 }

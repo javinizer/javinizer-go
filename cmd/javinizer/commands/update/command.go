@@ -270,7 +270,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	} else {
 		fmt.Printf("NFOs generated: %d\n", nfoCount)
 	}
-	fmt.Printf("Mode: Update (metadata only, files remain in place)\n")
+	fmt.Printf("Mode: Update (metadata & artwork, files remain in place)\n")
 
 	if dryRun {
 		fmt.Println("\n💡 Run without --dry-run to apply changes")

@@ -29,6 +29,7 @@ type MetadataConfig struct {
 	IgnoreGenres     []string               `yaml:"ignore_genres" json:"ignore_genres"`
 	RequiredFields   []string               `yaml:"required_fields" json:"required_fields"`
 	NFO              NFOConfig              `yaml:"nfo" json:"nfo"`
+	Completeness     CompletenessConfig     `yaml:"completeness" json:"completeness"` // Completeness scoring configuration
 }
 
 // TranslationConfig holds metadata translation settings.
@@ -249,6 +250,31 @@ type WordReplacementConfig struct {
 // TagDatabaseConfig holds per-movie tag database configuration
 type TagDatabaseConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"` // Enable per-movie tag lookup from database
+}
+
+// CompletenessConfig holds completeness scoring configuration
+type CompletenessConfig struct {
+	Enabled bool                   `yaml:"enabled" json:"enabled"`
+	Tiers   CompletenessTierConfig `yaml:"tiers" json:"tiers"`
+}
+
+// CompletenessTierConfig holds tier definitions for completeness scoring
+type CompletenessTierConfig struct {
+	Essential  CompletenessTierDefinition `yaml:"essential" json:"essential"`
+	Important  CompletenessTierDefinition `yaml:"important" json:"important"`
+	NiceToHave CompletenessTierDefinition `yaml:"nice_to_have" json:"nice_to_have"`
+}
+
+// CompletenessTierDefinition defines a single tier's weight and assigned fields
+type CompletenessTierDefinition struct {
+	Weight int      `yaml:"weight" json:"weight"` // Percentage weight (0-100, must sum to 100 across tiers)
+	Fields []string `yaml:"fields" json:"fields"` // Movie field names assigned to this tier
+}
+
+// MarshalJSON serializes CompletenessConfig with proper snake_case keys
+func (cc CompletenessConfig) MarshalJSON() ([]byte, error) {
+	type Alias CompletenessConfig
+	return json.Marshal((*Alias)(&cc))
 }
 
 // NFOConfig holds NFO generation settings

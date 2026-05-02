@@ -55,10 +55,10 @@
 			</button>
 
 			<button
-				onclick={() => handleOperationModeChange('metadata-only')}
-				class="flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-sm transition-all {effectiveMode === 'metadata-only' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
+				onclick={() => handleOperationModeChange('metadata-artwork')}
+				class="flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-sm transition-all {effectiveMode === 'metadata-artwork' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 			>
-				<div class="font-medium"><FileText size={16} class="inline mr-1" />Metadata only</div>
+				<div class="font-medium"><FileText size={16} class="inline mr-1" />Metadata & Artwork</div>
 				<div class="text-xs text-muted-foreground">No file or folder changes</div>
 			</button>
 		</div>

@@ -563,38 +563,26 @@ func mergeActresses(fieldName string, scraped, nfo []models.Actress, strategy Me
 		return scraped
 	}
 
-	// Both have data
+	// Both have data — use smart merge that preserves DMMIDs from scraped data.
+	// NFO-parsed actresses never have DMMIDs, so losing scraped DMMIDs breaks
+	// actress database lookups and associations.
 	switch strategy {
 	case PreferNFO, PreserveExisting, FillMissingOnly:
-		// All three strategies prefer existing NFO data when both sources have data
-		// For arrays: PreserveExisting/FillMissingOnly behave same as PreferNFO
+		// Merge actresses by matching names, preferring NFO name data but
+		// always preserving DMMID from scraped source.
+		merged := mergeActressSlices(scraped, nfo, true)
 		stats.FromNFO++
 		stats.ConflictsResolved++
 		nfoTimestamp := nfoTS
 		provenance[fieldName] = DataSource{Source: "nfo", Confidence: 1.0, LastUpdated: &nfoTimestamp}
-		return nfo
+		return merged
 	case MergeArrays:
-		// Merge and deduplicate by normalized name (case-insensitive, trimmed)
-		merged := make([]models.Actress, 0, len(scraped)+len(nfo))
-		seen := make(map[string]bool)
-
-		for _, actress := range scraped {
-			key := actressKey(actress)
-			if !seen[key] {
-				merged = append(merged, actress)
-				seen[key] = true
-			}
-		}
-		for _, actress := range nfo {
-			key := actressKey(actress)
-			if !seen[key] {
-				merged = append(merged, actress)
-				seen[key] = true
-			}
-		}
-
+		// Merge and deduplicate with cross-source matching.
+		// Unlike the naive key-based approach, this matches actresses across
+		// sources using all available identifiers (JapaneseName, DMMID, romanized name)
+		// to avoid creating duplicate entries for the same person.
+		merged := mergeActressSlices(scraped, nfo, false)
 		stats.MergedArrays++
-		// Use the newer timestamp when merging arrays from both sources - create unique copy
 		mergedTimestamp := scrapedTS
 		if nfoTS.After(scrapedTS) {
 			mergedTimestamp = nfoTS
@@ -608,6 +596,224 @@ func mergeActresses(fieldName string, scraped, nfo []models.Actress, strategy Me
 		provenance[fieldName] = DataSource{Source: "scraper", Confidence: 1.0, LastUpdated: &scrapedTimestamp}
 		return scraped
 	}
+}
+
+// mergeActressSlices merges two actress slices with smart cross-source matching.
+// It matches actresses using all available identifiers (JapaneseName, DMMID, romanized name)
+// to avoid creating duplicate entries. When a match is found, fields are merged:
+//   - DMMID is always preserved from the scraped source (NFO never has DMMIDs)
+//   - Name fields use the preference determined by preferNFO flag
+//   - ThumbURL is filled from whichever source has it
+func mergeActressSlices(scraped, nfo []models.Actress, preferNFO bool) []models.Actress {
+	type actressEntry struct {
+		actress     models.Actress
+		fromScraper bool
+		matched     bool
+	}
+
+	entries := make([]actressEntry, 0, len(scraped)+len(nfo))
+
+	for _, a := range scraped {
+		entries = append(entries, actressEntry{actress: a, fromScraper: true})
+	}
+	for _, a := range nfo {
+		entries = append(entries, actressEntry{actress: a, fromScraper: false})
+	}
+
+	// Build lookup indices for scraped actresses
+	scrapedIndicesByJpName := make(map[string][]int)
+	scrapedIndicesByRomanizedName := make(map[string][]int)
+
+	for i, e := range entries {
+		if !e.fromScraper {
+			continue
+		}
+		a := e.actress
+		if jp := strings.ToLower(strings.TrimSpace(a.JapaneseName)); jp != "" {
+			scrapedIndicesByJpName["jp:"+jp] = append(scrapedIndicesByJpName["jp:"+jp], i)
+		}
+		fn := strings.ToLower(strings.TrimSpace(a.FirstName))
+		ln := strings.ToLower(strings.TrimSpace(a.LastName))
+		if fn != "" || ln != "" {
+			scrapedIndicesByRomanizedName["name:"+fn+"|"+ln] = append(scrapedIndicesByRomanizedName["name:"+fn+"|"+ln], i)
+		}
+	}
+
+	// Build lookup indices for NFO actresses (needed for reverse matching)
+	nfoIndicesByJpName := make(map[string][]int)
+	nfoIndicesByRomanizedName := make(map[string][]int)
+
+	for i, e := range entries {
+		if e.fromScraper {
+			continue
+		}
+		a := e.actress
+		if jp := strings.ToLower(strings.TrimSpace(a.JapaneseName)); jp != "" {
+			nfoIndicesByJpName["jp:"+jp] = append(nfoIndicesByJpName["jp:"+jp], i)
+		}
+		fn := strings.ToLower(strings.TrimSpace(a.FirstName))
+		ln := strings.ToLower(strings.TrimSpace(a.LastName))
+		if fn != "" || ln != "" {
+			nfoIndicesByRomanizedName["name:"+fn+"|"+ln] = append(nfoIndicesByRomanizedName["name:"+fn+"|"+ln], i)
+		}
+	}
+
+	// findScrapedMatch tries to find an unmatched scraped entry that matches the given NFO actress
+	findScrapedMatch := func(nfoActress models.Actress) int {
+		// 1. Match by JapaneseName (most reliable cross-source match)
+		if jp := strings.ToLower(strings.TrimSpace(nfoActress.JapaneseName)); jp != "" {
+			key := "jp:" + jp
+			for _, idx := range scrapedIndicesByJpName[key] {
+				if !entries[idx].matched {
+					return idx
+				}
+			}
+		}
+
+		// 2. Match by romanized name (including reversed order)
+		fn := strings.ToLower(strings.TrimSpace(nfoActress.FirstName))
+		ln := strings.ToLower(strings.TrimSpace(nfoActress.LastName))
+		if fn != "" || ln != "" {
+			for _, key := range []string{"name:" + fn + "|" + ln, "name:" + ln + "|" + fn} {
+				for _, idx := range scrapedIndicesByRomanizedName[key] {
+					if !entries[idx].matched {
+						return idx
+					}
+				}
+			}
+		}
+
+		return -1
+	}
+
+	// findNFOMatch tries to find an unmatched NFO entry that matches the given scraped actress
+	findNFOMatch := func(scrapedActress models.Actress) int {
+		// 1. Match by JapaneseName
+		if jp := strings.ToLower(strings.TrimSpace(scrapedActress.JapaneseName)); jp != "" {
+			key := "jp:" + jp
+			for _, idx := range nfoIndicesByJpName[key] {
+				if !entries[idx].matched {
+					return idx
+				}
+			}
+		}
+
+		// 2. Match by romanized name (including reversed order)
+		fn := strings.ToLower(strings.TrimSpace(scrapedActress.FirstName))
+		ln := strings.ToLower(strings.TrimSpace(scrapedActress.LastName))
+		if fn != "" || ln != "" {
+			for _, key := range []string{"name:" + fn + "|" + ln, "name:" + ln + "|" + fn} {
+				for _, idx := range nfoIndicesByRomanizedName[key] {
+					if !entries[idx].matched {
+						return idx
+					}
+				}
+			}
+		}
+
+		return -1
+	}
+
+	// Phase 1: Match NFO actresses to scraped actresses using NFO's identifiers
+	for i := range entries {
+		if entries[i].fromScraper || entries[i].matched {
+			continue
+		}
+		nfoActress := entries[i].actress
+		matchedIdx := findScrapedMatch(nfoActress)
+		if matchedIdx < 0 {
+			continue
+		}
+
+		scraperActress := entries[matchedIdx].actress
+		merged := scraperActress
+
+		if preferNFO {
+			if nfoActress.JapaneseName != "" {
+				merged.JapaneseName = nfoActress.JapaneseName
+			}
+			if nfoActress.FirstName != "" {
+				merged.FirstName = nfoActress.FirstName
+			}
+			if nfoActress.LastName != "" {
+				merged.LastName = nfoActress.LastName
+			}
+		} else {
+			if merged.JapaneseName == "" && nfoActress.JapaneseName != "" {
+				merged.JapaneseName = nfoActress.JapaneseName
+			}
+			if merged.FirstName == "" && nfoActress.FirstName != "" {
+				merged.FirstName = nfoActress.FirstName
+			}
+			if merged.LastName == "" && nfoActress.LastName != "" {
+				merged.LastName = nfoActress.LastName
+			}
+		}
+		if merged.ThumbURL == "" && nfoActress.ThumbURL != "" {
+			merged.ThumbURL = nfoActress.ThumbURL
+		}
+
+		entries[matchedIdx].actress = merged
+		entries[matchedIdx].matched = true
+		entries[i].matched = true
+	}
+
+	// Phase 2: Reverse match — for any unmatched scraped actresses, try to find
+	// an NFO match using the scraped actress's identifiers against NFO lookup indices.
+	// This handles the case where scraped has JapaneseName but NFO only has romanized name.
+	for i := range entries {
+		if !entries[i].fromScraper || entries[i].matched {
+			continue
+		}
+		scrapedActress := entries[i].actress
+		matchedIdx := findNFOMatch(scrapedActress)
+		if matchedIdx < 0 {
+			continue
+		}
+
+		nfoActress := entries[matchedIdx].actress
+		merged := scrapedActress
+
+		if preferNFO {
+			if nfoActress.JapaneseName != "" {
+				merged.JapaneseName = nfoActress.JapaneseName
+			}
+			if nfoActress.FirstName != "" {
+				merged.FirstName = nfoActress.FirstName
+			}
+			if nfoActress.LastName != "" {
+				merged.LastName = nfoActress.LastName
+			}
+		} else {
+			if merged.JapaneseName == "" && nfoActress.JapaneseName != "" {
+				merged.JapaneseName = nfoActress.JapaneseName
+			}
+			if merged.FirstName == "" && nfoActress.FirstName != "" {
+				merged.FirstName = nfoActress.FirstName
+			}
+			if merged.LastName == "" && nfoActress.LastName != "" {
+				merged.LastName = nfoActress.LastName
+			}
+		}
+		if merged.ThumbURL == "" && nfoActress.ThumbURL != "" {
+			merged.ThumbURL = nfoActress.ThumbURL
+		}
+
+		entries[i].actress = merged
+		entries[i].matched = true
+		entries[matchedIdx].matched = true
+	}
+
+	// Collect results: only unmatched entries + matched (merged) scraped entries
+	result := make([]models.Actress, 0, len(entries))
+	for _, e := range entries {
+		if e.matched && !e.fromScraper {
+			continue
+		}
+		result = append(result, e.actress)
+	}
+
+	return result
 }
 
 // mergeGenres merges genre slices
@@ -750,32 +956,6 @@ func mergeStringSlice(fieldName string, scraped, nfo []string, strategy MergeStr
 		provenance[fieldName] = DataSource{Source: "scraper", Confidence: 1.0, LastUpdated: &scrapedTimestamp}
 		return scraped
 	}
-}
-
-// actressKey creates a normalized unique key for deduplication
-// Priority: JapaneseName (most consistent) → DMMID → FirstName+LastName (least reliable due to order variations)
-func actressKey(actress models.Actress) string {
-	// 1. JapaneseName is most consistent across scraped and NFO data
-	//    Scraped data has DMMID but NFO typically doesn't, but both have JapaneseName
-	japaneseName := strings.ToLower(strings.TrimSpace(actress.JapaneseName))
-	if japaneseName != "" {
-		return fmt.Sprintf("jp:%s", japaneseName)
-	}
-
-	// 2. DMMID is reliable but only present in scraped data (not in NFO)
-	if actress.DMMID > 0 {
-		return fmt.Sprintf("dmm:%d", actress.DMMID)
-	}
-
-	// 3. Fall back to normalized romanized FirstName + LastName (least reliable)
-	firstName := strings.ToLower(strings.TrimSpace(actress.FirstName))
-	lastName := strings.ToLower(strings.TrimSpace(actress.LastName))
-	if firstName != "" || lastName != "" {
-		return fmt.Sprintf("name:%s|%s", firstName, lastName)
-	}
-
-	// No identifying information
-	return ""
 }
 
 // makeProvenanceMap creates a provenance map for a single source

@@ -395,9 +395,9 @@ func TestGeneratePreview_OperationMode(t *testing.T) {
 			expectedInResp: "in-place",
 		},
 		{
-			name:           "metadata-only mode in response",
-			operationMode:  organizer.OperationModeMetadataOnly,
-			expectedInResp: "metadata-only",
+			name:           "metadata-artwork mode in response",
+			operationMode:  organizer.OperationModeMetadataArtwork,
+			expectedInResp: "metadata-artwork",
 		},
 		{
 			name:           "preview mode in response",
@@ -567,8 +567,8 @@ func TestGeneratePreview_UNCSourcePath(t *testing.T) {
 		},
 	}
 
-	t.Run("metadata-only preserves UNC source path", func(t *testing.T) {
-		resp := generatePreview(movie, fileResults, `\\nas\output`, cfg, organizer.OperationModeMetadataOnly, true, true)
+	t.Run("metadata-artwork preserves UNC source path", func(t *testing.T) {
+		resp := generatePreview(movie, fileResults, `\\nas\output`, cfg, organizer.OperationModeMetadataArtwork, true, true)
 		assert.Equal(t, `\\nas\media\videos\ABC-123.mp4`, resp.SourcePath)
 		assert.Equal(t, `\\nas\media\videos\ABC-123.mp4`, resp.FullPath)
 		assert.Equal(t, "ABC-123", resp.FileName)
@@ -624,11 +624,11 @@ func TestGeneratePreview_UNCShareRoot(t *testing.T) {
 		assert.Contains(t, resp.FullPath, `\\nas\output`)
 	})
 
-	t.Run("metadata-only preserves UNC share root dir", func(t *testing.T) {
+	t.Run("metadata-artwork preserves UNC share root dir", func(t *testing.T) {
 		fileResults := []*worker.FileResult{
 			{FilePath: `\\nas\share\XYZ-789.mp4`, MovieID: "XYZ-789", Status: worker.JobStatusCompleted},
 		}
-		resp := generatePreview(movie, fileResults, `\\nas\output`, cfg, organizer.OperationModeMetadataOnly, true, true)
+		resp := generatePreview(movie, fileResults, `\\nas\output`, cfg, organizer.OperationModeMetadataArtwork, true, true)
 		assert.Equal(t, `\\nas\share\XYZ-789.mp4`, resp.SourcePath)
 		assert.Equal(t, `\\nas\share\XYZ-789.mp4`, resp.FullPath)
 	})
@@ -683,8 +683,8 @@ func TestGeneratePreview_InPlace(t *testing.T) {
 	assert.NotEmpty(t, resp.FolderName, "In-place should have a folder name for potential rename")
 }
 
-// TestGeneratePreview_MetadataOnly tests that metadata-only preview shows no file changes
-func TestGeneratePreview_MetadataOnly(t *testing.T) {
+// TestGeneratePreview_MetadataArtwork tests that metadata-artwork preview shows no file changes
+func TestGeneratePreview_MetadataArtwork(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Output.FolderFormat = "<ID>"
 	cfg.Output.FileFormat = "<ID>"
@@ -700,12 +700,12 @@ func TestGeneratePreview_MetadataOnly(t *testing.T) {
 		{FilePath: "/source/videos/IPX-535.mp4"},
 	}
 
-	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeMetadataOnly, false, false)
+	resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeMetadataArtwork, false, false)
 
-	assert.Equal(t, "metadata-only", resp.OperationMode)
+	assert.Equal(t, "metadata-artwork", resp.OperationMode)
 	assert.Equal(t, "/source/videos/IPX-535.mp4", filepath.ToSlash(resp.SourcePath))
-	assert.Equal(t, "/source/videos/IPX-535.mp4", filepath.ToSlash(resp.FullPath), "Metadata-only should keep original file path")
-	assert.Empty(t, resp.FolderName, "Metadata-only should have no folder name")
+	assert.Equal(t, "/source/videos/IPX-535.mp4", filepath.ToSlash(resp.FullPath), "Metadata-artwork should keep original file path")
+	assert.Empty(t, resp.FolderName, "Metadata-artwork should have no folder name")
 	assert.Contains(t, filepath.ToSlash(resp.NFOPath), "/source/videos/", "NFO should be in source directory")
 }
 
@@ -736,9 +736,9 @@ func TestGeneratePreview_SubfolderPath_NonOrganizeModes(t *testing.T) {
 		assert.Empty(t, resp.SubfolderPath, "In-place-norenamefolder mode should not have SubfolderPath")
 	})
 
-	t.Run("metadata-only mode has no subfolder_path", func(t *testing.T) {
-		resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeMetadataOnly, false, false)
-		assert.Empty(t, resp.SubfolderPath, "Metadata-only mode should not have SubfolderPath")
+	t.Run("metadata-artwork mode has no subfolder_path", func(t *testing.T) {
+		resp := generatePreview(movie, fileResults, "/library", cfg, organizer.OperationModeMetadataArtwork, false, false)
+		assert.Empty(t, resp.SubfolderPath, "Metadata-artwork mode should not have SubfolderPath")
 	})
 }
 
@@ -944,7 +944,7 @@ func TestGeneratePreview_StrategyParity(t *testing.T) {
 		organizer.OperationModeOrganize,
 		organizer.OperationModeInPlace,
 		organizer.OperationModeInPlaceNoRenameFolder,
-		organizer.OperationModeMetadataOnly,
+		organizer.OperationModeMetadataArtwork,
 	}
 
 	for _, mode := range modes {
@@ -985,8 +985,8 @@ func TestGeneratePreview_StrategyParity(t *testing.T) {
 				} else {
 					strategy = organizer.NewOrganizeStrategy(fs, &outputConfig, sharedEngine)
 				}
-			case types.OperationModeMetadataOnly:
-				strategy = organizer.NewMetadataOnlyStrategy(fs, &outputConfig)
+			case types.OperationModeMetadataArtwork:
+				strategy = organizer.NewMetadataArtworkStrategy(fs, &outputConfig)
 			default:
 				strategy = organizer.NewOrganizeStrategy(fs, &outputConfig, sharedEngine)
 			}

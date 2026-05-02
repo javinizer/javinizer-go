@@ -44,9 +44,9 @@ func TestNormalize_EmptyOperationModeDefaultsToOrganize(t *testing.T) {
 			wantChanged:  false,
 		},
 		{
-			name:         "explicit metadata-only mode not overridden",
-			explicitMode: "metadata-only",
-			wantMode:     types.OperationModeMetadataOnly,
+			name:         "explicit metadata-artwork mode not overridden",
+			explicitMode: "metadata-artwork",
+			wantMode:     types.OperationModeMetadataArtwork,
 			wantChanged:  false,
 		},
 	}

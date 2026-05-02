@@ -230,6 +230,123 @@ func TestMovieRepositoryEnsureActressesExistTx_DuplicateCreateRetries(t *testing
 	})
 }
 
+func TestMovieRepositoryUpsert_OrphanedTranslationsDoNotBlockActressCreation(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewMovieRepository(db)
+
+	contentID := "orphan-trans-test"
+	require.NoError(t, db.DB.Exec(
+		"INSERT INTO movie_translations (movie_id, language, title, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		contentID, "en", "Orphaned Title",
+	).Error)
+
+	movie := &models.Movie{
+		ContentID: contentID,
+		ID:        "ORPHAN-001",
+		Title:     "Movie With Orphaned Translation",
+		Actresses: []models.Actress{
+			{DMMID: 88888, JapaneseName: "OrphanTest Actress", FirstName: "Orphan", LastName: "Test"},
+		},
+		Genres: []models.Genre{
+			{Name: "OrphanGenre"},
+		},
+		Translations: []models.MovieTranslation{
+			{Language: "en", Title: "Real English Title"},
+			{Language: "zh", Title: "Chinese Title"},
+		},
+	}
+	result, err := repo.Upsert(movie)
+	require.NoError(t, err)
+
+	assert.Len(t, result.Actresses, 1)
+	assert.Equal(t, "OrphanTest Actress", result.Actresses[0].JapaneseName)
+	assert.Len(t, result.Genres, 1)
+	assert.Equal(t, "OrphanGenre", result.Genres[0].Name)
+	assert.Len(t, result.Translations, 2)
+
+	langTitles := make(map[string]string)
+	for _, tr := range result.Translations {
+		langTitles[tr.Language] = tr.Title
+	}
+	assert.Equal(t, "Real English Title", langTitles["en"], "orphaned translation should be upserted-over")
+	assert.Equal(t, "Chinese Title", langTitles["zh"])
+
+	found, err := repo.FindByContentID(contentID)
+	require.NoError(t, err)
+	assert.Len(t, found.Actresses, 1)
+	assert.Equal(t, 88888, found.Actresses[0].DMMID)
+	assert.Len(t, found.Translations, 2)
+
+	actressRepo := NewActressRepository(db)
+	actress, err := actressRepo.FindByDMMID(88888)
+	require.NoError(t, err)
+	assert.Equal(t, "OrphanTest Actress", actress.JapaneseName)
+}
+
+func TestMovieRepositoryUpsert_OrphanedTranslationsOnExistingMovieUpdate(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewMovieRepository(db)
+
+	contentID := "orphan-update-test"
+	movie := createTestMovie("ORPHAN-UPD-001")
+	movie.ContentID = contentID
+	movie.Actresses = []models.Actress{
+		{DMMID: 77711, JapaneseName: "Original Actress"},
+	}
+	err := repo.Create(movie)
+	require.NoError(t, err)
+
+	require.NoError(t, db.DB.Exec(
+		"INSERT INTO movie_translations (movie_id, language, title, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		contentID, "en", "Orphaned Title",
+	).Error)
+	require.NoError(t, db.DB.Exec(
+		"INSERT INTO movie_translations (movie_id, language, title, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		contentID, "ja", "Orphaned Japanese Title",
+	).Error)
+
+	updated := &models.Movie{
+		ContentID: contentID,
+		ID:        "ORPHAN-UPD-001",
+		Title:     "Updated Movie Title",
+		Actresses: []models.Actress{
+			{DMMID: 77712, JapaneseName: "New Actress", FirstName: "New", LastName: "Actress"},
+		},
+		Genres: []models.Genre{
+			{Name: "UpdatedGenre"},
+		},
+		Translations: []models.MovieTranslation{
+			{Language: "en", Title: "Replaced English Title"},
+			{Language: "zh", Title: "New Chinese Title"},
+		},
+	}
+	result, err := repo.Upsert(updated)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Updated Movie Title", result.Title)
+	assert.Len(t, result.Actresses, 1)
+	assert.Equal(t, "New Actress", result.Actresses[0].JapaneseName)
+	assert.Len(t, result.Genres, 1)
+	assert.Len(t, result.Translations, 2)
+
+	langTitles := make(map[string]string)
+	for _, tr := range result.Translations {
+		langTitles[tr.Language] = tr.Title
+	}
+	assert.Equal(t, "Replaced English Title", langTitles["en"], "orphaned translation should be upserted-over")
+	assert.Equal(t, "New Chinese Title", langTitles["zh"])
+	assert.NotContains(t, langTitles, "ja", "stale translation should be deleted")
+
+	found, err := repo.FindByContentID(contentID)
+	require.NoError(t, err)
+	assert.Len(t, found.Actresses, 1)
+	assert.Equal(t, 77712, found.Actresses[0].DMMID)
+
+	var transCount int64
+	require.NoError(t, db.DB.Model(&models.MovieTranslation{}).Where("movie_id = ?", contentID).Count(&transCount).Error)
+	assert.Equal(t, int64(2), transCount)
+}
+
 func TestMovieRepositoryUpsert_DuplicateCreateRaceFallbackUpdatePath(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewMovieRepository(db)

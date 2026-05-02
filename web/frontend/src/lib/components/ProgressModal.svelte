@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { untrack } from 'svelte';
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
 	import { fade, scale, slide } from 'svelte/transition';
@@ -7,21 +7,21 @@
 	import { portalToBody } from '$lib/actions/portal';
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
+	import { dismiss as dismissJob } from '$lib/stores/background-job.svelte';
+	import { computeJobProgress, isTerminalStatus } from '$lib/utils/job-progress';
 	import { createBatchJobPollingQuery, createConfigQuery } from '$lib/query/queries';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import type { BatchJobResponse, ProgressMessage, FileResult } from '$lib/api/types';
+	import type { BatchJobResponse, FileResult } from '$lib/api/types';
 	import { X, CircleCheckBig, CircleX, ChevronDown, ChevronRight } from 'lucide-svelte';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
 
 	interface Props {
 		jobId: string;
-		destination: string;
-		updateMode?: boolean;
 		onClose: () => void;
 	}
 
-	let { jobId, destination, updateMode = false, onClose }: Props = $props();
+	let { jobId, onClose }: Props = $props();
 
 	const queryClient = useQueryClient();
 	let jobQuery = $derived(createBatchJobPollingQuery(jobId));
@@ -40,16 +40,73 @@
 	let countdown = $state(3);
 	let countdownInterval: ReturnType<typeof setInterval> | null = null;
 	let cancelRedirect = $state(false);
+	let hasNavigated = false;
+
+	const successMessage = $derived.by(() => {
+		if (!job) return '';
+		const count = job.completed;
+		const files = `${count} file${count !== 1 ? 's' : ''}`;
+		if (job.status === 'organized') return `Organization complete! ${files} organized successfully.`;
+		if (job.status === 'reverted') return `Revert complete! ${files} reverted successfully.`;
+		return `Scraping completed! ${files} processed successfully.`;
+	});
 
 	let showCompleted = $state(false);
 	let showFailed = $state(false);
 
+	$effect(() => {
+		jobId;
+		countdown = 3;
+		cancelRedirect = false;
+		hasNavigated = false;
+		showCompleted = false;
+		showFailed = false;
+		if (countdownInterval) {
+			clearInterval(countdownInterval);
+			countdownInterval = null;
+		}
+	});
+
+	$effect(() => {
+		const status = jobQuery.data?.status;
+		if ((status === 'completed' || status === 'organized' || status === 'reverted') && !countdownInterval && !hasNavigated && untrack(() => !cancelRedirect)) {
+			countdownInterval = setInterval(() => {
+				countdown -= 1;
+				if (countdown <= 0 && cancelRedirect === false && !hasNavigated) {
+					hasNavigated = true;
+					if (countdownInterval) {
+						clearInterval(countdownInterval);
+						countdownInterval = null;
+					}
+					goto(`/review/${jobId}`).then(() => dismissJob(), () => dismissJob());
+				}
+			}, 1000);
+		}
+
+		return () => {
+			if (countdownInterval) {
+				clearInterval(countdownInterval);
+				countdownInterval = null;
+			}
+		};
+	});
+
 	const wsState = $derived($websocketStore);
-	const progressMessages = $derived(
-		wsState.messages.filter((m: ProgressMessage) => m.job_id === jobId)
-	);
 	const messagesByFile = $derived(wsState.messagesByFile[jobId] || {});
-	const latestMessage = $derived(progressMessages[progressMessages.length - 1]);
+	const latestMessage = $derived.by(() => {
+		const msgs = Object.values(messagesByFile);
+		if (msgs.length === 0) return null;
+		return msgs.reduce((latest, m) => (m.file_index > latest.file_index ? m : latest), msgs[0]);
+	});
+
+	const liveProgress = $derived.by(() => {
+		return computeJobProgress(
+			wsState.messagesByFile[jobId],
+			job?.total_files ?? 0,
+			job?.progress ?? 0,
+			job?.status?.toLowerCase() === 'running',
+		);
+	});
 
 	const activeFiles = $derived.by<FileResult[]>(() => {
 		if (!job?.results) return [];
@@ -72,33 +129,9 @@
 		return (Object.values(job.results) as FileResult[]).filter(r => r.status === 'failed');
 	});
 
-	$effect(() => {
-		const status = jobQuery.data?.status;
-		if (status === 'completed' && !countdownInterval && !cancelRedirect) {
-			countdownInterval = setInterval(() => {
-				countdown -= 1;
-				if (countdown <= 0 && !cancelRedirect) {
-					if (countdownInterval) {
-						clearInterval(countdownInterval);
-						countdownInterval = null;
-					}
-					const params = new URLSearchParams({ destination });
-					if (updateMode) params.set('update', 'true');
-					goto(`/review/${jobId}?${params.toString()}`);
-				}
-			}, 1000);
-		}
-	});
-
 	async function handleCancel() {
 		cancelMutation.mutate();
 	}
-
-	onDestroy(() => {
-		if (countdownInterval) {
-			clearInterval(countdownInterval);
-		}
-	});
 
 	function handleStayHere() {
 		cancelRedirect = true;
@@ -109,9 +142,9 @@
 	}
 
 	function handleViewResults() {
-		const params = new URLSearchParams({ destination });
-		if (updateMode) params.set('update', 'true');
-		goto(`/review/${jobId}?${params.toString()}`);
+		if (hasNavigated) return;
+		hasNavigated = true;
+		goto(`/review/${jobId}`).then(() => dismissJob(), () => dismissJob());
 	}
 
 	function getFileDisplayName(path: string): string {
@@ -162,11 +195,11 @@
 					<div class="h-3 bg-secondary rounded-full overflow-hidden">
 						<div
 							class="h-full bg-primary rounded-full transition-all duration-300"
-							style="width: {job.progress}%"
+							style="width: {liveProgress}%"
 						></div>
 					</div>
 					<div class="flex items-center justify-between text-xs text-muted-foreground">
-						<span>{job.progress.toFixed(1)}%</span>
+						<span>{liveProgress.toFixed(1)}%</span>
 						<span>
 							{#if completedFiles.length > 0}<span class="text-green-600 dark:text-green-400">{completedFiles.length} done</span> • {/if}{#if failedFiles.length > 0}<span class="text-red-600 dark:text-red-400">{failedFiles.length} failed</span> • {/if}{#if queuedFiles.length > 0}{queuedFiles.length} queued{/if}
 						</span>
@@ -299,12 +332,12 @@
 					<Button variant="destructive" onclick={handleCancel}>Cancel Job</Button>
 					<Button variant="outline" onclick={onClose}>Close & Run in Background</Button>
 				</div>
-			{:else if job && job.status === 'completed'}
+			{:else if job && (job.status === 'completed' || job.status === 'organized' || job.status === 'reverted')}
 				{#if !cancelRedirect && countdown > 0}
 					<div class="flex items-center gap-2">
 						<CircleCheckBig class="h-5 w-5 text-green-500 dark:text-green-400" />
 						<p class="text-sm font-medium text-green-700 dark:text-green-300">
-							Scraping completed! {job.completed} file{job.completed !== 1 ? 's' : ''} processed successfully.
+							{successMessage}
 						</p>
 					</div>
 					<div class="flex items-center gap-3">
@@ -316,7 +349,7 @@
 					<div class="flex items-center gap-2">
 						<CircleCheckBig class="h-5 w-5 text-green-500 dark:text-green-400" />
 						<p class="text-sm font-medium text-green-700 dark:text-green-300">
-							Scraping completed! {job.completed} file{job.completed !== 1 ? 's' : ''} processed successfully.
+							{successMessage}
 						</p>
 					</div>
 					<div class="flex items-center gap-3">
@@ -327,7 +360,7 @@
 			{:else}
 				<div></div>
 				<Button variant="outline" onclick={onClose}>
-					{job && (job.status === 'failed' || job.status === 'cancelled') ? 'Close' : 'Close & Run in Background'}
+					{job && isTerminalStatus(job.status) ? 'Close' : 'Close & Run in Background'}
 				</Button>
 			{/if}
 		</div>

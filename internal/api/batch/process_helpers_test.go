@@ -11,10 +11,12 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/history"
+	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -251,4 +253,82 @@ func TestProcessUpdateMode_MixedResults(t *testing.T) {
 	assert.Equal(t, worker.JobStatusCompleted, status.Status)
 	// Should complete with partial success
 	assert.Equal(t, 100.0, status.Progress)
+}
+
+func TestTrimPreviewPath(t *testing.T) {
+	t.Run("empty string returns empty", func(t *testing.T) {
+		assert.Equal(t, "", trimPreviewPath(""))
+	})
+
+	t.Run("root slash returns root", func(t *testing.T) {
+		assert.Equal(t, "/", trimPreviewPath("/"))
+	})
+
+	t.Run("root backslash returns root", func(t *testing.T) {
+		assert.Equal(t, `\`, trimPreviewPath(`\`))
+	})
+
+	t.Run("windows drive root returns as-is", func(t *testing.T) {
+		assert.Equal(t, `C:\`, trimPreviewPath(`C:\`))
+	})
+
+	t.Run("trailing slashes trimmed", func(t *testing.T) {
+		assert.Equal(t, "/path/to/dir", trimPreviewPath("/path/to/dir/"))
+	})
+
+	t.Run("trailing backslashes trimmed", func(t *testing.T) {
+		assert.Equal(t, `\path\to\dir`, trimPreviewPath(`\path\to\dir\`))
+	})
+}
+
+func TestIsWindowsPathLike(t *testing.T) {
+	t.Run("drive letter path", func(t *testing.T) {
+		assert.True(t, isWindowsPathLike(`C:\Users`))
+	})
+
+	t.Run("UNC path", func(t *testing.T) {
+		assert.True(t, isWindowsPathLike(`\\server\share`))
+	})
+
+	t.Run("unix path", func(t *testing.T) {
+		assert.False(t, isWindowsPathLike("/home/user"))
+	})
+}
+
+func TestEmitOrganizeCompletion_NilEmitter(t *testing.T) {
+	job := &worker.BatchJob{ID: "test-emit-job"}
+	emitOrganizeCompletion(nil, job, 5, 0)
+}
+
+func TestEmitOrganizeCompletion_WithEmitter(t *testing.T) {
+	job := &worker.BatchJob{ID: "test-emit-job"}
+	emitter := mocks.NewMockEventEmitter(t)
+	emitter.On("EmitOrganizeEvent", "batch", "File organization completed for job test-emit-job", models.SeverityInfo, mock.Anything).Return(nil)
+	emitOrganizeCompletion(emitter, job, 5, 0)
+}
+
+func TestEmitOrganizeCompletion_WarnSeverity(t *testing.T) {
+	job := &worker.BatchJob{ID: "test-emit-job"}
+	emitter := mocks.NewMockEventEmitter(t)
+	emitter.On("EmitOrganizeEvent", "batch", "File organization completed for job test-emit-job", models.SeverityWarn, mock.Anything).Return(nil)
+	emitOrganizeCompletion(emitter, job, 3, 1)
+}
+
+func TestEmitOrganizeCompletion_ErrorSeverity(t *testing.T) {
+	job := &worker.BatchJob{ID: "test-emit-job"}
+	emitter := mocks.NewMockEventEmitter(t)
+	emitter.On("EmitOrganizeEvent", "batch", "File organization completed for job test-emit-job", models.SeverityError, mock.Anything).Return(nil)
+	emitOrganizeCompletion(emitter, job, 0, 3)
+}
+
+func TestEmitUpdateCompletion_NilEmitter(t *testing.T) {
+	job := &worker.BatchJob{ID: "test-emit-job"}
+	emitUpdateCompletion(nil, job, 3, 0)
+}
+
+func TestEmitUpdateCompletion_WithEmitter(t *testing.T) {
+	job := &worker.BatchJob{ID: "test-emit-job"}
+	emitter := mocks.NewMockEventEmitter(t)
+	emitter.On("EmitOrganizeEvent", "batch", "Update completed for job test-emit-job", models.SeverityInfo, mock.Anything).Return(nil)
+	emitUpdateCompletion(emitter, job, 3, 0)
 }

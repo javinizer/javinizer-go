@@ -33,6 +33,10 @@ func ApplyUmask(perm os.FileMode) os.FileMode {
 	return configutil.ApplyUmask(perm)
 }
 
+type WebUIConfig struct {
+	DefaultReviewView string `yaml:"default_review_view" json:"default_review_view"`
+}
+
 // Config represents the application configuration
 type Config struct {
 	ConfigVersion int               `yaml:"config_version" json:"config_version"`
@@ -47,6 +51,7 @@ type Config struct {
 	Logging       LoggingConfig     `yaml:"logging" json:"logging"`
 	Performance   PerformanceConfig `yaml:"performance" json:"performance"`
 	MediaInfo     MediaInfoConfig   `yaml:"mediainfo" json:"mediainfo"`
+	WebUI         WebUIConfig       `yaml:"webui" json:"webui"`
 }
 
 // ServerConfig holds API server configuration
@@ -108,6 +113,7 @@ func (c *Config) MarshalYAML() (interface{}, error) {
 		"logging":        c.Logging,
 		"performance":    c.Performance,
 		"mediainfo":      c.MediaInfo,
+		"webui":          c.WebUI,
 	}
 
 	scrapersYAML, err := c.Scrapers.MarshalYAML()
@@ -304,6 +310,14 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("logging.max_age_days must be >= 0")
 	}
 
+	if v := c.WebUI.DefaultReviewView; v != "" {
+		switch v {
+		case "detail", "grid-poster", "grid-cover":
+		default:
+			return fmt.Errorf("webui.default_review_view must be one of: detail, grid-poster, grid-cover")
+		}
+	}
+
 	return nil
 }
 
@@ -315,11 +329,6 @@ func (c *Config) validateTranslationConfig() error {
 		provider = "openai"
 	}
 
-	targetLanguage := strings.TrimSpace(t.TargetLanguage)
-	if targetLanguage == "" {
-		targetLanguage = "ja"
-	}
-
 	timeoutSeconds := t.TimeoutSeconds
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 60
@@ -328,11 +337,6 @@ func (c *Config) validateTranslationConfig() error {
 	openAIBaseURL := strings.TrimSpace(t.OpenAI.BaseURL)
 	if openAIBaseURL == "" {
 		openAIBaseURL = "https://api.openai.com/v1"
-	}
-
-	openAIModel := strings.TrimSpace(t.OpenAI.Model)
-	if openAIModel == "" {
-		openAIModel = "gpt-4o-mini"
 	}
 
 	deepLMode := strings.ToLower(strings.TrimSpace(t.DeepL.Mode))
@@ -353,15 +357,8 @@ func (c *Config) validateTranslationConfig() error {
 		return fmt.Errorf("metadata.translation.timeout_seconds must be between 5 and 300")
 	}
 
-	if targetLanguage == "" {
-		return fmt.Errorf("metadata.translation.target_language is required when translation is enabled")
-	}
-
 	switch provider {
 	case "openai":
-		if openAIModel == "" {
-			return fmt.Errorf("metadata.translation.openai.model is required when provider=openai")
-		}
 		if err := validateHTTPBaseURL("metadata.translation.openai.base_url", openAIBaseURL); err != nil {
 			return err
 		}

@@ -29,9 +29,9 @@ func TestBatchScrapeRequest_OperationMode(t *testing.T) {
 			wantMode: "in-place",
 		},
 		{
-			name:     "metadata-only operation_mode",
-			json:     `{"files":["/test/file.mp4"],"operation_mode":"metadata-only"}`,
-			wantMode: "metadata-only",
+			name:     "metadata-artwork operation_mode",
+			json:     `{"files":["/test/file.mp4"],"operation_mode":"metadata-artwork"}`,
+			wantMode: "metadata-artwork",
 		},
 		{
 			name:     "preview operation_mode",

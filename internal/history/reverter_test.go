@@ -1335,3 +1335,29 @@ func TestRevertBatch_CleansUpNestedDirWhenDBStatusFails(t *testing.T) {
 
 	mockRepo.AssertExpectations(t)
 }
+
+func TestIsDescendant(t *testing.T) {
+	t.Run("same path is descendant", func(t *testing.T) {
+		assert.True(t, isDescendant("/out/ABP-880", "/out/ABP-880"))
+	})
+
+	t.Run("child is descendant", func(t *testing.T) {
+		assert.True(t, isDescendant("/out/ABP-880/ABP-880.mp4", "/out/ABP-880"))
+	})
+
+	t.Run("nested child is descendant", func(t *testing.T) {
+		assert.True(t, isDescendant("/out/ABP-880/sub/ABP-880.mp4", "/out/ABP-880"))
+	})
+
+	t.Run("unrelated path is not descendant", func(t *testing.T) {
+		assert.False(t, isDescendant("/out/OTHER-123/OTHER-123.mp4", "/out/ABP-880"))
+	})
+
+	t.Run("prefix match without separator is not descendant", func(t *testing.T) {
+		assert.False(t, isDescendant("/out/ABP-8800/video.mp4", "/out/ABP-880"))
+	})
+
+	t.Run("relative paths work", func(t *testing.T) {
+		assert.True(t, isDescendant("out/sub/file.txt", "out/sub"))
+	})
+}

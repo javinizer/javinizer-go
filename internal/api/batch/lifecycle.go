@@ -74,6 +74,10 @@ func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
 			job.SetOperationModeOverride(req.OperationMode)
 		}
 
+		if req.Update {
+			job.SetUpdate(true)
+		}
+
 		// Populate file match metadata (multipart info from discovery)
 		for path, info := range fileMatchInfo {
 			job.SetFileMatchInfo(path, info)
@@ -181,6 +185,7 @@ func getBatchJobFull(deps *ServerDependencies, c *gin.Context, jobID string) {
 		StartedAt:             job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
 		CompletedAt:           completedAt,
 		OperationModeOverride: job.OperationModeOverride,
+		Update:                job.Update,
 		PersistError:          job.PersistError,
 	})
 }
@@ -239,6 +244,7 @@ func getBatchJobSlim(deps *ServerDependencies, c *gin.Context, jobID string) {
 		StartedAt:             slim.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
 		CompletedAt:           completedAt,
 		OperationModeOverride: slim.OperationModeOverride,
+		Update:                slim.Update,
 		PersistError:          slim.PersistError,
 	})
 }
@@ -390,6 +396,7 @@ func listBatchJobs(deps *ServerDependencies) gin.HandlerFunc {
 				Results:        results,
 				StartedAt:      job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
 				CompletedAt:    completedAt,
+				Update:         job.Update,
 			})
 		}
 

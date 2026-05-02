@@ -71,7 +71,11 @@ import type {
 	DeleteEventsParams,
 	DeleteEventsResponse,
 	UpdateRequest,
-	VersionStatusResponse
+	VersionStatusResponse,
+	BatchExcludeRequest,
+	BatchExcludeResponse,
+	BulkRescrapeRequest,
+	BulkRescrapeResponse
 } from './types';
 
 // Build API base URL dynamically from browser location
@@ -242,6 +246,20 @@ class APIClient {
 	async excludeBatchMovie(jobId: string, movieId: string): Promise<{ message: string }> {
 		return this.request<{ message: string }>(`/api/v1/batch/${jobId}/movies/${movieId}/exclude`, {
 			method: 'POST'
+		});
+	}
+
+	async batchExcludeMovies(jobId: string, request: BatchExcludeRequest): Promise<BatchExcludeResponse> {
+		return this.request<BatchExcludeResponse>(`/api/v1/batch/${jobId}/movies/batch-exclude`, {
+			method: 'POST',
+			body: JSON.stringify(request)
+		});
+	}
+
+	async bulkRescrapeMovies(jobId: string, request: BulkRescrapeRequest): Promise<BulkRescrapeResponse> {
+		return this.request<BulkRescrapeResponse>(`/api/v1/batch/${jobId}/movies/batch-rescrape`, {
+			method: 'POST',
+			body: JSON.stringify(request)
 		});
 	}
 

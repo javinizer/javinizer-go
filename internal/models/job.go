@@ -31,6 +31,7 @@ type Job struct {
 	CompletedAt   *time.Time `json:"completed_at"`
 	OrganizedAt   *time.Time `json:"organized_at"`
 	RevertedAt    *time.Time `json:"reverted_at"`
+	Update        bool       `json:"update" gorm:"column:update;default:false"`
 }
 
 func (Job) TableName() string {

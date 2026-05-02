@@ -1275,7 +1275,7 @@ func TestOrganizer_Plan_BothConfigsFalse_NoFolderChanges(t *testing.T) {
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeMetadataOnly,
+		OperationMode: types.OperationModeMetadataArtwork,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
@@ -1306,7 +1306,7 @@ func TestOrganizer_Plan_BothConfigsFalse_NoFolderChanges(t *testing.T) {
 	}
 
 	if plan.InPlace {
-		t.Error("Expected InPlace=false in metadata-only mode")
+		t.Error("Expected InPlace=false in metadata-artwork mode")
 	}
 
 	if filepath.ToSlash(plan.TargetDir) != filepath.ToSlash(sourceDir) {
@@ -1331,7 +1331,7 @@ func TestOrganizer_Plan_NoOpHasEmptyConflicts(t *testing.T) {
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeMetadataOnly,
+		OperationMode: types.OperationModeMetadataArtwork,
 	}
 
 	org := NewOrganizer(afero.NewOsFs(), cfg, nil)

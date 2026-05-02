@@ -148,7 +148,7 @@ func TestScraperListContains(t *testing.T) {
 	}
 }
 
-func TestRunBatchScrapeOnce_MatcherFallbackRoutesToResolverAndSkipsPersistence(t *testing.T) {
+func TestRunBatchScrapeOnce_MatcherFallbackRoutesToResolverAndPersists(t *testing.T) {
 	cfg, _, movieRepo, agg, fileMatcher := newRunBatchTestEnv(t, "resolver")
 
 	registry := models.NewScraperRegistry()
@@ -159,7 +159,18 @@ func TestRunBatchScrapeOnce_MatcherFallbackRoutesToResolverAndSkipsPersistence(t
 			"special-title": "SPECIAL-777",
 		},
 		results: map[string]*models.ScraperResult{
-			"SPECIAL-777": testRunBatchResult("resolver", "SPECIAL-777", "Resolved Title", "special777"),
+			"SPECIAL-777": {
+				Source:    "resolver",
+				Language:  "ja",
+				ID:        "SPECIAL-777",
+				ContentID: "special777",
+				Title:     "Resolved Title",
+				Maker:     "maker",
+				Genres:    []string{"Drama"},
+				Actresses: []models.ActressInfo{
+					{JapaneseName: "テスト女優", DMMID: 12345},
+				},
+			},
 		},
 		errors: map[string]error{},
 	}
@@ -202,8 +213,12 @@ func TestRunBatchScrapeOnce_MatcherFallbackRoutesToResolverAndSkipsPersistence(t
 	if len(scraper.calls) != 1 || scraper.calls[0] != "SPECIAL-777" {
 		t.Fatalf("scraper.calls = %#v", scraper.calls)
 	}
-	if _, err := movieRepo.FindByID("SPECIAL-777"); err == nil {
-		t.Fatal("expected custom scraper mode to skip database persistence")
+	saved, err := movieRepo.FindByID("SPECIAL-777")
+	if err != nil {
+		t.Fatal("expected custom scraper mode to persist to database")
+	}
+	if len(saved.Actresses) != 1 || saved.Actresses[0].JapaneseName != "テスト女優" || saved.Actresses[0].DMMID != 12345 {
+		t.Fatalf("expected actress to be persisted, got actresses = %#v", saved.Actresses)
 	}
 }
 

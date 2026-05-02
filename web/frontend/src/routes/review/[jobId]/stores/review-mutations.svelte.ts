@@ -1,9 +1,9 @@
 import { createMutation } from '@tanstack/svelte-query';
 import type { QueryClient } from '@tanstack/svelte-query';
-import type { BatchJobResponse, FileResult, Movie, PosterCropResponse, PosterFromURLResponse } from '$lib/api/types';
+import type { BatchJobResponse, BatchExcludeRequest, BatchExcludeResponse, BulkRescrapeRequest, BulkRescrapeResponse, FileResult, Movie, PosterCropResponse, PosterFromURLResponse } from '$lib/api/types';
 import { normalizeCropBox, type PosterCropBox, type PosterCropState, type PosterPreviewOverride, type PosterCropMetrics } from '../review-utils';
 
-interface ReviewMutationsDeps {
+	interface ReviewMutationsDeps {
 	getJobId: () => string;
 	getJob: () => BatchJobResponse | null;
 	setJob: (job: BatchJobResponse) => void;
@@ -24,6 +24,11 @@ interface ReviewMutationsDeps {
 	excludeBatchMovie: (jobId: string, movieId: string) => Promise<unknown>;
 	updateBatchMovie: (jobId: string, movieId: string, movie: Movie) => Promise<unknown>;
 	updateBatchMoviePosterCrop: (jobId: string, movieId: string, crop: PosterCropBox) => Promise<PosterCropResponse>;
+	batchExcludeMovies: (jobId: string, request: BatchExcludeRequest) => Promise<BatchExcludeResponse>;
+	bulkRescrapeMovies: (jobId: string, request: BulkRescrapeRequest) => Promise<BulkRescrapeResponse>;
+	getSelectedMovieIds: () => Set<string>;
+	clearSelectedMovieIds: () => void;
+	deleteSelectedMovieId: (movieId: string) => void;
 	toastSuccess: (message: string, duration?: number) => void;
 	toastError: (message: string, duration?: number) => void;
 }
@@ -102,17 +107,20 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			return deps.excludeBatchMovie(mutationJobId, movieId);
 		},
 		onSuccess: async (_data, { movieId }) => {
+			deps.deleteSelectedMovieId(movieId);
 			deps.toastSuccess(`Movie ${movieId} excluded from organization`);
 			invalidateJobQueries();
 
 			const movieResultsLength = deps.getMovieResultsLength();
-			if (movieResultsLength === 0) {
+			const postExcludeLength = movieResultsLength - 1;
+			if (postExcludeLength <= 0) {
 				await deps.gotoJobs();
 				return;
 			}
 
-			if (deps.getCurrentMovieIndex() >= movieResultsLength) {
-				deps.setCurrentMovieIndex(movieResultsLength - 1);
+			const currentIndex = deps.getCurrentMovieIndex();
+			if (currentIndex >= postExcludeLength) {
+				deps.setCurrentMovieIndex(postExcludeLength - 1);
 			}
 		},
 		onError: (err: Error) => {
@@ -171,10 +179,72 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		}
 	}));
 
+	const bulkExcludeMutation = createMutation(() => ({
+		mutationFn: async ({ movieIds }: { movieIds: string[] }) => {
+			return deps.batchExcludeMovies(deps.getJobId(), { movie_ids: movieIds });
+		},
+		onSuccess: (data) => {
+			if (data.job) {
+				deps.skipJobSync();
+				deps.setJob(data.job);
+			}
+
+			deps.clearSelectedMovieIds();
+
+			if (data.failed.length > 0) {
+				deps.toastError(`Failed to exclude ${data.failed.length} movie${data.failed.length !== 1 ? 's' : ''}`);
+			} else {
+				deps.toastSuccess(`Excluded ${data.excluded.length} movie${data.excluded.length !== 1 ? 's' : ''}`);
+			}
+
+			invalidateJobQueries();
+		},
+		onError: (err: Error) => {
+			deps.toastError(`Failed to exclude movies: ${err.message}`);
+		}
+	}));
+
+	const bulkRescrapeMutation = createMutation(() => ({
+		mutationFn: async ({ movieIds, selectedScrapers, preset, scalarStrategy, arrayStrategy }: {
+			movieIds: string[];
+			selectedScrapers: string[];
+			preset?: string;
+			scalarStrategy?: string;
+			arrayStrategy?: string;
+		}) => {
+			return deps.bulkRescrapeMovies(deps.getJobId(), {
+				movie_ids: movieIds,
+				selected_scrapers: selectedScrapers,
+				preset: preset as 'conservative' | 'gap-fill' | 'aggressive' | undefined,
+				scalar_strategy: scalarStrategy as 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only' | undefined,
+				array_strategy: arrayStrategy as 'merge' | 'replace' | undefined,
+			});
+		},
+		onSuccess: (data) => {
+			if (data.job) {
+				deps.skipJobSync();
+				deps.setJob(data.job);
+			}
+
+			if (data.failed > 0) {
+				deps.toastError(`Failed to rescrape ${data.failed} movie${data.failed !== 1 ? 's' : ''}`);
+			} else {
+				deps.toastSuccess(`Rescraped ${data.succeeded} movie${data.succeeded !== 1 ? 's' : ''}`);
+			}
+
+			invalidateJobQueries();
+		},
+		onError: (err: Error) => {
+			deps.toastError(`Failed to rescrape movies: ${err.message}`);
+		}
+	}));
+
 	return {
 		posterFromUrlMutation,
 		applyPosterFromUrl,
 		excludeMovieMutation,
+		bulkExcludeMutation,
+		bulkRescrapeMutation,
 		saveEditsMutation,
 		posterCropMutation
 	};

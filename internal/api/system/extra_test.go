@@ -954,3 +954,74 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "proxy verification token is invalid or expired")
 	})
 }
+
+func TestScraperDisplayTitleAndOptions(t *testing.T) {
+	t.Run("returns fallback for unknown scraper", func(t *testing.T) {
+		title, options := scraperDisplayTitleAndOptions("nonexistent_scraper", nil)
+		assert.Equal(t, "nonexistent_scraper", title)
+		assert.NotEmpty(t, options)
+	})
+
+	t.Run("returns registered options for known scraper", func(t *testing.T) {
+		title, options := scraperDisplayTitleAndOptions("r18dev", nil)
+		assert.NotEmpty(t, title)
+		assert.NotEmpty(t, options)
+	})
+}
+
+func TestProxyProfilesEqual(t *testing.T) {
+	t.Run("equal maps", func(t *testing.T) {
+		a := map[string]config.ProxyProfile{
+			"test": {URL: "http://localhost:8080"},
+		}
+		b := map[string]config.ProxyProfile{
+			"test": {URL: "http://localhost:8080"},
+		}
+		assert.True(t, proxyProfilesEqual(a, b))
+	})
+
+	t.Run("different length", func(t *testing.T) {
+		a := map[string]config.ProxyProfile{
+			"test": {URL: "http://localhost:8080"},
+		}
+		b := map[string]config.ProxyProfile{}
+		assert.False(t, proxyProfilesEqual(a, b))
+	})
+
+	t.Run("different values", func(t *testing.T) {
+		a := map[string]config.ProxyProfile{
+			"test": {URL: "http://localhost:8080"},
+		}
+		b := map[string]config.ProxyProfile{
+			"test": {URL: "http://other:9090"},
+		}
+		assert.False(t, proxyProfilesEqual(a, b))
+	})
+
+	t.Run("missing key", func(t *testing.T) {
+		a := map[string]config.ProxyProfile{
+			"test": {URL: "http://localhost:8080"},
+		}
+		b := map[string]config.ProxyProfile{
+			"other": {URL: "http://localhost:8080"},
+		}
+		assert.False(t, proxyProfilesEqual(a, b))
+	})
+}
+
+func TestPreserveRedactedSecrets(t *testing.T) {
+	t.Run("nil configs do nothing", func(t *testing.T) {
+		preserveRedactedSecrets(nil, nil)
+		preserveRedactedSecrets(nil, &config.Config{})
+		preserveRedactedSecrets(&config.Config{}, nil)
+	})
+
+	t.Run("redacted DSN preserved", func(t *testing.T) {
+		old := config.DefaultConfig()
+		old.Database.DSN = "real-dsn-value"
+		newCfg := config.DefaultConfig()
+		newCfg.Database.DSN = config.RedactedValue
+		preserveRedactedSecrets(old, newCfg)
+		assert.Equal(t, "real-dsn-value", newCfg.Database.DSN)
+	})
+}

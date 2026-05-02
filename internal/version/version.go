@@ -1,7 +1,6 @@
 package version
 
 import (
-	_ "embed"
 	"fmt"
 	"runtime"
 	"runtime/debug"
@@ -10,27 +9,23 @@ import (
 
 // Build information. Values are injected at build time via ldflags.
 var (
-	// Version is the semantic version (e.g., "1.0.0")
-	Version = "dev"
-
-	// Commit is the git commit hash
-	Commit = "unknown"
-
-	// BuildDate is the build timestamp
-	BuildDate = "unknown"
-
-	// GoVersion is the Go version used to build
+	Version   = "dev"
+	Commit    = unknown
+	BuildDate = unknown
 	GoVersion = runtime.Version()
 )
 
-//go:embed version.txt
-var trackedVersion string
+const unknown = "unknown"
 
 func init() {
+	// applyBuildInfo must run before applyDevVersion.
+	// applyDevVersion only acts when Version == "dev", and applyBuildInfo
+	// may set Version from module info. Reversing the order would cause
+	// isPseudoVersion() to reject the v0.0.0-* format that applyDevVersion produces.
 	if info, ok := debug.ReadBuildInfo(); ok {
 		applyBuildInfo(info)
 	}
-	applyTrackedVersion()
+	applyDevVersion()
 }
 
 // applyBuildInfo populates version metadata from Go build info when ldflags
@@ -70,13 +65,21 @@ func isPseudoVersion(v string) bool {
 	return strings.HasPrefix(v, "v0.0.0-") || strings.Contains(v, "+dirty")
 }
 
-func applyTrackedVersion() {
-	if Version != "" && Version != "dev" {
+func applyDevVersion() {
+	if Version != "dev" {
 		return
 	}
 
-	if tracked := strings.TrimSpace(trackedVersion); tracked != "" {
-		Version = tracked
+	Version = "v0.0.0"
+	if Commit != "" && Commit != unknown {
+		commit := strings.TrimSuffix(Commit, "-dirty")
+		if len(commit) > 12 {
+			commit = commit[:12]
+		}
+		Version = "v0.0.0-" + commit
+		if strings.HasSuffix(Commit, "-dirty") {
+			Version += "-dirty"
+		}
 	}
 }
 
@@ -88,18 +91,6 @@ func Info() string {
 
 // Short returns just the version number
 func Short() string {
-	if Version == "dev" {
-		commit := Commit
-		dirtySuffix := ""
-		if strings.HasSuffix(commit, "-dirty") {
-			dirtySuffix = "-dirty"
-			commit = strings.TrimSuffix(commit, dirtySuffix)
-		}
-		if len(commit) > 7 {
-			commit = commit[:7]
-		}
-		return fmt.Sprintf("%s-%s%s", Version, commit, dirtySuffix)
-	}
 	return Version
 }
 

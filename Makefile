@@ -79,9 +79,8 @@ help:
 	@echo ""
 
 # Version information (can be overridden)
-VERSION_FILE := internal/version/version.txt
 VERSION ?= $(shell ./scripts/version.sh)
-COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 # Build flags

@@ -223,6 +223,7 @@ type BatchJobSlim struct {
 	OrganizedAt           *time.Time                 `json:"organized_at,omitempty"`
 	RevertedAt            *time.Time                 `json:"reverted_at,omitempty"`
 	OperationModeOverride string                     `json:"operation_mode_override,omitempty"`
+	Update                bool                       `json:"update"`
 	PersistError          string                     `json:"persist_error,omitempty"`
 }
 
@@ -278,6 +279,7 @@ type BatchJob struct {
 	OrganizedAt           *time.Time               `json:"organized_at,omitempty"`
 	RevertedAt            *time.Time               `json:"reverted_at,omitempty"`
 	OperationModeOverride string                   `json:"operation_mode_override,omitempty"`
+	Update                bool                     `json:"update"`
 	PersistError          string                   `json:"persist_error,omitempty"`
 	CancelFunc            context.CancelFunc       `json:"-"`
 	Done                  chan struct{}            `json:"-"`
@@ -412,6 +414,7 @@ func (jq *JobQueue) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 		CompletedAt:   dbJob.CompletedAt,
 		OrganizedAt:   dbJob.OrganizedAt,
 		RevertedAt:    dbJob.RevertedAt,
+		Update:        dbJob.Update,
 		Results:       make(map[string]*FileResult),
 		Excluded:      make(map[string]bool),
 		FileMatchInfo: make(map[string]FileMatchInfo),
@@ -539,6 +542,7 @@ func (jq *JobQueue) persistToDatabase(job *BatchJob) {
 		CompletedAt:   job.CompletedAt,
 		OrganizedAt:   job.OrganizedAt,
 		RevertedAt:    job.RevertedAt,
+		Update:        job.Update,
 	}
 
 	if err := jq.jobRepo.Upsert(dbJob); err != nil {
@@ -995,9 +999,9 @@ func (job *BatchJob) GetStatus() *BatchJob {
 		OrganizedAt:           organizedAt,
 		RevertedAt:            revertedAt,
 		OperationModeOverride: job.OperationModeOverride,
+		Update:                job.Update,
 		PersistError:          job.PersistError,
 	}
-
 	return status
 }
 
@@ -1064,6 +1068,7 @@ func (job *BatchJob) GetStatusSlim() *BatchJobSlim {
 		OrganizedAt:           organizedAt,
 		RevertedAt:            revertedAt,
 		OperationModeOverride: job.OperationModeOverride,
+		Update:                job.Update,
 		PersistError:          job.PersistError,
 	}
 
@@ -1104,6 +1109,18 @@ func (job *BatchJob) SetDestination(dest string) {
 	job.mu.Lock()
 	defer job.mu.Unlock()
 	job.Destination = dest
+}
+
+func (job *BatchJob) GetUpdate() bool {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return job.Update
+}
+
+func (job *BatchJob) SetUpdate(update bool) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.Update = update
 }
 
 // GetFiles returns a copy of the files list (thread-safe)

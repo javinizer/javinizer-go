@@ -11,7 +11,7 @@ const (
 	OperationModeOrganize              OperationMode = "organize"
 	OperationModeInPlace               OperationMode = "in-place"
 	OperationModeInPlaceNoRenameFolder OperationMode = "in-place-norenamefolder"
-	OperationModeMetadataOnly          OperationMode = "metadata-only"
+	OperationModeMetadataArtwork       OperationMode = "metadata-artwork"
 	OperationModePreview               OperationMode = "preview"
 )
 
@@ -24,18 +24,18 @@ func ParseOperationMode(raw string) (OperationMode, error) {
 		return OperationModeInPlace, nil
 	case string(OperationModeInPlaceNoRenameFolder):
 		return OperationModeInPlaceNoRenameFolder, nil
-	case string(OperationModeMetadataOnly):
-		return OperationModeMetadataOnly, nil
+	case string(OperationModeMetadataArtwork):
+		return OperationModeMetadataArtwork, nil
 	case string(OperationModePreview):
 		return OperationModePreview, nil
 	default:
-		return OperationMode(""), fmt.Errorf("invalid operation mode %q (expected one of: organize, in-place, in-place-norenamefolder, metadata-only, preview)", raw)
+		return OperationMode(""), fmt.Errorf("invalid operation mode %q (expected one of: organize, in-place, in-place-norenamefolder, metadata-artwork, preview)", raw)
 	}
 }
 
 func (m OperationMode) IsValid() bool {
 	switch m {
-	case OperationModeOrganize, OperationModeInPlace, OperationModeInPlaceNoRenameFolder, OperationModeMetadataOnly, OperationModePreview:
+	case OperationModeOrganize, OperationModeInPlace, OperationModeInPlaceNoRenameFolder, OperationModeMetadataArtwork, OperationModePreview:
 		return true
 	default:
 		return false
@@ -44,7 +44,7 @@ func (m OperationMode) IsValid() bool {
 
 func IsValidOperationMode(mode string) bool {
 	switch mode {
-	case string(OperationModeOrganize), string(OperationModeInPlace), string(OperationModeInPlaceNoRenameFolder), string(OperationModeMetadataOnly), string(OperationModePreview):
+	case string(OperationModeOrganize), string(OperationModeInPlace), string(OperationModeInPlaceNoRenameFolder), string(OperationModeMetadataArtwork), string(OperationModePreview):
 		return true
 	default:
 		return false

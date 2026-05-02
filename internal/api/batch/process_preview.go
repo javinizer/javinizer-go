@@ -36,7 +36,7 @@ func generatePreview(movie *models.Movie, fileResults []*worker.FileResult, dest
 	if sourcePath == "" || sourcePath == "." {
 		if operationMode == types.OperationModeInPlaceNoRenameFolder ||
 			operationMode == types.OperationModeInPlace ||
-			operationMode == types.OperationModeMetadataOnly {
+			operationMode == types.OperationModeMetadataArtwork {
 			return OrganizePreviewResponse{OperationMode: string(operationMode)}
 		}
 	}
@@ -195,8 +195,8 @@ func createPreviewStrategy(outputConfig *config.OutputConfig, cfg *config.Config
 		}
 	case types.OperationModeInPlaceNoRenameFolder:
 		strategy = organizer.NewInPlaceNoRenameFolderStrategy(fs, outputConfig, fileMatcher, sharedEngine)
-	case types.OperationModeMetadataOnly:
-		strategy = organizer.NewMetadataOnlyStrategy(fs, outputConfig)
+	case types.OperationModeMetadataArtwork:
+		strategy = organizer.NewMetadataArtworkStrategy(fs, outputConfig)
 	default:
 		strategy = organizer.NewOrganizeStrategy(fs, outputConfig, sharedEngine)
 	}
@@ -352,7 +352,7 @@ func rebuildUNCPath(plan *organizer.OrganizePlan, originalSource string, destina
 func rebuildUNCTargetDir(plan *organizer.OrganizePlan, originalSource string, destination string) string {
 	sourceDir := previewPathDir(originalSource)
 
-	if plan.Strategy == organizer.StrategyTypeMetadataOnly {
+	if plan.Strategy == organizer.StrategyTypeMetadataArtwork {
 		return sourceDir
 	}
 

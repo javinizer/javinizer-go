@@ -19,6 +19,7 @@
 	import ReviewHeader from './components/ReviewHeader.svelte';
 	import ReviewMediaSidebar from './components/ReviewMediaSidebar.svelte';
 	import RescrapeModal from './components/RescrapeModal.svelte';
+	import BulkRescrapeProgress from './components/BulkRescrapeProgress.svelte';
 	import SourceFilesCard from './components/SourceFilesCard.svelte';
 	import { createReviewState } from './stores/review-state.svelte';
 	import {
@@ -30,7 +31,7 @@
 </script>
 
 <div class="container mx-auto px-4 py-8">
-	<div class="max-w-7xl mx-auto space-y-6">
+	<div class="{(s.viewMode === 'grid-cover') ? 'max-w-full' : 'max-w-7xl'} mx-auto space-y-6">
 		{#if s.loading}
 			<div class="text-center py-12">
 				<p class="text-muted-foreground">Loading batch job...</p>
@@ -73,6 +74,19 @@
 				bind:preserveNfo={s.preserveNfo}
 				bind:skipNfo={s.skipNfo}
 				bind:skipDownload={s.skipDownload}
+				selectedCount={s.selectedCount}
+				allSelected={s.allSelected}
+				bulkExcluding={s.bulkExcludeMutation.isPending}
+				bulkRescraping={s.bulkRescraping}
+				completenessFilter={s.completenessFilter}
+				tierCounts={s.tierCounts}
+				selectionMode={s.selectionMode}
+				onToggleCompletenessTier={s.toggleCompletenessTier}
+				onToggleSelectionMode={s.toggleSelectionMode}
+				onSelectAll={s.selectAllMovies}
+				onDeselectAll={s.deselectAllMovies}
+				onBulkExclude={s.bulkExcludeMovies}
+				onBulkRescrape={s.openBulkRescrapeModal}
 				onClose={() => goto('/browse')}
 				onUpdateAll={s.updateAll}
 				onOrganizeAll={s.organizeAll}
@@ -88,23 +102,32 @@
 				onContinue={() => goto('/browse')}
 			/>
 
-			{#if s.viewMode === 'grid'}
-				<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-					{#each s.movieGroups as group, index}
+			{#if s.viewMode === 'grid-poster' || s.viewMode === 'grid-cover'}
+				<div class="grid {s.viewMode === 'grid-cover' ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'} {s.viewMode === 'grid-cover' ? 'gap-2' : 'gap-4'}">
+					{#each s.filteredMovieGroups as group}
 						<ReviewGridCard
 							movieGroup={group}
-							isSelected={index === s.currentMovieIndex}
+							isSelected={group.movieId === s.currentMovie?.id}
 							isEdited={s.editedMovies.has(group.primaryResult.file_path)}
+							isBulkSelected={s.selectedMovieIds.has(group.movieId)}
+							selectionMode={s.selectionMode}
 							displayPosterUrl={(() => {
 								const movie = group.primaryResult.data;
 								if (!movie) return undefined;
 								return s.resolvePosterUrl(movie, group.primaryResult.file_path);
 							})()}
+							displayCoverUrl={group.primaryResult.data?.cover_url}
+							displayImageType={s.viewMode === 'grid-cover' ? 'cover' : 'poster'}
 							previewImageURL={s.reviewPageController.previewImageURL}
-							onclick={() => {
-								s.currentMovieIndex = index;
-								s.viewMode = 'detail';
+							onclick={(e) => {
+								if (s.selectionMode) {
+									s.toggleMovieSelection(group.movieId, e.shiftKey);
+								} else {
+									s.currentMovieIndex = s.movieGroups.findIndex(g => g.movieId === group.movieId);
+									s.viewMode = 'detail';
+								}
 							}}
+							completenessConfig={s.completenessConfig}
 						/>
 					{/each}
 				</div>
@@ -238,8 +261,9 @@
 
 <RescrapeModal
 	bind:show={s.showRescrapeModal}
-	rescraping={s.rescrapingStates.get(s.rescrapeMovieId) || false}
+	rescraping={s.rescrapingStates.get(s.rescrapeMovieId) || false || s.bulkRescraping}
 	rescrapeMovieId={s.rescrapeMovieId}
+	bulkMovieCount={s.bulkRescrapeMovieIds.length || undefined}
 	availableScrapers={s.availableScrapers}
 	bind:selectedScrapers={s.rescrapeSelectedScrapers}
 	bind:manualSearchMode={s.manualSearchMode}
@@ -247,7 +271,7 @@
 	bind:rescrapePreset={s.rescrapePreset}
 	bind:rescrapeScalarStrategy={s.rescrapeScalarStrategy}
 	onApplyPreset={(preset) => s.applyRescrapePreset(preset)}
-	onExecute={s.executeRescrape}
+	onExecute={s.bulkRescrapeMovieIds.length > 0 ? s.executeBulkRescrape : s.executeRescrape}
 />
 
 <DestinationBrowserModal
@@ -256,4 +280,10 @@
 	bind:tempDestinationPath={s.tempDestinationPath}
 	onCancel={s.reviewPageController.cancelDestination}
 	onConfirm={s.reviewPageController.confirmDestination}
+/>
+
+<BulkRescrapeProgress
+	progress={s.bulkRescrapeProgress}
+	active={s.bulkRescraping}
+	onDismiss={() => { s.dismissBulkRescrapeProgress(); }}
 />

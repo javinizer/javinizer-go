@@ -516,3 +516,37 @@ func createTestConnections(t *testing.T) (*websocket.Conn, *websocket.Conn, *htt
 
 	return serverConn, clientConn, server
 }
+
+func TestRegister_NilHub(t *testing.T) {
+	var hub *Hub
+	hub.Register(nil)
+}
+
+func TestUnregister_NilHub(t *testing.T) {
+	var hub *Hub
+	hub.Unregister(nil)
+}
+
+func TestRegister_NilClient(t *testing.T) {
+	hub := NewHub()
+	hub.Register(nil)
+}
+
+func TestUnregister_NilClient(t *testing.T) {
+	hub := NewHub()
+	hub.Unregister(nil)
+}
+
+func TestRegister_ClosedDone(t *testing.T) {
+	hub := NewHub()
+	close(hub.done)
+	client := NewClient(nil)
+	hub.Register(client)
+}
+
+func TestUnregister_ClosedDone(t *testing.T) {
+	hub := NewHub()
+	close(hub.done)
+	client := NewClient(nil)
+	hub.Unregister(client)
+}

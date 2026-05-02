@@ -14,6 +14,7 @@
 		show: boolean;
 		rescraping: boolean;
 		rescrapeMovieId: string;
+		bulkMovieCount?: number;
 		availableScrapers: Scraper[];
 		selectedScrapers: string[];
 		manualSearchMode: boolean;
@@ -28,6 +29,7 @@
 		show = $bindable(false),
 		rescraping,
 		rescrapeMovieId,
+		bulkMovieCount = undefined,
 		availableScrapers,
 		selectedScrapers = $bindable([]),
 		manualSearchMode = $bindable(false),
@@ -58,7 +60,13 @@
 		>
 			<Card class="w-full flex flex-col max-h-[90vh]">
 				<div class="p-6 border-b flex items-center justify-between">
-					<h2 class="text-xl font-bold">{manualSearchMode ? 'Manual Search' : `Rescrape ${rescrapeMovieId}`}</h2>
+					<h2 class="text-xl font-bold">
+					{#if bulkMovieCount}
+						Rescrape {bulkMovieCount} movie{bulkMovieCount !== 1 ? 's' : ''}
+					{:else}
+						{manualSearchMode ? 'Manual Search' : `Rescrape ${rescrapeMovieId}`}
+					{/if}
+				</h2>
 					<Button variant="ghost" size="icon" onclick={close} disabled={rescraping}>
 						{#snippet children()}
 							<X class="h-4 w-4" />
@@ -67,6 +75,7 @@
 				</div>
 
 				<div class="flex-1 overflow-auto p-6">
+					{#if !bulkMovieCount}
 					<div class="flex gap-2 mb-6 p-1 bg-accent rounded-lg">
 						<button
 							onclick={() => (manualSearchMode = false)}
@@ -81,6 +90,7 @@
 							Manual Search
 						</button>
 					</div>
+					{/if}
 
 					{#if manualSearchMode}
 						<div class="space-y-4">
@@ -236,10 +246,10 @@
 						{#snippet children()}
 							{#if rescraping}
 								<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
-								{manualSearchMode ? 'Scraping...' : 'Rescraping...'}
+								{bulkMovieCount ? `Rescraping ${bulkMovieCount} movies...` : (manualSearchMode ? 'Scraping...' : 'Rescraping...')}
 							{:else}
 								<RotateCcw class="h-4 w-4 mr-2" />
-								{manualSearchMode ? 'Search' : 'Rescrape'}
+								{bulkMovieCount ? `Rescrape ${bulkMovieCount} movies` : (manualSearchMode ? 'Search' : 'Rescrape')}
 							{/if}
 						{/snippet}
 					</Button>

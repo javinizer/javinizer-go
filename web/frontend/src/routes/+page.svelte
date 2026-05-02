@@ -24,6 +24,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
+	import { isTerminalStatus } from '$lib/utils/job-progress';
 	import type { HealthResponse, HistoryRecord, HistoryStats } from '$lib/api/types';
 
 	const STORAGE_KEY_INPUT = 'javinizer_input_path';
@@ -151,13 +152,12 @@
 	});
 
 	const activeJobCount = $derived.by(() => {
-		const terminal = new Set(['completed', 'failed', 'cancelled', 'skipped', 'done']);
 		let active = 0;
 
 		for (const [, files] of Object.entries(wsState.messagesByFile)) {
-			const statuses = Object.values(files).map((msg) => msg.status.toLowerCase());
-			if (statuses.length === 0) continue;
-			const hasActive = statuses.some((status) => !terminal.has(status));
+			const messages = Object.values(files);
+			if (messages.length === 0) continue;
+			const hasActive = messages.some((msg) => !isTerminalStatus(msg.status));
 			if (hasActive) active += 1;
 		}
 

@@ -1,12 +1,12 @@
 import { onDestroy, onMount, untrack } from 'svelte';
-import { SvelteMap } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
 import type { Page } from '@sveltejs/kit';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
 import { createConfigQuery } from '$lib/query/queries';
-import type { BatchJobResponse, FileResult, Movie, Scraper, UpdateRequest } from '$lib/api/types';
+	import type { BatchJobResponse, FileResult, Movie, Scraper, UpdateRequest, CompletenessConfig } from '$lib/api/types';
 import { toastStore } from '$lib/stores/toast';
 import { confirmDialog } from '$lib/stores/dialog.svelte';
 import { websocketStore } from '$lib/stores/websocket';
@@ -22,6 +22,7 @@ import {
 	type PosterPreviewOverride
 } from '../review-utils';
 import equal from 'fast-deep-equal';
+import { calculateCompleteness, type CompletenessTier } from '$lib/utils/completeness';
 import { createReviewMutations } from './review-mutations.svelte';
 
 interface MovieGroup {
@@ -67,8 +68,18 @@ export function createReviewState(pageStore: Page) {
 	const configQuery = createConfigQuery();
 	let config = $derived(configQuery.data ?? null);
 
+	let completenessConfig = $derived<CompletenessConfig | undefined>(
+		config?.metadata?.completeness?.enabled
+			? config.metadata.completeness
+			: undefined
+	);
+
 	let currentMovieIndex = $state(0);
 	let editedMovies = new SvelteMap<string, Movie>();
+	let selectedMovieIds = new SvelteSet<string>();
+	let lastSelectedMovieId = $state<string | null>(null);
+	let completenessFilter = new SvelteSet<CompletenessTier>(['incomplete', 'partial', 'complete']);
+	let selectionMode = $state(false);
 	let originalPosterState = new SvelteMap<string, { poster_url: string; cropped_poster_url: string; should_crop_poster: boolean }>();
 	let organizing = $state(false);
 	let destinationPath = $state('');
@@ -77,11 +88,12 @@ export function createReviewState(pageStore: Page) {
 	let tempDestinationPath = $state('');
 	let showTrailerModal = $state(false);
 
-	let isUpdateMode = $derived(pageStore.url.searchParams.get('update') === 'true');
+	let isUpdateMode = $derived(job?.update ?? false);
 	let showFieldScraperSources = $state(false);
 	const SHOW_FIELD_SCRAPER_SOURCES_KEY = 'javinizer.review.showFieldScraperSources';
 	const VIEW_MODE_KEY = 'javinizer.review.viewMode';
-	let viewMode = $state<'detail' | 'grid'>('detail');
+	let viewMode = $state<'detail' | 'grid-poster' | 'grid-cover'>('detail');
+	let viewModeInitialized = $state(false);
 	let posterCropStatesStorageKey = $derived(`javinizer.review.posterCropStates.${jobId}`);
 
 	let organizeProgress = $state(0);
@@ -154,6 +166,10 @@ export function createReviewState(pageStore: Page) {
 	let rescrapeScalarStrategy: ScalarStrategy = $state('prefer-nfo');
 	let rescrapeArrayStrategy: ArrayStrategy = $state('merge');
 
+	let bulkRescraping = $state(false);
+	let bulkRescrapeProgress: { movie_id: string; status: string; error?: string }[] = $state([]);
+	let bulkRescrapeMovieIds: string[] = $state([]);
+
 	const movieGroups = $derived<MovieGroup[]>(
 		job ? (() => {
 			const excluded = (job as BatchJobResponse).excluded || {};
@@ -183,6 +199,29 @@ export function createReviewState(pageStore: Page) {
 				primaryResult: results[0]
 			}));
 		})() : []
+	);
+
+	const tierCounts = $derived.by<Record<CompletenessTier, number>>(() => {
+		const counts: Record<CompletenessTier, number> = { incomplete: 0, partial: 0, complete: 0 };
+		for (const group of movieGroups) {
+			const movie = group.primaryResult.data;
+			if (movie) {
+				const { tier } = calculateCompleteness(movie, completenessConfig);
+				counts[tier]++;
+			}
+		}
+		return counts;
+	});
+
+	const filteredMovieGroups = $derived<MovieGroup[]>(
+		completenessFilter.size === 3
+			? movieGroups
+			: movieGroups.filter(group => {
+				const movie = group.primaryResult.data;
+				if (!movie) return false;
+				const { tier } = calculateCompleteness(movie, completenessConfig);
+				return completenessFilter.has(tier);
+			})
 	);
 
 	const movieResults = $derived<FileResult[]>(movieGroups.map(g => g.primaryResult));
@@ -238,7 +277,7 @@ export function createReviewState(pageStore: Page) {
 		if (isUpdateMode) return false;
 		if (!config) return false;
 		const mode = getEffectiveOperationMode();
-		return mode === 'organize' || mode === 'in-place' || mode === 'in-place-norenamefolder';
+		return mode === 'organize' || mode === 'in-place' || mode === 'in-place-norenamefolder' || mode === 'metadata-artwork';
 	}
 
 	const canOrganize = $derived(getCanOrganize());
@@ -277,7 +316,7 @@ export function createReviewState(pageStore: Page) {
 				destination: destinationPath,
 				copy_only: copyOnly,
 				link_mode: linkMode,
-				operation_mode: operationMode as 'organize' | 'in-place' | 'in-place-norenamefolder' | 'metadata-only' | 'preview',
+				operation_mode: operationMode as 'organize' | 'in-place' | 'in-place-norenamefolder' | 'metadata-artwork' | 'preview',
 				skip_nfo: skipNfo,
 				skip_download: skipDownload,
 				movie: movieOverride,
@@ -313,6 +352,11 @@ export function createReviewState(pageStore: Page) {
 		excludeBatchMovie: (mutationJobId, movieId) => apiClient.excludeBatchMovie(mutationJobId, movieId),
 		updateBatchMovie: (mutationJobId, movieId, movie) => apiClient.updateBatchMovie(mutationJobId, movieId, movie),
 		updateBatchMoviePosterCrop: (mutationJobId, movieId, crop) => apiClient.updateBatchMoviePosterCrop(mutationJobId, movieId, crop),
+		batchExcludeMovies: (mutationJobId, request) => apiClient.batchExcludeMovies(mutationJobId, request),
+		bulkRescrapeMovies: (mutationJobId, request) => apiClient.bulkRescrapeMovies(mutationJobId, request),
+		getSelectedMovieIds: () => selectedMovieIds,
+		clearSelectedMovieIds: () => { selectedMovieIds.clear(); lastSelectedMovieId = null; },
+		deleteSelectedMovieId: (movieId: string) => { selectedMovieIds.delete(movieId); if (lastSelectedMovieId === movieId) { lastSelectedMovieId = null; } },
 		toastSuccess: (message, duration) => toastStore.success(message, duration),
 		toastError: (message, duration) => toastStore.error(message, duration),
 	});
@@ -332,6 +376,141 @@ export function createReviewState(pageStore: Page) {
 	function resetCurrentMovie() {
 		if (!currentResult?.data) return;
 		editedMovies.delete(currentResult.file_path);
+	}
+
+	function toggleMovieSelection(movieId: string, shiftKey: boolean) {
+		if (!selectionMode) return;
+		if (shiftKey && lastSelectedMovieId !== null) {
+			const fromIndex = filteredMovieGroups.findIndex(g => g.movieId === lastSelectedMovieId);
+			const toIndex = filteredMovieGroups.findIndex(g => g.movieId === movieId);
+			if (fromIndex !== -1 && toIndex !== -1) {
+				selectMovieRange(fromIndex, toIndex);
+			}
+		} else {
+			if (selectedMovieIds.has(movieId)) {
+				selectedMovieIds.delete(movieId);
+			} else {
+				selectedMovieIds.add(movieId);
+				lastSelectedMovieId = movieId;
+			}
+		}
+	}
+
+	function selectMovieRange(fromIndex: number, toIndex: number) {
+		const start = Math.min(fromIndex, toIndex);
+		const end = Math.max(fromIndex, toIndex);
+		for (let i = start; i <= end; i++) {
+			const group = filteredMovieGroups[i];
+			if (group) {
+				selectedMovieIds.add(group.movieId);
+			}
+		}
+	}
+
+	function selectAllMovies() {
+		for (const group of filteredMovieGroups) {
+			selectedMovieIds.add(group.movieId);
+		}
+	}
+
+	function deselectAllMovies() {
+		selectedMovieIds.clear();
+		lastSelectedMovieId = null;
+	}
+
+	function toggleCompletenessTier(tier: CompletenessTier) {
+		if (completenessFilter.has(tier)) {
+			completenessFilter.delete(tier);
+		} else {
+			completenessFilter.add(tier);
+		}
+	}
+
+	function toggleSelectionMode() {
+		selectionMode = !selectionMode;
+		if (!selectionMode) {
+			selectedMovieIds.clear();
+			lastSelectedMovieId = null;
+		}
+	}
+
+	const selectedCount = $derived(selectedMovieIds.size);
+	const allSelected = $derived(
+		filteredMovieGroups.length > 0 && filteredMovieGroups.every(g => selectedMovieIds.has(g.movieId))
+	);
+
+	async function bulkExcludeMovies() {
+		if (selectedMovieIds.size === 0) return;
+		const count = selectedMovieIds.size;
+		const confirmed = await confirmDialog(
+			'Exclude Movies',
+			`Exclude ${count} movie${count !== 1 ? 's' : ''} from this job?`,
+			{ confirmLabel: 'Exclude', variant: 'danger' }
+		);
+		if (!confirmed) return;
+		mutations.bulkExcludeMutation.mutate({ movieIds: Array.from(selectedMovieIds) });
+	}
+
+	async function openBulkRescrapeModal() {
+		if (selectedMovieIds.size === 0) return;
+		if (availableScrapers.length === 0) {
+			try {
+				availableScrapers = await apiClient.getScrapers();
+			} catch {
+				toastStore.error('Failed to load scrapers');
+				return;
+			}
+		}
+		rescrapeMovieId = '';
+		bulkRescrapeMovieIds = Array.from(selectedMovieIds);
+		rescrapeSelectedScrapers = availableScrapers.filter(s => s.enabled).map(s => s.name);
+		manualSearchMode = false;
+		manualSearchInput = '';
+		rescrapePreset = undefined;
+		rescrapeScalarStrategy = 'prefer-nfo';
+		rescrapeArrayStrategy = 'merge';
+		showRescrapeModal = true;
+	}
+
+	async function executeBulkRescrape() {
+		if (bulkRescrapeMovieIds.length === 0) return;
+		const selectedScrapers = rescrapeSelectedScrapers;
+		if (selectedScrapers.length === 0) {
+			toastStore.error('Please select at least one scraper');
+			return;
+		}
+
+		bulkRescraping = true;
+		bulkRescrapeProgress = bulkRescrapeMovieIds.map(id => ({ movie_id: id, status: 'pending' }));
+		showRescrapeModal = false;
+
+		try {
+			const result = await mutations.bulkRescrapeMutation.mutateAsync({
+				movieIds: bulkRescrapeMovieIds,
+				selectedScrapers,
+				preset: rescrapePreset,
+				scalarStrategy: rescrapeScalarStrategy || undefined,
+				arrayStrategy: rescrapeArrayStrategy || undefined,
+			});
+
+			bulkRescrapeProgress = result.results.map(r => ({
+				movie_id: r.movie_id,
+				status: r.status,
+				error: r.error,
+			}));
+
+			if (result.job) {
+				skipJobSync = true;
+				job = JSON.parse(JSON.stringify(result.job));
+			}
+
+			void queryClient.invalidateQueries({ queryKey: ['batch-job', jobId] });
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			toastStore.error(`Bulk rescrape failed: ${errorMessage}`);
+		} finally {
+			bulkRescraping = false;
+		}
 	}
 
 	function clearPosterPreviewOverride() {
@@ -489,6 +668,7 @@ export function createReviewState(pageStore: Page) {
 	}
 
 	async function openRescrapeModal(movieId: string) {
+		bulkRescrapeMovieIds = [];
 		await rescrapeController.openRescrapeModal(movieId);
 	}
 
@@ -528,6 +708,7 @@ export function createReviewState(pageStore: Page) {
 
 	$effect(() => {
 		if (!browser) return;
+		if (!viewModeInitialized) return;
 		localStorage.setItem(VIEW_MODE_KEY, viewMode);
 	});
 
@@ -553,7 +734,19 @@ export function createReviewState(pageStore: Page) {
 		if (browser) {
 			showFieldScraperSources =
 				localStorage.getItem(SHOW_FIELD_SCRAPER_SOURCES_KEY) === 'true';
-			viewMode = localStorage.getItem(VIEW_MODE_KEY) === 'grid' ? 'grid' : 'detail';
+			const savedViewMode = localStorage.getItem(VIEW_MODE_KEY);
+			if (savedViewMode === 'grid-cover' || savedViewMode === 'grid-poster' || savedViewMode === 'grid') {
+				viewMode = savedViewMode === 'grid' ? 'grid-poster' : savedViewMode;
+			} else {
+				const cfgDefault = config?.webui?.default_review_view ?? 'grid-poster';
+				if (cfgDefault === 'grid-cover' || cfgDefault === 'grid-poster' || cfgDefault === 'detail') {
+					viewMode = cfgDefault;
+				} else {
+					console.warn(`Invalid webui.default_review_view value "${cfgDefault}", falling back to "grid-poster"`);
+					viewMode = 'grid-poster';
+				}
+			}
+			viewModeInitialized = true;
 			const savedCrops = localStorage.getItem(posterCropStatesStorageKey);
 			if (savedCrops) {
 				try {
@@ -567,10 +760,6 @@ export function createReviewState(pageStore: Page) {
 					localStorage.removeItem(posterCropStatesStorageKey);
 				}
 			}
-		}
-		const urlDestination = pageStore.url.searchParams.get('destination');
-		if (urlDestination) {
-			destinationPath = urlDestination;
 		}
 
 		window.addEventListener('resize', posterCropController.handleWindowResize);
@@ -590,6 +779,7 @@ export function createReviewState(pageStore: Page) {
 		get loading() { return loading; },
 		get error() { return error; },
 		get config() { return config; },
+		get completenessConfig() { return completenessConfig; },
 		get currentMovieIndex() { return currentMovieIndex; },
 		set currentMovieIndex(v) { currentMovieIndex = v; },
 		get editedMovies() { return editedMovies; },
@@ -691,6 +881,8 @@ export function createReviewState(pageStore: Page) {
 		get canOrganize() { return canOrganize; },
 		posterFromUrlMutation: mutations.posterFromUrlMutation,
 		posterCropMutation: mutations.posterCropMutation,
+		bulkExcludeMutation: mutations.bulkExcludeMutation,
+		bulkRescrapeMutation: mutations.bulkRescrapeMutation,
 		resolvePosterUrl,
 		getEffectiveOperationMode,
 		updateCurrentMovie,
@@ -698,6 +890,26 @@ export function createReviewState(pageStore: Page) {
 		resetPoster,
 		useScreenshotAsPoster,
 		saveAllEdits,
+		get selectedMovieIds() { return selectedMovieIds; },
+		get selectedCount() { return selectedCount; },
+		get allSelected() { return allSelected; },
+		toggleMovieSelection,
+		selectMovieRange,
+		selectAllMovies,
+		deselectAllMovies,
+		get completenessFilter() { return completenessFilter; },
+		get selectionMode() { return selectionMode; },
+		get filteredMovieGroups() { return filteredMovieGroups; },
+		get tierCounts() { return tierCounts; },
+		toggleCompletenessTier,
+		toggleSelectionMode,
+		bulkExcludeMovies,
+		get bulkRescraping() { return bulkRescraping; },
+		get bulkRescrapeProgress() { return bulkRescrapeProgress; },
+		get bulkRescrapeMovieIds() { return bulkRescrapeMovieIds; },
+		dismissBulkRescrapeProgress() { bulkRescrapeProgress = []; },
+		openBulkRescrapeModal,
+		executeBulkRescrape,
 		organizeController,
 		rescrapeController,
 		posterCropController,

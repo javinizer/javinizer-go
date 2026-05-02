@@ -84,10 +84,10 @@ func TestMergeMovieMetadataWithOptions_AllCombinations(t *testing.T) {
 			mergeArrays:     false,
 			expectedTitle:   "NFO Title",
 			expectedMaker:   "NFO Studio",
-			actressCount:    2, // Only NFO actresses
+			actressCount:    3, // NFO actresses (Yui Hatano, Mika Sumire) + unmatched scraped (Akari Asagiri) — smart merge preserves DMMIDs
 			genreCount:      2, // Only NFO genres
 			screenshotCount: 2, // Only NFO screenshots
-			description:     "Keep NFO scalar fields, use only NFO arrays",
+			description:     "Keep NFO scalar fields, use NFO name data for actresses but preserve scraped DMMIDs and include unmatched scraped actresses",
 		},
 		{
 			name:            "PreferScraper + Merge Arrays",
@@ -359,6 +359,99 @@ func TestMergeMovieMetadataWithOptions_ActressRomanizedNameDeduplication(t *test
 	assert.Len(t, result.Merged.Actresses, 1, "Should have 1 unique actress (same romanized name)")
 	assert.Equal(t, "Yui", result.Merged.Actresses[0].FirstName)
 	assert.Equal(t, "Hatano", result.Merged.Actresses[0].LastName)
+}
+
+// TestMergeActresses_PreservesDMMIDFromScraper verifies that DMMIDs from scraped data
+// are never lost during NFO merge, regardless of strategy. This is critical because
+// NFO-parsed actresses never have DMMIDs, and losing them breaks database associations.
+func TestMergeActresses_PreservesDMMIDFromScraper(t *testing.T) {
+	t.Run("PreferNFO with merge preserves DMMID", func(t *testing.T) {
+		scraped := &models.Movie{
+			ID: "AFB-159", ContentID: "afb159", Title: "Test",
+			Actresses: []models.Actress{
+				{FirstName: "Remu", LastName: "Suzumori", JapaneseName: "涼森れむ", DMMID: 1051912},
+			},
+		}
+		nfoData := &models.Movie{
+			ID: "AFB-159", ContentID: "afb159", Title: "Test",
+			Actresses: []models.Actress{
+				{FirstName: "Suzumori", LastName: "Remu", JapaneseName: "涼森れむ"},
+			},
+		}
+
+		result, err := MergeMovieMetadataWithOptions(scraped, nfoData, PreferNFO, true)
+		require.NoError(t, err)
+		assert.Len(t, result.Merged.Actresses, 1)
+		assert.Equal(t, 1051912, result.Merged.Actresses[0].DMMID, "DMMID must be preserved from scraped data")
+	})
+
+	t.Run("PreferNFO with replace preserves DMMID", func(t *testing.T) {
+		scraped := &models.Movie{
+			ID: "AFB-159", ContentID: "afb159", Title: "Test",
+			Actresses: []models.Actress{
+				{FirstName: "Remu", LastName: "Suzumori", JapaneseName: "涼森れむ", DMMID: 1051912},
+			},
+		}
+		nfoData := &models.Movie{
+			ID: "AFB-159", ContentID: "afb159", Title: "Test",
+			Actresses: []models.Actress{
+				{FirstName: "Suzumori", LastName: "Remu", JapaneseName: "涼森れむ"},
+			},
+		}
+
+		result, err := MergeMovieMetadataWithOptions(scraped, nfoData, PreferNFO, false)
+		require.NoError(t, err)
+		assert.Len(t, result.Merged.Actresses, 1)
+		assert.Equal(t, 1051912, result.Merged.Actresses[0].DMMID, "DMMID must be preserved even in replace mode")
+	})
+
+	t.Run("cross-source match by romanized name preserves DMMID", func(t *testing.T) {
+		// This scenario: scraped has both JapaneseName AND romanized name,
+		// NFO has romanized name but no JapaneseName (e.g., AltNameRole disabled)
+		scraped := &models.Movie{
+			ID: "TEST-001", ContentID: "test001", Title: "Test",
+			Actresses: []models.Actress{
+				{FirstName: "Remu", LastName: "Suzumori", JapaneseName: "涼森れむ", DMMID: 1051912},
+			},
+		}
+		nfoData := &models.Movie{
+			ID: "TEST-001", ContentID: "test001", Title: "Test",
+			Actresses: []models.Actress{
+				{FirstName: "Suzumori", LastName: "Remu"}, // Reversed name order, no JapaneseName
+			},
+		}
+
+		result, err := MergeMovieMetadataWithOptions(scraped, nfoData, PreferNFO, true)
+		require.NoError(t, err)
+		assert.Len(t, result.Merged.Actresses, 1, "Should deduplicate same actress matched by romanized name (reversed order)")
+		assert.Equal(t, 1051912, result.Merged.Actresses[0].DMMID, "DMMID preserved from scraped source")
+	})
+
+	t.Run("unmatched scraped actress kept in replace mode", func(t *testing.T) {
+		scraped := &models.Movie{
+			ID: "TEST-002", ContentID: "test002", Title: "Test",
+			Actresses: []models.Actress{
+				{FirstName: "Remu", LastName: "Suzumori", JapaneseName: "涼森れむ", DMMID: 1051912},
+				{JapaneseName: "八掛うみ", DMMID: 1084476},
+			},
+		}
+		nfoData := &models.Movie{
+			ID: "TEST-002", ContentID: "test002", Title: "Test",
+			Actresses: []models.Actress{
+				{FirstName: "Suzumori", LastName: "Remu", JapaneseName: "涼森れむ"},
+			},
+		}
+
+		result, err := MergeMovieMetadataWithOptions(scraped, nfoData, PreferNFO, false)
+		require.NoError(t, err)
+		assert.Len(t, result.Merged.Actresses, 2, "Should have matched + unmatched actresses")
+		dmmIDs := make(map[int]bool)
+		for _, a := range result.Merged.Actresses {
+			dmmIDs[a.DMMID] = true
+		}
+		assert.True(t, dmmIDs[1051912], "First actress DMMID preserved")
+		assert.True(t, dmmIDs[1084476], "Unmatched scraped actress DMMID preserved")
+	})
 }
 
 // TestParseScalarStrategy tests the scalar strategy parsing

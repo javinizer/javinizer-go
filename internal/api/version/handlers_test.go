@@ -127,6 +127,93 @@ func TestVersionStatus(t *testing.T) {
 	})
 }
 
+func TestVersionCheck_EnabledNoCache(t *testing.T) {
+	tempDataDir := t.TempDir()
+	t.Setenv("JAVINIZER_DATA_DIR", tempDataDir)
+
+	cfg := config.DefaultConfig()
+	cfg.System.VersionCheckEnabled = true
+
+	deps := &ServerDependencies{}
+	deps.SetConfig(cfg)
+
+	router := gin.New()
+	router.POST("/version/check", versionCheck(deps))
+
+	req := httptest.NewRequest(http.MethodPost, "/version/check", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp VersionStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assertVersionBuildMetadata(t, resp)
+	assert.NotEmpty(t, resp.Source)
+}
+
+func TestVersionCheck_CachedState(t *testing.T) {
+	tempDataDir := t.TempDir()
+	t.Setenv("JAVINIZER_DATA_DIR", tempDataDir)
+
+	checkedAt := time.Now().UTC().Format(time.RFC3339)
+	state := &update.UpdateState{
+		Version:    "v9.9.9",
+		CheckedAt:  checkedAt,
+		Available:  true,
+		Prerelease: false,
+		Source:     "fresh",
+	}
+	statePath := filepath.Join(tempDataDir, "update_cache.json")
+	require.NoError(t, update.SaveStateToFile(statePath, state))
+
+	cfg := config.DefaultConfig()
+	cfg.System.VersionCheckEnabled = true
+
+	deps := &ServerDependencies{}
+	deps.SetConfig(cfg)
+
+	router := gin.New()
+	router.POST("/version/check", versionCheck(deps))
+
+	req := httptest.NewRequest(http.MethodPost, "/version/check", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp VersionStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assertVersionBuildMetadata(t, resp)
+	assert.NotEmpty(t, resp.Source)
+}
+
+func TestVersionStatus_ErrorState(t *testing.T) {
+	tempDataDir := t.TempDir()
+	t.Setenv("JAVINIZER_DATA_DIR", tempDataDir)
+
+	cfg := config.DefaultConfig()
+	cfg.System.VersionCheckEnabled = true
+
+	deps := &ServerDependencies{}
+	deps.SetConfig(cfg)
+
+	router := gin.New()
+	router.GET("/version", versionStatus(deps))
+
+	req := httptest.NewRequest(http.MethodGet, "/version", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp VersionStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "none", resp.Source)
+	assert.False(t, resp.UpdateAvailable)
+	assertVersionBuildMetadata(t, resp)
+}
+
 func TestVersionCheck_Disabled(t *testing.T) {
 	tempDataDir := t.TempDir()
 	t.Setenv("JAVINIZER_DATA_DIR", tempDataDir)

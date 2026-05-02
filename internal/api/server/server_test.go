@@ -211,6 +211,8 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"POST /api/v1/auth/logout",
 		"POST /api/v1/auth/setup",
 		"POST /api/v1/batch/:id/cancel",
+		"POST /api/v1/batch/:id/movies/batch-exclude",
+		"POST /api/v1/batch/:id/movies/batch-rescrape",
 		"POST /api/v1/batch/:id/movies/:movieId/exclude",
 		"POST /api/v1/batch/:id/movies/:movieId/poster-crop",
 		"POST /api/v1/batch/:id/movies/:movieId/poster-from-url",

@@ -40,7 +40,7 @@
 		switch (mode) {
 			case 'in-place': return 'Reorganize in place';
 			case 'in-place-norenamefolder': return 'Rename file only';
-			case 'metadata-only': return 'Metadata only';
+			case 'metadata-artwork': return 'Metadata & Artwork';
 			case 'organize': return 'Organize';
 			default: return 'Organize';
 		}
@@ -165,7 +165,7 @@
 		{#if preview}
 			{@const opMode = preview.operation_mode || 'organize'}
 			{@const isInPlaceMode = opMode === 'in-place-norenamefolder'}
-			{@const isMetadataOnly = opMode === 'metadata-only'}
+			{@const isMetadataArtwork = opMode === 'metadata-artwork'}
 			{@const isInPlace = opMode === 'in-place'}
 
 			{#snippet screenshotList(indentPx: number)}
@@ -267,7 +267,7 @@
 					{@render screenshotList(8)}
 				</div>
 			</div>
-			{:else if isMetadataOnly}
+			{:else if isMetadataArtwork}
 				<div class="mt-3 p-3 bg-accent/50 rounded border border-dashed overflow-hidden">
 					<p class="text-xs font-medium mb-1 text-muted-foreground">{getOperationLabel(opMode)} (no file changes):</p>
 					<div class="font-mono text-xs space-y-1 overflow-x-auto">

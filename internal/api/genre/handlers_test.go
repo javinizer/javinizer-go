@@ -250,3 +250,197 @@ func TestGenreReplacementListPagination(t *testing.T) {
 	assert.Equal(t, 2, resp.Limit)
 	assert.Equal(t, 0, resp.Offset)
 }
+
+func TestGenreReplacementUpdate(t *testing.T) {
+	deps := newTestDeps(t)
+	repo := deps.GenreReplacementRepo
+	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
+
+	router := setupRouter(deps)
+
+	payload := map[string]string{"original": "HD", "replacement": "HD Video"}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest("PUT", "/genres/replacements", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var updated models.GenreReplacement
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &updated))
+	assert.Equal(t, "HD", updated.Original)
+	assert.Equal(t, "HD Video", updated.Replacement)
+}
+
+func TestGenreReplacementUpdateNotFound(t *testing.T) {
+	deps := newTestDeps(t)
+	router := setupRouter(deps)
+
+	payload := map[string]string{"original": "nonexistent", "replacement": "test"}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest("PUT", "/genres/replacements", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestGenreReplacementUpdateEmptyOriginal(t *testing.T) {
+	deps := newTestDeps(t)
+	router := setupRouter(deps)
+
+	payload := map[string]string{"original": "", "replacement": "test"}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest("PUT", "/genres/replacements", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestGenreReplacementExport(t *testing.T) {
+	deps := newTestDeps(t)
+	repo := deps.GenreReplacementRepo
+	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
+	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "VR", Replacement: "Virtual Reality"}))
+
+	router := setupRouter(deps)
+
+	req := httptest.NewRequest("GET", "/genres/replacements/export", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var replacements []models.GenreReplacement
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &replacements))
+	assert.Len(t, replacements, 2)
+	assert.Equal(t, "HD", replacements[0].Original)
+	assert.Equal(t, "VR", replacements[1].Original)
+}
+
+func TestGenreReplacementExportEmpty(t *testing.T) {
+	deps := newTestDeps(t)
+	router := setupRouter(deps)
+
+	req := httptest.NewRequest("GET", "/genres/replacements/export", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var replacements []models.GenreReplacement
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &replacements))
+	assert.Len(t, replacements, 0)
+}
+
+func TestGenreReplacementImport(t *testing.T) {
+	deps := newTestDeps(t)
+	router := setupRouter(deps)
+
+	importPayload := map[string]interface{}{
+		"replacements": []map[string]string{
+			{"original": "HD", "replacement": "High Definition"},
+			{"original": "VR", "replacement": "Virtual Reality"},
+		},
+	}
+	body, _ := json.Marshal(importPayload)
+
+	req := httptest.NewRequest("POST", "/genres/replacements/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var summary importSummaryResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &summary))
+	assert.Equal(t, 2, summary.Imported)
+	assert.Equal(t, 0, summary.Skipped)
+	assert.Equal(t, 0, summary.Errors)
+}
+
+func TestGenreReplacementImport_SkipsDefaults(t *testing.T) {
+	deps := newTestDeps(t)
+	router := setupRouter(deps)
+
+	importPayload := map[string]interface{}{
+		"replacements": []map[string]string{
+			{"original": "HD", "replacement": "High Definition"},
+			{"original": "", "replacement": "Empty"},
+		},
+	}
+	body, _ := json.Marshal(importPayload)
+
+	req := httptest.NewRequest("POST", "/genres/replacements/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var summary importSummaryResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &summary))
+	assert.Equal(t, 1, summary.Imported)
+	assert.Equal(t, 1, summary.Errors)
+}
+
+func TestGenreReplacementImport_ExistingUnchanged(t *testing.T) {
+	deps := newTestDeps(t)
+	repo := deps.GenreReplacementRepo
+	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
+
+	router := setupRouter(deps)
+
+	importPayload := map[string]interface{}{
+		"replacements": []map[string]string{
+			{"original": "HD", "replacement": "High Definition"},
+		},
+	}
+	body, _ := json.Marshal(importPayload)
+
+	req := httptest.NewRequest("POST", "/genres/replacements/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var summary importSummaryResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &summary))
+	assert.Equal(t, 0, summary.Imported)
+	assert.Equal(t, 1, summary.Skipped)
+}
+
+func TestGenreReplacementImport_ExistingUpdated(t *testing.T) {
+	deps := newTestDeps(t)
+	repo := deps.GenreReplacementRepo
+	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "OldValue"}))
+
+	router := setupRouter(deps)
+
+	importPayload := map[string]interface{}{
+		"replacements": []map[string]string{
+			{"original": "HD", "replacement": "HD Video"},
+		},
+	}
+	body, _ := json.Marshal(importPayload)
+
+	req := httptest.NewRequest("POST", "/genres/replacements/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var summary importSummaryResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &summary))
+	assert.Equal(t, 1, summary.Imported)
+	assert.Equal(t, 0, summary.Skipped)
+}

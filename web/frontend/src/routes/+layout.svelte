@@ -9,13 +9,19 @@
 	import Navigation from '$lib/components/Navigation.svelte';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
 	import DialogContainer from '$lib/components/ui/DialogContainer.svelte';
+	import BackgroundJobIndicator from '$lib/components/BackgroundJobIndicator.svelte';
+	import ProgressModal from '$lib/components/ProgressModal.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
+	import { getBackgroundJobState, reopenModal, dismiss, closeModal } from '$lib/stores/background-job.svelte';
 	import { getQueryClient } from '$lib/query/client';
 	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import '../app.css';
 
 	let { children } = $props();
+
+	let bgJobId = $derived(getBackgroundJobState().jobId);
+	let bgShowModal = $derived(getBackgroundJobState().showModal);
 
 	let authLoading = $state(true);
 	let authSubmitting = $state(false);
@@ -304,6 +310,19 @@
 				</main>
 			<ToastContainer />
 			<DialogContainer />
+			{#if bgJobId && !bgShowModal}
+				<BackgroundJobIndicator
+					jobId={bgJobId}
+					onReopen={reopenModal}
+					onDismiss={dismiss}
+				/>
+			{/if}
+			{#if bgShowModal && bgJobId}
+				<ProgressModal
+					jobId={bgJobId}
+					onClose={closeModal}
+				/>
+			{/if}
 		</div>
 		</QueryClientProvider>
 	{:else}

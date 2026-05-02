@@ -233,9 +233,9 @@ func TestRunBatchScrapeOnce_ContextCancelledBeforeScrape(t *testing.T) {
 }
 
 func TestRunBatchScrapeOnce_DMMSelectionFallbackBranches(t *testing.T) {
-	cfg, movieRepo, agg, fileMatcher := newRunBatchFallbackEnv(t)
-
 	t.Run("selected scrapers exclude dmm", func(t *testing.T) {
+		cfg, movieRepo, agg, fileMatcher := newRunBatchFallbackEnv(t)
+
 		registry := models.NewScraperRegistry()
 		scraper := &runBatchTestScraper{
 			name:    "resolver",
@@ -282,6 +282,8 @@ func TestRunBatchScrapeOnce_DMMSelectionFallbackBranches(t *testing.T) {
 	})
 
 	t.Run("dmm type assertion failure uses original id", func(t *testing.T) {
+		cfg, movieRepo, agg, fileMatcher := newRunBatchFallbackEnv(t)
+
 		registry := models.NewScraperRegistry()
 		registry.Register(&runBatchTestScraper{
 			name:    "dmm",

@@ -623,7 +623,7 @@ func TestPerFieldPriorityJSONRoundTrip(t *testing.T) {
 			"timeout_seconds": 30,
 			"request_timeout_seconds": 60
 		},
-		"output": {"operation_mode": "metadata-only"},
+		"output": {"operation_mode": "metadata-artwork"},
 		"database": {"type": "sqlite", "dsn": "test.db"},
 		"metadata": {
 			"priority": {

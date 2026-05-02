@@ -570,7 +570,7 @@ The build pipeline is defined in `.github/workflows/cli-release.yml`:
 **Build Steps**:
 
 1. **Prepare release metadata**:
-   - Resolves version from `internal/version/version.txt`
+   - Resolves version from `git describe --tags` via `scripts/version.sh`
    - Generates build metadata (version, commit SHA, build date)
    - Validates version format and matches tracked version
 

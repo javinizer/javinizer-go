@@ -146,4 +146,147 @@ func TestRedact(t *testing.T) {
 		var cfg *Config
 		assert.Nil(t, cfg.Redact())
 	})
+
+	t.Run("deep copy of priority fields map", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Priority.Fields = map[string][]string{
+			"javbus": {"title", "actresses"},
+			"dmm":    {"cover_url"},
+		}
+		redacted := cfg.Redact()
+
+		redacted.Metadata.Priority.Fields["javbus"][0] = "tampered"
+		delete(redacted.Metadata.Priority.Fields, "dmm")
+
+		assert.Equal(t, "title", cfg.Metadata.Priority.Fields["javbus"][0])
+		assert.Contains(t, cfg.Metadata.Priority.Fields, "dmm")
+	})
+
+	t.Run("deep copy of priority fields nil values", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Priority.Fields = map[string][]string{
+			"empty": nil,
+		}
+		redacted := cfg.Redact()
+		assert.Nil(t, redacted.Metadata.Priority.Fields["empty"])
+	})
+
+	t.Run("deep copy of priority fields nil map", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Metadata.Priority.Fields = nil
+		redacted := cfg.Redact()
+		assert.Nil(t, redacted.Metadata.Priority.Fields)
+	})
+
+	t.Run("redacts scraper override download proxy profiles", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Scrapers.Overrides = map[string]*ScraperSettings{
+			"javdb": {
+				Enabled: true,
+				DownloadProxy: &ProxyConfig{
+					Enabled: true,
+					Profiles: map[string]ProxyProfile{
+						"dlproxy": {URL: "http://dl:8080", Username: "dluser", Password: "dlpass"},
+					},
+				},
+			},
+		}
+		redacted := cfg.Redact()
+		assert.Equal(t, RedactedValue, redacted.Scrapers.Overrides["javdb"].DownloadProxy.Profiles["dlproxy"].Username)
+		assert.Equal(t, RedactedValue, redacted.Scrapers.Overrides["javdb"].DownloadProxy.Profiles["dlproxy"].Password)
+		assert.Equal(t, "http://dl:8080", redacted.Scrapers.Overrides["javdb"].DownloadProxy.Profiles["dlproxy"].URL)
+	})
+
+	t.Run("handles nil scraper override value", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Scrapers.Overrides = map[string]*ScraperSettings{
+			"nilscraper": nil,
+		}
+		redacted := cfg.Redact()
+		assert.Nil(t, redacted.Scrapers.Overrides["nilscraper"])
+	})
+
+	t.Run("redacts scraper override with nil proxy", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Scrapers.Overrides = map[string]*ScraperSettings{
+			"noproxy": {
+				Enabled: true,
+			},
+		}
+		redacted := cfg.Redact()
+		_, exists := redacted.Scrapers.Overrides["noproxy"]
+		assert.True(t, exists)
+	})
+}
+
+func TestDeepCopyFieldsMap(t *testing.T) {
+	t.Run("nil map returns nil", func(t *testing.T) {
+		assert.Nil(t, deepCopyFieldsMap(nil))
+	})
+
+	t.Run("empty map returns empty map", func(t *testing.T) {
+		result := deepCopyFieldsMap(map[string][]string{})
+		assert.Empty(t, result)
+	})
+
+	t.Run("copies all values", func(t *testing.T) {
+		original := map[string][]string{
+			"key1": {"a", "b"},
+			"key2": {"c"},
+		}
+		result := deepCopyFieldsMap(original)
+		assert.Equal(t, original, result)
+	})
+
+	t.Run("deep copy is independent", func(t *testing.T) {
+		original := map[string][]string{
+			"key1": {"a", "b"},
+		}
+		result := deepCopyFieldsMap(original)
+		result["key1"][0] = "modified"
+		assert.Equal(t, "a", original["key1"][0])
+	})
+
+	t.Run("nil slice values preserved", func(t *testing.T) {
+		original := map[string][]string{
+			"key1": nil,
+		}
+		result := deepCopyFieldsMap(original)
+		assert.Nil(t, result["key1"])
+	})
+}
+
+func TestRedactString(t *testing.T) {
+	t.Run("empty string returns empty", func(t *testing.T) {
+		assert.Equal(t, "", redactString(""))
+	})
+
+	t.Run("non-empty string returns redacted", func(t *testing.T) {
+		assert.Equal(t, RedactedValue, redactString("secret"))
+	})
+}
+
+func TestRedactProxyProfiles(t *testing.T) {
+	t.Run("nil profiles returns nil", func(t *testing.T) {
+		assert.Nil(t, redactProxyProfiles(nil))
+	})
+
+	t.Run("redacts username and password", func(t *testing.T) {
+		profiles := map[string]ProxyProfile{
+			"main": {URL: "http://proxy:8080", Username: "admin", Password: "s3cret"},
+		}
+		result := redactProxyProfiles(profiles)
+		assert.Equal(t, RedactedValue, result["main"].Username)
+		assert.Equal(t, RedactedValue, result["main"].Password)
+		assert.Equal(t, "http://proxy:8080", result["main"].URL)
+	})
+
+	t.Run("empty username and password not redacted", func(t *testing.T) {
+		profiles := map[string]ProxyProfile{
+			"noauth": {URL: "http://proxy:8080", Username: "", Password: ""},
+		}
+		result := redactProxyProfiles(profiles)
+		assert.Equal(t, "", result["noauth"].Username)
+		assert.Equal(t, "", result["noauth"].Password)
+	})
 }

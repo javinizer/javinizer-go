@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/Button.svelte';
-	import { ChevronDown, ChevronUp, LayoutGrid, List, LoaderCircle, Play, RefreshCw, Settings2, X } from 'lucide-svelte';
+	import { ChevronDown, ChevronUp, Image, LayoutGrid, List, LoaderCircle, Play, RefreshCw, Settings2, X, CheckSquare, Square, Trash2, RotateCcw, MousePointerClick } from 'lucide-svelte';
+	import type { CompletenessTier } from '$lib/utils/completeness';
 
 	interface Props {
 		isUpdateMode: boolean;
@@ -8,11 +9,24 @@
 		organizing: boolean;
 		movieResultsLength: number;
 		destinationPath: string;
-		viewMode?: 'detail' | 'grid';
+		viewMode?: 'detail' | 'grid-poster' | 'grid-cover';
 		forceOverwrite?: boolean;
 		preserveNfo?: boolean;
 		skipNfo?: boolean;
 		skipDownload?: boolean;
+		selectedCount?: number;
+		allSelected?: boolean;
+		bulkExcluding?: boolean;
+		bulkRescraping?: boolean;
+		completenessFilter?: Set<CompletenessTier>;
+		tierCounts?: Record<string, number>;
+		selectionMode?: boolean;
+		onToggleCompletenessTier?: (tier: CompletenessTier) => void;
+		onToggleSelectionMode?: () => void;
+		onSelectAll?: () => void;
+		onDeselectAll?: () => void;
+		onBulkExclude?: () => void;
+		onBulkRescrape?: () => void;
 		onClose: () => void;
 		onUpdateAll: () => void;
 		onOrganizeAll: () => void;
@@ -24,11 +38,24 @@
 		organizing,
 		movieResultsLength,
 		destinationPath,
-		viewMode = $bindable<'detail' | 'grid'>('detail'),
+		viewMode = $bindable<'detail' | 'grid-poster' | 'grid-cover'>('detail'),
 		forceOverwrite = $bindable(false),
 		preserveNfo = $bindable(false),
 		skipNfo = $bindable(false),
 		skipDownload = $bindable(false),
+		selectedCount = 0,
+		allSelected = false,
+		bulkExcluding = false,
+		bulkRescraping = false,
+		completenessFilter = new Set<CompletenessTier>(['incomplete', 'partial', 'complete']),
+		tierCounts = { incomplete: 0, partial: 0, complete: 0 },
+		selectionMode = false,
+		onToggleCompletenessTier,
+		onToggleSelectionMode,
+		onSelectAll,
+		onDeselectAll,
+		onBulkExclude,
+		onBulkRescrape,
 		onClose,
 		onUpdateAll,
 		onOrganizeAll
@@ -43,6 +70,12 @@
 	});
 
 	let showOptions = $state(false);
+
+	const tierConfig: { tier: CompletenessTier; label: string; dotClass: string }[] = [
+		{ tier: 'incomplete', label: 'Incomplete', dotClass: 'bg-red-500' },
+		{ tier: 'partial', label: 'Partial', dotClass: 'bg-yellow-500' },
+		{ tier: 'complete', label: 'Complete', dotClass: 'bg-green-500' },
+	];
 </script>
 
 <div class="flex items-center justify-between mb-6">
@@ -70,12 +103,22 @@
 			</Button>
 			<Button
 				size="sm"
-				variant={viewMode === 'grid' ? 'default' : 'ghost'}
-				onclick={() => { viewMode = 'grid'; }}
+				variant={viewMode === 'grid-poster' ? 'default' : 'ghost'}
+				onclick={() => { viewMode = 'grid-poster'; }}
 			>
 				{#snippet children()}
 					<LayoutGrid class="h-4 w-4 mr-1" />
-					Grid
+					Poster
+				{/snippet}
+			</Button>
+			<Button
+				size="sm"
+				variant={viewMode === 'grid-cover' ? 'default' : 'ghost'}
+				onclick={() => { viewMode = 'grid-cover'; }}
+			>
+				{#snippet children()}
+					<Image class="h-4 w-4 mr-1" />
+					Cover
 				{/snippet}
 			</Button>
 		</div>
@@ -100,7 +143,7 @@
 			<Button onclick={onOrganizeAll} disabled={organizing || !canOrganize || !destinationPath.trim()}>
 				{#snippet children()}
 					{#if organizing}
-						<LoaderCircle class="h-4 w-4 mr-2" />
+						<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
 					{:else}
 						<Play class="h-4 w-4 mr-2" />
 					{/if}
@@ -110,6 +153,85 @@
 		{/if}
 	</div>
 </div>
+
+{#if viewMode === 'grid-poster' || viewMode === 'grid-cover'}
+	<div class="flex items-center gap-3 mb-4">
+		<Button
+			size="sm"
+			variant={selectionMode ? 'default' : 'outline'}
+			aria-pressed={selectionMode}
+			onclick={() => onToggleSelectionMode?.()}
+		>
+			{#snippet children()}
+				<MousePointerClick class="h-4 w-4 mr-1" />
+				Select
+			{/snippet}
+		</Button>
+		{#if selectionMode}
+			<Button
+				size="sm"
+				variant="outline"
+				onclick={allSelected ? onDeselectAll : onSelectAll}
+			>
+				{#snippet children()}
+					{#if allSelected}
+						<CheckSquare class="h-4 w-4 mr-1" />
+						Deselect All
+					{:else}
+						<Square class="h-4 w-4 mr-1" />
+						Select All
+					{/if}
+				{/snippet}
+			</Button>
+		{/if}
+		<div class="h-4 w-px bg-border"></div>
+		<div class="inline-flex items-center gap-1">
+			{#each tierConfig as { tier, label, dotClass }}
+				{@const count = tierCounts[tier] ?? 0}
+				{@const isActive = completenessFilter.has(tier)}
+				<button
+					class="inline-flex items-center gap-1.5 h-9 px-3 text-sm font-medium rounded-md border transition-colors
+						{isActive ? 'bg-secondary text-secondary-foreground border-border' : 'bg-transparent text-muted-foreground border-transparent hover:bg-accent hover:text-accent-foreground'}
+						{count === 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"
+					onclick={() => onToggleCompletenessTier?.(tier)}
+					disabled={count === 0}
+				>
+					<span class="w-2 h-2 rounded-full {isActive ? dotClass : 'bg-muted-foreground/30'}"></span>
+					{label} ({count})
+				</button>
+			{/each}
+		</div>
+	</div>
+{/if}
+
+{#if selectedCount > 0}
+	<div class="flex items-center gap-3 mb-4 px-1">
+		<span class="text-sm font-medium text-muted-foreground">
+			{selectedCount} selected
+		</span>
+		<div class="h-4 w-px bg-border"></div>
+		<Button size="sm" variant="outline" onclick={onBulkExclude} disabled={bulkExcluding || bulkRescraping} class="text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300">
+			{#snippet children()}
+				{#if bulkExcluding}
+					<LoaderCircle class="h-4 w-4 mr-1 animate-spin" />
+				{:else}
+					<Trash2 class="h-4 w-4 mr-1" />
+				{/if}
+				Remove
+			{/snippet}
+		</Button>
+		<Button size="sm" variant="outline" onclick={onBulkRescrape} disabled={bulkExcluding || bulkRescraping}>
+			{#snippet children()}
+				{#if bulkRescraping}
+					<LoaderCircle class="h-4 w-4 mr-1 animate-spin" />
+				{:else}
+					<RotateCcw class="h-4 w-4 mr-1" />
+				{/if}
+				Rescrape
+			{/snippet}
+		</Button>
+	</div>
+{/if}
 
 {#if isUpdateMode}
 	<div class="mb-4">

@@ -21,6 +21,8 @@
 	import MediaInfoSettingsSection from '$lib/components/settings/sections/MediaInfoSettingsSection.svelte';
 	import BrowserSettingsSection from '$lib/components/settings/sections/BrowserSettingsSection.svelte';
 	import ApiTokensSection from '$lib/components/settings/sections/ApiTokensSection.svelte';
+	import CompletenessSettingsSection from '$lib/components/settings/sections/CompletenessSettingsSection.svelte';
+	import WebUISettingsSection from '$lib/components/settings/sections/WebUISettingsSection.svelte';
 	import TokenDisplayModal from '$lib/components/settings/TokenDisplayModal.svelte';
 	import type { CreateTokenResponse } from '$lib/types/token';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
@@ -203,6 +205,8 @@
 				<MetadataPriority config={settings.settingsConfig} onUpdate={(updatedConfig) => { settings.config = updatedConfig; }} />
 			</SettingsSection>
 
+			<CompletenessSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
+
 			<FileOperationsSettingsSection config={settings.settingsConfig} />
 			<OutputSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 			<DatabaseSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
@@ -276,6 +280,7 @@
 			<FileMatchingSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 			<LoggingSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 			<MediaInfoSettingsSection config={settings.settingsConfig} />
+			<WebUISettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 		{/if}
 	</div>
 </div>

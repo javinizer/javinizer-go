@@ -71,6 +71,33 @@ definitions:
         description: 'Viewport width (default: 1920)'
         type: integer
     type: object
+  config.CompletenessConfig:
+    properties:
+      enabled:
+        type: boolean
+      tiers:
+        $ref: '#/definitions/config.CompletenessTierConfig'
+    type: object
+  config.CompletenessTierConfig:
+    properties:
+      essential:
+        $ref: '#/definitions/config.CompletenessTierDefinition'
+      important:
+        $ref: '#/definitions/config.CompletenessTierDefinition'
+      nice_to_have:
+        $ref: '#/definitions/config.CompletenessTierDefinition'
+    type: object
+  config.CompletenessTierDefinition:
+    properties:
+      fields:
+        description: Movie field names assigned to this tier
+        items:
+          type: string
+        type: array
+      weight:
+        description: Percentage weight (0-100, must sum to 100 across tiers)
+        type: integer
+    type: object
   config.DatabaseConfig:
     properties:
       dsn:
@@ -194,6 +221,10 @@ definitions:
         allOf:
         - $ref: '#/definitions/config.ActressDatabaseConfig'
         description: Actress image database (SQLite-backed)
+      completeness:
+        allOf:
+        - $ref: '#/definitions/config.CompletenessConfig'
+        description: Completeness scoring configuration
       genre_replacement:
         allOf:
         - $ref: '#/definitions/config.GenreReplacementConfig'
@@ -597,6 +628,11 @@ definitions:
       title:
         type: boolean
     type: object
+  config.WebUIConfig:
+    properties:
+      default_review_view:
+        type: string
+    type: object
   config.WordReplacementConfig:
     properties:
       enabled:
@@ -613,6 +649,15 @@ definitions:
         type: string
       source_value: {}
       target_value: {}
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeFailed:
+    properties:
+      error:
+        example: Movie not found in job
+        type: string
+      movie_id:
+        example: IPX-535
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchFileResult:
     properties:
@@ -690,6 +735,8 @@ definitions:
         type: string
       total_files:
         type: integer
+      update:
+        type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.DataSource:
     properties:
@@ -1113,6 +1160,31 @@ definitions:
           type: string
         type: array
     type: object
+  internal_api_batch.BatchExcludeRequest:
+    properties:
+      movie_ids:
+        example:
+        - IPX-535
+        - ABC-123
+        items:
+          type: string
+        type: array
+    required:
+    - movie_ids
+    type: object
+  internal_api_batch.BatchExcludeResponse:
+    properties:
+      excluded:
+        items:
+          type: string
+        type: array
+      failed:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeFailed'
+        type: array
+      job:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse'
+    type: object
   internal_api_batch.BatchJobResponse:
     properties:
       completed:
@@ -1149,6 +1221,8 @@ definitions:
         type: string
       total_files:
         type: integer
+      update:
+        type: boolean
     type: object
   internal_api_batch.BatchRescrapeRequest:
     properties:
@@ -1211,7 +1285,7 @@ definitions:
         type: boolean
       operation_mode:
         description: 'Override config.output.operation_mode: organize, in-place, in-place-norenamefolder,
-          metadata-only, preview'
+          metadata-artwork, preview'
         example: organize
         type: string
       preset:
@@ -2101,6 +2175,8 @@ definitions:
         $ref: '#/definitions/config.ServerConfig'
       system:
         $ref: '#/definitions/config.SystemConfig'
+      webui:
+        $ref: '#/definitions/config.WebUIConfig'
     type: object
   internal_api_temp.ErrorResponse:
     properties:
@@ -3140,6 +3216,42 @@ paths:
           schema:
             $ref: '#/definitions/internal_api_batch.ErrorResponse'
       summary: Rescrape movie in batch job
+      tags:
+      - web
+  /api/v1/batch/{id}/movies/batch-exclude:
+    post:
+      consumes:
+      - application/json
+      description: 'Exclude multiple movies from a batch job in a single request.
+        Best-effort: excludes as many as possible and returns per-movie failures.'
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Movie IDs to exclude
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_batch.BatchExcludeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_batch.BatchExcludeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+      summary: Bulk exclude movies from batch organization
       tags:
       - web
   /api/v1/batch/{id}/organize:

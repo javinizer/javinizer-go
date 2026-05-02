@@ -332,6 +332,26 @@ func TestRevertBatch(t *testing.T) {
 	}
 }
 
+func TestListJobs_EmptyDatabase(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	deps, db := setupJobsTestDeps(t)
+	defer func() { _ = db.Close() }()
+
+	router := gin.New()
+	router.GET("/api/v1/jobs", listJobs(deps))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp JobListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Empty(t, resp.Jobs)
+}
+
 func TestRevertOperation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

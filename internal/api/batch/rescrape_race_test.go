@@ -28,8 +28,8 @@ func setJobDeleted(job *worker.BatchJob, deleted bool) {
 	// BatchJob struct layout (from internal/worker/job_queue.go):
 	// type BatchJob struct {
 	//   ID, Status, TotalFiles, Completed, Failed, Excluded, Files, Results, FileMatchInfo
-	//   Progress, Destination, TempDir, StartedAt, CompletedAt, OrganizedAt
-	//   CancelFunc, Done, mu, deleted
+	//   Progress, Destination, TempDir, StartedAt, CompletedAt, OrganizedAt, RevertedAt
+	//   OperationModeOverride, Update, PersistError, CancelFunc, Done, mu, deleted
 	// }
 	// We need to set the `deleted` field which is unexported.
 	// Using a shadow struct to calculate offset:
@@ -52,6 +52,7 @@ func setJobDeleted(job *worker.BatchJob, deleted bool) {
 		OrganizedAt           *time.Time
 		RevertedAt            *time.Time
 		OperationModeOverride string
+		Update                bool
 		PersistError          string
 		CancelFunc            context.CancelFunc
 		Done                  chan struct{}

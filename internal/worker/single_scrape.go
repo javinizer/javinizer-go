@@ -211,5 +211,5 @@ func RunBatchScrapeOnce(
 
 	posterErr := generateScrapedPoster(ctx, job, fileIndex, movie, httpClient, userAgent, referer, processedMovieIDs, cfg)
 
-	return saveScrapedResult(job, fileIndex, filePath, movie, query.movieID, query.resolvedID, results, usingCustomScrapers, movieRepo, fieldSources, actressSources, posterErr, translationWarning, query.matchResultPtr, startTime)
+	return saveScrapedResult(job, fileIndex, filePath, movie, query.movieID, query.resolvedID, results, movieRepo, fieldSources, actressSources, posterErr, translationWarning, query.matchResultPtr, startTime)
 }

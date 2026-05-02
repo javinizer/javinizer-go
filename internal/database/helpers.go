@@ -54,7 +54,7 @@ func raceRetryCreate(tx *gorm.DB, entity interface{}, findExisting func(tx *gorm
 }
 
 func upsertMovieCore(tx *gorm.DB, db *DB, movie *models.Movie, translations []models.MovieTranslation) error {
-	if err := tx.Omit("Actresses", "Genres").Save(movie).Error; err != nil {
+	if err := tx.Omit("Actresses", "Genres", "Translations").Save(movie).Error; err != nil {
 		return err
 	}
 
@@ -65,11 +65,32 @@ func upsertMovieCore(tx *gorm.DB, db *DB, movie *models.Movie, translations []mo
 		return err
 	}
 
+	// Translations are managed via UpsertTx instead of Association().Replace() to preserve
+	// ID and CreatedAt on existing rows, and to maintain the SettingsHash field per translation.
+	// When the incoming translations list is empty, existing translations are preserved — unlike
+	// Genres/Actresses which are cleared. This is intentional: most scrapers do not return
+	// translations, and an empty list should not wipe translations provided by a different scraper.
 	translationRepo := NewMovieTranslationRepository(db)
+	incomingLangs := make(map[string]bool, len(translations))
 	for i := range translations {
 		translations[i].MovieID = movie.ContentID
+		incomingLangs[translations[i].Language] = true
 		if err := translationRepo.UpsertTx(tx, &translations[i]); err != nil {
 			return err
+		}
+	}
+
+	if len(translations) > 0 {
+		var existingTranslations []models.MovieTranslation
+		if err := tx.Where("movie_id = ?", movie.ContentID).Find(&existingTranslations).Error; err != nil {
+			return wrapDBErr("find stale translations", movie.ContentID, err)
+		}
+		for _, et := range existingTranslations {
+			if !incomingLangs[et.Language] {
+				if err := tx.Delete(&et).Error; err != nil {
+					return wrapDBErr("delete stale translation", translationEntityID(movie.ContentID, et.Language), err)
+				}
+			}
 		}
 	}
 

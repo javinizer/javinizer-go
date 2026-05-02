@@ -10,7 +10,7 @@ const (
 	OperationModeOrganize              = types.OperationModeOrganize
 	OperationModeInPlace               = types.OperationModeInPlace
 	OperationModeInPlaceNoRenameFolder = types.OperationModeInPlaceNoRenameFolder
-	OperationModeMetadataOnly          = types.OperationModeMetadataOnly
+	OperationModeMetadataArtwork       = types.OperationModeMetadataArtwork
 	OperationModePreview               = types.OperationModePreview
 )
 

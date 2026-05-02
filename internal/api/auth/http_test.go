@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1244,4 +1245,178 @@ func TestRequireTokenOrSession_RegeneratedTokenOldFails(t *testing.T) {
 	w3 := httptest.NewRecorder()
 	router.ServeHTTP(w3, req3)
 	assert.Equal(t, http.StatusOK, w3.Code)
+}
+
+func TestParseCIDRList(t *testing.T) {
+	t.Run("empty string returns nil", func(t *testing.T) {
+		assert.Nil(t, parseCIDRList(""))
+	})
+
+	t.Run("single valid CIDR", func(t *testing.T) {
+		result := parseCIDRList("10.0.0.0/8")
+		require.Len(t, result, 1)
+		assert.True(t, result[0].Contains(net.ParseIP("10.1.2.3")))
+	})
+
+	t.Run("multiple valid CIDRs", func(t *testing.T) {
+		result := parseCIDRList("10.0.0.0/8,192.168.0.0/16")
+		require.Len(t, result, 2)
+	})
+
+	t.Run("invalid CIDR skipped", func(t *testing.T) {
+		result := parseCIDRList("10.0.0.0/8,not-a-cidr,192.168.0.0/16")
+		require.Len(t, result, 2)
+	})
+
+	t.Run("whitespace trimmed", func(t *testing.T) {
+		result := parseCIDRList(" 10.0.0.0/8 , 192.168.0.0/16 ")
+		require.Len(t, result, 2)
+	})
+
+	t.Run("empty segments skipped", func(t *testing.T) {
+		result := parseCIDRList("10.0.0.0/8,,192.168.0.0/16")
+		require.Len(t, result, 2)
+	})
+}
+
+func TestPeerIP(t *testing.T) {
+	t.Run("extracts IP from host:port", func(t *testing.T) {
+		assert.Equal(t, "192.168.1.1", peerIP("192.168.1.1:12345"))
+	})
+
+	t.Run("returns raw address when no port", func(t *testing.T) {
+		assert.Equal(t, "192.168.1.1", peerIP("192.168.1.1"))
+	})
+
+	t.Run("handles IPv6 with brackets", func(t *testing.T) {
+		assert.Equal(t, "::1", peerIP("[::1]:12345"))
+	})
+}
+
+func TestIsTrustedClient(t *testing.T) {
+	t.Run("loopback IPv4 is trusted", func(t *testing.T) {
+		assert.True(t, isTrustedClient("127.0.0.1"))
+	})
+
+	t.Run("loopback IPv6 is trusted", func(t *testing.T) {
+		assert.True(t, isTrustedClient("::1"))
+	})
+
+	t.Run("private IP is not trusted by default", func(t *testing.T) {
+		assert.False(t, isTrustedClient("192.168.1.1"))
+	})
+
+	t.Run("invalid IP is not trusted", func(t *testing.T) {
+		assert.False(t, isTrustedClient("not-an-ip"))
+	})
+
+	t.Run("IPv6 with brackets is trusted for loopback", func(t *testing.T) {
+		assert.True(t, isTrustedClient("[::1]"))
+	})
+}
+
+func TestRequireAuthenticated_InitializedWithValidSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
+	cfg := config.DefaultConfig()
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	deps := createTestDeps(t, cfg, configFile)
+
+	manager, err := NewAuthManager(configFile, time.Hour)
+	require.NoError(t, err)
+	deps.Auth = manager
+
+	require.NoError(t, manager.Setup("admin", "password123"))
+	sessionID, err := manager.Login("admin", "password123", false)
+	require.NoError(t, err)
+
+	called := false
+	testRouter := gin.New()
+	testRouter.GET("/test", requireAuthenticated(deps), func(c *gin.Context) {
+		called = true
+		username, _ := c.Get("auth_username")
+		assert.Equal(t, "admin", username)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
+	w := httptest.NewRecorder()
+	testRouter.ServeHTTP(w, req)
+	assert.True(t, called)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequireAuthenticated_InitializedNoCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
+	cfg := config.DefaultConfig()
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	deps := createTestDeps(t, cfg, configFile)
+
+	manager, err := NewAuthManager(configFile, time.Hour)
+	require.NoError(t, err)
+	deps.Auth = manager
+
+	require.NoError(t, manager.Setup("admin", "password123"))
+
+	testRouter := gin.New()
+	testRouter.GET("/test", requireAuthenticated(deps), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	testRouter.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestRequireAuthenticated_NotInitialized(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := config.DefaultConfig()
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	deps := createTestDeps(t, cfg, configFile)
+
+	manager, err := NewAuthManager(configFile, time.Hour)
+	require.NoError(t, err)
+	deps.Auth = manager
+
+	testRouter := gin.New()
+	testRouter.GET("/test", requireAuthenticated(deps), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	testRouter.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestRequireAuthenticated_InvalidSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
+	cfg := config.DefaultConfig()
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	deps := createTestDeps(t, cfg, configFile)
+
+	manager, err := NewAuthManager(configFile, time.Hour)
+	require.NoError(t, err)
+	deps.Auth = manager
+
+	require.NoError(t, manager.Setup("admin", "password123"))
+
+	testRouter := gin.New()
+	testRouter.GET("/test", requireAuthenticated(deps), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "invalid-session-id"})
+	w := httptest.NewRecorder()
+	testRouter.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }

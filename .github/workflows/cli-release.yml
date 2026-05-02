@@ -79,11 +79,11 @@ jobs:
           event_name="${GITHUB_EVENT_NAME}"
           build_date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           commit="${GITHUB_SHA}"
-          tracked_version="$(tr -d '[:space:]' < internal/version/version.txt)"
+          tracked_version="$(./scripts/version.sh)"
           nightly_should_run="true"
 
           if [[ -z "${tracked_version}" ]]; then
-            echo "Tracked version file is empty" >&2
+            echo "Failed to resolve version" >&2
             exit 1
           fi
 
@@ -109,7 +109,7 @@ jobs:
 
             since_ts="$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
             changed_files="$(git log --since="${since_ts}" --name-only --pretty=format: -- . | sed '/^$/d' | sort -u)"
-            relevant_pattern='^(cmd/|internal/|web/|Dockerfile$|go\.mod$|go\.sum$|Makefile$|internal/version/version\.txt$|\.github/workflows/cli-release\.yml$)'
+            relevant_pattern='^(cmd/|internal/|web/|Dockerfile$|go\.mod$|go\.sum$|Makefile$|scripts/version\.sh$|\.github/workflows/cli-release\.yml$)'
 
             if [[ -z "${changed_files}" ]]; then
               nightly_should_run="false"

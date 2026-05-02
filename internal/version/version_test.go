@@ -60,36 +60,27 @@ func TestInfo(t *testing.T) {
 }
 
 func TestShort(t *testing.T) {
-	// Save original values
 	origVersion := Version
-	origCommit := Commit
-	defer func() {
-		Version = origVersion
-		Commit = origCommit
-	}()
+	defer func() { Version = origVersion }()
 
 	tests := []struct {
 		name    string
 		version string
-		commit  string
 		want    string
 	}{
 		{
 			name:    "production version",
 			version: "1.2.3",
-			commit:  "abc123def",
 			want:    "1.2.3",
 		},
 		{
-			name:    "dev version with commit",
-			version: "dev",
-			commit:  "abc123def",
-			want:    "dev-abc123d",
+			name:    "dev pseudo-version",
+			version: "v0.0.0-abc123def456",
+			want:    "v0.0.0-abc123def456",
 		},
 		{
 			name:    "version with metadata",
 			version: "2.0.0-beta.1",
-			commit:  "xyz789abc",
 			want:    "2.0.0-beta.1",
 		},
 	}
@@ -97,7 +88,6 @@ func TestShort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			Version = tt.version
-			Commit = tt.commit
 
 			got := Short()
 
@@ -105,73 +95,6 @@ func TestShort(t *testing.T) {
 				t.Errorf("Short() = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestShort_DevVersionCommitShortening(t *testing.T) {
-	// Save original values
-	origVersion := Version
-	origCommit := Commit
-	defer func() {
-		Version = origVersion
-		Commit = origCommit
-	}()
-
-	Version = "dev"
-	Commit = "1234567890abcdef"
-
-	got := Short()
-	want := "dev-1234567"
-
-	if got != want {
-		t.Errorf("Short() with dev version = %q, want %q", got, want)
-	}
-
-	// Verify it takes exactly 7 characters
-	if !strings.HasPrefix(got, "dev-") {
-		t.Errorf("Short() dev version should start with 'dev-', got %q", got)
-	}
-	commitPart := strings.TrimPrefix(got, "dev-")
-	if len(commitPart) != 7 {
-		t.Errorf("Short() dev version should have 7-char commit hash, got %d chars: %q", len(commitPart), commitPart)
-	}
-}
-
-func TestShort_DevVersionCommitShort(t *testing.T) {
-	origVersion := Version
-	origCommit := Commit
-	defer func() {
-		Version = origVersion
-		Commit = origCommit
-	}()
-
-	Version = "dev"
-	Commit = "abc"
-
-	got := Short()
-	want := "dev-abc"
-
-	if got != want {
-		t.Errorf("Short() with short commit = %q, want %q", got, want)
-	}
-}
-
-func TestShort_DevVersionDirtyCommit(t *testing.T) {
-	origVersion := Version
-	origCommit := Commit
-	defer func() {
-		Version = origVersion
-		Commit = origCommit
-	}()
-
-	Version = "dev"
-	Commit = "1234567890abcdef-dirty"
-
-	got := Short()
-	want := "dev-1234567-dirty"
-
-	if got != want {
-		t.Errorf("Short() with dirty commit = %q, want %q", got, want)
 	}
 }
 
@@ -278,33 +201,55 @@ func TestGoVersion(t *testing.T) {
 	}
 }
 
-func TestApplyTrackedVersion(t *testing.T) {
+func TestApplyDevVersion(t *testing.T) {
 	origVersion := Version
-	origTracked := trackedVersion
+	origCommit := Commit
 	defer func() {
 		Version = origVersion
-		trackedVersion = origTracked
+		Commit = origCommit
 	}()
 
-	t.Run("uses tracked version when build version is default", func(t *testing.T) {
+	t.Run("constructs pseudo-version from commit when build version is dev", func(t *testing.T) {
 		Version = "dev"
-		trackedVersion = "v2.3.4-dev\n"
+		Commit = "abcdef1234567890"
 
-		applyTrackedVersion()
+		applyDevVersion()
 
-		if Version != "v2.3.4-dev" {
-			t.Fatalf("Version = %q, want %q", Version, "v2.3.4-dev")
+		if Version != "v0.0.0-abcdef123456" {
+			t.Fatalf("Version = %q, want %q", Version, "v0.0.0-abcdef123456")
+		}
+	})
+
+	t.Run("handles dirty commit suffix", func(t *testing.T) {
+		Version = "dev"
+		Commit = "abcdef1234567890-dirty"
+
+		applyDevVersion()
+
+		if Version != "v0.0.0-abcdef123456-dirty" {
+			t.Fatalf("Version = %q, want %q", Version, "v0.0.0-abcdef123456-dirty")
 		}
 	})
 
 	t.Run("keeps explicit build version", func(t *testing.T) {
 		Version = "v9.9.9"
-		trackedVersion = "v2.3.4-dev"
+		Commit = "abcdef1234567890"
 
-		applyTrackedVersion()
+		applyDevVersion()
 
 		if Version != "v9.9.9" {
 			t.Fatalf("Version = %q, want %q", Version, "v9.9.9")
+		}
+	})
+
+	t.Run("falls back to v0.0.0 when commit is unknown", func(t *testing.T) {
+		Version = "dev"
+		Commit = "unknown"
+
+		applyDevVersion()
+
+		if Version != "v0.0.0" {
+			t.Fatalf("Version = %q, want %q", Version, "v0.0.0")
 		}
 	})
 }

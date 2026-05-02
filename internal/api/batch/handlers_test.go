@@ -1227,6 +1227,137 @@ func TestExcludeBatchMovie(t *testing.T) {
 	}
 }
 
+func TestBatchExcludeMovies(t *testing.T) {
+	tests := []struct {
+		name           string
+		setupJob       func(*worker.JobQueue) (jobID string, movieIDs []string)
+		expectedStatus int
+		validateFn     func(*testing.T, *BatchExcludeResponse)
+	}{
+		{
+			name: "exclude multiple movies at once",
+			setupJob: func(jq *worker.JobQueue) (string, []string) {
+				job := jq.CreateJob([]string{"/path/to/IPX-535.mp4", "/path/to/ABC-123.mp4"})
+				job.UpdateFileResult("/path/to/IPX-535.mp4", &worker.FileResult{
+					FilePath:  "/path/to/IPX-535.mp4",
+					MovieID:   "IPX-535",
+					Status:    worker.JobStatusCompleted,
+					Data:      &models.Movie{ID: "IPX-535", Title: "Test Movie 1"},
+					StartedAt: time.Now(),
+				})
+				job.UpdateFileResult("/path/to/ABC-123.mp4", &worker.FileResult{
+					FilePath:  "/path/to/ABC-123.mp4",
+					MovieID:   "ABC-123",
+					Status:    worker.JobStatusCompleted,
+					Data:      &models.Movie{ID: "ABC-123", Title: "Test Movie 2"},
+					StartedAt: time.Now(),
+				})
+				return job.ID, []string{"IPX-535", "ABC-123"}
+			},
+			expectedStatus: 200,
+			validateFn: func(t *testing.T, resp *BatchExcludeResponse) {
+				assert.Len(t, resp.Excluded, 2)
+				assert.Contains(t, resp.Excluded, "IPX-535")
+				assert.Contains(t, resp.Excluded, "ABC-123")
+				assert.Empty(t, resp.Failed)
+				assert.NotNil(t, resp.Job)
+			},
+		},
+		{
+			name: "exclude mix of existing and non-existing movies",
+			setupJob: func(jq *worker.JobQueue) (string, []string) {
+				job := jq.CreateJob([]string{"/path/to/IPX-535.mp4"})
+				job.UpdateFileResult("/path/to/IPX-535.mp4", &worker.FileResult{
+					FilePath:  "/path/to/IPX-535.mp4",
+					MovieID:   "IPX-535",
+					Status:    worker.JobStatusCompleted,
+					Data:      &models.Movie{ID: "IPX-535", Title: "Test Movie"},
+					StartedAt: time.Now(),
+				})
+				return job.ID, []string{"IPX-535", "NONEXISTENT-999"}
+			},
+			expectedStatus: 200,
+			validateFn: func(t *testing.T, resp *BatchExcludeResponse) {
+				assert.Len(t, resp.Excluded, 1)
+				assert.Contains(t, resp.Excluded, "IPX-535")
+				assert.Len(t, resp.Failed, 1)
+				assert.Equal(t, "NONEXISTENT-999", resp.Failed[0].MovieID)
+			},
+		},
+		{
+			name: "exclude already-excluded movie is idempotent",
+			setupJob: func(jq *worker.JobQueue) (string, []string) {
+				job := jq.CreateJob([]string{"/path/to/IPX-535.mp4"})
+				job.UpdateFileResult("/path/to/IPX-535.mp4", &worker.FileResult{
+					FilePath:  "/path/to/IPX-535.mp4",
+					MovieID:   "IPX-535",
+					Status:    worker.JobStatusCompleted,
+					Data:      &models.Movie{ID: "IPX-535", Title: "Test Movie"},
+					StartedAt: time.Now(),
+				})
+				job.ExcludeFile("/path/to/IPX-535.mp4")
+				return job.ID, []string{"IPX-535"}
+			},
+			expectedStatus: 200,
+			validateFn: func(t *testing.T, resp *BatchExcludeResponse) {
+				assert.Len(t, resp.Excluded, 1)
+				assert.Contains(t, resp.Excluded, "IPX-535")
+				assert.Empty(t, resp.Failed)
+			},
+		},
+		{
+			name: "job not found",
+			setupJob: func(jq *worker.JobQueue) (string, []string) {
+				return "nonexistent-job", []string{"IPX-535"}
+			},
+			expectedStatus: 404,
+		},
+		{
+			name: "empty movie_ids returns 400",
+			setupJob: func(jq *worker.JobQueue) (string, []string) {
+				job := jq.CreateJob([]string{"/path/to/IPX-535.mp4"})
+				job.UpdateFileResult("/path/to/IPX-535.mp4", &worker.FileResult{
+					FilePath:  "/path/to/IPX-535.mp4",
+					MovieID:   "IPX-535",
+					Status:    worker.JobStatusCompleted,
+					Data:      &models.Movie{ID: "IPX-535", Title: "Test Movie"},
+					StartedAt: time.Now(),
+				})
+				return job.ID, []string{}
+			},
+			expectedStatus: 400,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			deps := createTestDeps(t, cfg, "")
+
+			jobID, movieIDs := tt.setupJob(deps.JobQueue)
+
+			router := gin.New()
+			router.POST("/batch/:id/movies/batch-exclude", batchExcludeMovies(deps))
+
+			body, _ := json.Marshal(BatchExcludeRequest{MovieIDs: movieIDs})
+			req := httptest.NewRequest("POST", "/batch/"+jobID+"/movies/batch-exclude", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code, "Response body: %s", w.Body.String())
+
+			if tt.validateFn != nil && w.Code == 200 {
+				var resp BatchExcludeResponse
+				err := json.Unmarshal(w.Body.Bytes(), &resp)
+				require.NoError(t, err)
+				tt.validateFn(t, &resp)
+			}
+		})
+	}
+}
+
 // TestUpdateBatchJob tests the update batch job endpoint
 func TestUpdateBatchJob(t *testing.T) {
 	tests := []struct {

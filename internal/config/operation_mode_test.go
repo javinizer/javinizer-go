@@ -33,9 +33,9 @@ func TestOperationModeConstants(t *testing.T) {
 			want:     "in-place",
 		},
 		{
-			name:     "metadata-only constant",
-			constant: types.OperationModeMetadataOnly,
-			want:     "metadata-only",
+			name:     "metadata-artwork constant",
+			constant: types.OperationModeMetadataArtwork,
+			want:     "metadata-artwork",
 		},
 		{
 			name:     "preview constant",
@@ -68,8 +68,8 @@ func TestIsValidOperationMode(t *testing.T) {
 			want:  true,
 		},
 		{
-			name:  "metadata-only is valid",
-			input: "metadata-only",
+			name:  "metadata-artwork is valid",
+			input: "metadata-artwork",
 			want:  true,
 		},
 		{
@@ -177,9 +177,9 @@ func TestGetOperationMode(t *testing.T) {
 			want:  types.OperationModeInPlace,
 		},
 		{
-			name:  "metadata-only returns metadata-only",
-			input: "metadata-only",
-			want:  types.OperationModeMetadataOnly,
+			name:  "metadata-artwork returns metadata-artwork",
+			input: "metadata-artwork",
+			want:  types.OperationModeMetadataArtwork,
 		},
 		{
 			name:  "preview returns preview",

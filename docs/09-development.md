@@ -164,11 +164,10 @@ GOOS=windows GOARCH=amd64 go build -o bin/javinizer-windows-amd64.exe ./cmd/javi
 
 Release automation is handled by `.github/workflows/cli-release.yml`.
 
-1. Update `internal/version/version.txt` with the intended version.
-2. Push a semver tag for release builds:
+1. Push a semver tag for release builds:
    - Stable: `vX.Y.Z`
    - Pre-release: `vX.Y.Z-alpha`, `vX.Y.Z-beta`, `vX.Y.Z-rc.1`, etc.
-3. Workflow builds artifacts and publishes GitHub release assets.
+2. Workflow builds artifacts and publishes GitHub release assets.
 
 Manual dispatch (`workflow_dispatch`) also supports snapshot/stable/prerelease runs.
 

@@ -447,6 +447,8 @@ func TestMovieRepository_Upsert(t *testing.T) {
 		found, err = repo.FindByID("IPX-064")
 		require.NoError(t, err)
 		assert.Len(t, found.Translations, 2)
+		assert.Equal(t, "Updated English Title", found.Translations[0].Title)
+		assert.Equal(t, "Chinese Title", found.Translations[1].Title)
 	})
 
 	t.Run("Upsert with ContentID derived from ID", func(t *testing.T) {

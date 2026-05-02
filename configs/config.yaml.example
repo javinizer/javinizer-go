@@ -512,3 +512,10 @@ mediainfo:
 
     # Timeout for CLI execution in seconds (default: 30)
     cli_timeout: 30
+
+# Web UI configuration
+webui:
+    # Default view mode for the review page
+    # Options: detail, grid-poster, grid-cover
+    # Default: grid-poster
+    default_review_view: grid-poster

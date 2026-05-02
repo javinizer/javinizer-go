@@ -535,3 +535,155 @@ func excludeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 		c.JSON(200, gin.H{"message": "Movie excluded from organization"})
 	}
 }
+
+const bulkExcludeMaxMovies = 100
+
+// batchExcludeMovies godoc
+// @Summary Bulk exclude movies from batch organization
+// @Description Exclude multiple movies from a batch job in a single request. Best-effort: excludes as many as possible and returns per-movie failures.
+// @Tags web
+// @Accept json
+// @Produce json
+// @Param id path string true "Job ID"
+// @Param request body BatchExcludeRequest true "Movie IDs to exclude"
+// @Success 200 {object} BatchExcludeResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/v1/batch/{id}/movies/batch-exclude [post]
+func batchExcludeMovies(deps *ServerDependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		jobID := c.Param("id")
+
+		var req BatchExcludeRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		if len(req.MovieIDs) == 0 {
+			c.JSON(400, ErrorResponse{Error: "movie_ids is required and must not be empty"})
+			return
+		}
+
+		if len(req.MovieIDs) > bulkExcludeMaxMovies {
+			c.JSON(400, ErrorResponse{Error: fmt.Sprintf("movie_ids must not exceed %d items", bulkExcludeMaxMovies)})
+			return
+		}
+
+		job, ok := deps.JobQueue.GetJobPointer(jobID)
+		if !ok {
+			c.JSON(404, ErrorResponse{Error: "Job not found"})
+			return
+		}
+
+		status := job.GetStatus()
+
+		var excluded []string
+		var failed []BatchExcludeFailed
+
+		for _, movieID := range req.MovieIDs {
+			var filePaths []string
+			for filePath, result := range status.Results {
+				if result.MovieID == movieID {
+					filePaths = append(filePaths, filePath)
+				}
+			}
+
+			if len(filePaths) == 0 {
+				for filePath, result := range status.Results {
+					if result.Data != nil {
+						if m, ok := result.Data.(*models.Movie); ok && m.ID == movieID {
+							filePaths = append(filePaths, filePath)
+						}
+					}
+				}
+			}
+
+			if len(filePaths) == 0 {
+				failed = append(failed, BatchExcludeFailed{
+					MovieID: movieID,
+					Error:   fmt.Sprintf("Movie %s not found in job", movieID),
+				})
+				continue
+			}
+
+			for _, filePath := range filePaths {
+				job.ExcludeFile(filePath)
+			}
+			excluded = append(excluded, movieID)
+		}
+
+		if job.AllFilesExcluded() {
+			job.MarkCancelled()
+			deps.JobQueue.PersistJob(job)
+			logging.Infof("All files excluded from batch job %s, marked as cancelled", jobID)
+		}
+
+		logging.Infof("Batch exclude: %d movie(s) excluded, %d failed from batch job %s", len(excluded), len(failed), jobID)
+
+		updatedStatus := job.GetStatus()
+		jobResponse := buildBatchJobResponse(updatedStatus)
+
+		if excluded == nil {
+			excluded = []string{}
+		}
+		if failed == nil {
+			failed = []BatchExcludeFailed{}
+		}
+
+		c.JSON(200, BatchExcludeResponse{
+			Excluded: excluded,
+			Failed:   failed,
+			Job:      jobResponse,
+		})
+	}
+}
+
+func buildBatchJobResponse(job *worker.BatchJob) *BatchJobResponse {
+	var completedAt *string
+	if job.CompletedAt != nil {
+		str := job.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
+		completedAt = &str
+	}
+
+	results := make(map[string]*BatchFileResult, len(job.Results))
+	for filePath, fileResult := range job.Results {
+		var endedAt *string
+		if fileResult.EndedAt != nil {
+			str := fileResult.EndedAt.Format("2006-01-02T15:04:05Z07:00")
+			endedAt = &str
+		}
+
+		results[filePath] = &BatchFileResult{
+			FilePath:       fileResult.FilePath,
+			MovieID:        fileResult.MovieID,
+			Status:         string(fileResult.Status),
+			Error:          fileResult.Error,
+			FieldSources:   fileResult.FieldSources,
+			ActressSources: fileResult.ActressSources,
+			Data:           fileResult.Data,
+			StartedAt:      fileResult.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+			EndedAt:        endedAt,
+			IsMultiPart:    fileResult.IsMultiPart,
+			PartNumber:     fileResult.PartNumber,
+			PartSuffix:     fileResult.PartSuffix,
+		}
+	}
+
+	return &BatchJobResponse{
+		ID:                    job.ID,
+		Status:                string(job.Status),
+		TotalFiles:            job.TotalFiles,
+		Completed:             job.Completed,
+		Failed:                job.Failed,
+		Excluded:              job.Excluded,
+		Progress:              job.Progress,
+		Destination:           job.Destination,
+		Results:               results,
+		StartedAt:             job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CompletedAt:           completedAt,
+		OperationModeOverride: job.OperationModeOverride,
+		Update:                job.GetUpdate(),
+		PersistError:          job.PersistError,
+	}
+}

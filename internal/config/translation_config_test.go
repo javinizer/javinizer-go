@@ -220,3 +220,69 @@ func TestTranslationConfig_SettingsHash(t *testing.T) {
 		assert.NotEqual(t, cfg1.SettingsHash(), cfg2.SettingsHash(), "thinking toggle should affect hash")
 	})
 }
+
+func TestOpenAICompatibleTranslationConfig_NormalizedBackendType(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"empty string", "", ""},
+		{"auto", "auto", ""},
+		{"auto with whitespace", " Auto ", ""},
+		{"vllm", "vllm", "vllm"},
+		{"vllm uppercase", "VLLM", "vllm"},
+		{"ollama", "ollama", "ollama"},
+		{"llama.cpp", "llama.cpp", "llama.cpp"},
+		{"llamacpp", "llamacpp", "llama.cpp"},
+		{"llama_cpp", "llama_cpp", "llama.cpp"},
+		{"other", "other", "other"},
+		{"generic", "generic", "other"},
+		{"unknown passthrough", "mybackend", "mybackend"},
+		{"unknown passthrough uppercase", "MyBackend", "mybackend"},
+		{"whitespace trimmed", "  vllm  ", "vllm"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := OpenAICompatibleTranslationConfig{BackendType: tc.input}
+			assert.Equal(t, tc.expected, cfg.NormalizedBackendType())
+		})
+	}
+}
+
+func TestOpenAICompatibleTranslationConfig_EffectiveEnableThinking(t *testing.T) {
+	t.Run("nil returns false", func(t *testing.T) {
+		cfg := OpenAICompatibleTranslationConfig{}
+		assert.False(t, cfg.EffectiveEnableThinking())
+	})
+
+	t.Run("true pointer returns true", func(t *testing.T) {
+		v := true
+		cfg := OpenAICompatibleTranslationConfig{EnableThinking: &v}
+		assert.True(t, cfg.EffectiveEnableThinking())
+	})
+
+	t.Run("false pointer returns false", func(t *testing.T) {
+		v := false
+		cfg := OpenAICompatibleTranslationConfig{EnableThinking: &v}
+		assert.False(t, cfg.EffectiveEnableThinking())
+	})
+}
+
+func TestNFOConfig_IsUnknownActressFallback(t *testing.T) {
+	t.Run("returns true when mode is fallback", func(t *testing.T) {
+		n := NFOConfig{UnknownActressMode: "fallback"}
+		assert.True(t, n.IsUnknownActressFallback())
+	})
+
+	t.Run("returns false when mode is not fallback", func(t *testing.T) {
+		n := NFOConfig{UnknownActressMode: "skip"}
+		assert.False(t, n.IsUnknownActressFallback())
+	})
+
+	t.Run("returns false when mode is empty", func(t *testing.T) {
+		n := NFOConfig{}
+		assert.False(t, n.IsUnknownActressFallback())
+	})
+}

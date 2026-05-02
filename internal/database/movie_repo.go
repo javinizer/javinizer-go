@@ -90,7 +90,7 @@ func (r *MovieRepository) Upsert(movie *models.Movie) (*models.Movie, error) {
 			}
 
 			if !existingFound {
-				if err := tx.Omit("Actresses", "Genres").Create(movie).Error; err != nil {
+				if err := tx.Omit("Actresses", "Genres", "Translations").Create(movie).Error; err != nil {
 					if errors.Is(err, gorm.ErrDuplicatedKey) {
 						var existingMovie models.Movie
 						loadErr := tx.Select("created_at").First(&existingMovie, "content_id = ?", movie.ContentID).Error

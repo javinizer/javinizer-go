@@ -267,7 +267,7 @@ func TestPlan_InPlaceFallbackToOrganize(t *testing.T) {
 		}
 	})
 
-	t.Run("Metadata-only mode with mixed IDs stays in source", func(t *testing.T) {
+	t.Run("Metadata-artwork mode with mixed IDs stays in source", func(t *testing.T) {
 		sourceDir := filepath.Join(tmpDir, "mixed-no-move")
 		if err := os.MkdirAll(sourceDir, 0755); err != nil {
 			t.Fatalf("Failed to create source dir: %v", err)
@@ -280,7 +280,7 @@ func TestPlan_InPlaceFallbackToOrganize(t *testing.T) {
 		}
 
 		cfg := &config.OutputConfig{
-			OperationMode: types.OperationModeMetadataOnly,
+			OperationMode: types.OperationModeMetadataArtwork,
 			FolderFormat:  "<ID> - <TITLE>",
 			FileFormat:    "<ID>",
 			RenameFile:    true,

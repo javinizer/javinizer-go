@@ -5,8 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,6 +64,45 @@ func TestGetJob(t *testing.T) {
 				assert.Equal(t, int64(0), item.OperationCount)
 				assert.Equal(t, int64(0), item.RevertedCount)
 				assert.Equal(t, "completed", item.Status)
+			},
+		},
+		{
+			name: "reverted job includes reverted_at",
+			setupFn: func(t *testing.T, deps *ServerDependencies) string {
+				now := time.Now()
+				job := &models.Job{
+					ID:          uuid.New().String(),
+					Status:      string(models.JobStatusReverted),
+					TotalFiles:  2,
+					Completed:   2,
+					Failed:      0,
+					Progress:    1.0,
+					Destination: "/dest/reverted",
+					StartedAt:   now.Add(-2 * time.Hour),
+					RevertedAt:  &now,
+				}
+				require.NoError(t, deps.JobRepo.Create(job))
+				return job.ID
+			},
+			expectedStatus: http.StatusOK,
+			validateFn: func(t *testing.T, body []byte) {
+				var item JobListItem
+				require.NoError(t, json.Unmarshal(body, &item))
+				assert.Equal(t, "reverted", item.Status)
+				assert.NotNil(t, item.RevertedAt)
+			},
+		},
+		{
+			name: "organized job includes organized_at",
+			setupFn: func(t *testing.T, deps *ServerDependencies) string {
+				return seedJobsData(t, deps)
+			},
+			expectedStatus: http.StatusOK,
+			validateFn: func(t *testing.T, body []byte) {
+				var item JobListItem
+				require.NoError(t, json.Unmarshal(body, &item))
+				assert.Equal(t, "organized", item.Status)
+				assert.NotNil(t, item.OrganizedAt)
 			},
 		},
 	}

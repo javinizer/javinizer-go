@@ -3,7 +3,6 @@
 # Runs fast checks before allowing a commit
 #
 # Installation: cp scripts/pre-commit.sample .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
-# Dependencies: chmod +x scripts/validate-config-sync.sh
 # To skip this hook temporarily: git commit --no-verify
 
 set -e
@@ -14,6 +13,15 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+FORBIDDEN_PATHS=".planning/"
+
+for path in $FORBIDDEN_PATHS; do
+    if git diff --cached --name-only | grep -q "^${path}"; then
+        echo -e "${RED}✗ Blocked: ${path} must not be committed (found in staged files)${NC}"
+        exit 1
+    fi
+done
 
 # Golangci-lint configuration
 GOLANGCI_LINT="${HOME}/go/bin/golangci-lint"
@@ -137,25 +145,21 @@ fi
 echo -e "${GREEN}✓ Swagger documentation up to date${NC}"
 echo ""
 
-# Check 7: Config synchronization validation
-echo -e "${BLUE}[7/7] Validating config.yaml.example sync with DefaultConfig()...${NC}"
-if [[ -x "./scripts/validate-config-sync.sh" ]]; then
-    if ! ./scripts/validate-config-sync.sh 2>&1; then
-        echo -e "${RED}✗ Config synchronization check failed${NC}"
-        echo ""
-        echo -e "${YELLOW}config.yaml.example and DefaultConfig() have drifted.${NC}"
-        echo -e "${YELLOW}Run the test for details: go test -v -run TestDefaultConfigMatchesExample ./internal/config/...${NC}"
-        echo ""
-        echo -e "${YELLOW}To fix:${NC}"
-        echo -e "${YELLOW}  1. Update internal/config/defaults.go to match configs/config.yaml.example${NC}"
-        echo -e "${YELLOW}  2. Or update configs/config.yaml.example to match internal/config/defaults.go${NC}"
-        echo -e "${YELLOW}  3. Ensure both represent the same default configuration${NC}"
-        exit 1
+# Check 7: Frontend type checking (only if frontend files changed)
+FRONTEND_CHANGED=$(git diff --cached --name-only | grep -c "^web/frontend/src/" || true)
+if [ "$FRONTEND_CHANGED" -gt 0 ]; then
+    echo -e "${BLUE}[7/7] Running frontend type check (svelte-check)...${NC}"
+    if [ -d "web/frontend/node_modules" ]; then
+        if ! (cd web/frontend && npx svelte-check --threshold error) 2>&1; then
+            echo -e "${RED}✗ Frontend type check failed${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✓ Frontend type check passed${NC}"
+    else
+        echo -e "${YELLOW}⚠ Frontend dependencies not installed, skipping type check${NC}"
     fi
-    echo -e "${GREEN}✓ Config synchronization OK${NC}"
 else
-    echo -e "${YELLOW}⚠ validate-config-sync.sh not found or not executable (skipping)${NC}"
-    echo -e "${YELLOW}  Run: chmod +x scripts/validate-config-sync.sh${NC}"
+    echo -e "${BLUE}[7/7] Frontend type check${NC} (skipped — no frontend changes)"
 fi
 echo ""
 

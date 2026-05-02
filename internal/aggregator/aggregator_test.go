@@ -2355,3 +2355,61 @@ func (m *mockWordRepo) GetReplacementMap() (map[string]string, error) {
 	}
 	return m.replacements, nil
 }
+
+func TestApplyActressAlias(t *testing.T) {
+	agg := &Aggregator{
+		actressAliasCache: map[string]string{
+			"波多野結衣":      "Hatano Yui",
+			"Yui Hatano": "Hatano Yui",
+			"Hatano Yui": "Hatano Yui",
+		},
+	}
+
+	t.Run("replaces japanese name with canonical", func(t *testing.T) {
+		actress := &models.Actress{JapaneseName: "波多野結衣"}
+		agg.applyActressAlias(actress)
+		assert.Equal(t, "Hatano Yui", actress.JapaneseName)
+	})
+
+	t.Run("replaces first+last name with canonical split", func(t *testing.T) {
+		actress := &models.Actress{FirstName: "Yui", LastName: "Hatano"}
+		agg.applyActressAlias(actress)
+		assert.Equal(t, "Hatano", actress.LastName)
+		assert.Equal(t, "Yui", actress.FirstName)
+	})
+
+	t.Run("replaces reversed name with canonical", func(t *testing.T) {
+		agg2 := &Aggregator{
+			actressAliasCache: map[string]string{
+				"Hatano Yui": "Hatano Yui",
+			},
+		}
+		actress := &models.Actress{FirstName: "Yui", LastName: "Hatano"}
+		agg2.applyActressAlias(actress)
+		assert.Equal(t, "Hatano", actress.LastName)
+		assert.Equal(t, "Yui", actress.FirstName)
+	})
+
+	t.Run("no match leaves actress unchanged", func(t *testing.T) {
+		actress := &models.Actress{JapaneseName: "未知名"}
+		agg.applyActressAlias(actress)
+		assert.Equal(t, "未知名", actress.JapaneseName)
+	})
+
+	t.Run("empty names do nothing", func(t *testing.T) {
+		actress := &models.Actress{}
+		agg.applyActressAlias(actress)
+		assert.Equal(t, "", actress.JapaneseName)
+	})
+
+	t.Run("canonical single name sets japanese name", func(t *testing.T) {
+		agg2 := &Aggregator{
+			actressAliasCache: map[string]string{
+				"Yui Hatano": "波多野結衣",
+			},
+		}
+		actress := &models.Actress{FirstName: "Yui", LastName: "Hatano"}
+		agg2.applyActressAlias(actress)
+		assert.Equal(t, "波多野結衣", actress.JapaneseName)
+	})
+}

@@ -233,7 +233,7 @@ func (r *ActressRepository) Search(query string) ([]models.Actress, error) {
 	err := r.GetDB().Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
 		searchPattern, searchPattern, searchPattern).
 		Order("japanese_name ASC, last_name ASC, first_name ASC").
-		Limit(20).
+		Limit(50).
 		Find(&actresses).Error
 	if err != nil {
 		return nil, wrapDBErr("search", "actresses", err)

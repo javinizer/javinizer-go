@@ -6,13 +6,12 @@
 	import { fade, scale, slide } from 'svelte/transition';
 	import { portalToBody } from '$lib/actions/portal';
 	import FileBrowser from '$lib/components/FileBrowser.svelte';
-	import ProgressModal from '$lib/components/ProgressModal.svelte';
-	import BackgroundJobIndicator from '$lib/components/BackgroundJobIndicator.svelte';
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
+	import { startJob } from '$lib/stores/background-job.svelte';
 	import { createConfigQuery, createScrapersQuery } from '$lib/query/queries';
 	import { Play, FolderOutput, FolderOpen, FileEdit, FileText, RotateCcw, LoaderCircle, RefreshCw, Settings, ChevronUp, ChevronDown, X, Scan } from 'lucide-svelte';
 	import type { Scraper, FileInfo, Config } from '$lib/api/types';
@@ -20,8 +19,6 @@
 
 	type BrowseMode = 'scrape' | 'update';
 	let selectedFiles: string[] = $state([]);
-	let currentJobId: string | null = $state(null);
-	let showProgress = $state(false);
 	let scraping = $state(false);
 	let forceRefresh = $state(false);
 	let operationMode: BrowseMode = $state('scrape');
@@ -94,7 +91,7 @@
 
 	let isInPlaceImplied: boolean = $derived.by(() => {
 		if (destinationPath.trim() === '' || destinationPath.trim() !== initialPath.trim()) return false;
-		const output = config?.output as Record<string, any> | undefined;
+		const output = config?.output;
 		if (output?.folder_format) return false;
 		if (output?.subfolder_format && output.subfolder_format.length > 0) return false;
 		return true;
@@ -266,7 +263,7 @@
 				array_strategy: isUpdateMode ? arrayStrategy : undefined,
 				operation_mode: effectiveOperationMode,
 			});
-			currentJobId = response.job_id;
+			startJob(response.job_id);
 			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
 
 			const modeText = isUpdateMode ? 'Updating metadata' : 'Batch scraping';
@@ -274,8 +271,6 @@
 				`${modeText} started for ${selectedFiles.length} file${selectedFiles.length !== 1 ? 's' : ''}`,
 				5000
 			);
-
-			showProgress = true;
 		} catch (error) {
 			// Show error toast
 			const errorMessage = error instanceof Error ? error.message : 'Failed to start batch operation';
@@ -283,19 +278,6 @@
 		} finally {
 			scraping = false;
 		}
-	}
-
-	function closeProgress() {
-		showProgress = false;
-		// Keep the job ID so user can reopen if needed
-	}
-
-	function reopenProgress() {
-		showProgress = true;
-	}
-
-	function dismissBackgroundIndicator() {
-		currentJobId = null;
 	}
 
 	function openDestinationBrowser() {
@@ -333,7 +315,7 @@
 			initialPath = response.path;
 			destinationPath = response.path;
 		} catch (error) {
-			console.error('Failed to get current working directory:', error);
+			toastStore.error('Failed to get current working directory');
 		}
 	}
 </script>
@@ -514,7 +496,7 @@
 						{ value: 'organize' as OperationMode, label: 'Organize', desc: 'Move to folder', icon: FolderOutput },
 						{ value: 'in-place' as OperationMode, label: 'Reorganize in place', desc: 'Keep location, rename folder and file', icon: FolderOpen },
 						{ value: 'in-place-norenamefolder' as OperationMode, label: 'Rename file only', desc: 'Rename video file, keep folder', icon: FileEdit },
-						{ value: 'metadata-only' as OperationMode, label: 'Metadata only', desc: 'No file changes', icon: FileText },
+						{ value: 'metadata-artwork' as OperationMode, label: 'Metadata & Artwork', desc: 'No file changes', icon: FileText },
 					] as mode}
 						{@const disabled = isInPlaceImplied && (mode.value === 'organize' || mode.value === 'in-place')}
 						<button
@@ -612,8 +594,8 @@
 					<!-- Files List -->
 					<div class="max-h-60 overflow-y-auto space-y-1 border rounded-md p-2 bg-accent/20">
 						{#each selectedFiles as filePath (filePath)}
-							{@const fileName = filePath.split('/').pop()}
-							{@const dirPath = filePath.substring(0, filePath.lastIndexOf('/'))}
+						{@const fileName = filePath.split(/[\\/]/).pop()}
+						{@const dirPath = filePath.substring(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')))}
 							<div animate:flip={{ duration: 220, easing: quintOut }}>
 								<div
 									class="flex items-center justify-between bg-background px-3 py-2 rounded border hover:border-primary transition-colors group"
@@ -838,16 +820,6 @@
 	</div>
 </div>
 
-<!-- Progress Modal -->
-{#if showProgress && currentJobId}
-	<ProgressModal
-		jobId={currentJobId}
-		destination={destinationPath}
-		updateMode={operationMode === 'update'}
-		onClose={closeProgress}
-	/>
-{/if}
-
 <!-- Destination Browser Modal -->
 {#if showDestinationBrowser}
 	<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" use:portalToBody in:fade|local={{ duration: 140 }} out:fade|local={{ duration: 120 }}>
@@ -904,13 +876,4 @@
 			</div>
 		</div>
 	</div>
-{/if}
-
-<!-- Background Job Indicator -->
-{#if currentJobId && !showProgress}
-	<BackgroundJobIndicator
-		jobId={currentJobId}
-		onReopen={reopenProgress}
-		onDismiss={dismissBackgroundIndicator}
-	/>
 {/if}

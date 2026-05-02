@@ -638,7 +638,7 @@ javinizer sort ~/unsorted --dry-run
 - No downloads occur
 - Perfect for testing
 
-### Example 4: Metadata Only
+### Example 4: Metadata & Artwork
 
 ```bash
 javinizer sort ~/Videos \

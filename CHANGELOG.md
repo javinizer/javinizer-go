@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.3-alpha] - 2026-05-02
+
+### Added
+
+- Completeness scoring system with configurable essential/important/nice-to-have tiers and weighted percentage calculation
+- CompletenessDial SVG component with tier-appropriate colors (red/yellow/green) and hover breakdown tooltip
+- Completeness filter buttons on review page to filter movies by Incomplete/Partial/Complete
+- Grid card selection mode with shift-click range selection, select all/deselect all, and bulk exclude/rescrape actions
+- Review page grid view with poster and cover display modes (3-column layout for cover art)
+- WebUI config section with `default_review_view` setting (detail, grid-poster, grid-cover) and settings UI
+- Runes-based global background-job store (`$state`) replacing local component state for cross-page persistence
+- BackgroundJobIndicator and ProgressModal moved to authenticated layout so they persist across page navigation
+- BackgroundJobIndicator redesigned as theme-aware card (`bg-card`) with status-tinted rings and lucide icons
+- All Go backend job statuses handled in indicator and modal (completed, failed, cancelled, organized, reverted, pending, running)
+- Status-specific success messages in ProgressModal (scraping completed, organization complete, revert complete)
+- Real-time job progress synchronization on /jobs page via WebSocket-derived `computeJobProgress` utility
+- Auto-polling (5s interval) for running jobs on /jobs page, stopping when no jobs are running
+- `liveProgress` in ProgressModal derived from WebSocket data instead of REST API polling
+- Shared `$lib/utils/job-progress.ts` utility with `TERMINAL_STATUSES`, `isTerminalStatus()`, and `computeJobProgress()`
+- `clearJobMessages()` method on websocket store for evicting stale per-job data
+- WebSocket store deep-copy for `messagesByFile` per-job records (store immutability)
+- Capped WebSocket `messages` array at 200 entries to prevent unbounded growth
+- Playwright E2E test suite (98 tests) for review page: completeness dial, selection mode, bulk actions, view toggle, keyboard navigation, filter persistence, and edge cases
+- Review state unit tests for completeness computation and view mode handling
+- Completeness utility tests for tier scoring, edge cases, and custom weight validation
+- Batch rescrape endpoint with scraper selection, NFO merge strategy presets, and progress indicator
+- Batch exclude endpoint with per-movie and bulk exclusion support
+- Movie edit PATCH endpoint for inline field editing on review page
+- `Update` field persisted on `BatchJob` and `BatchJobSlim` for update mode tracking
+- Database migration `000008_jobs_update_column.sql` for jobs update column
+- Comprehensive backend test coverage: batch rescrape (unit + integration), batch exclude integration, API handlers (actress, auth, genre, history, events, version, system, jobs), config validation/redact, NFO merger DMMID preservation, database helpers/race branches, WebSocket hub nil guards, fsutil move, httpclient builder, DMM scraper helpers, worker single_scrape branches
+
+### Changed
+
+- Rename `metadata-only` operation mode to `metadata-artwork` across codebase (Go types, organizer strategy, config, tests)
+- Derive version from git tags/commit hash instead of embedded `version.txt` file (removed `version.txt`)
+- Review page view mode is now 3-state: `detail | grid-poster | grid-cover` (legacy `grid` maps to `grid-poster`)
+- ProgressModal uses two separate `$effect` blocks with `untrack()` to avoid `cancelRedirect` circular dependency
+- ProgressModal auto-redirect countdown now guarded by `hasNavigated` flag preventing duplicate navigation
+- ProgressModal `latestMessage` derived from `messagesByFile` instead of capped `messages` array
+- `TERMINAL_STATUSES` aligned with Go backend: `completed`, `failed`, `cancelled`, `organized`, `reverted` (removed non-existent `done` and `skipped`)
+- `createBatchJobPollingQuery` uses `isTerminalStatus()` to stop polling for all terminal statuses
+- Homepage `activeJobCount` uses shared `isTerminalStatus` utility instead of inline Set
+- E2E test selectors updated from `/^grid$/i` to `/^poster$/i` for view mode toggle buttons
+
+### Fixed
+
+- Scraped movies now always persisted to database regardless of custom scraper selection
+- NFO actress merge preserves DMMIDs from scraped data when matching by JapaneseName or romanized name
+- Omit `Translations` in `Upsert` to prevent transaction rollback on orphaned rows
+- Frontend review page reads destination from job data instead of query param
+- Actress search switched to server-side to prevent client-side performance issues
+- svelte-check added to pre-commit hook to catch TypeScript errors early
+- BackgroundJobIndicator auto-dismiss timer re-arms when user closes modal after terminal status (tracks `showModal` as dependency)
+- Auto-dismiss timer callback guards against null `jobId` and verifies prop matches store's current jobId
+- ProgressModal dismisses job store state after successful `goto()` navigation (handles rejection too)
+- `reopenModal()` guards against null `jobId` to prevent inconsistent store state
+- `Math.max(0, ...)` for remaining files count when `completed + failed > total_files` (retry scenarios)
+- Windows path separators handled in browse page file display (`split(/[\\/]/)`)
+- Unnecessary `Record<string, any>` type assertion removed from browse page config access
+
 ## [v0.3.2-alpha] - 2026-05-01
 
 ### Added
@@ -19,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MediaInfo OOM issues — use mp4.DecModeLazyMdat to skip mdat data in MP4/MOV parsing, add 16MB element size cap in EBML reader, fix EBML readVintSize mask bug for lengths 3-6
+- Replace ebml-go with manual EBML parser and add mp4_fallback.go for manual ISOBMFF parsing when mp4ff fails
+- Remove FLV support (flv.go, flv_test.go)
 - TokenService.Validate() now uses synchronous UpdateLastUsed matching middleware behavior
 - Token CRUD endpoints moved to writeProtected group with IP rate limiting
 

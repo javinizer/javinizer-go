@@ -535,6 +535,253 @@ func TestListActresses_Sorting(t *testing.T) {
 	assert.Equal(t, 10, resp.Actresses[2].DMMID)
 }
 
+func TestExportActresses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+	setupActresses(t, repo, []models.Actress{
+		{DMMID: 100, FirstName: "Yui", LastName: "Hatano", JapaneseName: "波多野結衣"},
+		{DMMID: 101, FirstName: "Ai", LastName: "Uehara", JapaneseName: "上原亜衣"},
+	})
+
+	router := gin.New()
+	router.GET("/actresses/export", exportActresses(repo))
+
+	req := httptest.NewRequest("GET", "/actresses/export", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var actresses []models.Actress
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &actresses))
+	assert.Len(t, actresses, 2)
+}
+
+func TestExportActresses_Empty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+
+	router := gin.New()
+	router.GET("/actresses/export", exportActresses(repo))
+
+	req := httptest.NewRequest("GET", "/actresses/export", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var actresses []models.Actress
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &actresses))
+	assert.Len(t, actresses, 0)
+}
+
+func TestImportActresses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+
+	router := gin.New()
+	router.POST("/actresses/import", importActresses(repo))
+
+	importPayload := map[string]interface{}{
+		"actresses": []map[string]interface{}{
+			{"dmm_id": 200, "first_name": "Imported", "japanese_name": "インポート"},
+			{"dmm_id": 201, "first_name": "Another", "japanese_name": "アナザー"},
+		},
+	}
+	body, _ := json.Marshal(importPayload)
+
+	req := httptest.NewRequest("POST", "/actresses/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var summary importSummaryResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &summary))
+	assert.Equal(t, 2, summary.Imported)
+	assert.Equal(t, 0, summary.Skipped)
+	assert.Equal(t, 0, summary.Errors)
+}
+
+func TestImportActresses_InvalidJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+
+	router := gin.New()
+	router.POST("/actresses/import", importActresses(repo))
+
+	req := httptest.NewRequest("POST", "/actresses/import", bytes.NewReader([]byte("invalid json")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestImportActresses_SkipsInvalid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+
+	router := gin.New()
+	router.POST("/actresses/import", importActresses(repo))
+
+	importPayload := map[string]interface{}{
+		"actresses": []map[string]interface{}{
+			{"dmm_id": 300, "first_name": "Valid", "japanese_name": "有効"},
+			{"dmm_id": -1, "first_name": "BadID", "japanese_name": "無効ID"},
+			{"dmm_id": 301, "first_name": "", "japanese_name": ""},
+		},
+	}
+	body, _ := json.Marshal(importPayload)
+
+	req := httptest.NewRequest("POST", "/actresses/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var summary importSummaryResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &summary))
+	assert.Equal(t, 1, summary.Imported)
+	assert.Equal(t, 2, summary.Errors)
+}
+
+func TestImportActresses_ExistingUnchanged(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+	require.NoError(t, repo.Create(&models.Actress{DMMID: 400, FirstName: "Existing", JapaneseName: "既存"}))
+
+	router := gin.New()
+	router.POST("/actresses/import", importActresses(repo))
+
+	importPayload := map[string]interface{}{
+		"actresses": []map[string]interface{}{
+			{"dmm_id": 400, "first_name": "Existing", "japanese_name": "既存"},
+		},
+	}
+	body, _ := json.Marshal(importPayload)
+
+	req := httptest.NewRequest("POST", "/actresses/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var summary importSummaryResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &summary))
+	assert.Equal(t, 0, summary.Imported)
+	assert.Equal(t, 1, summary.Skipped)
+}
+
+func TestImportActresses_ExistingUpdated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+	require.NoError(t, repo.Create(&models.Actress{DMMID: 500, FirstName: "OldName", JapaneseName: "旧名"}))
+
+	router := gin.New()
+	router.POST("/actresses/import", importActresses(repo))
+
+	importPayload := map[string]interface{}{
+		"actresses": []map[string]interface{}{
+			{"dmm_id": 500, "first_name": "NewName", "japanese_name": "旧名"},
+		},
+	}
+	body, _ := json.Marshal(importPayload)
+
+	req := httptest.NewRequest("POST", "/actresses/import", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var summary importSummaryResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &summary))
+	assert.Equal(t, 1, summary.Imported)
+	assert.Equal(t, 0, summary.Skipped)
+}
+
+func TestListActresses_EmptyDatabase(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+
+	router := gin.New()
+	router.GET("/actresses", listActresses(repo))
+
+	req := httptest.NewRequest("GET", "/actresses", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp actressesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, int64(0), resp.Total)
+	assert.Empty(t, resp.Actresses)
+}
+
+func TestListActresses_Pagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+	for i := 0; i < 5; i++ {
+		require.NoError(t, repo.Create(&models.Actress{
+			DMMID:     600 + i,
+			FirstName: fmt.Sprintf("Actress%d", i),
+		}))
+	}
+
+	router := gin.New()
+	router.GET("/actresses", listActresses(repo))
+
+	req := httptest.NewRequest("GET", "/actresses?limit=2&offset=0", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp actressesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, int64(5), resp.Total)
+	assert.Len(t, resp.Actresses, 2)
+	assert.Equal(t, 2, resp.Limit)
+	assert.Equal(t, 0, resp.Offset)
+}
+
+func TestUpdateActress_NotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+
+	router := gin.New()
+	router.PUT("/actresses/:id", updateActress(repo))
+
+	payload := map[string]interface{}{
+		"dmm_id":        999,
+		"first_name":    "Updated",
+		"japanese_name": "更新",
+	}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest("PUT", "/actresses/9999", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
 func toString(id uint) string {
 	return strconv.FormatUint(uint64(id), 10)
 }

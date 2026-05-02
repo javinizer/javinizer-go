@@ -29,9 +29,9 @@ func TestParseOperationMode(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "metadata-only mode",
-			input:   "metadata-only",
-			want:    OperationModeMetadataOnly,
+			name:    "metadata-artwork mode",
+			input:   "metadata-artwork",
+			want:    OperationModeMetadataArtwork,
 			wantErr: false,
 		},
 		{
@@ -92,8 +92,8 @@ func TestOperationMode_IsValid(t *testing.T) {
 			valid: true,
 		},
 		{
-			name:  "metadata-only is valid",
-			mode:  OperationModeMetadataOnly,
+			name:  "metadata-artwork is valid",
+			mode:  OperationModeMetadataArtwork,
 			valid: true,
 		},
 		{
@@ -135,8 +135,8 @@ func TestOrganizerAliases_MatchTypesPackage(t *testing.T) {
 		assert.Equal(t, types.OperationModeInPlace, OperationModeInPlace)
 	})
 
-	t.Run("OperationModeMetadataOnly constant matches types package", func(t *testing.T) {
-		assert.Equal(t, types.OperationModeMetadataOnly, OperationModeMetadataOnly)
+	t.Run("OperationModeMetadataArtwork constant matches types package", func(t *testing.T) {
+		assert.Equal(t, types.OperationModeMetadataArtwork, OperationModeMetadataArtwork)
 	})
 
 	t.Run("OperationModePreview constant matches types package", func(t *testing.T) {

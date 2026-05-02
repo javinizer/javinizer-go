@@ -197,6 +197,23 @@ func DefaultConfig() *Config {
 				IncludeTrailer:       true,
 				RatingSource:         getFirstScraperPriority(),
 			},
+			Completeness: CompletenessConfig{
+				Enabled: false,
+				Tiers: CompletenessTierConfig{
+					Essential: CompletenessTierDefinition{
+						Weight: 50,
+						Fields: []string{"title", "poster_url", "cover_url", "actresses", "genres"},
+					},
+					Important: CompletenessTierDefinition{
+						Weight: 35,
+						Fields: []string{"description", "maker", "release_date", "director", "runtime", "trailer_url", "screenshot_urls"},
+					},
+					NiceToHave: CompletenessTierDefinition{
+						Weight: 15,
+						Fields: []string{"label", "series", "rating_score", "original_title", "translations"},
+					},
+				},
+			},
 		},
 		Matching: MatchingConfig{
 			Extensions:      []string{".mp4", ".mkv", ".avi", ".wmv", ".flv"},
@@ -266,6 +283,9 @@ func DefaultConfig() *Config {
 			VersionCheckEnabled:       true,
 			VersionCheckIntervalHours: 24,
 			TempDir:                   DefaultTempDir,
+		},
+		WebUI: WebUIConfig{
+			DefaultReviewView: "grid-poster",
 		},
 	}
 }

@@ -177,7 +177,7 @@ type BatchScrapeRequest struct {
 	Preset           string   `json:"preset,omitempty" example:"conservative"`        // Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)
 	ScalarStrategy   string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"` // For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
 	ArrayStrategy    string   `json:"array_strategy,omitempty" example:"merge"`       // For Update mode: merge, replace
-	OperationMode    string   `json:"operation_mode,omitempty" example:"organize"`    // Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-only, preview
+	OperationMode    string   `json:"operation_mode,omitempty" example:"organize"`    // Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-artwork, preview
 }
 
 // BatchScrapeResponse represents batch scrape response
@@ -281,6 +281,7 @@ type BatchJobResponse struct {
 	StartedAt             string                      `json:"started_at"`
 	CompletedAt           *string                     `json:"completed_at,omitempty"`
 	OperationModeOverride string                      `json:"operation_mode_override,omitempty"`
+	Update                bool                        `json:"update"`
 	PersistError          string                      `json:"persist_error,omitempty"`
 }
 
@@ -298,6 +299,7 @@ type BatchJobResponseSlim struct {
 	StartedAt             string                          `json:"started_at"`
 	CompletedAt           *string                         `json:"completed_at,omitempty"`
 	OperationModeOverride string                          `json:"operation_mode_override,omitempty"`
+	Update                bool                            `json:"update"`
 	PersistError          string                          `json:"persist_error,omitempty"`
 }
 
@@ -533,4 +535,48 @@ type OverlapInfo struct {
 	JobID          string `json:"job_id" example:"660e8400-e29b-41d4-a716-446655440001"`
 	CreatedAt      string `json:"created_at" example:"2026-04-12T12:00:00Z"`
 	OperationCount int    `json:"operation_count" example:"3"`
+}
+
+// BatchExcludeRequest represents a request to exclude multiple movies from a batch job
+type BatchExcludeRequest struct {
+	MovieIDs []string `json:"movie_ids" binding:"required" example:"IPX-535,ABC-123"`
+}
+
+// BatchExcludeFailed represents a per-movie failure during batch exclude
+type BatchExcludeFailed struct {
+	MovieID string `json:"movie_id" example:"IPX-535"`
+	Error   string `json:"error" example:"Movie not found in job"`
+}
+
+// BatchExcludeResponse represents the result of a batch exclude operation
+type BatchExcludeResponse struct {
+	Excluded []string             `json:"excluded"`
+	Failed   []BatchExcludeFailed `json:"failed"`
+	Job      *BatchJobResponse    `json:"job"`
+}
+
+// BulkRescrapeRequest represents a request to rescrape multiple movies in a batch job
+type BulkRescrapeRequest struct {
+	MovieIDs         []string `json:"movie_ids" binding:"required" example:"IPX-535,ABC-123"`
+	SelectedScrapers []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
+	Force            bool     `json:"force" example:"false"`
+	Preset           string   `json:"preset,omitempty" example:"conservative"`
+	ScalarStrategy   string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"`
+	ArrayStrategy    string   `json:"array_strategy,omitempty" example:"merge"`
+}
+
+// BulkRescrapeMovieResult represents the per-movie result of a bulk rescrape operation
+type BulkRescrapeMovieResult struct {
+	MovieID string        `json:"movie_id" example:"IPX-535"`
+	Status  string        `json:"status" example:"success"`
+	Error   string        `json:"error,omitempty" example:"Movie not found in job"`
+	Movie   *models.Movie `json:"movie,omitempty"`
+}
+
+// BulkRescrapeResponse represents the result of a bulk rescrape operation
+type BulkRescrapeResponse struct {
+	Results   []BulkRescrapeMovieResult `json:"results"`
+	Succeeded int                       `json:"succeeded"`
+	Failed    int                       `json:"failed"`
+	Job       *BatchJobResponse         `json:"job"`
 }

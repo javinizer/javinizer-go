@@ -43,13 +43,6 @@ func TestOrganizeJob_OperationMode(t *testing.T) {
 			expectedError:  "Preview mode should use the preview endpoint",
 		},
 		{
-			name:           "metadata-only mode rejected",
-			operationMode:  "metadata-only",
-			configMode:     "organize",
-			expectedStatus: 400,
-			expectedError:  "metadata-only mode",
-		},
-		{
 			name:           "invalid operation mode rejected",
 			operationMode:  "invalid-mode",
 			configMode:     "organize",
@@ -141,9 +134,9 @@ func TestPreviewOrganize_OperationMode(t *testing.T) {
 			expectedInResp: "in-place-norenamefolder",
 		},
 		{
-			name:           "metadata-only mode",
-			operationMode:  "metadata-only",
-			expectedInResp: "metadata-only",
+			name:           "metadata-artwork mode",
+			operationMode:  "metadata-artwork",
+			expectedInResp: "metadata-artwork",
 		},
 		{
 			name:           "preview mode",
