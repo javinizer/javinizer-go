@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.4-alpha] - 2026-05-02
+
+### Fixed
+
+- Replace contentIDMatchesExpected with core series+number validation (contentIDCoreMatch) to reach 97.7% r18.dev match rate, ignoring suffix mismatches that caused 84% of old failures
+- Remove generateAlternateContentIDs fallback which matched 0% of misses due to only trying 4 hardcoded maker codes out of 7,704
+- Prevent ONED-025 false positive resolving to ONED-205 by validating core number match
+
 ## [v0.3.3-alpha] - 2026-05-02
 
 ### Added
