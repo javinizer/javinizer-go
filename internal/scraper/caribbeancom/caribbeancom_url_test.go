@@ -28,7 +28,7 @@ func TestGetURL(t *testing.T) {
 			name:     "English direct ID",
 			language: "en",
 			movieID:  "120614-753",
-			want:     "https://www.caribbeancom.com/eng/moviepages/120614-753/index.html",
+			want:     "https://en.caribbeancom.com/eng/moviepages/120614-753/index.html",
 			wantErr:  false,
 		},
 		{
@@ -42,7 +42,7 @@ func TestGetURL(t *testing.T) {
 			name:     "English underscore ID normalized",
 			language: "en",
 			movieID:  "020326_01-10MU",
-			want:     "https://www.caribbeancom.com/eng/moviepages/020326-001/index.html",
+			want:     "https://en.caribbeancom.com/eng/moviepages/020326-001/index.html",
 			wantErr:  false,
 		},
 	}

@@ -162,6 +162,10 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, fmt.Errorf("failed to parse Caribbeancom detail page: %w", err)
 	}
 
+	if !isMovieDetailPage(doc, html) {
+		return nil, models.NewScraperNotFoundError("Caribbeancom", fmt.Sprintf("movie %s not found on Caribbeancom", id))
+	}
+
 	return parseDetailPage(doc, html, detailURL, id, s.language), nil
 }
 
@@ -230,7 +234,30 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("failed to parse Caribbeancom detail page: %w", err)
 	}
 
+	if !isMovieDetailPage(doc, html) {
+		return nil, models.NewScraperNotFoundError("Caribbeancom", fmt.Sprintf("movie %s not found on Caribbeancom", id))
+	}
+
 	return parseDetailPage(doc, html, detailURL, id, s.language), nil
+}
+
+// isMovieDetailPage returns false when Caribbeancom serves a soft-404 with HTTP 200.
+// The site embeds a full site shell (header/footer) in its error page, so we cannot
+// rely on the status code alone. A real movie page always contains #moviepages or
+// h1[itemprop='name']; the error page has neither but always has class="error404-wrap".
+func isMovieDetailPage(doc *goquery.Document, html string) bool {
+	if doc.Find(".error404-wrap, .error404-content").Length() > 0 {
+		return false
+	}
+	if movieIDFromJSONRe.MatchString(html) {
+		return true
+	}
+	for _, sel := range []string{"#moviepages", ".movie-info", "h1[itemprop='name']"} {
+		if doc.Find(sel).Length() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackID, language string) *models.ScraperResult {
@@ -592,10 +619,12 @@ func normalizeLanguage(v string) string {
 
 func (s *Scraper) buildMoviePageURL(movieID string) string {
 	movieID = normalizeMovieID(movieID)
-	if s.language == "en" {
-		return strings.TrimRight(s.baseURL, "/") + "/eng/moviepages/" + movieID + "/index.html"
-	}
-	return strings.TrimRight(s.baseURL, "/") + "/moviepages/" + movieID + "/index.html"
+	// Always build the canonical Japanese path from baseURL, then let applyLanguage
+	// swap the hostname and inject the /eng/ prefix when language == "en".
+	// This fixes the 500 error caused by requesting /eng/moviepages/... on
+	// www.caribbeancom.com, which only serves English content on en.caribbeancom.com.
+	rawURL := strings.TrimRight(s.baseURL, "/") + "/moviepages/" + movieID + "/index.html"
+	return s.applyLanguage(rawURL)
 }
 
 func (s *Scraper) applyLanguage(rawURL string) string {
