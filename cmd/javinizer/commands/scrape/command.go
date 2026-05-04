@@ -25,7 +25,7 @@ func NewCommand() *cobra.Command {
 			return runScrape(cmd, args, configFile)
 		},
 	}
-	scrapeCmd.Flags().StringSliceP("scrapers", "s", nil, "Comma-separated list of scrapers to use (e.g., 'r18dev,dmm' or 'dmm')")
+	scrapeCmd.Flags().StringSliceP("scrapers", "s", nil, "Comma-separated subset of enabled scrapers to use (e.g., 'r18dev,dmm'); scraper must be enabled in config.yaml")
 	scrapeCmd.Flags().BoolP("force", "f", false, "Force refresh metadata from scrapers (clear cache)")
 	scrapeCmd.Flags().Bool("scrape-actress", false, "Enable actress scraping (overrides config)")
 	scrapeCmd.Flags().Bool("no-scrape-actress", false, "Disable actress scraping (overrides config)")
