@@ -161,6 +161,7 @@ export function createReviewState(pageStore: Page) {
 	let rescrapingStates = new SvelteMap<string, boolean>();
 	let manualSearchMode = $state(false);
 	let manualSearchInput = $state('');
+	let rescrapeTargetResult = $state<FileResult | null>(null);
 
 	let rescrapePreset: string | undefined = $state(undefined);
 	let rescrapeScalarStrategy: ScalarStrategy = $state('prefer-nfo');
@@ -199,6 +200,14 @@ export function createReviewState(pageStore: Page) {
 				primaryResult: results[0]
 			}));
 		})() : []
+	);
+
+	const failedResults = $derived<FileResult[]>(
+		job
+			? (Object.values((job as BatchJobResponse).results) as FileResult[]).filter(
+					(r) => r.status === 'failed' && !(((job as BatchJobResponse).excluded ?? {})[r.file_path])
+				)
+			: []
 	);
 
 	const tierCounts = $derived.by<Record<CompletenessTier, number>>(() => {
@@ -587,7 +596,7 @@ export function createReviewState(pageStore: Page) {
 
 	const rescrapeController = createRescrapeController({
 		getJobId: () => jobId,
-		getCurrentResult: () => currentResult,
+		getCurrentResult: () => rescrapeTargetResult ?? currentResult,
 		getJob: () => job,
 		setJob: (nextJob) => { job = nextJob; },
 		getEditedMovies: () => editedMovies,
@@ -669,8 +678,36 @@ export function createReviewState(pageStore: Page) {
 
 	async function openRescrapeModal(movieId: string) {
 		bulkRescrapeMovieIds = [];
+		rescrapeTargetResult = null;
 		await rescrapeController.openRescrapeModal(movieId);
 	}
+
+	async function openRescrapeModalForFailed(result: FileResult) {
+		bulkRescrapeMovieIds = [];
+		if (availableScrapers.length === 0) {
+			try {
+				availableScrapers = await apiClient.getScrapers();
+			} catch {
+				toastStore.error('Failed to load scrapers');
+				return;
+			}
+		}
+		rescrapeTargetResult = result;
+		rescrapeMovieId = result.movie_id;
+		rescrapeSelectedScrapers = availableScrapers.filter((s) => s.enabled).map((s) => s.name);
+		manualSearchMode = true;
+		manualSearchInput = '';
+		rescrapePreset = undefined;
+		rescrapeScalarStrategy = 'prefer-nfo';
+		rescrapeArrayStrategy = 'merge';
+		showRescrapeModal = true;
+	}
+
+	$effect(() => {
+		if (!showRescrapeModal) {
+			rescrapeTargetResult = null;
+		}
+	});
 
 	async function executeRescrape(mode?: { manualSearchMode: boolean; manualSearchInput: string }) {
 		await rescrapeController.executeRescrape(mode);
@@ -871,6 +908,7 @@ export function createReviewState(pageStore: Page) {
 		get rescrapeArrayStrategy() { return rescrapeArrayStrategy; },
 		set rescrapeArrayStrategy(v) { rescrapeArrayStrategy = v; },
 		get movieGroups() { return movieGroups; },
+		get failedResults() { return failedResults; },
 		get movieResults() { return movieResults; },
 		get currentMovieGroup() { return currentMovieGroup; },
 		get currentResult() { return currentResult; },
@@ -916,6 +954,7 @@ export function createReviewState(pageStore: Page) {
 		reviewPageController,
 		applyRescrapePreset,
 		openRescrapeModal,
+		openRescrapeModalForFailed,
 		executeRescrape,
 		organizeAll,
 		updateAll,

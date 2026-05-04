@@ -21,6 +21,7 @@
 	import RescrapeModal from './components/RescrapeModal.svelte';
 	import BulkRescrapeProgress from './components/BulkRescrapeProgress.svelte';
 	import SourceFilesCard from './components/SourceFilesCard.svelte';
+	import UnidentifiedFilesCard from './components/UnidentifiedFilesCard.svelte';
 	import { createReviewState } from './stores/review-state.svelte';
 	import {
 		ChevronLeft,
@@ -50,7 +51,7 @@
 					</Button>
 				</div>
 			</Card>
-		{:else if s.job && s.movieResults.length === 0}
+		{:else if s.job && s.movieResults.length === 0 && s.failedResults.length === 0}
 			<Card class="p-6">
 				<div class="text-center">
 					<p class="text-muted-foreground">No movies to review</p>
@@ -62,6 +63,24 @@
 					</Button>
 				</div>
 			</Card>
+		{:else if s.job && s.movieResults.length === 0 && s.failedResults.length > 0}
+			<UnidentifiedFilesCard
+				failedResults={s.failedResults}
+				onSearchManually={s.openRescrapeModalForFailed}
+			/>
+			<RescrapeModal
+				bind:show={s.showRescrapeModal}
+				rescraping={s.rescrapingStates.get(s.rescrapeMovieId) ?? false}
+				rescrapeMovieId={s.rescrapeMovieId}
+				availableScrapers={s.availableScrapers}
+				bind:selectedScrapers={s.rescrapeSelectedScrapers}
+				bind:manualSearchMode={s.manualSearchMode}
+				bind:manualSearchInput={s.manualSearchInput}
+				bind:rescrapePreset={s.rescrapePreset}
+				bind:rescrapeScalarStrategy={s.rescrapeScalarStrategy}
+				onApplyPreset={s.applyRescrapePreset}
+				onExecute={s.executeRescrape}
+			/>
 		{:else if s.currentMovie && s.currentResult}
 			<ReviewHeader
 				isUpdateMode={s.isUpdateMode}
@@ -100,6 +119,11 @@
 				isUpdateMode={s.isUpdateMode}
 				onRetryFailed={s.retryFailed}
 				onContinue={() => goto('/browse')}
+			/>
+
+			<UnidentifiedFilesCard
+				failedResults={s.failedResults}
+				onSearchManually={s.openRescrapeModalForFailed}
 			/>
 
 			{#if s.viewMode === 'grid-poster' || s.viewMode === 'grid-cover'}
