@@ -379,9 +379,12 @@ DOCKER_FULL_IMAGE := $(DOCKER_IMAGE):$(DOCKER_TAG)
 DOCKER_CONTAINER_NAME := javinizer
 
 # Build Docker image with version injection
+# --ulimit nofile=65536:65536 is required: Vite 7's SSR/CSS pipeline opens many
+# files in parallel and hits the default container RLIMIT_NOFILE of 1024.
 docker-build:
 	@echo "Building Docker image $(DOCKER_FULL_IMAGE)..."
 	docker build \
+		--ulimit nofile=65536:65536 \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMMIT=$(COMMIT) \
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
@@ -395,6 +398,7 @@ docker-build:
 docker-build-no-cache:
 	@echo "Building Docker image $(DOCKER_FULL_IMAGE) without cache..."
 	docker build --no-cache \
+		--ulimit nofile=65536:65536 \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMMIT=$(COMMIT) \
 		--build-arg BUILD_DATE=$(BUILD_DATE) \

@@ -6,13 +6,19 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /frontend
 
-# Copy package files and install dependencies
+# Install deps without running prepare/postinstall scripts.
+# svelte-kit sync needs the full source tree (svelte.config.js etc.) to work,
+# which we don't have yet at this layer.
 COPY web/frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --production=false
+    npm ci --include=dev --ignore-scripts
 
-# Copy frontend source and build
+# Bring in the rest of the source, including svelte.config.js.
 COPY web/frontend/ ./
+
+# Run svelte-kit sync explicitly now that the config is present.
+RUN npx svelte-kit sync
+
 RUN --mount=type=cache,target=/root/.npm \
     npm run build
 
