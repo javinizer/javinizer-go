@@ -26,6 +26,7 @@ var (
 	movieIDTokenRegex  = regexp.MustCompile(`(?i)(?:^|[^0-9])(\d{6})[-_](\d{2,3})(?:[^0-9]|$)`)
 	movieIDFromPageRe  = regexp.MustCompile(`(?i)/moviepages/(\d{6}[-_]\d{3})/`)
 	movieIDFromJSONRe  = regexp.MustCompile(`(?i)"movie_id"\s*:\s*"(\d{6}-\d{3})"`)
+	movieNullJSONRe    = regexp.MustCompile(`(?i)var\s+Movie\s*=\s*null`)
 	trailerURLJSONRe   = regexp.MustCompile(`(?i)"sample_flash_url"\s*:\s*"([^"]+)"`)
 	trailerURLAssignRe = regexp.MustCompile(`(?i)sample_flash_url\s*=\s*['"]([^'"]+)['"]`)
 	coverImagePathRe   = regexp.MustCompile(`(?i)(/moviepages/\d{6}-\d{3}/images/l(?:_l)?\.jpg)`)
@@ -242,11 +243,17 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 }
 
 // isMovieDetailPage returns false when Caribbeancom serves a soft-404 with HTTP 200.
-// The site embeds a full site shell (header/footer) in its error page, so we cannot
-// rely on the status code alone. A real movie page always contains #moviepages or
-// h1[itemprop='name']; the error page has neither but always has class="error404-wrap".
+// Two distinct blank-page variants exist:
+//   - Japanese: returns HTTP 200 with class="error404-wrap" in the body.
+//   - English: returns HTTP 200 with the full page shell (header, #moviepages, .movie-info,
+//     h1[itemprop='name']) but all content fields empty and var Movie = null in the JS.
+//
+// A real movie page always has a populated var Movie = {...} object with a "movie_id" field.
 func isMovieDetailPage(doc *goquery.Document, html string) bool {
 	if doc.Find(".error404-wrap, .error404-content").Length() > 0 {
+		return false
+	}
+	if movieNullJSONRe.MatchString(html) {
 		return false
 	}
 	if movieIDFromJSONRe.MatchString(html) {

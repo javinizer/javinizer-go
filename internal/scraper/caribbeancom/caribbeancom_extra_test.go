@@ -95,6 +95,11 @@ func TestIsMovieDetailPage(t *testing.T) {
 			html: `<html><head><title>Caribbeancom.com - No.1 Japanese Uncensored Adult Site</title></head><body><div id="header"></div></body></html>`,
 			want: false,
 		},
+		{
+			name: "English blank entry page with Movie=null (invalid ID, HTTP 200)",
+			html: `<html><body><div id="moviepages"><div class="movie-info"><h1 itemprop="name"></h1></div></div><script>var Movie = null;</script></body></html>`,
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
