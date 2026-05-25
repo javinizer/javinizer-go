@@ -1,20 +1,23 @@
 package server
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	swaggerPkg "github.com/javinizer/javinizer-go/docs/swagger"
 	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestNewServer(t *testing.T) {
@@ -926,14 +929,31 @@ func TestAcceptsHTML(t *testing.T) {
 	}
 }
 
-func TestResolveSwaggerPath(t *testing.T) {
-	// Test that resolveSwaggerPath returns a valid path
-	path := resolveSwaggerPath()
+func TestSwaggerJSONEmbedded(t *testing.T) {
+	data := swaggerPkg.SwaggerJSON()
+	assert.NotEmpty(t, data, "embedded swagger.json should not be empty")
+	assert.True(t, bytes.Contains(data, []byte(`"swagger"`)), "embedded JSON should contain swagger key")
+	assert.True(t, bytes.Contains(data, []byte(`"Javinizer API"`)), "embedded JSON should contain API title")
+}
 
-	// Should return either Docker or local path
-	assert.True(t,
-		path == "/app/docs/swagger/swagger.json" || path == "./docs/swagger/swagger.json",
-		"Expected Docker or local swagger path, got: %s", path)
+func TestDocsOpenAPIJSON(t *testing.T) {
+	router := setupTestRouter()
+	registerDocumentationRoutes(router)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/docs/openapi.json", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	assert.Equal(t, "public, max-age=86400", w.Header().Get("Cache-Control"))
+	assert.NotEmpty(t, w.Body.Bytes())
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("HEAD", "/docs/openapi.json", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	assert.Equal(t, "public, max-age=86400", w.Header().Get("Cache-Control"))
 }
 
 func setupTestRouter() *gin.Engine {

@@ -7,6 +7,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+	"golang.org/x/time/rate"
+
+	swaggerPkg "github.com/javinizer/javinizer-go/docs/swagger"
 	"github.com/javinizer/javinizer-go/internal/api/actress"
 	"github.com/javinizer/javinizer-go/internal/api/auth"
 	"github.com/javinizer/javinizer-go/internal/api/batch"
@@ -25,9 +30,6 @@ import (
 	apiversion "github.com/javinizer/javinizer-go/internal/api/version"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	webui "github.com/javinizer/javinizer-go/web"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
-	"golang.org/x/time/rate"
 )
 
 type webUIAssets struct {
@@ -93,7 +95,12 @@ func registerCORSMiddleware(router *gin.Engine, deps *core.ServerDependencies) {
 }
 
 func registerDocumentationRoutes(router *gin.Engine) {
-	router.StaticFile("/docs/openapi.json", resolveSwaggerPath())
+	openAPIHandler := func(c *gin.Context) {
+		c.Header("Cache-Control", "public, max-age=86400")
+		c.Data(http.StatusOK, "application/json", swaggerPkg.SwaggerJSON())
+	}
+	router.GET("/docs/openapi.json", openAPIHandler)
+	router.HEAD("/docs/openapi.json", openAPIHandler)
 	router.GET("/docs", serveScalarDocs)
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 }

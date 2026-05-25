@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -14,15 +13,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
-
-// resolveSwaggerPath returns the path to swagger.json, checking multiple locations.
-func resolveSwaggerPath() string {
-	dockerPath := "/app/docs/swagger/swagger.json"
-	if _, err := os.Stat(dockerPath); err == nil {
-		return dockerPath
-	}
-	return "./docs/swagger/swagger.json"
-}
 
 // isSameOrigin checks if the origin matches the request host (same-origin).
 func isSameOrigin(origin string, r *http.Request) bool {

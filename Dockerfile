@@ -111,8 +111,7 @@ RUN chmod +x /usr/local/bin/javinizer
 # Copy frontend static files
 COPY --from=go-builder /build/web/dist /app/web/dist
 
-# Copy API documentation (Swagger/OpenAPI) to /app (avoids volume mount shadowing)
-COPY --from=go-builder /build/docs/swagger /app/docs/swagger
+# Swagger/OpenAPI docs are embedded in the binary via go:embed (docs/swagger/embed.go)
 
 # Copy entrypoint script
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
