@@ -159,6 +159,33 @@ func TestServerDependencies_NilFields(t *testing.T) {
 	assert.Nil(t, deps.GetMatcher(), "GetMatcher should return nil when not set")
 }
 
+func TestServerDependencies_ReloadReplacementCaches(t *testing.T) {
+	t.Run("no panic when aggregator is nil", func(t *testing.T) {
+		deps := &ServerDependencies{}
+		assert.NotPanics(t, func() {
+			deps.ReloadReplacementCaches()
+		}, "ReloadReplacementCaches should not panic when aggregator is nil")
+	})
+
+	t.Run("calls reload on non-nil aggregator", func(t *testing.T) {
+		cfg := &config.Config{
+			Database: config.DatabaseConfig{Type: "sqlite", DSN: ":memory:"},
+			Logging:  config.LoggingConfig{Level: "error"},
+		}
+		db, err := database.New(cfg)
+		require.NoError(t, err)
+		require.NoError(t, db.AutoMigrate())
+		t.Cleanup(func() { _ = db.Close() })
+
+		agg := aggregator.NewWithDatabase(cfg, db)
+		deps := &ServerDependencies{Aggregator: agg}
+
+		assert.NotPanics(t, func() {
+			deps.ReloadReplacementCaches()
+		}, "ReloadReplacementCaches should not panic with real aggregator")
+	})
+}
+
 func TestServerDependencies_AllFields(t *testing.T) {
 	cfg := &config.Config{ConfigVersion: 1}
 	registry := &models.ScraperRegistry{}

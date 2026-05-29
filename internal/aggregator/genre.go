@@ -81,21 +81,23 @@ func (a *Aggregator) applyGenreReplacement(original string) string {
 
 	// Auto-add genre if enabled and repository is available
 	if a.config.Metadata.GenreReplacement.AutoAdd && a.genreReplacementRepo != nil {
-		// Create identity mapping (genre maps to itself)
 		genreReplacement := &models.GenreReplacement{
 			Original:    original,
 			Replacement: original,
 		}
 
-		// Try to create the replacement (will fail on unique constraint if already exists)
-		a.genreCacheMutex.Lock()
-		a.genreReplacementCache[original] = original
-		a.genreCacheMutex.Unlock()
 		if err := a.genreReplacementRepo.Create(genreReplacement); err != nil {
-			// Best-effort: log non-unique-constraint errors
-			if !errors.Is(err, gorm.ErrDuplicatedKey) {
+			if errors.Is(err, gorm.ErrDuplicatedKey) {
+				a.genreCacheMutex.Lock()
+				a.genreReplacementCache[original] = original
+				a.genreCacheMutex.Unlock()
+			} else {
 				logging.Warnf("genre auto-add failed for %q: %v", original, err)
 			}
+		} else {
+			a.genreCacheMutex.Lock()
+			a.genreReplacementCache[original] = original
+			a.genreCacheMutex.Unlock()
 		}
 	}
 
@@ -151,6 +153,8 @@ func (a *Aggregator) loadWordReplacementCache() {
 		a.wordReplacementCache = replacementMap
 		a.wordReplacementSorted = pairs
 		a.wordCacheMutex.Unlock()
+	} else {
+		logging.Warnf("failed to load word replacement cache: %v", err)
 	}
 }
 

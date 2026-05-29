@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
 )
@@ -226,6 +227,8 @@ func (a *Aggregator) loadGenreReplacementCache() {
 		a.genreCacheMutex.Lock()
 		a.genreReplacementCache = replacementMap
 		a.genreCacheMutex.Unlock()
+	} else {
+		logging.Warnf("failed to load genre replacement cache: %v", err)
 	}
 }
 

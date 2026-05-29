@@ -99,6 +99,7 @@ func createWordReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
+		deps.ReloadReplacementCaches()
 		c.JSON(http.StatusCreated, replacement)
 	}
 }
@@ -138,6 +139,7 @@ func updateWordReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
+		deps.ReloadReplacementCaches()
 		c.JSON(http.StatusOK, existing)
 	}
 }
@@ -169,6 +171,7 @@ func deleteWordReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 				return
 			}
 
+			deps.ReloadReplacementCaches()
 			c.JSON(http.StatusOK, gin.H{"message": "word replacement deleted", "original": replacement.Original})
 			return
 		}
@@ -189,6 +192,7 @@ func deleteWordReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 				return
 			}
 
+			deps.ReloadReplacementCaches()
 			c.JSON(http.StatusOK, gin.H{"message": "word replacement deleted", "original": existing.Original})
 			return
 		}
@@ -272,6 +276,10 @@ func importWordReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 			} else {
 				skipped++
 			}
+		}
+
+		if imported > 0 {
+			deps.ReloadReplacementCaches()
 		}
 
 		c.JSON(http.StatusOK, importSummaryResponse{

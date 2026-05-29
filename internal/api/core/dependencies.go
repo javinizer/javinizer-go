@@ -109,6 +109,13 @@ func (d *ServerDependencies) GetMatcher() *matcher.Matcher {
 	return d.Matcher
 }
 
+func (d *ServerDependencies) ReloadReplacementCaches() {
+	if agg := d.GetAggregator(); agg != nil {
+		agg.ReloadGenreReplacements()
+		agg.ReloadWordReplacements()
+	}
+}
+
 // ReplaceReloadable swaps config-coupled runtime components atomically.
 func (d *ServerDependencies) ReplaceReloadable(
 	cfg *config.Config,
