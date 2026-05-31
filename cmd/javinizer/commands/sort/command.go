@@ -40,7 +40,7 @@ func NewCommand() *cobra.Command {
 	sortCmd.Flags().BoolP("nfo", "", true, "Generate NFO files")
 	sortCmd.Flags().BoolP("download", "", true, "Download media (covers, screenshots, etc.)")
 	sortCmd.Flags().Bool("extrafanart", false, "Download extrafanart (screenshots)")
-	sortCmd.Flags().StringSliceP("scrapers", "p", nil, "Scraper priority (comma-separated, e.g., 'r18dev,dmm')")
+	sortCmd.Flags().StringSliceP("scrapers", "p", nil, "Scraper priority override — comma-separated subset of enabled scrapers (e.g., 'r18dev,dmm'); scraper must be enabled in config.yaml")
 	sortCmd.Flags().BoolP("force-update", "f", false, "Force update existing files")
 	sortCmd.Flags().Bool("force-refresh", false, "Force refresh metadata from scrapers (clear cache)")
 	return sortCmd
