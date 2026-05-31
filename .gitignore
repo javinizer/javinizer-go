@@ -74,6 +74,9 @@ COVERAGE_REPORT.md
 # Local GitHub Actions testing (act)
 .secrets
 
+# Agent runtime
+.omo/
+
 # superturtle
 .superturtle/
 .planning/
