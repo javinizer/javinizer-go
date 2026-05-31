@@ -11,7 +11,7 @@ func init() {
 	m := &scraperModule{}
 	m.StandardModule = scraperutil.StandardModule{
 		ScraperName:        "libredmm",
-		ScraperDescription: "LibreDMM",
+		ScraperDescription: "LibreDMM (Fanza, MGStage, SOD, FC2)",
 		ScraperOptions: []any{
 			models.ScraperOption{
 				Key:         "request_delay",
@@ -25,7 +25,7 @@ func init() {
 			models.ScraperOption{
 				Key:         "base_url",
 				Label:       "Base URL",
-				Description: "LibreDMM base URL",
+				Description: "LibreDMM base URL (aggregates Fanza, MGStage, SOD, FC2 sources)",
 				Type:        "string",
 			},
 			models.ScraperOption{

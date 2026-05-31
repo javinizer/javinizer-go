@@ -39,6 +39,9 @@ var (
 	// Pattern to strip other control characters (0x00-0x1F) except tab, newline, carriage return
 	// These can be injected by broken proxies or terminal wrappers
 	controlCharRegex = regexp.MustCompile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
+	// FC2 ID patterns — LibreDMM aggregates FC2 content alongside Fanza/MGStage/SOD
+	fc2IDRegex = regexp.MustCompile(`(?i)fc2[\s_-]*ppv[\s_-]*(\d{5,10})`)
+	ppvIDRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])ppv[\s_-]*(\d{5,10})(?:$|[^a-z0-9])`)
 )
 
 type actressPayload struct {
@@ -278,13 +281,21 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 	return nil, nil, false
 }
 
-// ResolveSearchQuery prioritizes this scraper when the input is a LibreDMM URL.
+// ResolveSearchQuery prioritizes this scraper when the input is a LibreDMM URL
+// or an FC2-style identifier (since LibreDMM aggregates FC2 content).
 func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
-	normalized, ok := normalizeMovieURL(strings.TrimSpace(input), s.baseURL)
-	if !ok {
-		return "", false
+	input = strings.TrimSpace(input)
+
+	normalized, ok := normalizeMovieURL(input, s.baseURL)
+	if ok {
+		return normalized, true
 	}
-	return normalized, true
+
+	if articleID := extractFC2ArticleID(input); articleID != "" {
+		return "FC2-PPV-" + articleID, true
+	}
+
+	return "", false
 }
 
 func (s *Scraper) GetURL(id string) (string, error) {
@@ -692,6 +703,19 @@ func toHTTPS(raw string) string {
 		return "https://" + strings.TrimPrefix(raw, "http://")
 	}
 	return raw
+}
+
+func extractFC2ArticleID(input string) string {
+	if input == "" {
+		return ""
+	}
+	if m := fc2IDRegex.FindStringSubmatch(input); len(m) > 1 {
+		return m[1]
+	}
+	if m := ppvIDRegex.FindStringSubmatch(input); len(m) > 1 {
+		return m[1]
+	}
+	return ""
 }
 
 // stripANSICodes removes ANSI escape sequences and control characters from a string.

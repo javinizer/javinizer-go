@@ -25,7 +25,7 @@ Javinizer Go is a metadata scraper and file organizer for Japanese Adult Videos 
 |---|---|---|---|
 | `r18dev` | Yes | `en`, `ja` | JSON API scraper with rate-limit handling options. |
 | `dmm` | No | N/A | Supports optional browser mode for JS-rendered pages; placeholder detection for screenshots. |
-| `libredmm` | No | N/A | Community mirror source. |
+| `libredmm` | No | N/A | Aggregates Fanza, MGStage, SOD, and FC2 sources. |
 | `mgstage` | No | N/A | Usually requires age-verification cookie (`adc=1`). |
 | `javlibrary` | No | `en`, `ja`, `cn`, `tw` | Can use FlareSolverr for Cloudflare challenges. |
 | `javdb` | No | N/A | Can use FlareSolverr; proxy-friendly setup. |

@@ -300,7 +300,7 @@ func TestGetAvailableScrapers(t *testing.T) {
 			validateFn: func(t *testing.T, resp AvailableScrapersResponse) {
 				require.Len(t, resp.Scrapers, 1)
 				assert.Equal(t, "libredmm", resp.Scrapers[0].Name)
-				assert.Equal(t, "LibreDMM", resp.Scrapers[0].DisplayTitle)
+				assert.Equal(t, "LibreDMM (Fanza, MGStage, SOD, FC2)", resp.Scrapers[0].DisplayTitle)
 				assert.True(t, resp.Scrapers[0].Enabled)
 				assert.Len(t, resp.Scrapers[0].Options, 9)
 

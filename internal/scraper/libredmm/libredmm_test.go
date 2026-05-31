@@ -815,6 +815,66 @@ func TestResolveSearchQuery(t *testing.T) {
 			want:  "",
 			ok:    false,
 		},
+		{
+			name:  "fc2 ppv hyphenated",
+			input: "FC2-PPV-1234567",
+			want:  "FC2-PPV-1234567",
+			ok:    true,
+		},
+		{
+			name:  "fc2 ppv lowercase",
+			input: "fc2-ppv-1234567",
+			want:  "FC2-PPV-1234567",
+			ok:    true,
+		},
+		{
+			name:  "fc2 ppv underscore",
+			input: "fc2_ppv_1234567",
+			want:  "FC2-PPV-1234567",
+			ok:    true,
+		},
+		{
+			name:  "ppv prefix only",
+			input: "ppv-1234567",
+			want:  "FC2-PPV-1234567",
+			ok:    true,
+		},
+		{
+			name:  "fc2 ppv spaces",
+			input: "FC2 PPV 1234567",
+			want:  "FC2-PPV-1234567",
+			ok:    true,
+		},
+		{
+			name:  "fc2 ppv too short",
+			input: "FC2-PPV-1234",
+			want:  "",
+			ok:    false,
+		},
+		{
+			name:  "fc2 ppv 11 digits matches first 10",
+			input: "FC2-PPV-12345678901",
+			want:  "FC2-PPV-1234567890",
+			ok:    true,
+		},
+		{
+			name:  "bare digits not fc2",
+			input: "123456789",
+			want:  "",
+			ok:    false,
+		},
+		{
+			name:  "short digits not fc2",
+			input: "1234",
+			want:  "",
+			ok:    false,
+		},
+		{
+			name:  "dmm style id not fc2",
+			input: "MIDE-123",
+			want:  "",
+			ok:    false,
+		},
 	}
 
 	for _, tt := range tests {

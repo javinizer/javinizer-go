@@ -18,7 +18,7 @@
 	// Helper to format scraper names
 	function formatScraperName(name: string): string {
 		if (name === 'dmm') return 'DMM/Fanza';
-		if (name === 'libredmm') return 'LibreDMM';
+		if (name === 'libredmm') return 'LibreDMM (Fanza, MGStage, SOD, FC2)';
 		if (name === 'r18dev') return 'R18.dev';
 		if (name === 'javlibrary') return 'JavLibrary';
 		if (name === 'javdb') return 'JavDB';
