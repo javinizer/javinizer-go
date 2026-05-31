@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.6-alpha] - 2026-05-31
+
+### Added
+
+- Expand LibreDMM scope to support FC2/MGStage/SOD sources
+- Surface unidentified files and allow manual rescrape from review page
+- Add first_name_order config for actress name formatting
+
+### Fixed
+
+- Fix caribbeancom English URL construction and reject soft-404 responses
+- Detect caribbeancom English blank-entry soft-404 (var Movie = null)
+- Fix docker frontend-builder stage ordering and limit Rollup parallel file ops
+- Remove content ID zero-stripping canonicalization that broke r18.dev image URLs
+- Refresh aggregator replacement caches after CRUD operations
+- Detect Windows cross-device move error, add customizable GroupActressName
+
+### Changed
+
+- Embed swagger.json in binary via go:embed
+- Clarify --scrapers flag only selects from enabled scrapers
+- Add .omo/ to .gitignore
+
 ## [v0.3.5-alpha] - 2026-05-25
 
 ### Fixed
