@@ -9,6 +9,11 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const (
+	MergeResolutionTarget = "target"
+	MergeResolutionSource = "source"
+)
+
 // mergeFieldDecision validates and normalizes a merge field decision.
 // Returns "target" or "source" based on the decision string.
 // Empty/whitespace or "target" returns "target", "source" returns "source".

@@ -303,7 +303,7 @@ func (r *ActressRepository) Merge(targetID, sourceID uint, resolutions map[strin
 	}
 	for _, conflict := range preview.Conflicts {
 		if _, exists := normalizedResolutions[conflict.Field]; !exists {
-			normalizedResolutions[conflict.Field] = "target"
+			normalizedResolutions[conflict.Field] = MergeResolutionTarget
 		}
 	}
 
