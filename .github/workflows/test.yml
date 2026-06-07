@@ -55,14 +55,12 @@ jobs:
 
     - name: Upload coverage to Codecov
       if: steps.detect.outputs.running_in_act != 'true'
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
         files: ./coverage.out
-        slug: javinizer/Javinizer-Go
         flags: unittests
         name: codecov-javinizer
-        use_oidc: true
-        fail_ci_if_error: true
+        fail_ci_if_error: false
         verbose: true
 
     - name: Archive coverage report
