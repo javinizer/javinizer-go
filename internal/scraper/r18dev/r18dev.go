@@ -338,6 +338,7 @@ func generateContentIDVariations(id string) []string {
 		return nil
 	}
 
+	padded3 := fmt.Sprintf("%03d", num)
 	padded5 := fmt.Sprintf("%05d", num)
 
 	// Look up known prefixes for this series from the r18.dev database dump
@@ -352,21 +353,18 @@ func generateContentIDVariations(id string) []string {
 	var variations []string
 	seen := make(map[string]bool)
 
-	for _, prefix := range prefixes {
-		// With DMM prefix + 5-digit padded number
-		v := prefix + series + padded5
+	add := func(v string) {
 		if !seen[v] {
 			seen[v] = true
 			variations = append(variations, v)
 		}
 	}
 
-	// Also try with most common prefix "1" + unpadded (original number)
-	// This handles edge cases where the number format differs
-	v := "1" + series + numStr
-	if !seen[v] {
-		seen[v] = true
-		variations = append(variations, v)
+	for _, prefix := range prefixes {
+		// 5-digit padded (standard DMM content_id format)
+		add(prefix + series + padded5)
+		// 3-digit padded (used by many r18.dev content_ids)
+		add(prefix + series + padded3)
 	}
 
 	return variations

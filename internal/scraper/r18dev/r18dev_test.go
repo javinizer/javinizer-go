@@ -2234,47 +2234,52 @@ func TestGenerateContentIDVariations(t *testing.T) {
 		{
 			name:     "multi-prefix series (IPX-535 has 8 prefixes)",
 			input:    "IPX-535",
-			expected: []string{"ipx00535", "4ipx00535", "5ipx00535", "6ipx00535", "7ipx00535", "9ipx00535", "77ipx00535", "88ipx00535", "1ipx535"},
+			expected: []string{"ipx00535", "ipx535", "4ipx00535", "4ipx535", "5ipx00535", "5ipx535", "6ipx00535", "6ipx535", "7ipx00535", "7ipx535", "9ipx00535", "9ipx535", "77ipx00535", "77ipx535", "88ipx00535", "88ipx535"},
 		},
 		{
 			name:     "single long prefix (ABW-001 uses 118)",
 			input:    "ABW-001",
-			expected: []string{"118abw00001", "1abw001"},
+			expected: []string{"118abw00001", "118abw001"},
 		},
 		{
 			name:     "4-digit number with multi-prefix (DSVR-1984)",
 			input:    "DSVR-1984",
-			expected: []string{"dsvr01984", "13dsvr01984", "1dsvr1984"},
+			expected: []string{"dsvr01984", "dsvr1984", "13dsvr01984", "13dsvr1984"},
 		},
 		{
-			name:     "1-digit number zero-padded to 5 (ROYD-1)",
+			name:     "1-digit number zero-padded (ROYD-1)",
 			input:    "ROYD-1",
-			expected: []string{"royd00001", "2royd00001", "1royd1"},
+			expected: []string{"royd00001", "royd001", "2royd00001", "2royd001"},
 		},
 		{
 			name:     "2-digit number (ROYD-19)",
 			input:    "ROYD-19",
-			expected: []string{"royd00019", "2royd00019", "1royd19"},
+			expected: []string{"royd00019", "royd019", "2royd00019", "2royd019"},
 		},
 		{
 			name:     "large 4-digit number (SSIS-1200)",
 			input:    "SSIS-1200",
-			expected: []string{"ssis01200", "4ssis01200", "7ssis01200", "9ssis01200", "77ssis01200", "88ssis01200", "1ssis1200"},
+			expected: []string{"ssis01200", "ssis1200", "4ssis01200", "4ssis1200", "7ssis01200", "7ssis1200", "9ssis01200", "9ssis1200", "77ssis01200", "77ssis1200", "88ssis01200", "88ssis1200"},
 		},
 		{
 			name:     "no-dash content_id format (1sdam00171 from API)",
 			input:    "1sdam00171",
-			expected: []string{"1sdam00171"},
+			expected: []string{"1sdam00171", "1sdam171"},
 		},
 		{
 			name:     "unknown series falls back to empty+1 prefix",
 			input:    "ZZZZ-123",
-			expected: []string{"zzzz00123", "1zzzz00123", "1zzzz123"},
+			expected: []string{"zzzz00123", "zzzz123", "1zzzz00123", "1zzzz123"},
 		},
 		{
 			name:     "no dash and unparseable returns nil",
 			input:    "invalid",
 			expected: nil,
+		},
+		{
+			name:     "3-digit number with multi-prefix (ABF-346 uses 118 and 436)",
+			input:    "ABF-346",
+			expected: []string{"118abf00346", "118abf346", "436abf00346", "436abf346"},
 		},
 	}
 
