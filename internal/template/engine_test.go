@@ -712,12 +712,13 @@ func TestTemplateEngine_GroupActress(t *testing.T) {
 	engine := NewEngine()
 
 	tests := []struct {
-		name             string
-		actresses        []string
-		groupActress     bool
-		groupActressName string
-		template         string
-		want             string
+		name                    string
+		actresses               []string
+		groupActress            bool
+		groupActressName        string
+		groupUnknownActressName string
+		template                string
+		want                    string
 	}{
 		{
 			name:             "Multiple actresses with GroupActress enabled (default name)",
@@ -765,7 +766,49 @@ func TestTemplateEngine_GroupActress(t *testing.T) {
 			groupActress:     true,
 			groupActressName: "",
 			template:         "<ID> - <ACTORS>",
-			want:             "IPX-535 - ",
+			want:             "IPX-535 - @Unknown",
+		},
+		{
+			name:                    "No actresses with GroupActress enabled (custom unknown name)",
+			actresses:               []string{},
+			groupActress:            true,
+			groupActressName:        "",
+			groupUnknownActressName: "Unknown",
+			template:                "<ID> - <ACTORS>",
+			want:                    "IPX-535 - Unknown",
+		},
+		{
+			name:                    "No actresses with GroupActress enabled (custom label)",
+			actresses:               []string{},
+			groupActress:            true,
+			groupActressName:        "",
+			groupUnknownActressName: "@Various",
+			template:                "<ID> - <ACTORS>",
+			want:                    "IPX-535 - @Various",
+		},
+		{
+			name:             "Single unknown actress with GroupActress enabled",
+			actresses:        []string{"Unknown"},
+			groupActress:     true,
+			groupActressName: "",
+			template:         "<ID> - <ACTORS>",
+			want:             "IPX-535 - @Unknown",
+		},
+		{
+			name:             "Single unknown actress with GroupActress enabled (memory check, case-insensitive)",
+			actresses:        []string{"unknown actress"},
+			groupActress:     true,
+			groupActressName: "",
+			template:         "<ID> - <ACTORS>",
+			want:             "IPX-535 - @Unknown",
+		},
+		{
+			name:             "Single unknown actress with GroupActress disabled returns raw name",
+			actresses:        []string{"Unknown"},
+			groupActress:     false,
+			groupActressName: "",
+			template:         "<ID> - <ACTORS>",
+			want:             "IPX-535 - Unknown",
 		},
 		{
 			name:             "Two actresses with GroupActress enabled",
@@ -780,10 +823,11 @@ func TestTemplateEngine_GroupActress(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := &Context{
-				ID:               "IPX-535",
-				Actresses:        tt.actresses,
-				GroupActress:     tt.groupActress,
-				GroupActressName: tt.groupActressName,
+				ID:                      "IPX-535",
+				Actresses:               tt.actresses,
+				GroupActress:            tt.groupActress,
+				GroupActressName:        tt.groupActressName,
+				GroupUnknownActressName: tt.groupUnknownActressName,
 			}
 
 			got, err := engine.Execute(tt.template, ctx)

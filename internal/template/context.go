@@ -82,10 +82,11 @@ type Context struct {
 	DefaultLanguage string
 
 	// Output configuration
-	GroupActress      bool   // Replace multiple actresses with group name
-	GroupActressName  string // Folder name when GroupActress is enabled and multiple actresses (default: "@Group")
-	FirstNameOrder    bool   // true = FirstName LastName, false = LastName FirstName (default: false for backward compat)
-	ActressLanguageJa bool   // true = prefer JapaneseName over First/Last when available (mirrors nfo.actress_language_ja)
+	GroupActress            bool   // Replace multiple actresses with group name
+	GroupActressName        string // Folder name when GroupActress is enabled and multiple actresses (default: "@Group")
+	GroupUnknownActressName string // Replacement when GroupActress is enabled and the actress is unknown/empty (default: "@Unknown")
+	FirstNameOrder          bool   // true = FirstName LastName, false = LastName FirstName (default: false for backward compat)
+	ActressLanguageJa       bool   // true = prefer JapaneseName over First/Last when available (mirrors nfo.actress_language_ja)
 }
 
 // NewContextFromMovie creates a template context from a Movie model

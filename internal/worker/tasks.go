@@ -477,7 +477,7 @@ func (t *OrganizeTask) Execute(ctx context.Context) error {
 		sourceDir := filepath.Dir(t.match.File.Path)
 		var sourceNFOFilename string
 		if t.nfoConfig != nil {
-			sourceNFOFilename = nfo.ResolveNFOFilename(t.movie, t.nfoConfig.NFOFilenameTemplate, t.nfoConfig.GroupActress, t.nfoConfig.GroupActressName, t.nfoConfig.ActorFirstNameOrder, t.nfoConfig.PerFile, t.match.IsMultiPart, t.match.PartSuffix)
+			sourceNFOFilename = nfo.ResolveNFOFilename(t.movie, t.nfoConfig.NFOFilenameTemplate, t.nfoConfig.GroupActress, t.nfoConfig.GroupActressName, t.nfoConfig.GroupUnknownActressName, t.nfoConfig.ActorFirstNameOrder, t.nfoConfig.PerFile, t.match.IsMultiPart, t.match.PartSuffix)
 		} else {
 			sourceNFOFilename = t.movie.ID + ".nfo"
 		}
@@ -533,7 +533,7 @@ func (t *OrganizeTask) Execute(ctx context.Context) error {
 		nfoPath := ""
 		if result != nil && result.ShouldGenerateMetadata {
 			if t.nfoConfig != nil {
-				nfoFilename := nfo.ResolveNFOFilename(t.movie, t.nfoConfig.NFOFilenameTemplate, t.nfoConfig.GroupActress, t.nfoConfig.GroupActressName, t.nfoConfig.ActorFirstNameOrder, t.nfoConfig.PerFile, t.match.IsMultiPart, t.match.PartSuffix)
+				nfoFilename := nfo.ResolveNFOFilename(t.movie, t.nfoConfig.NFOFilenameTemplate, t.nfoConfig.GroupActress, t.nfoConfig.GroupActressName, t.nfoConfig.GroupUnknownActressName, t.nfoConfig.ActorFirstNameOrder, t.nfoConfig.PerFile, t.match.IsMultiPart, t.match.PartSuffix)
 				nfoPath = filepath.Join(result.FolderPath, nfoFilename)
 			} else {
 				nfoPath = filepath.Join(result.FolderPath, t.movie.ID+".nfo")
@@ -941,7 +941,7 @@ func (t *ProcessFileTask) mergeWithExistingNFO(ctx context.Context, movie *model
 	if isMultiPart {
 		partSuffix = t.match.PartSuffix
 	}
-	nfoPath, legacyPaths := nfo.ResolveNFOPath(sourceDir, movie, t.cfg.Metadata.NFO.FilenameTemplate, t.cfg.Output.GroupActress, t.cfg.Output.GroupActressName, t.cfg.Output.FirstNameOrder, t.cfg.Metadata.NFO.PerFile, t.match.IsMultiPart, partSuffix, t.match.File.Path)
+	nfoPath, legacyPaths := nfo.ResolveNFOPath(sourceDir, movie, t.cfg.Metadata.NFO.FilenameTemplate, t.cfg.Output.GroupActress, t.cfg.Output.GroupActressName, t.cfg.Output.GroupUnknownActressName, t.cfg.Output.FirstNameOrder, t.cfg.Metadata.NFO.PerFile, t.match.IsMultiPart, partSuffix, t.match.File.Path)
 
 	foundPath := ""
 	if _, err := os.Stat(nfoPath); err == nil {
@@ -978,6 +978,7 @@ func (t *ProcessFileTask) mergeWithExistingNFO(ctx context.Context, movie *model
 		displayCtx := template.NewContextFromMovie(merged)
 		displayCtx.GroupActress = t.cfg.Output.GroupActress
 		displayCtx.GroupActressName = t.cfg.Output.GroupActressName
+		displayCtx.GroupUnknownActressName = t.cfg.Output.GroupUnknownActressName
 		displayCtx.FirstNameOrder = t.cfg.Output.FirstNameOrder
 		displayCtx.ActressLanguageJa = t.cfg.Output.ActressLanguageJA
 		displayCtx.Title = movie.Title
@@ -1024,5 +1025,5 @@ func (t *ScrapeTask) applyDisplayTitleFromConfig(ctx context.Context, movie *mod
 	if templateEngine == nil {
 		templateEngine = template.NewEngine()
 	}
-	ApplyDisplayTitle(ctx, movie, movie, cfg.Metadata.NFO.DisplayTitle, templateEngine, cfg.Output.GroupActress, cfg.Output.GroupActressName, cfg.Output.FirstNameOrder)
+	ApplyDisplayTitle(ctx, movie, movie, cfg.Metadata.NFO.DisplayTitle, templateEngine, cfg.Output.GroupActress, cfg.Output.GroupActressName, cfg.Output.GroupUnknownActressName, cfg.Output.FirstNameOrder)
 }

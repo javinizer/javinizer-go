@@ -44,6 +44,7 @@ func copyTempCroppedPoster(job *worker.BatchJob, movie *models.Movie, destDir st
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = cfg.Output.GroupActress
 	ctx.GroupActressName = cfg.Output.GroupActressName
+	ctx.GroupUnknownActressName = cfg.Output.GroupUnknownActressName
 	ctx.FirstNameOrder = cfg.Output.FirstNameOrder
 	ctx.ActressLanguageJa = cfg.Output.ActressLanguageJA
 	if multipart != nil {

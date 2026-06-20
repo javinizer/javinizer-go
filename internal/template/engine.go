@@ -384,30 +384,46 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 		return ctx.Series, nil
 
 	case "ACTORS", "ACTRESSES":
-		if len(ctx.Actresses) > 0 {
-			if ctx.GroupActress && len(ctx.Actresses) > 1 {
+		if len(ctx.Actresses) == 0 && len(ctx.ActressDetails) == 0 {
+			// No actresses at all. Under GroupActress, mirror the original
+			// PowerShell javinizer which substitutes @Unknown when the actress
+			// list is empty (so folder naming stays "@Unknown" rather than
+			// blank). Without GroupActress, return empty.
+			if ctx.GroupActress {
+				return resolveGroupUnknownName(ctx.GroupUnknownActressName), nil
+			}
+			return "", nil
+		}
+
+		// A tag-level language modifier (<ACTORS:JA>, <ACTORS:EN>) selects
+		// the actress name language for this tag and takes precedence over
+		// the config-level ActressLanguageJa default. Anything else is the
+		// delimiter between names (e.g. <ACTORS:|>).
+		preferJa := ctx.ActressLanguageJa
+		delimiter := ", "
+		if parsed.isLanguage {
+			preferJa = languageSpecPrefersJapanese(parsed.languageSpec)
+		} else if parsed.legacyModifier != "" {
+			delimiter = parsed.legacyModifier
+		}
+		names := ctx.formatActressNamesLang(preferJa)
+
+		if ctx.GroupActress {
+			if len(names) > 1 {
 				groupName := ctx.GroupActressName
 				if groupName == "" {
 					groupName = "@Group"
 				}
 				return groupName, nil
 			}
-
-			// A tag-level language modifier (<ACTORS:JA>, <ACTORS:EN>) selects
-			// the actress name language for this tag and takes precedence over
-			// the config-level ActressLanguageJa default. Anything else is the
-			// delimiter between names (e.g. <ACTORS:|>).
-			preferJa := ctx.ActressLanguageJa
-			delimiter := ", "
-			if parsed.isLanguage {
-				preferJa = languageSpecPrefersJapanese(parsed.languageSpec)
-			} else if parsed.legacyModifier != "" {
-				delimiter = parsed.legacyModifier
+			// Single actress: mirror the original javinizer which substitutes
+			// @Unknown when the only name is unknown or empty.
+			if len(names) == 0 || isUnknownActressName(names[0]) {
+				return resolveGroupUnknownName(ctx.GroupUnknownActressName), nil
 			}
-			names := ctx.formatActressNamesLang(preferJa)
-			return strings.Join(names, delimiter), nil
+			return names[0], nil
 		}
-		return "", nil
+		return strings.Join(names, delimiter), nil
 
 	case "ACTRESS":
 		if ctx.ActressName != "" {
@@ -861,6 +877,27 @@ func (e *Engine) languageCandidates(explicitLang string, ctx *Context) []string 
 	}
 
 	return candidates
+}
+
+// resolveGroupUnknownName returns the configured @Unknown replacement name,
+// falling back to the original PowerShell javinizer's hard-coded "@Unknown".
+// Used by the <ACTORS>/<ACTRESSES> resolver when GroupActress is enabled and
+// the actress list is empty or the only name is unknown.
+func resolveGroupUnknownName(configured string) string {
+	if configured == "" {
+		return "@Unknown"
+	}
+	return configured
+}
+
+// should be treated as 'unknown' for GroupActress substitution. Mirrors the
+// original PowerShell javinizer check `-match 'Unknown' -or $actresses -eq ”`:
+// an exact empty string, or any name containing "unknown" (case-insensitive).
+func isUnknownActressName(name string) bool {
+	if name == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(name), "unknown")
 }
 
 // languageSpecPrefersJapanese reports whether the given language spec (which

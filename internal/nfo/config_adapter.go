@@ -14,31 +14,34 @@ func ConfigFromAppConfig(appCfg *config.NFOConfig, outputCfg *config.OutputConfi
 
 	groupActress := false
 	var groupActressName string
+	var groupUnknownActressName string
 	if outputCfg != nil {
 		groupActress = outputCfg.GroupActress
 		groupActressName = outputCfg.GroupActressName
+		groupUnknownActressName = outputCfg.GroupUnknownActressName
 	}
 
 	nfoConfig := &Config{
-		ActorFirstNameOrder:  appCfg.FirstNameOrder,
-		ActorJapaneseNames:   appCfg.ActressLanguageJA,
-		UnknownActress:       appCfg.UnknownActressText,
-		UnknownActressMode:   appCfg.UnknownActressMode,
-		NFOFilenameTemplate:  appCfg.FilenameTemplate,
-		PerFile:              appCfg.PerFile,
-		ActressAsTag:         appCfg.ActressAsTag,
-		AddGenericRole:       appCfg.AddGenericRole,
-		AltNameRole:          appCfg.AltNameRole,
-		IncludeOriginalPath:  appCfg.IncludeOriginalPath,
-		IncludeStreamDetails: appCfg.IncludeStreamDetails,
-		IncludeFanart:        appCfg.IncludeFanart,
-		IncludeTrailer:       appCfg.IncludeTrailer,
-		DefaultRatingSource:  appCfg.RatingSource,
-		StaticTags:           appCfg.Tag,
-		StaticTagline:        appCfg.Tagline,
-		StaticCredits:        appCfg.Credits,
-		GroupActress:         groupActress,
-		GroupActressName:     groupActressName,
+		ActorFirstNameOrder:     appCfg.FirstNameOrder,
+		ActorJapaneseNames:      appCfg.ActressLanguageJA,
+		UnknownActress:          appCfg.UnknownActressText,
+		UnknownActressMode:      appCfg.UnknownActressMode,
+		NFOFilenameTemplate:     appCfg.FilenameTemplate,
+		PerFile:                 appCfg.PerFile,
+		ActressAsTag:            appCfg.ActressAsTag,
+		AddGenericRole:          appCfg.AddGenericRole,
+		AltNameRole:             appCfg.AltNameRole,
+		IncludeOriginalPath:     appCfg.IncludeOriginalPath,
+		IncludeStreamDetails:    appCfg.IncludeStreamDetails,
+		IncludeFanart:           appCfg.IncludeFanart,
+		IncludeTrailer:          appCfg.IncludeTrailer,
+		DefaultRatingSource:     appCfg.RatingSource,
+		StaticTags:              appCfg.Tag,
+		StaticTagline:           appCfg.Tagline,
+		StaticCredits:           appCfg.Credits,
+		GroupActress:            groupActress,
+		GroupActressName:        groupActressName,
+		GroupUnknownActressName: groupUnknownActressName,
 	}
 
 	// Add tag database if enabled and db provided

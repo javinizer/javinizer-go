@@ -740,6 +740,10 @@ definitions:
         description: 'Folder name when group_actress is enabled and multiple actresses
           (default: "@Group")'
         type: string
+      group_unknown_actress_name:
+        description: 'Folder name when group_actress is enabled and the actress list
+          is empty or unknown (default: "@Unknown")'
+        type: string
       max_path_length:
         type: integer
       max_title_length:

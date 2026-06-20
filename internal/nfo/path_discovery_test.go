@@ -80,7 +80,7 @@ func TestResolveNFOPath(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			nfoPath, legacyPaths := ResolveNFOPath(tc.baseDir, tc.movie, tc.nfoFilenameTemplate, tc.groupActress, "", false, tc.perFile, tc.isMultiPart, tc.partSuffix, tc.videoFilePath)
+			nfoPath, legacyPaths := ResolveNFOPath(tc.baseDir, tc.movie, tc.nfoFilenameTemplate, tc.groupActress, "", "", false, tc.perFile, tc.isMultiPart, tc.partSuffix, tc.videoFilePath)
 			if filepath.ToSlash(nfoPath) != tc.wantNFOPath {
 				t.Errorf("ResolveNFOPath nfoPath = %q, want %q", filepath.ToSlash(nfoPath), tc.wantNFOPath)
 			}
@@ -161,7 +161,7 @@ func TestFindNFOFile(t *testing.T) {
 			osStat = func(name string) (os.FileInfo, error) { return fs.Stat(name) }
 			defer func() { osStat = origOSStat }()
 
-			got := FindNFOFile(tc.baseDir, movie, tc.nfoFilenameTemplate, false, "", false, tc.perFile, tc.isMultiPart, tc.partSuffix, tc.videoFilePath)
+			got := FindNFOFile(tc.baseDir, movie, tc.nfoFilenameTemplate, false, "", "", false, tc.perFile, tc.isMultiPart, tc.partSuffix, tc.videoFilePath)
 			if filepath.ToSlash(got) != tc.wantPath {
 				t.Errorf("FindNFOFile = %q, want %q", filepath.ToSlash(got), tc.wantPath)
 			}

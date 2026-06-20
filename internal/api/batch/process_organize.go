@@ -113,7 +113,7 @@ func initOrganizeDependencies(job *worker.BatchJob, jobQueue *worker.JobQueue, c
 }
 
 func capturePreOrganizeSnapshot(movie *models.Movie, filePath string, sourceDir string, match matcher.MatchResult, cfg *config.Config, batchFileOpRepo *database.BatchFileOperationRepository, job *worker.BatchJob, copyOnly bool, linkMode organizer.LinkMode) (*models.BatchFileOperation, history.NFOSnapshotResult) {
-	sourceNFOFilename := nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Output.GroupActressName, cfg.Output.FirstNameOrder, cfg.Metadata.NFO.PerFile, match.IsMultiPart, match.PartSuffix)
+	sourceNFOFilename := nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Output.GroupActressName, cfg.Output.GroupUnknownActressName, cfg.Output.FirstNameOrder, cfg.Metadata.NFO.PerFile, match.IsMultiPart, match.PartSuffix)
 	snapshotCandidates := []string{
 		filepath.Join(sourceDir, sourceNFOFilename),
 		filepath.Join(sourceDir, movie.ID+".nfo"),
@@ -239,7 +239,7 @@ func handlePostOrganize(ctx context.Context, result *organizer.OrganizeResult, m
 			logging.Warnf("[post-move] mode=Organize movie=%s file=%s stage=nfo_generate folder=%s video=%s part_suffix=%q err=%v", movie.ID, filePath, result.FolderPath, videoFilePath, por.partSuffix, nfoErr)
 		}
 
-		nfoPath := filepath.Join(result.FolderPath, nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Output.GroupActressName, cfg.Output.FirstNameOrder, cfg.Metadata.NFO.PerFile, match.IsMultiPart, por.partSuffix))
+		nfoPath := filepath.Join(result.FolderPath, nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Output.GroupActressName, cfg.Output.GroupUnknownActressName, cfg.Output.FirstNameOrder, cfg.Metadata.NFO.PerFile, match.IsMultiPart, por.partSuffix))
 		if logErr := historyLogger.LogNFO(movie.ID, nfoPath, nfoErr); logErr != nil {
 			logging.Warnf("Failed to log NFO history for %s: %v", movie.ID, logErr)
 		}
@@ -267,7 +267,7 @@ func updatePreOrganizeRecord(preRecord *models.BatchFileOperation, result *organ
 	nfoPath := ""
 	generatedNFOPath := ""
 	if result.ShouldGenerateMetadata && cfg.Metadata.NFO.Enabled && !skipNFO {
-		generatedNFOPath = filepath.Join(result.FolderPath, nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Output.GroupActressName, cfg.Output.FirstNameOrder, cfg.Metadata.NFO.PerFile, match.IsMultiPart, por.partSuffix))
+		generatedNFOPath = filepath.Join(result.FolderPath, nfo.ResolveNFOFilename(movie, cfg.Metadata.NFO.FilenameTemplate, cfg.Output.GroupActress, cfg.Output.GroupActressName, cfg.Output.GroupUnknownActressName, cfg.Output.FirstNameOrder, cfg.Metadata.NFO.PerFile, match.IsMultiPart, por.partSuffix))
 		if snapshotResult.FoundPath != "" {
 			nfoPath = snapshotResult.FoundPath
 		} else {

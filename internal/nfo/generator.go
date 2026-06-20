@@ -56,8 +56,9 @@ type Config struct {
 	TagDatabase *database.MovieTagRepository // Optional tag database for per-movie tags
 
 	// Output configuration
-	GroupActress     bool   // Replace multiple actresses with group name (default: false)
-	GroupActressName string // Folder name when GroupActress is enabled and multiple actresses (default: "@Group")
+	GroupActress            bool   // Replace multiple actresses with group name (default: false)
+	GroupActressName        string // Folder name when GroupActress is enabled and multiple actresses (default: "@Group")
+	GroupUnknownActressName string // Replacement when group_actress is enabled and the actress list is empty or unknown (default: "@Unknown")
 }
 
 // NewGenerator creates a new NFO generator
@@ -109,6 +110,7 @@ func (g *Generator) Generate(movie *models.Movie, outputPath string, partSuffix 
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = g.config.GroupActress
 	ctx.GroupActressName = g.config.GroupActressName
+	ctx.GroupUnknownActressName = g.config.GroupUnknownActressName
 	ctx.FirstNameOrder = g.config.ActorFirstNameOrder
 	ctx.ActressLanguageJa = g.config.ActorJapaneseNames
 	filename, err := g.templateEngine.Execute(g.config.NFOFilenameTemplate, ctx)
@@ -651,10 +653,11 @@ func (g *Generator) extractStreamDetails(videoFilePath string) *StreamDetails {
 // ResolveNFOFilename computes the NFO filename for a movie using the same logic
 // as Generate, without writing the file. This ensures that history/revert code
 // tracks the exact path the generator will use.
-func ResolveNFOFilename(movie *models.Movie, nfoFilenameTemplate string, groupActress bool, groupActressName string, firstNameOrder bool, perFile bool, isMultiPart bool, partSuffix string) string {
+func ResolveNFOFilename(movie *models.Movie, nfoFilenameTemplate string, groupActress bool, groupActressName string, groupUnknownActressName string, firstNameOrder bool, perFile bool, isMultiPart bool, partSuffix string) string {
 	tmplCtx := template.NewContextFromMovie(movie)
 	tmplCtx.GroupActress = groupActress
 	tmplCtx.GroupActressName = groupActressName
+	tmplCtx.GroupUnknownActressName = groupUnknownActressName
 	tmplCtx.FirstNameOrder = firstNameOrder
 	engine := template.NewEngine()
 	filename, err := engine.Execute(nfoFilenameTemplate, tmplCtx)

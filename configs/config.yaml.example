@@ -455,6 +455,10 @@ output:
     group_actress: false
     # Folder name when group_actress is enabled and multiple actresses are found (default: "@Group")
     # group_actress_name: "@Group"
+    # Replacement when group_actress is enabled and the actress list is empty or
+    # contains only an unknown actress (default: "@Unknown"; mirrors original
+    # Javinizer behavior)
+    # group_unknown_actress_name: "@Unknown"
     # Actress name ordering in templates: true = FirstName LastName, false = LastName FirstName (default: false)
     # first_name_order: false
     # Actress name language: true = prefer Japanese name (e.g. 桜空もも) for <ACTORS>/<ACTRESS>

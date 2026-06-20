@@ -36,6 +36,7 @@ func (s *InPlaceNoRenameFolderStrategy) Plan(match matcher.MatchResult, movie *m
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = s.config.GroupActress
 	ctx.GroupActressName = s.config.GroupActressName
+	ctx.GroupUnknownActressName = s.config.GroupUnknownActressName
 	ctx.FirstNameOrder = s.config.FirstNameOrder
 	ctx.ActressLanguageJa = s.config.ActressLanguageJA
 

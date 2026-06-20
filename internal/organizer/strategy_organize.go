@@ -35,6 +35,7 @@ func (s *OrganizeStrategy) Plan(match matcher.MatchResult, movie *models.Movie, 
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = s.config.GroupActress
 	ctx.GroupActressName = s.config.GroupActressName
+	ctx.GroupUnknownActressName = s.config.GroupUnknownActressName
 	ctx.FirstNameOrder = s.config.FirstNameOrder
 	ctx.ActressLanguageJa = s.config.ActressLanguageJA
 	applyTitleTruncation(s.templateEngine, ctx, s.config.MaxTitleLength)

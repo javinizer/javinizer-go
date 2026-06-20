@@ -149,6 +149,7 @@ func (a *Aggregator) aggregateWithPriority(results []*models.ScraperResult, prio
 		ctx := template.NewContextFromMovie(movie)
 		ctx.GroupActress = a.config.Output.GroupActress
 		ctx.GroupActressName = a.config.Output.GroupActressName
+		ctx.GroupUnknownActressName = a.config.Output.GroupUnknownActressName
 		ctx.FirstNameOrder = a.config.Output.FirstNameOrder
 		ctx.ActressLanguageJa = a.config.Output.ActressLanguageJA
 		displayTitle, err := a.templateEngine.Execute(a.config.Metadata.NFO.DisplayTitle, ctx)

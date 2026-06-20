@@ -223,35 +223,36 @@ func DefaultConfig() *Config {
 			RegexPattern:    `([a-zA-Z|tT28]+-\d+[zZ]?[eE]?)(?:-pt)?(\d{1,2})?`,
 		},
 		Output: OutputConfig{
-			FolderFormat:        "<ID> [<STUDIO>] - <TITLE> (<YEAR>)",
-			FileFormat:          "<ID><IF:MULTIPART>-pt<PART></IF>",
-			SubfolderFormat:     []string{"<ID>"},
-			Delimiter:           ", ",
-			MaxTitleLength:      100,
-			MaxPathLength:       240,
-			MoveSubtitles:       false,
-			SubtitleExtensions:  []string{".srt", ".ass", ".ssa", ".smi", ".vtt"},
-			OperationMode:       "",
-			RenameFile:          true,     // Rename files by default
-			AllowRevert:         false,    // Opt-in: revert is disabled by default for safety
-			GroupActress:        false,    // Don't group actresses by default
-			GroupActressName:    "@Group", // Default group name when group_actress is enabled
-			FirstNameOrder:      false,    // Default to LastName FirstName (Japanese naming convention)
-			ActressLanguageJA:   false,    // Default to First/Last name; <ACTORS:JA> overrides per-tag
-			PosterFormat:        "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
-			FanartFormat:        "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
-			TrailerFormat:       "<ID>-trailer.mp4",
-			ScreenshotFormat:    "fanart<INDEX>.jpg",
-			ScreenshotFolder:    "extrafanart",
-			ScreenshotPadding:   1,
-			ActressFolder:       ".actors",
-			ActressFormat:       "<ACTORNAME>.jpg",
-			DownloadCover:       true,
-			DownloadPoster:      true,
-			DownloadExtrafanart: true,
-			DownloadTrailer:     true,
-			DownloadActress:     true,
-			DownloadTimeout:     60, // 60 seconds default
+			FolderFormat:            "<ID> [<STUDIO>] - <TITLE> (<YEAR>)",
+			FileFormat:              "<ID><IF:MULTIPART>-pt<PART></IF>",
+			SubfolderFormat:         []string{"<ID>"},
+			Delimiter:               ", ",
+			MaxTitleLength:          100,
+			MaxPathLength:           240,
+			MoveSubtitles:           false,
+			SubtitleExtensions:      []string{".srt", ".ass", ".ssa", ".smi", ".vtt"},
+			OperationMode:           "",
+			RenameFile:              true,       // Rename files by default
+			AllowRevert:             false,      // Opt-in: revert is disabled by default for safety
+			GroupActress:            false,      // Don't group actresses by default
+			GroupActressName:        "@Group",   // Default group name when group_actress is enabled
+			GroupUnknownActressName: "@Unknown", // Default unknown-actress name when group_actress is enabled and the actress list is empty or unknown
+			FirstNameOrder:          false,      // Default to LastName FirstName (Japanese naming convention)
+			ActressLanguageJA:       false,      // Default to First/Last name; <ACTORS:JA> overrides per-tag
+			PosterFormat:            "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
+			FanartFormat:            "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
+			TrailerFormat:           "<ID>-trailer.mp4",
+			ScreenshotFormat:        "fanart<INDEX>.jpg",
+			ScreenshotFolder:        "extrafanart",
+			ScreenshotPadding:       1,
+			ActressFolder:           ".actors",
+			ActressFormat:           "<ACTORNAME>.jpg",
+			DownloadCover:           true,
+			DownloadPoster:          true,
+			DownloadExtrafanart:     true,
+			DownloadTrailer:         true,
+			DownloadActress:         true,
+			DownloadTimeout:         60, // 60 seconds default
 			DownloadProxy: ProxyConfig{
 				Enabled: false,
 			},
