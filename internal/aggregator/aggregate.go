@@ -114,6 +114,7 @@ func (a *Aggregator) aggregateWithPriority(results []*models.ScraperResult, prio
 	genreNames := a.getGenresByPriority(resultsBySource, priorityFunc("Genre"))
 	movie.Genres = make([]models.Genre, 0, len(genreNames))
 	for _, name := range genreNames {
+		name = a.applyWordReplacement(name)
 		replacedName := a.applyGenreReplacement(name)
 
 		if a.isGenreIgnored(replacedName) {

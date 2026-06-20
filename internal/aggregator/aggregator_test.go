@@ -2260,6 +2260,80 @@ func TestApplyWordReplacements_WithTranslations(t *testing.T) {
 	assert.Equal(t, "good series", movie.Translations[0].Series)
 }
 
+// TestAggregate_GenresWordReplacement is a regression test for issue #30:
+// word replacement must apply to genre names so censored genre strings
+// (e.g. "S******n") are uncensored (e.g. "Shotacon") before
+// genre-replacement normalization and ignore-genre filtering run.
+func TestAggregate_GenresWordReplacement(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"r18dev"},
+		},
+		Metadata: config.MetadataConfig{
+			Priority:        config.PriorityConfig{Priority: []string{"r18dev"}},
+			WordReplacement: config.WordReplacementConfig{Enabled: true},
+		},
+	}
+
+	agg := New(cfg)
+	agg.wordReplacementCache = map[string]string{"S******n": "Shotacon"}
+	agg.wordReplacementSorted = []struct{ orig, repl string }{{"S******n", "Shotacon"}}
+
+	results := []*models.ScraperResult{
+		{
+			Source: "r18dev",
+			ID:     "RCTD-676",
+			Title:  "Test Movie",
+			Genres: []string{"Older Sister", "Variety", "S******n", "Creampie"},
+		},
+	}
+
+	movie, _, err := agg.Aggregate(results)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+
+	names := make([]string, len(movie.Genres))
+	for i, g := range movie.Genres {
+		names[i] = g.Name
+	}
+	assert.Contains(t, names, "Shotacon")
+	assert.NotContains(t, names, "S******n")
+}
+
+// TestAggregate_GenresWordReplacement_Disabled verifies that with word
+// replacement disabled the censored genre name passes through unchanged.
+func TestAggregate_GenresWordReplacement_Disabled(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"r18dev"},
+		},
+		Metadata: config.MetadataConfig{
+			Priority:        config.PriorityConfig{Priority: []string{"r18dev"}},
+			WordReplacement: config.WordReplacementConfig{Enabled: false},
+		},
+	}
+
+	agg := New(cfg)
+	agg.wordReplacementCache = map[string]string{"S******n": "Shotacon"}
+	agg.wordReplacementSorted = []struct{ orig, repl string }{{"S******n", "Shotacon"}}
+
+	results := []*models.ScraperResult{
+		{
+			Source: "r18dev",
+			ID:     "RCTD-676",
+			Title:  "Test Movie",
+			Genres: []string{"S******n"},
+		},
+	}
+
+	movie, _, err := agg.Aggregate(results)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+
+	require.Len(t, movie.Genres, 1)
+	assert.Equal(t, "S******n", movie.Genres[0].Name)
+}
+
 func TestReloadWordReplacements(t *testing.T) {
 	mockRepo := &mockWordRepo{replacements: map[string]string{"foo": "bar"}}
 	agg := &Aggregator{wordReplacementRepo: mockRepo}
