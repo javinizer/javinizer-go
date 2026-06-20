@@ -33,10 +33,12 @@ type EngineOptions struct {
 }
 
 // parsedModifier represents a parsed tag modifier with language awareness
+// plus an optional first-name-order override (ACTORS tags only).
 type parsedModifier struct {
 	isLanguage       bool
 	languageSpec     string
 	legacyModifier   string
+	firstNameOrder   *bool // nil = use ctx.FirstNameOrder; non-nil = tag-level override
 	rejectedLanguage bool
 }
 
@@ -395,18 +397,21 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 			return "", nil
 		}
 
-		// A tag-level language modifier (<ACTORS:JA>, <ACTORS:EN>) selects
-		// the actress name language for this tag and takes precedence over
-		// the config-level ActressLanguageJa default. Anything else is the
-		// delimiter between names (e.g. <ACTORS:|>).
+		// Per-tag modifiers on <ACTORS> support three keyword kinds combined with
+		// a comma:
+		//   - language spec (<ACTORS:JA>, <ACTORS:EN>, <ACTORS:JA|EN>)
+		//   - name order   (<ACTORS:FIRST>, <ACTORS:LAST>, <ACTORS:FIRSTNAMEORDER>, <ACTORS:LASTNAMEORDER>)
+		//   - combination  (<ACTORS:JA,FIRST>)
+		// Language spec takes precedence over the config-level ActressLanguageJa
+		// default. Name order takes precedence over the config-level
+		// FirstNameOrder default. Anything not matching any recognized keyword
+		// is treated as the legacy delimiter between names (e.g. <ACTORS:|>).
+		pm := e.parseActressModifier(modifier)
 		preferJa := ctx.ActressLanguageJa
-		delimiter := ", "
-		if parsed.isLanguage {
-			preferJa = languageSpecPrefersJapanese(parsed.languageSpec)
-		} else if parsed.legacyModifier != "" {
-			delimiter = parsed.legacyModifier
+		if pm.isLanguage {
+			preferJa = languageSpecPrefersJapanese(pm.languageSpec)
 		}
-		names := ctx.formatActressNamesLang(preferJa)
+		names := ctx.formatActressNamesLang(preferJa, pm.firstNameOrder)
 
 		if ctx.GroupActress {
 			if len(names) > 1 {
@@ -423,18 +428,27 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 			}
 			return names[0], nil
 		}
+
+		// Delimiter handling. When pm has no keyword flags and we still have
+		// a modifier, treat it as a custom delimiter (e.g. <ACTORS:|>).
+		// This preserves backward compat for the legacy delimiter behavior.
+		delimiter := ", "
+		if modifier != "" && !pm.isLanguage && pm.firstNameOrder == nil && pm.legacyModifier != "" {
+			delimiter = pm.legacyModifier
+		}
 		return strings.Join(names, delimiter), nil
 
 	case "ACTRESS":
 		if ctx.ActressName != "" {
 			return ctx.ActressName, nil
 		}
+		pm := e.parseActressModifier(modifier)
 		preferJa := ctx.ActressLanguageJa
-		if parsed.isLanguage {
-			preferJa = languageSpecPrefersJapanese(parsed.languageSpec)
+		if pm.isLanguage {
+			preferJa = languageSpecPrefersJapanese(pm.languageSpec)
 		}
 		if len(ctx.ActressDetails) > 0 {
-			return ctx.formatActressNameLang(ctx.ActressDetails[0], preferJa), nil
+			return ctx.formatActressNameLang(ctx.ActressDetails[0], preferJa, pm.firstNameOrder), nil
 		}
 		if len(ctx.Actresses) > 0 {
 			return ctx.Actresses[0], nil
@@ -478,12 +492,13 @@ func (e *Engine) resolveTag(tagName, modifier string, ctx *Context) (string, err
 		if ctx.ActressName != "" {
 			return ctx.ActressName, nil
 		}
+		pm := e.parseActressModifier(modifier)
 		preferJa := ctx.ActressLanguageJa
-		if parsed.isLanguage {
-			preferJa = languageSpecPrefersJapanese(parsed.languageSpec)
+		if pm.isLanguage {
+			preferJa = languageSpecPrefersJapanese(pm.languageSpec)
 		}
 		if len(ctx.ActressDetails) > 0 {
-			return ctx.formatActressNameLang(ctx.ActressDetails[0], preferJa), nil
+			return ctx.formatActressNameLang(ctx.ActressDetails[0], preferJa, pm.firstNameOrder), nil
 		}
 		if len(ctx.Actresses) > 0 {
 			return ctx.Actresses[0], nil
@@ -722,6 +737,114 @@ func normalizeLanguageList(langs []string) []string {
 		out = append(out, norm)
 	}
 	return out
+}
+
+// actressOrderModifier recognizes name-order keywords for the
+// <ACTORS>/<ACTRESS>/<ACTORNAME> tags. Returns nil if the token is not an
+// order modifier.
+func parseActressOrderModifier(part string) *bool {
+	switch strings.ToLower(strings.TrimSpace(part)) {
+	case "first", "firstnameorder":
+		b := true
+		return &b
+	case "last", "lastnameorder":
+		b := false
+		return &b
+	}
+	return nil
+}
+
+// parseActressModifier parses a modifier on the actress tags (<ACTORS>,
+// <ACTRESS>, <ACTORNAME>). It supports three kinds of components combined with
+// a comma:
+//   - Language spec: JA, EN, JA|EN, ...
+//   - Name order: FIRST|FIRSTNAMEORDER | LAST|LASTNAMEORDER
+//
+// Example combinations:
+//
+//	<ACTORS:JA>                  -> prefer Japanese names
+//	<ACTORS:FIRST>               -> force FirstName LastName
+//	<ACTORS:LAST>                -> force LastName FirstName
+//	<ACTORS:JA,FIRST>            -> Japanese + first-name order (Japanese
+//	                                 ignores order since it returns the
+//	                                 name as-is, but order stays set)
+//	<ACTORS:JA|EN,FIRST>         -> Japanese-with-English-fallback +
+//	                                 first-name order
+//
+// If NO component matches a recognized keyword (e.g. "|" or " & "), the
+// whole modifier is treated as a legacy delimiter string and returned in
+// legacyModifier (preserves backward compat for tags like <ACTORS:|>).
+//
+// If the modifier contains a comma AND some components are recognized but
+// others are not, the unrecognized components are ignored (so a stray comma
+// does not break when combined with a recognized keyword).
+func (e *Engine) parseActressModifier(modifier string) parsedModifier {
+	if modifier == "" {
+		return parsedModifier{}
+	}
+
+	// Split on comma into components. If no comma, this is a single component.
+	var parts []string
+	if strings.Contains(modifier, ",") {
+		parts = strings.Split(modifier, ",")
+	} else {
+		parts = []string{modifier}
+	}
+
+	var (
+		languageSpec   string
+		firstNameOrder *bool
+		sawKeyword     bool
+	)
+	for _, raw := range parts {
+		trimmed := strings.TrimSpace(raw)
+		if order := parseActressOrderModifier(trimmed); order != nil {
+			firstNameOrder = order
+			sawKeyword = true
+			continue
+		}
+		if e.looksLikeLanguageSpec(trimmed) {
+			// Accept the partial language spec; preserve the whole original
+			// (normalized). Single-component language spec ("ja") or
+			// fallback chain ("ja|en").
+			normalized := normalizeLanguageCode(trimmed)
+			if normalized == "" {
+				// try as fallback chain
+				chainParts := strings.Split(trimmed, "|")
+				valid := true
+				for _, p := range chainParts {
+					if normalizeLanguageCode(p) == "" {
+						valid = false
+						break
+					}
+				}
+				if !valid {
+					continue
+				}
+				normalized = trimmed
+			}
+			if normalized != "" {
+				// merge with earlier language specs via fallback chain
+				if languageSpec != "" {
+					languageSpec = languageSpec + "|" + normalized
+				} else {
+					languageSpec = normalized
+				}
+				sawKeyword = true
+			}
+		}
+	}
+
+	if !sawKeyword {
+		return parsedModifier{legacyModifier: modifier}
+	}
+
+	pm := parsedModifier{firstNameOrder: firstNameOrder}
+	if languageSpec != "" {
+		pm.isLanguage = true
+		pm.languageSpec = languageSpec
+	}
+	return pm
 }
 
 // parseModifier parses a tag modifier into language spec and legacy modifier components.

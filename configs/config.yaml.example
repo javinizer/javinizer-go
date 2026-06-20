@@ -465,6 +465,11 @@ output:
     # in folder/file naming when available; false = use First/Last name (default: false).
     # A tag-level modifier overrides this per-tag, e.g. <ACTORS:JA> forces Japanese,
     # <ACTORS:EN> forces English. JA|EN fallback chains are also supported.
+    # Tag-level name-order modifiers override first_name_order per-tag:
+    #   <ACTORS:FIRST> or <ACTORS:FIRSTNAMEORDER> -> First Last
+    #   <ACTORS:LAST>  or <ACTORS:LASTNAMEORDER>  -> Last First
+    # Combining with language is supported via a comma, e.g.
+    # <ACTORS:EN,FIRST> forces English + First Last regardless of config defaults.
     # actress_language_ja: false
     # Media file naming templates (support placeholders like <ID>, <TITLE>, <INDEX>, etc.)
     poster_format: <ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg    # Vertical poster image (e.g., IPX-535-poster.jpg, IPX-535-pt1-poster.jpg)

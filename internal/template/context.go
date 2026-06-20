@@ -327,14 +327,20 @@ func normalizeLanguageCode(lang string) string {
 }
 
 // formatActressNameLang formats a single actress name, allowing callers to
-// override the context-wide ActressLanguageJa preference. The override is
-// used by the <ACTORS:JA> / <ACTRESS:JA> / <ACTORNAME:JA> tag modifiers.
-func (c *Context) formatActressNameLang(detail ActressDetail, preferJa bool) string {
+// override the context-wide ActressLanguageJa and FirstNameOrder preferences.
+// The overrides are used by the <ACTORS:JA> / <ACTRESS:FIRST> /
+// <ACTORNAME:JA,LAST> tag modifiers. A nil firstNameOrderHint falls back to
+// c.FirstNameOrder (the config default).
+func (c *Context) formatActressNameLang(detail ActressDetail, preferJa bool, firstNameOrderHint *bool) string {
 	if preferJa && detail.JapaneseName != "" {
 		return detail.JapaneseName
 	}
 	if detail.FirstName != "" && detail.LastName != "" {
-		if c.FirstNameOrder {
+		firstNameOrder := c.FirstNameOrder
+		if firstNameOrderHint != nil {
+			firstNameOrder = *firstNameOrderHint
+		}
+		if firstNameOrder {
 			return detail.FirstName + " " + detail.LastName
 		}
 		return detail.LastName + " " + detail.FirstName
@@ -348,15 +354,16 @@ func (c *Context) formatActressNameLang(detail ActressDetail, preferJa bool) str
 	return detail.JapaneseName
 }
 
-// formatActressNamesLang formats all actress names with an explicit override
-// of the Japanese-preference flag. See formatActressNameLang.
-func (c *Context) formatActressNamesLang(preferJa bool) []string {
+// formatActressNamesLang formats all actress names with explicit overrides
+// of the Japanese-preference flag and first-name-order preference. See
+// formatActressNameLang.
+func (c *Context) formatActressNamesLang(preferJa bool, firstNameOrderHint *bool) []string {
 	if len(c.ActressDetails) == 0 {
 		return c.Actresses
 	}
 	names := make([]string, len(c.ActressDetails))
 	for i, detail := range c.ActressDetails {
-		names[i] = c.formatActressNameLang(detail, preferJa)
+		names[i] = c.formatActressNameLang(detail, preferJa, firstNameOrderHint)
 	}
 	return names
 }

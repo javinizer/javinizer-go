@@ -1135,6 +1135,166 @@ func TestTemplateEngine_ActorsLanguageModifier(t *testing.T) {
 	}
 }
 
+// TestTemplateEngine_ActorsFirstNameOrderModifier covers the tag-level
+// name-order modifier (<ACTORS:FIRST>, <ACTORS:LAST>, <ACTORS:FIRSTNAMEORDER>,
+// <ACTORS:LASTNAMEORDER>) on <ACTORS>/<ACTRESS>/<ACTORNAME> tags, alone and
+// combined with the language modifier (<ACTORS:JA,FIRST>).
+func TestTemplateEngine_ActorsFirstNameOrderModifier(t *testing.T) {
+	engine := NewEngine()
+
+	actresses := []ActressDetail{
+		{FirstName: "Yui", LastName: "Hatano", JapaneseName: "波多野結衣"},
+		{FirstName: "Ai", LastName: "Uehara", JapaneseName: "上原亜衣"},
+	}
+	prebuilt := func(details []ActressDetail) []string {
+		out := make([]string, len(details))
+		for i, d := range details {
+			if d.LastName != "" {
+				out[i] = d.LastName + " " + d.FirstName
+			} else {
+				out[i] = d.FirstName
+			}
+		}
+		return out
+	}
+
+	tests := []struct {
+		name           string
+		sliceSingle    bool // true: use only first actress (for <ACTRESS> tests)
+		firstNameOrder bool // config-level default
+		template       string
+		want           string
+	}{
+		// Order-only modifiers (config default is false / LastName First)
+		{
+			name:           "FIRST alias forces First Last",
+			firstNameOrder: false,
+			template:       "<ACTORS:FIRST>",
+			want:           "Yui Hatano, Ai Uehara",
+		},
+		{
+			name:           "LAST alias forces Last First",
+			firstNameOrder: true,
+			template:       "<ACTORS:LAST>",
+			want:           "Hatano Yui, Uehara Ai",
+		},
+		{
+			name:           "FIRSTNAMEORDER long form",
+			firstNameOrder: false,
+			template:       "<ACTORS:FIRSTNAMEORDER>",
+			want:           "Yui Hatano, Ai Uehara",
+		},
+		{
+			name:           "LASTNAMEORDER long form",
+			firstNameOrder: true,
+			template:       "<ACTORS:LASTNAMEORDER>",
+			want:           "Hatano Yui, Uehara Ai",
+		},
+		{
+			name:           "case-insensitive lowercase first",
+			firstNameOrder: false,
+			template:       "<ACTORS:first>",
+			want:           "Yui Hatano, Ai Uehara",
+		},
+		// No modifier honors config default
+		{
+			name:           "no modifier honors config true",
+			firstNameOrder: true,
+			template:       "<ACTORS>",
+			want:           "Yui Hatano, Ai Uehara",
+		},
+		{
+			name:           "no modifier honors config false",
+			firstNameOrder: false,
+			template:       "<ACTORS>",
+			want:           "Hatano Yui, Uehara Ai",
+		},
+		// Combinations with language modifier
+		{
+			name:           "JA,FIRST uses Japanese (order ignored)",
+			firstNameOrder: false,
+			template:       "<ACTORS:JA,FIRST>",
+			want:           "波多野結衣, 上原亜衣",
+		},
+		{
+			name:           "EN,FIRST forces English + First Last",
+			firstNameOrder: false,
+			template:       "<ACTORS:EN,FIRST>",
+			want:           "Yui Hatano, Ai Uehara",
+		},
+		{
+			name:           "EN,LAST forces English + Last First",
+			firstNameOrder: true,
+			template:       "<ACTORS:EN,LAST>",
+			want:           "Hatano Yui, Uehara Ai",
+		},
+		{
+			name:           "JA fallback chain + LAST",
+			firstNameOrder: true,
+			template:       "<ACTORS:JA|EN,LAST>",
+			want:           "波多野結衣, 上原亜衣",
+		},
+		// Legacy delimiter preserved when not matching keyword
+		{
+			name:           "legacy pipe delimiter preserved",
+			firstNameOrder: false,
+			template:       "<ACTORS:|>",
+			want:           "Hatano Yui|Uehara Ai",
+		},
+		{
+			name:           "legacy ' & ' delimiter preserved",
+			firstNameOrder: false,
+			template:       "<ACTORS: & >",
+			want:           "Hatano Yui & Uehara Ai",
+		},
+		// Single-actress ACTRESS tag
+		{
+			name:           "ACTRESS FIRST override",
+			sliceSingle:    true,
+			firstNameOrder: false,
+			template:       "<ACTRESS:FIRST>",
+			want:           "Yui Hatano",
+		},
+		{
+			name:           "ACTRESS LAST override",
+			sliceSingle:    true,
+			firstNameOrder: true,
+			template:       "<ACTRESS:LAST>",
+			want:           "Hatano Yui",
+		},
+		// ACTORNAME tag
+		{
+			name:           "ACTORNAME FIRST override",
+			sliceSingle:    true,
+			firstNameOrder: false,
+			template:       "<ACTORNAME:FIRST>",
+			want:           "Yui Hatano",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			details := actresses
+			if tt.sliceSingle {
+				details = actresses[:1]
+			}
+			ctx := &Context{
+				ID:             "IPX-535",
+				Actresses:      prebuilt(details),
+				ActressDetails: details,
+				FirstNameOrder: tt.firstNameOrder,
+			}
+			got, err := engine.Execute(tt.template, ctx)
+			if err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("Execute() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTemplateEngine_ResolutionTag(t *testing.T) {
 	engine := NewEngine()
 
