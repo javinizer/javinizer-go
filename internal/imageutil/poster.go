@@ -23,40 +23,46 @@ const (
 	maxDimensionReadBytes = 256 * 1024
 )
 
-// GetOptimalPosterURL attempts to find the highest quality poster URL
-// It tries the awsimgsrc URL first, checks its resolution, and falls back to cover if needed
-// Returns shouldCrop=false always since backend handles all cropping via downloadTempPoster
+// GetOptimalPosterURL attempts to find the highest quality poster URL.
+// It tries the awsimgsrc URL first, checks its resolution, and falls back to
+// the cover image when no high-quality portrait poster is available.
+//
+// When a high-quality portrait poster is found (>= MinPosterWidth x
+// MinPosterHeight), it is returned with shouldCrop=false so the downloader
+// downloads it directly.
+//
+// When no high-quality portrait poster is available (awsimgsrc 404, too
+// small, or unconstructable), the cover URL is returned with
+// shouldCrop=true. The downloader then crops the cover into a portrait
+// poster. Returning shouldCrop=false here would cause the downloader to
+// save the landscape cover unchanged as poster.jpg (see issue #31).
 func GetOptimalPosterURL(coverURL string, client *http.Client) (posterURL string, shouldCrop bool) {
 	if coverURL == "" {
-		return "", false // Backend handles cropping
+		return "", false
 	}
 
 	// Extract the content ID and construct awsimgsrc poster URL
 	awsimgsrcPosterURL := constructAwsimgsrcPosterURL(coverURL)
 	if awsimgsrcPosterURL == "" {
-		logging.Debug("ImageUtil: Could not construct awsimgsrc poster URL, backend will crop cover")
-		return coverURL, false // Backend handles cropping
+		logging.Debug("ImageUtil: Could not construct awsimgsrc poster URL, will crop cover")
+		return coverURL, true
 	}
 
 	// Check the resolution of the awsimgsrc poster
 	width, height, err := GetImageDimensions(awsimgsrcPosterURL, client)
 	if err != nil {
-		logging.Debugf("ImageUtil: Failed to check awsimgsrc poster dimensions: %v, backend will crop cover", err)
-		return coverURL, false // Backend handles cropping
+		logging.Debugf("ImageUtil: Failed to check awsimgsrc poster dimensions: %v, will crop cover", err)
+		return coverURL, true
 	}
 
 	// Check if the poster meets quality requirements
 	if width >= MinPosterWidth && height >= MinPosterHeight {
 		logging.Debugf("ImageUtil: Using high-quality awsimgsrc poster (%dx%d): %s", width, height, awsimgsrcPosterURL)
-		// Note: do NOT UpgradeCoverResolution here. awsimgsrc ps.jpg is the
-		// portrait poster (e.g. 1032x1467); pl.jpg is the landscape jacket
-		// (e.g. 2184x1467). Upgrading ps.jpg -> pl.jpg swaps the poster for
-		// the jacket, which then gets downloaded as poster.jpg on sort.
 		return awsimgsrcPosterURL, false
 	}
 
-	logging.Debugf("ImageUtil: Awsimgsrc poster too small (%dx%d), backend will crop cover", width, height)
-	return coverURL, false // Backend handles cropping
+	logging.Debugf("ImageUtil: Awsimgsrc poster too small (%dx%d), will crop cover", width, height)
+	return coverURL, true
 }
 
 // constructAwsimgsrcPosterURL converts a cover URL to an awsimgsrc poster URL

@@ -79,13 +79,13 @@ func TestGetOptimalPosterURL(t *testing.T) {
 		{
 			name:            "empty cover URL",
 			coverURL:        "",
-			expectedCrop:    false, // Backend handles all cropping now
+			expectedCrop:    false, // nothing to crop when there's no URL at all
 			expectedContain: "",
 		},
 		{
 			name:            "invalid cover URL format",
 			coverURL:        "https://example.com/image.jpg",
-			expectedCrop:    false, // Backend handles all cropping now
+			expectedCrop:    true, // no portrait poster found: caller must crop the cover
 			expectedContain: "example.com",
 		},
 	}
@@ -163,8 +163,8 @@ func TestGetOptimalPosterURL_WithHTTPServer(t *testing.T) {
 			coverURL:        "https://pics.dmm.co.jp/digital/video/sone00860/sone00860pl.jpg",
 			posterImageData: highQualityImage,
 			posterStatus:    http.StatusOK,
-			expectedPoster:  "awsimgsrc",
-			expectedCrop:    false,
+			expectedPoster:  "cover",
+			expectedCrop:    true, // test server isn't on awsimgsrc.dmm.com, so the constructed ps.jpg URL 404s and the cover is returned for cropping
 		},
 		{
 			name:            "low quality poster - fallback to cover",
@@ -172,7 +172,7 @@ func TestGetOptimalPosterURL_WithHTTPServer(t *testing.T) {
 			posterImageData: lowQualityImage,
 			posterStatus:    http.StatusOK,
 			expectedPoster:  "cover",
-			expectedCrop:    false,
+			expectedCrop:    true, // no high-quality portrait: caller must crop the cover
 		},
 		{
 			name:            "poster not found - fallback to cover",
@@ -180,7 +180,7 @@ func TestGetOptimalPosterURL_WithHTTPServer(t *testing.T) {
 			posterImageData: nil,
 			posterStatus:    http.StatusNotFound,
 			expectedPoster:  "cover",
-			expectedCrop:    false,
+			expectedCrop:    true, // no high-quality portrait: caller must crop the cover
 		},
 	}
 
