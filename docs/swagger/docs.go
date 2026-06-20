@@ -3079,6 +3079,967 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "config.APIConfig": {
+            "type": "object",
+            "properties": {
+                "security": {
+                    "$ref": "#/definitions/config.SecurityConfig"
+                }
+            }
+        },
+        "config.ActressDatabaseConfig": {
+            "type": "object",
+            "properties": {
+                "auto_add": {
+                    "description": "Automatically add new actresses to database",
+                    "type": "boolean"
+                },
+                "convert_alias": {
+                    "description": "Convert actress names using alias database",
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "description": "Enable actress image lookup from database",
+                    "type": "boolean"
+                }
+            }
+        },
+        "config.AnthropicTranslationConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "Required",
+                    "type": "string"
+                },
+                "base_url": {
+                    "description": "e.g., https://api.anthropic.com",
+                    "type": "string"
+                },
+                "model": {
+                    "description": "e.g., claude-sonnet-4-20250514",
+                    "type": "string"
+                }
+            }
+        },
+        "config.BrowserConfig": {
+            "type": "object",
+            "properties": {
+                "binary_path": {
+                    "description": "Chrome/Chromium path (auto-discovered if empty)",
+                    "type": "string"
+                },
+                "block_css": {
+                    "description": "Block CSS for speed (default: false)",
+                    "type": "boolean"
+                },
+                "block_images": {
+                    "description": "Block images for speed (default: true)",
+                    "type": "boolean"
+                },
+                "debug_visible": {
+                    "description": "Show browser window for debugging (default: false)",
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "description": "Master kill-switch (default: false)",
+                    "type": "boolean"
+                },
+                "headless": {
+                    "description": "Run headless (default: true)",
+                    "type": "boolean"
+                },
+                "max_retries": {
+                    "description": "Retry attempts (default: 3)",
+                    "type": "integer"
+                },
+                "slow_mo": {
+                    "description": "Slow motion delay ms (default: 0)",
+                    "type": "integer"
+                },
+                "stealth_mode": {
+                    "description": "Anti-detection measures (default: true)",
+                    "type": "boolean"
+                },
+                "timeout": {
+                    "description": "Operation timeout in seconds (default: 30)",
+                    "type": "integer"
+                },
+                "user_agent": {
+                    "description": "Override UA (empty = use scraper's)",
+                    "type": "string"
+                },
+                "window_height": {
+                    "description": "Viewport height (default: 1080)",
+                    "type": "integer"
+                },
+                "window_width": {
+                    "description": "Viewport width (default: 1920)",
+                    "type": "integer"
+                }
+            }
+        },
+        "config.CompletenessConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "tiers": {
+                    "$ref": "#/definitions/config.CompletenessTierConfig"
+                }
+            }
+        },
+        "config.CompletenessTierConfig": {
+            "type": "object",
+            "properties": {
+                "essential": {
+                    "$ref": "#/definitions/config.CompletenessTierDefinition"
+                },
+                "important": {
+                    "$ref": "#/definitions/config.CompletenessTierDefinition"
+                },
+                "nice_to_have": {
+                    "$ref": "#/definitions/config.CompletenessTierDefinition"
+                }
+            }
+        },
+        "config.CompletenessTierDefinition": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "description": "Movie field names assigned to this tier",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "weight": {
+                    "description": "Percentage weight (0-100, must sum to 100 across tiers)",
+                    "type": "integer"
+                }
+            }
+        },
+        "config.DatabaseConfig": {
+            "type": "object",
+            "properties": {
+                "dsn": {
+                    "description": "Data Source Name",
+                    "type": "string"
+                },
+                "log_level": {
+                    "description": "Database query logging: silent, error, warn, info (default: silent)",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "sqlite (currently only supported backend)",
+                    "type": "string"
+                }
+            }
+        },
+        "config.DeepLTranslationConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "DeepL API key",
+                    "type": "string"
+                },
+                "base_url": {
+                    "description": "Optional override (defaults to mode-specific endpoint)",
+                    "type": "string"
+                },
+                "mode": {
+                    "description": "free or pro",
+                    "type": "string"
+                }
+            }
+        },
+        "config.FlareSolverrConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enable FlareSolverr for bypassing Cloudflare",
+                    "type": "boolean"
+                },
+                "max_retries": {
+                    "description": "Max retry attempts for FlareSolverr calls (default: 3)",
+                    "type": "integer"
+                },
+                "session_ttl": {
+                    "description": "Session TTL in seconds (default: 300)",
+                    "type": "integer"
+                },
+                "timeout": {
+                    "description": "Request timeout in seconds (default: 30)",
+                    "type": "integer"
+                },
+                "url": {
+                    "description": "FlareSolverr endpoint (default: http://localhost:8191/v1)",
+                    "type": "string"
+                }
+            }
+        },
+        "config.GenreReplacementConfig": {
+            "type": "object",
+            "properties": {
+                "auto_add": {
+                    "description": "Automatically add new genres to database (identity mapping)",
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "description": "Enable genre replacement from database",
+                    "type": "boolean"
+                }
+            }
+        },
+        "config.GoogleTranslationConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "Required for paid mode",
+                    "type": "string"
+                },
+                "base_url": {
+                    "description": "Optional override",
+                    "type": "string"
+                },
+                "mode": {
+                    "description": "free or paid",
+                    "type": "string"
+                }
+            }
+        },
+        "config.LoggingConfig": {
+            "type": "object",
+            "properties": {
+                "compress": {
+                    "description": "Compress rotated files",
+                    "type": "boolean"
+                },
+                "format": {
+                    "description": "json, text",
+                    "type": "string"
+                },
+                "level": {
+                    "description": "debug, info, warn, error",
+                    "type": "string"
+                },
+                "max_age_days": {
+                    "description": "Max age in days to keep log files (0 = no limit)",
+                    "type": "integer"
+                },
+                "max_backups": {
+                    "description": "Max number of old log files to keep (0 = unlimited)",
+                    "type": "integer"
+                },
+                "max_size_mb": {
+                    "description": "Max size in MB before rotation (0 = no rotation)",
+                    "type": "integer"
+                },
+                "output": {
+                    "description": "stdout, file path",
+                    "type": "string"
+                }
+            }
+        },
+        "config.MatchingConfig": {
+            "type": "object",
+            "properties": {
+                "exclude_patterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "extensions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "min_size_mb": {
+                    "type": "integer"
+                },
+                "regex_enabled": {
+                    "type": "boolean"
+                },
+                "regex_pattern": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.MediaInfoConfig": {
+            "type": "object",
+            "properties": {
+                "cli_enabled": {
+                    "description": "Enable MediaInfo CLI fallback (default: false)",
+                    "type": "boolean"
+                },
+                "cli_path": {
+                    "description": "Path to mediainfo binary (default: \"mediainfo\")",
+                    "type": "string"
+                },
+                "cli_timeout": {
+                    "description": "Timeout in seconds for CLI execution (default: 30)",
+                    "type": "integer"
+                }
+            }
+        },
+        "config.MetadataConfig": {
+            "type": "object",
+            "properties": {
+                "actress_database": {
+                    "description": "Actress image database (SQLite-backed)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.ActressDatabaseConfig"
+                        }
+                    ]
+                },
+                "completeness": {
+                    "description": "Completeness scoring configuration",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.CompletenessConfig"
+                        }
+                    ]
+                },
+                "genre_replacement": {
+                    "description": "Genre replacement/normalization (SQLite-backed)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.GenreReplacementConfig"
+                        }
+                    ]
+                },
+                "ignore_genres": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "nfo": {
+                    "$ref": "#/definitions/config.NFOConfig"
+                },
+                "priority": {
+                    "$ref": "#/definitions/config.PriorityConfig"
+                },
+                "required_fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tag_database": {
+                    "description": "Per-movie tag database (SQLite-backed)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.TagDatabaseConfig"
+                        }
+                    ]
+                },
+                "translation": {
+                    "description": "Metadata translation pipeline",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.TranslationConfig"
+                        }
+                    ]
+                },
+                "word_replacement": {
+                    "description": "Word uncensor/text replacement (SQLite-backed)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.WordReplacementConfig"
+                        }
+                    ]
+                }
+            }
+        },
+        "config.NFOConfig": {
+            "type": "object",
+            "properties": {
+                "actress_as_tag": {
+                    "type": "boolean"
+                },
+                "actress_language_ja": {
+                    "type": "boolean"
+                },
+                "add_generic_role": {
+                    "description": "Add generic \"Actress\" role to all actresses",
+                    "type": "boolean"
+                },
+                "alt_name_role": {
+                    "description": "Use alternate name (Japanese) in role field",
+                    "type": "boolean"
+                },
+                "credits": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "display_title": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "filename_template": {
+                    "type": "string"
+                },
+                "first_name_order": {
+                    "type": "boolean"
+                },
+                "include_fanart": {
+                    "type": "boolean"
+                },
+                "include_originalpath": {
+                    "description": "Include source filename in NFO",
+                    "type": "boolean"
+                },
+                "include_stream_details": {
+                    "type": "boolean"
+                },
+                "include_trailer": {
+                    "type": "boolean"
+                },
+                "per_file": {
+                    "description": "Create separate NFO for each multi-part file",
+                    "type": "boolean"
+                },
+                "rating_source": {
+                    "type": "string"
+                },
+                "tag": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tagline": {
+                    "type": "string"
+                },
+                "unknown_actress_mode": {
+                    "description": "skip (default) or fallback",
+                    "type": "string"
+                },
+                "unknown_actress_text": {
+                    "description": "Text for fallback mode",
+                    "type": "string"
+                }
+            }
+        },
+        "config.OpenAICompatibleTranslationConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "Optional for local endpoints",
+                    "type": "string"
+                },
+                "base_url": {
+                    "description": "e.g., http://localhost:11434/v1",
+                    "type": "string"
+                },
+                "enable_thinking": {
+                    "description": "Toggle reasoning/thinking when supported by the backend",
+                    "type": "boolean"
+                },
+                "model": {
+                    "description": "e.g., llama3.1",
+                    "type": "string"
+                }
+            }
+        },
+        "config.OpenAITranslationConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "API key for the provider",
+                    "type": "string"
+                },
+                "base_url": {
+                    "description": "OpenAI-compatible base URL (e.g., https://api.openai.com/v1)",
+                    "type": "string"
+                },
+                "model": {
+                    "description": "Model name (e.g., gpt-4o-mini)",
+                    "type": "string"
+                }
+            }
+        },
+        "config.OutputConfig": {
+            "type": "object",
+            "properties": {
+                "actress_delimiter": {
+                    "description": "Delimiter between actress names when joining \u003cACTORS\u003e/\u003cACTRESSES\u003e with no in-tag DELIM= modifier (default: \", \")",
+                    "type": "string"
+                },
+                "actress_folder": {
+                    "type": "string"
+                },
+                "actress_format": {
+                    "type": "string"
+                },
+                "actress_language_ja": {
+                    "description": "true = prefer JapaneseName over First/Last for \u003cACTORS\u003e/\u003cACTRESS\u003e in folder/file naming (default: false), mirrors nfo.actress_language_ja; tag-level \u003cACTORS:JA\u003e still takes precedence",
+                    "type": "boolean"
+                },
+                "allow_revert": {
+                    "description": "Enable revert operations (default: false — opt-in for safety)",
+                    "type": "boolean"
+                },
+                "download_actress": {
+                    "type": "boolean"
+                },
+                "download_cover": {
+                    "type": "boolean"
+                },
+                "download_extrafanart": {
+                    "type": "boolean"
+                },
+                "download_poster": {
+                    "type": "boolean"
+                },
+                "download_proxy": {
+                    "description": "Separate proxy for downloads (optional)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.ProxyConfig"
+                        }
+                    ]
+                },
+                "download_timeout": {
+                    "description": "Timeout in seconds for HTTP downloads (default: 60)",
+                    "type": "integer"
+                },
+                "download_trailer": {
+                    "type": "boolean"
+                },
+                "fanart_format": {
+                    "type": "string"
+                },
+                "file_format": {
+                    "type": "string"
+                },
+                "first_name_order": {
+                    "description": "true = FirstName LastName, false = LastName FirstName (default: false)",
+                    "type": "boolean"
+                },
+                "folder_format": {
+                    "type": "string"
+                },
+                "group_actress": {
+                    "description": "Replace multiple actresses with group name in templates (default: false)",
+                    "type": "boolean"
+                },
+                "group_actress_name": {
+                    "description": "Folder name when group_actress is enabled and multiple actresses (default: \"@Group\")",
+                    "type": "string"
+                },
+                "group_unknown_actress_name": {
+                    "description": "Folder name when group_actress is enabled and the actress list is empty or unknown (default: \"@Unknown\")",
+                    "type": "string"
+                },
+                "max_path_length": {
+                    "type": "integer"
+                },
+                "max_title_length": {
+                    "type": "integer"
+                },
+                "move_subtitles": {
+                    "type": "boolean"
+                },
+                "operation_mode": {
+                    "type": "string"
+                },
+                "poster_format": {
+                    "type": "string"
+                },
+                "rename_file": {
+                    "description": "Rename files using file_format template (default: true)",
+                    "type": "boolean"
+                },
+                "screenshot_folder": {
+                    "type": "string"
+                },
+                "screenshot_format": {
+                    "type": "string"
+                },
+                "screenshot_padding": {
+                    "type": "integer"
+                },
+                "subfolder_format": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "subtitle_extensions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "trailer_format": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.PerformanceConfig": {
+            "type": "object",
+            "properties": {
+                "buffer_size": {
+                    "description": "Channel buffer size (default: 100)",
+                    "type": "integer"
+                },
+                "max_workers": {
+                    "description": "Maximum concurrent workers (default: 5)",
+                    "type": "integer"
+                },
+                "update_interval": {
+                    "description": "UI update interval in milliseconds (default: 100)",
+                    "type": "integer"
+                },
+                "worker_timeout": {
+                    "description": "Timeout per task in seconds (default: 300)",
+                    "type": "integer"
+                }
+            }
+        },
+        "config.PriorityConfig": {
+            "type": "object",
+            "properties": {
+                "priority": {
+                    "description": "Priority is the global scraper execution order.\nIf empty, derived from registered scraper priorities at initialization.\nIf set, used directly for all metadata fields that lack a Fields override.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "config.ProxyConfig": {
+            "type": "object",
+            "properties": {
+                "default_profile": {
+                    "description": "Default profile name (for global scrapers.proxy)",
+                    "type": "string"
+                },
+                "enabled": {
+                    "description": "Enable proxy for HTTP requests",
+                    "type": "boolean"
+                },
+                "profile": {
+                    "description": "Named profile to use (for scraper-specific overrides)",
+                    "type": "string"
+                },
+                "profiles": {
+                    "description": "Named proxy profiles (global scrapers.proxy)",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/config.ProxyProfile"
+                    }
+                }
+            }
+        },
+        "config.ProxyProfile": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.RateLimitConfig": {
+            "type": "object",
+            "properties": {
+                "requests_per_minute": {
+                    "type": "integer"
+                }
+            }
+        },
+        "config.ScrapersConfig": {
+            "type": "object",
+            "properties": {
+                "browser": {
+                    "description": "NEW: Global Browser configuration block",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.BrowserConfig"
+                        }
+                    ]
+                },
+                "flaresolverr": {
+                    "description": "Global FlareSolverr config for Cloudflare bypass",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.FlareSolverrConfig"
+                        }
+                    ]
+                },
+                "priority": {
+                    "description": "Global scraper priority order",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "proxy": {
+                    "description": "Default HTTP/SOCKS5 proxy for scraper requests",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.ProxyConfig"
+                        }
+                    ]
+                },
+                "referer": {
+                    "description": "Referer header for CDN compatibility (default: https://www.dmm.co.jp/)",
+                    "type": "string"
+                },
+                "request_timeout_seconds": {
+                    "description": "Overall request timeout in seconds (default: 60)",
+                    "type": "integer"
+                },
+                "scrape_actress": {
+                    "description": "NEW: Global scrape_actress default (opt-out behavior, default: true)",
+                    "type": "boolean"
+                },
+                "timeout_seconds": {
+                    "description": "HTTP client timeout in seconds (default: 30)",
+                    "type": "integer"
+                },
+                "user_agent": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.SecurityConfig": {
+            "type": "object",
+            "properties": {
+                "allow_unc": {
+                    "type": "boolean"
+                },
+                "allowed_directories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "allowed_origins": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "allowed_unc_servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "denied_directories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "force_secure_cookies": {
+                    "type": "boolean"
+                },
+                "max_files_per_scan": {
+                    "type": "integer"
+                },
+                "rate_limit": {
+                    "$ref": "#/definitions/config.RateLimitConfig"
+                },
+                "scan_timeout_seconds": {
+                    "type": "integer"
+                },
+                "trusted_proxies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "config.ServerConfig": {
+            "type": "object",
+            "properties": {
+                "host": {
+                    "type": "string"
+                },
+                "port": {
+                    "type": "integer"
+                }
+            }
+        },
+        "config.SystemConfig": {
+            "type": "object",
+            "properties": {
+                "temp_dir": {
+                    "description": "TempDir is the base directory for temporary files (default: \"data/temp\").\nCan be overridden with JAVINIZER_TEMP_DIR environment variable.\nSubdirectory \"posters/{jobID}\" is created for batch job temp posters.",
+                    "type": "string"
+                },
+                "umask": {
+                    "description": "Umask for file creation (e.g., \"002\" for rwxrwxr-x)\nCan be overridden with UMASK environment variable",
+                    "type": "string"
+                },
+                "version_check_enabled": {
+                    "description": "VersionCheckEnabled enables checking for new releases",
+                    "type": "boolean"
+                },
+                "version_check_interval_hours": {
+                    "description": "VersionCheckIntervalHours is the interval between version checks in hours",
+                    "type": "integer"
+                }
+            }
+        },
+        "config.TagDatabaseConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enable per-movie tag lookup from database",
+                    "type": "boolean"
+                }
+            }
+        },
+        "config.TranslationConfig": {
+            "type": "object",
+            "properties": {
+                "anthropic": {
+                    "description": "Anthropic (Claude) provider settings",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.AnthropicTranslationConfig"
+                        }
+                    ]
+                },
+                "apply_to_primary": {
+                    "description": "Replace primary movie metadata with translated text",
+                    "type": "boolean"
+                },
+                "deepl": {
+                    "description": "DeepL provider settings",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.DeepLTranslationConfig"
+                        }
+                    ]
+                },
+                "enabled": {
+                    "description": "Enable metadata translation after aggregation",
+                    "type": "boolean"
+                },
+                "fields": {
+                    "description": "Per-field translation controls",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.TranslationFieldsConfig"
+                        }
+                    ]
+                },
+                "google": {
+                    "description": "Google provider settings",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.GoogleTranslationConfig"
+                        }
+                    ]
+                },
+                "openai": {
+                    "description": "OpenAI/OpenAI-compatible provider settings",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.OpenAITranslationConfig"
+                        }
+                    ]
+                },
+                "openai_compatible": {
+                    "description": "OpenAI-compatible (Ollama, vLLM, etc.) provider settings",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.OpenAICompatibleTranslationConfig"
+                        }
+                    ]
+                },
+                "overwrite_existing_target": {
+                    "description": "Overwrite target-language translation if already present",
+                    "type": "boolean"
+                },
+                "provider": {
+                    "description": "openai, openai-compatible, anthropic, deepl, google",
+                    "type": "string"
+                },
+                "source_language": {
+                    "description": "Source language code (e.g., en, ja, auto)",
+                    "type": "string"
+                },
+                "target_language": {
+                    "description": "Target language code (e.g., en, ja, zh)",
+                    "type": "string"
+                },
+                "timeout_seconds": {
+                    "description": "Request timeout in seconds",
+                    "type": "integer"
+                }
+            }
+        },
+        "config.TranslationFieldsConfig": {
+            "type": "object",
+            "properties": {
+                "actresses": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "boolean"
+                },
+                "director": {
+                    "type": "boolean"
+                },
+                "genres": {
+                    "type": "boolean"
+                },
+                "label": {
+                    "type": "boolean"
+                },
+                "maker": {
+                    "type": "boolean"
+                },
+                "original_title": {
+                    "type": "boolean"
+                },
+                "series": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "config.WebUIConfig": {
+            "type": "object",
+            "properties": {
+                "default_review_view": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.WordReplacementConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enable word replacement from database",
+                    "type": "boolean"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeConflict": {
             "type": "object",
             "properties": {
@@ -3548,7 +4509,7 @@ const docTemplate = `{
                 "choices": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.ScraperChoice"
+                        "$ref": "#/definitions/models.ScraperChoice"
                     }
                 },
                 "default": {},
@@ -3581,1268 +4542,6 @@ const docTemplate = `{
                     "example": "seconds"
                 }
             }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.APIConfig": {
-            "type": "object",
-            "properties": {
-                "security": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.SecurityConfig"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.ActressDatabaseConfig": {
-            "type": "object",
-            "properties": {
-                "auto_add": {
-                    "description": "Automatically add new actresses to database",
-                    "type": "boolean"
-                },
-                "convert_alias": {
-                    "description": "Convert actress names using alias database",
-                    "type": "boolean"
-                },
-                "enabled": {
-                    "description": "Enable actress image lookup from database",
-                    "type": "boolean"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig": {
-            "type": "object",
-            "properties": {
-                "api_key": {
-                    "description": "Required",
-                    "type": "string"
-                },
-                "base_url": {
-                    "description": "e.g., https://api.anthropic.com",
-                    "type": "string"
-                },
-                "model": {
-                    "description": "e.g., claude-sonnet-4-20250514",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.BrowserConfig": {
-            "type": "object",
-            "properties": {
-                "binary_path": {
-                    "description": "Chrome/Chromium path (auto-discovered if empty)",
-                    "type": "string"
-                },
-                "block_css": {
-                    "description": "Block CSS for speed (default: false)",
-                    "type": "boolean"
-                },
-                "block_images": {
-                    "description": "Block images for speed (default: true)",
-                    "type": "boolean"
-                },
-                "debug_visible": {
-                    "description": "Show browser window for debugging (default: false)",
-                    "type": "boolean"
-                },
-                "enabled": {
-                    "description": "Master kill-switch (default: false)",
-                    "type": "boolean"
-                },
-                "headless": {
-                    "description": "Run headless (default: true)",
-                    "type": "boolean"
-                },
-                "max_retries": {
-                    "description": "Retry attempts (default: 3)",
-                    "type": "integer"
-                },
-                "slow_mo": {
-                    "description": "Slow motion delay ms (default: 0)",
-                    "type": "integer"
-                },
-                "stealth_mode": {
-                    "description": "Anti-detection measures (default: true)",
-                    "type": "boolean"
-                },
-                "timeout": {
-                    "description": "Operation timeout in seconds (default: 30)",
-                    "type": "integer"
-                },
-                "user_agent": {
-                    "description": "Override UA (empty = use scraper's)",
-                    "type": "string"
-                },
-                "window_height": {
-                    "description": "Viewport height (default: 1080)",
-                    "type": "integer"
-                },
-                "window_width": {
-                    "description": "Viewport width (default: 1920)",
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.CompletenessConfig": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "tiers": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.CompletenessTierConfig"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.CompletenessTierConfig": {
-            "type": "object",
-            "properties": {
-                "essential": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.CompletenessTierDefinition"
-                },
-                "important": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.CompletenessTierDefinition"
-                },
-                "nice_to_have": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.CompletenessTierDefinition"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.CompletenessTierDefinition": {
-            "type": "object",
-            "properties": {
-                "fields": {
-                    "description": "Movie field names assigned to this tier",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "weight": {
-                    "description": "Percentage weight (0-100, must sum to 100 across tiers)",
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.DatabaseConfig": {
-            "type": "object",
-            "properties": {
-                "dsn": {
-                    "description": "Data Source Name",
-                    "type": "string"
-                },
-                "log_level": {
-                    "description": "Database query logging: silent, error, warn, info (default: silent)",
-                    "type": "string"
-                },
-                "type": {
-                    "description": "sqlite (currently only supported backend)",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.DeepLTranslationConfig": {
-            "type": "object",
-            "properties": {
-                "api_key": {
-                    "description": "DeepL API key",
-                    "type": "string"
-                },
-                "base_url": {
-                    "description": "Optional override (defaults to mode-specific endpoint)",
-                    "type": "string"
-                },
-                "mode": {
-                    "description": "free or pro",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "description": "Enable FlareSolverr for bypassing Cloudflare",
-                    "type": "boolean"
-                },
-                "max_retries": {
-                    "description": "Max retry attempts for FlareSolverr calls (default: 3)",
-                    "type": "integer"
-                },
-                "session_ttl": {
-                    "description": "Session TTL in seconds (default: 300)",
-                    "type": "integer"
-                },
-                "timeout": {
-                    "description": "Request timeout in seconds (default: 30)",
-                    "type": "integer"
-                },
-                "url": {
-                    "description": "FlareSolverr endpoint (default: http://localhost:8191/v1)",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig": {
-            "type": "object",
-            "properties": {
-                "auto_add": {
-                    "description": "Automatically add new genres to database (identity mapping)",
-                    "type": "boolean"
-                },
-                "enabled": {
-                    "description": "Enable genre replacement from database",
-                    "type": "boolean"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.GoogleTranslationConfig": {
-            "type": "object",
-            "properties": {
-                "api_key": {
-                    "description": "Required for paid mode",
-                    "type": "string"
-                },
-                "base_url": {
-                    "description": "Optional override",
-                    "type": "string"
-                },
-                "mode": {
-                    "description": "free or paid",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.LoggingConfig": {
-            "type": "object",
-            "properties": {
-                "compress": {
-                    "description": "Compress rotated files",
-                    "type": "boolean"
-                },
-                "format": {
-                    "description": "json, text",
-                    "type": "string"
-                },
-                "level": {
-                    "description": "debug, info, warn, error",
-                    "type": "string"
-                },
-                "max_age_days": {
-                    "description": "Max age in days to keep log files (0 = no limit)",
-                    "type": "integer"
-                },
-                "max_backups": {
-                    "description": "Max number of old log files to keep (0 = unlimited)",
-                    "type": "integer"
-                },
-                "max_size_mb": {
-                    "description": "Max size in MB before rotation (0 = no rotation)",
-                    "type": "integer"
-                },
-                "output": {
-                    "description": "stdout, file path",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.MatchingConfig": {
-            "type": "object",
-            "properties": {
-                "exclude_patterns": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "extensions": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "min_size_mb": {
-                    "type": "integer"
-                },
-                "regex_enabled": {
-                    "type": "boolean"
-                },
-                "regex_pattern": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.MediaInfoConfig": {
-            "type": "object",
-            "properties": {
-                "cli_enabled": {
-                    "description": "Enable MediaInfo CLI fallback (default: false)",
-                    "type": "boolean"
-                },
-                "cli_path": {
-                    "description": "Path to mediainfo binary (default: \"mediainfo\")",
-                    "type": "string"
-                },
-                "cli_timeout": {
-                    "description": "Timeout in seconds for CLI execution (default: 30)",
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.MetadataConfig": {
-            "type": "object",
-            "properties": {
-                "actress_database": {
-                    "description": "Actress image database (SQLite-backed)",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ActressDatabaseConfig"
-                        }
-                    ]
-                },
-                "completeness": {
-                    "description": "Completeness scoring configuration",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.CompletenessConfig"
-                        }
-                    ]
-                },
-                "genre_replacement": {
-                    "description": "Genre replacement/normalization (SQLite-backed)",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig"
-                        }
-                    ]
-                },
-                "ignore_genres": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "nfo": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOConfig"
-                },
-                "priority": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.PriorityConfig"
-                },
-                "required_fields": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "tag_database": {
-                    "description": "Per-movie tag database (SQLite-backed)",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.TagDatabaseConfig"
-                        }
-                    ]
-                },
-                "translation": {
-                    "description": "Metadata translation pipeline",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationConfig"
-                        }
-                    ]
-                },
-                "word_replacement": {
-                    "description": "Word uncensor/text replacement (SQLite-backed)",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig"
-                        }
-                    ]
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.NFOConfig": {
-            "type": "object",
-            "properties": {
-                "actress_as_tag": {
-                    "type": "boolean"
-                },
-                "actress_language_ja": {
-                    "type": "boolean"
-                },
-                "add_generic_role": {
-                    "description": "Add generic \"Actress\" role to all actresses",
-                    "type": "boolean"
-                },
-                "alt_name_role": {
-                    "description": "Use alternate name (Japanese) in role field",
-                    "type": "boolean"
-                },
-                "credits": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "display_title": {
-                    "type": "string"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "filename_template": {
-                    "type": "string"
-                },
-                "first_name_order": {
-                    "type": "boolean"
-                },
-                "include_fanart": {
-                    "type": "boolean"
-                },
-                "include_originalpath": {
-                    "description": "Include source filename in NFO",
-                    "type": "boolean"
-                },
-                "include_stream_details": {
-                    "type": "boolean"
-                },
-                "include_trailer": {
-                    "type": "boolean"
-                },
-                "per_file": {
-                    "description": "Create separate NFO for each multi-part file",
-                    "type": "boolean"
-                },
-                "rating_source": {
-                    "type": "string"
-                },
-                "tag": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "tagline": {
-                    "type": "string"
-                },
-                "unknown_actress_mode": {
-                    "description": "skip (default) or fallback",
-                    "type": "string"
-                },
-                "unknown_actress_text": {
-                    "description": "Text for fallback mode",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig": {
-            "type": "object",
-            "properties": {
-                "api_key": {
-                    "description": "Optional for local endpoints",
-                    "type": "string"
-                },
-                "base_url": {
-                    "description": "e.g., http://localhost:11434/v1",
-                    "type": "string"
-                },
-                "enable_thinking": {
-                    "description": "Toggle reasoning/thinking when supported by the backend",
-                    "type": "boolean"
-                },
-                "model": {
-                    "description": "e.g., llama3.1",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.OpenAITranslationConfig": {
-            "type": "object",
-            "properties": {
-                "api_key": {
-                    "description": "API key for the provider",
-                    "type": "string"
-                },
-                "base_url": {
-                    "description": "OpenAI-compatible base URL (e.g., https://api.openai.com/v1)",
-                    "type": "string"
-                },
-                "model": {
-                    "description": "Model name (e.g., gpt-4o-mini)",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.OutputConfig": {
-            "type": "object",
-            "properties": {
-                "actress_delimiter": {
-                    "description": "Delimiter between actress names when joining \u003cACTORS\u003e/\u003cACTRESSES\u003e with no in-tag DELIM= modifier (default: \", \")",
-                    "type": "string"
-                },
-                "actress_folder": {
-                    "type": "string"
-                },
-                "actress_format": {
-                    "type": "string"
-                },
-                "actress_language_ja": {
-                    "description": "true = prefer JapaneseName over First/Last for \u003cACTORS\u003e/\u003cACTRESS\u003e in folder/file naming (default: false), mirrors nfo.actress_language_ja; tag-level \u003cACTORS:JA\u003e still takes precedence",
-                    "type": "boolean"
-                },
-                "allow_revert": {
-                    "description": "Enable revert operations (default: false — opt-in for safety)",
-                    "type": "boolean"
-                },
-                "download_actress": {
-                    "type": "boolean"
-                },
-                "download_cover": {
-                    "type": "boolean"
-                },
-                "download_extrafanart": {
-                    "type": "boolean"
-                },
-                "download_poster": {
-                    "type": "boolean"
-                },
-                "download_proxy": {
-                    "description": "Separate proxy for downloads (optional)",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig"
-                        }
-                    ]
-                },
-                "download_timeout": {
-                    "description": "Timeout in seconds for HTTP downloads (default: 60)",
-                    "type": "integer"
-                },
-                "download_trailer": {
-                    "type": "boolean"
-                },
-                "fanart_format": {
-                    "type": "string"
-                },
-                "file_format": {
-                    "type": "string"
-                },
-                "first_name_order": {
-                    "description": "true = FirstName LastName, false = LastName FirstName (default: false)",
-                    "type": "boolean"
-                },
-                "folder_format": {
-                    "type": "string"
-                },
-                "group_actress": {
-                    "description": "Replace multiple actresses with group name in templates (default: false)",
-                    "type": "boolean"
-                },
-                "group_actress_name": {
-                    "description": "Folder name when group_actress is enabled and multiple actresses (default: \"@Group\")",
-                    "type": "string"
-                },
-                "group_unknown_actress_name": {
-                    "description": "Folder name when group_actress is enabled and the actress list is empty or unknown (default: \"@Unknown\")",
-                    "type": "string"
-                },
-                "max_path_length": {
-                    "type": "integer"
-                },
-                "max_title_length": {
-                    "type": "integer"
-                },
-                "move_subtitles": {
-                    "type": "boolean"
-                },
-                "operation_mode": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_types.OperationMode"
-                },
-                "poster_format": {
-                    "type": "string"
-                },
-                "rename_file": {
-                    "description": "Rename files using file_format template (default: true)",
-                    "type": "boolean"
-                },
-                "screenshot_folder": {
-                    "type": "string"
-                },
-                "screenshot_format": {
-                    "type": "string"
-                },
-                "screenshot_padding": {
-                    "type": "integer"
-                },
-                "subfolder_format": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "subtitle_extensions": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "trailer_format": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.PerformanceConfig": {
-            "type": "object",
-            "properties": {
-                "buffer_size": {
-                    "description": "Channel buffer size (default: 100)",
-                    "type": "integer"
-                },
-                "max_workers": {
-                    "description": "Maximum concurrent workers (default: 5)",
-                    "type": "integer"
-                },
-                "update_interval": {
-                    "description": "UI update interval in milliseconds (default: 100)",
-                    "type": "integer"
-                },
-                "worker_timeout": {
-                    "description": "Timeout per task in seconds (default: 300)",
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.PriorityConfig": {
-            "type": "object",
-            "properties": {
-                "priority": {
-                    "description": "Priority is the global scraper execution order.\nIf empty, derived from registered scraper priorities at initialization.\nIf set, used directly for all metadata fields that lack a Fields override.",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.ProxyConfig": {
-            "type": "object",
-            "properties": {
-                "default_profile": {
-                    "description": "Default profile name (for global scrapers.proxy)",
-                    "type": "string"
-                },
-                "enabled": {
-                    "description": "Enable proxy for HTTP requests",
-                    "type": "boolean"
-                },
-                "profile": {
-                    "description": "Named profile to use (for scraper-specific overrides)",
-                    "type": "string"
-                },
-                "profiles": {
-                    "description": "Named proxy profiles (global scrapers.proxy)",
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyProfile"
-                    }
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.ProxyProfile": {
-            "type": "object",
-            "properties": {
-                "password": {
-                    "type": "string"
-                },
-                "url": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.RateLimitConfig": {
-            "type": "object",
-            "properties": {
-                "requests_per_minute": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.ScrapersConfig": {
-            "type": "object",
-            "properties": {
-                "browser": {
-                    "description": "NEW: Global Browser configuration block",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.BrowserConfig"
-                        }
-                    ]
-                },
-                "flaresolverr": {
-                    "description": "Global FlareSolverr config for Cloudflare bypass",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig"
-                        }
-                    ]
-                },
-                "priority": {
-                    "description": "Global scraper priority order",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "proxy": {
-                    "description": "Default HTTP/SOCKS5 proxy for scraper requests",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig"
-                        }
-                    ]
-                },
-                "referer": {
-                    "description": "Referer header for CDN compatibility (default: https://www.dmm.co.jp/)",
-                    "type": "string"
-                },
-                "request_timeout_seconds": {
-                    "description": "Overall request timeout in seconds (default: 60)",
-                    "type": "integer"
-                },
-                "scrape_actress": {
-                    "description": "NEW: Global scrape_actress default (opt-out behavior, default: true)",
-                    "type": "boolean"
-                },
-                "timeout_seconds": {
-                    "description": "HTTP client timeout in seconds (default: 30)",
-                    "type": "integer"
-                },
-                "user_agent": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.SecurityConfig": {
-            "type": "object",
-            "properties": {
-                "allow_unc": {
-                    "type": "boolean"
-                },
-                "allowed_directories": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "allowed_origins": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "allowed_unc_servers": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "denied_directories": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "force_secure_cookies": {
-                    "type": "boolean"
-                },
-                "max_files_per_scan": {
-                    "type": "integer"
-                },
-                "rate_limit": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.RateLimitConfig"
-                },
-                "scan_timeout_seconds": {
-                    "type": "integer"
-                },
-                "trusted_proxies": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.ServerConfig": {
-            "type": "object",
-            "properties": {
-                "host": {
-                    "type": "string"
-                },
-                "port": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.SystemConfig": {
-            "type": "object",
-            "properties": {
-                "temp_dir": {
-                    "description": "TempDir is the base directory for temporary files (default: \"data/temp\").\nCan be overridden with JAVINIZER_TEMP_DIR environment variable.\nSubdirectory \"posters/{jobID}\" is created for batch job temp posters.",
-                    "type": "string"
-                },
-                "umask": {
-                    "description": "Umask for file creation (e.g., \"002\" for rwxrwxr-x)\nCan be overridden with UMASK environment variable",
-                    "type": "string"
-                },
-                "version_check_enabled": {
-                    "description": "VersionCheckEnabled enables checking for new releases",
-                    "type": "boolean"
-                },
-                "version_check_interval_hours": {
-                    "description": "VersionCheckIntervalHours is the interval between version checks in hours",
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.TagDatabaseConfig": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "description": "Enable per-movie tag lookup from database",
-                    "type": "boolean"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.TranslationConfig": {
-            "type": "object",
-            "properties": {
-                "anthropic": {
-                    "description": "Anthropic (Claude) provider settings",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig"
-                        }
-                    ]
-                },
-                "apply_to_primary": {
-                    "description": "Replace primary movie metadata with translated text",
-                    "type": "boolean"
-                },
-                "deepl": {
-                    "description": "DeepL provider settings",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.DeepLTranslationConfig"
-                        }
-                    ]
-                },
-                "enabled": {
-                    "description": "Enable metadata translation after aggregation",
-                    "type": "boolean"
-                },
-                "fields": {
-                    "description": "Per-field translation controls",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationFieldsConfig"
-                        }
-                    ]
-                },
-                "google": {
-                    "description": "Google provider settings",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.GoogleTranslationConfig"
-                        }
-                    ]
-                },
-                "openai": {
-                    "description": "OpenAI/OpenAI-compatible provider settings",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.OpenAITranslationConfig"
-                        }
-                    ]
-                },
-                "openai_compatible": {
-                    "description": "OpenAI-compatible (Ollama, vLLM, etc.) provider settings",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig"
-                        }
-                    ]
-                },
-                "overwrite_existing_target": {
-                    "description": "Overwrite target-language translation if already present",
-                    "type": "boolean"
-                },
-                "provider": {
-                    "description": "openai, openai-compatible, anthropic, deepl, google",
-                    "type": "string"
-                },
-                "source_language": {
-                    "description": "Source language code (e.g., en, ja, auto)",
-                    "type": "string"
-                },
-                "target_language": {
-                    "description": "Target language code (e.g., en, ja, zh)",
-                    "type": "string"
-                },
-                "timeout_seconds": {
-                    "description": "Request timeout in seconds",
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.TranslationFieldsConfig": {
-            "type": "object",
-            "properties": {
-                "actresses": {
-                    "type": "boolean"
-                },
-                "description": {
-                    "type": "boolean"
-                },
-                "director": {
-                    "type": "boolean"
-                },
-                "genres": {
-                    "type": "boolean"
-                },
-                "label": {
-                    "type": "boolean"
-                },
-                "maker": {
-                    "type": "boolean"
-                },
-                "original_title": {
-                    "type": "boolean"
-                },
-                "series": {
-                    "type": "boolean"
-                },
-                "title": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.WebUIConfig": {
-            "type": "object",
-            "properties": {
-                "default_review_view": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "description": "Enable word replacement from database",
-                    "type": "boolean"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_models.Actress": {
-            "type": "object",
-            "properties": {
-                "aliases": {
-                    "description": "Pipe-separated",
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "dmm_id": {
-                    "description": "Real DMM actress ID when available (unique only for values \u003e 0)",
-                    "type": "integer"
-                },
-                "first_name": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "japanese_name": {
-                    "type": "string"
-                },
-                "last_name": {
-                    "type": "string"
-                },
-                "thumb_url": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_models.Event": {
-            "type": "object",
-            "properties": {
-                "context": {
-                    "description": "JSON-encoded details",
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "event_type": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "severity": {
-                    "type": "string"
-                },
-                "source": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_models.Genre": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "integer"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_models.GenreReplacement": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "original": {
-                    "type": "string"
-                },
-                "replacement": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_models.Movie": {
-            "type": "object",
-            "properties": {
-                "actresses": {
-                    "description": "Relationships",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
-                    }
-                },
-                "content_id": {
-                    "type": "string"
-                },
-                "cover_url": {
-                    "description": "Landscape/fanart image",
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "cropped_poster_url": {
-                    "description": "URL to the cropped poster (persisted)",
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "director": {
-                    "type": "string"
-                },
-                "display_title": {
-                    "type": "string"
-                },
-                "genres": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre"
-                    }
-                },
-                "id": {
-                    "type": "string"
-                },
-                "label": {
-                    "description": "Sub-label",
-                    "type": "string"
-                },
-                "maker": {
-                    "description": "Studio/maker",
-                    "type": "string"
-                },
-                "original_cropped_poster_url": {
-                    "type": "string"
-                },
-                "original_filename": {
-                    "type": "string"
-                },
-                "original_poster_url": {
-                    "type": "string"
-                },
-                "original_should_crop_poster": {
-                    "type": "boolean"
-                },
-                "original_title": {
-                    "description": "Japanese/original language title",
-                    "type": "string"
-                },
-                "poster_url": {
-                    "description": "Portrait/box art image",
-                    "type": "string"
-                },
-                "rating_score": {
-                    "type": "number"
-                },
-                "rating_votes": {
-                    "type": "integer"
-                },
-                "rating_warning": {
-                    "type": "string"
-                },
-                "release_date": {
-                    "type": "string"
-                },
-                "release_year": {
-                    "type": "integer"
-                },
-                "runtime": {
-                    "description": "in minutes",
-                    "type": "integer"
-                },
-                "screenshot_urls": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "series": {
-                    "description": "Series name",
-                    "type": "string"
-                },
-                "should_crop_poster": {
-                    "description": "Whether poster needs cropping from cover",
-                    "type": "boolean"
-                },
-                "source_name": {
-                    "description": "Metadata",
-                    "type": "string"
-                },
-                "source_url": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "trailer_url": {
-                    "type": "string"
-                },
-                "translations": {
-                    "description": "Translations",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation"
-                    }
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_models.MovieTranslation": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "director": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "label": {
-                    "type": "string"
-                },
-                "language": {
-                    "description": "ISO 639-1: en, ja, zh, etc.",
-                    "type": "string"
-                },
-                "maker": {
-                    "type": "string"
-                },
-                "movie_id": {
-                    "type": "string"
-                },
-                "original_title": {
-                    "description": "Japanese/original language title",
-                    "type": "string"
-                },
-                "series": {
-                    "type": "string"
-                },
-                "settings_hash": {
-                    "description": "Hash of translation settings used",
-                    "type": "string"
-                },
-                "source_name": {
-                    "description": "Which scraper provided this translation",
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_models.ScraperChoice": {
-            "type": "object",
-            "properties": {
-                "label": {
-                    "type": "string",
-                    "example": "English"
-                },
-                "value": {
-                    "type": "string",
-                    "example": "en"
-                }
-            }
-        },
-        "github_com_javinizer_javinizer-go_internal_types.OperationMode": {
-            "type": "string",
-            "enum": [
-                "organize",
-                "in-place",
-                "in-place-norenamefolder",
-                "metadata-artwork",
-                "preview"
-            ],
-            "x-enum-varnames": [
-                "OperationModeOrganize",
-                "OperationModeInPlace",
-                "OperationModeInPlaceNoRenameFolder",
-                "OperationModeMetadataArtwork",
-                "OperationModePreview"
-            ]
         },
         "internal_api_actress.Actress": {
             "type": "object",
@@ -4911,13 +4610,13 @@ const docTemplate = `{
                     }
                 },
                 "proposed_merged": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                    "$ref": "#/definitions/models.Actress"
                 },
                 "source": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                    "$ref": "#/definitions/models.Actress"
                 },
                 "target": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                    "$ref": "#/definitions/models.Actress"
                 }
             }
         },
@@ -4960,7 +4659,7 @@ const docTemplate = `{
                     "example": 3
                 },
                 "merged_actress": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                    "$ref": "#/definitions/models.Actress"
                 },
                 "merged_from_id": {
                     "type": "integer",
@@ -5016,7 +4715,7 @@ const docTemplate = `{
                 "actresses": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                        "$ref": "#/definitions/models.Actress"
                     }
                 },
                 "count": {
@@ -5237,7 +4936,7 @@ const docTemplate = `{
                     }
                 },
                 "movie": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                    "$ref": "#/definitions/models.Movie"
                 }
             }
         },
@@ -5338,7 +5037,7 @@ const docTemplate = `{
                     ]
                 },
                 "movie": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                    "$ref": "#/definitions/models.Movie"
                 },
                 "provenance": {
                     "description": "Field-level data source tracking",
@@ -5375,7 +5074,7 @@ const docTemplate = `{
                     "description": "Optional movie override for previewing unsaved edits",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                            "$ref": "#/definitions/models.Movie"
                         }
                     ]
                 },
@@ -5562,7 +5261,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "movie": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                    "$ref": "#/definitions/models.Movie"
                 }
             }
         },
@@ -5639,7 +5338,7 @@ const docTemplate = `{
                 "events": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Event"
+                        "$ref": "#/definitions/models.Event"
                     }
                 },
                 "total": {
@@ -5857,7 +5556,7 @@ const docTemplate = `{
                 "replacements": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.GenreReplacement"
+                        "$ref": "#/definitions/models.GenreReplacement"
                     }
                 },
                 "total": {
@@ -6135,7 +5834,7 @@ const docTemplate = `{
                     ]
                 },
                 "movie": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                    "$ref": "#/definitions/models.Movie"
                 },
                 "provenance": {
                     "description": "Field-level data source tracking",
@@ -6156,7 +5855,7 @@ const docTemplate = `{
                 "movies": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                        "$ref": "#/definitions/models.Movie"
                     }
                 }
             }
@@ -6219,7 +5918,7 @@ const docTemplate = `{
                     "description": "Result of merging",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                            "$ref": "#/definitions/models.Movie"
                         }
                     ]
                 },
@@ -6231,7 +5930,7 @@ const docTemplate = `{
                     "description": "Data from NFO file",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                            "$ref": "#/definitions/models.Movie"
                         }
                     ]
                 },
@@ -6255,7 +5954,7 @@ const docTemplate = `{
                     "description": "Fresh scraped data",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                            "$ref": "#/definitions/models.Movie"
                         }
                     ]
                 }
@@ -6323,7 +6022,7 @@ const docTemplate = `{
                     }
                 },
                 "movie": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Movie"
+                    "$ref": "#/definitions/models.Movie"
                 },
                 "sources_used": {
                     "type": "integer",
@@ -6435,7 +6134,7 @@ const docTemplate = `{
                     "description": "FlareSolverr config (separate from ProxyConfig)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.FlareSolverrConfig"
+                            "$ref": "#/definitions/config.FlareSolverrConfig"
                         }
                     ]
                 },
@@ -6448,7 +6147,7 @@ const docTemplate = `{
                     ]
                 },
                 "proxy": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ProxyConfig"
+                    "$ref": "#/definitions/config.ProxyConfig"
                 },
                 "target_url": {
                     "description": "Optional override target URL",
@@ -6531,31 +6230,31 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "api": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.APIConfig"
+                    "$ref": "#/definitions/config.APIConfig"
                 },
                 "config_version": {
                     "type": "integer"
                 },
                 "database": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.DatabaseConfig"
+                    "$ref": "#/definitions/config.DatabaseConfig"
                 },
                 "file_matching": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.MatchingConfig"
+                    "$ref": "#/definitions/config.MatchingConfig"
                 },
                 "logging": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.LoggingConfig"
+                    "$ref": "#/definitions/config.LoggingConfig"
                 },
                 "mediainfo": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.MediaInfoConfig"
+                    "$ref": "#/definitions/config.MediaInfoConfig"
                 },
                 "metadata": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.MetadataConfig"
+                    "$ref": "#/definitions/config.MetadataConfig"
                 },
                 "output": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.OutputConfig"
+                    "$ref": "#/definitions/config.OutputConfig"
                 },
                 "performance": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.PerformanceConfig"
+                    "$ref": "#/definitions/config.PerformanceConfig"
                 },
                 "proxy_verification_tokens": {
                     "type": "object",
@@ -6564,16 +6263,16 @@ const docTemplate = `{
                     }
                 },
                 "scrapers": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ScrapersConfig"
+                    "$ref": "#/definitions/config.ScrapersConfig"
                 },
                 "server": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.ServerConfig"
+                    "$ref": "#/definitions/config.ServerConfig"
                 },
                 "system": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.SystemConfig"
+                    "$ref": "#/definitions/config.SystemConfig"
                 },
                 "webui": {
-                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.WebUIConfig"
+                    "$ref": "#/definitions/config.WebUIConfig"
                 }
             }
         },
@@ -6710,6 +6409,290 @@ const docTemplate = `{
                 "update_available": {
                     "description": "Whether an update is available",
                     "type": "boolean"
+                }
+            }
+        },
+        "models.Actress": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "description": "Pipe-separated",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "dmm_id": {
+                    "description": "Real DMM actress ID when available (unique only for values \u003e 0)",
+                    "type": "integer"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "thumb_url": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Event": {
+            "type": "object",
+            "properties": {
+                "context": {
+                    "description": "JSON-encoded details",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Genre": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.GenreReplacement": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "original": {
+                    "type": "string"
+                },
+                "replacement": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Movie": {
+            "type": "object",
+            "properties": {
+                "actresses": {
+                    "description": "Relationships",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Actress"
+                    }
+                },
+                "content_id": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "description": "Landscape/fanart image",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "cropped_poster_url": {
+                    "description": "URL to the cropped poster (persisted)",
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "director": {
+                    "type": "string"
+                },
+                "display_title": {
+                    "type": "string"
+                },
+                "genres": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Genre"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "description": "Sub-label",
+                    "type": "string"
+                },
+                "maker": {
+                    "description": "Studio/maker",
+                    "type": "string"
+                },
+                "original_cropped_poster_url": {
+                    "type": "string"
+                },
+                "original_filename": {
+                    "type": "string"
+                },
+                "original_poster_url": {
+                    "type": "string"
+                },
+                "original_should_crop_poster": {
+                    "type": "boolean"
+                },
+                "original_title": {
+                    "description": "Japanese/original language title",
+                    "type": "string"
+                },
+                "poster_url": {
+                    "description": "Portrait/box art image",
+                    "type": "string"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "rating_votes": {
+                    "type": "integer"
+                },
+                "rating_warning": {
+                    "type": "string"
+                },
+                "release_date": {
+                    "type": "string"
+                },
+                "release_year": {
+                    "type": "integer"
+                },
+                "runtime": {
+                    "description": "in minutes",
+                    "type": "integer"
+                },
+                "screenshot_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "series": {
+                    "description": "Series name",
+                    "type": "string"
+                },
+                "should_crop_poster": {
+                    "description": "Whether poster needs cropping from cover",
+                    "type": "boolean"
+                },
+                "source_name": {
+                    "description": "Metadata",
+                    "type": "string"
+                },
+                "source_url": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "trailer_url": {
+                    "type": "string"
+                },
+                "translations": {
+                    "description": "Translations",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.MovieTranslation"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.MovieTranslation": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "director": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "language": {
+                    "description": "ISO 639-1: en, ja, zh, etc.",
+                    "type": "string"
+                },
+                "maker": {
+                    "type": "string"
+                },
+                "movie_id": {
+                    "type": "string"
+                },
+                "original_title": {
+                    "description": "Japanese/original language title",
+                    "type": "string"
+                },
+                "series": {
+                    "type": "string"
+                },
+                "settings_hash": {
+                    "description": "Hash of translation settings used",
+                    "type": "string"
+                },
+                "source_name": {
+                    "description": "Which scraper provided this translation",
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.ScraperChoice": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string",
+                    "example": "English"
+                },
+                "value": {
+                    "type": "string",
+                    "example": "en"
                 }
             }
         }
