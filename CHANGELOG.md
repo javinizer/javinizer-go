@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.12-alpha] - 2026-06-20
+
+### Added
+
+- Implement User-Agent priority chain for scrapers
+- Support actress Japanese name in folder/file templates
+- Add @Unknown substitution for grouped unknown actresses
+- Support tag-level first-name-order modifier on actress tags
+- Rename output.delimiter -> actress_delimiter; DELIM= modifier; hard break
+
+### Fixed
+
+- Disable proxy by default since r18.dev doesn't need it
+- Capture PPV underscore prefixes in content_id lookup
+- Apply word replacement to genres
+- Stop upgrading poster URL ps.jpg -> pl.jpg
+- Set shouldCrop=true when falling back to cover poster
+- Address sub-agent code review findings
+
+### Changed
+
+- Regenerate swagger docs
+- Update template system docs for new actress tag features
+
 ## [v0.3.11-alpha] - 2026-06-07
 
 ### Fixed
