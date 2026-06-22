@@ -263,17 +263,26 @@ func (r *APIRuntime) buildBatchJobFactory() any {
 		return nil
 	}
 
+	matcher := r.NewMatcher()
+	workerBatchCfg := worker.BatchJobConfig{
+		MaxWorkers:      batchCfg.MaxWorkers,
+		WorkerTimeout:   batchCfg.WorkerTimeout,
+		ScraperPriority: batchCfg.ScraperPriority,
+		NFOEnabled:      batchCfg.NFOEnabled,
+	}
+
+	// Re-hydrate reconstructed jobs with infrastructure deps (matcher, posterGen,
+	// batchCfg) that were not available at JobStore construction time. This
+	// ensures jobs loaded from DB on startup can run apply/rescrape with the
+	// correct BatchCfg (e.g. NFOEnabled) and PosterGen after restart.
+	r.deps.JobStore.SetReconstructionDeps(matcher, posterGen, workerBatchCfg)
+
 	return worker.NewBatchJobFactory(
 		r.deps.JobStore,
 		nil, // WF is per-job (GetBatchWorkflow), not shared across all jobs
-		r.NewMatcher(),
+		matcher,
 		posterGen,
-		worker.BatchJobConfig{
-			MaxWorkers:      batchCfg.MaxWorkers,
-			WorkerTimeout:   batchCfg.WorkerTimeout,
-			ScraperPriority: batchCfg.ScraperPriority,
-			NFOEnabled:      batchCfg.NFOEnabled,
-		},
+		workerBatchCfg,
 		r.deps.EventEmitter,
 	)
 }

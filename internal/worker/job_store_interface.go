@@ -2,6 +2,9 @@ package worker
 
 import (
 	"context"
+
+	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/poster"
 )
 
 // JobStoreInterface defines the contract for the in-memory batch job store.
@@ -79,6 +82,12 @@ type JobStoreInterface interface {
 	// a terminal state for >24 hours or orphaned (job no longer in the database).
 	// Returns the count of removed directories.
 	CleanupStaleTempDirs(ctx context.Context) (int, error)
+
+	// SetReconstructionDeps sets the infrastructure dependencies (matcher,
+	// posterGen, batchCfg) used when reconstructing jobs from the database.
+	// Called by APIRuntime after the BatchJobFactory is built, since these deps
+	// are not available at NewJobStore time. Also re-hydrates already-loaded jobs.
+	SetReconstructionDeps(m matcher.MatcherInterface, pg poster.PosterGenerator, batchCfg BatchJobConfig)
 }
 
 // Compile-time assertion that JobStore satisfies JobStoreInterface.

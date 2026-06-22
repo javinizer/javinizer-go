@@ -92,10 +92,17 @@ func (s *JobStore) reconstructResultTracker(dbJob *models.Job) *ResultTracker {
 //
 // movieRepo may be nil (for newBatchJob, the caller sets it later via
 // JobStore.createJob; for reconstructed jobs it comes from JobStore).
+// When non-nil, it is set on job.deps.MovieRepo so that jobEditorImpl
+// (created via getAdapters/buildAdapters) can persist movie edits to the
+// database. Without this, reconstructed jobs have nil MovieRepo and
+// UpdateMovie() silently skips DB persistence.
 func wireJobDeps(job *BatchJob, movieRepo database.MovieRepositoryInterface, persistFn func()) {
 	job.attachLifecycleCallback()
 	job.posterEditor = NewPosterEditor(job.resultIndex, job.results, movieRepo)
 	job.controller = newJobController(job)
+	if movieRepo != nil {
+		job.deps.MovieRepo = movieRepo
+	}
 	if persistFn != nil {
 		job.deps.PersistFn = persistFn
 	}
@@ -144,6 +151,25 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 
 	// Step 3: Wire shared dependencies
 	wireJobDeps(batchJob, s.movieRepo, func() { s.persistence.PersistJob(batchJob) })
+
+	// Step 3b: Restore infrastructure deps that are not persisted in the DB
+	// but are required for apply/rescrape phases. These are set on the JobStore
+	// via SetReconstructionDeps after the BatchJobFactory is built. They may
+	// be nil if reconstruction runs before SetReconstructionDeps is called
+	// (loadFromDatabase at startup) — SetReconstructionDeps re-hydrates them.
+	batchJob.mu.Lock()
+	if s.reconMatcher != nil {
+		batchJob.deps.Matcher = s.reconMatcher
+	}
+	if s.reconPosterGen != nil {
+		batchJob.deps.PosterGen = s.reconPosterGen
+	}
+	// BatchCfg is a value type — only overwrite if non-zero to avoid clobbering
+	// a BatchCfg that might have been set from a JobConfig for new jobs.
+	if s.reconBatchCfg.MaxWorkers > 0 || s.reconBatchCfg.WorkerTimeout > 0 || len(s.reconBatchCfg.ScraperPriority) > 0 || s.reconBatchCfg.NFOEnabled {
+		batchJob.deps.BatchCfg = s.reconBatchCfg
+	}
+	batchJob.mu.Unlock()
 
 	// Inline setOperationModeFromDB: DB reconstruction must not fail on corrupted data.
 	if dbJob.OperationModeOverride != "" && !dbJob.OperationModeOverride.IsValid() {

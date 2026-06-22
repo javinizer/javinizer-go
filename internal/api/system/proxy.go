@@ -111,7 +111,14 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 				if hashErr != nil {
 					logging.Warnf("failed to hash %s config: %v", req.Mode, hashErr)
 				} else {
-					token, expiresAt, createErr := deps.TokenStore.Create(req.Mode, configHash)
+					// Direct proxy tests validate the global proxy configuration, so the
+					// token is issued with scope "global" to match what config-save
+					// validation expects (config.go validates "global" and "flaresolverr").
+					tokenScope := req.Mode
+					if req.Mode == "direct" {
+						tokenScope = "global"
+					}
+					token, expiresAt, createErr := deps.TokenStore.Create(tokenScope, configHash)
 					if createErr != nil {
 						logging.Warnf("failed to generate verification token: %v", createErr)
 					} else {

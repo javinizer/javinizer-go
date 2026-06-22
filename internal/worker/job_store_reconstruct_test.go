@@ -1,14 +1,18 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -427,4 +431,140 @@ func TestJobStore_ReconstructBatchJob(t *testing.T) {
 			t.Error("Done channel should be closed for reverted status")
 		}
 	})
+}
+
+// --- Tests for reconstruction dep restoration (Findings 2 & 3) ---
+
+// stubReconMatcher is a minimal MatcherInterface for reconstruction tests.
+type stubReconMatcher struct{}
+
+func (s *stubReconMatcher) Match(_ []models.FileMatchInfo) []matcher.MatchResult  { return nil }
+func (s *stubReconMatcher) MatchFile(_ models.FileMatchInfo) *matcher.MatchResult { return nil }
+func (s *stubReconMatcher) MatchString(_ string) string                           { return "TEST-001" }
+
+// stubReconPosterGen is a minimal PosterGenerator for reconstruction tests.
+type stubReconPosterGen struct{}
+
+func (s *stubReconPosterGen) GeneratePoster(_ context.Context, _ string, _ *models.Movie) error {
+	return nil
+}
+
+// mockMovieRepoForReconstruct is a minimal MovieRepositoryInterface for reconstruction tests.
+// Uses the generated mock so the interface stays in sync automatically.
+func newMockMovieRepoForReconstruct(t *testing.T) *mocks.MockMovieRepositoryInterface {
+	m := mocks.NewMockMovieRepositoryInterface(t)
+	m.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&models.Movie{}, nil).Maybe()
+	return m
+}
+
+// TestReconstructBatchJob_RestoresMovieRepo verifies that wireJobDeps sets
+// job.deps.MovieRepo on reconstructed jobs so that jobEditorImpl.UpdateMovie()
+// persists edits to the database instead of silently skipping DB persistence.
+func TestReconstructBatchJob_RestoresMovieRepo(t *testing.T) {
+	t.Parallel()
+
+	mockRepo := &mockJobRepoForPersist{}
+	mockMovieRepo := newMockMovieRepoForReconstruct(t)
+	jq := NewJobStore(mockRepo, nil, mockMovieRepo, "/tmp/javtest", nil, nil)
+
+	dbJob := &models.Job{
+		ID:         "test-recon-movie-repo",
+		Status:     models.JobStatusCompleted,
+		TotalFiles: 1,
+		Completed:  1,
+	}
+
+	reconstructed := jq.reconstructBatchJob(dbJob)
+	require.NotNil(t, reconstructed)
+
+	// The critical assertion: MovieRepo must be set on the reconstructed job
+	// so that jobEditorImpl (created via getAdapters) can persist movie edits.
+	reconstructed.mu.RLock()
+	movieRepo := reconstructed.deps.MovieRepo
+	reconstructed.mu.RUnlock()
+	assert.NotNil(t, movieRepo, "reconstructed job should have MovieRepo set for DB persistence")
+}
+
+// TestReconstructBatchJob_RestoresBatchCfgAndPosterGen verifies that
+// reconstructBatchJob restores BatchCfg, PosterGen, and Matcher from the
+// JobStore's reconstruction deps, so post-restart apply/rescrape uses the
+// correct configuration (e.g. NFOEnabled) and can generate posters.
+func TestReconstructBatchJob_RestoresBatchCfgAndPosterGen(t *testing.T) {
+	t.Parallel()
+
+	m := &stubReconMatcher{}
+	pg := &stubReconPosterGen{}
+	batchCfg := BatchJobConfig{
+		MaxWorkers:    4,
+		WorkerTimeout: 45 * time.Second,
+		NFOEnabled:    true,
+	}
+
+	mockRepo := &mockJobRepoForPersist{}
+	jq := NewJobStore(mockRepo, nil, nil, "/tmp/javtest", nil, nil)
+	jq.SetReconstructionDeps(m, pg, batchCfg)
+
+	dbJob := &models.Job{
+		ID:         "test-recon-infra-deps",
+		Status:     models.JobStatusCompleted,
+		TotalFiles: 1,
+		Completed:  1,
+	}
+
+	reconstructed := jq.reconstructBatchJob(dbJob)
+	require.NotNil(t, reconstructed)
+
+	reconstructed.mu.RLock()
+	defer reconstructed.mu.RUnlock()
+
+	assert.Equal(t, m, reconstructed.deps.Matcher, "reconstructed job should have Matcher restored")
+	assert.Equal(t, pg, reconstructed.deps.PosterGen, "reconstructed job should have PosterGen restored")
+	assert.Equal(t, 4, reconstructed.deps.BatchCfg.MaxWorkers, "reconstructed job should have BatchCfg.MaxWorkers restored")
+	assert.True(t, reconstructed.deps.BatchCfg.NFOEnabled, "reconstructed job should have BatchCfg.NFOEnabled restored")
+}
+
+// TestSetReconstructionDeps_RehydratesExistingJobs verifies that
+// SetReconstructionDeps sets infrastructure deps on already-loaded jobs
+// (reconstructed at startup before the factory was built), not just on
+// future jobs reconstructed afterwards.
+func TestSetReconstructionDeps_RehydratesExistingJobs(t *testing.T) {
+	t.Parallel()
+
+	mockRepo := &mockJobRepoForPersist{}
+	jq := NewJobStore(mockRepo, nil, nil, "/tmp/javtest", nil, nil)
+
+	// Simulate a job loaded from DB at startup (before SetReconstructionDeps)
+	dbJob := &models.Job{
+		ID:         "test-rehydrate",
+		Status:     models.JobStatusCompleted,
+		TotalFiles: 1,
+		Completed:  1,
+	}
+	reconstructed := jq.reconstructBatchJob(dbJob)
+	require.NotNil(t, reconstructed)
+
+	// Add to store's map (simulates loadFromDatabase adding reconstructed jobs)
+	jq.mu.Lock()
+	jq.jobs[reconstructed.ID] = reconstructed
+	jq.mu.Unlock()
+
+	// Before SetReconstructionDeps: infra deps are nil/zero
+	reconstructed.mu.RLock()
+	assert.Nil(t, reconstructed.deps.Matcher)
+	assert.Nil(t, reconstructed.deps.PosterGen)
+	assert.False(t, reconstructed.deps.BatchCfg.NFOEnabled)
+	reconstructed.mu.RUnlock()
+
+	// Now set reconstruction deps — simulates factory being built after startup
+	m := &stubReconMatcher{}
+	pg := &stubReconPosterGen{}
+	batchCfg := BatchJobConfig{NFOEnabled: true, MaxWorkers: 2}
+	jq.SetReconstructionDeps(m, pg, batchCfg)
+
+	// The existing job should now have the deps set
+	reconstructed.mu.RLock()
+	defer reconstructed.mu.RUnlock()
+	assert.Equal(t, m, reconstructed.deps.Matcher, "existing job should have Matcher re-hydrated")
+	assert.Equal(t, pg, reconstructed.deps.PosterGen, "existing job should have PosterGen re-hydrated")
+	assert.True(t, reconstructed.deps.BatchCfg.NFOEnabled, "existing job should have BatchCfg re-hydrated")
 }

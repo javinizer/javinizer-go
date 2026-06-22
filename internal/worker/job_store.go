@@ -9,7 +9,9 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
 )
@@ -34,6 +36,15 @@ type JobStore struct {
 	deserializeErrors atomic.Int64    // count of JSON deserialization failures in reconstructBatchJob
 	tempCleaner       *TempDirCleaner // Per P-8: owns CleanupStaleTempDirs and StartStaleTempCleanup
 	tempCleanerOnce   sync.Once       // Guards tempCleaner lazy-init against concurrent RLock callers
+
+	// reconstructionDeps are infrastructure dependencies that reconstructed jobs
+	// (loaded from DB on startup) need for apply/rescrape phases. They are set
+	// after JobStore construction via SetReconstructionDeps, once the
+	// BatchJobFactory (which owns matcher, posterGen, batchCfg) is built.
+	// New jobs created via createJob get these from JobConfig.BatchJobDeps instead.
+	reconMatcher   matcher.MatcherInterface
+	reconPosterGen poster.PosterGenerator
+	reconBatchCfg  BatchJobConfig
 }
 
 // JobStoreOption configures a JobStore during construction.
@@ -108,6 +119,36 @@ func NewJobStore(jobRepo database.JobRepositoryInterface, batchFileOpRepo databa
 	s.loadFromDatabase()
 
 	return s
+}
+
+// SetReconstructionDeps sets the infrastructure dependencies (matcher, posterGen,
+// batchCfg) used when reconstructing jobs from the database. These are not
+// available at NewJobStore time because they require the WorkflowFactory
+// (which is built later, lazily, by APIRuntime). APIRuntime.buildBatchJobFactory
+// calls this once the factory deps are ready.
+//
+// The method also re-hydrates all already-loaded in-memory jobs so that jobs
+// reconstructed during NewJobStore.loadFromDatabase (before this call) get
+// the same deps as jobs reconstructed afterwards.
+func (s *JobStore) SetReconstructionDeps(m matcher.MatcherInterface, pg poster.PosterGenerator, batchCfg BatchJobConfig) {
+	s.mu.Lock()
+	s.reconMatcher = m
+	s.reconPosterGen = pg
+	s.reconBatchCfg = batchCfg
+	for _, job := range s.jobs {
+		job.mu.Lock()
+		if m != nil {
+			job.deps.Matcher = m
+		}
+		if pg != nil {
+			job.deps.PosterGen = pg
+		}
+		// BatchCfg is a value type (not a pointer), so we always overwrite to
+		// pick up the latest config snapshot.
+		job.deps.BatchCfg = batchCfg
+		job.mu.Unlock()
+	}
+	s.mu.Unlock()
 }
 
 // loadFromDatabase loads existing jobs from the database on startup

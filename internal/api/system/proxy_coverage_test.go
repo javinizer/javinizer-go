@@ -347,3 +347,70 @@ func TestProxyCov_IsValidHTTPURL_EdgeCases(t *testing.T) {
 	assert.False(t, isValidHTTPURL("not-a-url"))
 	assert.False(t, isValidHTTPURL("http://"))
 }
+
+// TestProxyCov_DirectTokenScopeIsGlobal verifies that a successful direct proxy
+// test issues a verification token with scope "global" (not "direct"), so that
+// it can be validated by config-save validation which only accepts "global" and
+// "flaresolverr" scopes.
+func TestProxyCov_DirectTokenScopeIsGlobal(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	})
+	t.Cleanup(cleanup)
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer target.Close()
+
+	proxy := startTestForwardProxy(t)
+	defer proxy.Close()
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy.Enabled = true
+	cfg.Scrapers.Proxy.DefaultProfile = "main"
+	cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
+		"main": {URL: proxy.URL},
+	}
+
+	tokenStore := core.NewTokenStore()
+	deps := newTestDeps(cfg, func(d *core.APIDeps) {
+		d.TokenStore = tokenStore
+	})
+
+	router := gin.New()
+	router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
+
+	body, err := json.Marshal(contracts.ProxyTestRequest{
+		Mode:      "direct",
+		TargetURL: target.URL,
+		Proxy: models.ProxyConfig{
+			Enabled: true,
+		},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response contracts.ProxyTestResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	require.NotEmpty(t, response.VerificationToken)
+
+	// The token must validate with scope "global", not "direct" — config-save
+	// validation (config.go) only checks "global" and "flaresolverr" scopes.
+	// The hash matches req.Proxy (what was tested), which in the real frontend flow
+	// is the same config the user saves.
+	testProxyCfg := models.ProxyConfig{Enabled: true}
+	hash, _ := core.HashProxyConfig(testProxyCfg)
+	assert.True(t, tokenStore.Validate(response.VerificationToken, "global", hash),
+		"direct proxy test token should validate with scope 'global'")
+	assert.False(t, tokenStore.Validate(response.VerificationToken, "direct", hash),
+		"direct proxy test token should NOT have scope 'direct'")
+}
