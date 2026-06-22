@@ -193,6 +193,11 @@ func TestProxyCov_InvalidMode(t *testing.T) {
 // --- testProxy: flaresolverr mode with proxy resolution ---
 
 func TestProxyCov_FlareSolverrWithProxy(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	})
+	t.Cleanup(cleanup)
+
 	fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
 		_ = json.NewDecoder(r.Body).Decode(&reqBody)
@@ -233,6 +238,11 @@ func TestProxyCov_FlareSolverrWithProxy(t *testing.T) {
 // --- testProxy: flaresolverr success with token ---
 
 func TestProxyCov_FlareSolverrSuccessWithToken(t *testing.T) {
+	cleanup := ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	})
+	t.Cleanup(cleanup)
+
 	fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok","message":"Challenge solved!","solution":{"url":"https://example.com","status":200,"cookies":[{"name":"cf","value":"token"}],"response":"<html>test</html>"},"startTimestamp":0,"endTimestamp":0}`))
