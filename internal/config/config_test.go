@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,11 +21,10 @@ metadata:
 `
 
 	// Write test config
-	tmpFile := "/tmp/test_new_config.yaml"
+	tmpFile := filepath.Join(t.TempDir(), "test_new_config.yaml")
 	if err := os.WriteFile(tmpFile, []byte(newConfig), 0644); err != nil {
 		t.Fatalf("Failed to write config: %v", err)
 	}
-	defer func() { _ = os.Remove(tmpFile) }()
 
 	// Load config
 	cfg, err := Load(tmpFile)
@@ -62,11 +62,10 @@ metadata:
 `
 
 	// Write test config
-	tmpFile := "/tmp/test_old_config_fails.yaml"
+	tmpFile := filepath.Join(t.TempDir(), "test_old_config_fails.yaml")
 	if err := os.WriteFile(tmpFile, []byte(oldConfig), 0644); err != nil {
 		t.Fatalf("Failed to write config: %v", err)
 	}
-	defer func() { _ = os.Remove(tmpFile) }()
 
 	// Load config - old field names should be ignored, defaults used
 	cfg, err := Load(tmpFile)

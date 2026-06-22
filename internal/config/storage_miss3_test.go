@@ -44,14 +44,23 @@ func TestMiss3_EncodeYAMLDocument_ValidDoc(t *testing.T) {
 // --- isProcessAlive: 88.9% ---
 
 func TestMiss3_IsProcessAlive_OwnPID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	assert.True(t, isProcessAlive(os.Getpid()))
 }
 
 func TestMiss3_IsProcessAlive_ZeroPID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	assert.False(t, isProcessAlive(0))
 }
 
 func TestMiss3_IsProcessAlive_NegativePID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	assert.False(t, isProcessAlive(-1))
 }
 

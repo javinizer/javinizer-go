@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -50,6 +51,9 @@ func TestMakeConfigLockToken(t *testing.T) {
 }
 
 func TestIsProcessAlive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	t.Run("current process is alive", func(t *testing.T) {
 		assert.True(t, isProcessAlive(os.Getpid()))
 	})

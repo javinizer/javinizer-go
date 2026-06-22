@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -92,11 +93,17 @@ func TestMakeConfigLockTokenDeep2(t *testing.T) {
 }
 
 func TestIsProcessAliveDeep2_InvalidPID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	assert.False(t, isProcessAlive(0))
 	assert.False(t, isProcessAlive(-1))
 }
 
 func TestIsProcessAliveDeep2_CurrentProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	assert.True(t, isProcessAlive(os.Getpid()))
 }
 

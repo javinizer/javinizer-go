@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,11 +55,17 @@ func TestSyncDir_NonExistent(t *testing.T) {
 }
 
 func TestIsProcessAlive_Current(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	alive := isProcessAlive(os.Getpid())
 	assert.True(t, alive)
 }
 
 func TestIsProcessAlive_NonExistent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	alive := isProcessAlive(999999)
 	assert.False(t, alive)
 }

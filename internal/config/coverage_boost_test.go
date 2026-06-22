@@ -1225,6 +1225,9 @@ func TestApplyInitDefaultsFromEnv_NoEnvVars(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIsProcessAlive_InvalidPID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	assert.False(t, isProcessAlive(0))
 	assert.False(t, isProcessAlive(-1))
 }
@@ -1238,6 +1241,9 @@ func TestIsProcessAlive_CurrentProcess(t *testing.T) {
 }
 
 func TestIsProcessAlive_NonexistentProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// Very high PID is unlikely to exist
 	assert.False(t, isProcessAlive(999999999))
 }

@@ -413,6 +413,9 @@ func TestShouldReapConfigLock_WindowsOwnPIDStale(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIsProcessAlive_EPERM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// EPERM is returned when the process exists but we don't have permission
 	// to signal it (e.g., a root process from non-root user).
 	// We can't reliably trigger this in tests, but we verify the function

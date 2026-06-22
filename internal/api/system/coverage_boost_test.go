@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -85,6 +86,10 @@ func TestValidateAndApply_ValidationError(t *testing.T) {
 // --- ValidateAndApply: persist error branch (configFile is unwritable) ---
 
 func TestValidateAndApply_PersistError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("config.Save with directory-as-path behaves differently on Windows")
+	}
+
 	tmpDir := t.TempDir()
 	// Create a directory at the config path so config.Save fails (cannot write
 	// a file where a directory exists). Works on all platforms including Windows

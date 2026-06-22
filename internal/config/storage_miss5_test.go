@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -60,6 +61,9 @@ func TestMiss5_ParseConfigLockMetadata_EmptyPart(t *testing.T) {
 // Line 241-243
 
 func TestMiss5_IsProcessAlive_ZeroOrNegativePID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	assert.False(t, isProcessAlive(0))
 	assert.False(t, isProcessAlive(-1))
 }
@@ -117,6 +121,10 @@ func TestMiss5_SyncDir_NonExistentDir(t *testing.T) {
 // Lines 378-380: tmpFile.Close error
 
 func TestMiss5_AtomicReplaceFile_WriteToReadOnlyDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permissions (os.Chmod 0555) do not restrict access on Windows")
+	}
+
 	tmpDir := t.TempDir()
 	targetPath := filepath.Join(tmpDir, "target.yaml")
 

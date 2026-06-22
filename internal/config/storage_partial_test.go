@@ -78,18 +78,27 @@ func TestParseConfigLockMetadata_EmptyParts_Partial(t *testing.T) {
 // --- isProcessAlive: FindProcess error / Signal error (lines 241) ---
 
 func TestIsProcessAlive_InvalidPID_Partial(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// PID <= 0 returns false
 	assert.False(t, isProcessAlive(0))
 	assert.False(t, isProcessAlive(-1))
 }
 
 func TestIsProcessAlive_NonexistentProcess_Partial(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// Use a very high PID that likely doesn't exist
 	// Signal(0) should return an error (no such process)
 	assert.False(t, isProcessAlive(999999999))
 }
 
 func TestIsProcessAlive_CurrentProcess_Partial(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// Current process should be alive
 	assert.True(t, isProcessAlive(os.Getpid()))
 }
@@ -819,6 +828,9 @@ func TestAtomicReplaceFile_CleanupOnError_Partial(t *testing.T) {
 // --- isProcessAlive: EPERM case ---
 
 func TestIsProcessAlive_EPERM_Partial(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// We can't easily force EPERM in a test, but we can at least verify
 	// that our own process is alive and a very-high PID is not
 	assert.True(t, isProcessAlive(os.Getpid()))

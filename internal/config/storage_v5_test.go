@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -293,6 +294,10 @@ func TestSave_V5_UnreadableFile(t *testing.T) {
 }
 
 func TestLoadOrCreate_V5_StatError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permissions (os.MkdirAll with 0000) do not restrict access on Windows")
+	}
+
 	// Create a directory where we can't stat a file inside
 	dir := t.TempDir()
 	path := filepath.Join(dir, "subdir", "config.yaml")

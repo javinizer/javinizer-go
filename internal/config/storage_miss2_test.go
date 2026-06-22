@@ -94,6 +94,9 @@ func TestShouldReapConfigLock_WindowsDifferentPIDStale(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIsProcessAlive_PID1EPERM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// PID 1 always exists. Non-root users typically get EPERM from Signal(0).
 	// isProcessAlive should return true in the EPERM case.
 	if os.Getuid() == 0 {
@@ -104,6 +107,9 @@ func TestIsProcessAlive_PID1EPERM(t *testing.T) {
 }
 
 func TestIsProcessAlive_OurPID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	alive := isProcessAlive(os.Getpid())
 	assert.True(t, alive, "own PID should be alive")
 }
@@ -602,14 +608,23 @@ func TestMakeConfigLockToken2(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIsProcessAlive_NegativePID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	assert.False(t, isProcessAlive(-1), "negative PID should return false")
 }
 
 func TestIsProcessAlive_ZeroPID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	assert.False(t, isProcessAlive(0), "zero PID should return false")
 }
 
 func TestIsProcessAlive_VeryLargePID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// A very large PID is almost certainly not alive
 	alive := isProcessAlive(999999999)
 	assert.False(t, alive, "very large PID should not be alive")
@@ -760,6 +775,9 @@ func TestDecodeConfig_SetsConfigVersionZero(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIsProcessAlive_SignalError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// On macOS/Linux, Signaling a non-existent process returns ESRCH
 	// which is not EPERM, so isProcessAlive returns false.
 	// We use a very large PID that is almost certainly not alive.
@@ -773,6 +791,9 @@ func TestIsProcessAlive_SignalError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIsProcessAlive_SignalZeroOnOwnProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	process, err := os.FindProcess(os.Getpid())
 	require.NoError(t, err)
 	err = process.Signal(syscall.Signal(0))
@@ -784,6 +805,9 @@ func TestIsProcessAlive_SignalZeroOnOwnProcess(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIsProcessAlive_EPERMExplicit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// The EPERM branch: if err == syscall.EPERM, return true.
 	// We can't easily produce EPERM in a test, but we can verify the logic
 	// by checking that our own PID is alive.
