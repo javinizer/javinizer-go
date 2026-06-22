@@ -9,7 +9,7 @@ import (
 )
 
 func TestCanHandleURL(t *testing.T) {
-	s := &Scraper{baseURL: "https://www.javbus.com"}
+	s := &scraper{baseURL: "https://www.javbus.com"}
 
 	tests := []struct {
 		name     string
@@ -35,7 +35,7 @@ func TestCanHandleURL(t *testing.T) {
 }
 
 func TestExtractIDFromURL(t *testing.T) {
-	s := &Scraper{baseURL: "https://www.javbus.com"}
+	s := &scraper{baseURL: "https://www.javbus.com"}
 
 	tests := []struct {
 		name     string
@@ -70,10 +70,9 @@ func TestExtractIDFromURL(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance(t *testing.T) {
-	s := &Scraper{baseURL: "https://www.javbus.com"}
+	s := &scraper{baseURL: "https://www.javbus.com"}
 	var _ models.Scraper = s
-	var _ models.URLHandler = s
-	var _ models.DirectURLScraper = s
+	var _ models.Scraper = s
 }
 
 func TestExtractCoverURL_PrefersBigImageHref(t *testing.T) {

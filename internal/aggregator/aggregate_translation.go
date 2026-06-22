@@ -9,7 +9,7 @@ import (
 // one of the aggregated movie's fields (Title, OriginalTitle, or Description).
 // This ensures buildTranslations only captures translations from scrapers that
 // actually won the priority merge, preventing duplicate language entries.
-func (a *Aggregator) buildTranslations(results []*models.ScraperResult, movie *models.Movie) []models.MovieTranslation {
+func (a *Aggregator) buildTranslations(results []*models.ScraperResult, scraped *models.Movie) []models.MovieTranslation {
 	translations := make([]models.MovieTranslation, 0, len(results))
 
 	for _, result := range results {
@@ -64,25 +64,25 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult, movie *m
 		// to the aggregated movie. A scraper is a winner if ANY of its non-empty
 		// translation fields match the corresponding aggregated movie field.
 		isWinner := false
-		if result.Title != "" && result.Title == movie.Title {
+		if result.Title != "" && result.Title == scraped.Title {
 			isWinner = true
 		}
-		if result.OriginalTitle != "" && result.OriginalTitle == movie.OriginalTitle {
+		if result.OriginalTitle != "" && result.OriginalTitle == scraped.OriginalTitle {
 			isWinner = true
 		}
-		if result.Description != "" && result.Description == movie.Description {
+		if result.Description != "" && result.Description == scraped.Description {
 			isWinner = true
 		}
-		if result.Director != "" && result.Director == movie.Director {
+		if result.Director != "" && result.Director == scraped.Director {
 			isWinner = true
 		}
-		if result.Maker != "" && result.Maker == movie.Maker {
+		if result.Maker != "" && result.Maker == scraped.Maker {
 			isWinner = true
 		}
-		if result.Label != "" && result.Label == movie.Label {
+		if result.Label != "" && result.Label == scraped.Label {
 			isWinner = true
 		}
-		if result.Series != "" && result.Series == movie.Series {
+		if result.Series != "" && result.Series == scraped.Series {
 			isWinner = true
 		}
 

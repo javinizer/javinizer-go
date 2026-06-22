@@ -17,59 +17,6 @@ func TestNewRuntimeState(t *testing.T) {
 	assert.Nil(t, rt.WebSocketHub(), "New RuntimeState should have nil WebSocketHub")
 }
 
-func TestDefaultRuntimeState(t *testing.T) {
-	t.Run("returns nil when not set", func(t *testing.T) {
-		defaultRuntimeMu.Lock()
-		original := defaultRuntime
-		defaultRuntime = nil
-		defaultRuntimeMu.Unlock()
-		t.Cleanup(func() {
-			defaultRuntimeMu.Lock()
-			defaultRuntime = original
-			defaultRuntimeMu.Unlock()
-		})
-
-		rt := DefaultRuntimeState()
-		assert.Nil(t, rt, "DefaultRuntimeState should return nil when not initialized")
-	})
-
-	t.Run("returns runtime when set", func(t *testing.T) {
-		defaultRuntimeMu.Lock()
-		original := defaultRuntime
-		defaultRuntimeMu.Unlock()
-		t.Cleanup(func() {
-			defaultRuntimeMu.Lock()
-			defaultRuntime = original
-			defaultRuntimeMu.Unlock()
-		})
-
-		rt := NewRuntimeState()
-		SetDefaultRuntimeState(rt)
-
-		got := DefaultRuntimeState()
-		assert.Equal(t, rt, got, "DefaultRuntimeState should return the set runtime")
-	})
-}
-
-func TestSetDefaultRuntimeState(t *testing.T) {
-	defaultRuntimeMu.Lock()
-	original := defaultRuntime
-	defaultRuntimeMu.Unlock()
-	t.Cleanup(func() {
-		defaultRuntimeMu.Lock()
-		defaultRuntime = original
-		defaultRuntimeMu.Unlock()
-	})
-
-	rt1 := NewRuntimeState()
-	SetDefaultRuntimeState(rt1)
-	assert.Equal(t, rt1, DefaultRuntimeState(), "First SetDefaultRuntimeState should work")
-
-	rt2 := NewRuntimeState()
-	SetDefaultRuntimeState(rt2)
-	assert.Equal(t, rt2, DefaultRuntimeState(), "Second SetDefaultRuntimeState should replace first")
-}
-
 func TestRuntimeState_Shutdown(t *testing.T) {
 	t.Run("no-op when no WebSocket hub", func(t *testing.T) {
 		rt := NewRuntimeState()
@@ -177,36 +124,13 @@ func TestRuntimeState_SetWebSocketUpgraderForTesting(t *testing.T) {
 }
 
 func TestNoopOriginCheck(t *testing.T) {
-	result := NoopOriginCheck(nil)
-	assert.True(t, result, "NoopOriginCheck should always return true")
+	result := noopOriginCheck(nil)
+	assert.True(t, result, "noopOriginCheck should always return true")
 
 	req, err := http.NewRequest("GET", "http://example.com", nil)
 	require.NoError(t, err)
-	result = NoopOriginCheck(req)
-	assert.True(t, result, "NoopOriginCheck should return true for any request")
-}
-
-func TestDefaultRuntimeState_ThreadSafety(t *testing.T) {
-	rt := NewRuntimeState()
-	done := make(chan bool)
-
-	go func() {
-		for i := 0; i < 100; i++ {
-			SetDefaultRuntimeState(rt)
-		}
-		done <- true
-	}()
-
-	go func() {
-		for i := 0; i < 100; i++ {
-			_ = DefaultRuntimeState()
-		}
-		done <- true
-	}()
-
-	for i := 0; i < 2; i++ {
-		<-done
-	}
+	result = noopOriginCheck(req)
+	assert.True(t, result, "noopOriginCheck should return true for any request")
 }
 
 func TestRuntimeState_ConcurrentAccess(t *testing.T) {

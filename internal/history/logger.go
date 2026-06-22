@@ -1,235 +1,113 @@
 package history
 
 import (
-	"encoding/json"
+	"context"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// Logger handles logging operations to the history database
+// Logger wraps HistoryRepositoryInterface for CLI history commands.
+// GetStats is the only method with genuine depth — it aggregates 6 repo calls
+// (Count, CountByStatus×3, CountByOperation×2+) into a single stats struct.
+// The other methods are intentionally kept as thin wrappers for CLI ergonomics
+// (callers say logger.GetRecent(...) rather than repo.FindRecent(...));
+// they do not add depth and should not gain logic.
 type Logger struct {
-	repo *database.HistoryRepository
+	repo database.HistoryRepositoryInterface
 }
 
-// NewLogger creates a new history logger
-func NewLogger(db *database.DB) *Logger {
+func NewLogger(repo database.HistoryRepositoryInterface) *Logger {
 	return &Logger{
-		repo: database.NewHistoryRepository(db),
+		repo: repo,
 	}
 }
 
-// LogOrganize logs a file organization operation
-func (l *Logger) LogOrganize(movieID, originalPath, newPath string, dryRun bool, err error) error {
-	status := "success"
-	errorMsg := ""
-	if err != nil {
-		status = "failed"
-		errorMsg = err.Error()
-	}
-
-	history := &models.History{
-		MovieID:      movieID,
-		Operation:    "organize",
-		OriginalPath: originalPath,
-		NewPath:      newPath,
-		Status:       status,
-		ErrorMessage: errorMsg,
-		DryRun:       dryRun,
-		CreatedAt:    time.Now().UTC(),
-	}
-
-	return l.repo.Create(history)
+// GetRecent returns the most recent history records.
+// Pass-through to repo.FindRecent — retained for CLI call-site readability.
+func (l *Logger) GetRecent(ctx context.Context, limit int) ([]models.History, error) {
+	return l.repo.FindRecent(ctx, limit)
 }
 
-// LogScrape logs a metadata scraping operation
-func (l *Logger) LogScrape(movieID, sourceURL string, metadata interface{}, err error) error {
-	status := "success"
-	errorMsg := ""
-	if err != nil {
-		status = "failed"
-		errorMsg = err.Error()
-	}
-
-	// Convert metadata to JSON
-	metadataJSON := ""
-	if metadata != nil {
-		if bytes, jsonErr := json.Marshal(metadata); jsonErr == nil {
-			metadataJSON = string(bytes)
-		}
-	}
-
-	history := &models.History{
-		MovieID:      movieID,
-		Operation:    "scrape",
-		OriginalPath: sourceURL,
-		NewPath:      "",
-		Status:       status,
-		ErrorMessage: errorMsg,
-		Metadata:     metadataJSON,
-		DryRun:       false,
-		CreatedAt:    time.Now().UTC(),
-	}
-
-	return l.repo.Create(history)
+// GetByMovieID returns history records for a given movie ID.
+// Pass-through to repo.FindByMovieID — retained for CLI call-site readability.
+func (l *Logger) GetByMovieID(ctx context.Context, movieID string) ([]models.History, error) {
+	return l.repo.FindByMovieID(ctx, movieID)
 }
 
-// LogDownload logs a media download operation
-func (l *Logger) LogDownload(movieID, url, localPath, mediaType string, err error) error {
-	status := "success"
-	errorMsg := ""
-	if err != nil {
-		status = "failed"
-		errorMsg = err.Error()
-	}
-
-	// Store media type in metadata
-	metadataMap := map[string]string{
-		"media_type": mediaType,
-	}
-	metadataJSON, _ := json.Marshal(metadataMap)
-
-	history := &models.History{
-		MovieID:      movieID,
-		Operation:    "download",
-		OriginalPath: url,
-		NewPath:      localPath,
-		Status:       status,
-		ErrorMessage: errorMsg,
-		Metadata:     string(metadataJSON),
-		DryRun:       false,
-		CreatedAt:    time.Now().UTC(),
-	}
-
-	return l.repo.Create(history)
+// GetByOperation returns history records for a given operation type.
+// Pass-through to repo.FindByOperation — retained for CLI call-site readability.
+func (l *Logger) GetByOperation(ctx context.Context, operation models.HistoryOperation, limit int) ([]models.History, error) {
+	return l.repo.FindByOperation(ctx, operation, limit)
 }
 
-// LogNFO logs an NFO generation operation
-func (l *Logger) LogNFO(movieID, nfoPath string, err error) error {
-	status := "success"
-	errorMsg := ""
-	if err != nil {
-		status = "failed"
-		errorMsg = err.Error()
-	}
-
-	history := &models.History{
-		MovieID:      movieID,
-		Operation:    "nfo",
-		OriginalPath: "",
-		NewPath:      nfoPath,
-		Status:       status,
-		ErrorMessage: errorMsg,
-		DryRun:       false,
-		CreatedAt:    time.Now().UTC(),
-	}
-
-	return l.repo.Create(history)
+// GetByStatus returns history records for a given status.
+// Pass-through to repo.FindByStatus — retained for CLI call-site readability.
+func (l *Logger) GetByStatus(ctx context.Context, status models.HistoryStatus, limit int) ([]models.History, error) {
+	return l.repo.FindByStatus(ctx, status, limit)
 }
 
-// LogRevert logs a revert operation
-func (l *Logger) LogRevert(movieID, originalPath, revertedFrom string, err error) error {
-	status := "reverted"
-	errorMsg := ""
-	if err != nil {
-		status = "failed"
-		errorMsg = err.Error()
-	}
+// GetStats aggregates counts by status and operation into a single struct.
+// This is the only method with real depth — it consolidates 6+ repo calls
+// behind a single interface, giving callers leverage and maintainers locality.
+func (l *Logger) GetStats(ctx context.Context) (*Stats, error) {
+	s := &Stats{}
 
-	history := &models.History{
-		MovieID:      movieID,
-		Operation:    "organize", // Revert is still an organize operation
-		OriginalPath: revertedFrom,
-		NewPath:      originalPath,
-		Status:       status,
-		ErrorMessage: errorMsg,
-		DryRun:       false,
-		CreatedAt:    time.Now().UTC(),
-	}
-
-	return l.repo.Create(history)
-}
-
-// GetRecent retrieves recent history records
-func (l *Logger) GetRecent(limit int) ([]models.History, error) {
-	return l.repo.FindRecent(limit)
-}
-
-// GetByMovieID retrieves history for a specific movie
-func (l *Logger) GetByMovieID(movieID string) ([]models.History, error) {
-	return l.repo.FindByMovieID(movieID)
-}
-
-// GetByOperation retrieves history for a specific operation type
-func (l *Logger) GetByOperation(operation string, limit int) ([]models.History, error) {
-	return l.repo.FindByOperation(operation, limit)
-}
-
-// GetByStatus retrieves history with a specific status
-func (l *Logger) GetByStatus(status string, limit int) ([]models.History, error) {
-	return l.repo.FindByStatus(status, limit)
-}
-
-// GetStats returns statistics about operations
-func (l *Logger) GetStats() (*Stats, error) {
-	stats := &Stats{}
-
-	// Get total count
-	total, err := l.repo.Count()
+	total, err := l.repo.Count(ctx)
 	if err != nil {
 		return nil, err
 	}
-	stats.Total = total
+	s.Total = total
 
-	// Get counts by status
-	success, err := l.repo.CountByStatus("success")
+	success, err := l.repo.CountByStatus(ctx, models.HistoryStatusSuccess)
 	if err != nil {
 		return nil, err
 	}
-	stats.Success = success
+	s.Success = success
 
-	failed, err := l.repo.CountByStatus("failed")
+	failed, err := l.repo.CountByStatus(ctx, models.HistoryStatusFailed)
 	if err != nil {
 		return nil, err
 	}
-	stats.Failed = failed
+	s.Failed = failed
 
-	reverted, err := l.repo.CountByStatus("reverted")
+	reverted, err := l.repo.CountByStatus(ctx, models.HistoryStatusReverted)
 	if err != nil {
 		return nil, err
 	}
-	stats.Reverted = reverted
+	s.Reverted = reverted
 
-	// Get counts by operation
-	scrapeCount, err := l.repo.CountByOperation("scrape")
+	scrapeCount, err := l.repo.CountByOperation(ctx, models.HistoryOpScrape)
 	if err != nil {
 		return nil, err
 	}
-	stats.Scrape = scrapeCount
+	s.Scrape = scrapeCount
 
-	organizeCount, err := l.repo.CountByOperation("organize")
+	organizeCount, err := l.repo.CountByOperation(ctx, models.HistoryOpOrganize)
 	if err != nil {
 		return nil, err
 	}
-	stats.Organize = organizeCount
+	s.Organize = organizeCount
 
-	downloadCount, err := l.repo.CountByOperation("download")
+	downloadCount, err := l.repo.CountByOperation(ctx, models.HistoryOpDownload)
 	if err != nil {
 		return nil, err
 	}
-	stats.Download = downloadCount
+	s.Download = downloadCount
 
-	nfoCount, err := l.repo.CountByOperation("nfo")
+	nfoCount, err := l.repo.CountByOperation(ctx, models.HistoryOpNFO)
 	if err != nil {
 		return nil, err
 	}
-	stats.NFO = nfoCount
+	s.NFO = nfoCount
 
-	return stats, nil
+	return s, nil
 }
 
-// Stats represents history statistics
+// Stats holds aggregated history counts by status and operation.
+// Populated by Logger.GetStats, which consolidates 6+ repository calls
+// behind a single interface — giving callers leverage and maintainers locality.
 type Stats struct {
 	Total    int64
 	Success  int64
@@ -241,8 +119,14 @@ type Stats struct {
 	NFO      int64
 }
 
-// CleanupOldRecords removes history records older than the specified duration
-func (l *Logger) CleanupOldRecords(olderThan time.Duration) error {
+// CleanupOldRecords removes history records older than the given duration.
+// Pass-through to repo.DeleteOlderThan — retained for CLI call-site readability.
+func (l *Logger) CleanupOldRecords(ctx context.Context, olderThan time.Duration) error {
 	cutoffDate := time.Now().UTC().Add(-olderThan)
-	return l.repo.DeleteOlderThan(cutoffDate)
+	return l.repo.DeleteOlderThan(ctx, cutoffDate)
+}
+
+// Count returns the total number of history records.
+func (l *Logger) Count(ctx context.Context) (int64, error) {
+	return l.repo.Count(ctx)
 }

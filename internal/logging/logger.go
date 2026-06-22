@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/javinizer/javinizer-go/internal/configutil"
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -19,8 +19,16 @@ type loggerState struct {
 	closers []io.Closer // files to close (excludes stdout/stderr)
 }
 
-// current holds the active logger state (thread-safe via atomic.Value)
-var current atomic.Value // holds *loggerState
+// globalInit is the package-level LoggerInitializer singleton.
+// Production code uses InitLogger / L via this singleton;
+// test code constructs its own loggerInit for isolation.
+var globalInit = newLoggerInit()
+
+// current is an alias to globalInit.current for backward compatibility
+// with test code that resets logger state directly.
+//
+//nolint:unused // used by same-package tests
+var current = &globalInit.current
 
 // Config represents logging configuration
 type Config struct {
@@ -33,47 +41,39 @@ type Config struct {
 	Compress   bool   `yaml:"compress"`     // Compress rotated files
 }
 
-// InitLogger initializes or reloads the global logger based on configuration.
-// It atomically swaps in the new logger and closes previous file handles to prevent leaks.
-// This function is safe to call multiple times for config reloading.
-func InitLogger(cfg *Config) error {
-	if cfg == nil {
-		cfg = &Config{
-			Level:  "info",
-			Format: "text",
-			Output: "stdout",
-		}
-	}
+// LoggerInitializer is the seam for initializing and accessing the logger.
+// Production code uses the package-level singleton; test code constructs its
+// own instance with a backing atomic.Value for isolation.
+type LoggerInitializer interface {
+	// Init initializes or reloads the logger based on configuration.
+	// It atomically swaps in the new logger and closes previous file handles.
+	Init(cfg *Config) error
+	// L returns the current Logger instance.
+	L() Logger
+}
 
-	// 1. Build new logger and open files
-	logger := logrus.New()
+// loggerInit holds the atomic logger state and implements LoggerInitializer.
+type loggerInit struct {
+	current atomic.Value // holds *loggerState
+}
 
-	// Set log level
-	level, err := logrus.ParseLevel(cfg.Level)
-	if err != nil {
-		return fmt.Errorf("invalid log level %q: %w", cfg.Level, err)
-	}
-	logger.SetLevel(level)
+// newLoggerInit creates a LoggerInitializer backed by a fresh atomic.Value.
+func newLoggerInit() *loggerInit {
+	li := &loggerInit{}
+	return li
+}
 
-	// Set log format
-	switch strings.ToLower(cfg.Format) {
-	case "json":
-		logger.SetFormatter(&logrus.JSONFormatter{
-			TimestampFormat: "2006-01-02 15:04:05",
-		})
-	case "text", "":
-		logger.SetFormatter(&logrus.TextFormatter{
-			FullTimestamp:   true,
-			TimestampFormat: "2006-01-02 15:04:05",
-		})
-	default:
-		return fmt.Errorf("invalid log format %q (must be 'text' or 'json')", cfg.Format)
-	}
-
-	// Set log output(s)
+// resolveLogWriters resolves the output configuration into io.Writer and io.Closer
+// slices. It isolates the lumberjack/plain-file branching and directory creation
+// from the Init orchestrator, making the writer resolution independently testable.
+//
+// The closers slice contains writers that must be closed on logger reload
+// (excludes os.Stdout and os.Stderr). On error, any opened files are closed
+// before returning.
+func resolveLogWriters(cfg *Config) ([]io.Writer, []io.Closer, error) {
 	outputs := strings.Split(cfg.Output, ",")
 	var writers []io.Writer
-	var closers []io.Closer // Track files to close (excludes stdout/stderr)
+	var closers []io.Closer
 
 	for _, output := range outputs {
 		output = strings.TrimSpace(output)
@@ -89,20 +89,20 @@ func InitLogger(cfg *Config) error {
 		default:
 			// It's a file path - create directory if needed
 			dir := filepath.Dir(output)
-			if err := os.MkdirAll(dir, configutil.DirPerm); err != nil {
+			if err := os.MkdirAll(dir, config.DirPerm); err != nil {
 				// Close any files we've opened so far
 				for _, c := range closers {
 					_ = c.Close()
 				}
-				return fmt.Errorf("failed to create log directory %q: %w", dir, err)
+				return nil, nil, fmt.Errorf("failed to create log directory %q: %w", dir, err)
 			}
 
 			// Use lumberjack for rotation if MaxSizeMB > 0, otherwise plain file
 			if cfg.MaxSizeMB > 0 {
 				// Lumberjack defaults to 0600 permissions. Pre-create the file
-				// with umask-aware permissions (configutil.FilePerm) to match non-rotation behavior.
+				// with umask-aware permissions (config.FilePerm) to match non-rotation behavior.
 				if _, err := os.Stat(output); os.IsNotExist(err) {
-					if file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY, configutil.FilePerm); err == nil {
+					if file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY, config.FilePerm); err == nil {
 						_ = file.Close()
 					}
 				}
@@ -118,13 +118,13 @@ func InitLogger(cfg *Config) error {
 				closers = append(closers, lj) // Track for cleanup
 			} else {
 				// No rotation - plain file append
-				file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, configutil.FilePerm)
+				file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, config.FilePerm)
 				if err != nil {
 					// Close any files we've opened so far
 					for _, c := range closers {
 						_ = c.Close()
 					}
-					return fmt.Errorf("failed to open log file %q: %w", output, err)
+					return nil, nil, fmt.Errorf("failed to open log file %q: %w", output, err)
 				}
 				writers = append(writers, file)
 				closers = append(closers, file) // Track for cleanup
@@ -140,7 +140,37 @@ func InitLogger(cfg *Config) error {
 		for _, c := range closers {
 			_ = c.Close()
 		}
-		return fmt.Errorf("no valid log outputs configured in %q (expected stdout, stderr, or a file path)", cfg.Output)
+		return nil, nil, fmt.Errorf("no valid log outputs configured in %q (expected stdout, stderr, or a file path)", cfg.Output)
+	}
+
+	return writers, closers, nil
+}
+
+// buildLogrusLogger constructs a logrus.Logger from config, setting level, format,
+// and output writers. This isolates logger construction from the Init orchestrator.
+func buildLogrusLogger(cfg *Config, writers []io.Writer) (*logrus.Logger, error) {
+	logger := logrus.New()
+
+	// Set log level
+	level, err := logrus.ParseLevel(cfg.Level)
+	if err != nil {
+		return nil, fmt.Errorf("invalid log level %q: %w", cfg.Level, err)
+	}
+	logger.SetLevel(level)
+
+	// Set log format
+	switch strings.ToLower(cfg.Format) {
+	case "json":
+		logger.SetFormatter(&logrus.JSONFormatter{
+			TimestampFormat: "2006-01-02 15:04:05",
+		})
+	case "text", "":
+		logger.SetFormatter(&logrus.TextFormatter{
+			FullTimestamp:   true,
+			TimestampFormat: "2006-01-02 15:04:05",
+		})
+	default:
+		return nil, fmt.Errorf("invalid log format %q (must be 'text' or 'json')", cfg.Format)
 	}
 
 	// Set output to multi-writer if multiple outputs
@@ -150,22 +180,59 @@ func InitLogger(cfg *Config) error {
 		logger.SetOutput(io.MultiWriter(writers...))
 	}
 
-	// 2. Create new state
+	return logger, nil
+}
+
+// Init initializes or reloads the logger based on configuration.
+// It atomically swaps in the new logger and closes previous file handles to prevent leaks.
+// This function is safe to call multiple times for config reloading.
+//
+// The three-step orchestrator: resolve writers → build logger → swap + cleanup.
+func (li *loggerInit) Init(cfg *Config) error {
+	if cfg == nil {
+		cfg = &Config{
+			Level:  "info",
+			Format: "text",
+			Output: "stdout",
+		}
+	}
+
+	// Step 1: Resolve output writers from config.
+	writers, closers, err := resolveLogWriters(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Step 2: Build the logrus logger with level, format, and output.
+	logger, err := buildLogrusLogger(cfg, writers)
+	if err != nil {
+		// Clean up any opened files since we won't be using them.
+		for _, c := range closers {
+			_ = c.Close()
+		}
+		return err
+	}
+
+	// Step 3: Create new state, atomically swap, and clean up previous.
 	newState := &loggerState{
 		logger:  logger,
 		closers: closers,
 	}
 
-	// 3. Atomically swap in the new logger
-	prevValue := current.Swap(newState)
+	prevValue := li.current.Swap(newState)
 
-	// 4. Close previous file handles to prevent leaks
+	// Close previous file handles to prevent leaks
 	if prevValue != nil {
 		prevState, ok := prevValue.(*loggerState)
-		// Guard against typed nil pointer (can happen after CloseLogger)
+		// Guard against typed nil pointer (can happen after closeLogger)
 		if ok && prevState != nil {
 			// Close old files asynchronously to avoid blocking this call
 			go func(state *loggerState) {
+				defer func() {
+					if r := recover(); r != nil {
+						_, _ = fmt.Fprintf(os.Stderr, "Logger async closer panicked: %v\n", r)
+					}
+				}()
 				for _, c := range state.closers {
 					if err := c.Close(); err != nil {
 						// Log to new logger (or stderr as fallback)
@@ -179,18 +246,45 @@ func InitLogger(cfg *Config) error {
 	return nil
 }
 
-// L returns the current logger instance. Callers should NOT cache the returned
-// pointer across config reloads; instead, call logging.L() when you need to log.
-// This ensures you always get the current logger after config reloads.
-func L() *logrus.Logger {
-	v := current.Load()
+// InitLogger initializes or reloads the global logger based on configuration.
+// It delegates to the package-level singleton LoggerInitializer.
+// This function is safe to call multiple times for config reloading.
+func InitLogger(cfg *Config) error {
+	return globalInit.Init(cfg)
+}
+
+// CloseLogger synchronously closes the current logger's file handles and resets
+// the global logger state to nil. Used by tests that need to ensure all file
+// handles are released before t.TempDir() cleanup, and by the TUI on shutdown.
+func CloseLogger() {
+	prevValue := globalInit.current.Swap((*loggerState)(nil))
+	if prevValue == nil {
+		return
+	}
+	prevState, ok := prevValue.(*loggerState)
+	if !ok || prevState == nil {
+		return
+	}
+	for _, c := range prevState.closers {
+		if err := c.Close(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: failed to close log file during shutdown: %v\n", err)
+		}
+	}
+}
+
+// L returns the current Logger instance from the package-level singleton.
+func L() Logger {
+	return globalInit.L()
+}
+
+// getLogger returns the current logrus.Logger instance, initializing with defaults if needed.
+func getLogger() *logrus.Logger {
+	v := globalInit.current.Load()
 	if v == nil {
-		// Fallback: initialize with defaults if not already initialized
-		_ = InitLogger(nil)
-		v = current.Load()
+		_ = globalInit.Init(nil)
+		v = globalInit.current.Load()
 	}
 
-	// Check if we have a valid state (handles both nil interface and typed nil pointer)
 	if v == nil {
 		return logrus.StandardLogger()
 	}
@@ -203,14 +297,55 @@ func L() *logrus.Logger {
 	return state.logger
 }
 
-// CloseLogger closes current logger's file handles and clears the logger.
+// L returns the current Logger instance, initializing with defaults if needed.
+func (li *loggerInit) L() Logger {
+	return &logrusLoggerAdapter{logger: li.getLogrus()}
+}
+
+// getLogrus returns the current logrus.Logger, initializing with defaults if needed.
+func (li *loggerInit) getLogrus() *logrus.Logger {
+	v := li.current.Load()
+	if v == nil {
+		_ = li.Init(nil)
+		v = li.current.Load()
+	}
+
+	if v == nil {
+		return logrus.StandardLogger()
+	}
+
+	state, ok := v.(*loggerState)
+	if !ok || state == nil {
+		return logrus.StandardLogger()
+	}
+
+	return state.logger
+}
+
+// logrusLoggerAdapter adapts a *logrus.Logger to the Logger interface.
+type logrusLoggerAdapter struct {
+	logger *logrus.Logger
+}
+
+func (a *logrusLoggerAdapter) Debug(args ...any)                 { a.logger.Debug(args...) }
+func (a *logrusLoggerAdapter) Debugf(format string, args ...any) { a.logger.Debugf(format, args...) }
+func (a *logrusLoggerAdapter) Info(args ...any)                  { a.logger.Info(args...) }
+func (a *logrusLoggerAdapter) Infof(format string, args ...any)  { a.logger.Infof(format, args...) }
+func (a *logrusLoggerAdapter) Warn(args ...any)                  { a.logger.Warn(args...) }
+func (a *logrusLoggerAdapter) Warnf(format string, args ...any)  { a.logger.Warnf(format, args...) }
+func (a *logrusLoggerAdapter) Error(args ...any)                 { a.logger.Error(args...) }
+func (a *logrusLoggerAdapter) Errorf(format string, args ...any) { a.logger.Errorf(format, args...) }
+
+// closeLogger closes current logger's file handles and clears the logger.
 // Call during shutdown to release file descriptors. Safe to call multiple times.
-func CloseLogger() {
-	v := current.Load()
+//
+//nolint:unused // used by same-package tests
+func closeLogger() {
+	v := globalInit.current.Load()
 	if v == nil {
 		return
 	}
-	prevValue := current.Swap((*loggerState)(nil))
+	prevValue := globalInit.current.Swap((*loggerState)(nil))
 	if prevValue == nil {
 		return
 	}
@@ -227,67 +362,55 @@ func CloseLogger() {
 }
 
 // Debug logs a debug message
-func Debug(args ...interface{}) {
-	L().Debug(args...)
+func Debug(args ...any) {
+	getLogger().Debug(args...)
 }
 
 // Debugf logs a formatted debug message
-func Debugf(format string, args ...interface{}) {
-	L().Debugf(format, args...)
+func Debugf(format string, args ...any) {
+	getLogger().Debugf(format, args...)
 }
 
 // Info logs an info message
-func Info(args ...interface{}) {
-	L().Info(args...)
+func Info(args ...any) {
+	getLogger().Info(args...)
 }
 
 // Infof logs a formatted info message
-func Infof(format string, args ...interface{}) {
-	L().Infof(format, args...)
+func Infof(format string, args ...any) {
+	getLogger().Infof(format, args...)
 }
 
 // Warn logs a warning message
-func Warn(args ...interface{}) {
-	L().Warn(args...)
+func Warn(args ...any) {
+	getLogger().Warn(args...)
 }
 
 // Warnf logs a formatted warning message
-func Warnf(format string, args ...interface{}) {
-	L().Warnf(format, args...)
+func Warnf(format string, args ...any) {
+	getLogger().Warnf(format, args...)
 }
 
 // Error logs an error message
-func Error(args ...interface{}) {
-	L().Error(args...)
+func Error(args ...any) {
+	getLogger().Error(args...)
 }
 
 // Errorf logs a formatted error message
-func Errorf(format string, args ...interface{}) {
-	L().Errorf(format, args...)
+func Errorf(format string, args ...any) {
+	getLogger().Errorf(format, args...)
 }
 
-// Fatal logs a fatal message and exits with status code 1.
-// Note: This function calls os.Exit() and cannot be tested in unit tests.
-// Any test attempting to cover this function would terminate the test process.
-func Fatal(args ...interface{}) {
-	L().Fatal(args...)
+// WithField returns a logrus.Entry with a single structured field.
+// Use for machine-parseable logging: WithField("job_id", id).Info("Job started")
+func WithField(key string, value any) *logrus.Entry {
+	return getLogger().WithField(key, value)
 }
 
-// Fatalf logs a formatted fatal message and exits with status code 1.
-// Note: This function calls os.Exit() and cannot be tested in unit tests.
-// Any test attempting to cover this function would terminate the test process.
-func Fatalf(format string, args ...interface{}) {
-	L().Fatalf(format, args...)
-}
-
-// WithField returns a logger with a single field
-func WithField(key string, value interface{}) *logrus.Entry {
-	return L().WithField(key, value)
-}
-
-// WithFields returns a logger with multiple fields
+// WithFields returns a logrus.Entry with multiple structured fields.
+// Use for machine-parseable logging: WithFields(logrus.Fields{"job_id": id, "file": path}).Info("Processing")
 func WithFields(fields logrus.Fields) *logrus.Entry {
-	return L().WithFields(fields)
+	return getLogger().WithFields(fields)
 }
 
 // FileOnlyOutput returns the comma-separated file targets from output, stripping
@@ -301,6 +424,81 @@ func FileOnlyOutput(output, defaultPath string) string {
 	}
 	return strings.Join(files, ",")
 }
+
+// Logger is the seam interface for structured logging. Consumers that need
+// testable logging should depend on this interface rather than calling the
+// package-level logging.Debug/Info/Warn/Error functions directly.
+//
+// The production implementation (GlobalLogger) delegates to the package-level
+// functions. Tests inject mock or spy implementations via DI.
+//
+// Migration strategy: add the Logger field to DI containers (BatchJobDeps,
+// workflowFactoryConfig, CoreDeps/APIDeps) and consume it in new code.
+// Existing package-level calls remain valid — migrate incrementally, not
+// all 483 calls at once.
+type Logger interface {
+	// Debug logs a debug-level message.
+	Debug(args ...any)
+	// Debugf logs a formatted debug-level message.
+	Debugf(format string, args ...any)
+	// Info logs an info-level message.
+	Info(args ...any)
+	// Infof logs a formatted info-level message.
+	Infof(format string, args ...any)
+	// Warn logs a warning-level message.
+	Warn(args ...any)
+	// Warnf logs a formatted warning-level message.
+	Warnf(format string, args ...any)
+	// Error logs an error-level message.
+	Error(args ...any)
+	// Errorf logs a formatted error-level message.
+	Errorf(format string, args ...any)
+}
+
+// globalLogger delegates to the package-level logging functions.
+// It is the default Logger implementation used by production DI containers.
+type globalLogger struct{}
+
+// GlobalLogger returns a Logger that delegates to the package-level
+// logging functions (Debug, Info, Warn, Error, etc.). This is the
+// default implementation for production DI containers.
+func GlobalLogger() Logger {
+	return &globalLogger{}
+}
+
+func (g *globalLogger) Debug(args ...any) { Debug(args...) }
+func (g *globalLogger) Debugf(format string, args ...any) {
+	Debugf(format, args...)
+}
+func (g *globalLogger) Info(args ...any) { Info(args...) }
+func (g *globalLogger) Infof(format string, args ...any) {
+	Infof(format, args...)
+}
+func (g *globalLogger) Warn(args ...any) { Warn(args...) }
+func (g *globalLogger) Warnf(format string, args ...any) {
+	Warnf(format, args...)
+}
+func (g *globalLogger) Error(args ...any) { Error(args...) }
+func (g *globalLogger) Errorf(format string, args ...any) {
+	Errorf(format, args...)
+}
+
+// NoOpLogger returns a Logger that discards all output.
+// Useful in tests that don't assert on log output.
+func NoOpLogger() Logger {
+	return &noOpLogger{}
+}
+
+type noOpLogger struct{}
+
+func (n *noOpLogger) Debug(_ ...any)            {}
+func (n *noOpLogger) Debugf(_ string, _ ...any) {}
+func (n *noOpLogger) Info(_ ...any)             {}
+func (n *noOpLogger) Infof(_ string, _ ...any)  {}
+func (n *noOpLogger) Warn(_ ...any)             {}
+func (n *noOpLogger) Warnf(_ string, _ ...any)  {}
+func (n *noOpLogger) Error(_ ...any)            {}
+func (n *noOpLogger) Errorf(_ string, _ ...any) {}
 
 // GetFileOutputs extracts file paths from a comma-separated output string.
 // Returns only file paths (excludes "stdout" and "stderr").

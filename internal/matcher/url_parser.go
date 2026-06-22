@@ -2,27 +2,52 @@ package matcher
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// ParsedInput represents the result of parsing user input
-type ParsedInput struct {
+// URLScraperLister is the narrow interface the URL parser requires from the
+// scraper registry. It needs only the ability to iterate all scraper instances
+// to check URL handling capability. Defined here per Go convention: consume
+// interfaces, produce structs.
+type URLScraperLister interface {
+	GetAllInstances() []models.Scraper
+}
+
+// parsedInput represents the result of parsing user input
+type parsedInput struct {
 	ID                 string   // Extracted movie ID
 	ScraperHint        string   // Suggested scraper ("dmm", "r18dev", or "")
 	IsURL              bool     // true if input was a URL
 	CompatibleScrapers []string // List of scrapers that can handle this URL (if IsURL)
 }
 
+// isNilInterface checks whether an interface value is nil or wraps a nil
+// underlying pointer. This handles Go's nil-interface pitfall where a typed
+// nil pointer (e.g., (*ScraperRegistry)(nil)) wrapped in an interface is
+// non-nil by interface comparison but will panic on method calls.
+func isNilInterface(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+		return rv.IsNil()
+	}
+	return false
+}
+
 // ParseInput determines if input is a URL or ID and extracts the movie ID.
 // The parser is agnostic about URL patterns - it delegates URL detection to scrapers
-// that implement the URLHandler interface. If no scraper handles the URL, the input
+// that implement the Scraper interface. If no scraper handles the URL, the input
 // is treated as a plain movie ID.
 //
 // When input is a URL, the function also returns the list of all compatible scrapers
 // that can handle the URL, avoiding redundant registry iteration in callers.
-func ParseInput(input string, registry *models.ScraperRegistry) (*ParsedInput, error) {
+func ParseInput(input string, registry URLScraperLister) (*parsedInput, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return nil, fmt.Errorf("input cannot be empty")
@@ -40,29 +65,26 @@ func ParseInput(input string, registry *models.ScraperRegistry) (*ParsedInput, e
 	var firstFailedScraper string
 	var firstFailedErr error
 
-	if registry != nil {
-		for _, scraper := range registry.GetAll() {
-			// Defensive nil check - registry should never contain nil scrapers, but be safe
-			if scraper == nil {
+	if !isNilInterface(registry) {
+		for _, scraper := range registry.GetAllInstances() {
+			if scraper == nil || !scraper.IsEnabled() {
 				continue
 			}
-			if handler, ok := scraper.(models.URLHandler); ok && scraper.IsEnabled() {
-				if handler.CanHandleURL(input) {
-					compatibleScrapers = append(compatibleScrapers, scraper.Name())
-					// Extract ID from first match, but continue collecting all compatible scrapers
-					if !matched {
-						id, err := handler.ExtractIDFromURL(input)
-						if err == nil {
-							matchedID = id
-							matchedScraper = scraper.Name()
-							matched = true
-						} else if !claimedButFailed {
-							// Track first failure for error message
-							claimedButFailed = true
-							firstFailedScraper = scraper.Name()
-							firstFailedErr = err
-						}
-					}
+			handler, ok := scraper.(models.URLHandler)
+			if !ok || !handler.CanHandleURL(input) {
+				continue
+			}
+			compatibleScrapers = append(compatibleScrapers, scraper.Name())
+			if !matched {
+				id, err := handler.ExtractIDFromURL(input)
+				if err == nil {
+					matchedID = id
+					matchedScraper = scraper.Name()
+					matched = true
+				} else if !claimedButFailed {
+					claimedButFailed = true
+					firstFailedScraper = scraper.Name()
+					firstFailedErr = err
 				}
 			}
 		}
@@ -70,7 +92,7 @@ func ParseInput(input string, registry *models.ScraperRegistry) (*ParsedInput, e
 
 	// If at least one scraper matched, return as URL
 	if matched {
-		return &ParsedInput{
+		return &parsedInput{
 			ID:                 matchedID,
 			ScraperHint:        matchedScraper,
 			IsURL:              true,
@@ -85,7 +107,7 @@ func ParseInput(input string, registry *models.ScraperRegistry) (*ParsedInput, e
 	}
 
 	// No scraper handles this URL - treat as plain movie ID
-	return &ParsedInput{
+	return &parsedInput{
 		ID:                 input,
 		ScraperHint:        "",
 		IsURL:              false,
@@ -93,7 +115,7 @@ func ParseInput(input string, registry *models.ScraperRegistry) (*ParsedInput, e
 	}, nil
 }
 
-// FilterScrapersForURL filters a list of scrapers to only those compatible with a parsed URL.
+// filterScrapersForURL filters a list of scrapers to only those compatible with a parsed URL.
 // This helper is used by API endpoints to optimize scraper selection when URL is detected.
 //
 // Parameters:
@@ -102,7 +124,7 @@ func ParseInput(input string, registry *models.ScraperRegistry) (*ParsedInput, e
 //
 // Returns filtered scrapers or all compatible scrapers if userScrapers is empty.
 // If no compatible scrapers exist, returns empty slice (caller should handle this case).
-func FilterScrapersForURL(userScrapers []string, parsed *ParsedInput) []string {
+func filterScrapersForURL(userScrapers []string, parsed *parsedInput) []string {
 	if parsed == nil || !parsed.IsURL || len(parsed.CompatibleScrapers) == 0 {
 		return userScrapers
 	}
@@ -131,7 +153,7 @@ func FilterScrapersForURL(userScrapers []string, parsed *ParsedInput) []string {
 	return filtered
 }
 
-// ReorderWithPriority moves the priority scraper to the front of the list.
+// reorderWithPriority moves the priority scraper to the front of the list.
 // This is useful when multiple compatible scrapers exist for a URL - the hinted
 // scraper should be tried first for best performance.
 //
@@ -141,7 +163,7 @@ func FilterScrapersForURL(userScrapers []string, parsed *ParsedInput) []string {
 //
 // Returns reordered list with priority scraper first.
 // If scrapers is empty, returns a single-item list with just the priority scraper.
-func ReorderWithPriority(scrapers []string, priority string) []string {
+func reorderWithPriority(scrapers []string, priority string) []string {
 	if priority == "" {
 		return scrapers
 	}
@@ -177,7 +199,7 @@ func ReorderWithPriority(scrapers []string, priority string) []string {
 func CalculateOptimalScrapers(
 	requestScrapers []string,
 	configPriority []string,
-	parsed *ParsedInput,
+	parsed *parsedInput,
 ) []string {
 	// Step 1: Start with user's selection or config default
 	scrapersToUse := configPriority
@@ -191,7 +213,7 @@ func CalculateOptimalScrapers(
 	}
 
 	// Step 3: Filter to compatible scrapers
-	filteredScrapers := FilterScrapersForURL(scrapersToUse, parsed)
+	filteredScrapers := filterScrapersForURL(scrapersToUse, parsed)
 	if len(filteredScrapers) > 0 {
 		scrapersToUse = filteredScrapers
 
@@ -202,7 +224,7 @@ func CalculateOptimalScrapers(
 				for _, compat := range parsed.CompatibleScrapers {
 					if prioScraper == compat {
 						// Reorder with the highest priority compatible scraper as hint
-						scrapersToUse = ReorderWithPriority(scrapersToUse, prioScraper)
+						scrapersToUse = reorderWithPriority(scrapersToUse, prioScraper)
 						return scrapersToUse
 					}
 				}

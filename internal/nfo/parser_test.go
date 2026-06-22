@@ -1,14 +1,17 @@
 package nfo
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/spf13/afero"
 	"time"
 
+	"github.com/spf13/afero"
+
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -80,7 +83,7 @@ func TestParseNFO_CompleteNFO(t *testing.T) {
 	assert.Contains(t, genreNames, "Comedy")
 
 	// Media URLs
-	assert.Equal(t, "https://example.com/poster.jpg", movie.CoverURL)
+	assert.Equal(t, "https://example.com/poster.jpg", movie.Poster.CoverURL)
 	assert.Equal(t, "https://example.com/trailer.mp4", movie.TrailerURL)
 	require.Len(t, movie.Screenshots, 3)
 	assert.Contains(t, movie.Screenshots, "https://example.com/screenshot1.jpg")
@@ -126,15 +129,15 @@ func TestParseNFO_EmptyFields(t *testing.T) {
 func TestNFOToMovie_RatingExtraction(t *testing.T) {
 	nfo := &Movie{
 		Title: "Test Movie",
-		Ratings: Ratings{
-			Rating: []Rating{
+		Ratings: ratings{
+			Rating: []rating{
 				{Name: "imdb", Max: 10, Default: false, Value: 7.5, Votes: 100},
 				{Name: "themoviedb", Max: 10, Default: true, Value: 8.0, Votes: 200},
 			},
 		},
 	}
 
-	movie, warnings := NFOToMovie(nfo)
+	movie, warnings := nfoToMovie(nfo)
 	assert.Empty(t, warnings)
 
 	// Should use the default rating
@@ -145,15 +148,15 @@ func TestNFOToMovie_RatingExtraction(t *testing.T) {
 func TestNFOToMovie_RatingExtraction_NoDefault(t *testing.T) {
 	nfo := &Movie{
 		Title: "Test Movie",
-		Ratings: Ratings{
-			Rating: []Rating{
+		Ratings: ratings{
+			Rating: []rating{
 				{Name: "imdb", Max: 10, Default: false, Value: 7.5, Votes: 100},
 				{Name: "themoviedb", Max: 10, Default: false, Value: 8.0, Votes: 200},
 			},
 		},
 	}
 
-	movie, warnings := NFOToMovie(nfo)
+	movie, warnings := nfoToMovie(nfo)
 	assert.Empty(t, warnings)
 
 	// Should use first rating when no default specified
@@ -202,7 +205,7 @@ func TestSplitActorName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			first, last := splitActorName(tt.input)
+			first, last := models.SplitFullName(tt.input)
 			assert.Equal(t, tt.wantFirst, first)
 			assert.Equal(t, tt.wantLast, last)
 		})
@@ -226,7 +229,7 @@ func TestContainsJapanese(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := containsJapanese(tt.input)
+			got := scraperutil.HasJapanese(tt.input)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -311,7 +314,7 @@ func TestRoundTrip(t *testing.T) {
 		Runtime:       90,
 		RatingScore:   7.8,
 		RatingVotes:   500,
-		CoverURL:      "https://example.com/cover.jpg",
+		Poster:        models.PosterState{CoverURL: "https://example.com/cover.jpg"},
 		TrailerURL:    "https://example.com/trailer.mp4",
 		Screenshots:   []string{"https://example.com/shot1.jpg", "https://example.com/shot2.jpg"},
 		Actresses: []models.Actress{
@@ -329,11 +332,11 @@ func TestRoundTrip(t *testing.T) {
 	}
 
 	// Generate NFO
-	generator := NewGenerator(afero.NewOsFs(), DefaultConfig())
+	generator := NewGenerator(afero.NewOsFs(), defaultConfig())
 	generator.config.IncludeFanart = true
 	generator.config.IncludeTrailer = true
 	generator.config.AltNameRole = true // Include Japanese names in role field for round-trip
-	nfoStruct := generator.MovieToNFO(originalMovie, "")
+	nfoStruct := generator.movieToNFO(context.Background(), originalMovie, "", nil)
 
 	// Write to temp file
 	tmpDir := t.TempDir()
@@ -386,7 +389,7 @@ func TestRoundTrip(t *testing.T) {
 	assert.Contains(t, genreNames, "Romance")
 
 	// Verify media URLs
-	assert.Equal(t, originalMovie.CoverURL, parsedMovie.CoverURL)
+	assert.Equal(t, originalMovie.Poster.CoverURL, parsedMovie.Poster.CoverURL)
 	assert.Equal(t, originalMovie.TrailerURL, parsedMovie.TrailerURL)
 	assert.Equal(t, originalMovie.Screenshots, parsedMovie.Screenshots)
 }
@@ -394,14 +397,14 @@ func TestRoundTrip(t *testing.T) {
 func TestParseActorToActress(t *testing.T) {
 	tests := []struct {
 		name          string
-		actor         Actor
+		actor         actor
 		wantFirstName string
 		wantLastName  string
 		wantJapanese  string
 	}{
 		{
 			name: "English name with Japanese role",
-			actor: Actor{
+			actor: actor{
 				Name: "Yui Hatano",
 				Role: "波多野結衣",
 			},
@@ -411,7 +414,7 @@ func TestParseActorToActress(t *testing.T) {
 		},
 		{
 			name: "English name with English role",
-			actor: Actor{
+			actor: actor{
 				Name: "Yui Hatano",
 				Role: "Actress",
 			},
@@ -421,7 +424,7 @@ func TestParseActorToActress(t *testing.T) {
 		},
 		{
 			name: "Single name",
-			actor: Actor{
+			actor: actor{
 				Name: "Madonna",
 			},
 			wantFirstName: "Madonna",
@@ -430,7 +433,7 @@ func TestParseActorToActress(t *testing.T) {
 		},
 		{
 			name: "Japanese name in Name field (no Role)",
-			actor: Actor{
+			actor: actor{
 				Name: "波多野結衣",
 			},
 			wantFirstName: "", // Japanese detected, not used for romanized names
@@ -439,7 +442,7 @@ func TestParseActorToActress(t *testing.T) {
 		},
 		{
 			name: "English name with Japanese in Name (fallback when Role empty)",
-			actor: Actor{
+			actor: actor{
 				Name: "Yui Hatano 波多野結衣",
 				Role: "",
 			},

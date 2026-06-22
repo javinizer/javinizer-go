@@ -11,6 +11,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 type actressRequest struct {
@@ -76,7 +78,7 @@ func parseSort(c *gin.Context) (string, string, error) {
 func parseActressID(c *gin.Context) (uint, bool) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || id == 0 {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid actress id"})
+		c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid actress id"})
 		return 0, false
 	}
 	return uint(id), true
@@ -92,46 +94,64 @@ func parseActressID(c *gin.Context) (uint, bool) {
 // @Param sort_order query string false "Sort direction (asc, desc)" default(asc)
 // @Param limit query int false "Max results" default(50)
 // @Param offset query int false "Skip results" default(0)
+// @Param include_translations query string false "Language code to include translations for (e.g., 'en')"
 // @Success 200 {object} actressesResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/actresses [get]
-func listActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
+func listActresses(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit, offset := core.ParsePagination(c, 50, 500)
 		query := strings.TrimSpace(c.Query("q"))
 		sortBy, sortOrder, err := parseSort(c)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
 		var actresses []models.Actress
 		var total int64
 
+		repo := deps.ActressRepo
 		if query == "" {
-			total, err = actressRepo.Count()
+			total, err = repo.Count(c.Request.Context())
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 
-			actresses, err = actressRepo.ListSorted(limit, offset, sortBy, sortOrder)
+			actresses, err = repo.ListSorted(c.Request.Context(), limit, offset, sortBy, sortOrder)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 		} else {
-			total, err = actressRepo.CountSearch(query)
+			total, err = repo.CountSearch(c.Request.Context(), query)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 
-			actresses, err = actressRepo.SearchPagedSorted(query, limit, offset, sortBy, sortOrder)
+			actresses, err = repo.SearchPagedSorted(c.Request.Context(), query, limit, offset, sortBy, sortOrder)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
+			}
+		}
+
+		includeLang := strings.TrimSpace(c.Query("include_translations"))
+		if includeLang != "" {
+			actressIDs := make([]uint, len(actresses))
+			for i, a := range actresses {
+				actressIDs[i] = a.ID
+			}
+			transMap, err := deps.safeFindTranslationsByIDs(c.Request.Context(), actressIDs, includeLang)
+			if err != nil {
+				// Translation lookup is best-effort; log and continue
+			} else if transMap != nil {
+				for i := range actresses {
+					actresses[i].Translations = transMap[actresses[i].ID]
+				}
 			}
 		}
 
@@ -150,27 +170,38 @@ func listActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 // @Description Retrieve a single actress by their database ID
 // @Tags actress
 // @Produce json
-// @Param id path uint true "Actress ID"
-// @Success 200 {object} Actress
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Param id path uint true "models.Actress ID"
+// @Param include_translations query string false "Language code to include translations for (e.g., 'en')"
+// @Success 200 {object} models.Actress
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/actresses/{id} [get]
-func getActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
+func getActress(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseActressID(c)
 		if !ok {
 			return
 		}
 
-		actress, err := actressRepo.FindByID(id)
+		actress, err := deps.ActressRepo.FindByID(c.Request.Context(), id)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, ErrorResponse{Error: "actress not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
+		}
+
+		includeLang := strings.TrimSpace(c.Query("include_translations"))
+		if includeLang != "" {
+			t, findErr := deps.safeFindTranslationByActress(c.Request.Context(), actress.ID, includeLang)
+			if findErr != nil {
+				// best-effort translation lookup
+			} else if t != nil {
+				actress.Translations = append(actress.Translations, *t)
+			}
 		}
 
 		c.JSON(http.StatusOK, actress)
@@ -183,22 +214,22 @@ func getActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 // @Tags actress
 // @Accept json
 // @Produce json
-// @Param request body actressRequest true "Actress details"
-// @Success 201 {object} Actress
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Param request body actressRequest true "models.Actress details"
+// @Success 201 {object} models.Actress
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/actresses [post]
-func createActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
+func createActress(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req actressRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
 		normalizeActressRequest(&req)
 		if err := validateActressRequest(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -211,8 +242,8 @@ func createActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 			Aliases:      req.Aliases,
 		}
 
-		if err := actressRepo.Create(actress); err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		if err := deps.ActressRepo.Create(c.Request.Context(), actress); err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -226,39 +257,39 @@ func createActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 // @Tags actress
 // @Accept json
 // @Produce json
-// @Param id path uint true "Actress ID"
+// @Param id path uint true "models.Actress ID"
 // @Param request body actressRequest true "Updated actress details"
-// @Success 200 {object} Actress
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Success 200 {object} models.Actress
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/actresses/{id} [put]
-func updateActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
+func updateActress(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseActressID(c)
 		if !ok {
 			return
 		}
 
-		existing, err := actressRepo.FindByID(id)
+		existing, err := deps.ActressRepo.FindByID(c.Request.Context(), id)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, ErrorResponse{Error: "actress not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
 		var req actressRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
 		normalizeActressRequest(&req)
 		if err := validateActressRequest(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -269,8 +300,8 @@ func updateActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 		existing.ThumbURL = req.ThumbURL
 		existing.Aliases = req.Aliases
 
-		if err := actressRepo.Update(existing); err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		if err := deps.ActressRepo.Update(c.Request.Context(), existing); err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -283,31 +314,31 @@ func updateActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
 // @Description Delete an actress record by ID
 // @Tags actress
 // @Produce json
-// @Param id path uint true "Actress ID"
+// @Param id path uint true "models.Actress ID"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/actresses/{id} [delete]
-func deleteActress(actressRepo *database.ActressRepository) gin.HandlerFunc {
+func deleteActress(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseActressID(c)
 		if !ok {
 			return
 		}
 
-		existing, err := actressRepo.FindByID(id)
+		existing, err := deps.ActressRepo.FindByID(c.Request.Context(), id)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, ErrorResponse{Error: "actress not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		if err := actressRepo.Delete(id); err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		if err := deps.ActressRepo.Delete(c.Request.Context(), id); err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -334,28 +365,42 @@ type importSummaryResponse struct {
 	Errors   int `json:"errors"`
 }
 
-func exportActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
+func exportActresses(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		all, err := actressRepo.ListAll()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-			return
+		// Load actresses in chunks to avoid loading the entire table into memory.
+		// For a library with 100k+ actresses, loading all at once would allocate
+		// hundreds of megabytes and risk OOM.
+		const chunkSize = 1000
+		var all []models.Actress
+		offset := 0
+		for {
+			chunk, err := deps.ActressRepo.List(c.Request.Context(), chunkSize, offset)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+				return
+			}
+			if len(chunk) == 0 {
+				break
+			}
+			all = append(all, chunk...)
+			offset += chunkSize
 		}
 
 		c.JSON(http.StatusOK, all)
 	}
 }
 
-func importActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
+func importActresses(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
 
 		var req actressesImportRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
+		repo := deps.ActressRepo
 		var imported, skipped, errorsCount int
 
 		for _, item := range req.Actresses {
@@ -375,7 +420,7 @@ func importActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 				continue
 			}
 
-			existing, err := actressRepo.FindByJapaneseNameAndDMMID(japaneseName, item.DMMID)
+			existing, err := repo.FindByJapaneseNameAndDMMID(c.Request.Context(), japaneseName, item.DMMID)
 			if err != nil && !database.IsNotFound(err) && !errors.Is(err, database.ErrInvalidLookup) {
 				errorsCount++
 				continue
@@ -390,7 +435,7 @@ func importActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 					ThumbURL:     thumbURL,
 					Aliases:      aliases,
 				}
-				if err := actressRepo.Create(actress); err != nil {
+				if err := repo.Create(c.Request.Context(), actress); err != nil {
 					errorsCount++
 					continue
 				}
@@ -407,7 +452,7 @@ func importActresses(actressRepo *database.ActressRepository) gin.HandlerFunc {
 					existing.ThumbURL = thumbURL
 					existing.Aliases = aliases
 
-					if err := actressRepo.Update(existing); err != nil {
+					if err := repo.Update(c.Request.Context(), existing); err != nil {
 						errorsCount++
 						continue
 					}

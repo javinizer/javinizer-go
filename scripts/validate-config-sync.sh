@@ -78,8 +78,8 @@ detect_hardcoded_in_struct() {
     awk -v field="$field" '
     BEGIN { in_struct = 0; brace_depth = 0 }
     
-    # Track if we are inside ScraperSettings{ or &config.ScraperSettings{
-    /ScraperSettings\s*\{/ || /&config\.ScraperSettings\s*\{/ {
+    # Track if we are inside ScraperSettings{ or &models.ScraperSettings{
+    /ScraperSettings\s*\{/ || /\&models\.ScraperSettings\s*\{/ {
         in_struct = 1
         brace_depth = 1
         struct_start_line = NR

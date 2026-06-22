@@ -26,8 +26,6 @@
 	import RevertConfirmationModal from '$lib/components/RevertConfirmationModal.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
-	import { websocketStore } from '$lib/stores/websocket';
-	import { computeJobProgress } from '$lib/utils/job-progress';
 	import { createBatchJobsQuery, createConfigQuery } from '$lib/query/queries';
 	import type { BatchJobResponse, FileResult } from '$lib/api/types';
 
@@ -39,32 +37,6 @@
 	let isRefreshing = $derived(jobsQuery.isFetching && !!jobsQuery.data);
 	let hasLoadedOnce = $derived(!!jobsQuery.data);
 	let error = $derived(jobsQuery.error?.message ?? null);
-
-	let hasRunningJobs = $derived(jobs.some((j) => j.status.toLowerCase() === 'running'));
-
-	$effect(() => {
-		const shouldPoll = hasRunningJobs;
-		if (!shouldPoll) return;
-		const interval = setInterval(() => {
-			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
-		}, 5000);
-		return () => clearInterval(interval);
-	});
-
-	let lastEvictedJobs = $state<Set<string>>(new Set());
-
-	$effect(() => {
-		const runningIds = new Set(
-			jobs.filter((j) => j.status.toLowerCase() === 'running').map((j) => j.id),
-		);
-		const wsJobIds = Object.keys(wsState.messagesByFile);
-		for (const jobId of wsJobIds) {
-			if (!runningIds.has(jobId) && !lastEvictedJobs.has(jobId)) {
-				lastEvictedJobs = new Set([...lastEvictedJobs, jobId]);
-				websocketStore.clearJobMessages(jobId);
-			}
-		}
-	});
 
 	const configQuery = createConfigQuery();
 	let config = $derived(configQuery.data ?? null);
@@ -80,17 +52,6 @@
 	let revertModalOpen = $state(false);
 	let revertTargetId = $state('');
 	let revertFileCount = $state(0);
-
-	const wsState = $derived($websocketStore);
-
-	function getJobProgress(job: BatchJobResponse): number {
-		return computeJobProgress(
-			wsState.messagesByFile[job.id],
-			job.total_files,
-			job.progress,
-			job.status.toLowerCase() === 'running',
-		);
-	}
 
 	$effect(() => {
 		const statusParam = $page.url.searchParams.get('status');
@@ -275,11 +236,11 @@
 	function getFirstPoster(job: BatchJobResponse): string | null {
 		const results = Object.values(job.results || {});
 		for (const r of results) {
-			if (r.data?.cropped_poster_url) {
-				return r.data.cropped_poster_url;
+			if (r.movie?.cropped_poster_url) {
+				return r.movie.cropped_poster_url;
 			}
-			if (r.data?.poster_url) {
-				return apiClient.getPreviewImageURL(r.data.poster_url);
+			if (r.movie?.poster_url) {
+				return apiClient.getPreviewImageURL(r.movie.poster_url);
 			}
 		}
 		return null;
@@ -461,7 +422,7 @@
 												<div class="h-1.5 rounded-full bg-muted overflow-hidden">
 													<div
 														class="h-full bg-primary transition-all duration-300"
-														style="width: {Math.max(0, Math.min(100, getJobProgress(job)))}%"
+														style="width: {Math.max(0, Math.min(100, job.progress))}%"
 													></div>
 												</div>
 											</div>

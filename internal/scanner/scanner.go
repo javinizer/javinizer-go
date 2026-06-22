@@ -6,15 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
-)
-
-var (
-	ErrMaxFilesExceeded = errors.New("maximum file limit exceeded")
-	ErrScanTimeout      = errors.New("scan operation timed out")
 )
 
 const (
@@ -26,11 +20,11 @@ const (
 // Scanner finds video files based on configuration
 type Scanner struct {
 	fs     afero.Fs
-	config *config.MatchingConfig
+	config *Config
 	extSet map[string]struct{}
 }
 
-func NewScanner(fs afero.Fs, cfg *config.MatchingConfig) *Scanner {
+func NewScanner(fs afero.Fs, cfg *Config) *Scanner {
 	extSet := make(map[string]struct{}, len(cfg.Extensions))
 	for _, ext := range cfg.Extensions {
 		extSet[strings.ToLower(ext)] = struct{}{}
@@ -59,25 +53,18 @@ func trackSkipped(result *ScanResult, path string) {
 	}
 }
 
-// FileInfo represents a discovered video file
-type FileInfo struct {
-	Path      string    // Full absolute path
-	Name      string    // Filename without path
-	Extension string    // File extension (e.g., ".mp4")
-	Size      int64     // File size in bytes
-	ModTime   time.Time // Last modified time
-	Dir       string    // Directory containing the file
-}
+// Per ADR-0034: fileInfo was eliminated — ScanResult.Files is now []models.FileMatchInfo.
+// The scanner populates FileMatchInfo directly, removing the need for ToFileMatchInfo().
 
 // ScanResult contains the results of a directory scan
 type ScanResult struct {
-	Files        []FileInfo // Matched video files
-	Skipped      []string   // Sample of skipped files (capped at MaxSkippedFiles)
-	SkippedCount int        // Total count of skipped files
-	Errors       []error    // Errors encountered during scan
-	LimitReached bool       // Whether max file limit was reached
-	TimedOut     bool       // Whether scan timed out
-	TotalScanned int        // Total number of files scanned before limit/timeout
+	Files        []models.FileMatchInfo // Matched video files
+	Skipped      []string               // Sample of skipped files (capped at MaxSkippedFiles)
+	SkippedCount int                    // Total count of skipped files
+	Errors       []error                // Errors encountered during scan
+	LimitReached bool                   // Whether max file limit was reached
+	TimedOut     bool                   // Whether scan timed out
+	TotalScanned int                    // Total number of files scanned before limit/timeout
 }
 
 // Scan recursively scans a directory for video files (no limits)
@@ -97,7 +84,7 @@ func (s *Scanner) ScanWithLimits(ctx context.Context, rootPath string, maxFiles 
 // filter = "" means no filter; otherwise, only directories/files containing the filter string (case-insensitive) are processed
 func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles int, filter string) (*ScanResult, error) {
 	result := &ScanResult{
-		Files:   make([]FileInfo, 0),
+		Files:   make([]models.FileMatchInfo, 0),
 		Skipped: make([]string, 0),
 		Errors:  make([]error, 0),
 	}
@@ -183,16 +170,15 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 
 		// Check if file matches criteria
 		if s.shouldIncludeFile(path, d) {
-			fileInfo := FileInfo{
+			fmi := models.FileMatchInfo{
 				Path:      path,
 				Name:      d.Name(),
 				Extension: filepath.Ext(path),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
-				Dir:       filepath.Dir(path),
 			}
 
-			result.Files = append(result.Files, fileInfo)
+			result.Files = append(result.Files, fmi)
 
 			// Check if we've reached the file limit
 			if maxFiles > 0 && len(result.Files) >= maxFiles {
@@ -221,7 +207,7 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 // directory handle from ValidateAndOpenPath.
 func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 	result := &ScanResult{
-		Files:   make([]FileInfo, 0),
+		Files:   make([]models.FileMatchInfo, 0),
 		Skipped: make([]string, 0),
 		Errors:  make([]error, 0),
 	}
@@ -274,16 +260,15 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 			}
 
 			if s.shouldIncludeFile(fullPath, nil) {
-				fileInfo := FileInfo{
+				fmi := models.FileMatchInfo{
 					Path:      fullPath,
 					Name:      entryInfo.Name(),
 					Extension: filepath.Ext(fullPath),
 					Size:      entryInfo.Size(),
 					ModTime:   entryInfo.ModTime(),
-					Dir:       absPath,
 				}
 
-				result.Files = append(result.Files, fileInfo)
+				result.Files = append(result.Files, fmi)
 			} else {
 				trackSkipped(result, fullPath)
 			}
@@ -291,16 +276,15 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 	} else {
 		// Single file
 		if s.shouldIncludeFile(absPath, nil) {
-			fileInfo := FileInfo{
+			fmi := models.FileMatchInfo{
 				Path:      absPath,
 				Name:      info.Name(),
 				Extension: filepath.Ext(absPath),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
-				Dir:       filepath.Dir(absPath),
 			}
 
-			result.Files = append(result.Files, fileInfo)
+			result.Files = append(result.Files, fmi)
 		} else {
 			trackSkipped(result, absPath)
 		}
@@ -315,7 +299,7 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 // directly from the provided file handle, preventing symlink swap attacks
 // between validation and scanning.
 //
-// The canonicalPath is used for recording paths in the returned FileInfo
+// The canonicalPath is used for recording paths in the returned FileMatchInfo
 // structures. It should be the absolute, symlink-resolved path that was
 // validated before opening the handle.
 //
@@ -323,7 +307,7 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 // this call returns.
 func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*ScanResult, error) {
 	result := &ScanResult{
-		Files:   make([]FileInfo, 0),
+		Files:   make([]models.FileMatchInfo, 0),
 		Skipped: make([]string, 0),
 		Errors:  make([]error, 0),
 	}
@@ -361,15 +345,14 @@ func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*Sca
 		}
 
 		if s.shouldIncludeFile(fullPath, entry) {
-			fileInfo := FileInfo{
+			fmi := models.FileMatchInfo{
 				Path:      fullPath,
 				Name:      info.Name(),
 				Extension: filepath.Ext(fullPath),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
-				Dir:       canonicalPath,
 			}
-			result.Files = append(result.Files, fileInfo)
+			result.Files = append(result.Files, fmi)
 		} else {
 			trackSkipped(result, fullPath)
 		}
@@ -421,8 +404,8 @@ func (s *Scanner) shouldIncludeFile(path string, entry os.DirEntry) bool {
 }
 
 // Filter filters a list of files based on configuration
-func (s *Scanner) Filter(files []string) []FileInfo {
-	result := make([]FileInfo, 0)
+func (s *Scanner) Filter(files []string) []models.FileMatchInfo {
+	result := make([]models.FileMatchInfo, 0)
 
 	for _, path := range files {
 		info, err := s.lstatInfo(path)
@@ -440,16 +423,15 @@ func (s *Scanner) Filter(files []string) []FileInfo {
 			continue
 		}
 
-		fileInfo := FileInfo{
+		fmi := models.FileMatchInfo{
 			Path:      path,
 			Name:      info.Name(),
 			Extension: filepath.Ext(path),
 			Size:      info.Size(),
 			ModTime:   info.ModTime(),
-			Dir:       filepath.Dir(path),
 		}
 
-		result = append(result, fileInfo)
+		result = append(result, fmi)
 	}
 
 	return result

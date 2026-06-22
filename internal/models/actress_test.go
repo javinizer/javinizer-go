@@ -656,8 +656,16 @@ func TestActressFullNameMethod(t *testing.T) {
 				LastName:     "Hatano",
 				JapaneseName: "波多野",
 			},
-			// Without FirstName, falls back to JapaneseName
-			expectedName: "波多野",
+			// Without FirstName, LastName takes priority over JapaneseName
+			expectedName: "Hatano",
+		},
+		{
+			name: "only LastName (no FirstName, no JapaneseName)",
+			actress: &Actress{
+				LastName: "Hatano",
+			},
+			// LastName returned when it's the only name component
+			expectedName: "Hatano",
 		},
 	}
 

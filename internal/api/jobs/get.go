@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/logging"
-	"github.com/javinizer/javinizer-go/internal/models"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 // getJob godoc
@@ -16,48 +16,33 @@ import (
 // @Tags jobs
 // @Produce json
 // @Param id path string true "Job ID"
-// @Success 200 {object} JobListItem
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Success 200 {object} contracts.JobListItem
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/jobs/{id} [get]
-func getJob(deps *ServerDependencies) gin.HandlerFunc {
+func getJob(deps JobDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jobID := c.Param("id")
 
-		job, err := deps.JobRepo.FindByID(jobID)
+		result, err := deps.GetJobWithStats(c.Request.Context(), jobID)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, ErrorResponse{Error: "Job not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
 				return
 			}
-			logging.Errorf("Failed to find job %s: %v", jobID, err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve job"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve job"})
 			return
 		}
 
-		// Get operation count for this job
-		opCount, err := deps.BatchFileOpRepo.CountByBatchJobID(job.ID)
-		if err != nil {
-			logging.Errorf("Failed to count operations for job %s: %v", job.ID, err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve operation counts"})
-			return
-		}
-
-		revertedCount, err := deps.BatchFileOpRepo.CountByBatchJobIDAndRevertStatus(job.ID, models.RevertStatusReverted)
-		if err != nil {
-			logging.Errorf("Failed to count reverted operations for job %s: %v", job.ID, err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve revert counts"})
-			return
-		}
-
-		item := JobListItem{
+		job := result.Job
+		item := contracts.JobListItem{
 			ID:             job.ID,
 			Status:         job.Status,
 			TotalFiles:     job.TotalFiles,
 			Completed:      job.Completed,
 			Failed:         job.Failed,
-			OperationCount: opCount,
-			RevertedCount:  revertedCount,
+			OperationCount: result.OpCount,
+			RevertedCount:  result.RevertedCount,
 			Progress:       job.Progress,
 			Destination:    job.Destination,
 			StartedAt:      job.StartedAt.Format(time.RFC3339),

@@ -2,6 +2,7 @@ package token_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -46,15 +47,15 @@ func setupTokenTestDB(t *testing.T) string {
 	err := os.MkdirAll(filepath.Dir(dbPath), 0755)
 	require.NoError(t, err)
 
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	err = config.Save(testCfg, configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(testCfg)
+	db, err := database.New(&database.Config{Type: testCfg.Database.Type, DSN: testCfg.Database.DSN, LogLevel: testCfg.Database.LogLevel})
 	require.NoError(t, err)
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 

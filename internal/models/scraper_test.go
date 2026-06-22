@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -607,16 +606,17 @@ func TestScraperInterfaceCompliance(t *testing.T) {
 
 // mockScraperForTest is a minimal test implementation to verify interface compliance
 // This demonstrates that any struct with Name(), Search(), GetURL(), IsEnabled() satisfies the interface
-type mockScraperForTest struct{}
+type mockScraperForTest struct {
+}
 
 func (m *mockScraperForTest) Name() string { return "mock" }
 func (m *mockScraperForTest) Search(_ context.Context, _ string) (*ScraperResult, error) {
 	return nil, nil
 }
-func (m *mockScraperForTest) GetURL(id string) (string, error) { return "", nil }
-func (m *mockScraperForTest) IsEnabled() bool                  { return true }
-func (m *mockScraperForTest) Config() *config.ScraperSettings  { return &config.ScraperSettings{} }
-func (m *mockScraperForTest) Close() error                     { return nil }
+func (m *mockScraperForTest) GetURL(_ context.Context, id string) (string, error) { return "", nil }
+func (m *mockScraperForTest) IsEnabled() bool                                     { return true }
+func (m *mockScraperForTest) Config() *ScraperSettings                            { return &ScraperSettings{} }
+func (m *mockScraperForTest) Close() error                                        { return nil }
 
 // TestActressInfoValidation tests ActressInfo struct validation (AC-2.5.5)
 func TestActressInfoValidation(t *testing.T) {
@@ -1015,17 +1015,6 @@ func TestScraperResultNormalizeMediaURLs_NilReceiver(t *testing.T) {
 	})
 }
 
-func TestScraperRegistry_Reset(t *testing.T) {
-	reg := NewScraperRegistry()
-	reg.Register(&mockScraperForTest{})
-	_, exists := reg.Get("mock")
-	assert.True(t, exists)
-
-	reg.Reset()
-	_, exists = reg.Get("mock")
-	assert.False(t, exists)
-}
-
 func TestReplacePathSuffixIgnoreCase(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1065,4 +1054,13 @@ func TestNormalizeDMMPosterURL_EdgeCases(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestNilReceiverNoPanic(t *testing.T) {
+	t.Run("NormalizeMediaURLs does not panic on nil receiver", func(t *testing.T) {
+		var sr *ScraperResult
+		assert.NotPanics(t, func() {
+			sr.NormalizeMediaURLs()
+		}, "ScraperResult.NormalizeMediaURLs() should not panic on nil receiver")
+	})
 }

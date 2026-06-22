@@ -3,6 +3,7 @@ package aventertainment
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path"
 	"regexp"
@@ -12,7 +13,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/challengedetect"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -34,22 +35,22 @@ var (
 	dateRegex        = regexp.MustCompile(`(\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2}|\d{4}/\d{2}/\d{2})`)
 )
 
-// Scraper implements the AVEntertainment scraper.
-type Scraper struct {
+// scraper implements the Aventertainment scraper.
+type scraper struct {
 	client        *resty.Client
 	enabled       bool
 	baseURL       string
 	language      string
 	scrapeBonus   bool
-	proxyOverride *config.ProxyConfig
-	downloadProxy *config.ProxyConfig
+	proxyOverride *models.ProxyConfig
+	downloadProxy *models.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings // stores the full settings for Config() method
+	settings      models.ScraperSettings // stores the full settings for Config() method
 }
 
-// New creates a new AVEntertainment scraper.
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+// newScraper creates a new Aventertainment scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
 			httpclient.StandardHTMLHeaders(),
 			httpclient.UserAgentHeader(settings.UserAgent),
@@ -64,14 +65,9 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	}
 	base = strings.TrimRight(base, "/")
 
-	scrapeBonus := false
-	if settings.Extra != nil {
-		if val, ok := settings.Extra["scrape_bonus_screens"].(bool); ok {
-			scrapeBonus = val
-		}
-	}
+	scrapeBonus := settings.ScrapeBonusScreens
 
-	s := &Scraper{
+	s := &scraper{
 		client:        client,
 		enabled:       settings.Enabled,
 		baseURL:       base,
@@ -80,7 +76,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
-		settings:      settings,
+		settings:      *settings,
 	}
 
 	if result.ProxyEnabled && strings.TrimSpace(result.ProxyProfile.URL) != "" {
@@ -91,36 +87,37 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 }
 
 // Name returns scraper identifier.
-func (s *Scraper) Name() string { return "aventertainment" }
+func (s *scraper) Name() string { return "aventertainment" }
 
 // IsEnabled returns whether scraper is enabled.
-func (s *Scraper) IsEnabled() bool { return s.enabled }
+func (s *scraper) IsEnabled() bool { return s.enabled }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	return nil
 }
 
 // ResolveDownloadProxyForHost declares AVEntertainment-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
 	}
 	if host == "aventertainments.com" || strings.HasSuffix(host, ".aventertainments.com") {
-		return s.downloadProxy, s.proxyOverride, true
+		return s.settings.DownloadProxy, s.settings.Proxy, true
 	}
 	return nil, nil, false
 }
 
 // ResolveSearchQuery maps non-standard filename IDs to AVEntertainment-friendly
 // query formats.
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -129,7 +126,7 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 	return host == "aventertainments.com" || strings.HasSuffix(host, ".aventertainments.com")
 }
 
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse URL: %w", err)
@@ -152,7 +149,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from AVEntertainment URL")
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("AVEntertainment", "URL not handled by AVEntertainment scraper")
 	}
@@ -172,7 +169,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, models.NewScraperNotFoundError("AVEntertainment", "page not found")
 	}
 	if status == 429 {
-		return nil, models.NewScraperStatusError("AVEntertainment", 429, "rate limited")
+		return nil, models.NewScraperStatusError("AVEntertainment", http.StatusTooManyRequests, "rate limited")
 	}
 	if status == 403 || status == 451 {
 		return nil, models.NewScraperStatusError("AVEntertainment", status, "access blocked")
@@ -189,7 +186,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	return parseDetailPage(doc, html, detailURL, id, s.language, s.scrapeBonus), nil
 }
 
-func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
+func (s *scraper) ResolveSearchQuery(input string) (string, bool) {
 	norm := normalizeResolverInput(input)
 	if norm == "" {
 		return "", false
@@ -223,11 +220,11 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 }
 
 // GetURL resolves a detail page URL from movie ID.
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -290,7 +287,7 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 }
 
 // Search scrapes metadata for an ID.
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("AVEntertainment scraper is disabled")
 	}
@@ -314,6 +311,24 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	}
 
 	return parseDetailPage(doc, html, detailURL, id, s.language, s.scrapeBonus), nil
+}
+
+// ParseHTML parses an AV Entertainment detail page from a goquery.Document and the
+// original raw HTML string. This is the documented parsing seam for testing.
+func ParseHTML(doc *goquery.Document, html, sourceURL, language string, scrapeBonus bool) *models.ScraperResult {
+	return parseDetailPage(doc, html, sourceURL, "", language, scrapeBonus)
+}
+
+// ParseHTML implements the models.HTMLParser interface. It renders the document
+// back to HTML for the internal parser (which uses both DOM and regex-based
+// extraction) and delegates to the package-level ParseHTML with the scraper's
+// configured language and scrapeBonus settings.
+func (s *scraper) ParseHTML(doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+	html, err := doc.Html()
+	if err != nil {
+		return nil, fmt.Errorf("aventertainment: failed to render document to HTML: %w", err)
+	}
+	return ParseHTML(doc, html, sourceURL, s.language, s.scrapeBonus), nil
 }
 
 func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackID, language string, scrapeBonus bool) *models.ScraperResult {
@@ -814,7 +829,7 @@ func isAVEBonusScreenshotURL(raw string) bool {
 	return re.MatchString(path)
 }
 
-func (s *Scraper) applyLanguage(rawURL string) string {
+func (s *scraper) applyLanguage(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return rawURL
@@ -850,7 +865,7 @@ func (s *Scraper) applyLanguage(rawURL string) string {
 	return u.String()
 }
 
-func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
+func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}
@@ -860,7 +875,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 		return "", 0, err
 	}
 	html := resp.String()
-	if resp.StatusCode() == 200 && models.IsCloudflareChallengePage(html) {
+	if resp.StatusCode() == 200 && challengedetect.IsCloudflareChallengePage(html) {
 		return "", resp.StatusCode(), models.NewScraperChallengeError(
 			"AVEntertainment",
 			"AVEntertainment returned a Cloudflare challenge page (request blocked; adjust proxy/IP)",

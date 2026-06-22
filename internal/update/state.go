@@ -7,39 +7,62 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/configutil"
-	"github.com/javinizer/javinizer-go/internal/runtime"
+	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/spf13/afero"
 )
 
-// UpdateState represents the cached update information.
-type UpdateState struct {
-	Version    string `json:"version"`         // Latest version found
-	CheckedAt  string `json:"checked_at"`      // ISO8601 timestamp
-	Available  bool   `json:"available"`       // Whether update is available
-	Prerelease bool   `json:"prerelease"`      // Whether latest is prerelease
-	Source     string `json:"source"`          // "cached" or "fresh"
-	Error      string `json:"error,omitempty"` // Last error message
+// UpdateSource represents the source of an update check result.
+type UpdateSource string
+
+const (
+	// UpdateSourceCached indicates the result came from a cached check.
+	UpdateSourceCached UpdateSource = "cached"
+	// UpdateSourceFresh indicates the result came from a fresh check.
+	UpdateSourceFresh UpdateSource = "fresh"
+	// UpdateSourceDisabled indicates update checking is disabled.
+	UpdateSourceDisabled UpdateSource = "disabled"
+	// UpdateSourceNone indicates no update information is available.
+	UpdateSourceNone UpdateSource = "none"
+	// UpdateSourceError indicates the update check failed.
+	UpdateSourceError UpdateSource = "error"
+)
+
+// updateState represents the cached update information.
+type updateState struct {
+	Version    string       `json:"version"`         // Latest version found
+	CheckedAt  string       `json:"checked_at"`      // ISO8601 timestamp
+	Available  bool         `json:"available"`       // Whether update is available
+	Prerelease bool         `json:"prerelease"`      // Whether latest is prerelease
+	Source     UpdateSource `json:"source"`          // Update source status
+	Error      string       `json:"error,omitempty"` // Last error message
 }
 
-// StateStore handles loading and saving update state.
-type StateStore struct {
+// stateStore handles loading and saving update state.
+type stateStore struct {
 	mu       sync.RWMutex
-	state    *UpdateState
+	state    *updateState
 	path     string
 	interval time.Duration
+	fs       afero.Fs
 }
 
-// NewStateStore creates a new state store with the given path and check interval.
-func NewStateStore(path string, interval time.Duration) *StateStore {
-	return &StateStore{
+// newStateStore creates a new state store with the given path and check interval.
+func newStateStore(path string, interval time.Duration) *stateStore {
+	return newStateStoreWithFs(path, interval, afero.NewOsFs())
+}
+
+// newStateStoreWithFs creates a new state store with the given filesystem.
+func newStateStoreWithFs(path string, interval time.Duration, fs afero.Fs) *stateStore {
+	return &stateStore{
 		path:     path,
 		interval: interval,
+		fs:       fs,
 	}
 }
 
 // LoadState loads the update state from file.
 // Returns a copy of the state to prevent race conditions.
-func (s *StateStore) LoadState() (*UpdateState, error) {
+func (s *stateStore) LoadState() (*updateState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -52,11 +75,11 @@ func (s *StateStore) LoadState() (*UpdateState, error) {
 
 	// Ensure data directory exists
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, configutil.DirPerm); err != nil {
+	if err := s.fs.MkdirAll(dir, config.DirPerm); err != nil {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(s.path)
+	data, err := afero.ReadFile(s.fs, s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -64,7 +87,7 @@ func (s *StateStore) LoadState() (*UpdateState, error) {
 		return nil, err
 	}
 
-	var state UpdateState
+	var state updateState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, err
 	}
@@ -76,13 +99,13 @@ func (s *StateStore) LoadState() (*UpdateState, error) {
 }
 
 // SaveState saves the update state to file atomically.
-func (s *StateStore) SaveState(state *UpdateState) error {
+func (s *stateStore) SaveState(state *updateState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// Ensure data directory exists
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, configutil.DirPerm); err != nil {
+	if err := s.fs.MkdirAll(dir, config.DirPerm); err != nil {
 		return err
 	}
 
@@ -94,13 +117,13 @@ func (s *StateStore) SaveState(state *UpdateState) error {
 
 	// Write to temp file first, then rename (atomic on most systems)
 	tmpPath := s.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, configutil.FilePerm); err != nil {
+	if err := afero.WriteFile(s.fs, tmpPath, data, config.FilePerm); err != nil {
 		return err
 	}
 
-	if err := os.Rename(tmpPath, s.path); err != nil {
+	if err := s.fs.Rename(tmpPath, s.path); err != nil {
 		// Clean up temp file on error
-		_ = os.Remove(tmpPath)
+		_ = s.fs.Remove(tmpPath)
 		return err
 	}
 
@@ -109,7 +132,7 @@ func (s *StateStore) SaveState(state *UpdateState) error {
 }
 
 // ShouldCheck returns true if enough time has passed since last check.
-func (s *StateStore) ShouldCheck() bool {
+func (s *stateStore) ShouldCheck() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -126,16 +149,16 @@ func (s *StateStore) ShouldCheck() bool {
 }
 
 // ClearState clears the cached state.
-func (s *StateStore) ClearState() error {
+func (s *stateStore) ClearState() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.state = nil
-	return os.Remove(s.path)
+	return s.fs.Remove(s.path)
 }
 
 // SetState sets the state directly without file I/O (for testing).
-func (s *StateStore) SetState(state *UpdateState) {
+func (s *stateStore) SetState(state *updateState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -146,7 +169,7 @@ func (s *StateStore) SetState(state *UpdateState) {
 
 // GetState returns the current state (thread-safe).
 // Returns a copy to prevent race conditions.
-func (s *StateStore) GetState() *UpdateState {
+func (s *stateStore) GetState() *updateState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -158,9 +181,9 @@ func (s *StateStore) GetState() *UpdateState {
 	return &copy
 }
 
-// LoadStateFromFile loads state from file directly (for testing).
-func LoadStateFromFile(path string) (*UpdateState, error) {
-	data, err := os.ReadFile(path)
+// loadStateFromFile loads state from file using the provided filesystem.
+func loadStateFromFile(fs afero.Fs, path string) (*updateState, error) {
+	data, err := afero.ReadFile(fs, path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -168,7 +191,7 @@ func LoadStateFromFile(path string) (*UpdateState, error) {
 		return nil, err
 	}
 
-	var state UpdateState
+	var state updateState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, err
 	}
@@ -176,10 +199,10 @@ func LoadStateFromFile(path string) (*UpdateState, error) {
 	return &state, nil
 }
 
-// SaveStateToFile saves state to file directly (for testing).
-func SaveStateToFile(path string, state *UpdateState) error {
+// saveStateToFile saves state to file using the provided filesystem.
+func saveStateToFile(fs afero.Fs, path string, state *updateState) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, configutil.DirPerm); err != nil {
+	if err := fs.MkdirAll(dir, config.DirPerm); err != nil {
 		return err
 	}
 
@@ -189,27 +212,62 @@ func SaveStateToFile(path string, state *UpdateState) error {
 	}
 
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, configutil.FilePerm); err != nil {
+	if err := afero.WriteFile(fs, tmpPath, data, config.FilePerm); err != nil {
 		return err
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := fs.Rename(tmpPath, path); err != nil {
+		_ = fs.Remove(tmpPath)
 		return err
 	}
 
 	return nil
 }
 
-// DefaultCheckInterval is the default interval between update checks.
-const DefaultCheckInterval = 24 * time.Hour
-
-// NewDefaultStateStore creates a state store with default settings.
-func NewDefaultStateStore() *StateStore {
-	return NewStateStore(runtime.UpdateStatePath(), DefaultCheckInterval)
+// writeTestState writes an update state file for testing using the OS filesystem.
+func writeTestState(path, ver, checkedAt string, available, prerelease bool, source UpdateSource) error {
+	return writeTestStateWithFs(afero.NewOsFs(), path, ver, checkedAt, available, prerelease, source)
 }
 
-// NowISO8601 returns the current time in ISO8601 format.
-func NowISO8601() string {
+// writeTestStateWithFs writes an update state file for testing using the provided filesystem.
+func writeTestStateWithFs(fs afero.Fs, path, ver, checkedAt string, available, prerelease bool, source UpdateSource) error {
+	state := &updateState{
+		Version:    ver,
+		CheckedAt:  checkedAt,
+		Available:  available,
+		Prerelease: prerelease,
+		Source:     source,
+	}
+	return saveStateToFile(fs, path, state)
+}
+
+// writeTestStateWithError writes an update state file with an error message for testing using the OS filesystem.
+func writeTestStateWithError(path, ver, checkedAt string, available, prerelease bool, source UpdateSource, errMsg string) error {
+	return writeTestStateWithErrorFs(afero.NewOsFs(), path, ver, checkedAt, available, prerelease, source, errMsg)
+}
+
+// writeTestStateWithErrorFs writes an update state file with an error message for testing using the provided filesystem.
+func writeTestStateWithErrorFs(fs afero.Fs, path, ver, checkedAt string, available, prerelease bool, source UpdateSource, errMsg string) error {
+	state := &updateState{
+		Version:    ver,
+		CheckedAt:  checkedAt,
+		Available:  available,
+		Prerelease: prerelease,
+		Source:     source,
+		Error:      errMsg,
+	}
+	return saveStateToFile(fs, path, state)
+}
+
+// defaultCheckInterval is the default interval between update checks.
+const defaultCheckInterval = 24 * time.Hour
+
+// newDefaultStateStore creates a state store with default settings.
+func newDefaultStateStore() *stateStore {
+	return newStateStore(updateStatePath(), defaultCheckInterval)
+}
+
+// nowISO8601 returns the current time in ISO8601 format.
+func nowISO8601() string {
 	return time.Now().UTC().Format(time.RFC3339)
 }

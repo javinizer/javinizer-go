@@ -18,48 +18,51 @@ import (
 
 const maxUpdateResponseSize = 1024 * 1024 // 1MB
 
-// VersionInfo represents information about a GitHub release.
-type VersionInfo struct {
+// versionInfo represents information about a GitHub release.
+type versionInfo struct {
 	Version     string `json:"version"`      // Human-readable version (e.g., "v1.6.0")
 	TagName     string `json:"tag_name"`     // Git tag (e.g., "v1.6.0")
 	Prerelease  bool   `json:"prerelease"`   // Whether this is a prerelease
 	PublishedAt string `json:"published_at"` // ISO8601 timestamp
 }
 
-// Checker is the interface for checking version information.
-type Checker interface {
-	CheckLatestVersion(ctx context.Context) (*VersionInfo, error)
+// checker is the interface for checking version information.
+type checker interface {
+	CheckLatestVersion(ctx context.Context) (*versionInfo, error)
 }
 
-// GitHubChecker checks versions from GitHub releases.
-type GitHubChecker struct {
+// githubChecker checks versions from GitHub releases.
+type githubChecker struct {
 	repo       string
 	httpClient *http.Client
 	apiBaseURL string // For testing - override the GitHub API base URL
+	envLookup  func(string) string
 }
 
-// NewGitHubChecker creates a new GitHub checker.
+// newGitHubChecker creates a new GitHub checker.
 // The repo should be in format "owner/repo" (e.g., "javinizer/Javinizer").
-func NewGitHubChecker(repo string) *GitHubChecker {
-	return &GitHubChecker{
+func newGitHubChecker(repo string) *githubChecker {
+	return &githubChecker{
 		repo:       repo,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 		apiBaseURL: "https://api.github.com",
+		envLookup:  os.Getenv,
 	}
 }
 
-// NewGitHubCheckerWithBaseURL creates a new GitHub checker with a custom base URL (for testing).
-func NewGitHubCheckerWithBaseURL(repo, baseURL string) *GitHubChecker {
-	return &GitHubChecker{
+// newGitHubCheckerWithBaseURL creates a new GitHub checker with a custom base URL (for testing).
+func newGitHubCheckerWithBaseURL(repo, baseURL string) *githubChecker {
+	return &githubChecker{
 		repo:       repo,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 		apiBaseURL: baseURL,
+		envLookup:  os.Getenv,
 	}
 }
 
 // CheckLatestVersion fetches the latest stable release from GitHub.
 // If no stable release is found, it returns the latest release (which may be a prerelease).
-func (c *GitHubChecker) CheckLatestVersion(ctx context.Context) (*VersionInfo, error) {
+func (c *githubChecker) CheckLatestVersion(ctx context.Context) (*versionInfo, error) {
 	url := fmt.Sprintf("%s/repos/%s/releases/latest", c.apiBaseURL, c.repo)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -72,9 +75,9 @@ func (c *GitHubChecker) CheckLatestVersion(ctx context.Context) (*VersionInfo, e
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
 	// Check for GitHub token in environment
-	if token := os.Getenv("GH_TOKEN"); token != "" {
+	if token := c.envLookup("GH_TOKEN"); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
-	} else if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+	} else if token := c.envLookup("GITHUB_TOKEN"); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
@@ -117,7 +120,7 @@ func (c *GitHubChecker) CheckLatestVersion(ctx context.Context) (*VersionInfo, e
 		version = release.Name
 	}
 
-	return &VersionInfo{
+	return &versionInfo{
 		Version:     version,
 		TagName:     release.TagName,
 		Prerelease:  release.Prerelease,
@@ -125,8 +128,8 @@ func (c *GitHubChecker) CheckLatestVersion(ctx context.Context) (*VersionInfo, e
 	}, nil
 }
 
-// ParseGitHubReleaseVersion extracts version information from a GitHub tag name.
-func ParseGitHubReleaseVersion(tagName string) (*VersionInfo, error) {
+// parseGitHubReleaseVersion extracts version information from a GitHub tag name.
+func parseGitHubReleaseVersion(tagName string) (*versionInfo, error) {
 	// Ensure tag starts with 'v' for version
 	version := tagName
 	if !strings.HasPrefix(version, "v") {
@@ -140,7 +143,7 @@ func ParseGitHubReleaseVersion(tagName string) (*VersionInfo, error) {
 		return nil, fmt.Errorf("invalid version format: %s", version)
 	}
 
-	return &VersionInfo{
+	return &versionInfo{
 		Version:    version,
 		TagName:    tagName,
 		Prerelease: strings.Contains(version, "-"),
@@ -263,24 +266,24 @@ func parseStringToInt(s string) (int, error) {
 	return n, nil
 }
 
-// GetLatestStableVersion checks GitHub and returns the latest stable version.
+// getLatestStableVersion checks GitHub and returns the latest stable version.
 // Returns (version, isAvailable, error).
-func GetLatestStableVersion(ctx context.Context) (*VersionInfo, error) {
-	checker := NewGitHubChecker("javinizer/Javinizer")
+func getLatestStableVersion(ctx context.Context) (*versionInfo, error) {
+	checker := newGitHubChecker("javinizer/Javinizer")
 	return checker.CheckLatestVersion(ctx)
 }
 
-// CheckForUpdate checks if an update is available and returns status.
+// checkForUpdate checks if an update is available and returns status.
 // If checkPrerelease is true, prereleases will also be considered.
-func CheckForUpdate(ctx context.Context, currentVersion string, checkPrerelease bool) (*VersionInfo, bool, error) {
-	return CheckForUpdateWithChecker(ctx, currentVersion, checkPrerelease, NewGitHubChecker("javinizer/Javinizer"))
+func checkForUpdate(ctx context.Context, currentVersion string, checkPrerelease bool) (*versionInfo, bool, error) {
+	return checkForUpdateWithChecker(ctx, currentVersion, checkPrerelease, newGitHubChecker("javinizer/Javinizer"))
 }
 
-// CheckForUpdateWithChecker checks if an update is available using a custom checker (for testing).
-func CheckForUpdateWithChecker(ctx context.Context, currentVersion string, checkPrerelease bool, checker *GitHubChecker) (*VersionInfo, bool, error) {
+// checkForUpdateWithChecker checks if an update is available using a custom checker (for testing).
+func checkForUpdateWithChecker(ctx context.Context, currentVersion string, checkPrerelease bool, chk *githubChecker) (*versionInfo, bool, error) {
 	logging.Debugf("Checking for update (current: %s, checkPrerelease: %v)", currentVersion, checkPrerelease)
 
-	latest, err := checker.CheckLatestVersion(ctx)
+	latest, err := chk.CheckLatestVersion(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -288,10 +291,10 @@ func CheckForUpdateWithChecker(ctx context.Context, currentVersion string, check
 	// If not checking prereleases and latest is prerelease, skip it
 	if !checkPrerelease && IsPrerelease(latest.Version) {
 		// Try to get the latest non-prerelease
-		if versions, err := checker.getRecentReleases(ctx, 10); err == nil {
+		if versions, err := chk.getRecentReleases(ctx, 10); err == nil {
 			for _, v := range versions {
 				if !IsPrerelease(v) {
-					latest = &VersionInfo{Version: v, Prerelease: false}
+					latest = &versionInfo{Version: v, Prerelease: false}
 					break
 				}
 			}
@@ -313,7 +316,7 @@ func CheckForUpdateWithChecker(ctx context.Context, currentVersion string, check
 
 // getRecentReleases fetches recent releases to find a stable version.
 // Uses the checker's apiBaseURL for testing flexibility.
-func (c *GitHubChecker) getRecentReleases(ctx context.Context, limit int) ([]string, error) {
+func (c *githubChecker) getRecentReleases(ctx context.Context, limit int) ([]string, error) {
 	url := fmt.Sprintf("%s/repos/%s/releases?per_page=%d", c.apiBaseURL, c.repo, limit)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -325,9 +328,9 @@ func (c *GitHubChecker) getRecentReleases(ctx context.Context, limit int) ([]str
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
 	// Check for GitHub token in environment
-	if token := os.Getenv("GH_TOKEN"); token != "" {
+	if token := c.envLookup("GH_TOKEN"); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
-	} else if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+	} else if token := c.envLookup("GITHUB_TOKEN"); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
@@ -371,8 +374,8 @@ func (c *GitHubChecker) getRecentReleases(ctx context.Context, limit int) ([]str
 	return versions, nil
 }
 
-// GetRecentReleases fetches recent releases using the default checker.
-func GetRecentReleases(ctx context.Context, limit int) ([]string, error) {
-	checker := NewGitHubChecker("javinizer/Javinizer")
+// getRecentReleases fetches recent releases using the default checker.
+func getRecentReleases(ctx context.Context, limit int) ([]string, error) {
+	checker := newGitHubChecker("javinizer/Javinizer")
 	return checker.getRecentReleases(ctx, limit)
 }

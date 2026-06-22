@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ func TestJobRepository_Create(t *testing.T) {
 
 	job := &models.Job{
 		ID:         "test-job-1",
-		Status:     string(models.JobStatusRunning),
+		Status:     models.JobStatusRunning,
 		TotalFiles: 10,
 		Completed:  5,
 		Failed:     0,
@@ -24,10 +25,10 @@ func TestJobRepository_Create(t *testing.T) {
 		StartedAt:  time.Now(),
 	}
 
-	err := repo.Create(job)
+	err := repo.Create(context.TODO(), job)
 	require.NoError(t, err)
 
-	found, err := repo.FindByID("test-job-1")
+	found, err := repo.FindByID(context.TODO(), "test-job-1")
 	require.NoError(t, err)
 	assert.Equal(t, "test-job-1", found.ID)
 	assert.Equal(t, 10, found.TotalFiles)
@@ -39,15 +40,15 @@ func TestJobRepository_List(t *testing.T) {
 
 	now := time.Now()
 	jobs := []*models.Job{
-		{ID: "job-1", Status: string(models.JobStatusRunning), TotalFiles: 5, Files: "[]", StartedAt: now.Add(-1 * time.Hour)},
-		{ID: "job-2", Status: string(models.JobStatusCompleted), TotalFiles: 3, Files: "[]", StartedAt: now},
+		{ID: "job-1", Status: models.JobStatusRunning, TotalFiles: 5, Files: "[]", StartedAt: now.Add(-1 * time.Hour)},
+		{ID: "job-2", Status: models.JobStatusCompleted, TotalFiles: 3, Files: "[]", StartedAt: now},
 	}
 
 	for _, j := range jobs {
-		require.NoError(t, repo.Create(j))
+		require.NoError(t, repo.Create(context.TODO(), j))
 	}
 
-	list, err := repo.List()
+	list, err := repo.List(context.TODO())
 	require.NoError(t, err)
 	require.Len(t, list, 2)
 	assert.Equal(t, "job-2", list[0].ID)
@@ -59,17 +60,17 @@ func TestJobRepository_Delete(t *testing.T) {
 
 	job := &models.Job{
 		ID:         "to-delete",
-		Status:     string(models.JobStatusCompleted),
+		Status:     models.JobStatusCompleted,
 		TotalFiles: 1,
 		Files:      "[]",
 		StartedAt:  time.Now(),
 	}
-	require.NoError(t, repo.Create(job))
+	require.NoError(t, repo.Create(context.TODO(), job))
 
-	err := repo.Delete("to-delete")
+	err := repo.Delete(context.TODO(), "to-delete")
 	require.NoError(t, err)
 
-	_, err = repo.FindByID("to-delete")
+	_, err = repo.FindByID(context.TODO(), "to-delete")
 	assert.Error(t, err)
 }
 
@@ -82,7 +83,7 @@ func TestJobRepository_DeleteOrganizedOlderThan(t *testing.T) {
 
 	organizedOld := &models.Job{
 		ID:          "organized-old",
-		Status:      string(models.JobStatusOrganized),
+		Status:      models.JobStatusOrganized,
 		TotalFiles:  1,
 		Files:       "[]",
 		StartedAt:   twoDaysAgo.Add(-1 * time.Hour),
@@ -90,20 +91,20 @@ func TestJobRepository_DeleteOrganizedOlderThan(t *testing.T) {
 	}
 	organizedRecent := &models.Job{
 		ID:          "organized-recent",
-		Status:      string(models.JobStatusOrganized),
+		Status:      models.JobStatusOrganized,
 		TotalFiles:  1,
 		Files:       "[]",
 		StartedAt:   now.Add(-1 * time.Hour),
 		OrganizedAt: ptrTime(now.Add(-12 * time.Hour)),
 	}
 
-	require.NoError(t, repo.Create(organizedOld))
-	require.NoError(t, repo.Create(organizedRecent))
+	require.NoError(t, repo.Create(context.TODO(), organizedOld))
+	require.NoError(t, repo.Create(context.TODO(), organizedRecent))
 
-	err := repo.DeleteOrganizedOlderThan(now.Add(-24 * time.Hour))
+	err := repo.DeleteOrganizedOlderThan(context.TODO(), now.Add(-24*time.Hour))
 	require.NoError(t, err)
 
-	list, err := repo.List()
+	list, err := repo.List(context.TODO())
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	assert.Equal(t, "organized-recent", list[0].ID)

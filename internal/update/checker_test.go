@@ -43,7 +43,7 @@ func TestCheckLatestVersion(t *testing.T) {
 	defer server.Close()
 
 	// Create checker with mock server URL using the test helper
-	checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+	checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
 
 	ctx := context.Background()
 	info, err := checker.CheckLatestVersion(ctx)
@@ -72,7 +72,7 @@ func TestParseGitHubReleaseVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			info, err := ParseGitHubReleaseVersion(tt.tagName)
+			info, err := parseGitHubReleaseVersion(tt.tagName)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -158,7 +158,7 @@ func TestGetLatestStableVersion(t *testing.T) {
 	defer server.Close()
 
 	// Create a checker with the mock server
-	checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+	checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
 
 	// Test with context
 	ctx := context.Background()
@@ -206,10 +206,10 @@ func TestCheckForUpdate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+			checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
 			ctx := context.Background()
 
-			latest, available, err := CheckForUpdateWithChecker(ctx, tt.current, tt.checkPrerelease, checker)
+			latest, available, err := checkForUpdateWithChecker(ctx, tt.current, tt.checkPrerelease, checker)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -239,7 +239,7 @@ func TestParseGitHubReleaseVersionEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			info, err := ParseGitHubReleaseVersion(tt.tagName)
+			info, err := parseGitHubReleaseVersion(tt.tagName)
 			if err != nil && tt.tagName != "v" {
 				// "v" alone is technically invalid semver
 				t.Logf("Got expected error for %q: %v", tt.tagName, err)
@@ -253,7 +253,7 @@ func TestParseGitHubReleaseVersionEdgeCases(t *testing.T) {
 
 // TestVersionInfo_JSON tests JSON serialization.
 func TestVersionInfo_JSON(t *testing.T) {
-	info := VersionInfo{
+	info := versionInfo{
 		Version:     "v1.6.0",
 		TagName:     "v1.6.0",
 		Prerelease:  false,
@@ -263,7 +263,7 @@ func TestVersionInfo_JSON(t *testing.T) {
 	data, err := json.Marshal(info)
 	require.NoError(t, err)
 
-	var loaded VersionInfo
+	var loaded versionInfo
 	err = json.Unmarshal(data, &loaded)
 	assert.NoError(t, err)
 	assert.Equal(t, info, loaded)
@@ -271,7 +271,7 @@ func TestVersionInfo_JSON(t *testing.T) {
 
 // TestGitHubChecker_ClientConfig tests that the checker has proper client settings.
 func TestGitHubChecker_ClientConfig(t *testing.T) {
-	checker := NewGitHubChecker("test/repo")
+	checker := newGitHubChecker("test/repo")
 
 	// Verify the checker was created with proper settings
 	assert.NotNil(t, checker)
@@ -287,7 +287,7 @@ func TestCheckLatestVersion_EdgeCases(t *testing.T) {
 		}))
 		defer server.Close()
 
-		checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+		checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
 		_, err := checker.CheckLatestVersion(context.Background())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "rate limited")
@@ -299,7 +299,7 @@ func TestCheckLatestVersion_EdgeCases(t *testing.T) {
 		}))
 		defer server.Close()
 
-		checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+		checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
 		_, err := checker.CheckLatestVersion(context.Background())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "rate limited")
@@ -312,7 +312,7 @@ func TestCheckLatestVersion_EdgeCases(t *testing.T) {
 		}))
 		defer server.Close()
 
-		checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+		checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
 		_, err := checker.CheckLatestVersion(context.Background())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "status 500")
@@ -325,7 +325,7 @@ func TestCheckLatestVersion_EdgeCases(t *testing.T) {
 		}))
 		defer server.Close()
 
-		checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+		checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
 		_, err := checker.CheckLatestVersion(context.Background())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse response")
@@ -343,7 +343,7 @@ func TestCheckLatestVersion_EdgeCases(t *testing.T) {
 		}))
 		defer server.Close()
 
-		checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+		checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
 		info, err := checker.CheckLatestVersion(context.Background())
 		require.NoError(t, err)
 		require.NotNil(t, info)
@@ -375,8 +375,8 @@ func TestCheckForUpdateWithChecker_PrereleaseFallback(t *testing.T) {
 		}))
 		defer server.Close()
 
-		checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
-		latest, available, err := CheckForUpdateWithChecker(context.Background(), "v1.4.0", false, checker)
+		checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+		latest, available, err := checkForUpdateWithChecker(context.Background(), "v1.4.0", false, checker)
 		require.NoError(t, err)
 		require.NotNil(t, latest)
 		assert.True(t, available)
@@ -406,8 +406,8 @@ func TestCheckForUpdateWithChecker_PrereleaseFallback(t *testing.T) {
 		}))
 		defer server.Close()
 
-		checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
-		latest, available, err := CheckForUpdateWithChecker(context.Background(), "v1.9.0", false, checker)
+		checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+		latest, available, err := checkForUpdateWithChecker(context.Background(), "v1.9.0", false, checker)
 		require.NoError(t, err)
 		require.NotNil(t, latest)
 		assert.True(t, available)
@@ -433,8 +433,8 @@ func TestCheckForUpdateWithChecker_PrereleaseFallback(t *testing.T) {
 		}))
 		defer server.Close()
 
-		checker := NewGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
-		latest, available, err := CheckForUpdateWithChecker(context.Background(), "v2.9.0", false, checker)
+		checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+		latest, available, err := checkForUpdateWithChecker(context.Background(), "v2.9.0", false, checker)
 		require.NoError(t, err)
 		require.NotNil(t, latest)
 		assert.True(t, available)
@@ -497,7 +497,7 @@ func TestWrapperFunctions(t *testing.T) {
 		})
 		defer func() { http.DefaultTransport = original }()
 
-		info, err := GetLatestStableVersion(context.Background())
+		info, err := getLatestStableVersion(context.Background())
 		require.NoError(t, err)
 		require.NotNil(t, info)
 		assert.Equal(t, "v9.9.9", info.Version)
@@ -520,7 +520,7 @@ func TestWrapperFunctions(t *testing.T) {
 		})
 		defer func() { http.DefaultTransport = original }()
 
-		latest, available, err := CheckForUpdate(context.Background(), "v1.0.0", false)
+		latest, available, err := checkForUpdate(context.Background(), "v1.0.0", false)
 		require.NoError(t, err)
 		require.NotNil(t, latest)
 		assert.True(t, available)
@@ -544,7 +544,7 @@ func TestWrapperFunctions(t *testing.T) {
 		})
 		defer func() { http.DefaultTransport = original }()
 
-		versions, err := GetRecentReleases(context.Background(), 10)
+		versions, err := getRecentReleases(context.Background(), 10)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"v1.5.0", "v1.4.0", "v1.3.0"}, versions)
 	})

@@ -24,13 +24,30 @@ var (
 	genreNameRegex = regexp.MustCompile(`>([^<]+)</a>`)
 )
 
-func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+func (s *scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
 		Language:  "ja",
 	}
 
+	isNewSite := strings.Contains(sourceURL, "video.dmm.co.jp")
+	var jsonldMetadata map[string]any
+	if isNewSite {
+		jsonldMetadata = extractMetadataFromJSONLD(doc)
+	}
+
+	// 4-step pipeline
+	s.extractIdentifiers(result, sourceURL)
+	s.extractTextualMetadata(result, doc, isNewSite, jsonldMetadata)
+	s.extractStructuredData(ctx, result, doc, sourceURL, isNewSite, jsonldMetadata)
+	s.extractMediaFields(ctx, result, doc, sourceURL, isNewSite, jsonldMetadata)
+
+	return result, nil
+}
+
+// extractIdentifiers populates ContentID and ID from the source URL.
+func (s *scraper) extractIdentifiers(result *models.ScraperResult, sourceURL string) {
 	if cid := extractContentIDFromURL(sourceURL); cid != "" {
 		// Always strip rental 'r' suffix from content IDs regardless of URL path.
 		// DMM uses 'r' suffix for rental content IDs across all URL types, not just /rental/ pages.
@@ -41,14 +58,11 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 		result.ContentID = cid
 		result.ID = normalizeID(cid)
 	}
+}
 
-	isNewSite := strings.Contains(sourceURL, "video.dmm.co.jp")
-
-	var jsonldMetadata map[string]interface{}
-	if isNewSite {
-		jsonldMetadata = extractMetadataFromJSONLD(doc)
-	}
-
+// extractTextualMetadata populates Title, Description, Director, Maker, Label, Series.
+func (s *scraper) extractTextualMetadata(result *models.ScraperResult, doc *goquery.Document, isNewSite bool, jsonldMetadata map[string]any) {
+	// Title
 	var japaneseTitle string
 	if isNewSite {
 		if title := getStringFromMetadata(jsonldMetadata, "title"); title != "" {
@@ -63,10 +77,10 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 	} else {
 		japaneseTitle = scraperutil.CleanString(doc.Find("h1#title.item").Text())
 	}
-
 	result.Title = japaneseTitle
 	result.OriginalTitle = japaneseTitle
 
+	// Description
 	if isNewSite {
 		if desc := getStringFromMetadata(jsonldMetadata, "description"); desc != "" {
 			result.Description = desc
@@ -77,6 +91,30 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 		result.Description = s.extractDescription(doc, isNewSite)
 	}
 
+	// Director
+	result.Director = s.extractDirector(doc)
+
+	// Maker
+	if isNewSite {
+		if maker := getStringFromMetadata(jsonldMetadata, "maker"); maker != "" {
+			result.Maker = maker
+		} else {
+			result.Maker = s.extractMaker(doc, isNewSite)
+		}
+	} else {
+		result.Maker = s.extractMaker(doc, isNewSite)
+	}
+
+	// Label
+	result.Label = s.extractLabel(doc)
+
+	// Series
+	result.Series = s.extractSeries(doc, isNewSite)
+}
+
+// extractStructuredData populates ReleaseDate, Runtime, Rating, Genres, Actresses.
+func (s *scraper) extractStructuredData(ctx context.Context, result *models.ScraperResult, doc *goquery.Document, sourceURL string, isNewSite bool, jsonldMetadata map[string]any) {
+	// ReleaseDate
 	if isNewSite {
 		if date := getTimeFromMetadata(jsonldMetadata, "release_date"); date != nil {
 			result.ReleaseDate = date
@@ -89,24 +127,10 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 		}
 	}
 
+	// Runtime
 	result.Runtime = s.extractRuntime(doc)
 
-	result.Director = s.extractDirector(doc)
-
-	if isNewSite {
-		if maker := getStringFromMetadata(jsonldMetadata, "maker"); maker != "" {
-			result.Maker = maker
-		} else {
-			result.Maker = s.extractMaker(doc, isNewSite)
-		}
-	} else {
-		result.Maker = s.extractMaker(doc, isNewSite)
-	}
-
-	result.Label = s.extractLabel(doc)
-
-	result.Series = s.extractSeries(doc, isNewSite)
-
+	// Rating
 	if isNewSite {
 		ratingValue := getFloat64FromMetadata(jsonldMetadata, "rating_value")
 		ratingCount := getIntFromMetadata(jsonldMetadata, "rating_count")
@@ -122,6 +146,7 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 		result.Rating = s.extractRating(doc, isNewSite)
 	}
 
+	// Genres
 	if isNewSite {
 		if genres := getStringSliceFromMetadata(jsonldMetadata, "genres"); len(genres) > 0 {
 			result.Genres = genres
@@ -132,6 +157,7 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 		result.Genres = s.extractGenres(doc)
 	}
 
+	// Actresses
 	isMonthlyPage := strings.Contains(sourceURL, "/monthly/")
 	isStreamingPage := strings.Contains(sourceURL, "video.dmm.co.jp")
 
@@ -148,7 +174,11 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 	} else {
 		logging.Debug("DMM: Skipping actress extraction (scrape_actress=false)")
 	}
+}
 
+// extractMediaFields populates CoverURL, PosterURL, ScreenshotURL, TrailerURL.
+func (s *scraper) extractMediaFields(ctx context.Context, result *models.ScraperResult, doc *goquery.Document, sourceURL string, isNewSite bool, jsonldMetadata map[string]any) {
+	// CoverURL
 	if isNewSite {
 		if coverURL := getStringFromMetadata(jsonldMetadata, "cover_url"); coverURL != "" {
 			result.CoverURL = coverURL
@@ -159,6 +189,7 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 		result.CoverURL = s.extractCoverURL(doc, isNewSite, result.ContentID)
 	}
 
+	// PosterURL
 	if result.CoverURL != "" {
 		posterURL, shouldCrop := imageutil.GetOptimalPosterURL(result.CoverURL, s.client.GetClient())
 		result.ShouldCropPoster = shouldCrop
@@ -169,6 +200,7 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 		}
 	}
 
+	// Screenshots
 	var screenshots []string
 	if isNewSite {
 		if ss := getStringSliceFromMetadata(jsonldMetadata, "screenshots"); len(ss) > 0 {
@@ -181,6 +213,7 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 	}
 	result.ScreenshotURL = s.filterPlaceholderScreenshots(ctx, screenshots)
 
+	// TrailerURL
 	if isNewSite {
 		if trailerURL := getStringFromMetadata(jsonldMetadata, "trailer_url"); trailerURL != "" {
 			result.TrailerURL = trailerURL
@@ -190,11 +223,9 @@ func (s *Scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 	} else {
 		result.TrailerURL = s.extractTrailerURL(doc, sourceURL)
 	}
-
-	return result, nil
 }
 
-func (s *Scraper) extractDescription(doc *goquery.Document, isNewSite bool) string {
+func (s *scraper) extractDescription(doc *goquery.Document, isNewSite bool) string {
 	if isNewSite {
 		return s.extractDescriptionNewSite(doc)
 	}
@@ -206,7 +237,7 @@ func (s *Scraper) extractDescription(doc *goquery.Document, isNewSite bool) stri
 	return scraperutil.CleanString(desc)
 }
 
-func (s *Scraper) extractReleaseDate(doc *goquery.Document) *time.Time {
+func (s *scraper) extractReleaseDate(doc *goquery.Document) *time.Time {
 	dateStr := dateRegex.FindString(doc.Text())
 
 	if dateStr != "" {
@@ -218,7 +249,7 @@ func (s *Scraper) extractReleaseDate(doc *goquery.Document) *time.Time {
 	return nil
 }
 
-func (s *Scraper) extractRuntime(doc *goquery.Document) int {
+func (s *scraper) extractRuntime(doc *goquery.Document) int {
 	matches := runtimeRegex.FindStringSubmatch(doc.Text())
 
 	if len(matches) > 1 {
@@ -228,7 +259,7 @@ func (s *Scraper) extractRuntime(doc *goquery.Document) int {
 	return 0
 }
 
-func (s *Scraper) extractDirector(doc *goquery.Document) string {
+func (s *scraper) extractDirector(doc *goquery.Document) string {
 	html, _ := doc.Html()
 	matches := directorRegex.FindStringSubmatch(html)
 
@@ -238,7 +269,7 @@ func (s *Scraper) extractDirector(doc *goquery.Document) string {
 	return ""
 }
 
-func (s *Scraper) extractMaker(doc *goquery.Document, isNewSite bool) string {
+func (s *scraper) extractMaker(doc *goquery.Document, isNewSite bool) string {
 	if isNewSite {
 		return s.extractMakerNewSite(doc)
 	}
@@ -252,7 +283,7 @@ func (s *Scraper) extractMaker(doc *goquery.Document, isNewSite bool) string {
 	return maker
 }
 
-func (s *Scraper) extractLabel(doc *goquery.Document) string {
+func (s *scraper) extractLabel(doc *goquery.Document) string {
 	var label string
 	doc.Find("a[href*='?label='], a[href*='/article=label/id=']").Each(func(i int, sel *goquery.Selection) {
 		if label == "" {
@@ -262,7 +293,7 @@ func (s *Scraper) extractLabel(doc *goquery.Document) string {
 	return label
 }
 
-func (s *Scraper) extractSeries(doc *goquery.Document, isNewSite bool) string {
+func (s *scraper) extractSeries(doc *goquery.Document, isNewSite bool) string {
 	if isNewSite {
 		return s.extractSeriesNewSite(doc)
 	}
@@ -276,7 +307,7 @@ func (s *Scraper) extractSeries(doc *goquery.Document, isNewSite bool) string {
 	return ""
 }
 
-func (s *Scraper) extractRating(doc *goquery.Document, isNewSite bool) *models.Rating {
+func (s *scraper) extractRating(doc *goquery.Document, isNewSite bool) *models.Rating {
 	if isNewSite {
 		rating, votes := s.extractRatingNewSite(doc)
 		if rating > 0 || votes > 0 {
@@ -327,7 +358,7 @@ func (s *Scraper) extractRating(doc *goquery.Document, isNewSite bool) *models.R
 	return nil
 }
 
-func (s *Scraper) extractGenres(doc *goquery.Document) []string {
+func (s *scraper) extractGenres(doc *goquery.Document) []string {
 	genres := make([]string, 0)
 	html, _ := doc.Html()
 

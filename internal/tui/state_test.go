@@ -6,291 +6,49 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewState(t *testing.T) {
-	state := NewState()
+func moveCursorUp(state state) state {
+	newState := state
+	newState.Cursor--
 
-	assert.Equal(t, ViewBrowser, state.CurrentView, "Should default to Browser view")
+	if newState.Cursor < 0 {
+		newState.Cursor = 0
+	}
+
+	return newState
+}
+
+func moveCursorDown(state state, maxItems int) state {
+	newState := state
+	newState.Cursor++
+
+	if maxItems > 0 && newState.Cursor >= maxItems {
+		newState.Cursor = maxItems - 1
+	}
+
+	return newState
+}
+
+func setFileCount(state state, count int) state {
+	newState := state
+	newState.FileCount = count
+
+	if newState.Cursor >= count {
+		newState.Cursor = 0
+	}
+
+	return newState
+}
+
+func TestNewState(t *testing.T) {
+	state := newState()
+
 	assert.Equal(t, 0, state.Cursor, "Should default cursor to 0")
 	assert.Equal(t, 0, state.FileCount, "Should default file count to 0")
 	assert.Equal(t, 0, state.SelectedIdx, "Should default selected index to 0")
-	assert.False(t, state.ShowingFolderPicker, "Should default folder picker to hidden")
-	assert.False(t, state.ShowingManualSearch, "Should default manual search to hidden")
 	assert.False(t, state.EditingPath, "Should default path editing to false")
 	assert.False(t, state.IsProcessing, "Should default processing to false")
 	assert.False(t, state.IsPaused, "Should default paused to false")
 	assert.False(t, state.ProcessingComplete, "Should default processing complete to false")
-}
-
-func TestSwitchToView(t *testing.T) {
-	tests := []struct {
-		name           string
-		initialView    ViewMode
-		targetView     ViewMode
-		expectedView   ViewMode
-		expectedCursor int
-		shouldChange   bool
-	}{
-		{
-			name:           "switch from Browser to Dashboard",
-			initialView:    ViewBrowser,
-			targetView:     ViewDashboard,
-			expectedView:   ViewDashboard,
-			expectedCursor: 0,
-			shouldChange:   true,
-		},
-		{
-			name:           "switch from Dashboard to Logs",
-			initialView:    ViewDashboard,
-			targetView:     ViewLogs,
-			expectedView:   ViewLogs,
-			expectedCursor: 0,
-			shouldChange:   true,
-		},
-		{
-			name:           "switch from Logs to Settings",
-			initialView:    ViewLogs,
-			targetView:     ViewSettings,
-			expectedView:   ViewSettings,
-			expectedCursor: 0,
-			shouldChange:   true,
-		},
-		{
-			name:           "switch from Settings to Help",
-			initialView:    ViewSettings,
-			targetView:     ViewHelp,
-			expectedView:   ViewHelp,
-			expectedCursor: 0,
-			shouldChange:   true,
-		},
-		{
-			name:           "switch from Help to Browser",
-			initialView:    ViewHelp,
-			targetView:     ViewBrowser,
-			expectedView:   ViewBrowser,
-			expectedCursor: 0,
-			shouldChange:   true,
-		},
-		{
-			name:           "stay on same view (Browser)",
-			initialView:    ViewBrowser,
-			targetView:     ViewBrowser,
-			expectedView:   ViewBrowser,
-			expectedCursor: 5, // Cursor should be preserved
-			shouldChange:   false,
-		},
-		{
-			name:           "stay on same view (Dashboard)",
-			initialView:    ViewDashboard,
-			targetView:     ViewDashboard,
-			expectedView:   ViewDashboard,
-			expectedCursor: 3,
-			shouldChange:   false,
-		},
-		{
-			name:           "invalid view (negative)",
-			initialView:    ViewBrowser,
-			targetView:     ViewMode(-1),
-			expectedView:   ViewBrowser, // No change
-			expectedCursor: 2,
-			shouldChange:   false,
-		},
-		{
-			name:           "invalid view (too large)",
-			initialView:    ViewDashboard,
-			targetView:     ViewMode(10),
-			expectedView:   ViewDashboard, // No change
-			expectedCursor: 4,
-			shouldChange:   false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create initial state
-			state := State{
-				CurrentView: tt.initialView,
-				Cursor:      tt.expectedCursor,
-			}
-
-			// Switch to target view
-			newState := SwitchToView(state, tt.targetView)
-
-			// Verify view changed correctly
-			assert.Equal(t, tt.expectedView, newState.CurrentView)
-
-			if tt.shouldChange {
-				// Cursor should reset to 0 when view changes
-				assert.Equal(t, 0, newState.Cursor, "Cursor should reset to 0 on view change")
-			} else {
-				// Cursor should be preserved when view doesn't change
-				assert.Equal(t, tt.expectedCursor, newState.Cursor, "Cursor should be preserved when view unchanged")
-			}
-		})
-	}
-}
-
-func TestCycleView(t *testing.T) {
-	tests := []struct {
-		name         string
-		initialView  ViewMode
-		expectedView ViewMode
-	}{
-		{
-			name:         "cycle from Browser to Dashboard",
-			initialView:  ViewBrowser,
-			expectedView: ViewDashboard,
-		},
-		{
-			name:         "cycle from Dashboard to Logs",
-			initialView:  ViewDashboard,
-			expectedView: ViewLogs,
-		},
-		{
-			name:         "cycle from Logs to Settings",
-			initialView:  ViewLogs,
-			expectedView: ViewSettings,
-		},
-		{
-			name:         "cycle from Settings back to Browser (skip Help)",
-			initialView:  ViewSettings,
-			expectedView: ViewBrowser,
-		},
-		{
-			name:         "cycle from Help to Browser (Help not in normal cycle)",
-			initialView:  ViewHelp,
-			expectedView: ViewBrowser,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			state := State{
-				CurrentView: tt.initialView,
-				Cursor:      5, // Set non-zero cursor
-			}
-
-			newState := CycleView(state)
-
-			assert.Equal(t, tt.expectedView, newState.CurrentView)
-			assert.Equal(t, 0, newState.Cursor, "Cursor should reset to 0 on cycle")
-		})
-	}
-}
-
-func TestIsValidView(t *testing.T) {
-	tests := []struct {
-		name     string
-		view     ViewMode
-		expected bool
-	}{
-		{
-			name:     "Browser view is valid",
-			view:     ViewBrowser,
-			expected: true,
-		},
-		{
-			name:     "Dashboard view is valid",
-			view:     ViewDashboard,
-			expected: true,
-		},
-		{
-			name:     "Logs view is valid",
-			view:     ViewLogs,
-			expected: true,
-		},
-		{
-			name:     "Settings view is valid",
-			view:     ViewSettings,
-			expected: true,
-		},
-		{
-			name:     "Help view is valid",
-			view:     ViewHelp,
-			expected: true,
-		},
-		{
-			name:     "negative view is invalid",
-			view:     ViewMode(-1),
-			expected: false,
-		},
-		{
-			name:     "view beyond Help is invalid",
-			view:     ViewMode(5),
-			expected: false,
-		},
-		{
-			name:     "large view number is invalid",
-			view:     ViewMode(100),
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsValidView(tt.view)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestToggleHelp(t *testing.T) {
-	tests := []struct {
-		name         string
-		initialView  ViewMode
-		previousView ViewMode
-		expectedView ViewMode
-	}{
-		{
-			name:         "toggle Help on from Browser",
-			initialView:  ViewBrowser,
-			previousView: ViewBrowser,
-			expectedView: ViewHelp,
-		},
-		{
-			name:         "toggle Help off to Browser",
-			initialView:  ViewHelp,
-			previousView: ViewBrowser,
-			expectedView: ViewBrowser,
-		},
-		{
-			name:         "toggle Help on from Dashboard",
-			initialView:  ViewDashboard,
-			previousView: ViewDashboard,
-			expectedView: ViewHelp,
-		},
-		{
-			name:         "toggle Help off to Dashboard",
-			initialView:  ViewHelp,
-			previousView: ViewDashboard,
-			expectedView: ViewDashboard,
-		},
-		{
-			name:         "toggle Help on from Logs",
-			initialView:  ViewLogs,
-			previousView: ViewLogs,
-			expectedView: ViewHelp,
-		},
-		{
-			name:         "toggle Help off to Logs",
-			initialView:  ViewHelp,
-			previousView: ViewLogs,
-			expectedView: ViewLogs,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			state := State{
-				CurrentView: tt.initialView,
-				Cursor:      3, // Non-zero cursor
-			}
-
-			newState := ToggleHelp(state, tt.previousView)
-
-			assert.Equal(t, tt.expectedView, newState.CurrentView)
-			assert.Equal(t, 0, newState.Cursor, "Cursor should reset to 0 on toggle")
-		})
-	}
 }
 
 func TestMoveCursorUp(t *testing.T) {
@@ -323,11 +81,11 @@ func TestMoveCursorUp(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state := State{
+			state := state{
 				Cursor: tt.initialCursor,
 			}
 
-			newState := MoveCursorUp(state)
+			newState := moveCursorUp(state)
 
 			assert.Equal(t, tt.expectedCursor, newState.Cursor)
 		})
@@ -381,11 +139,11 @@ func TestMoveCursorDown(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state := State{
+			state := state{
 				Cursor: tt.initialCursor,
 			}
 
-			newState := MoveCursorDown(state, tt.maxItems)
+			newState := moveCursorDown(state, tt.maxItems)
 
 			assert.Equal(t, tt.expectedCursor, newState.Cursor)
 		})
@@ -445,12 +203,12 @@ func TestSetFileCount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state := State{
+			state := state{
 				Cursor:    tt.initialCursor,
 				FileCount: tt.initialCount,
 			}
 
-			newState := SetFileCount(state, tt.newCount)
+			newState := setFileCount(state, tt.newCount)
 
 			assert.Equal(t, tt.expectedCount, newState.FileCount)
 			assert.Equal(t, tt.expectedCursor, newState.Cursor)
@@ -458,41 +216,398 @@ func TestSetFileCount(t *testing.T) {
 	}
 }
 
-// Test that all state functions are pure (no side effects)
+// Test that state helper functions are pure (no side effects)
 func TestStateFunctionsPurity(t *testing.T) {
-	t.Run("SwitchToView does not modify original state", func(t *testing.T) {
-		original := State{CurrentView: ViewBrowser, Cursor: 5}
+	t.Run("moveCursorUp does not modify original state", func(t *testing.T) {
+		original := state{Cursor: 5}
 		originalCopy := original
 
-		_ = SwitchToView(original, ViewDashboard)
+		_ = moveCursorUp(original)
 
 		assert.Equal(t, originalCopy, original, "Original state should be unchanged")
 	})
 
-	t.Run("CycleView does not modify original state", func(t *testing.T) {
-		original := State{CurrentView: ViewBrowser, Cursor: 3}
+	t.Run("moveCursorDown does not modify original state", func(t *testing.T) {
+		original := state{Cursor: 5}
 		originalCopy := original
 
-		_ = CycleView(original)
+		_ = moveCursorDown(original, 10)
 
 		assert.Equal(t, originalCopy, original, "Original state should be unchanged")
 	})
+}
 
-	t.Run("MoveCursorUp does not modify original state", func(t *testing.T) {
-		original := State{Cursor: 5}
-		originalCopy := original
+// --- viewManager tests (migrated from state_test.go) ---
 
-		_ = MoveCursorUp(original)
+func TestNewViewManager(t *testing.T) {
+	vm := newViewManager()
+	assert.Equal(t, viewBrowser, vm.currentView(), "Should default to browser view")
+}
 
-		assert.Equal(t, originalCopy, original, "Original state should be unchanged")
+func TestViewManager_SwitchTo(t *testing.T) {
+	tests := []struct {
+		name         string
+		initialView  viewMode
+		targetView   viewMode
+		expectedView viewMode
+	}{
+		{
+			name:         "switch from browser to dashboard",
+			initialView:  viewBrowser,
+			targetView:   viewDashboard,
+			expectedView: viewDashboard,
+		},
+		{
+			name:         "switch from dashboard to Logs",
+			initialView:  viewDashboard,
+			targetView:   viewLogs,
+			expectedView: viewLogs,
+		},
+		{
+			name:         "switch from Logs to Settings",
+			initialView:  viewLogs,
+			targetView:   viewSettings,
+			expectedView: viewSettings,
+		},
+		{
+			name:         "switch from Settings to Help",
+			initialView:  viewSettings,
+			targetView:   viewHelp,
+			expectedView: viewHelp,
+		},
+		{
+			name:         "switch from Help to browser",
+			initialView:  viewHelp,
+			targetView:   viewBrowser,
+			expectedView: viewBrowser,
+		},
+		{
+			name:         "stay on same view (browser)",
+			initialView:  viewBrowser,
+			targetView:   viewBrowser,
+			expectedView: viewBrowser,
+		},
+		{
+			name:         "stay on same view (dashboard)",
+			initialView:  viewDashboard,
+			targetView:   viewDashboard,
+			expectedView: viewDashboard,
+		},
+		{
+			name:         "invalid view (negative)",
+			initialView:  viewBrowser,
+			targetView:   viewMode(-1),
+			expectedView: viewBrowser, // No change
+		},
+		{
+			name:         "invalid view (too large)",
+			initialView:  viewDashboard,
+			targetView:   viewMode(10),
+			expectedView: viewDashboard, // No change
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vm := newViewManager()
+			// Set initial view by switching from default browser
+			if tt.initialView != viewBrowser {
+				vm.switchTo(tt.initialView)
+			}
+
+			vm.switchTo(tt.targetView)
+			assert.Equal(t, tt.expectedView, vm.currentView())
+		})
+	}
+}
+
+func TestViewManager_Cycle(t *testing.T) {
+	tests := []struct {
+		name         string
+		initialView  viewMode
+		expectedView viewMode
+	}{
+		{
+			name:         "cycle from browser to dashboard",
+			initialView:  viewBrowser,
+			expectedView: viewDashboard,
+		},
+		{
+			name:         "cycle from dashboard to Logs",
+			initialView:  viewDashboard,
+			expectedView: viewLogs,
+		},
+		{
+			name:         "cycle from Logs to Settings",
+			initialView:  viewLogs,
+			expectedView: viewSettings,
+		},
+		{
+			name:         "cycle from Settings back to browser (skip Help)",
+			initialView:  viewSettings,
+			expectedView: viewBrowser,
+		},
+		{
+			name:         "cycle from Help to browser (Help not in normal cycle)",
+			initialView:  viewHelp,
+			expectedView: viewBrowser,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vm := newViewManager()
+			if tt.initialView != viewBrowser {
+				vm.switchTo(tt.initialView)
+			}
+			vm.cycle()
+			assert.Equal(t, tt.expectedView, vm.currentView())
+		})
+	}
+}
+
+func TestViewManager_ToggleHelp(t *testing.T) {
+	tests := []struct {
+		name         string
+		initialView  viewMode
+		expectedView viewMode
+	}{
+		{
+			name:         "toggle Help on from browser",
+			initialView:  viewBrowser,
+			expectedView: viewHelp,
+		},
+		{
+			name:         "toggle Help on from dashboard",
+			initialView:  viewDashboard,
+			expectedView: viewHelp,
+		},
+		{
+			name:         "toggle Help on from Logs",
+			initialView:  viewLogs,
+			expectedView: viewHelp,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vm := newViewManager()
+			if tt.initialView != viewBrowser {
+				vm.switchTo(tt.initialView)
+			}
+			vm.toggleHelp()
+			assert.Equal(t, tt.expectedView, vm.currentView())
+		})
+	}
+
+	// Test toggle off: browser → Help → browser
+	t.Run("toggle Help off to browser", func(t *testing.T) {
+		vm := newViewManager()
+		vm.toggleHelp() // browser → Help
+		assert.Equal(t, viewHelp, vm.currentView())
+		vm.toggleHelp() // Help → browser
+		assert.Equal(t, viewBrowser, vm.currentView())
 	})
 
-	t.Run("MoveCursorDown does not modify original state", func(t *testing.T) {
-		original := State{Cursor: 5}
-		originalCopy := original
-
-		_ = MoveCursorDown(original, 10)
-
-		assert.Equal(t, originalCopy, original, "Original state should be unchanged")
+	// Test toggle off: dashboard → Help → dashboard
+	t.Run("toggle Help off to dashboard", func(t *testing.T) {
+		vm := newViewManager()
+		vm.switchTo(viewDashboard)
+		vm.toggleHelp() // dashboard → Help
+		assert.Equal(t, viewHelp, vm.currentView())
+		vm.toggleHelp() // Help → dashboard
+		assert.Equal(t, viewDashboard, vm.currentView())
 	})
+
+	// Test toggle off: logs → Help → logs
+	t.Run("toggle Help off to logs", func(t *testing.T) {
+		vm := newViewManager()
+		vm.switchTo(viewLogs)
+		vm.toggleHelp() // logs → Help
+		assert.Equal(t, viewHelp, vm.currentView())
+		vm.toggleHelp() // Help → logs
+		assert.Equal(t, viewLogs, vm.currentView())
+	})
+}
+
+func TestIsValidView(t *testing.T) {
+	tests := []struct {
+		name     string
+		view     viewMode
+		expected bool
+	}{
+		{
+			name:     "browser view is valid",
+			view:     viewBrowser,
+			expected: true,
+		},
+		{
+			name:     "dashboard view is valid",
+			view:     viewDashboard,
+			expected: true,
+		},
+		{
+			name:     "Logs view is valid",
+			view:     viewLogs,
+			expected: true,
+		},
+		{
+			name:     "Settings view is valid",
+			view:     viewSettings,
+			expected: true,
+		},
+		{
+			name:     "Help view is valid",
+			view:     viewHelp,
+			expected: true,
+		},
+		{
+			name:     "negative view is invalid",
+			view:     viewMode(-1),
+			expected: false,
+		},
+		{
+			name:     "view beyond Help is invalid",
+			view:     viewMode(5),
+			expected: false,
+		},
+		{
+			name:     "large view number is invalid",
+			view:     viewMode(100),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isValidView(tt.view)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// --- settingsManager tests ---
+
+func TestNewSettingsManager(t *testing.T) {
+	sm := newSettingsManager(settingsManagerDeps{}, false, false)
+	s := sm.get()
+
+	assert.True(t, s.ScrapeEnabled, "Scrape should default to true")
+	assert.True(t, s.DownloadEnabled, "Download should default to true")
+	assert.True(t, s.OrganizeEnabled, "Organize should default to true")
+	assert.True(t, s.NFOEnabled, "NFO should default to true")
+	assert.False(t, s.DryRun, "DryRun should default to false")
+	assert.False(t, s.ForceUpdate, "ForceUpdate should default to false")
+	assert.False(t, s.ForceRefresh, "ForceRefresh should default to false")
+	assert.False(t, s.MoveFiles, "MoveFiles should default to false")
+	assert.False(t, s.UpdateMode, "UpdateMode should default to false")
+	assert.Equal(t, 0, sm.cursorPos(), "Cursor should default to 0")
+}
+
+func TestSettingsManager_MoveCursor(t *testing.T) {
+	sm := newSettingsManager(settingsManagerDeps{}, false, false)
+
+	// Move down
+	sm.moveCursor(1)
+	assert.Equal(t, 1, sm.cursorPos())
+
+	sm.moveCursor(1)
+	assert.Equal(t, 2, sm.cursorPos())
+
+	// Move up
+	sm.moveCursor(-1)
+	assert.Equal(t, 1, sm.cursorPos())
+
+	// Can't go below 0
+	sm.moveCursor(-1)
+	sm.moveCursor(-1)
+	assert.Equal(t, 0, sm.cursorPos())
+
+	// Can't go above maxSettings (9)
+	for i := 0; i < 20; i++ {
+		sm.moveCursor(1)
+	}
+	assert.Equal(t, 9, sm.cursorPos())
+}
+
+func TestSettingsManager_Toggle(t *testing.T) {
+	// Track apply calls
+	var applyCount int
+	sm := newSettingsManager(settingsManagerDeps{
+		apply: func(s settingsSnapshot) { applyCount++ },
+		log:   func(level, message string) {},
+	}, false, false)
+
+	// Toggle DryRun (cursor 0)
+	sm.moveCursor(0)
+	desc := sm.toggle()
+	assert.Contains(t, desc, "Dry run mode enabled")
+	assert.True(t, sm.get().DryRun)
+	assert.Equal(t, 1, applyCount)
+
+	// Toggle again to disable
+	desc = sm.toggle()
+	assert.Contains(t, desc, "Dry run mode disabled")
+	assert.False(t, sm.get().DryRun)
+	assert.Equal(t, 2, applyCount)
+}
+
+func TestSettingsManager_ToggleUpdateMode(t *testing.T) {
+	_ = settingsSnapshot{} // verify type is usable
+	sm := newSettingsManager(settingsManagerDeps{
+		apply: func(s settingsSnapshot) {},
+		log:   func(level, message string) {},
+	}, false, false)
+
+	// Toggle UpdateMode (cursor 9)
+	sm.moveCursor(9)
+	desc := sm.toggle()
+	assert.Contains(t, desc, "Update mode enabled")
+	assert.True(t, sm.get().UpdateMode)
+	assert.False(t, sm.get().OrganizeEnabled, "Organize should be disabled when update mode is on")
+
+	// Toggle again to disable
+	desc = sm.toggle()
+	assert.Contains(t, desc, "Update mode disabled")
+	assert.False(t, sm.get().UpdateMode)
+	assert.True(t, sm.get().OrganizeEnabled, "Organize should be re-enabled when update mode is off")
+}
+
+func TestSettingsManager_SetDryRun(t *testing.T) {
+	var applyCount int
+	sm := newSettingsManager(settingsManagerDeps{
+		apply: func(s settingsSnapshot) { applyCount++ },
+		log:   func(level, message string) {},
+	}, false, false)
+
+	sm.setDryRun(true)
+	assert.True(t, sm.get().DryRun)
+	assert.Equal(t, 1, applyCount)
+
+	sm.setDryRun(false)
+	assert.False(t, sm.get().DryRun)
+	assert.Equal(t, 2, applyCount)
+}
+
+func TestSettingsManager_SetUpdateMode(t *testing.T) {
+	sm := newSettingsManager(settingsManagerDeps{
+		apply: func(s settingsSnapshot) {},
+		log:   func(level, message string) {},
+	}, false, false)
+
+	sm.setUpdateMode(true)
+	assert.True(t, sm.get().UpdateMode)
+	assert.False(t, sm.get().OrganizeEnabled, "Organize should be disabled when update mode is on")
+
+	sm.setUpdateMode(false)
+	assert.False(t, sm.get().UpdateMode)
+	assert.True(t, sm.get().OrganizeEnabled, "Organize should be re-enabled when update mode is off")
+}
+
+func TestSettingsManager_ExtrafanartConfig(t *testing.T) {
+	sm := newSettingsManager(settingsManagerDeps{}, true, false)
+	assert.True(t, sm.get().DownloadExtrafanart, "Extrafanart should match config")
+
+	sm2 := newSettingsManager(settingsManagerDeps{}, false, false)
+	assert.False(t, sm2.get().DownloadExtrafanart, "Extrafanart should match config")
 }

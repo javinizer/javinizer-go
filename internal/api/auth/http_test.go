@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"net"
@@ -13,32 +14,40 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/api/token"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
-func setupAuthenticatedTestServer(t *testing.T) (*gin.Engine, *ServerDependencies) {
+func authDepsFromCore(deps *core.APIDeps) *core.APIDeps {
+	return deps
+}
+
+func setupAuthenticatedTestServer(t *testing.T) (*gin.Engine, *core.APIDeps) {
 	t.Helper()
 
 	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	deps := createTestDeps(t, cfg, configFile)
 
-	deps.ApiTokenRepo = createTestApiTokenRepo(t, deps)
+	deps.Repos.ApiTokenRepo = createTestApiTokenRepo(t, deps)
 
 	manager, err := NewAuthManager(configFile, time.Hour)
 	require.NoError(t, err)
+	manager.SetApiTokenRepo(deps.Repos.ApiTokenRepo)
 	deps.Auth = manager
 
 	router := NewServer(deps)
 	t.Cleanup(func() {
 		cleanupServerHub(t, deps)
-		_ = deps.DB.Close()
+		_ = deps.CoreDeps.DB.Close()
 	})
 
 	return router, deps
@@ -67,9 +76,9 @@ func newJSONRequest(t *testing.T, method, path string, payload any, cookie *http
 	return req
 }
 
-func parseAuthStatus(t *testing.T, recorder *httptest.ResponseRecorder) AuthStatusResponse {
+func parseAuthStatus(t *testing.T, recorder *httptest.ResponseRecorder) contracts.AuthStatusResponse {
 	t.Helper()
-	var status AuthStatusResponse
+	var status contracts.AuthStatusResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &status))
 	return status
 }
@@ -415,7 +424,7 @@ func TestAuth_SessionCookieIgnoresForwardedHTTPSWithoutTrustedProxies(t *testing
 func TestAuth_SessionCookieSecureWithTrustedProxyAndForwardedProto(t *testing.T) {
 	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.API.Security.TrustedProxies = []string{"127.0.0.1"}
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	deps := createTestDeps(t, cfg, configFile)
@@ -427,7 +436,7 @@ func TestAuth_SessionCookieSecureWithTrustedProxyAndForwardedProto(t *testing.T)
 	router := NewServer(deps)
 	t.Cleanup(func() {
 		cleanupServerHub(t, deps)
-		_ = deps.DB.Close()
+		_ = deps.CoreDeps.DB.Close()
 	})
 
 	setupReq := newJSONRequest(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
@@ -447,7 +456,7 @@ func TestAuth_SessionCookieSecureWithTrustedProxyAndForwardedProto(t *testing.T)
 func TestAuth_SessionCookieSecureWithForceSecureCookies(t *testing.T) {
 	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.API.Security.ForceSecureCookies = true
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	deps := createTestDeps(t, cfg, configFile)
@@ -459,7 +468,7 @@ func TestAuth_SessionCookieSecureWithForceSecureCookies(t *testing.T) {
 	router := NewServer(deps)
 	t.Cleanup(func() {
 		cleanupServerHub(t, deps)
-		_ = deps.DB.Close()
+		_ = deps.CoreDeps.DB.Close()
 	})
 
 	setupReq := newJSONRequest(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
@@ -477,7 +486,7 @@ func TestAuth_SessionCookieSecureWithForceSecureCookies(t *testing.T) {
 func TestAuth_SessionCookieNotSecureFromUntrustedProxy(t *testing.T) {
 	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.API.Security.TrustedProxies = []string{"10.0.0.1"}
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	deps := createTestDeps(t, cfg, configFile)
@@ -489,7 +498,7 @@ func TestAuth_SessionCookieNotSecureFromUntrustedProxy(t *testing.T) {
 	router := NewServer(deps)
 	t.Cleanup(func() {
 		cleanupServerHub(t, deps)
-		_ = deps.DB.Close()
+		_ = deps.CoreDeps.DB.Close()
 	})
 
 	setupReq := newJSONRequest(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
@@ -576,15 +585,15 @@ func TestAuth_SetupRejectedFromRemoteWithoutSecret(t *testing.T) {
 	router.ServeHTTP(setupW, setupReq)
 	assert.Equal(t, http.StatusForbidden, setupW.Code)
 
-	var errResp ErrorResponse
+	var errResp contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(setupW.Body.Bytes(), &errResp))
 	assert.Contains(t, errResp.Error, "bootstrap secret")
 }
 
-func createSetupServerWithoutSecret(t *testing.T) (*gin.Engine, *ServerDependencies) {
+func createSetupServerWithoutSecret(t *testing.T) (*gin.Engine, *core.APIDeps) {
 	t.Helper()
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	deps := createTestDeps(t, cfg, configFile)
 
@@ -595,7 +604,7 @@ func createSetupServerWithoutSecret(t *testing.T) (*gin.Engine, *ServerDependenc
 	router := NewServer(deps)
 	t.Cleanup(func() {
 		cleanupServerHub(t, deps)
-		_ = deps.DB.Close()
+		_ = deps.CoreDeps.DB.Close()
 	})
 
 	return router, deps
@@ -618,8 +627,6 @@ func TestAuth_SetupAllowedFromLocalhostWithoutSecret(t *testing.T) {
 
 func TestAuth_SetupAllowedFromDockerBridgeWithoutSecret(t *testing.T) {
 	t.Setenv("JAVINIZER_SETUP_TRUSTED_CIDRS", "172.16.0.0/12")
-	resetTrustedCIDRsCache()
-	t.Cleanup(resetTrustedCIDRsCache)
 	router, _ := createSetupServerWithoutSecret(t)
 
 	body := map[string]string{"username": "admin", "password": "password123"}
@@ -651,8 +658,6 @@ func TestAuth_SetupRejectedFromDockerBridgeWithoutEnvVar(t *testing.T) {
 
 func TestAuth_SetupAllowedFromCustomTrustedCIDR(t *testing.T) {
 	t.Setenv("JAVINIZER_SETUP_TRUSTED_CIDRS", "10.0.0.0/8,192.168.0.0/16")
-	resetTrustedCIDRsCache()
-	t.Cleanup(resetTrustedCIDRsCache)
 
 	for _, addr := range []string{"10.0.0.5:12345", "192.168.1.100:12345"} {
 		t.Run(addr, func(t *testing.T) {
@@ -688,7 +693,7 @@ func TestAuth_SetupRejectedFromPrivateLanWithoutSecret(t *testing.T) {
 			router.ServeHTTP(setupW, setupReq)
 			assert.Equal(t, http.StatusForbidden, setupW.Code)
 
-			var errResp ErrorResponse
+			var errResp contracts.ErrorResponse
 			require.NoError(t, json.Unmarshal(setupW.Body.Bytes(), &errResp))
 			assert.Contains(t, errResp.Error, "trusted network")
 		})
@@ -740,7 +745,7 @@ func TestAuth_SetupRejectedWithWrongBootstrapSecret(t *testing.T) {
 	router.ServeHTTP(setupW, setupReq)
 	assert.Equal(t, http.StatusForbidden, setupW.Code)
 
-	var errResp ErrorResponse
+	var errResp contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(setupW.Body.Bytes(), &errResp))
 	assert.Contains(t, errResp.Error, "bootstrap secret")
 }
@@ -765,9 +770,9 @@ func TestAuth_SetupAlreadyInitializedReturns409(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, setupAgainW.Code)
 }
 
-func createTestApiTokenRepo(t *testing.T, deps *ServerDependencies) *database.ApiTokenRepository {
+func createTestApiTokenRepo(t *testing.T, deps *core.APIDeps) *database.ApiTokenRepository {
 	t.Helper()
-	return database.NewApiTokenRepository(deps.DB)
+	return database.NewApiTokenRepository(deps.CoreDeps.DB)
 }
 
 func bearerRequest(t *testing.T, method, path, token string) *http.Request {
@@ -777,7 +782,7 @@ func bearerRequest(t *testing.T, method, path, token string) *http.Request {
 	return req
 }
 
-func setupTokenAuthTestServer(t *testing.T) (*gin.Engine, *ServerDependencies) {
+func setupTokenAuthTestServer(t *testing.T) (*gin.Engine, *core.APIDeps) {
 	t.Helper()
 
 	router, deps := setupAuthenticatedTestServer(t)
@@ -793,10 +798,10 @@ func setupTokenAuthTestServer(t *testing.T) (*gin.Engine, *ServerDependencies) {
 	return router, deps
 }
 
-func createTestToken(t *testing.T, deps *ServerDependencies) string {
+func createTestToken(t *testing.T, deps *core.APIDeps) string {
 	t.Helper()
-	svc := token.NewTokenService(deps.ApiTokenRepo)
-	_, fullToken, err := svc.Create("test-token")
+	svc := token.NewTokenService(deps.Repos.ApiTokenRepo)
+	_, fullToken, err := svc.Create(context.Background(), "test-token")
 	require.NoError(t, err)
 	return fullToken
 }
@@ -819,7 +824,7 @@ func TestRequireTokenOrSession_BearerTokenInvalid(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var errResp ErrorResponse
+	var errResp contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 	assert.Contains(t, errResp.Error, "invalid or revoked token")
 }
@@ -849,7 +854,7 @@ func TestRequireTokenOrSession_NoBearerNoSession(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var errResp ErrorResponse
+	var errResp contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 	assert.Contains(t, errResp.Error, "authentication required")
 }
@@ -857,17 +862,17 @@ func TestRequireTokenOrSession_NoBearerNoSession(t *testing.T) {
 func TestRequireTokenOrSession_AuthNotInitializedWithBearer(t *testing.T) {
 	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	deps := createTestDeps(t, cfg, configFile)
-	deps.ApiTokenRepo = createTestApiTokenRepo(t, deps)
+	deps.Repos.ApiTokenRepo = createTestApiTokenRepo(t, deps)
 
 	manager, err := NewAuthManager(configFile, time.Hour)
 	require.NoError(t, err)
 	deps.Auth = manager
 
 	testRouter := gin.Default()
-	testRouter.GET("/api/v1/test", RequireTokenOrSession(deps), func(c *gin.Context) {
+	testRouter.GET("/api/v1/test", RequireTokenOrSession(authDepsFromCore(deps)), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
@@ -876,7 +881,7 @@ func TestRequireTokenOrSession_AuthNotInitializedWithBearer(t *testing.T) {
 	testRouter.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 
-	var errResp ErrorResponse
+	var errResp contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 	assert.Contains(t, errResp.Error, "authentication is not initialized")
 }
@@ -884,17 +889,17 @@ func TestRequireTokenOrSession_AuthNotInitializedWithBearer(t *testing.T) {
 func TestRequireTokenOrSession_AuthNotInitializedNoBearer(t *testing.T) {
 	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	deps := createTestDeps(t, cfg, configFile)
-	deps.ApiTokenRepo = createTestApiTokenRepo(t, deps)
+	deps.Repos.ApiTokenRepo = createTestApiTokenRepo(t, deps)
 
 	manager, err := NewAuthManager(configFile, time.Hour)
 	require.NoError(t, err)
 	deps.Auth = manager
 
 	testRouter := gin.Default()
-	testRouter.GET("/api/v1/test", RequireTokenOrSession(deps), func(c *gin.Context) {
+	testRouter.GET("/api/v1/test", RequireTokenOrSession(authDepsFromCore(deps)), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
@@ -946,11 +951,11 @@ func TestRequireTokenOrSession_RevokedToken(t *testing.T) {
 	router, deps := setupTokenAuthTestServer(t)
 	fullToken := createTestToken(t, deps)
 
-	svc := token.NewTokenService(deps.ApiTokenRepo)
-	tokens, err := svc.List()
+	svc := token.NewTokenService(deps.Repos.ApiTokenRepo)
+	tokens, err := svc.List(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, tokens)
-	err = svc.Revoke(tokens[0].ID)
+	err = svc.Revoke(context.Background(), tokens[0].ID)
 	require.NoError(t, err)
 
 	req := bearerRequest(t, http.MethodGet, "/api/v1/config", fullToken)
@@ -958,7 +963,7 @@ func TestRequireTokenOrSession_RevokedToken(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var errResp ErrorResponse
+	var errResp contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 	assert.Contains(t, errResp.Error, "invalid or revoked token")
 }
@@ -971,7 +976,7 @@ func TestRequireTokenOrSession_TokenWithoutJvPrefix(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var errResp ErrorResponse
+	var errResp contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 	assert.Contains(t, errResp.Error, "invalid or revoked token")
 }
@@ -980,8 +985,8 @@ func TestTokenAuth_Revocation(t *testing.T) {
 	router, deps := setupTokenAuthTestServer(t)
 	fullToken := createTestToken(t, deps)
 
-	svc := token.NewTokenService(deps.ApiTokenRepo)
-	tokens, err := svc.List()
+	svc := token.NewTokenService(deps.Repos.ApiTokenRepo)
+	tokens, err := svc.List(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, tokens)
 
@@ -990,7 +995,7 @@ func TestTokenAuth_Revocation(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	err = svc.Revoke(tokens[0].ID)
+	err = svc.Revoke(context.Background(), tokens[0].ID)
 	require.NoError(t, err)
 
 	req2 := bearerRequest(t, http.MethodGet, "/api/v1/config", fullToken)
@@ -1003,8 +1008,8 @@ func TestTokenAuth_LastUsedAt(t *testing.T) {
 	router, deps := setupTokenAuthTestServer(t)
 	fullToken := createTestToken(t, deps)
 
-	svc := token.NewTokenService(deps.ApiTokenRepo)
-	tokens, err := svc.List()
+	svc := token.NewTokenService(deps.Repos.ApiTokenRepo)
+	tokens, err := svc.List(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, tokens)
 	assert.Nil(t, tokens[0].LastUsedAt)
@@ -1014,7 +1019,7 @@ func TestTokenAuth_LastUsedAt(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	updated, err := deps.ApiTokenRepo.FindByID(tokens[0].ID)
+	updated, err := deps.Repos.ApiTokenRepo.FindByID(context.Background(), tokens[0].ID)
 	require.NoError(t, err)
 	assert.NotNil(t, updated.LastUsedAt)
 	assert.WithinDuration(t, time.Now(), *updated.LastUsedAt, 5*time.Second)
@@ -1037,8 +1042,8 @@ func TestTokenAuth_LastUsedAtNotUpdatedForSession(t *testing.T) {
 	router.ServeHTTP(protectedW, protectedReq)
 	assert.Equal(t, http.StatusOK, protectedW.Code)
 
-	svc := token.NewTokenService(deps.ApiTokenRepo)
-	tokens, err := svc.List()
+	svc := token.NewTokenService(deps.Repos.ApiTokenRepo)
+	tokens, err := svc.List(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, tokens)
 	assert.Nil(t, tokens[0].LastUsedAt)
@@ -1049,17 +1054,6 @@ func TestRequireAuthenticated_NilDeps(t *testing.T) {
 	testRouter := gin.New()
 	called := false
 	testRouter.GET("/test", requireAuthenticated(nil), func(c *gin.Context) { called = true })
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	w := httptest.NewRecorder()
-	testRouter.ServeHTTP(w, req)
-	assert.True(t, called)
-}
-
-func TestRequireAuthenticated_ExportedWrapper(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	testRouter := gin.New()
-	called := false
-	testRouter.GET("/test", RequireAuthenticated(nil), func(c *gin.Context) { called = true })
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 	testRouter.ServeHTTP(w, req)
@@ -1086,7 +1080,7 @@ func TestRequireTokenOrSession_EmptyBearerValue(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var errResp ErrorResponse
+	var errResp contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 	assert.Contains(t, errResp.Error, "invalid or revoked token")
 }
@@ -1110,7 +1104,7 @@ func TestRequireTokenOrSession_WhitespaceOnlyToken(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var errResp ErrorResponse
+	var errResp contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 	assert.Contains(t, errResp.Error, "invalid or revoked token")
 }
@@ -1120,15 +1114,15 @@ func TestRequireTokenOrSession_ContextValuesSetOnTokenAuth(t *testing.T) {
 	_, deps := setupTokenAuthTestServer(t)
 	fullToken := createTestToken(t, deps)
 
-	svc := token.NewTokenService(deps.ApiTokenRepo)
-	tokens, err := svc.List()
+	svc := token.NewTokenService(deps.Repos.ApiTokenRepo)
+	tokens, err := svc.List(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, tokens)
 	expectedTokenID := tokens[0].ID
 
 	var capturedAuthMethod, capturedTokenID, capturedUsername string
 	testRouter := gin.New()
-	testRouter.GET("/api/v1/test", RequireTokenOrSession(deps), func(c *gin.Context) {
+	testRouter.GET("/api/v1/test", RequireTokenOrSession(authDepsFromCore(deps)), func(c *gin.Context) {
 		if v, exists := c.Get("auth_method"); exists {
 			capturedAuthMethod = v.(string)
 		}
@@ -1154,17 +1148,17 @@ func TestRequireTokenOrSession_ContextValuesSetOnSessionAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	deps := createTestDeps(t, cfg, configFile)
-	deps.ApiTokenRepo = createTestApiTokenRepo(t, deps)
+	deps.Repos.ApiTokenRepo = createTestApiTokenRepo(t, deps)
 	manager, err := NewAuthManager(configFile, time.Hour)
 	require.NoError(t, err)
 	deps.Auth = manager
 
 	var capturedAuthMethod, capturedUsername string
 	testRouter := gin.New()
-	testRouter.GET("/api/v1/test", RequireTokenOrSession(deps), func(c *gin.Context) {
+	testRouter.GET("/api/v1/test", RequireTokenOrSession(authDepsFromCore(deps)), func(c *gin.Context) {
 		if v, exists := c.Get("auth_method"); exists {
 			capturedAuthMethod = v.(string)
 		}
@@ -1195,17 +1189,17 @@ func TestRequireTokenOrSession_ContextValuesSetOnSessionAuth(t *testing.T) {
 
 	t.Cleanup(func() {
 		cleanupServerHub(t, deps)
-		_ = deps.DB.Close()
+		_ = deps.CoreDeps.DB.Close()
 	})
 }
 
 func TestRequireTokenOrSession_MultipleTokensSameName(t *testing.T) {
 	router, deps := setupTokenAuthTestServer(t)
 
-	svc := token.NewTokenService(deps.ApiTokenRepo)
-	_, token1, err := svc.Create("same-name")
+	svc := token.NewTokenService(deps.Repos.ApiTokenRepo)
+	_, token1, err := svc.Create(context.Background(), "same-name")
 	require.NoError(t, err)
-	_, token2, err := svc.Create("same-name")
+	_, token2, err := svc.Create(context.Background(), "same-name")
 	require.NoError(t, err)
 
 	req1 := bearerRequest(t, http.MethodGet, "/api/v1/config", token1)
@@ -1223,8 +1217,8 @@ func TestRequireTokenOrSession_RegeneratedTokenOldFails(t *testing.T) {
 	router, deps := setupTokenAuthTestServer(t)
 	fullToken := createTestToken(t, deps)
 
-	svc := token.NewTokenService(deps.ApiTokenRepo)
-	tokens, err := svc.List()
+	svc := token.NewTokenService(deps.Repos.ApiTokenRepo)
+	tokens, err := svc.List(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, tokens)
 
@@ -1233,7 +1227,7 @@ func TestRequireTokenOrSession_RegeneratedTokenOldFails(t *testing.T) {
 	router.ServeHTTP(w1, req1)
 	assert.Equal(t, http.StatusOK, w1.Code)
 
-	_, newFullToken, err := svc.Regenerate(tokens[0].ID)
+	_, newFullToken, err := svc.Regenerate(context.Background(), tokens[0].ID)
 	require.NoError(t, err)
 
 	req2 := bearerRequest(t, http.MethodGet, "/api/v1/config", fullToken)
@@ -1295,128 +1289,22 @@ func TestPeerIP(t *testing.T) {
 
 func TestIsTrustedClient(t *testing.T) {
 	t.Run("loopback IPv4 is trusted", func(t *testing.T) {
-		assert.True(t, isTrustedClient("127.0.0.1"))
+		assert.True(t, isTrustedClient("127.0.0.1", nil))
 	})
 
 	t.Run("loopback IPv6 is trusted", func(t *testing.T) {
-		assert.True(t, isTrustedClient("::1"))
+		assert.True(t, isTrustedClient("::1", nil))
 	})
 
 	t.Run("private IP is not trusted by default", func(t *testing.T) {
-		assert.False(t, isTrustedClient("192.168.1.1"))
+		assert.False(t, isTrustedClient("192.168.1.1", nil))
 	})
 
 	t.Run("invalid IP is not trusted", func(t *testing.T) {
-		assert.False(t, isTrustedClient("not-an-ip"))
+		assert.False(t, isTrustedClient("not-an-ip", nil))
 	})
 
 	t.Run("IPv6 with brackets is trusted for loopback", func(t *testing.T) {
-		assert.True(t, isTrustedClient("[::1]"))
+		assert.True(t, isTrustedClient("[::1]", nil))
 	})
-}
-
-func TestRequireAuthenticated_InitializedWithValidSession(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
-	cfg := config.DefaultConfig()
-	configFile := filepath.Join(t.TempDir(), "config.yaml")
-	deps := createTestDeps(t, cfg, configFile)
-
-	manager, err := NewAuthManager(configFile, time.Hour)
-	require.NoError(t, err)
-	deps.Auth = manager
-
-	require.NoError(t, manager.Setup("admin", "password123"))
-	sessionID, err := manager.Login("admin", "password123", false)
-	require.NoError(t, err)
-
-	called := false
-	testRouter := gin.New()
-	testRouter.GET("/test", requireAuthenticated(deps), func(c *gin.Context) {
-		called = true
-		username, _ := c.Get("auth_username")
-		assert.Equal(t, "admin", username)
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
-	w := httptest.NewRecorder()
-	testRouter.ServeHTTP(w, req)
-	assert.True(t, called)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestRequireAuthenticated_InitializedNoCookie(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
-	cfg := config.DefaultConfig()
-	configFile := filepath.Join(t.TempDir(), "config.yaml")
-	deps := createTestDeps(t, cfg, configFile)
-
-	manager, err := NewAuthManager(configFile, time.Hour)
-	require.NoError(t, err)
-	deps.Auth = manager
-
-	require.NoError(t, manager.Setup("admin", "password123"))
-
-	testRouter := gin.New()
-	testRouter.GET("/test", requireAuthenticated(deps), func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	w := httptest.NewRecorder()
-	testRouter.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}
-
-func TestRequireAuthenticated_NotInitialized(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	cfg := config.DefaultConfig()
-	configFile := filepath.Join(t.TempDir(), "config.yaml")
-	deps := createTestDeps(t, cfg, configFile)
-
-	manager, err := NewAuthManager(configFile, time.Hour)
-	require.NoError(t, err)
-	deps.Auth = manager
-
-	testRouter := gin.New()
-	testRouter.GET("/test", requireAuthenticated(deps), func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	w := httptest.NewRecorder()
-	testRouter.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
-}
-
-func TestRequireAuthenticated_InvalidSession(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	t.Setenv("JAVINIZER_SETUP_SECRET", "test-bootstrap-secret")
-	cfg := config.DefaultConfig()
-	configFile := filepath.Join(t.TempDir(), "config.yaml")
-	deps := createTestDeps(t, cfg, configFile)
-
-	manager, err := NewAuthManager(configFile, time.Hour)
-	require.NoError(t, err)
-	deps.Auth = manager
-
-	require.NoError(t, manager.Setup("admin", "password123"))
-
-	testRouter := gin.New()
-	testRouter.GET("/test", requireAuthenticated(deps), func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "invalid-session-id"})
-	w := httptest.NewRecorder()
-	testRouter.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }

@@ -10,13 +10,12 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
 func TestCanHandleURL(t *testing.T) {
-	s := &Scraper{baseURL: "https://jp.jav321.com"}
+	s := &scraper{baseURL: "https://jp.jav321.com"}
 
 	tests := []struct {
 		name     string
@@ -41,7 +40,7 @@ func TestCanHandleURL(t *testing.T) {
 }
 
 func TestExtractIDFromURL(t *testing.T) {
-	s := &Scraper{baseURL: "https://jp.jav321.com"}
+	s := &scraper{baseURL: "https://jp.jav321.com"}
 
 	tests := []struct {
 		name     string
@@ -75,14 +74,13 @@ func TestExtractIDFromURL(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance(t *testing.T) {
-	s := &Scraper{baseURL: "https://jp.jav321.com"}
+	s := &scraper{baseURL: "https://jp.jav321.com"}
 	var _ models.Scraper = s
-	var _ models.URLHandler = s
-	var _ models.DirectURLScraper = s
+	var _ models.Scraper = s
 }
 
-func testSettings(baseURL string) config.ScraperSettings {
-	return config.ScraperSettings{
+func testSettings(baseURL string) *models.ScraperSettings {
+	return &models.ScraperSettings{
 		Enabled:   true,
 		RateLimit: 0,
 		BaseURL:   baseURL,
@@ -125,7 +123,7 @@ func TestSearch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	s := New(testSettings(server.URL), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings(server.URL), nil, models.FlareSolverrConfig{})
 	result, err := s.Search(context.Background(), "ABC-123")
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)

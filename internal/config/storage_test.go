@@ -70,7 +70,7 @@ metadata:
 	assert.Equal(t, "custom-host", cfg.Server.Host, "custom host should be preserved")
 	assert.Equal(t, 9999, cfg.Server.Port, "custom port should be preserved")
 	assert.Equal(t, "CustomAgent", cfg.Scrapers.UserAgent, "custom user_agent should be preserved")
-	assert.False(t, cfg.Metadata.NFO.Enabled, "custom nfo.enabled should be preserved")
+	assert.False(t, cfg.Metadata.NFO.Feature.Enabled, "custom nfo.enabled should be preserved")
 }
 
 // TestCreateConfigFromEmbedded creates a config and verifies structure
@@ -121,20 +121,20 @@ func TestMoveFilesRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Enable move mode and persist
-	cfg.Output.MoveFiles = true
+	cfg.Output.Operation.MoveFiles = true
 	require.NoError(t, Save(cfg, configPath))
 
 	// Reload and confirm the setting persisted
 	reloaded, err := LoadOrCreate(configPath)
 	require.NoError(t, err)
-	assert.True(t, reloaded.Output.MoveFiles, "move_files should persist as true after save/reload")
+	assert.True(t, reloaded.Output.Operation.MoveFiles, "move_files should persist as true after save/reload")
 
 	// Flip back to false and confirm that also persists
-	reloaded.Output.MoveFiles = false
+	reloaded.Output.Operation.MoveFiles = false
 	require.NoError(t, Save(reloaded, configPath))
 	final, err := LoadOrCreate(configPath)
 	require.NoError(t, err)
-	assert.False(t, final.Output.MoveFiles, "move_files should persist as false after save/reload")
+	assert.False(t, final.Output.Operation.MoveFiles, "move_files should persist as false after save/reload")
 }
 
 // TestUpdateAtomicallyModifiesSingleField verifies config.Update performs an atomic
@@ -144,20 +144,20 @@ func TestUpdateAtomicallyModifiesSingleField(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	cfg := DefaultConfig()
-	cfg.Output.MoveFiles = false
-	cfg.Output.DownloadExtrafanart = false
+	cfg := DefaultConfig(nil, nil)
+	cfg.Output.Operation.MoveFiles = false
+	cfg.Output.Download.DownloadExtrafanart = false
 	require.NoError(t, Save(cfg, configPath))
 
 	// Use Update to persist only move_files (simulating a TUI toggle).
 	require.NoError(t, Update(configPath, func(c *Config) {
-		c.Output.MoveFiles = true
+		c.Output.Operation.MoveFiles = true
 	}))
 
 	reloaded, err := LoadOrCreate(configPath)
 	require.NoError(t, err)
-	assert.True(t, reloaded.Output.MoveFiles, "Update should persist move_files")
-	assert.False(t, reloaded.Output.DownloadExtrafanart, "Update must not touch unrelated fields")
+	assert.True(t, reloaded.Output.Operation.MoveFiles, "Update should persist move_files")
+	assert.False(t, reloaded.Output.Download.DownloadExtrafanart, "Update must not touch unrelated fields")
 }
 
 // TestUpdateConcurrentWritersNoLostUpdates proves config.Update is an atomic
@@ -170,8 +170,8 @@ func TestUpdateConcurrentWritersNoLostUpdates(t *testing.T) {
 	}
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
-	cfg := DefaultConfig()
-	cfg.Output.MaxPosterHeight = 0
+	cfg := DefaultConfig(nil, nil)
+	cfg.Output.MediaFormat.MaxPosterHeight = 0
 	require.NoError(t, Save(cfg, configPath))
 
 	const N = 100
@@ -180,28 +180,28 @@ func TestUpdateConcurrentWritersNoLostUpdates(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = Update(configPath, func(c *Config) { c.Output.MaxPosterHeight++ })
+			_ = Update(configPath, func(c *Config) { c.Output.MediaFormat.MaxPosterHeight++ })
 		}()
 	}
 	wg.Wait()
 
 	reloaded, err := LoadOrCreate(configPath)
 	require.NoError(t, err)
-	assert.Equal(t, N, reloaded.Output.MaxPosterHeight, "no concurrent updates should be lost (atomic RMW under lock)")
+	assert.Equal(t, N, reloaded.Output.MediaFormat.MaxPosterHeight, "no concurrent updates should be lost (atomic RMW under lock)")
 }
 
 // TestUpdateOnMissingFileWritesDefaults verifies Update on a non-existent path
-// writes a config with the mutation applied (loadLocked returns DefaultConfig()
+// writes a config with the mutation applied (loadLocked returns DefaultConfig(nil, nil)
 // for missing files).
 func TestUpdateOnMissingFileWritesDefaults(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	require.NoError(t, Update(configPath, func(c *Config) { c.Output.MoveFiles = true }))
+	require.NoError(t, Update(configPath, func(c *Config) { c.Output.Operation.MoveFiles = true }))
 
 	reloaded, err := LoadOrCreate(configPath)
 	require.NoError(t, err)
-	assert.True(t, reloaded.Output.MoveFiles, "Update on a missing file should write the mutation")
+	assert.True(t, reloaded.Output.Operation.MoveFiles, "Update on a missing file should write the mutation")
 }
 
 // TestUpdate_NilMutateReturnsError guards against a nil callback panicking inside
@@ -209,7 +209,7 @@ func TestUpdateOnMissingFileWritesDefaults(t *testing.T) {
 func TestUpdate_NilMutateReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
-	require.NoError(t, Save(DefaultConfig(), configPath))
+	require.NoError(t, Save(DefaultConfig(nil, nil), configPath))
 
 	err := Update(configPath, nil)
 	require.Error(t, err)

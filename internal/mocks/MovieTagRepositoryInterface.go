@@ -5,6 +5,9 @@
 package mocks
 
 import (
+	"context"
+
+	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -36,16 +39,16 @@ func (_m *MockMovieTagRepositoryInterface) EXPECT() *MockMovieTagRepositoryInter
 }
 
 // AddTag provides a mock function for the type MockMovieTagRepositoryInterface
-func (_mock *MockMovieTagRepositoryInterface) AddTag(movieID string, tag string) error {
-	ret := _mock.Called(movieID, tag)
+func (_mock *MockMovieTagRepositoryInterface) AddTag(ctx context.Context, movieID string, tag string) error {
+	ret := _mock.Called(ctx, movieID, tag)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AddTag")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string, string) error); ok {
-		r0 = returnFunc(movieID, tag)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = returnFunc(ctx, movieID, tag)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -58,25 +61,31 @@ type MockMovieTagRepositoryInterface_AddTag_Call struct {
 }
 
 // AddTag is a helper method to define mock.On call
+//   - ctx context.Context
 //   - movieID string
 //   - tag string
-func (_e *MockMovieTagRepositoryInterface_Expecter) AddTag(movieID interface{}, tag interface{}) *MockMovieTagRepositoryInterface_AddTag_Call {
-	return &MockMovieTagRepositoryInterface_AddTag_Call{Call: _e.mock.On("AddTag", movieID, tag)}
+func (_e *MockMovieTagRepositoryInterface_Expecter) AddTag(ctx interface{}, movieID interface{}, tag interface{}) *MockMovieTagRepositoryInterface_AddTag_Call {
+	return &MockMovieTagRepositoryInterface_AddTag_Call{Call: _e.mock.On("AddTag", ctx, movieID, tag)}
 }
 
-func (_c *MockMovieTagRepositoryInterface_AddTag_Call) Run(run func(movieID string, tag string)) *MockMovieTagRepositoryInterface_AddTag_Call {
+func (_c *MockMovieTagRepositoryInterface_AddTag_Call) Run(run func(ctx context.Context, movieID string, tag string)) *MockMovieTagRepositoryInterface_AddTag_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 string
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -87,14 +96,14 @@ func (_c *MockMovieTagRepositoryInterface_AddTag_Call) Return(err error) *MockMo
 	return _c
 }
 
-func (_c *MockMovieTagRepositoryInterface_AddTag_Call) RunAndReturn(run func(movieID string, tag string) error) *MockMovieTagRepositoryInterface_AddTag_Call {
+func (_c *MockMovieTagRepositoryInterface_AddTag_Call) RunAndReturn(run func(ctx context.Context, movieID string, tag string) error) *MockMovieTagRepositoryInterface_AddTag_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetMoviesWithTag provides a mock function for the type MockMovieTagRepositoryInterface
-func (_mock *MockMovieTagRepositoryInterface) GetMoviesWithTag(tag string) ([]string, error) {
-	ret := _mock.Called(tag)
+func (_mock *MockMovieTagRepositoryInterface) GetMoviesWithTag(ctx context.Context, tag string) ([]string, error) {
+	ret := _mock.Called(ctx, tag)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetMoviesWithTag")
@@ -102,18 +111,18 @@ func (_mock *MockMovieTagRepositoryInterface) GetMoviesWithTag(tag string) ([]st
 
 	var r0 []string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) ([]string, error)); ok {
-		return returnFunc(tag)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]string, error)); ok {
+		return returnFunc(ctx, tag)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) []string); ok {
-		r0 = returnFunc(tag)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []string); ok {
+		r0 = returnFunc(ctx, tag)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(tag)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, tag)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -126,291 +135,17 @@ type MockMovieTagRepositoryInterface_GetMoviesWithTag_Call struct {
 }
 
 // GetMoviesWithTag is a helper method to define mock.On call
+//   - ctx context.Context
 //   - tag string
-func (_e *MockMovieTagRepositoryInterface_Expecter) GetMoviesWithTag(tag interface{}) *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call {
-	return &MockMovieTagRepositoryInterface_GetMoviesWithTag_Call{Call: _e.mock.On("GetMoviesWithTag", tag)}
+func (_e *MockMovieTagRepositoryInterface_Expecter) GetMoviesWithTag(ctx interface{}, tag interface{}) *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call {
+	return &MockMovieTagRepositoryInterface_GetMoviesWithTag_Call{Call: _e.mock.On("GetMoviesWithTag", ctx, tag)}
 }
 
-func (_c *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call) Run(run func(tag string)) *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call {
+func (_c *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call) Run(run func(ctx context.Context, tag string)) *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call) Return(strings []string, err error) *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call {
-	_c.Call.Return(strings, err)
-	return _c
-}
-
-func (_c *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call) RunAndReturn(run func(tag string) ([]string, error)) *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetTagsForMovie provides a mock function for the type MockMovieTagRepositoryInterface
-func (_mock *MockMovieTagRepositoryInterface) GetTagsForMovie(movieID string) ([]string, error) {
-	ret := _mock.Called(movieID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetTagsForMovie")
-	}
-
-	var r0 []string
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) ([]string, error)); ok {
-		return returnFunc(movieID)
-	}
-	if returnFunc, ok := ret.Get(0).(func(string) []string); ok {
-		r0 = returnFunc(movieID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(movieID)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockMovieTagRepositoryInterface_GetTagsForMovie_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTagsForMovie'
-type MockMovieTagRepositoryInterface_GetTagsForMovie_Call struct {
-	*mock.Call
-}
-
-// GetTagsForMovie is a helper method to define mock.On call
-//   - movieID string
-func (_e *MockMovieTagRepositoryInterface_Expecter) GetTagsForMovie(movieID interface{}) *MockMovieTagRepositoryInterface_GetTagsForMovie_Call {
-	return &MockMovieTagRepositoryInterface_GetTagsForMovie_Call{Call: _e.mock.On("GetTagsForMovie", movieID)}
-}
-
-func (_c *MockMovieTagRepositoryInterface_GetTagsForMovie_Call) Run(run func(movieID string)) *MockMovieTagRepositoryInterface_GetTagsForMovie_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockMovieTagRepositoryInterface_GetTagsForMovie_Call) Return(strings []string, err error) *MockMovieTagRepositoryInterface_GetTagsForMovie_Call {
-	_c.Call.Return(strings, err)
-	return _c
-}
-
-func (_c *MockMovieTagRepositoryInterface_GetTagsForMovie_Call) RunAndReturn(run func(movieID string) ([]string, error)) *MockMovieTagRepositoryInterface_GetTagsForMovie_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetUniqueTagsList provides a mock function for the type MockMovieTagRepositoryInterface
-func (_mock *MockMovieTagRepositoryInterface) GetUniqueTagsList() ([]string, error) {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetUniqueTagsList")
-	}
-
-	var r0 []string
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() ([]string, error)); ok {
-		return returnFunc()
-	}
-	if returnFunc, ok := ret.Get(0).(func() []string); ok {
-		r0 = returnFunc()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockMovieTagRepositoryInterface_GetUniqueTagsList_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUniqueTagsList'
-type MockMovieTagRepositoryInterface_GetUniqueTagsList_Call struct {
-	*mock.Call
-}
-
-// GetUniqueTagsList is a helper method to define mock.On call
-func (_e *MockMovieTagRepositoryInterface_Expecter) GetUniqueTagsList() *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call {
-	return &MockMovieTagRepositoryInterface_GetUniqueTagsList_Call{Call: _e.mock.On("GetUniqueTagsList")}
-}
-
-func (_c *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call) Run(run func()) *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call) Return(strings []string, err error) *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call {
-	_c.Call.Return(strings, err)
-	return _c
-}
-
-func (_c *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call) RunAndReturn(run func() ([]string, error)) *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ListAll provides a mock function for the type MockMovieTagRepositoryInterface
-func (_mock *MockMovieTagRepositoryInterface) ListAll() (map[string][]string, error) {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for ListAll")
-	}
-
-	var r0 map[string][]string
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (map[string][]string, error)); ok {
-		return returnFunc()
-	}
-	if returnFunc, ok := ret.Get(0).(func() map[string][]string); ok {
-		r0 = returnFunc()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string][]string)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockMovieTagRepositoryInterface_ListAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAll'
-type MockMovieTagRepositoryInterface_ListAll_Call struct {
-	*mock.Call
-}
-
-// ListAll is a helper method to define mock.On call
-func (_e *MockMovieTagRepositoryInterface_Expecter) ListAll() *MockMovieTagRepositoryInterface_ListAll_Call {
-	return &MockMovieTagRepositoryInterface_ListAll_Call{Call: _e.mock.On("ListAll")}
-}
-
-func (_c *MockMovieTagRepositoryInterface_ListAll_Call) Run(run func()) *MockMovieTagRepositoryInterface_ListAll_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockMovieTagRepositoryInterface_ListAll_Call) Return(stringToStrings map[string][]string, err error) *MockMovieTagRepositoryInterface_ListAll_Call {
-	_c.Call.Return(stringToStrings, err)
-	return _c
-}
-
-func (_c *MockMovieTagRepositoryInterface_ListAll_Call) RunAndReturn(run func() (map[string][]string, error)) *MockMovieTagRepositoryInterface_ListAll_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RemoveAllTags provides a mock function for the type MockMovieTagRepositoryInterface
-func (_mock *MockMovieTagRepositoryInterface) RemoveAllTags(movieID string) error {
-	ret := _mock.Called(movieID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for RemoveAllTags")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string) error); ok {
-		r0 = returnFunc(movieID)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockMovieTagRepositoryInterface_RemoveAllTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveAllTags'
-type MockMovieTagRepositoryInterface_RemoveAllTags_Call struct {
-	*mock.Call
-}
-
-// RemoveAllTags is a helper method to define mock.On call
-//   - movieID string
-func (_e *MockMovieTagRepositoryInterface_Expecter) RemoveAllTags(movieID interface{}) *MockMovieTagRepositoryInterface_RemoveAllTags_Call {
-	return &MockMovieTagRepositoryInterface_RemoveAllTags_Call{Call: _e.mock.On("RemoveAllTags", movieID)}
-}
-
-func (_c *MockMovieTagRepositoryInterface_RemoveAllTags_Call) Run(run func(movieID string)) *MockMovieTagRepositoryInterface_RemoveAllTags_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockMovieTagRepositoryInterface_RemoveAllTags_Call) Return(err error) *MockMovieTagRepositoryInterface_RemoveAllTags_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *MockMovieTagRepositoryInterface_RemoveAllTags_Call) RunAndReturn(run func(movieID string) error) *MockMovieTagRepositoryInterface_RemoveAllTags_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RemoveTag provides a mock function for the type MockMovieTagRepositoryInterface
-func (_mock *MockMovieTagRepositoryInterface) RemoveTag(movieID string, tag string) error {
-	ret := _mock.Called(movieID, tag)
-
-	if len(ret) == 0 {
-		panic("no return value specified for RemoveTag")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string, string) error); ok {
-		r0 = returnFunc(movieID, tag)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockMovieTagRepositoryInterface_RemoveTag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveTag'
-type MockMovieTagRepositoryInterface_RemoveTag_Call struct {
-	*mock.Call
-}
-
-// RemoveTag is a helper method to define mock.On call
-//   - movieID string
-//   - tag string
-func (_e *MockMovieTagRepositoryInterface_Expecter) RemoveTag(movieID interface{}, tag interface{}) *MockMovieTagRepositoryInterface_RemoveTag_Call {
-	return &MockMovieTagRepositoryInterface_RemoveTag_Call{Call: _e.mock.On("RemoveTag", movieID, tag)}
-}
-
-func (_c *MockMovieTagRepositoryInterface_RemoveTag_Call) Run(run func(movieID string, tag string)) *MockMovieTagRepositoryInterface_RemoveTag_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 string
 		if args[1] != nil {
@@ -424,12 +159,466 @@ func (_c *MockMovieTagRepositoryInterface_RemoveTag_Call) Run(run func(movieID s
 	return _c
 }
 
+func (_c *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call) Return(strings []string, err error) *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call {
+	_c.Call.Return(strings, err)
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call) RunAndReturn(run func(ctx context.Context, tag string) ([]string, error)) *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetTagsForMovie provides a mock function for the type MockMovieTagRepositoryInterface
+func (_mock *MockMovieTagRepositoryInterface) GetTagsForMovie(ctx context.Context, movieID string) ([]string, error) {
+	ret := _mock.Called(ctx, movieID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTagsForMovie")
+	}
+
+	var r0 []string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]string, error)); ok {
+		return returnFunc(ctx, movieID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []string); ok {
+		r0 = returnFunc(ctx, movieID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, movieID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockMovieTagRepositoryInterface_GetTagsForMovie_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTagsForMovie'
+type MockMovieTagRepositoryInterface_GetTagsForMovie_Call struct {
+	*mock.Call
+}
+
+// GetTagsForMovie is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieID string
+func (_e *MockMovieTagRepositoryInterface_Expecter) GetTagsForMovie(ctx interface{}, movieID interface{}) *MockMovieTagRepositoryInterface_GetTagsForMovie_Call {
+	return &MockMovieTagRepositoryInterface_GetTagsForMovie_Call{Call: _e.mock.On("GetTagsForMovie", ctx, movieID)}
+}
+
+func (_c *MockMovieTagRepositoryInterface_GetTagsForMovie_Call) Run(run func(ctx context.Context, movieID string)) *MockMovieTagRepositoryInterface_GetTagsForMovie_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_GetTagsForMovie_Call) Return(strings []string, err error) *MockMovieTagRepositoryInterface_GetTagsForMovie_Call {
+	_c.Call.Return(strings, err)
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_GetTagsForMovie_Call) RunAndReturn(run func(ctx context.Context, movieID string) ([]string, error)) *MockMovieTagRepositoryInterface_GetTagsForMovie_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetUniqueTagsList provides a mock function for the type MockMovieTagRepositoryInterface
+func (_mock *MockMovieTagRepositoryInterface) GetUniqueTagsList(ctx context.Context) ([]string, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUniqueTagsList")
+	}
+
+	var r0 []string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]string, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []string); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockMovieTagRepositoryInterface_GetUniqueTagsList_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUniqueTagsList'
+type MockMovieTagRepositoryInterface_GetUniqueTagsList_Call struct {
+	*mock.Call
+}
+
+// GetUniqueTagsList is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockMovieTagRepositoryInterface_Expecter) GetUniqueTagsList(ctx interface{}) *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call {
+	return &MockMovieTagRepositoryInterface_GetUniqueTagsList_Call{Call: _e.mock.On("GetUniqueTagsList", ctx)}
+}
+
+func (_c *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call) Run(run func(ctx context.Context)) *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call) Return(strings []string, err error) *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call {
+	_c.Call.Return(strings, err)
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call) RunAndReturn(run func(ctx context.Context) ([]string, error)) *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListAll provides a mock function for the type MockMovieTagRepositoryInterface
+func (_mock *MockMovieTagRepositoryInterface) ListAll(ctx context.Context) (map[string][]string, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListAll")
+	}
+
+	var r0 map[string][]string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (map[string][]string, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) map[string][]string); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string][]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockMovieTagRepositoryInterface_ListAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAll'
+type MockMovieTagRepositoryInterface_ListAll_Call struct {
+	*mock.Call
+}
+
+// ListAll is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockMovieTagRepositoryInterface_Expecter) ListAll(ctx interface{}) *MockMovieTagRepositoryInterface_ListAll_Call {
+	return &MockMovieTagRepositoryInterface_ListAll_Call{Call: _e.mock.On("ListAll", ctx)}
+}
+
+func (_c *MockMovieTagRepositoryInterface_ListAll_Call) Run(run func(ctx context.Context)) *MockMovieTagRepositoryInterface_ListAll_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_ListAll_Call) Return(stringToStrings map[string][]string, err error) *MockMovieTagRepositoryInterface_ListAll_Call {
+	_c.Call.Return(stringToStrings, err)
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_ListAll_Call) RunAndReturn(run func(ctx context.Context) (map[string][]string, error)) *MockMovieTagRepositoryInterface_ListAll_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListAllChunked provides a mock function for the type MockMovieTagRepositoryInterface
+func (_mock *MockMovieTagRepositoryInterface) ListAllChunked(ctx context.Context, chunkSize int) (map[string][]string, error) {
+	ret := _mock.Called(ctx, chunkSize)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListAllChunked")
+	}
+
+	var r0 map[string][]string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int) (map[string][]string, error)); ok {
+		return returnFunc(ctx, chunkSize)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int) map[string][]string); ok {
+		r0 = returnFunc(ctx, chunkSize)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string][]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int) error); ok {
+		r1 = returnFunc(ctx, chunkSize)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockMovieTagRepositoryInterface_ListAllChunked_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAllChunked'
+type MockMovieTagRepositoryInterface_ListAllChunked_Call struct {
+	*mock.Call
+}
+
+// ListAllChunked is a helper method to define mock.On call
+//   - ctx context.Context
+//   - chunkSize int
+func (_e *MockMovieTagRepositoryInterface_Expecter) ListAllChunked(ctx interface{}, chunkSize interface{}) *MockMovieTagRepositoryInterface_ListAllChunked_Call {
+	return &MockMovieTagRepositoryInterface_ListAllChunked_Call{Call: _e.mock.On("ListAllChunked", ctx, chunkSize)}
+}
+
+func (_c *MockMovieTagRepositoryInterface_ListAllChunked_Call) Run(run func(ctx context.Context, chunkSize int)) *MockMovieTagRepositoryInterface_ListAllChunked_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_ListAllChunked_Call) Return(stringToStrings map[string][]string, err error) *MockMovieTagRepositoryInterface_ListAllChunked_Call {
+	_c.Call.Return(stringToStrings, err)
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_ListAllChunked_Call) RunAndReturn(run func(ctx context.Context, chunkSize int) (map[string][]string, error)) *MockMovieTagRepositoryInterface_ListAllChunked_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListTagsPaginated provides a mock function for the type MockMovieTagRepositoryInterface
+func (_mock *MockMovieTagRepositoryInterface) ListTagsPaginated(ctx context.Context, limit int, offset int) ([]models.MovieTag, error) {
+	ret := _mock.Called(ctx, limit, offset)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListTagsPaginated")
+	}
+
+	var r0 []models.MovieTag
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) ([]models.MovieTag, error)); ok {
+		return returnFunc(ctx, limit, offset)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) []models.MovieTag); ok {
+		r0 = returnFunc(ctx, limit, offset)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.MovieTag)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int, int) error); ok {
+		r1 = returnFunc(ctx, limit, offset)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockMovieTagRepositoryInterface_ListTagsPaginated_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListTagsPaginated'
+type MockMovieTagRepositoryInterface_ListTagsPaginated_Call struct {
+	*mock.Call
+}
+
+// ListTagsPaginated is a helper method to define mock.On call
+//   - ctx context.Context
+//   - limit int
+//   - offset int
+func (_e *MockMovieTagRepositoryInterface_Expecter) ListTagsPaginated(ctx interface{}, limit interface{}, offset interface{}) *MockMovieTagRepositoryInterface_ListTagsPaginated_Call {
+	return &MockMovieTagRepositoryInterface_ListTagsPaginated_Call{Call: _e.mock.On("ListTagsPaginated", ctx, limit, offset)}
+}
+
+func (_c *MockMovieTagRepositoryInterface_ListTagsPaginated_Call) Run(run func(ctx context.Context, limit int, offset int)) *MockMovieTagRepositoryInterface_ListTagsPaginated_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_ListTagsPaginated_Call) Return(movieTags []models.MovieTag, err error) *MockMovieTagRepositoryInterface_ListTagsPaginated_Call {
+	_c.Call.Return(movieTags, err)
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_ListTagsPaginated_Call) RunAndReturn(run func(ctx context.Context, limit int, offset int) ([]models.MovieTag, error)) *MockMovieTagRepositoryInterface_ListTagsPaginated_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveAllTags provides a mock function for the type MockMovieTagRepositoryInterface
+func (_mock *MockMovieTagRepositoryInterface) RemoveAllTags(ctx context.Context, movieID string) error {
+	ret := _mock.Called(ctx, movieID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveAllTags")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, movieID)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockMovieTagRepositoryInterface_RemoveAllTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveAllTags'
+type MockMovieTagRepositoryInterface_RemoveAllTags_Call struct {
+	*mock.Call
+}
+
+// RemoveAllTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieID string
+func (_e *MockMovieTagRepositoryInterface_Expecter) RemoveAllTags(ctx interface{}, movieID interface{}) *MockMovieTagRepositoryInterface_RemoveAllTags_Call {
+	return &MockMovieTagRepositoryInterface_RemoveAllTags_Call{Call: _e.mock.On("RemoveAllTags", ctx, movieID)}
+}
+
+func (_c *MockMovieTagRepositoryInterface_RemoveAllTags_Call) Run(run func(ctx context.Context, movieID string)) *MockMovieTagRepositoryInterface_RemoveAllTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_RemoveAllTags_Call) Return(err error) *MockMovieTagRepositoryInterface_RemoveAllTags_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockMovieTagRepositoryInterface_RemoveAllTags_Call) RunAndReturn(run func(ctx context.Context, movieID string) error) *MockMovieTagRepositoryInterface_RemoveAllTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveTag provides a mock function for the type MockMovieTagRepositoryInterface
+func (_mock *MockMovieTagRepositoryInterface) RemoveTag(ctx context.Context, movieID string, tag string) error {
+	ret := _mock.Called(ctx, movieID, tag)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveTag")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = returnFunc(ctx, movieID, tag)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockMovieTagRepositoryInterface_RemoveTag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveTag'
+type MockMovieTagRepositoryInterface_RemoveTag_Call struct {
+	*mock.Call
+}
+
+// RemoveTag is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieID string
+//   - tag string
+func (_e *MockMovieTagRepositoryInterface_Expecter) RemoveTag(ctx interface{}, movieID interface{}, tag interface{}) *MockMovieTagRepositoryInterface_RemoveTag_Call {
+	return &MockMovieTagRepositoryInterface_RemoveTag_Call{Call: _e.mock.On("RemoveTag", ctx, movieID, tag)}
+}
+
+func (_c *MockMovieTagRepositoryInterface_RemoveTag_Call) Run(run func(ctx context.Context, movieID string, tag string)) *MockMovieTagRepositoryInterface_RemoveTag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
 func (_c *MockMovieTagRepositoryInterface_RemoveTag_Call) Return(err error) *MockMovieTagRepositoryInterface_RemoveTag_Call {
 	_c.Call.Return(err)
 	return _c
 }
 
-func (_c *MockMovieTagRepositoryInterface_RemoveTag_Call) RunAndReturn(run func(movieID string, tag string) error) *MockMovieTagRepositoryInterface_RemoveTag_Call {
+func (_c *MockMovieTagRepositoryInterface_RemoveTag_Call) RunAndReturn(run func(ctx context.Context, movieID string, tag string) error) *MockMovieTagRepositoryInterface_RemoveTag_Call {
 	_c.Call.Return(run)
 	return _c
 }

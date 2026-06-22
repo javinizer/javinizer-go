@@ -8,24 +8,29 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/javinizer/javinizer-go/internal/configutil"
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 )
 
-// GeneratedFilesJSON is the JSON structure stored in BatchFileOperation.GeneratedFiles.
-// Phase 3 (Organize Integration) populates this during organize; Reverter consumes it.
-type GeneratedFilesJSON struct {
-	Delete   []string   `json:"delete,omitempty"`    // Files to delete on revert (NFO, images, screenshots)
-	MoveBack []FileMove `json:"move_back,omitempty"` // Files to move back on revert (subtitles)
-}
+// Per ADR-0034: generatedFilesJSON and fileMove moved to internal/models/revert_types.go.
+// The history package imports models.GeneratedFilesJSON and models.FileMove instead of
+// defining duplicate types.
 
-// FileMove represents a file that was moved during organize and should be moved back on revert.
-type FileMove struct {
-	OriginalPath string `json:"original_path"` // Where the file was before organize
-	NewPath      string `json:"new_path"`      // Where the file is after organize
+// BatchReverter is the narrow interface for batch revert operations.
+// Per D-10: decoupled from the concrete *Reverter so that callers (API handlers,
+// CLI commands) depend on behavior, not implementation. The concrete Reverter
+// satisfies this interface implicitly.
+//
+// This interface lives in the history package alongside the concrete type,
+// following the Go convention of defining interfaces where they're implemented
+// when the interface represents a core domain behavior.
+type BatchReverter interface {
+	RevertBatch(ctx context.Context, batchJobID string) (*RevertBatchResult, error)
+	RevertScrape(ctx context.Context, batchJobID string, movieID string) (*RevertBatchResult, error)
 }
 
 // RevertBatchResult summarizes the outcome of a batch-level revert.
@@ -43,9 +48,9 @@ type RevertFileResult struct {
 	MovieID      string // Movie identifier
 	OriginalPath string
 	NewPath      string
-	Outcome      string // RevertOutcome: reverted, skipped, or failed
-	Reason       string // RevertReason: why the outcome occurred (empty for success)
-	Error        string // Error message for failed outcomes
+	Outcome      models.RevertOutcomeEnum // RevertOutcome: reverted, skipped, or failed
+	Reason       models.RevertReasonEnum  // RevertReason: why the outcome occurred (empty for success)
+	Error        string                   // Error message for failed outcomes
 }
 
 var (
@@ -57,385 +62,133 @@ var (
 	ErrNoOperationsFound = errors.New("no operations found for batch")
 )
 
+// fileSystemReverter abstracts filesystem revert operations so that Reverter.revertFile
+// becomes a thin orchestrator. Production code uses the afero-based implementation;
+// tests can inject a mock to verify orchestration without touching the filesystem.
+//
+// Per W-2: cleanupEmptyDir, cleanupGeneratedFiles, and restoreNFO are methods on
+// this interface so that RevertBatch/RevertScrape/revertFile call through the seam
+// instead of reaching for the standalone FS functions directly. The standalone
+// functions (cleanupEmptyDirFS, cleanupGeneratedFilesFS, RestoreNFO) become
+// unexported helpers used only by aferoFSReverter.
+type fileSystemReverter interface {
+	// revertPrimaryFile moves the primary file back to its original location.
+	revertPrimaryFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error)
+	// cleanupGeneratedFiles removes generated artifacts (NFO, images) for an operation.
+	cleanupGeneratedFiles(op *models.BatchFileOperation, stopAt string)
+	// cleanupEmptyDir removes empty directories, walking up to stopAt.
+	cleanupEmptyDir(dirPath string, stopAt string)
+	// restoreNFO restores the NFO snapshot for a reverted operation.
+	// Returns a warning string (soft failure) or a failed RevertFileResult (hard failure).
+	restoreNFO(ctx context.Context, op *models.BatchFileOperation, hardFailure bool) (string, *RevertFileResult)
+}
+
 // Reverter handles reverting file organization operations.
 // It reads BatchFileOperation records from the database, performs inverse file
 // operations via afero, and tracks per-operation revert status.
 type Reverter struct {
 	fs              afero.Fs
 	batchFileOpRepo database.BatchFileOperationRepositoryInterface
+	fsReverter      fileSystemReverter // filesystem operations seam
 }
 
-func fsPath(p string) string {
-	if len(p) >= 3 && p[1] == ':' && (p[2] == '/' || p[2] == '\\') {
-		p = p[2:]
+// failRevert records a failed revert in the database and returns a RevertFileResult
+// with the given reason and error message. The DB status update is best-effort;
+// a DB failure is logged but does not override the revert result.
+func failRevert(ctx context.Context, batchFileOpRepo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, reason models.RevertReasonEnum, errMsg string) *RevertFileResult {
+	if dbErr := batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusFailed); dbErr != nil {
+		logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
 	}
-	p = filepath.ToSlash(p)
-	return p
-}
-
-// NewReverter creates a new Reverter with the given filesystem and repository.
-func NewReverter(fs afero.Fs, batchFileOpRepo database.BatchFileOperationRepositoryInterface) *Reverter {
-	return &Reverter{
-		fs:              fs,
-		batchFileOpRepo: batchFileOpRepo,
-	}
-}
-
-// revertFile reverts a single BatchFileOperation.
-// It returns a RevertFileResult with the outcome details. The outer error is only
-// for system-level failures (DB errors); per-operation outcomes are in RevertFileResult.
-//
-// Checks performed (in order):
-// 1. Double-revert guard (D-09)
-// 2. Anchor check — skip if video file missing (D-02)
-// 3. Destination conflict — fail if OriginalPath already occupied (D-04)
-// 4. Main revert operation (move/rename/NFO restore)
-// 5. Conditional cleanup of generated files (D-03) — only after successful primary revert
-// 6. NFO restore with proper error handling per mode (D-05)
-func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
-	logging.Debugf("Reverting operation %d: movie=%s type=%s original=%s new=%s revert_status=%s",
-		op.ID, op.MovieID, op.OperationType, op.OriginalPath, op.NewPath, op.RevertStatus)
-
-	// Guard: double-revert protection (D-09)
-	if op.RevertStatus == models.RevertStatusReverted {
-		return nil, ErrBatchAlreadyReverted
-	}
-
-	// Only applied and failed operations are processable
-	if op.RevertStatus != models.RevertStatusApplied && op.RevertStatus != models.RevertStatusFailed {
-		return nil, fmt.Errorf("operation has unexpected revert status: %s", op.RevertStatus)
-	}
-
-	// --- Copy/hardlink/symlink guard (D-11) — check BEFORE anchor check ---
-	if op.OperationType != models.OperationTypeMove && op.OperationType != models.OperationTypeUpdate {
-		if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-			logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-		}
-		return &RevertFileResult{
-			OperationID:  op.ID,
-			MovieID:      op.MovieID,
-			OriginalPath: op.OriginalPath,
-			NewPath:      op.NewPath,
-			Outcome:      models.RevertOutcomeFailed,
-			Reason:       models.RevertReasonUnexpectedPathState,
-			Error:        ErrCopyModeNotRevertible.Error(),
-		}, nil
-	}
-
-	// --- Anchor-based skip check (D-02) ---
-	// In update-mode: check if video file exists at OriginalPath (the anchor)
-	// In move-mode: check if video file exists at NewPath (the anchor)
-	anchorPath := op.NewPath
-	if op.OperationType == models.OperationTypeUpdate {
-		anchorPath = op.OriginalPath
-	}
-	if _, err := r.fs.Stat(anchorPath); err != nil {
-		if os.IsNotExist(err) {
-			logging.Warnf("Anchor file missing for op %d at %s: skipping revert (anchor_missing)", op.ID, anchorPath)
-			return &RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeSkipped,
-				Reason:       models.RevertReasonAnchorMissing,
-			}, nil
-		}
-		if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-			logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-		}
-		logging.Errorf("Cannot access anchor file for op %d at %s: %v (access_denied)", op.ID, anchorPath, err)
-		return &RevertFileResult{
-			OperationID:  op.ID,
-			MovieID:      op.MovieID,
-			OriginalPath: op.OriginalPath,
-			NewPath:      op.NewPath,
-			Outcome:      models.RevertOutcomeFailed,
-			Reason:       models.RevertReasonAccessDenied,
-			Error:        fmt.Sprintf("cannot access anchor file: %v", err),
-		}, nil
-	}
-
-	// --- Update-mode revert path (HIST-05) ---
-	if op.OperationType == models.OperationTypeUpdate {
-		return r.revertUpdateMode(op)
-	}
-
-	// --- Move-mode revert path ---
-	return r.revertMoveMode(op)
-}
-
-// revertUpdateMode handles update-mode revert (HIST-05):
-// Video file is not moved, so we only restore NFO and delete generated files.
-// Anchor check already passed — video file exists at OriginalPath.
-func (r *Reverter) revertUpdateMode(op *models.BatchFileOperation) (*RevertFileResult, error) {
-	destRoot := filepath.Dir(filepath.Dir(op.OriginalPath))
-
-	// In update-mode, it's safe to delete generated files BEFORE NFO restore
-	// because the video anchor still exists (D-03)
-	r.handleGeneratedFiles(op, destRoot)
-
-	// NFO restore — in update-mode, NFO IS the operation (D-05)
-	if op.NFOSnapshot != "" {
-		nfoPath := op.NFOPath
-		if nfoPath == "" && op.MovieID != "" {
-			nfoPath = filepath.Join(filepath.Dir(op.OriginalPath), op.MovieID+".nfo")
-		}
-		if nfoPath != "" {
-			nfoDir := filepath.Dir(nfoPath)
-			canonicalNfoDir, err := filepath.Abs(filepath.Clean(nfoDir))
-			if err != nil {
-				// Path error — fail the operation
-				if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-					logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-				}
-				return &RevertFileResult{
-					OperationID:  op.ID,
-					MovieID:      op.MovieID,
-					OriginalPath: op.OriginalPath,
-					NewPath:      op.NewPath,
-					Outcome:      models.RevertOutcomeFailed,
-					Reason:       models.RevertReasonNFORestoreFailed,
-					Error:        fmt.Sprintf("failed to canonicalize NFO path: %v", err),
-				}, nil
-			}
-			if err := r.fs.MkdirAll(fsPath(canonicalNfoDir), configutil.DirPerm); err != nil {
-				if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-					logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-				}
-				return &RevertFileResult{
-					OperationID:  op.ID,
-					MovieID:      op.MovieID,
-					OriginalPath: op.OriginalPath,
-					NewPath:      op.NewPath,
-					Outcome:      models.RevertOutcomeFailed,
-					Reason:       models.RevertReasonNFORestoreFailed,
-					Error:        fmt.Sprintf("failed to create NFO directory: %v", err),
-				}, nil
-			}
-			canonicalNfoPath := fsPath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
-			if err := afero.WriteFile(r.fs, canonicalNfoPath, []byte(op.NFOSnapshot), configutil.FilePerm); err != nil {
-				// NFO restore IS the operation in update-mode — this is a hard failure (D-05)
-				if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-					logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-				}
-				return &RevertFileResult{
-					OperationID:  op.ID,
-					MovieID:      op.MovieID,
-					OriginalPath: op.OriginalPath,
-					NewPath:      op.NewPath,
-					Outcome:      models.RevertOutcomeFailed,
-					Reason:       models.RevertReasonNFORestoreFailed,
-					Error:        fmt.Sprintf("failed to restore NFO: %v", err),
-				}, nil
-			}
-		}
-	}
-
-	if err := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusReverted); err != nil {
-		return nil, fmt.Errorf("filesystem reverted but failed to persist revert status for op %d: %w", op.ID, err)
-	}
-	logging.Infof("Reverted update operation %d: movie=%s at %s", op.ID, op.MovieID, op.OriginalPath)
 	return &RevertFileResult{
 		OperationID:  op.ID,
 		MovieID:      op.MovieID,
 		OriginalPath: op.OriginalPath,
 		NewPath:      op.NewPath,
-		Outcome:      models.RevertOutcomeReverted,
-	}, nil
+		Outcome:      models.RevertOutcomeFailed,
+		Reason:       reason,
+		Error:        errMsg,
+	}
 }
 
-// revertMoveMode handles move-mode revert with anchor check, destination conflict check,
-// conditional cleanup, and NFO error handling.
-func (r *Reverter) revertMoveMode(op *models.BatchFileOperation) (*RevertFileResult, error) {
-	var sourcePath string
+// skipRevert returns a RevertFileResult indicating the revert was skipped with
+// the given reason. No DB status update is performed — skipped operations remain
+// in their current status so they can be retried if the anchor reappears.
+func (r *Reverter) skipRevert(op *models.BatchFileOperation, reason models.RevertReasonEnum) *RevertFileResult {
+	return &RevertFileResult{
+		OperationID:  op.ID,
+		MovieID:      op.MovieID,
+		OriginalPath: op.OriginalPath,
+		NewPath:      op.NewPath,
+		Outcome:      models.RevertOutcomeSkipped,
+		Reason:       reason,
+	}
+}
 
-	// In-place rename handling (D-08)
-	if op.InPlaceRenamed && op.OriginalDirPath != "" {
-		currentDir := filepath.Dir(op.NewPath)
+// NewReverter creates a new Reverter with the given filesystem and repository.
+func NewReverter(fs afero.Fs, batchFileOpRepo database.BatchFileOperationRepositoryInterface) *Reverter {
+	r := &Reverter{
+		fs:              fs,
+		batchFileOpRepo: batchFileOpRepo,
+	}
+	r.fsReverter = &aferoFSReverter{fs: fs, batchFileOpRepo: batchFileOpRepo}
+	return r
+}
 
-		// --- Destination conflict check for in-place rename (D-04) ---
-		if _, err := r.fs.Stat(op.OriginalDirPath); err == nil {
-			// OriginalDirPath already exists — destination conflict
-			if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-				logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-			}
-			return &RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeFailed,
-				Reason:       models.RevertReasonDestinationConflict,
-				Error:        fmt.Sprintf("directory %s already exists (destination conflict)", op.OriginalDirPath),
-			}, nil
-		}
+// aferoFSReverter implements fileSystemReverter using the afero filesystem.
+// This is the production implementation; tests can substitute a mock.
+type aferoFSReverter struct {
+	fs              afero.Fs
+	batchFileOpRepo database.BatchFileOperationRepositoryInterface
+}
 
-		// Rename the current directory back to the original directory path
-		if err := r.fs.Rename(currentDir, op.OriginalDirPath); err != nil {
-			if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-				logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-			}
-			reason := models.RevertReasonUnexpectedPathState
-			if os.IsPermission(err) {
-				reason = models.RevertReasonAccessDenied
-			}
-			return &RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeFailed,
-				Reason:       reason,
-				Error:        fmt.Sprintf("failed to rename directory back: %v", err),
-			}, nil
-		}
+func (a *aferoFSReverter) revertPrimaryFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
+	// Delegate to the existing standalone function, routing cleanup through the seam
+	return revertPrimaryFileFS(ctx, a.fs, a.batchFileOpRepo, op, a.cleanupEmptyDir)
+}
 
-		// After dir rename, the file is now at OriginalDirPath/Base(NewPath)
-		sourcePath = filepath.Join(op.OriginalDirPath, filepath.Base(op.NewPath))
+func (a *aferoFSReverter) cleanupGeneratedFiles(op *models.BatchFileOperation, stopAt string) {
+	cleanupGeneratedFilesFS(a.fs, op, stopAt)
+}
 
-		// If OriginalPath differs from current location, rename the file within the directory
-		if sourcePath != op.OriginalPath {
-			targetDir := filepath.Dir(op.OriginalPath)
-			if err := r.fs.MkdirAll(targetDir, configutil.DirPerm); err != nil {
-				if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-					logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-				}
-				return &RevertFileResult{
-					OperationID:  op.ID,
-					MovieID:      op.MovieID,
-					OriginalPath: op.OriginalPath,
-					NewPath:      op.NewPath,
-					Outcome:      models.RevertOutcomeFailed,
-					Reason:       models.RevertReasonUnexpectedPathState,
-					Error:        fmt.Sprintf("failed to create directory for file rename: %v", err),
-				}, nil
-			}
-			if err := r.fs.Rename(sourcePath, op.OriginalPath); err != nil {
-				if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-					logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-				}
-				reason := models.RevertReasonUnexpectedPathState
-				if os.IsPermission(err) {
-					reason = models.RevertReasonAccessDenied
-				}
-				return &RevertFileResult{
-					OperationID:  op.ID,
-					MovieID:      op.MovieID,
-					OriginalPath: op.OriginalPath,
-					NewPath:      op.NewPath,
-					Outcome:      models.RevertOutcomeFailed,
-					Reason:       reason,
-					Error:        fmt.Sprintf("failed to rename file within directory: %v", err),
-				}, nil
-			}
-		}
+func (a *aferoFSReverter) cleanupEmptyDir(dirPath string, stopAt string) {
+	cleanupEmptyDirFS(a.fs, dirPath, stopAt)
+}
+
+func (a *aferoFSReverter) restoreNFO(ctx context.Context, op *models.BatchFileOperation, hardFailure bool) (string, *RevertFileResult) {
+	return restoreNFOFS(ctx, a.fs, a.batchFileOpRepo, op, hardFailure)
+}
+
+func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
+	logging.Debugf("Reverting operation %d: movie=%s type=%s original=%s new=%s revert_status=%s",
+		op.ID, op.MovieID, op.OperationType, op.OriginalPath, op.NewPath, op.RevertStatus)
+
+	if result, err := r.guardDoubleRevert(ctx, op); result != nil || err != nil {
+		return result, err
+	}
+	if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
+		return result, err
+	}
+
+	isUpdate := op.OperationType == models.OperationTypeUpdate
+	if isUpdate {
+		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
 	} else {
-		// --- Destination conflict check for standard move (D-04) ---
-		if _, err := r.fs.Stat(op.OriginalPath); err == nil {
-			// OriginalPath already exists — destination conflict
-			if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-				logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-			}
-			return &RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeFailed,
-				Reason:       models.RevertReasonDestinationConflict,
-				Error:        fmt.Sprintf("file %s already exists (destination conflict)", op.OriginalPath),
-			}, nil
+		if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
+			return result, err
 		}
-
-		targetDir := filepath.Dir(op.OriginalPath)
-		canonicalDir, err := filepath.Abs(filepath.Clean(targetDir))
-		if err != nil {
-			if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-				logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-			}
-			return &RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeFailed,
-				Reason:       models.RevertReasonUnexpectedPathState,
-				Error:        fmt.Sprintf("failed to canonicalize directory path: %v", err),
-			}, nil
-		}
-		if err := r.fs.MkdirAll(fsPath(canonicalDir), configutil.DirPerm); err != nil {
-			if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-				logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-			}
-			return &RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeFailed,
-				Reason:       models.RevertReasonAccessDenied,
-				Error:        fmt.Sprintf("failed to recreate original directory: %v", err),
-			}, nil
-		}
-
-		sourcePath = op.NewPath
-		if err := r.fs.Rename(sourcePath, op.OriginalPath); err != nil {
-			if dbErr := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusFailed); dbErr != nil {
-				logging.Warnf("Failed to update revert status for op %d: %v", op.ID, dbErr)
-			}
-			reason := models.RevertReasonUnexpectedPathState
-			if os.IsPermission(err) {
-				reason = models.RevertReasonAccessDenied
-			}
-			return &RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeFailed,
-				Reason:       reason,
-				Error:        fmt.Sprintf("failed to revert move: %v", err),
-			}, nil
-		}
-
 		destRoot := filepath.Dir(filepath.Dir(op.NewPath))
-		r.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
-	}
-
-	// --- Conditional cleanup (D-03): generated files cleanup AFTER successful primary move ---
-	destRoot := filepath.Dir(filepath.Dir(op.NewPath))
-	r.handleGeneratedFiles(op, destRoot)
-
-	// Re-check if generated file deletion made the directory empty
-	if !op.InPlaceRenamed {
-		destRoot := filepath.Dir(filepath.Dir(op.NewPath))
-		r.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
-	}
-
-	// --- NFO restore (D-05): in move-mode, NFO failure is a warning, not a hard failure ---
-	var nfoWarning string
-	if op.NFOSnapshot != "" {
-		nfoPath := op.NFOPath
-		if nfoPath == "" && op.MovieID != "" {
-			nfoPath = filepath.Join(filepath.Dir(op.OriginalPath), op.MovieID+".nfo")
-		}
-		if nfoPath != "" {
-			nfoDir := filepath.Dir(op.OriginalPath)
-			canonicalNfoDir, err := filepath.Abs(filepath.Clean(nfoDir))
-			if err == nil {
-				_ = r.fs.MkdirAll(fsPath(canonicalNfoDir), configutil.DirPerm)
-				restorePath := fsPath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
-				if err := afero.WriteFile(r.fs, restorePath, []byte(op.NFOSnapshot), configutil.FilePerm); err != nil {
-					// NFO restore failed — log warning, but the primary revert succeeded (D-05)
-					logging.Warnf("Failed to restore NFO for op %d: %v (move-mode: treating as warning)", op.ID, err)
-					nfoWarning = fmt.Sprintf("NFO restore failed: %v", err)
-				}
-			}
+		r.fsReverter.cleanupGeneratedFiles(op, destRoot)
+		if !op.InPlaceRenamed {
+			r.fsReverter.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
 		}
 	}
 
-	if err := r.batchFileOpRepo.UpdateRevertStatus(op.ID, models.RevertStatusReverted); err != nil {
+	nfoWarning, failedResult := r.fsReverter.restoreNFO(ctx, op, isUpdate)
+	if failedResult != nil {
+		return failedResult, nil
+	}
+
+	if err := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusReverted); err != nil {
 		return nil, fmt.Errorf("filesystem reverted but failed to persist revert status for op %d: %w", op.ID, err)
 	}
 
@@ -449,20 +202,208 @@ func (r *Reverter) revertMoveMode(op *models.BatchFileOperation) (*RevertFileRes
 	if nfoWarning != "" {
 		result.Error = nfoWarning
 	}
-	logging.Infof("Reverted operation %d: movie=%s moved from %s back to %s", op.ID, op.MovieID, op.NewPath, op.OriginalPath)
+	if isUpdate {
+		logging.Infof("Reverted update operation %d: movie=%s at %s", op.ID, op.MovieID, op.OriginalPath)
+	} else {
+		logging.Infof("Reverted operation %d: movie=%s moved from %s back to %s", op.ID, op.MovieID, op.NewPath, op.OriginalPath)
+	}
 	return result, nil
+}
+
+func (r *Reverter) guardDoubleRevert(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
+	if op.RevertStatus == models.RevertStatusReverted {
+		return nil, ErrBatchAlreadyReverted
+	}
+
+	if op.RevertStatus != models.RevertStatusApplied && op.RevertStatus != models.RevertStatusFailed {
+		return nil, fmt.Errorf("operation has unexpected revert status: %s", op.RevertStatus)
+	}
+
+	if op.OperationType != models.OperationTypeMove && op.OperationType != models.OperationTypeUpdate {
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, ErrCopyModeNotRevertible.Error()), nil
+	}
+
+	return nil, nil
+}
+
+func (r *Reverter) checkAnchor(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
+	anchorPath := op.NewPath
+	if op.OperationType == models.OperationTypeUpdate {
+		anchorPath = op.OriginalPath
+	}
+
+	if _, err := r.fs.Stat(anchorPath); err != nil {
+		if os.IsNotExist(err) {
+			logging.Warnf("Anchor file missing for op %d at %s: skipping revert (anchor_missing)", op.ID, anchorPath)
+			return r.skipRevert(op, models.RevertReasonAnchorMissing), nil
+		}
+		logging.Errorf("Cannot access anchor file for op %d at %s: %v (access_denied)", op.ID, anchorPath, err)
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonAccessDenied, fmt.Sprintf("cannot access anchor file: %v", err)), nil
+	}
+
+	return nil, nil
+}
+
+// revertPrimaryPaths computes the source path and target directory for reverting
+// a primary file move, without touching the filesystem. This separation makes the
+// path logic testable independently of FS operations.
+type revertPrimaryPaths struct {
+	SourcePath      string // file to rename/move back
+	TargetDir       string // directory that must exist before the rename
+	OriginalDirPath string // for InPlaceRenamed: the original directory path to restore
+	CurrentDir      string // for InPlaceRenamed: the current directory path being renamed
+	DestRoot        string // boundary for empty-dir cleanup
+}
+
+// computeRevertPrimaryPaths calculates the paths needed to revert a primary file move.
+func computeRevertPrimaryPaths(op *models.BatchFileOperation) revertPrimaryPaths {
+	if op.InPlaceRenamed && op.OriginalDirPath != "" {
+		currentDir := filepath.Dir(op.NewPath)
+		sourcePath := filepath.Join(op.OriginalDirPath, filepath.Base(op.NewPath))
+		return revertPrimaryPaths{
+			SourcePath:      sourcePath,
+			TargetDir:       filepath.Dir(op.OriginalPath),
+			OriginalDirPath: op.OriginalDirPath,
+			CurrentDir:      currentDir,
+			DestRoot:        filepath.Dir(filepath.Dir(op.NewPath)),
+		}
+	}
+	return revertPrimaryPaths{
+		SourcePath: op.NewPath,
+		TargetDir:  filepath.Dir(op.OriginalPath),
+		DestRoot:   filepath.Dir(filepath.Dir(op.NewPath)),
+	}
+}
+
+// revertPrimaryFileFS is the standalone filesystem implementation of revertPrimaryFile.
+// cleanupDirFn routes empty-directory cleanup through the caller's seam (typically
+// aferoFSReverter.cleanupEmptyDir) instead of calling cleanupEmptyDirFS directly.
+func revertPrimaryFileFS(ctx context.Context, fs afero.Fs, batchFileOpRepo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, cleanupDirFn func(dirPath, stopAt string)) (*RevertFileResult, error) {
+	paths := computeRevertPrimaryPaths(op)
+
+	if op.InPlaceRenamed && op.OriginalDirPath != "" {
+		if _, err := fs.Stat(paths.OriginalDirPath); err == nil {
+			return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonDestinationConflict, fmt.Sprintf("directory %s already exists (destination conflict)", paths.OriginalDirPath)), nil
+		}
+
+		if err := fs.Rename(paths.CurrentDir, paths.OriginalDirPath); err != nil {
+			reason := models.RevertReasonUnexpectedPathState
+			if os.IsPermission(err) {
+				reason = models.RevertReasonAccessDenied
+			}
+			return failRevert(ctx, batchFileOpRepo, op, reason, fmt.Sprintf("failed to rename directory back: %v", err)), nil
+		}
+
+		if paths.SourcePath != op.OriginalPath {
+			if err := fs.MkdirAll(paths.TargetDir, config.DirPerm); err != nil {
+				return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("failed to create directory for file rename: %v", err)), nil
+			}
+			if err := fs.Rename(paths.SourcePath, op.OriginalPath); err != nil {
+				reason := models.RevertReasonUnexpectedPathState
+				if os.IsPermission(err) {
+					reason = models.RevertReasonAccessDenied
+				}
+				return failRevert(ctx, batchFileOpRepo, op, reason, fmt.Sprintf("failed to rename file within directory: %v", err)), nil
+			}
+		}
+	} else {
+		if _, err := fs.Stat(op.OriginalPath); err == nil {
+			return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonDestinationConflict, fmt.Sprintf("file %s already exists (destination conflict)", op.OriginalPath)), nil
+		}
+
+		targetDir := paths.TargetDir
+		canonicalDir, err := fsutil.CanonicalizePath(targetDir)
+		if err != nil {
+			return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("failed to canonicalize directory path: %v", err)), nil
+		}
+		if err := fs.MkdirAll(canonicalDir, config.DirPerm); err != nil {
+			return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonAccessDenied, fmt.Sprintf("failed to recreate original directory: %v", err)), nil
+		}
+
+		if err := fs.Rename(paths.SourcePath, op.OriginalPath); err != nil {
+			reason := models.RevertReasonUnexpectedPathState
+			if os.IsPermission(err) {
+				reason = models.RevertReasonAccessDenied
+			}
+			return failRevert(ctx, batchFileOpRepo, op, reason, fmt.Sprintf("failed to revert move: %v", err)), nil
+		}
+
+		cleanupDirFn(filepath.Dir(op.NewPath), paths.DestRoot)
+	}
+
+	return nil, nil
+}
+
+// restoreNFOFS is the standalone filesystem implementation that restores the NFO
+// snapshot for a reverted operation. It is an unexported helper used only by
+// aferoFSReverter.restoreNFO. Extracted from Reverter so it can be tested
+// independently and called from different contexts.
+func restoreNFOFS(ctx context.Context, fs afero.Fs, batchFileOpRepo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, hardFailure bool) (string, *RevertFileResult) {
+	if op.NFOSnapshot == "" {
+		return "", nil
+	}
+
+	nfoPath := op.NFOPath
+	if nfoPath == "" && op.MovieID != "" {
+		nfoPath = filepath.Join(filepath.Dir(op.OriginalPath), op.MovieID+".nfo")
+	}
+	if nfoPath == "" {
+		return "", nil
+	}
+
+	if hardFailure {
+		return restoreNFOHardFailure(ctx, fs, batchFileOpRepo, op, nfoPath)
+	}
+	return restoreNFOSoftFailure(fs, op, nfoPath)
+}
+
+func restoreNFOHardFailure(ctx context.Context, fs afero.Fs, batchFileOpRepo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, nfoPath string) (string, *RevertFileResult) {
+	nfoDir := filepath.Dir(nfoPath)
+	canonicalNfoDir, err := fsutil.CanonicalizePath(nfoDir)
+	if err != nil {
+		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to canonicalize NFO path: %v", err))
+	}
+	if err := fs.MkdirAll(canonicalNfoDir, config.DirPerm); err != nil {
+		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to create NFO directory: %v", err))
+	}
+	canonicalNfoPath := fsutil.NormalizePath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
+	if err := afero.WriteFile(fs, canonicalNfoPath, []byte(op.NFOSnapshot), config.FilePerm); err != nil {
+		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to restore NFO: %v", err))
+	}
+
+	return "", nil
+}
+
+func restoreNFOSoftFailure(fs afero.Fs, op *models.BatchFileOperation, nfoPath string) (string, *RevertFileResult) {
+	nfoDir := filepath.Dir(op.OriginalPath)
+	canonicalNfoDir, err := fsutil.CanonicalizePath(nfoDir)
+	if err != nil {
+		logging.Warnf("restoreNFOSoftFailure: failed to resolve absolute path for %q: %v", nfoDir, err)
+		canonicalNfoDir = filepath.Clean(nfoDir)
+	}
+	_ = fs.MkdirAll(canonicalNfoDir, config.DirPerm)
+	restorePath := fsutil.NormalizePath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
+	if err := afero.WriteFile(fs, restorePath, []byte(op.NFOSnapshot), config.FilePerm); err != nil {
+		logging.Warnf("Failed to restore NFO for op %d: %v (move-mode: treating as warning)", op.ID, err)
+		return fmt.Sprintf("NFO restore failed: %v", err), nil
+	}
+
+	return "", nil
 }
 
 // cleanupEmptyDir removes the directory at dirPath if it is empty.
 // Best-effort: errors are logged but not returned. Does not remove non-empty directories.
 // Walks up parent directories removing empty ones until hitting stopAt or a non-empty directory.
-func (r *Reverter) cleanupEmptyDir(dirPath string, stopAt string) {
+// cleanupEmptyDirFS removes the directory at dirPath if it is empty.
+// Best-effort: errors are logged but not returned. Does not remove non-empty directories.
+// Walks up parent directories removing empty ones until hitting stopAt or a non-empty directory.
+func cleanupEmptyDirFS(fs afero.Fs, dirPath string, stopAt string) {
 	current := filepath.Clean(dirPath)
 	stop := filepath.Clean(stopAt)
 
 	for current != "" && current != "." && current != "/" && current != filepath.ToSlash(filepath.VolumeName(current)+"/") && current != stop {
 		// Read directory entries to check if empty
-		entries, err := afero.ReadDir(r.fs, current)
+		entries, err := afero.ReadDir(fs, current)
 		if err != nil {
 			// Directory doesn't exist or can't be read — nothing to clean up
 			return
@@ -472,7 +413,7 @@ func (r *Reverter) cleanupEmptyDir(dirPath string, stopAt string) {
 			return
 		}
 		// Directory is empty — remove it
-		if err := r.fs.Remove(current); err != nil {
+		if err := fs.Remove(current); err != nil {
 			// Failed to remove (e.g., permission denied) — stop walking up
 			return
 		}
@@ -486,16 +427,16 @@ func (r *Reverter) cleanupEmptyDir(dirPath string, stopAt string) {
 	}
 }
 
-// handleGeneratedFiles processes the GeneratedFiles JSON on a BatchFileOperation:
+// cleanupGeneratedFilesFS processes the GeneratedFiles JSON on a BatchFileOperation:
 // deletes files in the Delete list and moves back files in the MoveBack list.
 // After deleting files, it removes empty parent directories left behind,
 // stopping at stopAt boundary to prevent removing shared ancestor directories.
 // Best-effort: missing files are skipped (os.IsNotExist), errors don't fail the revert.
-func (r *Reverter) handleGeneratedFiles(op *models.BatchFileOperation, stopAt string) {
+func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt string) {
 	if op.GeneratedFiles == "" {
 		return
 	}
-	var gf GeneratedFilesJSON
+	var gf models.GeneratedFilesJSON
 	if err := json.Unmarshal([]byte(op.GeneratedFiles), &gf); err != nil {
 		return
 	}
@@ -503,15 +444,15 @@ func (r *Reverter) handleGeneratedFiles(op *models.BatchFileOperation, stopAt st
 	dirsToCheck := make(map[string]bool)
 	// Delete files in the Delete array (best-effort — skip IsNotExist)
 	for _, path := range gf.Delete {
-		if err := r.fs.Remove(path); err != nil && !os.IsNotExist(err) {
-			_ = err
+		if err := fs.Remove(path); err != nil && !os.IsNotExist(err) {
+			logging.Debugf("cleanupGeneratedFiles: failed to remove %s: %v", path, err)
 		}
 		dirsToCheck[filepath.Dir(path)] = true
 	}
 	// Move back files in the MoveBack array (best-effort)
 	for _, fm := range gf.MoveBack {
-		if err := r.fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
-			_ = err
+		if err := fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
+			logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
 		}
 		dirsToCheck[filepath.Dir(fm.NewPath)] = true
 	}
@@ -524,7 +465,7 @@ func (r *Reverter) handleGeneratedFiles(op *models.BatchFileOperation, stopAt st
 			logging.Warnf("Skipping cleanup of directory %q: outside batch root %q", cleanDir, batchRoot)
 			continue
 		}
-		r.cleanupEmptyDirDownward(cleanDir, stopAt)
+		cleanupEmptyDirDownwardFS(fs, cleanDir, stopAt)
 	}
 }
 
@@ -546,12 +487,16 @@ func isDescendant(path string, parentDir string) bool {
 // walking up through parents until hitting stopAt boundary.
 // Unlike cleanupEmptyDir (which walks UP from a starting dir), this handles
 // the case where deleting files leaves empty subdirectories.
-func (r *Reverter) cleanupEmptyDirDownward(dirPath string, stopAt string) {
+// cleanupEmptyDirDownwardFS removes empty directories starting from dirPath,
+// walking up through parents until hitting stopAt boundary.
+// Unlike cleanupEmptyDirFS (which walks UP from a starting dir), this handles
+// the case where deleting files leaves empty subdirectories.
+func cleanupEmptyDirDownwardFS(fs afero.Fs, dirPath string, stopAt string) {
 	current := filepath.Clean(dirPath)
 	stop := filepath.Clean(stopAt)
 
 	for {
-		entries, err := afero.ReadDir(r.fs, current)
+		entries, err := afero.ReadDir(fs, current)
 		if err != nil {
 			return
 		}
@@ -561,7 +506,7 @@ func (r *Reverter) cleanupEmptyDirDownward(dirPath string, stopAt string) {
 		if current == stop {
 			return
 		}
-		if err := r.fs.Remove(current); err != nil {
+		if err := fs.Remove(current); err != nil {
 			return
 		}
 		parent := filepath.Dir(current)
@@ -572,11 +517,64 @@ func (r *Reverter) cleanupEmptyDirDownward(dirPath string, stopAt string) {
 	}
 }
 
+// revertOperations processes a slice of operations using the given revert function,
+// tracking per-operation outcomes. Each operation is processed independently
+// (best-effort: individual failures don't abort the batch). Returns the ordered
+// list of per-operation results.
+func (r *Reverter) revertOperations(ctx context.Context, ops []models.BatchFileOperation, revertFn func(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error)) []RevertFileResult {
+	var outcomes []RevertFileResult
+	for i := range ops {
+		op := &ops[i]
+		res, sysErr := revertFn(ctx, op)
+		if sysErr != nil {
+			outcomes = append(outcomes, RevertFileResult{
+				OperationID:  op.ID,
+				MovieID:      op.MovieID,
+				OriginalPath: op.OriginalPath,
+				NewPath:      op.NewPath,
+				Outcome:      models.RevertOutcomeFailed,
+				Error:        sysErr.Error(),
+			})
+			continue
+		}
+		outcomes = append(outcomes, *res)
+	}
+	return outcomes
+}
+
+// summarizeOutcomes computes aggregate succeeded/skipped/failed counts from
+// per-operation outcomes.
+func summarizeOutcomes(outcomes []RevertFileResult) (succeeded, skipped, failed int) {
+	for _, o := range outcomes {
+		switch o.Outcome {
+		case models.RevertOutcomeReverted:
+			succeeded++
+		case models.RevertOutcomeSkipped:
+			skipped++
+		case models.RevertOutcomeFailed:
+			failed++
+		}
+	}
+	return
+}
+
+// collectDestRoots extracts destination root directories from operations for
+// batch-level empty-dir cleanup after revert.
+func collectDestRoots(ops []models.BatchFileOperation) map[string]bool {
+	destRoots := make(map[string]bool)
+	for i := range ops {
+		if !ops[i].InPlaceRenamed && ops[i].NewPath != "" {
+			destRoots[filepath.Dir(filepath.Dir(ops[i].NewPath))] = true
+		}
+	}
+	return destRoots
+}
+
 // RevertBatch reverts all operations in a batch (D-02, D-04).
 // It uses best-effort processing: individual failures don't abort the batch.
 // After all operations are processed, it sweeps empty destination directories.
 func (r *Reverter) RevertBatch(ctx context.Context, batchJobID string) (*RevertBatchResult, error) {
-	ops, err := r.batchFileOpRepo.FindByBatchJobID(batchJobID)
+	ops, err := r.batchFileOpRepo.FindByBatchJobID(ctx, batchJobID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch batch operations: %w", err)
 	}
@@ -605,49 +603,8 @@ func (r *Reverter) RevertBatch(ctx context.Context, batchJobID string) (*RevertB
 		return nil, ErrNoOperationsFound
 	}
 
-	// Process each operation (D-04: best-effort, continue on failure)
-	result := &RevertBatchResult{
-		Total: len(processable),
-	}
-
-	// Pre-collect destRoots for batch-level cleanup. We track these before
-	// processing so that even if individual revertFile calls fail (e.g., DB
-	// status persistence failure after filesystem success), the batch sweep
-	// still attempts to clean up empty directories. cleanupEmptyDir is safe
-	// to call on any directory — it only removes actually-empty ones.
-	destRoots := make(map[string]bool)
-	for i := range processable {
-		if !processable[i].InPlaceRenamed && processable[i].NewPath != "" {
-			destRoots[filepath.Dir(filepath.Dir(processable[i].NewPath))] = true
-		}
-	}
-
-	for i := range processable {
-		op := &processable[i]
-		res, sysErr := r.revertFile(ctx, op)
-		if sysErr != nil {
-			result.Failed++
-			result.Outcomes = append(result.Outcomes, RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeFailed,
-				Error:        sysErr.Error(),
-			})
-			continue
-		}
-
-		switch res.Outcome {
-		case models.RevertOutcomeReverted:
-			result.Succeeded++
-		case models.RevertOutcomeSkipped:
-			result.Skipped++
-		case models.RevertOutcomeFailed:
-			result.Failed++
-		}
-		result.Outcomes = append(result.Outcomes, *res)
-	}
+	outcomes := r.revertOperations(ctx, processable, r.revertFile)
+	succeeded, skipped, failed := summarizeOutcomes(outcomes)
 
 	// Batch-level cleanup: per-file cleanupEmptyDir uses destRoot as a stop
 	// boundary, which leaves intermediate parent directories behind (e.g.,
@@ -657,16 +614,22 @@ func (r *Reverter) RevertBatch(ctx context.Context, batchJobID string) (*RevertB
 	// ancestors (including the top-level output directory if it contains other
 	// files) are preserved. An empty output directory will be removed, which
 	// is the correct behavior after a full batch revert.
-	for dirPath := range destRoots {
-		r.cleanupEmptyDir(filepath.Clean(dirPath), "")
+	for dirPath := range collectDestRoots(processable) {
+		r.fsReverter.cleanupEmptyDir(filepath.Clean(dirPath), "")
 	}
 
-	return result, nil
+	return &RevertBatchResult{
+		Total:     len(processable),
+		Succeeded: succeeded,
+		Skipped:   skipped,
+		Failed:    failed,
+		Outcomes:  outcomes,
+	}, nil
 }
 
 // RevertScrape reverts only the operations for a specific movie within a batch (HIST-04).
 func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID string) (*RevertBatchResult, error) {
-	ops, err := r.batchFileOpRepo.FindByBatchJobID(batchJobID)
+	ops, err := r.batchFileOpRepo.FindByBatchJobID(ctx, batchJobID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch batch operations: %w", err)
 	}
@@ -688,48 +651,18 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 		return nil, fmt.Errorf("no processable operations found for movie %s in batch %s", movieID, batchJobID)
 	}
 
-	// Process each matching operation
-	result := &RevertBatchResult{
-		Total: len(matching),
+	outcomes := r.revertOperations(ctx, matching, r.revertFile)
+	succeeded, skipped, failed := summarizeOutcomes(outcomes)
+
+	for dirPath := range collectDestRoots(matching) {
+		r.fsReverter.cleanupEmptyDir(filepath.Clean(dirPath), "")
 	}
 
-	destRoots := make(map[string]bool)
-	for i := range matching {
-		if !matching[i].InPlaceRenamed && matching[i].NewPath != "" {
-			destRoots[filepath.Dir(filepath.Dir(matching[i].NewPath))] = true
-		}
-	}
-
-	for i := range matching {
-		op := &matching[i]
-		res, sysErr := r.revertFile(ctx, op)
-		if sysErr != nil {
-			result.Failed++
-			result.Outcomes = append(result.Outcomes, RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeFailed,
-				Error:        sysErr.Error(),
-			})
-			continue
-		}
-
-		switch res.Outcome {
-		case models.RevertOutcomeReverted:
-			result.Succeeded++
-		case models.RevertOutcomeSkipped:
-			result.Skipped++
-		case models.RevertOutcomeFailed:
-			result.Failed++
-		}
-		result.Outcomes = append(result.Outcomes, *res)
-	}
-
-	for dirPath := range destRoots {
-		r.cleanupEmptyDir(filepath.Clean(dirPath), "")
-	}
-
-	return result, nil
+	return &RevertBatchResult{
+		Total:     len(matching),
+		Succeeded: succeeded,
+		Skipped:   skipped,
+		Failed:    failed,
+		Outcomes:  outcomes,
+	}, nil
 }

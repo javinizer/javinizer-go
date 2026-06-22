@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -13,69 +12,46 @@ import (
 	"github.com/spf13/afero"
 )
 
-type InPlaceNoRenameFolderStrategy struct {
+type inPlaceNoRenameFolderStrategy struct {
 	fs             afero.Fs
-	config         *config.OutputConfig
-	templateEngine *template.Engine
+	config         *Config
+	templateEngine template.EngineInterface
 }
 
-var _ OperationStrategy = (*InPlaceNoRenameFolderStrategy)(nil)
+var _ OperationStrategy = (*inPlaceNoRenameFolderStrategy)(nil)
 
-func NewInPlaceNoRenameFolderStrategy(fs afero.Fs, cfg *config.OutputConfig, _ *matcher.Matcher, engine *template.Engine) *InPlaceNoRenameFolderStrategy {
+func newInPlaceNoRenameFolderStrategy(fs afero.Fs, cfg *Config, _ matcher.MatcherInterface, engine template.EngineInterface) *inPlaceNoRenameFolderStrategy {
 	if engine == nil {
 		engine = template.NewEngine()
 	}
-	return &InPlaceNoRenameFolderStrategy{
+	return &inPlaceNoRenameFolderStrategy{
 		fs:             fs,
 		config:         cfg,
 		templateEngine: engine,
 	}
 }
 
-func (s *InPlaceNoRenameFolderStrategy) Plan(match matcher.MatchResult, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
-	ctx := template.NewContextFromMovie(movie)
-	ctx.GroupActress = s.config.GroupActress
-	ctx.GroupActressName = s.config.GroupActressName
-	ctx.GroupUnknownActressName = s.config.GroupUnknownActressName
-	ctx.FirstNameOrder = s.config.FirstNameOrder
-	ctx.ActressLanguageJa = s.config.ActressLanguageJA
-	ctx.ActressDelimiter = s.config.ActressDelimiter
-
-	applyTitleTruncation(s.templateEngine, ctx, s.config.MaxTitleLength)
-
-	ctx.PartNumber = match.PartNumber
-	ctx.PartSuffix = match.PartSuffix
-	ctx.IsMultiPart = match.IsMultiPart
-
-	var fileName string
-	var err error
-	if s.config.RenameFile {
-		fileName, err = resolveFileName(s.config, s.templateEngine, ctx, match)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		fileName = match.File.Name
-		if fileName == "" && match.File.Path != "" {
-			fileName = filepath.Base(match.File.Path)
-		}
+func (s *inPlaceNoRenameFolderStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
+	pc := buildPlanContext(s.config, s.templateEngine, movie, match)
+	if pc.Err != nil {
+		return nil, pc.Err
 	}
 
-	sourceDir := filepath.Dir(match.File.Path)
+	sourceDir := filepath.Dir(match.Path)
 	targetDir := sourceDir
-	targetPath := filepath.Join(targetDir, fileName)
-	willMove := filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
+	targetPath := filepath.Join(targetDir, pc.FileName)
+	willMove := filepath.ToSlash(match.Path) != filepath.ToSlash(targetPath)
 
 	if s.config.MaxPathLength > 0 && len(targetPath) > s.config.MaxPathLength {
 		excess := len(targetPath) - s.config.MaxPathLength
-		ext := match.File.Extension
-		currentNameLen := len(fileName) - len(ext)
+		ext := match.Extension
+		currentNameLen := len(pc.FileName) - len(ext)
 		if currentNameLen > excess && currentNameLen-excess > 0 {
-			baseName := s.templateEngine.TruncateTitleBytes(strings.TrimSuffix(fileName, ext), currentNameLen-excess)
+			baseName := s.templateEngine.TruncateTitleBytes(strings.TrimSuffix(pc.FileName, ext), currentNameLen-excess)
 			if baseName != "" {
-				fileName = template.SanitizeFolderPath(baseName) + ext
-				targetPath = filepath.Join(targetDir, fileName)
-				willMove = filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
+				pc.FileName = template.SanitizeFilename(baseName) + ext
+				targetPath = filepath.Join(targetDir, pc.FileName)
+				willMove = filepath.ToSlash(match.Path) != filepath.ToSlash(targetPath)
 			}
 		}
 	}
@@ -86,30 +62,33 @@ func (s *InPlaceNoRenameFolderStrategy) Plan(match matcher.MatchResult, movie *m
 		}
 	}
 
-	conflicts := checkTargetConflict(s.fs, match.File.Path, targetPath, forceUpdate, willMove)
+	conflicts := checkTargetConflict(s.fs, match.Path, targetPath, forceUpdate, willMove)
 
 	return &OrganizePlan{
-		Match:             match,
-		Movie:             movie,
-		SourcePath:        match.File.Path,
-		TargetDir:         targetDir,
-		TargetFile:        fileName,
-		TargetPath:        targetPath,
-		WillMove:          willMove,
-		Conflicts:         conflicts,
-		InPlace:           false,
-		OldDir:            "",
-		IsDedicated:       false,
-		SkipInPlaceReason: "in-place-norenamefolder mode - file rename only",
-		FolderName:        "",
-		SubfolderPath:     "",
-		BaseFileName:      resolveBaseFileName(s.config, s.templateEngine, movie, match),
-		Strategy:          StrategyTypeInPlaceNoRenameFolder,
-		executeStrategy:   s,
+		Match:              match,
+		Movie:              movie,
+		SourcePath:         match.Path,
+		TargetDir:          targetDir,
+		TargetFile:         pc.FileName,
+		TargetPath:         targetPath,
+		WillMove:           willMove,
+		Conflicts:          conflicts,
+		InPlace:            false,
+		OldDir:             "",
+		IsDedicated:        false,
+		SkipInPlaceReason:  "in-place-norenamefolder mode - file rename only",
+		FolderName:         "",
+		SubfolderPath:      "",
+		BaseFileName:       resolveBaseFileName(s.config, s.templateEngine, movie, match),
+		PreserveSourcePath: true,
+		RenameFolder:       false,
+		strategy:           strategyInPlaceNoRenameFolder,
+		executeStrategy:    s,
+		moveFiles:          true,
 	}, nil
 }
 
-func (s *InPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
+func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	result := &OrganizeResult{
 		OriginalPath:           plan.SourcePath,
 		NewPath:                plan.TargetPath,

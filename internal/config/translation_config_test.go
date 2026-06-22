@@ -3,6 +3,7 @@ package config
 import (
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -272,12 +273,12 @@ func TestOpenAICompatibleTranslationConfig_EffectiveEnableThinking(t *testing.T)
 
 func TestNFOConfig_IsUnknownActressFallback(t *testing.T) {
 	t.Run("returns true when mode is fallback", func(t *testing.T) {
-		n := NFOConfig{UnknownActressMode: "fallback"}
+		n := NFOConfig{Format: NFOFormatConfig{UnknownActressMode: models.UnknownActressModeFallback}}
 		assert.True(t, n.IsUnknownActressFallback())
 	})
 
 	t.Run("returns false when mode is not fallback", func(t *testing.T) {
-		n := NFOConfig{UnknownActressMode: "skip"}
+		n := NFOConfig{Format: NFOFormatConfig{UnknownActressMode: models.UnknownActressModeSkip}}
 		assert.False(t, n.IsUnknownActressFallback())
 	})
 

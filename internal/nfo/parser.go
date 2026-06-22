@@ -6,9 +6,9 @@ import (
 	"io"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/spf13/afero"
 )
 
@@ -48,7 +48,7 @@ func ParseNFO(fs afero.Fs, filePath string) (*ParseResult, error) {
 	}
 
 	// Convert to models.Movie
-	movie, warnings := NFOToMovie(&nfoMovie)
+	movie, warnings := nfoToMovie(&nfoMovie)
 
 	return &ParseResult{
 		Movie:    movie,
@@ -58,10 +58,78 @@ func ParseNFO(fs afero.Fs, filePath string) (*ParseResult, error) {
 	}, nil
 }
 
-// NFOToMovie converts an NFO Movie struct to a models.Movie
-func NFOToMovie(nfo *Movie) (*models.Movie, []string) {
+// resolveNFOIDs extracts the movie ID and ContentID from NFO uniqueid elements.
+// If ContentID is not found via uniqueid, ID is used as fallback.
+func resolveNFOIDs(nfo *Movie) (id, contentID string) {
+	id = nfo.ID
+
+	for _, uid := range nfo.UniqueID {
+		if uid.Type == "contentid" && uid.Value != "" {
+			contentID = uid.Value
+			break
+		}
+	}
+
+	// If ContentID is still empty, use ID as fallback
+	if contentID == "" && id != "" {
+		contentID = id
+	}
+
+	return id, contentID
+}
+
+// resolveNFORatings extracts the default or first rating from NFO ratings.
+func resolveNFORatings(nfo *Movie) (score float64, votes int) {
+	if len(nfo.Ratings.Rating) == 0 {
+		return 0, 0
+	}
+
+	var rating *rating
+	for i := range nfo.Ratings.Rating {
+		if nfo.Ratings.Rating[i].Default {
+			rating = &nfo.Ratings.Rating[i]
+			break
+		}
+	}
+	if rating == nil {
+		rating = &nfo.Ratings.Rating[0]
+	}
+
+	return rating.Value, rating.Votes
+}
+
+// resolveNFOMedia extracts cover URL and screenshot URLs from NFO thumbs and fanart.
+func resolveNFOMedia(nfo *Movie) (coverURL string, screenshots []string) {
+	// Extract cover URL from thumbs
+	for _, thumb := range nfo.Thumb {
+		if thumb.Aspect == "poster" && thumb.Value != "" {
+			coverURL = thumb.Value
+			break
+		}
+	}
+	// Fallback to first thumb if no poster aspect found
+	if coverURL == "" && len(nfo.Thumb) > 0 {
+		coverURL = nfo.Thumb[0].Value
+	}
+
+	// Extract screenshot URLs from fanart
+	if nfo.Fanart != nil && len(nfo.Fanart.Thumbs) > 0 {
+		screenshots = make([]string, 0, len(nfo.Fanart.Thumbs))
+		for _, thumb := range nfo.Fanart.Thumbs {
+			if thumb.Value != "" {
+				screenshots = append(screenshots, thumb.Value)
+			}
+		}
+	}
+
+	return coverURL, screenshots
+}
+
+// nfoToMovie converts an NFO Movie struct to a models.Movie
+func nfoToMovie(nfo *Movie) (*models.Movie, []string) {
 	var warnings []string
 
+	// Construct movie with basic field mapping
 	movie := &models.Movie{
 		Title:         nfo.Title,
 		OriginalTitle: nfo.OriginalTitle,
@@ -79,25 +147,10 @@ func NFOToMovie(nfo *Movie) (*models.Movie, []string) {
 		movie.Maker = nfo.Studio
 	}
 
-	// Extract ID from various sources
-	if nfo.ID != "" {
-		movie.ID = nfo.ID
-	}
+	// Resolve IDs
+	movie.ID, movie.ContentID = resolveNFOIDs(nfo)
 
-	// Extract ContentID from uniqueid elements
-	for _, uid := range nfo.UniqueID {
-		if uid.Type == "contentid" && uid.Value != "" {
-			movie.ContentID = uid.Value
-			break
-		}
-	}
-
-	// If ContentID is still empty, use ID as fallback
-	if movie.ContentID == "" && movie.ID != "" {
-		movie.ContentID = movie.ID
-	}
-
-	// Parse release date (prefer ReleaseDate over Premiered)
+	// Resolve release date (prefer ReleaseDate over Premiered)
 	dateStr := nfo.ReleaseDate
 	if dateStr == "" {
 		dateStr = nfo.Premiered
@@ -114,23 +167,8 @@ func NFOToMovie(nfo *Movie) (*models.Movie, []string) {
 		}
 	}
 
-	// Extract rating
-	if len(nfo.Ratings.Rating) > 0 {
-		// Use first rating or find default
-		var rating *Rating
-		for i := range nfo.Ratings.Rating {
-			if nfo.Ratings.Rating[i].Default {
-				rating = &nfo.Ratings.Rating[i]
-				break
-			}
-		}
-		if rating == nil {
-			rating = &nfo.Ratings.Rating[0]
-		}
-
-		movie.RatingScore = rating.Value
-		movie.RatingVotes = rating.Votes
-	}
+	// Resolve ratings
+	movie.RatingScore, movie.RatingVotes = resolveNFORatings(nfo)
 
 	// Convert actors to actresses
 	if len(nfo.Actors) > 0 {
@@ -154,27 +192,10 @@ func NFOToMovie(nfo *Movie) (*models.Movie, []string) {
 		}
 	}
 
-	// Extract cover URL from thumbs
-	for _, thumb := range nfo.Thumb {
-		if thumb.Aspect == "poster" && thumb.Value != "" {
-			movie.CoverURL = thumb.Value
-			break
-		}
-	}
-	// Fallback to first thumb if no poster aspect found
-	if movie.CoverURL == "" && len(nfo.Thumb) > 0 {
-		movie.CoverURL = nfo.Thumb[0].Value
-	}
-
-	// Extract screenshot URLs from fanart
-	if nfo.Fanart != nil && len(nfo.Fanart.Thumbs) > 0 {
-		movie.Screenshots = make([]string, 0, len(nfo.Fanart.Thumbs))
-		for _, thumb := range nfo.Fanart.Thumbs {
-			if thumb.Value != "" {
-				movie.Screenshots = append(movie.Screenshots, thumb.Value)
-			}
-		}
-	}
+	// Resolve media (cover and screenshots)
+	coverURL, screenshots := resolveNFOMedia(nfo)
+	movie.Poster.CoverURL = coverURL
+	movie.Screenshots = screenshots
 
 	// Extract trailer URL
 	if nfo.Trailer != "" {
@@ -193,15 +214,15 @@ func NFOToMovie(nfo *Movie) (*models.Movie, []string) {
 }
 
 // parseActorToActress converts an NFO Actor to a models.Actress
-func parseActorToActress(actor Actor) models.Actress {
+func parseActorToActress(actor actor) models.Actress {
 	actress := models.Actress{
 		ThumbURL: actor.Thumb,
 	}
 
 	// Determine which field has Japanese and which has romanized text
-	nameHasJapanese := containsJapanese(actor.Name)
-	altNameHasJapanese := containsJapanese(actor.AltName)
-	roleHasJapanese := actor.Role != "" && containsJapanese(actor.Role)
+	nameHasJapanese := scraperutil.HasJapanese(actor.Name)
+	altNameHasJapanese := scraperutil.HasJapanese(actor.AltName)
+	roleHasJapanese := actor.Role != "" && scraperutil.HasJapanese(actor.Role)
 
 	// Priority for FirstName/LastName (romanized):
 	// 1. Use AltName if it's romanized (not Japanese)
@@ -209,12 +230,12 @@ func parseActorToActress(actor Actor) models.Actress {
 	// 3. Otherwise leave empty (both are Japanese)
 	if actor.AltName != "" && !altNameHasJapanese {
 		// AltName is romanized, use it
-		firstName, lastName := splitActorName(actor.AltName)
+		firstName, lastName := models.SplitFullName(actor.AltName)
 		actress.FirstName = firstName
 		actress.LastName = lastName
 	} else if actor.Name != "" && !nameHasJapanese {
 		// Name is romanized, use it
-		firstName, lastName := splitActorName(actor.Name)
+		firstName, lastName := models.SplitFullName(actor.Name)
 		actress.FirstName = firstName
 		actress.LastName = lastName
 	}
@@ -232,39 +253,6 @@ func parseActorToActress(actor Actor) models.Actress {
 	}
 
 	return actress
-}
-
-// splitActorName attempts to split a full name into first and last names
-// Handles both "FirstName LastName" and "LastName FirstName" formats
-func splitActorName(fullName string) (firstName, lastName string) {
-	fullName = strings.TrimSpace(fullName)
-	if fullName == "" {
-		return "", ""
-	}
-
-	parts := strings.Fields(fullName)
-	if len(parts) == 0 {
-		return "", ""
-	} else if len(parts) == 1 {
-		return parts[0], ""
-	} else if len(parts) == 2 {
-		// Assume FirstName LastName format (most common in NFO files)
-		return parts[0], parts[1]
-	} else {
-		// Multiple parts: take first as firstName, rest as lastName
-		return parts[0], strings.Join(parts[1:], " ")
-	}
-}
-
-// containsJapanese checks if a string contains Japanese characters
-// Uses unicode package for robust detection of Hiragana, Katakana, and Han (Kanji) characters
-func containsJapanese(s string) bool {
-	for _, r := range s {
-		if unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han) {
-			return true
-		}
-	}
-	return false
 }
 
 // parseDate parses various date formats commonly found in NFO files

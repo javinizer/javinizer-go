@@ -21,6 +21,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	// Import scrapers to trigger init() registration of options
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	_ "github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
 	_ "github.com/javinizer/javinizer-go/internal/scraper/caribbeancom"
 	_ "github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
@@ -48,7 +50,7 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 			scraperName: "mgstage",
 			wantLabel:   "MGStage",
 			wantKeys: []string{
-				"request_delay",
+				"rate_limit",
 				"user_agent",
 				"proxy.enabled",
 				"proxy.profile",
@@ -62,7 +64,7 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 			wantLabel:   "JavLibrary",
 			wantKeys: []string{
 				"language",
-				"request_delay",
+				"rate_limit",
 				"base_url",
 				"use_flaresolverr",
 				"user_agent",
@@ -78,7 +80,7 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 			wantLabel:   "JavBus",
 			wantKeys: []string{
 				"language",
-				"request_delay",
+				"rate_limit",
 				"base_url",
 				"user_agent",
 				"proxy.enabled",
@@ -92,7 +94,7 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 			scraperName: "jav321",
 			wantLabel:   "Jav321",
 			wantKeys: []string{
-				"request_delay",
+				"rate_limit",
 				"base_url",
 				"user_agent",
 				"proxy.enabled",
@@ -107,7 +109,7 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 			wantLabel:   "Tokyo-Hot",
 			wantKeys: []string{
 				"language",
-				"request_delay",
+				"rate_limit",
 				"base_url",
 				"user_agent",
 				"proxy.enabled",
@@ -122,7 +124,7 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 			wantLabel:   "AV Entertainment",
 			wantKeys: []string{
 				"language",
-				"request_delay",
+				"rate_limit",
 				"base_url",
 				"scrape_bonus_screens",
 				"user_agent",
@@ -137,7 +139,7 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 			scraperName: "dlgetchu",
 			wantLabel:   "DLGetchu",
 			wantKeys: []string{
-				"request_delay",
+				"rate_limit",
 				"base_url",
 				"user_agent",
 				"proxy.enabled",
@@ -150,20 +152,19 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			registry := models.NewScraperRegistry()
-			registry.Register(&mockScraper{name: tt.scraperName, enabled: true})
+			registry := newTestRegistry()
+			registry.RegisterInstance(&mockScraper{name: tt.scraperName, enabled: true})
 
-			cfg := config.DefaultConfig()
-			cfg.Scrapers.Proxy.Profiles = map[string]config.ProxyProfile{
+			cfg := config.DefaultConfig(nil, nil)
+			cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
 				"alpha": {URL: "http://alpha.example:8080"},
 				"beta":  {URL: "http://beta.example:8080"},
 			}
 
-			deps := &ServerDependencies{Registry: registry}
-			deps.SetConfig(cfg)
+			deps := newTestDeps(cfg, withRegistry(registry))
 
 			router := gin.New()
-			router.GET("/scrapers", getAvailableScrapers(deps))
+			router.GET("/scrapers", getAvailableScrapers(testkit.GetTestRuntime(deps)))
 
 			req := httptest.NewRequest(http.MethodGet, "/scrapers", nil)
 			w := httptest.NewRecorder()
@@ -171,7 +172,7 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 
 			require.Equal(t, http.StatusOK, w.Code)
 
-			var response AvailableScrapersResponse
+			var response contracts.AvailableScrapersResponse
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 			require.Len(t, response.Scrapers, 1)
 
@@ -179,7 +180,7 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 			assert.Equal(t, tt.scraperName, scraper.Name)
 			assert.Equal(t, tt.wantLabel, scraper.DisplayTitle)
 
-			keys := make(map[string]ScraperOption, len(scraper.Options))
+			keys := make(map[string]contracts.ScraperOption, len(scraper.Options))
 			for _, option := range scraper.Options {
 				keys[option.Key] = option
 			}
@@ -190,7 +191,7 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 
 			proxyProfile := keys["proxy.profile"]
 			require.Len(t, proxyProfile.Choices, 3)
-			assert.Equal(t, []ScraperChoice{
+			assert.Equal(t, []contracts.ScraperChoice{
 				{Value: "", Label: "Inherit Default"},
 				{Value: "alpha", Label: "alpha"},
 				{Value: "beta", Label: "beta"},
@@ -200,21 +201,21 @@ func TestGetAvailableScrapers_AdditionalOptionSets(t *testing.T) {
 }
 
 func TestProxyProfileChoices(t *testing.T) {
-	assert.Equal(t, []ScraperChoice{
+	assert.Equal(t, []contracts.ScraperChoice{
 		{Value: "", Label: "Inherit Default"},
-	}, proxyProfileChoices(nil))
+	}, proxyProfileChoices(core.APIConfig{}))
 
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy.Profiles = map[string]config.ProxyProfile{
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
 		"zeta":  {URL: "http://zeta.example:8080"},
 		"alpha": {URL: "http://alpha.example:8080"},
 	}
 
-	assert.Equal(t, []ScraperChoice{
+	assert.Equal(t, []contracts.ScraperChoice{
 		{Value: "", Label: "Inherit Default"},
 		{Value: "alpha", Label: "alpha"},
 		{Value: "zeta", Label: "zeta"},
-	}, proxyProfileChoices(cfg))
+	}, proxyProfileChoices(core.ConfigFromAppConfig(cfg)))
 }
 
 func TestValidateTranslationSaveConfig(t *testing.T) {
@@ -229,12 +230,12 @@ func TestValidateTranslationSaveConfig(t *testing.T) {
 		},
 		{
 			name: "disabled translation allowed",
-			cfg:  config.DefaultConfig(),
+			cfg:  config.DefaultConfig(nil, nil),
 		},
 		{
 			name: "openai missing key",
 			cfg: func() *config.Config {
-				cfg := config.DefaultConfig()
+				cfg := config.DefaultConfig(nil, nil)
 				cfg.Metadata.Translation.Enabled = true
 				cfg.Metadata.Translation.Provider = "openai"
 				return cfg
@@ -244,7 +245,7 @@ func TestValidateTranslationSaveConfig(t *testing.T) {
 		{
 			name: "deepl missing key",
 			cfg: func() *config.Config {
-				cfg := config.DefaultConfig()
+				cfg := config.DefaultConfig(nil, nil)
 				cfg.Metadata.Translation.Enabled = true
 				cfg.Metadata.Translation.Provider = "deepl"
 				return cfg
@@ -254,7 +255,7 @@ func TestValidateTranslationSaveConfig(t *testing.T) {
 		{
 			name: "google paid missing key",
 			cfg: func() *config.Config {
-				cfg := config.DefaultConfig()
+				cfg := config.DefaultConfig(nil, nil)
 				cfg.Metadata.Translation.Enabled = true
 				cfg.Metadata.Translation.Provider = "google"
 				cfg.Metadata.Translation.Google.Mode = "paid"
@@ -265,7 +266,7 @@ func TestValidateTranslationSaveConfig(t *testing.T) {
 		{
 			name: "google free without key allowed",
 			cfg: func() *config.Config {
-				cfg := config.DefaultConfig()
+				cfg := config.DefaultConfig(nil, nil)
 				cfg.Metadata.Translation.Enabled = true
 				cfg.Metadata.Translation.Provider = "google"
 				cfg.Metadata.Translation.Google.Mode = "free"
@@ -275,7 +276,7 @@ func TestValidateTranslationSaveConfig(t *testing.T) {
 		{
 			name: "openai with key allowed",
 			cfg: func() *config.Config {
-				cfg := config.DefaultConfig()
+				cfg := config.DefaultConfig(nil, nil)
 				cfg.Metadata.Translation.Enabled = true
 				cfg.Metadata.Translation.Provider = "openai"
 				cfg.Metadata.Translation.OpenAI.APIKey = "test-key"
@@ -338,8 +339,8 @@ func TestFetchOpenAICompatibleModels_ErrorPaths(t *testing.T) {
 }
 
 func TestGetTranslationModels_AdditionalErrors(t *testing.T) {
-	deps := &ServerDependencies{}
-	deps.SetConfig(config.DefaultConfig())
+	testCfg := config.DefaultConfig(nil, nil)
+	deps := newTestDeps(testCfg)
 
 	router := gin.New()
 	router.POST("/translation/models", getTranslationModels(deps))
@@ -402,11 +403,11 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	t.Run("invalid request body", func(t *testing.T) {
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		testCfg := config.DefaultConfig(nil, nil)
+		deps := newTestDeps(testCfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
 		req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBufferString(`{"mode":`))
 		req.Header.Set("Content-Type", "application/json")
@@ -418,11 +419,11 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("invalid target url", func(t *testing.T) {
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		testCfg := config.DefaultConfig(nil, nil)
+		deps := newTestDeps(testCfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
 		req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBufferString(`{"mode":"direct","target_url":"ftp://example.com"}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -434,11 +435,11 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("direct proxy requires configuration", func(t *testing.T) {
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		testCfg := config.DefaultConfig(nil, nil)
+		deps := newTestDeps(testCfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
 		req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBufferString(`{"mode":"direct","target_url":"https://example.com","proxy":{"enabled":false}}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -458,23 +459,23 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 		proxy := startTestForwardProxy(t)
 		defer proxy.Close()
 
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy.Enabled = true
 		cfg.Scrapers.Proxy.DefaultProfile = "main"
-		cfg.Scrapers.Proxy.Profiles = map[string]config.ProxyProfile{
+		cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
 			"main": {URL: proxy.URL},
 		}
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(cfg)
+		testCfg := cfg
+		deps := newTestDeps(testCfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
-		body, err := json.Marshal(ProxyTestRequest{
+		body, err := json.Marshal(contracts.ProxyTestRequest{
 			Mode:      "direct",
 			TargetURL: target.URL,
-			Proxy: config.ProxyConfig{
+			Proxy: models.ProxyConfig{
 				Enabled: true,
 			},
 		})
@@ -487,7 +488,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var response ProxyTestResponse
+		var response contracts.ProxyTestResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 		assert.False(t, response.Success)
 		assert.Equal(t, http.StatusBadGateway, response.StatusCode)
@@ -495,11 +496,11 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("flaresolverr requires configuration", func(t *testing.T) {
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		testCfg := config.DefaultConfig(nil, nil)
+		deps := newTestDeps(testCfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
 		req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBufferString(`{"mode":"flaresolverr","target_url":"https://example.com","flaresolverr":{"enabled":false}}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -511,11 +512,11 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("flaresolverr client creation failure", func(t *testing.T) {
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		testCfg := config.DefaultConfig(nil, nil)
+		deps := newTestDeps(testCfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
 		reqBody := `{"mode":"flaresolverr","target_url":"https://example.com","flaresolverr":{"enabled":true,"url":"","timeout":30}}`
 		req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBufferString(reqBody))
@@ -528,23 +529,23 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("direct proxy client creation failure returns structured response", func(t *testing.T) {
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy.Enabled = true
 		cfg.Scrapers.Proxy.DefaultProfile = "main"
-		cfg.Scrapers.Proxy.Profiles = map[string]config.ProxyProfile{
+		cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
 			"main": {URL: "http://[::1"}, // Invalid URL to cause client creation failure
 		}
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(cfg)
+		testCfg := cfg
+		deps := newTestDeps(testCfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
-		reqBody := ProxyTestRequest{
+		reqBody := contracts.ProxyTestRequest{
 			Mode:      "direct",
 			TargetURL: "https://example.com",
-			Proxy: config.ProxyConfig{
+			Proxy: models.ProxyConfig{
 				Enabled: true,
 			},
 		}
@@ -558,7 +559,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var response ProxyTestResponse
+		var response contracts.ProxyTestResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 		assert.False(t, response.Success)
 		assert.Contains(t, response.Message, "failed to create proxy transport")
@@ -566,23 +567,23 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("direct proxy request failure returns structured response", func(t *testing.T) {
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy.Enabled = true
 		cfg.Scrapers.Proxy.DefaultProfile = "main"
-		cfg.Scrapers.Proxy.Profiles = map[string]config.ProxyProfile{
+		cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
 			"main": {URL: "http://127.0.0.1:1"}, // Invalid port to force connection error
 		}
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(cfg)
+		testCfg := cfg
+		deps := newTestDeps(testCfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
-		reqBody := ProxyTestRequest{
+		reqBody := contracts.ProxyTestRequest{
 			Mode:      "direct",
 			TargetURL: "https://example.com",
-			Proxy: config.ProxyConfig{
+			Proxy: models.ProxyConfig{
 				Enabled: true,
 			},
 		}
@@ -595,7 +596,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var response ProxyTestResponse
+		var response contracts.ProxyTestResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 		assert.False(t, response.Success)
 		assert.Contains(t, response.Message, "direct proxy request failed")
@@ -608,23 +609,23 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 		}))
 		defer nonProxy.Close()
 
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy.Enabled = true
 		cfg.Scrapers.Proxy.DefaultProfile = "main"
-		cfg.Scrapers.Proxy.Profiles = map[string]config.ProxyProfile{
+		cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
 			"main": {URL: nonProxy.URL},
 		}
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(cfg)
+		testCfg := cfg
+		deps := newTestDeps(testCfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
-		reqBody := ProxyTestRequest{
+		reqBody := contracts.ProxyTestRequest{
 			Mode:      "direct",
 			TargetURL: "https://example.com",
-			Proxy: config.ProxyConfig{
+			Proxy: models.ProxyConfig{
 				Enabled: true,
 			},
 		}
@@ -637,7 +638,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var response ProxyTestResponse
+		var response contracts.ProxyTestResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 		assert.False(t, response.Success)
 		assert.Contains(t, response.Message, "direct proxy request failed")
@@ -651,11 +652,11 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 		}))
 		defer fs.Close()
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		testCfg := config.DefaultConfig(nil, nil)
+		deps := newTestDeps(testCfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
 		reqBody := `{"mode":"flaresolverr","target_url":"https://example.com","flaresolverr":{"enabled":true,"url":"` + fs.URL + `","timeout":5}}`
 		req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBufferString(reqBody))
@@ -665,7 +666,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var response ProxyTestResponse
+		var response contracts.ProxyTestResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 		assert.False(t, response.Success)
 		assert.Contains(t, response.Message, "flaresolverr request failed")
@@ -684,12 +685,13 @@ func TestIsValidHTTPURL(t *testing.T) {
 func TestUpdateConfig_SaveAndTranslationFailures(t *testing.T) {
 	t.Run("translation save validation failure", func(t *testing.T) {
 		tempConfigFile := filepath.Join(t.TempDir(), "config.yaml")
-		deps := createTestDeps(t, config.DefaultConfig(), tempConfigFile)
+		coreDeps := createTestDeps(t, config.DefaultConfig(nil, nil), tempConfigFile)
+		deps := systemDepsFromCore(coreDeps)
 
 		router := gin.New()
-		router.PUT("/config", updateConfig(deps))
+		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		cfg.Metadata.Translation.Enabled = true
 		cfg.Metadata.Translation.Provider = "openai"
 		cfg.Metadata.Translation.OpenAI.APIKey = ""
@@ -712,12 +714,13 @@ func TestUpdateConfig_SaveAndTranslationFailures(t *testing.T) {
 		}
 
 		tempDir := t.TempDir()
-		deps := createTestDeps(t, config.DefaultConfig(), tempDir)
+		coreDeps := createTestDeps(t, config.DefaultConfig(nil, nil), tempDir)
+		deps := systemDepsFromCore(coreDeps)
 
 		router := gin.New()
-		router.PUT("/config", updateConfig(deps))
+		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		cfg.Server.Host = "0.0.0.0"
 
 		body, err := json.Marshal(cfg)
@@ -735,12 +738,13 @@ func TestUpdateConfig_SaveAndTranslationFailures(t *testing.T) {
 
 func TestUpdateConfig_PersistsSuccessfulReload(t *testing.T) {
 	tempConfigFile := filepath.Join(t.TempDir(), "config.yaml")
-	deps := createTestDeps(t, config.DefaultConfig(), tempConfigFile)
+	coreDeps := createTestDeps(t, config.DefaultConfig(nil, nil), tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
 
 	router := gin.New()
-	router.PUT("/config", updateConfig(deps))
+	router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.Server.Host = "127.0.0.1"
 	cfg.Server.Port = 9191
 	cfg.Metadata.Translation.Enabled = true
@@ -756,7 +760,7 @@ func TestUpdateConfig_PersistsSuccessfulReload(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	updated := deps.GetConfig()
+	updated := deps.CoreDeps.GetConfig()
 	assert.Equal(t, "127.0.0.1", updated.Server.Host)
 	assert.Equal(t, 9191, updated.Server.Port)
 
@@ -769,18 +773,19 @@ func TestUpdateConfig_PersistsSuccessfulReload(t *testing.T) {
 func TestUpdateConfig_ProxyVerification(t *testing.T) {
 	t.Run("save without token fails when proxy changed", func(t *testing.T) {
 		tempConfigFile := filepath.Join(t.TempDir(), "config.yaml")
-		deps := createTestDeps(t, config.DefaultConfig(), tempConfigFile)
+		coreDeps := createTestDeps(t, config.DefaultConfig(nil, nil), tempConfigFile)
+		deps := systemDepsFromCore(coreDeps)
 		// Initialize token store for this test
 		deps.TokenStore = core.NewTokenStore()
 
 		router := gin.New()
-		router.PUT("/config", updateConfig(deps))
+		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
 		// Change proxy settings without providing a token
-		cfg := *config.DefaultConfig()
+		cfg := *config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy.Enabled = true
 		cfg.Scrapers.Proxy.DefaultProfile = "test"
-		cfg.Scrapers.Proxy.Profiles = map[string]config.ProxyProfile{
+		cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
 			"test": {URL: "http://proxy.example:8080"},
 		}
 
@@ -798,33 +803,35 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 
 	t.Run("save with valid token succeeds when proxy changed", func(t *testing.T) {
 		tempConfigFile := filepath.Join(t.TempDir(), "config.yaml")
-		deps := createTestDeps(t, config.DefaultConfig(), tempConfigFile)
+		coreDeps := createTestDeps(t, config.DefaultConfig(nil, nil), tempConfigFile)
+		deps := systemDepsFromCore(coreDeps)
 		// Initialize token store
 		deps.TokenStore = core.NewTokenStore()
 
 		router := gin.New()
-		router.PUT("/config", updateConfig(deps))
+		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
 		// Create new proxy config
-		newProxy := config.ProxyConfig{
+		newProxy := models.ProxyConfig{
 			Enabled:        true,
 			DefaultProfile: "test",
-			Profiles: map[string]config.ProxyProfile{
+			Profiles: map[string]models.ProxyProfile{
 				"test": {URL: "http://proxy.example:8080"},
 			},
 		}
 
 		// Create a valid token for the new proxy config
-		vt := deps.TokenStore.Create("global", core.HashProxyConfig(newProxy))
+		newHash, _ := core.HashProxyConfig(newProxy)
+		vt, _, _ := deps.TokenStore.Create("global", newHash)
 
 		// Build the full config with the new proxy settings
-		cfg := *config.DefaultConfig()
+		cfg := *config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy = newProxy
 
 		reqBody := UpdateConfigRequest{
 			Config: cfg,
 			ProxyVerificationTokens: map[string]string{
-				"global": vt.Token,
+				"global": vt,
 			},
 		}
 
@@ -842,18 +849,19 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 
 	t.Run("save with invalid token fails", func(t *testing.T) {
 		tempConfigFile := filepath.Join(t.TempDir(), "config.yaml")
-		deps := createTestDeps(t, config.DefaultConfig(), tempConfigFile)
+		coreDeps := createTestDeps(t, config.DefaultConfig(nil, nil), tempConfigFile)
+		deps := systemDepsFromCore(coreDeps)
 		// Initialize token store
 		deps.TokenStore = core.NewTokenStore()
 
 		router := gin.New()
-		router.PUT("/config", updateConfig(deps))
+		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
 		// Change proxy settings with an invalid token
-		cfg := *config.DefaultConfig()
+		cfg := *config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy.Enabled = true
 		cfg.Scrapers.Proxy.DefaultProfile = "test"
-		cfg.Scrapers.Proxy.Profiles = map[string]config.ProxyProfile{
+		cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
 			"test": {URL: "http://proxy.example:8080"},
 		}
 
@@ -879,20 +887,21 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 	t.Run("save without token succeeds when proxy unchanged", func(t *testing.T) {
 		tempConfigFile := filepath.Join(t.TempDir(), "config.yaml")
 		// Start with proxy already configured
-		initialCfg := config.DefaultConfig()
+		initialCfg := config.DefaultConfig(nil, nil)
 		initialCfg.Scrapers.Proxy.Enabled = true
 		initialCfg.Scrapers.Proxy.DefaultProfile = "test"
-		initialCfg.Scrapers.Proxy.Profiles = map[string]config.ProxyProfile{
+		initialCfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
 			"test": {URL: "http://proxy.example:8080"},
 		}
 
-		deps := createTestDeps(t, initialCfg, tempConfigFile)
-		deps.SetConfig(initialCfg)
+		coreDeps := createTestDeps(t, initialCfg, tempConfigFile)
+		coreDeps.CoreDeps.SetConfig(initialCfg)
+		deps := systemDepsFromCore(coreDeps)
 		// Initialize token store
 		deps.TokenStore = core.NewTokenStore()
 
 		router := gin.New()
-		router.PUT("/config", updateConfig(deps))
+		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
 		// Change only server settings, keep proxy the same
 		cfg := *initialCfg
@@ -912,33 +921,34 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 
 	t.Run("save with expired token fails", func(t *testing.T) {
 		tempConfigFile := filepath.Join(t.TempDir(), "config.yaml")
-		deps := createTestDeps(t, config.DefaultConfig(), tempConfigFile)
+		coreDeps := createTestDeps(t, config.DefaultConfig(nil, nil), tempConfigFile)
+		deps := systemDepsFromCore(coreDeps)
 		// Initialize token store
 		deps.TokenStore = core.NewTokenStore()
 
 		router := gin.New()
-		router.PUT("/config", updateConfig(deps))
+		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
 		// Create new proxy config
-		newProxy := config.ProxyConfig{
+		newProxy := models.ProxyConfig{
 			Enabled:        true,
 			DefaultProfile: "test",
-			Profiles: map[string]config.ProxyProfile{
+			Profiles: map[string]models.ProxyProfile{
 				"test": {URL: "http://proxy.example:8080"},
 			},
 		}
 
 		// Create a token with wrong config hash (simulates token for different config)
-		wrongHashToken := deps.TokenStore.Create("global", "wrong_hash")
+		wrongHashToken, _, _ := deps.TokenStore.Create("global", "wrong_hash")
 
 		// Build the full config with the new proxy settings
-		cfg := *config.DefaultConfig()
+		cfg := *config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy = newProxy
 
 		reqBody := UpdateConfigRequest{
 			Config: cfg,
 			ProxyVerificationTokens: map[string]string{
-				"global": wrongHashToken.Token, // Token exists but for different config hash
+				"global": wrongHashToken, // Token exists but for different config hash
 			},
 		}
 
@@ -957,13 +967,13 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 
 func TestScraperDisplayTitleAndOptions(t *testing.T) {
 	t.Run("returns fallback for unknown scraper", func(t *testing.T) {
-		title, options := scraperDisplayTitleAndOptions("nonexistent_scraper", nil)
+		title, options := scraperDisplayTitleAndOptions(nil, "nonexistent_scraper", nil)
 		assert.Equal(t, "nonexistent_scraper", title)
 		assert.NotEmpty(t, options)
 	})
 
 	t.Run("returns registered options for known scraper", func(t *testing.T) {
-		title, options := scraperDisplayTitleAndOptions("r18dev", nil)
+		title, options := scraperDisplayTitleAndOptions(nil, "r18dev", nil)
 		assert.NotEmpty(t, title)
 		assert.NotEmpty(t, options)
 	})
@@ -971,38 +981,38 @@ func TestScraperDisplayTitleAndOptions(t *testing.T) {
 
 func TestProxyProfilesEqual(t *testing.T) {
 	t.Run("equal maps", func(t *testing.T) {
-		a := map[string]config.ProxyProfile{
+		a := map[string]models.ProxyProfile{
 			"test": {URL: "http://localhost:8080"},
 		}
-		b := map[string]config.ProxyProfile{
+		b := map[string]models.ProxyProfile{
 			"test": {URL: "http://localhost:8080"},
 		}
 		assert.True(t, proxyProfilesEqual(a, b))
 	})
 
 	t.Run("different length", func(t *testing.T) {
-		a := map[string]config.ProxyProfile{
+		a := map[string]models.ProxyProfile{
 			"test": {URL: "http://localhost:8080"},
 		}
-		b := map[string]config.ProxyProfile{}
+		b := map[string]models.ProxyProfile{}
 		assert.False(t, proxyProfilesEqual(a, b))
 	})
 
 	t.Run("different values", func(t *testing.T) {
-		a := map[string]config.ProxyProfile{
+		a := map[string]models.ProxyProfile{
 			"test": {URL: "http://localhost:8080"},
 		}
-		b := map[string]config.ProxyProfile{
+		b := map[string]models.ProxyProfile{
 			"test": {URL: "http://other:9090"},
 		}
 		assert.False(t, proxyProfilesEqual(a, b))
 	})
 
 	t.Run("missing key", func(t *testing.T) {
-		a := map[string]config.ProxyProfile{
+		a := map[string]models.ProxyProfile{
 			"test": {URL: "http://localhost:8080"},
 		}
-		b := map[string]config.ProxyProfile{
+		b := map[string]models.ProxyProfile{
 			"other": {URL: "http://localhost:8080"},
 		}
 		assert.False(t, proxyProfilesEqual(a, b))
@@ -1017,12 +1027,51 @@ func TestPreserveRedactedSecrets(t *testing.T) {
 	})
 
 	t.Run("redacted DSN preserved", func(t *testing.T) {
-		old := config.DefaultConfig()
+		old := config.DefaultConfig(nil, nil)
 		old.Database.DSN = "real-dsn-value"
-		newCfg := config.DefaultConfig()
-		newCfg.Database.DSN = config.RedactedValue
+		newCfg := config.DefaultConfig(nil, nil)
+		newCfg.Database.DSN = models.RedactedValue
 		preserveRedactedSecrets(old, newCfg)
 		assert.Equal(t, "real-dsn-value", newCfg.Database.DSN)
+	})
+
+	t.Run("redacted scraper APIKey preserved", func(t *testing.T) {
+		old := config.DefaultConfig(nil, nil)
+		old.Scrapers.Overrides = map[string]*models.ScraperSettings{
+			"javstash": {APIKey: "real-scraper-key"},
+		}
+		newCfg := config.DefaultConfig(nil, nil)
+		newCfg.Scrapers.Overrides = map[string]*models.ScraperSettings{
+			"javstash": {APIKey: models.RedactedValue},
+		}
+		preserveRedactedSecrets(old, newCfg)
+		assert.Equal(t, "real-scraper-key", newCfg.Scrapers.Overrides["javstash"].APIKey)
+	})
+
+	t.Run("explicit scraper APIKey change preserved", func(t *testing.T) {
+		old := config.DefaultConfig(nil, nil)
+		old.Scrapers.Overrides = map[string]*models.ScraperSettings{
+			"javstash": {APIKey: "old-key"},
+		}
+		newCfg := config.DefaultConfig(nil, nil)
+		newCfg.Scrapers.Overrides = map[string]*models.ScraperSettings{
+			"javstash": {APIKey: "new-key"},
+		}
+		preserveRedactedSecrets(old, newCfg)
+		assert.Equal(t, "new-key", newCfg.Scrapers.Overrides["javstash"].APIKey)
+	})
+
+	t.Run("scraper APIKey with nil override skipped", func(t *testing.T) {
+		old := config.DefaultConfig(nil, nil)
+		old.Scrapers.Overrides = map[string]*models.ScraperSettings{
+			"javstash": {APIKey: "real-key"},
+		}
+		newCfg := config.DefaultConfig(nil, nil)
+		newCfg.Scrapers.Overrides = map[string]*models.ScraperSettings{
+			"javstash": nil,
+		}
+		preserveRedactedSecrets(old, newCfg)
+		// Should not panic; nil newSettings is skipped
 	})
 }
 
@@ -1033,12 +1082,12 @@ func TestPreserveRedactedSecrets(t *testing.T) {
 // concern that the InitLogger zero-output error could surface via the API path.
 func TestUpdateConfig_EmptyLogOutputDefaultsAndReloadsNonFatally(t *testing.T) {
 	tempConfigFile := filepath.Join(t.TempDir(), "config.yaml")
-	deps := createTestDeps(t, config.DefaultConfig(), tempConfigFile)
+	deps := createTestDeps(t, config.DefaultConfig(nil, nil), tempConfigFile)
 
 	router := gin.New()
-	router.PUT("/config", updateConfig(deps))
+	router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.Logging.Output = "" // empty — previously could reach InitLogger with no valid targets
 
 	body, err := json.Marshal(cfg)
@@ -1054,7 +1103,7 @@ func TestUpdateConfig_EmptyLogOutputDefaultsAndReloadsNonFatally(t *testing.T) {
 	// The 200 above would pass even without the Normalize fix (reloadComponents
 	// swallows InitLogger errors). The assertion below is the real pin for the
 	// Normalize change: without it, updated.Logging.Output would remain "".
-	updated := deps.GetConfig()
-	assert.Equal(t, config.DefaultConfig().Logging.Output, updated.Logging.Output,
+	updated := deps.CoreDeps.GetConfig()
+	assert.Equal(t, config.DefaultConfig(nil, nil).Logging.Output, updated.Logging.Output,
 		"empty logging.output should be defaulted by Normalize before reload")
 }

@@ -1,17 +1,21 @@
 package history
 
+import (
+	"github.com/javinizer/javinizer-go/internal/models"
+)
+
 // HistoryRecord represents a single history record in API responses
 type HistoryRecord struct {
-	ID           uint   `json:"id"`
-	MovieID      string `json:"movie_id"`
-	Operation    string `json:"operation"`
-	OriginalPath string `json:"original_path"`
-	NewPath      string `json:"new_path"`
-	Status       string `json:"status"`
-	ErrorMessage string `json:"error_message"`
-	Metadata     string `json:"metadata"`
-	DryRun       bool   `json:"dry_run"`
-	CreatedAt    string `json:"created_at"`
+	ID           uint                    `json:"id"`
+	MovieID      string                  `json:"movie_id"`
+	Operation    models.HistoryOperation `json:"operation"`
+	OriginalPath string                  `json:"original_path"`
+	NewPath      string                  `json:"new_path"`
+	Status       models.HistoryStatus    `json:"status"`
+	ErrorMessage string                  `json:"error_message"`
+	Metadata     string                  `json:"metadata"`
+	DryRun       bool                    `json:"dry_run"`
+	CreatedAt    string                  `json:"created_at"`
 }
 
 // HistoryListResponse is the response for listing history records

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -92,19 +93,19 @@ func TestUpsertMovieCore(t *testing.T) {
 		}
 
 		err := db.Transaction(func(tx *gorm.DB) error {
-			if err := repo.ensureGenresExistTx(tx, movie.Genres); err != nil {
+			if err := repo.upserter.ensureGenresExistTx(tx, movie.Genres); err != nil {
 				return err
 			}
-			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
 				return err
 			}
 			translations := movie.Translations
 			movie.Translations = nil
-			return upsertMovieCore(tx, db, movie, translations)
+			return upsertMovieCore(tx, db, movie, translations, nil, nil)
 		})
 		require.NoError(t, err)
 
-		found, err := repo.FindByID("IPX-CORE-001")
+		found, err := repo.FindByID(context.TODO(), "IPX-CORE-001")
 		require.NoError(t, err)
 		assert.Equal(t, "IPX-CORE-001", found.ID)
 		assert.Len(t, found.Genres, 2)
@@ -120,9 +121,9 @@ func TestUpsertMovieCore(t *testing.T) {
 		movie := createTestMovie("IPX-CLEAR-001")
 		movie.Genres = []models.Genre{{Name: "Action"}}
 		movie.Actresses = []models.Actress{{DMMID: 99901, JapaneseName: "ToRemove"}}
-		require.NoError(t, repo.Create(movie))
+		require.NoError(t, repo.Create(context.TODO(), movie))
 
-		found, err := repo.FindByID("IPX-CLEAR-001")
+		found, err := repo.FindByID(context.TODO(), "IPX-CLEAR-001")
 		require.NoError(t, err)
 		require.Len(t, found.Actresses, 1)
 		require.Len(t, found.Genres, 1)
@@ -132,16 +133,16 @@ func TestUpsertMovieCore(t *testing.T) {
 		movie.Genres = []models.Genre{{Name: "Action"}}
 
 		err = db.Transaction(func(tx *gorm.DB) error {
-			if err := repo.ensureGenresExistTx(tx, movie.Genres); err != nil {
+			if err := repo.upserter.ensureGenresExistTx(tx, movie.Genres); err != nil {
 				return err
 			}
 			translations := movie.Translations
 			movie.Translations = nil
-			return upsertMovieCore(tx, db, movie, translations)
+			return upsertMovieCore(tx, db, movie, translations, nil, nil)
 		})
 		require.NoError(t, err)
 
-		found, err = repo.FindByID("IPX-CLEAR-001")
+		found, err = repo.FindByID(context.TODO(), "IPX-CLEAR-001")
 		require.NoError(t, err)
 		assert.Empty(t, found.Actresses, "actresses should be cleared when set to nil")
 		assert.Len(t, found.Genres, 1, "genres should remain unchanged")
@@ -154,9 +155,9 @@ func TestUpsertMovieCore(t *testing.T) {
 		movie := createTestMovie("IPX-CLEAR-002")
 		movie.Genres = []models.Genre{{Name: "Comedy"}, {Name: "Drama"}}
 		movie.Actresses = []models.Actress{{DMMID: 99902, JapaneseName: "KeepActress"}}
-		require.NoError(t, repo.Create(movie))
+		require.NoError(t, repo.Create(context.TODO(), movie))
 
-		found, err := repo.FindByID("IPX-CLEAR-002")
+		found, err := repo.FindByID(context.TODO(), "IPX-CLEAR-002")
 		require.NoError(t, err)
 		require.Len(t, found.Genres, 2)
 
@@ -165,16 +166,16 @@ func TestUpsertMovieCore(t *testing.T) {
 		movie.Actresses = []models.Actress{{DMMID: 99902, JapaneseName: "KeepActress"}}
 
 		err = db.Transaction(func(tx *gorm.DB) error {
-			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
 				return err
 			}
 			translations := movie.Translations
 			movie.Translations = nil
-			return upsertMovieCore(tx, db, movie, translations)
+			return upsertMovieCore(tx, db, movie, translations, nil, nil)
 		})
 		require.NoError(t, err)
 
-		found, err = repo.FindByID("IPX-CLEAR-002")
+		found, err = repo.FindByID(context.TODO(), "IPX-CLEAR-002")
 		require.NoError(t, err)
 		assert.Empty(t, found.Genres, "genres should be cleared when set to nil")
 		assert.Len(t, found.Actresses, 1, "actresses should remain unchanged")
@@ -187,9 +188,9 @@ func TestUpsertMovieCore(t *testing.T) {
 		movie := createTestMovie("IPX-CLEAR-003")
 		movie.Genres = []models.Genre{{Name: "Horror"}}
 		movie.Actresses = []models.Actress{{DMMID: 99903, JapaneseName: "ToRemove"}}
-		require.NoError(t, repo.Create(movie))
+		require.NoError(t, repo.Create(context.TODO(), movie))
 
-		found, err := repo.FindByID("IPX-CLEAR-003")
+		found, err := repo.FindByID(context.TODO(), "IPX-CLEAR-003")
 		require.NoError(t, err)
 		require.Len(t, found.Genres, 1)
 		require.Len(t, found.Actresses, 1)
@@ -201,11 +202,11 @@ func TestUpsertMovieCore(t *testing.T) {
 		err = db.Transaction(func(tx *gorm.DB) error {
 			translations := movie.Translations
 			movie.Translations = nil
-			return upsertMovieCore(tx, db, movie, translations)
+			return upsertMovieCore(tx, db, movie, translations, nil, nil)
 		})
 		require.NoError(t, err)
 
-		found, err = repo.FindByID("IPX-CLEAR-003")
+		found, err = repo.FindByID(context.TODO(), "IPX-CLEAR-003")
 		require.NoError(t, err)
 		assert.Empty(t, found.Genres, "genres should be cleared")
 		assert.Empty(t, found.Actresses, "actresses should be cleared")
@@ -217,9 +218,9 @@ func TestUpsertMovieCore(t *testing.T) {
 
 		movie := createTestMovie("IPX-CORE-002")
 		movie.Genres = []models.Genre{{Name: "Comedy"}}
-		require.NoError(t, repo.Create(movie))
+		require.NoError(t, repo.Create(context.TODO(), movie))
 
-		existing, err := repo.FindByID("IPX-CORE-002")
+		existing, err := repo.FindByID(context.TODO(), "IPX-CORE-002")
 		require.NoError(t, err)
 
 		movie.CreatedAt = existing.CreatedAt
@@ -231,19 +232,19 @@ func TestUpsertMovieCore(t *testing.T) {
 		}
 
 		err = db.Transaction(func(tx *gorm.DB) error {
-			if err := repo.ensureGenresExistTx(tx, movie.Genres); err != nil {
+			if err := repo.upserter.ensureGenresExistTx(tx, movie.Genres); err != nil {
 				return err
 			}
-			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
 				return err
 			}
 			translations := movie.Translations
 			movie.Translations = nil
-			return upsertMovieCore(tx, db, movie, translations)
+			return upsertMovieCore(tx, db, movie, translations, nil, nil)
 		})
 		require.NoError(t, err)
 
-		found, err := repo.FindByID("IPX-CORE-002")
+		found, err := repo.FindByID(context.TODO(), "IPX-CORE-002")
 		require.NoError(t, err)
 		assert.Equal(t, "Updated via Core", found.Title)
 		assert.Len(t, found.Genres, 1)
@@ -263,29 +264,29 @@ func TestUpsertMovieCore(t *testing.T) {
 			{Language: "zh", Title: "Chinese Title"},
 		}
 		err := db.Transaction(func(tx *gorm.DB) error {
-			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
 				return err
 			}
 			translations := movie.Translations
 			movie.Translations = nil
-			return upsertMovieCore(tx, db, movie, translations)
+			return upsertMovieCore(tx, db, movie, translations, nil, nil)
 		})
 		require.NoError(t, err)
 
-		existing, err := repo.FindByID("IPX-TRANS-PRES-001")
+		existing, err := repo.FindByID(context.TODO(), "IPX-TRANS-PRES-001")
 		require.NoError(t, err)
 		movie.CreatedAt = existing.CreatedAt
 		movie.Translations = nil
 		movie.Actresses = []models.Actress{{DMMID: 88890, JapaneseName: "Pres Actress"}}
 		err = db.Transaction(func(tx *gorm.DB) error {
-			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
 				return err
 			}
-			return upsertMovieCore(tx, db, movie, nil)
+			return upsertMovieCore(tx, db, movie, nil, nil, nil)
 		})
 		require.NoError(t, err)
 
-		found, err := repo.FindByID("IPX-TRANS-PRES-001")
+		found, err := repo.FindByID(context.TODO(), "IPX-TRANS-PRES-001")
 		require.NoError(t, err)
 		assert.Len(t, found.Translations, 2, "existing translations should be preserved when incoming list is empty")
 		assert.Equal(t, "English Title", found.Translations[0].Title)
@@ -304,30 +305,30 @@ func TestUpsertMovieCore(t *testing.T) {
 			{Language: "zh", Title: "Chinese Title"},
 		}
 		err := db.Transaction(func(tx *gorm.DB) error {
-			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
 				return err
 			}
 			translations := movie.Translations
 			movie.Translations = nil
-			return upsertMovieCore(tx, db, movie, translations)
+			return upsertMovieCore(tx, db, movie, translations, nil, nil)
 		})
 		require.NoError(t, err)
 
-		existing, err := repo.FindByID("IPX-TRANS-STALE-001")
+		existing, err := repo.FindByID(context.TODO(), "IPX-TRANS-STALE-001")
 		require.NoError(t, err)
 		movie.CreatedAt = existing.CreatedAt
 		err = db.Transaction(func(tx *gorm.DB) error {
-			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
 				return err
 			}
 			translations := []models.MovieTranslation{
 				{Language: "en", Title: "Updated English"},
 			}
-			return upsertMovieCore(tx, db, movie, translations)
+			return upsertMovieCore(tx, db, movie, translations, nil, nil)
 		})
 		require.NoError(t, err)
 
-		found, err := repo.FindByID("IPX-TRANS-STALE-001")
+		found, err := repo.FindByID(context.TODO(), "IPX-TRANS-STALE-001")
 		require.NoError(t, err)
 		assert.Len(t, found.Translations, 1, "stale translations should be removed")
 		assert.Equal(t, "en", found.Translations[0].Language)
@@ -345,35 +346,215 @@ func TestUpsertMovieCore(t *testing.T) {
 			{Language: "zh", Title: "Chinese Title"},
 		}
 		err := db.Transaction(func(tx *gorm.DB) error {
-			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
 				return err
 			}
 			translations := movie.Translations
 			movie.Translations = nil
-			return upsertMovieCore(tx, db, movie, translations)
+			return upsertMovieCore(tx, db, movie, translations, nil, nil)
 		})
 		require.NoError(t, err)
 
-		existing, err := repo.FindByID("IPX-TRANS-NOOP-001")
+		existing, err := repo.FindByID(context.TODO(), "IPX-TRANS-NOOP-001")
 		require.NoError(t, err)
 		movie.CreatedAt = existing.CreatedAt
 		err = db.Transaction(func(tx *gorm.DB) error {
-			if err := repo.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
 				return err
 			}
 			translations := []models.MovieTranslation{
 				{Language: "en", Title: "English Title"},
 				{Language: "zh", Title: "Chinese Title"},
 			}
-			return upsertMovieCore(tx, db, movie, translations)
+			return upsertMovieCore(tx, db, movie, translations, nil, nil)
 		})
 		require.NoError(t, err)
 
-		found, err := repo.FindByID("IPX-TRANS-NOOP-001")
+		found, err := repo.FindByID(context.TODO(), "IPX-TRANS-NOOP-001")
 		require.NoError(t, err)
 		assert.Len(t, found.Translations, 2)
 		assert.Equal(t, "English Title", found.Translations[0].Title)
 		assert.Equal(t, "Chinese Title", found.Translations[1].Title)
+	})
+
+	t.Run("persists genre translation carry-fields with correct ID resolution", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+		genreTransRepo := newGenreTranslationRepository(db)
+
+		movie := createTestMovie("IPX-GTRANS-001")
+		movie.Genres = []models.Genre{{Name: "Action"}, {Name: "Drama"}}
+		genreTranslations := []models.GenreTranslationData{
+			{GenreIndex: 0, Language: "en", Name: "Action (EN)", SourceName: "test"},
+			{GenreIndex: 1, Language: "en", Name: "Drama (EN)", SourceName: "test"},
+		}
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.upserter.ensureGenresExistTx(tx, movie.Genres); err != nil {
+				return err
+			}
+			return upsertMovieCore(tx, db, movie, nil, genreTranslations, nil)
+		})
+		require.NoError(t, err)
+
+		found, err := repo.FindByID(context.TODO(), "IPX-GTRANS-001")
+		require.NoError(t, err)
+		require.Len(t, found.Genres, 2)
+
+		for _, g := range found.Genres {
+			trans, err := genreTransRepo.FindAllByGenre(context.TODO(), g.ID)
+			require.NoError(t, err)
+			require.Len(t, trans, 1, "expected exactly 1 translation for genre %s", g.Name)
+			assert.Equal(t, "en", trans[0].Language)
+			assert.Equal(t, g.ID, trans[0].GenreID)
+			if g.Name == "Action" {
+				assert.Equal(t, "Action (EN)", trans[0].Name)
+			} else {
+				assert.Equal(t, "Drama (EN)", trans[0].Name)
+			}
+		}
+	})
+
+	t.Run("persists actress translation carry-fields with correct ID resolution", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+		actressTransRepo := newActressTranslationRepository(db)
+
+		movie := createTestMovie("IPX-ATRANS-001")
+		movie.Actresses = []models.Actress{{DMMID: 77001, JapaneseName: "Test Actress"}, {DMMID: 77002, JapaneseName: "Other Actress"}}
+		actressTranslations := []models.ActressTranslationData{
+			{ActressIndex: 0, Language: "en", DisplayName: "Test Actress (EN)", SourceName: "test"},
+			{ActressIndex: 1, Language: "en", DisplayName: "Other Actress (EN)", SourceName: "test"},
+		}
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return err
+			}
+			return upsertMovieCore(tx, db, movie, nil, nil, actressTranslations)
+		})
+		require.NoError(t, err)
+
+		found, err := repo.FindByID(context.TODO(), "IPX-ATRANS-001")
+		require.NoError(t, err)
+		require.Len(t, found.Actresses, 2)
+
+		for _, a := range found.Actresses {
+			trans, err := actressTransRepo.FindAllByActress(context.TODO(), a.ID)
+			require.NoError(t, err)
+			require.Len(t, trans, 1, "expected exactly 1 translation for actress %s", a.JapaneseName)
+			assert.Equal(t, "en", trans[0].Language)
+			assert.Equal(t, a.ID, trans[0].ActressID)
+			if a.JapaneseName == "Test Actress" {
+				assert.Equal(t, "Test Actress (EN)", trans[0].DisplayName)
+			} else {
+				assert.Equal(t, "Other Actress (EN)", trans[0].DisplayName)
+			}
+		}
+	})
+
+	t.Run("genre translation ID resolution preserves original slice order", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+		genreTransRepo := newGenreTranslationRepository(db)
+
+		genre1 := models.Genre{Name: "Zebra"}
+		genre2 := models.Genre{Name: "Alpha"}
+		require.NoError(t, db.DB.Create(&genre1).Error)
+		require.NoError(t, db.DB.Create(&genre2).Error)
+
+		movie := createTestMovie("IPX-GORDER-001")
+		movie.Genres = []models.Genre{{Name: "Zebra"}, {Name: "Alpha"}}
+		genreTranslations := []models.GenreTranslationData{
+			{GenreIndex: 0, Language: "en", Name: "Zebra (EN)", SourceName: "test"},
+			{GenreIndex: 1, Language: "en", Name: "Alpha (EN)", SourceName: "test"},
+		}
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.upserter.ensureGenresExistTx(tx, movie.Genres); err != nil {
+				return err
+			}
+			return upsertMovieCore(tx, db, movie, nil, genreTranslations, nil)
+		})
+		require.NoError(t, err)
+
+		zebraTrans, err := genreTransRepo.FindByGenreAndLanguage(context.TODO(), genre1.ID, "en")
+		require.NoError(t, err)
+		assert.Equal(t, "Zebra (EN)", zebraTrans.Name, "GenreIndex 0 should map to Zebra, not Alpha")
+
+		alphaTrans, err := genreTransRepo.FindByGenreAndLanguage(context.TODO(), genre2.ID, "en")
+		require.NoError(t, err)
+		assert.Equal(t, "Alpha (EN)", alphaTrans.Name, "GenreIndex 1 should map to Alpha, not Zebra")
+	})
+
+	t.Run("skips genre translation with out-of-range index", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+
+		movie := createTestMovie("IPX-GOUT-001")
+		movie.Genres = []models.Genre{{Name: "Action"}}
+		genreTranslations := []models.GenreTranslationData{
+			{GenreIndex: 5, Language: "en", Name: "Out of Range", SourceName: "test"},
+		}
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.upserter.ensureGenresExistTx(tx, movie.Genres); err != nil {
+				return err
+			}
+			return upsertMovieCore(tx, db, movie, nil, genreTranslations, nil)
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("skips actress translation with out-of-range index", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+
+		movie := createTestMovie("IPX-AOUT-001")
+		movie.Actresses = []models.Actress{{DMMID: 77010, JapaneseName: "Solo"}}
+		actressTranslations := []models.ActressTranslationData{
+			{ActressIndex: -1, Language: "en", DisplayName: "Negative Index", SourceName: "test"},
+		}
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return err
+			}
+			return upsertMovieCore(tx, db, movie, nil, nil, actressTranslations)
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("resolves actress ID via composite key when DMMID is zero", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewMovieRepository(db)
+		actressTransRepo := newActressTranslationRepository(db)
+
+		movie := createTestMovie("IPX-ACOMPOSITE-001")
+		movie.Actresses = []models.Actress{
+			{FirstName: "Jane", LastName: "Doe", JapaneseName: "ジェーン"},
+		}
+		actressTranslations := []models.ActressTranslationData{
+			{ActressIndex: 0, Language: "en", DisplayName: "Jane Doe (EN)", SourceName: "test"},
+		}
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := repo.upserter.ensureActressesExistTx(tx, movie.Actresses); err != nil {
+				return err
+			}
+			return upsertMovieCore(tx, db, movie, nil, nil, actressTranslations)
+		})
+		require.NoError(t, err)
+
+		found, err := repo.FindByID(context.TODO(), "IPX-ACOMPOSITE-001")
+		require.NoError(t, err)
+		require.Len(t, found.Actresses, 1)
+		assert.NotZero(t, found.Actresses[0].ID, "actress ID should be resolved via composite key")
+
+		trans, err := actressTransRepo.FindAllByActress(context.TODO(), found.Actresses[0].ID)
+		require.NoError(t, err)
+		require.Len(t, trans, 1)
+		assert.Equal(t, "Jane Doe (EN)", trans[0].DisplayName)
 	})
 }
 

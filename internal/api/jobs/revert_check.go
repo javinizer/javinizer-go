@@ -6,7 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -17,36 +16,34 @@ import (
 // @Produce json
 // @Param id path string true "Job ID"
 // @Success 200 {object} contracts.RevertCheckResponse
-// @Failure 403 {object} ErrorResponse "Revert is disabled"
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 403 {object} contracts.ErrorResponse "Revert is disabled"
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/jobs/{id}/revert-check [get]
-func revertCheck(deps *ServerDependencies) gin.HandlerFunc {
+func revertCheck(deps JobDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jobID := c.Param("id")
 
 		// Guard: revert must be explicitly enabled in config
-		if !deps.GetConfig().Output.AllowRevert {
+		if !deps.AllowRevert {
 			c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: "Revert is disabled. Enable it in Settings > File Operations."})
 			return
 		}
 
 		// Load target job — 404 if not found
-		job, err := deps.JobRepo.FindByID(jobID)
+		job, err := deps.JobRepo.FindByID(c.Request.Context(), jobID)
 		if err != nil {
 			if database.IsNotFound(err) {
 				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
 				return
 			}
-			logging.Errorf("Failed to find job %s for revert-check: %v", jobID, err)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve job"})
 			return
 		}
 
 		// Load all operations for the target job
-		targetOps, err := deps.BatchFileOpRepo.FindByBatchJobID(jobID)
+		targetOps, err := deps.BatchFileOpRepo.FindByBatchJobID(c.Request.Context(), jobID)
 		if err != nil {
-			logging.Errorf("Failed to fetch operations for revert-check job %s: %v", jobID, err)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve operations"})
 			return
 		}
@@ -71,9 +68,8 @@ func revertCheck(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		// Find later batches that have path overlaps
-		allJobs, err := deps.JobRepo.List()
+		allJobs, err := deps.JobRepo.List(c.Request.Context())
 		if err != nil {
-			logging.Errorf("Failed to list jobs for revert-check: %v", err)
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve job list"})
 			return
 		}
@@ -83,7 +79,7 @@ func revertCheck(deps *ServerDependencies) gin.HandlerFunc {
 			laterJob := &allJobs[i]
 
 			// Skip the target job itself and already-reverted jobs
-			if laterJob.ID == jobID || laterJob.Status == string(models.JobStatusReverted) {
+			if laterJob.ID == jobID || laterJob.Status == models.JobStatusReverted {
 				continue
 			}
 
@@ -96,9 +92,8 @@ func revertCheck(deps *ServerDependencies) gin.HandlerFunc {
 				continue
 			}
 
-			laterOps, err := deps.BatchFileOpRepo.FindByBatchJobID(laterJob.ID)
+			laterOps, err := deps.BatchFileOpRepo.FindByBatchJobID(c.Request.Context(), laterJob.ID)
 			if err != nil {
-				logging.Warnf("Failed to fetch operations for job %s during revert-check: %v", laterJob.ID, err)
 				continue
 			}
 

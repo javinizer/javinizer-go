@@ -4,12 +4,10 @@ import (
 	"context"
 	"net/url"
 	"path"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/PuerkitoBio/goquery"
 )
 
 // Rating represents rating information from scrapers
@@ -112,10 +110,25 @@ type ActressInfo struct {
 
 // FullName returns the actress's full name
 func (a *ActressInfo) FullName() string {
-	return FormatActressName(a.LastName, a.FirstName, a.JapaneseName)
+	return formatActressNameSimple(a.LastName, a.FirstName, a.JapaneseName)
 }
 
-// Scraper defines the interface that all scrapers must implement
+// ScraperConfigResolverInterface provides scraper registry lookups without
+// importing scraperutil. Defined in models so both config and scraperutil
+// can reference it without circular imports. Implementations live in
+// scraperutil (ScraperRegistry) and are injected by callers.
+type ScraperConfigResolverInterface interface {
+	IsRegistered(name string) bool
+	GetAllDefaults() map[string]ScraperSettings
+	GetValidateFn(name string) func(*ScraperSettings) error
+}
+
+// Scraper defines the core interface that all scrapers must implement.
+//
+// URL handling and download proxy resolution are separate optional interfaces
+// (URLHandler, DownloadProxyResolver). Consumers that need those capabilities
+// should use type assertions, following the same pattern as ScraperQueryResolver
+// and ContentIDResolver.
 type Scraper interface {
 	// Name returns the scraper's identifier (e.g., "r18dev", "dmm")
 	Name() string
@@ -125,17 +138,47 @@ type Scraper interface {
 	Search(ctx context.Context, id string) (*ScraperResult, error)
 
 	// GetURL attempts to find the URL for a given movie ID
-	GetURL(id string) (string, error)
+	GetURL(ctx context.Context, id string) (string, error)
 
 	// IsEnabled returns whether this scraper is enabled in configuration
 	IsEnabled() bool
 
 	// Config returns the scraper's configuration
-	Config() *config.ScraperSettings
+	Config() *ScraperSettings
 
 	// Close cleans up resources held by the scraper (e.g., HTTP clients, browsers)
 	// Returns nil if no cleanup is needed
 	Close() error
+}
+
+// URLHandler is an optional interface for scrapers that support URL-based
+// scraping. Scrapers that implement this interface can handle direct URL input,
+// extract movie IDs from URLs, and scrape metadata from a URL.
+//
+// Consumers should use type assertion: handler, ok := scraper.(URLHandler)
+type URLHandler interface {
+	// CanHandleURL returns true if this scraper can handle the given URL.
+	CanHandleURL(url string) bool
+
+	// ExtractIDFromURL extracts the movie ID from a URL this scraper can handle.
+	// Returns (id, nil) on success or ("", error) if extraction fails.
+	ExtractIDFromURL(url string) (string, error)
+
+	// ScrapeURL directly scrapes metadata from a URL.
+	// Returns ScraperResult on success, or error with typed ScraperError on failure.
+	// Context enables cancellation and timeout propagation through rate limiters and HTTP requests.
+	ScrapeURL(ctx context.Context, url string) (*ScraperResult, error)
+}
+
+// DownloadProxyResolver is an optional interface for scrapers that can resolve
+// download proxy configuration for media downloads from scraper-specific CDN hosts.
+//
+// Consumers should use type assertion: resolver, ok := scraper.(DownloadProxyResolver)
+type DownloadProxyResolver interface {
+	// ResolveDownloadProxyForHost returns proxy configuration for media downloads
+	// from scraper-specific CDN hosts. Implementations should return
+	// (nil, nil, false) for unrelated hosts.
+	ResolveDownloadProxyForHost(host string) (downloadOverride *ProxyConfig, scraperProxy *ProxyConfig, handled bool)
 }
 
 // ScraperQueryResolver is an optional hook for scrapers to declare and normalize
@@ -145,41 +188,6 @@ type Scraper interface {
 // scraper-specific pattern, or ("", false) when it does not apply.
 type ScraperQueryResolver interface {
 	ResolveSearchQuery(input string) (string, bool)
-}
-
-// ScraperDownloadProxyResolver is an optional hook for scrapers to control
-// media download proxy routing for scraper-specific media/CDN hosts.
-//
-// Implementations should return handled=false for unrelated hosts.
-// When handled=true, downloader applies the same proxy precedence rules used by
-// scraper download_proxy/proxy/global settings.
-type ScraperDownloadProxyResolver interface {
-	ResolveDownloadProxyForHost(host string) (downloadOverride *config.ProxyConfig, scraperProxy *config.ProxyConfig, handled bool)
-}
-
-// URLHandler is an optional interface for scrapers that can handle direct URL scraping.
-// Implementations should return true for URLs they can process and extract the movie ID.
-//
-// This enables extensible URL detection - scrapers declare which URLs they handle
-// instead of hardcoding patterns in the matcher.
-type URLHandler interface {
-	// CanHandleURL returns true if this scraper can handle the given URL
-	CanHandleURL(url string) bool
-
-	// ExtractIDFromURL extracts the movie ID from a URL this scraper can handle
-	// Returns (id, nil) on success or ("", error) if extraction fails
-	ExtractIDFromURL(url string) (string, error)
-}
-
-// DirectURLScraper is an optional interface for scrapers that can directly scrape URLs.
-// Scrapers implementing this interface can extract more accurate metadata from direct URLs
-// than from ID-based search results.
-type DirectURLScraper interface {
-	// ScrapeURL directly scrapes metadata from a URL.
-	// Returns ScraperResult on success, or error with typed ScraperError on failure.
-	// Implementations should return ScraperErrorKindNotFound for non-existent pages.
-	// Context enables cancellation and timeout propagation through rate limiters and HTTP requests.
-	ScrapeURL(ctx context.Context, url string) (*ScraperResult, error)
 }
 
 // ContentIDResolver is an optional interface for scrapers that can resolve
@@ -194,142 +202,24 @@ type ContentIDResolver interface {
 	ResolveContentID(id string) (string, error)
 }
 
-// ScraperRegistry manages available scrapers
-type ScraperRegistry struct {
-	mu       sync.RWMutex
-	scrapers map[string]Scraper
-}
-
-// NewScraperRegistry creates a new scraper registry
-func NewScraperRegistry() *ScraperRegistry {
-	return &ScraperRegistry{
-		scrapers: make(map[string]Scraper),
-	}
-}
-
-// Register adds a scraper to the registry
-func (r *ScraperRegistry) Register(scraper Scraper) {
-	if scraper == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.scrapers[scraper.Name()] = scraper
-}
-
-// Reset clears all registered scrapers from the registry.
-// Primarily used for test isolation.
-func (r *ScraperRegistry) Reset() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.scrapers = make(map[string]Scraper)
-}
-
-// Get retrieves a scraper by name
-func (r *ScraperRegistry) Get(name string) (Scraper, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	scraper, exists := r.scrapers[name]
-	return scraper, exists
-}
-
-// GetAll returns all registered scrapers in sorted key order for deterministic iteration
-func (r *ScraperRegistry) GetAll() []Scraper {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	keys := make([]string, 0, len(r.scrapers))
-	for k := range r.scrapers {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	scrapers := make([]Scraper, 0, len(r.scrapers))
-	for _, k := range keys {
-		if r.scrapers[k] != nil {
-			scrapers = append(scrapers, r.scrapers[k])
-		}
-	}
-	return scrapers
-}
-
-// GetEnabled returns all enabled scrapers in sorted key order for deterministic iteration
-func (r *ScraperRegistry) GetEnabled() []Scraper {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	keys := make([]string, 0, len(r.scrapers))
-	for k := range r.scrapers {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	scrapers := make([]Scraper, 0)
-	for _, k := range keys {
-		scraper := r.scrapers[k]
-		if scraper != nil && scraper.IsEnabled() {
-			scrapers = append(scrapers, scraper)
-		}
-	}
-	return scrapers
-}
-
-// GetByPriority returns enabled scrapers in the specified priority order
-// If priority list is empty or nil, returns all enabled scrapers
-// Only returns scrapers that are both in the priority list AND enabled
-func (r *ScraperRegistry) GetByPriority(priority []string) []Scraper {
-	if len(priority) == 0 {
-		return r.GetEnabled()
-	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	scrapers := make([]Scraper, 0)
-
-	// Add scrapers in priority order (only if enabled)
-	for _, name := range priority {
-		if scraper, exists := r.scrapers[name]; exists && scraper != nil && scraper.IsEnabled() {
-			scrapers = append(scrapers, scraper)
-		}
-	}
-
-	return scrapers
-}
-
-// GetByPriorityForInput returns enabled scrapers in priority order, but moves
-// scrapers with matching query resolvers to the front for the provided input.
+// HTMLParser is an optional interface for scrapers that can parse a pre-fetched
+// HTML document into a ScraperResult. Scrapers implement this so their parsing
+// logic can be tested with a static HTML fixture (goquery.Document) without
+// HTTP mocking.
 //
-// If no scraper resolver matches, the original GetByPriority ordering is
-// returned unchanged.
-func (r *ScraperRegistry) GetByPriorityForInput(priority []string, input string) []Scraper {
-	scrapers := r.GetByPriority(priority)
-	input = strings.TrimSpace(input)
-	if input == "" || len(scrapers) == 0 {
-		return scrapers
-	}
-
-	matching := make([]Scraper, 0, len(scrapers))
-	nonMatching := make([]Scraper, 0, len(scrapers))
-
-	for _, scraper := range scrapers {
-		if _, ok := ResolveSearchQueryForScraper(scraper, input); ok {
-			matching = append(matching, scraper)
-			continue
-		}
-		nonMatching = append(nonMatching, scraper)
-	}
-
-	if len(matching) == 0 {
-		return scrapers
-	}
-
-	return append(matching, nonMatching...)
+// Consumers should use type assertion: parser, ok := scraper.(HTMLParser)
+type HTMLParser interface {
+	// ParseHTML parses the given HTML document and returns scraper results.
+	// sourceURL is the URL the document was fetched from, used for resolving
+	// relative links and populating SourceURL on the result.
+	ParseHTML(doc *goquery.Document, sourceURL string) (*ScraperResult, error)
 }
 
 // ResolveSearchQueryForScraper resolves an input query using a scraper's
 // optional ScraperQueryResolver hook.
 func ResolveSearchQueryForScraper(scraper Scraper, input string) (string, bool) {
 	resolver, ok := scraper.(ScraperQueryResolver)
-	if !ok || resolver == nil {
+	if !ok {
 		return "", false
 	}
 
@@ -348,7 +238,7 @@ type ScraperOption struct {
 	Label       string          `json:"label" example:"Scrape Actress Information"`
 	Description string          `json:"description" example:"Enable detailed actress data scraping from DMM (may be slower)"`
 	Type        string          `json:"type" example:"boolean"`
-	Default     interface{}     `json:"default,omitempty"`
+	Default     any             `json:"default,omitempty"`
 	Min         *int            `json:"min,omitempty" example:"5"`
 	Max         *int            `json:"max,omitempty" example:"120"`
 	Unit        string          `json:"unit,omitempty" example:"seconds"`

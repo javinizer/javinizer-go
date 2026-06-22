@@ -1,11 +1,18 @@
-import type { BatchJobResponse, BatchRescrapeResponse, FileResult, Movie, Scraper } from '$lib/api/types';
+import type {
+	BatchJobResponse,
+	BatchRescrapeResponse,
+	FileResult,
+	Movie,
+	Scraper,
+} from '$lib/api/types';
 
 export type ScalarStrategy =
 	| ''
 	| 'prefer-nfo'
 	| 'prefer-scraper'
 	| 'preserve-existing'
-	| 'fill-missing-only';
+	| 'fill-missing-only'
+	| 'merge-arrays';
 
 export type ArrayStrategy = '' | 'merge' | 'replace';
 
@@ -17,8 +24,8 @@ interface RescrapeControllerDeps {
 	getEditedMovies: () => Map<string, Movie>;
 	getAvailableScrapers: () => Scraper[];
 	setAvailableScrapers: (scrapers: Scraper[]) => void;
-	getRescrapeMovieId: () => string;
-	setRescrapeMovieId: (movieId: string) => void;
+	getRescrapeResultId: () => string;
+	setRescrapeResultId: (resultId: string) => void;
 	getSelectedScrapers: () => string[];
 	setSelectedScrapers: (scrapers: string[]) => void;
 	getManualSearchMode: () => boolean;
@@ -47,7 +54,7 @@ interface RescrapeControllerDeps {
 				preset?: 'conservative' | 'gap-fill' | 'aggressive';
 				scalar_strategy?: Exclude<ScalarStrategy, ''>;
 				array_strategy?: Exclude<ArrayStrategy, ''>;
-			}
+			},
 		) => Promise<BatchRescrapeResponse>;
 	};
 }
@@ -80,7 +87,7 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 		}
 	}
 
-	async function openRescrapeModal(movieId: string) {
+	async function openRescrapeModal(resultId: string) {
 		if (deps.getAvailableScrapers().length === 0) {
 			try {
 				deps.setAvailableScrapers(await deps.api.getScrapers());
@@ -90,12 +97,12 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 			}
 		}
 
-		deps.setRescrapeMovieId(movieId);
+		deps.setRescrapeResultId(resultId);
 		deps.setSelectedScrapers(
 			deps
 				.getAvailableScrapers()
 				.filter((scraper) => scraper.enabled)
-				.map((scraper) => scraper.name)
+				.map((scraper) => scraper.name),
 		);
 		deps.setManualSearchMode(false);
 		deps.setManualSearchInput('');
@@ -127,14 +134,14 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 			}
 		}
 
-		const rescrapeMovieId = deps.getRescrapeMovieId();
-		setRescrapingState(deps, rescrapeMovieId, true);
+		const rescrapeResultId = deps.getRescrapeResultId();
+		setRescrapingState(deps, rescrapeResultId, true);
 
 		try {
 			const scalarStrategy = deps.getRescrapeScalarStrategy();
 			const arrayStrategy = deps.getRescrapeArrayStrategy();
 
-			const response = await deps.api.rescrapeBatchMovie(deps.getJobId(), rescrapeMovieId, {
+			const response = await deps.api.rescrapeBatchMovie(deps.getJobId(), rescrapeResultId, {
 				force: true,
 				selected_scrapers: selectedScrapers,
 				manual_search_input: effectiveManualSearchMode
@@ -142,11 +149,9 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 					: undefined,
 				preset: deps.getRescrapePreset() as 'conservative' | 'gap-fill' | 'aggressive' | undefined,
 				scalar_strategy:
-					scalarStrategy === ''
-						? undefined
-						: (scalarStrategy as Exclude<ScalarStrategy, ''>),
+					scalarStrategy === '' ? undefined : (scalarStrategy as Exclude<ScalarStrategy, ''>),
 				array_strategy:
-					arrayStrategy === '' ? undefined : (arrayStrategy as Exclude<ArrayStrategy, ''>)
+					arrayStrategy === '' ? undefined : (arrayStrategy as Exclude<ArrayStrategy, ''>),
 			});
 
 			const updatedMovie = response.movie;
@@ -157,9 +162,9 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 				newResults[filePath] = {
 					...newResults[filePath],
 					status: 'completed',
-					data: updatedMovie,
+					movie: updatedMovie,
 					field_sources: response.field_sources ?? newResults[filePath].field_sources,
-					actress_sources: response.actress_sources ?? newResults[filePath].actress_sources
+					actress_sources: response.actress_sources ?? newResults[filePath].actress_sources,
 				};
 				deps.setJob({ ...currentJob, results: newResults });
 			}
@@ -172,20 +177,22 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 			deps.toastSuccess(
 				effectiveManualSearchMode
 					? `Successfully scraped metadata for ${effectiveManualSearchInput.trim()}`
-					: 'Successfully rescraped'
+					: 'Successfully rescraped',
 			);
 			deps.setShowRescrapeModal(false);
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
-			deps.toastError((effectiveManualSearchMode ? 'Manual search failed: ' : 'Rescrape failed: ') + errorMessage);
+			deps.toastError(
+				(effectiveManualSearchMode ? 'Manual search failed: ' : 'Rescrape failed: ') + errorMessage,
+			);
 		} finally {
-			setRescrapingState(deps, rescrapeMovieId, false);
+			setRescrapingState(deps, rescrapeResultId, false);
 		}
 	}
 
 	return {
 		applyRescrapePreset,
 		openRescrapeModal,
-		executeRescrape
+		executeRescrape,
 	};
 }

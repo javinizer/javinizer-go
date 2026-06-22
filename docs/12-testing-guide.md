@@ -573,7 +573,7 @@ scrapers:
 
     db, err := database.New(cfg)
     require.NoError(t, err)
-    err = db.AutoMigrate()
+    err = db.RunMigrationsOnStartup()
     require.NoError(t, err)
 
     return tmpFile, db
@@ -658,7 +658,9 @@ The printMovie() function (240 lines of table formatting) remains at 0% coverage
 
 ### Story 9.1: Test Processor Business Logic
 
-**Before (Coupled with Worker Pool):**
+**Before (Historical, pre-workflow seam):**
+
+*This is historical context only. The task-based worker API shown below has been removed and is not compileable in the current codebase.*
 
 ```go
 // internal/tui/model.go:45 (BEFORE Epic 9)
@@ -670,8 +672,9 @@ type Model struct {
 func (m *Model) ProcessFiles() {
     // Business logic directly in Bubble Tea model
     for _, file := range m.selectedFiles {
-        task := worker.NewScrapeTask(file, m.cfg, /* ... */)
-        m.pool.Submit(task)  // Tight coupling
+        // Old task-based flow used to build a scrape task and submit it to the pool.
+        // worker.NewScrapeTask(...) no longer exists.
+        // m.pool.Submit(task)
     }
 }
 
@@ -680,32 +683,23 @@ func (m *Model) ProcessFiles() {
 // ❌ No way to verify task submission without side effects
 ```
 
-**After (Dependency Injection):**
+**After (Workflow seam):**
 
-*Note: The following are illustrative patterns showing dependency injection for testability. Actual interface and function signatures may differ in the codebase.*
+*The current pattern injects `workflow.WorkflowInterface` and calls seam methods directly.*
 
 ```go
-// Example dependency injection pattern (illustrative)
-type PoolInterface interface {
-    Submit(task worker.Task) error
-    Wait() error
-    Stop()
+type Processor struct {
+    wf workflow.WorkflowInterface
 }
 
-type ProcessingCoordinator struct {
-    pool PoolInterface  // Interface, not concrete type
-    cfg  *config.Config
-    db   database.DB
+func NewProcessor(wf workflow.WorkflowInterface) *Processor {
+    return &Processor{wf: wf}
 }
 
-func NewProcessingCoordinator(pool PoolInterface, cfg *config.Config, db database.DB) *ProcessingCoordinator {
-    return &ProcessingCoordinator{pool: pool, cfg: cfg, db: db}
-}
-
-func (pc *ProcessingCoordinator) ProcessFiles(files []string, options ProcessingOptions) error {
-    for _, file := range files {
-        task := worker.NewScrapeTask(file, pc.cfg, /* ... */)
-        if err := pc.pool.Submit(task); err != nil {
+func (p *Processor) ScrapeFiles(ctx context.Context, movieIDs []string) error {
+    for _, movieID := range movieIDs {
+        _, err := p.wf.Scrape(ctx, scrape.ScrapeCmd{MovieID: movieID}, nil)
+        if err != nil {
             return err
         }
     }
@@ -717,36 +711,47 @@ func (pc *ProcessingCoordinator) ProcessFiles(files []string, options Processing
 
 ```go
 // internal/tui/processor_test.go:45
-func TestProcessingCoordinator_ProcessFiles(t *testing.T) {
-    // Setup: Mock worker pool using interface
-    mockPool := &MockWorkerPool{
-        submitted: make([]worker.Task, 0),
-    }
+func TestProcessor_ScrapeFiles(t *testing.T) {
+    mockWF := &mockWorkflow{}
+    p := NewProcessor(mockWF)
 
-    cfg, _ := testutil.CreateTestConfig(t, nil)
-    db := testutil.SetupTestDB(t)
-    defer db.Close()
+    err := p.ScrapeFiles(context.Background(), []string{"IPX-123", "SSIS-456"})
 
-    pc := NewProcessingCoordinator(mockPool, cfg, db)
-
-    // Execute
-    files := []string{"IPX-123.mp4", "SSIS-456.mp4"}
-    err := pc.ProcessFiles(files, ProcessingOptions{
-        ScrapeEnabled: true,
-    })
-
-    // Verify
     assert.NoError(t, err)
-    assert.Len(t, mockPool.submitted, 2)
-    assert.Equal(t, "IPX-123.mp4", mockPool.submitted[0].Description())
+    assert.Equal(t, []string{"IPX-123", "SSIS-456"}, mockWF.movieIDs)
+}
+
+type mockWorkflow struct {
+    movieIDs []string
+}
+
+func (m *mockWorkflow) Scrape(_ context.Context, cmd scrape.ScrapeCmd, _ workflow.ProgressFunc) (*scrape.ScrapeResult, error) {
+    m.movieIDs = append(m.movieIDs, cmd.MovieID)
+    return &scrape.ScrapeResult{}, nil
+}
+
+func (m *mockWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ workflow.ProgressFunc) (*workflow.ApplyResult, error) {
+    return nil, nil
+}
+
+func (m *mockWorkflow) Preview(_ context.Context, _ workflow.PreviewCmd) (*workflow.PreviewResult, error) {
+    return nil, nil
+}
+
+func (m *mockWorkflow) Compare(_ context.Context, _ workflow.CompareCmd) (*workflow.CompareResult, error) {
+    return nil, nil
+}
+
+func (m *mockWorkflow) ScanAndMatch(_ context.Context, _ workflow.ScanAndMatchCmd) (*workflow.ScanAndMatchResult, error) {
+    return nil, nil
 }
 ```
 
 **Key Learnings:**
-- Extract interfaces for all external dependencies
-- Move business logic OUT of Bubble Tea callbacks
-- Use constructor injection (`NewProcessingCoordinator`) for testability
-- Mock interfaces, not concrete types
+- Inject the workflow seam, not the worker pool
+- Keep business logic out of Bubble Tea callbacks
+- Use constructor injection (`NewProcessor`) for testability
+- Mock `workflow.WorkflowInterface`, not concrete task types
 
 **Coverage Impact:** 76.5% → 100% (13 tests)
 **Reference:** `internal/tui/processor_test.go`, `internal/tui/interfaces.go`

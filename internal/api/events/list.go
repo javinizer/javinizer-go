@@ -8,18 +8,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 // validEventTypes and validSeverities for input validation (T-07-01)
-var validEventTypes = map[string]bool{
+var validEventTypes = map[models.EventCategory]bool{
 	models.EventCategoryScraper:  true,
 	models.EventCategoryOrganize: true,
 	models.EventCategorySystem:   true,
 }
 
-var validSeverities = map[string]bool{
+var validSeverities = map[models.EventSeverity]bool{
 	models.SeverityDebug: true,
 	models.SeverityInfo:  true,
 	models.SeverityWarn:  true,
@@ -45,35 +46,43 @@ type eventListResponse struct {
 // @Param limit query int false "Max events to return (default 50, max 200)" default(50)
 // @Param offset query int false "Offset for pagination" default(0)
 // @Success 200 {object} eventListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/events [get]
-func listEvents(deps *ServerDependencies) gin.HandlerFunc {
+func listEvents(eventRepo database.EventRepositoryInterface) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		eventType := c.Query("type")
-		severity := c.Query("severity")
+		eventTypeStr := c.Query("type")
+		severityStr := c.Query("severity")
 		source := c.Query("source")
 		startStr := c.Query("start")
 		endStr := c.Query("end")
 
-		if eventType != "" && !validEventTypes[eventType] {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid type filter. Must be one of: scraper, organize, system"})
-			return
+		var eventType models.EventCategory
+		if eventTypeStr != "" {
+			eventType = models.EventCategory(eventTypeStr)
+			if !validEventTypes[eventType] {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid type filter. Must be one of: scraper, organize, system"})
+				return
+			}
 		}
 
-		if severity != "" && !validSeverities[severity] {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid severity filter. Must be one of: debug, info, warn, error"})
-			return
+		var severity models.EventSeverity
+		if severityStr != "" {
+			severity = models.EventSeverity(severityStr)
+			if !validSeverities[severity] {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid severity filter. Must be one of: debug, info, warn, error"})
+				return
+			}
 		}
 
 		if source != "" && len(strings.TrimSpace(source)) == 0 {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Source filter must not be empty"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Source filter must not be empty"})
 			return
 		}
 
 		limit, offset := core.ParsePagination(c, 50, 200)
 
-		filter := database.EventFilter{
+		filter := EventFilter{
 			EventType: eventType,
 			Severity:  severity,
 			Source:    source,
@@ -82,7 +91,7 @@ func listEvents(deps *ServerDependencies) gin.HandlerFunc {
 		if startStr != "" {
 			start, err := time.Parse(time.RFC3339, startStr)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid start date format. Use ISO 8601 (e.g., 2026-01-01T00:00:00Z)"})
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid start date format. Use ISO 8601 (e.g., 2026-01-01T00:00:00Z)"})
 				return
 			}
 			filter.Start = &start
@@ -90,23 +99,21 @@ func listEvents(deps *ServerDependencies) gin.HandlerFunc {
 		if endStr != "" {
 			end, err := time.Parse(time.RFC3339, endStr)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid end date format. Use ISO 8601 (e.g., 2026-01-31T23:59:59Z)"})
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid end date format. Use ISO 8601 (e.g., 2026-01-31T23:59:59Z)"})
 				return
 			}
 			filter.End = &end
 		}
 
-		events, err := deps.EventRepo.FindFiltered(filter, limit, offset)
+		events, err := eventRepo.FindFiltered(c.Request.Context(), filter, limit, offset)
 		if err != nil {
-			logging.Errorf("Failed to list events: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve events"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve events"})
 			return
 		}
 
-		total, err := deps.EventRepo.CountFiltered(filter)
+		total, err := eventRepo.CountFiltered(c.Request.Context(), filter)
 		if err != nil {
-			logging.Errorf("Failed to count events: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to count events"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to count events"})
 			return
 		}
 

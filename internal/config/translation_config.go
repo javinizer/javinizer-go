@@ -6,17 +6,9 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"gopkg.in/yaml.v3"
 )
-
-// FlareSolverrConfig holds FlareSolverr configuration for bypassing Cloudflare
-type FlareSolverrConfig struct {
-	Enabled    bool   `yaml:"enabled" json:"enabled"`         // Enable FlareSolverr for bypassing Cloudflare
-	URL        string `yaml:"url" json:"url"`                 // FlareSolverr endpoint (default: http://localhost:8191/v1)
-	Timeout    int    `yaml:"timeout" json:"timeout"`         // Request timeout in seconds (default: 30)
-	MaxRetries int    `yaml:"max_retries" json:"max_retries"` // Max retry attempts for FlareSolverr calls (default: 3)
-	SessionTTL int    `yaml:"session_ttl" json:"session_ttl"` // Session TTL in seconds (default: 300)
-}
 
 // MetadataConfig holds metadata aggregation settings
 type MetadataConfig struct {
@@ -24,12 +16,12 @@ type MetadataConfig struct {
 	ActressDatabase  ActressDatabaseConfig  `yaml:"actress_database" json:"actress_database"`   // Actress image database (SQLite-backed)
 	GenreReplacement GenreReplacementConfig `yaml:"genre_replacement" json:"genre_replacement"` // Genre replacement/normalization (SQLite-backed)
 	WordReplacement  WordReplacementConfig  `yaml:"word_replacement" json:"word_replacement"`   // Word uncensor/text replacement (SQLite-backed)
-	TagDatabase      TagDatabaseConfig      `yaml:"tag_database" json:"tag_database"`           // Per-movie tag database (SQLite-backed)
+	TagDatabase      tagDatabaseConfig      `yaml:"tag_database" json:"tag_database"`           // Per-movie tag database (SQLite-backed)
 	Translation      TranslationConfig      `yaml:"translation" json:"translation"`             // Metadata translation pipeline
 	IgnoreGenres     []string               `yaml:"ignore_genres" json:"ignore_genres"`
 	RequiredFields   []string               `yaml:"required_fields" json:"required_fields"`
 	NFO              NFOConfig              `yaml:"nfo" json:"nfo"`
-	Completeness     CompletenessConfig     `yaml:"completeness" json:"completeness"` // Completeness scoring configuration
+	Completeness     completenessConfig     `yaml:"completeness" json:"completeness"` // Completeness scoring configuration
 }
 
 // TranslationConfig holds metadata translation settings.
@@ -71,16 +63,16 @@ type OpenAITranslationConfig struct {
 
 // DeepLTranslationConfig holds DeepL provider settings.
 type DeepLTranslationConfig struct {
-	Mode    string `yaml:"mode" json:"mode"`         // free or pro
-	BaseURL string `yaml:"base_url" json:"base_url"` // Optional override (defaults to mode-specific endpoint)
-	APIKey  string `yaml:"api_key" json:"api_key"`   // DeepL API key
+	Mode    models.DeepLMode `yaml:"mode" json:"mode"`         // free or pro
+	BaseURL string           `yaml:"base_url" json:"base_url"` // Optional override (defaults to mode-specific endpoint)
+	APIKey  string           `yaml:"api_key" json:"api_key"`   // DeepL API key
 }
 
 // GoogleTranslationConfig holds Google Translate provider settings.
 type GoogleTranslationConfig struct {
-	Mode    string `yaml:"mode" json:"mode"`         // free or paid
-	BaseURL string `yaml:"base_url" json:"base_url"` // Optional override
-	APIKey  string `yaml:"api_key" json:"api_key"`   // Required for paid mode
+	Mode    models.GoogleMode `yaml:"mode" json:"mode"`         // free or paid
+	BaseURL string            `yaml:"base_url" json:"base_url"` // Optional override
+	APIKey  string            `yaml:"api_key" json:"api_key"`   // Required for paid mode
 }
 
 // OpenAICompatibleTranslationConfig holds settings for self-hosted or third-party
@@ -247,61 +239,78 @@ type WordReplacementConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"` // Enable word replacement from database
 }
 
-// TagDatabaseConfig holds per-movie tag database configuration
-type TagDatabaseConfig struct {
+// tagDatabaseConfig holds per-movie tag database configuration
+type tagDatabaseConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"` // Enable per-movie tag lookup from database
 }
 
-// CompletenessConfig holds completeness scoring configuration
-type CompletenessConfig struct {
+// completenessConfig holds completeness scoring configuration
+type completenessConfig struct {
 	Enabled bool                   `yaml:"enabled" json:"enabled"`
-	Tiers   CompletenessTierConfig `yaml:"tiers" json:"tiers"`
+	Tiers   completenessTierConfig `yaml:"tiers" json:"tiers"`
 }
 
-// CompletenessTierConfig holds tier definitions for completeness scoring
-type CompletenessTierConfig struct {
-	Essential  CompletenessTierDefinition `yaml:"essential" json:"essential"`
-	Important  CompletenessTierDefinition `yaml:"important" json:"important"`
-	NiceToHave CompletenessTierDefinition `yaml:"nice_to_have" json:"nice_to_have"`
+// completenessTierConfig holds tier definitions for completeness scoring
+type completenessTierConfig struct {
+	Essential  completenessTierDefinition `yaml:"essential" json:"essential"`
+	Important  completenessTierDefinition `yaml:"important" json:"important"`
+	NiceToHave completenessTierDefinition `yaml:"nice_to_have" json:"nice_to_have"`
 }
 
-// CompletenessTierDefinition defines a single tier's weight and assigned fields
-type CompletenessTierDefinition struct {
+// completenessTierDefinition defines a single tier's weight and assigned fields
+type completenessTierDefinition struct {
 	Weight int      `yaml:"weight" json:"weight"` // Percentage weight (0-100, must sum to 100 across tiers)
 	Fields []string `yaml:"fields" json:"fields"` // Movie field names assigned to this tier
 }
 
-// MarshalJSON serializes CompletenessConfig with proper snake_case keys
-func (cc CompletenessConfig) MarshalJSON() ([]byte, error) {
-	type Alias CompletenessConfig
+// MarshalJSON serializes completenessConfig with proper snake_case keys
+func (cc completenessConfig) MarshalJSON() ([]byte, error) {
+	type Alias completenessConfig
 	return json.Marshal((*Alias)(&cc))
 }
 
-// NFOConfig holds NFO generation settings
+// NFOFeatureConfig controls which NFO features and inclusions are enabled.
+type NFOFeatureConfig struct {
+	Enabled              bool `yaml:"enabled" json:"enabled"`
+	PerFile              bool `yaml:"per_file" json:"per_file"` // Create separate NFO for each multi-part file
+	IncludeFanart        bool `yaml:"include_fanart" json:"include_fanart"`
+	IncludeTrailer       bool `yaml:"include_trailer" json:"include_trailer"`
+	IncludeStreamDetails bool `yaml:"include_stream_details" json:"include_stream_details"`
+	IncludeOriginalPath  bool `yaml:"include_originalpath" json:"include_originalpath"` // Include source filename in NFO
+	ActressAsTag         bool `yaml:"actress_as_tag" json:"actress_as_tag"`
+	AddGenericRole       bool `yaml:"add_generic_role" json:"add_generic_role"` // Add generic "Actress" role to all actresses
+	AltNameRole          bool `yaml:"alt_name_role" json:"alt_name_role"`       // Use alternate name (Japanese) in role field
+}
+
+// NFOFormatConfig controls NFO display and format settings.
+type NFOFormatConfig struct {
+	DisplayTitle       string                    `yaml:"display_title" json:"display_title"`
+	FilenameTemplate   string                    `yaml:"filename_template" json:"filename_template"`
+	FirstNameOrder     bool                      `yaml:"first_name_order" json:"first_name_order"`
+	ActressLanguageJA  bool                      `yaml:"actress_language_ja" json:"actress_language_ja"`
+	RatingSource       string                    `yaml:"rating_source" json:"rating_source"`
+	Tagline            string                    `yaml:"tagline" json:"tagline"`
+	UnknownActressMode models.UnknownActressMode `yaml:"unknown_actress_mode" json:"unknown_actress_mode"` // skip (default) or fallback
+	UnknownActressText string                    `yaml:"unknown_actress_text" json:"unknown_actress_text"` // Text for fallback mode
+}
+
+// NFOExtraConfig holds additional NFO metadata lists.
+type NFOExtraConfig struct {
+	Tag     []string `yaml:"tag" json:"tag"`
+	Credits []string `yaml:"credits" json:"credits"`
+}
+
+// NFOConfig holds NFO generation settings, composed of feature toggles,
+// format/display settings, and extra metadata lists.
+// The sub-structs use yaml:",inline" so the YAML layout remains flat under "nfo:".
 type NFOConfig struct {
-	Enabled              bool     `yaml:"enabled" json:"enabled"`
-	DisplayTitle         string   `yaml:"display_title" json:"display_title"`
-	FilenameTemplate     string   `yaml:"filename_template" json:"filename_template"`
-	FirstNameOrder       bool     `yaml:"first_name_order" json:"first_name_order"`
-	ActressLanguageJA    bool     `yaml:"actress_language_ja" json:"actress_language_ja"`
-	PerFile              bool     `yaml:"per_file" json:"per_file"`                         // Create separate NFO for each multi-part file
-	UnknownActressMode   string   `yaml:"unknown_actress_mode" json:"unknown_actress_mode"` // skip (default) or fallback
-	UnknownActressText   string   `yaml:"unknown_actress_text" json:"unknown_actress_text"` // Text for fallback mode
-	ActressAsTag         bool     `yaml:"actress_as_tag" json:"actress_as_tag"`
-	AddGenericRole       bool     `yaml:"add_generic_role" json:"add_generic_role"`         // Add generic "Actress" role to all actresses
-	AltNameRole          bool     `yaml:"alt_name_role" json:"alt_name_role"`               // Use alternate name (Japanese) in role field
-	IncludeOriginalPath  bool     `yaml:"include_originalpath" json:"include_originalpath"` // Include source filename in NFO
-	IncludeStreamDetails bool     `yaml:"include_stream_details" json:"include_stream_details"`
-	IncludeFanart        bool     `yaml:"include_fanart" json:"include_fanart"`
-	IncludeTrailer       bool     `yaml:"include_trailer" json:"include_trailer"`
-	RatingSource         string   `yaml:"rating_source" json:"rating_source"`
-	Tag                  []string `yaml:"tag" json:"tag"`
-	Tagline              string   `yaml:"tagline" json:"tagline"`
-	Credits              []string `yaml:"credits" json:"credits"`
+	Feature NFOFeatureConfig `yaml:",inline"`
+	Format  NFOFormatConfig  `yaml:",inline"`
+	Extra   NFOExtraConfig   `yaml:",inline"`
 }
 
 func (n *NFOConfig) IsUnknownActressFallback() bool {
-	return n.UnknownActressMode == "fallback"
+	return n.Format.UnknownActressMode == models.UnknownActressModeFallback
 }
 
 // SettingsHash computes a deterministic hash of output-affecting translation settings.
@@ -329,9 +338,9 @@ func (tc *TranslationConfig) SettingsHash() string {
 	case "anthropic":
 		hashInput.AnthropicModel = tc.Anthropic.Model
 	case "deepl":
-		hashInput.DeepLMode = tc.DeepL.Mode
+		hashInput.DeepLMode = string(tc.DeepL.Mode)
 	case "google":
-		hashInput.GoogleMode = tc.Google.Mode
+		hashInput.GoogleMode = string(tc.Google.Mode)
 	}
 
 	// Serialize to JSON with sorted keys for determinism

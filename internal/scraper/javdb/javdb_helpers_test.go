@@ -6,13 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"golang.org/x/net/html"
@@ -58,20 +58,22 @@ func docFromHTML(t *testing.T, raw string) *goquery.Document {
 }
 
 func TestResolveDownloadProxyForHost(t *testing.T) {
-	downloadProxy := &config.ProxyConfig{Enabled: true, Profile: "download", Profiles: map[string]config.ProxyProfile{"download": {URL: "http://download.example:8080"}}}
-	overrideProxy := &config.ProxyConfig{Enabled: true, Profile: "override", Profiles: map[string]config.ProxyProfile{"override": {URL: "http://override.example:8080"}}}
-	scraper := &Scraper{
-		downloadProxy: downloadProxy,
-		proxyOverride: overrideProxy,
+	downloadProxy := &models.ProxyConfig{Enabled: true, Profile: "download", Profiles: map[string]models.ProxyProfile{"download": {URL: "http://download.example:8080"}}}
+	overrideProxy := &models.ProxyConfig{Enabled: true, Profile: "override", Profiles: map[string]models.ProxyProfile{"override": {URL: "http://override.example:8080"}}}
+	scraper := &scraper{
+		settings: models.ScraperSettings{
+			DownloadProxy: downloadProxy,
+			Proxy:         overrideProxy,
+		},
 	}
 
 	dp, op, ok := scraper.ResolveDownloadProxyForHost("img.jdbstatic.com")
-	if !ok || dp != downloadProxy || op != overrideProxy {
+	if !ok || !reflect.DeepEqual(dp, downloadProxy) || !reflect.DeepEqual(op, overrideProxy) {
 		t.Fatalf("ResolveDownloadProxyForHost(jdbstatic) = (%v, %v, %v)", dp, op, ok)
 	}
 
 	dp, op, ok = scraper.ResolveDownloadProxyForHost("javdb.com")
-	if !ok || dp != downloadProxy || op != overrideProxy {
+	if !ok || !reflect.DeepEqual(dp, downloadProxy) || !reflect.DeepEqual(op, overrideProxy) {
 		t.Fatalf("ResolveDownloadProxyForHost(javdb) = (%v, %v, %v)", dp, op, ok)
 	}
 
@@ -82,8 +84,8 @@ func TestResolveDownloadProxyForHost(t *testing.T) {
 }
 
 func TestGetURL_EmptyID(t *testing.T) {
-	scraper := &Scraper{baseURL: "https://javdb.test"}
-	if _, err := scraper.GetURL("   "); err == nil {
+	scraper := &scraper{baseURL: "https://javdb.test"}
+	if _, err := scraper.GetURL(context.Background(), "   "); err == nil {
 		t.Fatal("expected GetURL to reject empty IDs")
 	}
 }
@@ -97,12 +99,12 @@ func TestFindDetailURL_Fallbacks(t *testing.T) {
 			},
 		})
 
-		scraper := &Scraper{
+		scraper := &scraper{
 			client:      client,
 			enabled:     true,
 			baseURL:     "https://javdb.test",
 			rateLimiter: ratelimit.NewLimiter(0),
-			settings:    config.ScraperSettings{Enabled: true},
+			settings:    models.ScraperSettings{Enabled: true},
 		}
 
 		got, err := scraper.findDetailURLCtx(context.Background(), "XYZ-999")
@@ -122,12 +124,12 @@ func TestFindDetailURL_Fallbacks(t *testing.T) {
 			},
 		})
 
-		scraper := &Scraper{
+		scraper := &scraper{
 			client:      client,
 			enabled:     true,
 			baseURL:     "https://javdb.test",
 			rateLimiter: ratelimit.NewLimiter(0),
-			settings:    config.ScraperSettings{Enabled: true},
+			settings:    models.ScraperSettings{Enabled: true},
 		}
 
 		_, err := scraper.findDetailURLCtx(context.Background(), "XYZ-999")
@@ -142,7 +144,7 @@ func TestFindDetailURL_Fallbacks(t *testing.T) {
 }
 
 func TestFetchPageDirectResponse(t *testing.T) {
-	scraper := &Scraper{}
+	scraper := &scraper{}
 
 	t.Run("propagates request error", func(t *testing.T) {
 		wantErr := errors.New("network down")
@@ -217,12 +219,12 @@ func TestFetchPage(t *testing.T) {
 		defer server.Close()
 
 		client := resty.New()
-		scraper := &Scraper{
+		scraper := &scraper{
 			client:      client,
 			enabled:     true,
 			baseURL:     server.URL,
 			rateLimiter: ratelimit.NewLimiter(0),
-			settings:    config.ScraperSettings{Enabled: true},
+			settings:    models.ScraperSettings{Enabled: true},
 		}
 
 		html, err := scraper.fetchPageCtx(context.Background(), server.URL)
@@ -238,12 +240,12 @@ func TestFetchPage(t *testing.T) {
 		client := resty.New()
 		client.SetTransport(&errorRoundTripper{err: errors.New("boom")})
 
-		scraper := &Scraper{
+		scraper := &scraper{
 			client:      client,
 			enabled:     true,
 			baseURL:     "https://javdb.test",
 			rateLimiter: ratelimit.NewLimiter(0),
-			settings:    config.ScraperSettings{Enabled: true},
+			settings:    models.ScraperSettings{Enabled: true},
 		}
 
 		_, err := scraper.fetchPageCtx(context.Background(), "https://javdb.test/page")
@@ -254,7 +256,7 @@ func TestFetchPage(t *testing.T) {
 }
 
 func TestWaitForRateLimitAndHelpers(t *testing.T) {
-	scraper := &Scraper{rateLimiter: ratelimit.NewLimiter(20 * time.Millisecond)}
+	scraper := &scraper{rateLimiter: ratelimit.NewLimiter(20 * time.Millisecond)}
 
 	start := time.Now()
 	if err := scraper.rateLimiter.Wait(context.Background()); err != nil {

@@ -3,37 +3,63 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
+	"sync/atomic"
 
-	"github.com/javinizer/javinizer-go/internal/configutil"
-	"github.com/javinizer/javinizer-go/internal/types"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"gopkg.in/yaml.v3"
 )
-
-// UserAgentString is a custom User-Agent string type that marshals/unmarshals as a plain string.
-// Type definition moved to configutil for Phase 1 refactoring.
-type UserAgentString struct {
-	Value string
-}
 
 const (
 	CurrentConfigVersion = 3
 
-	DirPerm     = configutil.DirPerm
-	DirPermTemp = configutil.DirPermTemp
-	FilePerm    = configutil.FilePerm
+	// DirPerm is the default permission for directory creation.
+	DirPerm = 0777
+	// DirPermTemp is the permission for temporary directory creation.
+	DirPermTemp = 0700
+	// FilePerm is the default permission for file creation.
+	FilePerm = 0666
 
+	// DefaultUserAgent is the true/identifying UA for Javinizer.
 	DefaultUserAgent = "Javinizer (+https://github.com/javinizer/javinizer-go)"
+
+	// DefaultScraperUserAgent is a browser-like UA used as the default for scrapers
+	// when no scraper-specific or global user_agent is configured.
+	DefaultScraperUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 
 	DefaultTempDir = "data/temp"
 )
 
-func ApplyUmask(perm os.FileMode) os.FileMode {
-	return configutil.ApplyUmask(perm)
+var cachedUmask atomic.Int32
+
+func init() {
+	cachedUmask.Store(0)
 }
 
-type WebUIConfig struct {
+// StoreUmask caches the provided umask value for later use.
+func StoreUmask(mask int) {
+	cachedUmask.Store(int32(mask))
+}
+
+// ValidateHTTPBaseURL checks that raw is a valid HTTP or HTTPS URL.
+// An empty string is accepted (the field is optional).
+func ValidateHTTPBaseURL(path, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+		return fmt.Errorf("%s must be a valid HTTP or HTTPS URL", path)
+	}
+	_, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%s must be a valid URL: %w", path, err)
+	}
+	return nil
+}
+
+type webUIConfig struct {
 	DefaultReviewView string `yaml:"default_review_view" json:"default_review_view"`
 }
 
@@ -50,8 +76,8 @@ type Config struct {
 	Database      DatabaseConfig    `yaml:"database" json:"database"`
 	Logging       LoggingConfig     `yaml:"logging" json:"logging"`
 	Performance   PerformanceConfig `yaml:"performance" json:"performance"`
-	MediaInfo     MediaInfoConfig   `yaml:"mediainfo" json:"mediainfo"`
-	WebUI         WebUIConfig       `yaml:"webui" json:"webui"`
+	MediaInfo     mediaInfoConfig   `yaml:"mediainfo" json:"mediainfo"`
+	WebUI         webUIConfig       `yaml:"webui" json:"webui"`
 }
 
 // ServerConfig holds API server configuration
@@ -149,8 +175,8 @@ type MatchingConfig struct {
 	RegexPattern    string   `yaml:"regex_pattern" json:"regex_pattern"`
 }
 
-// OutputConfig holds output/organization settings
-type OutputConfig struct {
+// OutputTemplateConfig controls filename and folder formatting.
+type OutputTemplateConfig struct {
 	FolderFormat     string   `yaml:"folder_format" json:"folder_format"`
 	FileFormat       string   `yaml:"file_format" json:"file_format"`
 	SubfolderFormat  []string `yaml:"subfolder_format" json:"subfolder_format"`
@@ -159,38 +185,64 @@ type OutputConfig struct {
 	// backward compatibility with configs written before the rename. It is
 	// omitted from JSON output and copied into ActressDelimiter during
 	// Normalize when the new key is unset and the legacy one is not.
+	// backward compatibility with configs written before the rename. It is
+	// omitted from JSON output and copied into ActressDelimiter during
+	// Normalize when the new key is unset and the legacy one is not.
 	// Exported because yaml.v3 cannot decode into unexported fields when
 	// UnmarshalYAML uses a type-alias decode path.
-	LegacyDelimiter         string              `yaml:"delimiter,omitempty" json:"-"`
-	MaxTitleLength          int                 `yaml:"max_title_length" json:"max_title_length"`
-	MaxPathLength           int                 `yaml:"max_path_length" json:"max_path_length"`
-	MaxPosterHeight         int                 `yaml:"max_poster_height" json:"max_poster_height"` // Max height in px for cropped posters; 0 = no cap (preserve source resolution). When the cropped poster exceeds this height it is downscaled preserving aspect ratio.
-	MoveSubtitles           bool                `yaml:"move_subtitles" json:"move_subtitles"`
-	MoveFiles               bool                `yaml:"move_files" json:"move_files"` // Move files instead of copying (default: false / copy)
-	SubtitleExtensions      []string            `yaml:"subtitle_extensions" json:"subtitle_extensions"`
-	OperationMode           types.OperationMode `yaml:"operation_mode" json:"operation_mode"`
-	RenameFile              bool                `yaml:"rename_file" json:"rename_file"`                               // Rename files using file_format template (default: true)
-	AllowRevert             bool                `yaml:"allow_revert" json:"allow_revert"`                             // Enable revert operations (default: false — opt-in for safety)
-	GroupActress            bool                `yaml:"group_actress" json:"group_actress"`                           // Replace multiple actresses with group name in templates (default: false)
-	GroupActressName        string              `yaml:"group_actress_name" json:"group_actress_name"`                 // Folder name when group_actress is enabled and multiple actresses (default: "@Group")
-	GroupUnknownActressName string              `yaml:"group_unknown_actress_name" json:"group_unknown_actress_name"` // Folder name when group_actress is enabled and the actress list is empty or unknown (default: "@Unknown")
-	FirstNameOrder          bool                `yaml:"first_name_order" json:"first_name_order"`                     // true = FirstName LastName, false = LastName FirstName (default: false)
-	ActressLanguageJA       bool                `yaml:"actress_language_ja" json:"actress_language_ja"`               // true = prefer JapaneseName over First/Last for <ACTORS>/<ACTRESS> in folder/file naming (default: false), mirrors nfo.actress_language_ja; tag-level <ACTORS:JA> still takes precedence
-	PosterFormat            string              `yaml:"poster_format" json:"poster_format"`
-	FanartFormat            string              `yaml:"fanart_format" json:"fanart_format"`
-	TrailerFormat           string              `yaml:"trailer_format" json:"trailer_format"`
-	ScreenshotFormat        string              `yaml:"screenshot_format" json:"screenshot_format"`
-	ScreenshotFolder        string              `yaml:"screenshot_folder" json:"screenshot_folder"`
-	ScreenshotPadding       int                 `yaml:"screenshot_padding" json:"screenshot_padding"`
-	ActressFolder           string              `yaml:"actress_folder" json:"actress_folder"`
-	ActressFormat           string              `yaml:"actress_format" json:"actress_format"`
-	DownloadCover           bool                `yaml:"download_cover" json:"download_cover"`
-	DownloadPoster          bool                `yaml:"download_poster" json:"download_poster"`
-	DownloadExtrafanart     bool                `yaml:"download_extrafanart" json:"download_extrafanart"`
-	DownloadTrailer         bool                `yaml:"download_trailer" json:"download_trailer"`
-	DownloadActress         bool                `yaml:"download_actress" json:"download_actress"`
-	DownloadTimeout         int                 `yaml:"download_timeout" json:"download_timeout"` // Timeout in seconds for HTTP downloads (default: 60)
-	DownloadProxy           ProxyConfig         `yaml:"download_proxy" json:"download_proxy"`     // Separate proxy for downloads (optional)
+	LegacyDelimiter   string `yaml:"delimiter,omitempty" json:"-"`
+	MaxTitleLength    int    `yaml:"max_title_length" json:"max_title_length"`
+	MaxPathLength     int    `yaml:"max_path_length" json:"max_path_length"`
+	FirstNameOrder    bool   `yaml:"first_name_order" json:"first_name_order"`       // true = FirstName LastName, false = LastName FirstName (default: false)
+	ActressLanguageJA bool   `yaml:"actress_language_ja" json:"actress_language_ja"` // true = prefer JapaneseName over First/Last for <ACTORS>/<ACTRESS> in folder/file naming (default: false), mirrors nfo.actress_language_ja; tag-level <ACTORS:JA> still takes precedence
+}
+
+// OutputOperationConfig controls file operations and revert behavior.
+type OutputOperationConfig struct {
+	OperationMode           operationmode.OperationMode `yaml:"operation_mode" json:"operation_mode"`
+	RenameFile              bool                        `yaml:"rename_file" json:"rename_file"`                               // Rename files using file_format template (default: true)
+	AllowRevert             bool                        `yaml:"allow_revert" json:"allow_revert"`                             // Enable revert operations (default: false — opt-in for safety)
+	GroupActress            bool                        `yaml:"group_actress" json:"group_actress"`                           // Replace multiple actresses with group name in templates (default: false)
+	GroupActressName        string                      `yaml:"group_actress_name" json:"group_actress_name"`                 // Folder name when group_actress is enabled and multiple actresses (default: "@Group")
+	GroupUnknownActressName string                      `yaml:"group_unknown_actress_name" json:"group_unknown_actress_name"` // Folder name when group_actress is enabled and the actress list is empty or unknown (default: "@Unknown")
+	MoveSubtitles           bool                        `yaml:"move_subtitles" json:"move_subtitles"`
+	MoveFiles               bool                        `yaml:"move_files" json:"move_files"` // Move files instead of copying (default: false / copy)
+	SubtitleExtensions      []string                    `yaml:"subtitle_extensions" json:"subtitle_extensions"`
+}
+
+// OutputMediaFormatConfig controls media filename templates.
+type OutputMediaFormatConfig struct {
+	PosterFormat      string `yaml:"poster_format" json:"poster_format"`
+	MaxPosterHeight   int    `yaml:"max_poster_height" json:"max_poster_height"` // Max height in px for cropped posters; 0 = no cap (preserve source resolution). When the cropped poster exceeds this height it is downscaled preserving aspect ratio.
+	FanartFormat      string `yaml:"fanart_format" json:"fanart_format"`
+	TrailerFormat     string `yaml:"trailer_format" json:"trailer_format"`
+	ScreenshotFormat  string `yaml:"screenshot_format" json:"screenshot_format"`
+	ScreenshotFolder  string `yaml:"screenshot_folder" json:"screenshot_folder"`
+	ScreenshotPadding int    `yaml:"screenshot_padding" json:"screenshot_padding"`
+	ActressFolder     string `yaml:"actress_folder" json:"actress_folder"`
+	ActressFormat     string `yaml:"actress_format" json:"actress_format"`
+}
+
+// OutputDownloadConfig controls which media types to download.
+type OutputDownloadConfig struct {
+	DownloadCover       bool               `yaml:"download_cover" json:"download_cover"`
+	DownloadPoster      bool               `yaml:"download_poster" json:"download_poster"`
+	DownloadExtrafanart bool               `yaml:"download_extrafanart" json:"download_extrafanart"`
+	DownloadTrailer     bool               `yaml:"download_trailer" json:"download_trailer"`
+	DownloadActress     bool               `yaml:"download_actress" json:"download_actress"`
+	DownloadTimeout     int                `yaml:"download_timeout" json:"download_timeout"` // Timeout in seconds for HTTP downloads (default: 60)
+	DownloadProxy       models.ProxyConfig `yaml:"download_proxy" json:"download_proxy"`     // Separate proxy for downloads (optional)
+}
+
+// OutputConfig holds output/organization settings.
+// Fields are grouped into named sub-structs using yaml:",inline" so the
+// YAML format stays flat (output.folder_format) while the Go type system
+// provides named access groups (cfg.Output.Template.FolderFormat).
+type OutputConfig struct {
+	Template    OutputTemplateConfig    `yaml:",inline"`
+	Operation   OutputOperationConfig   `yaml:",inline"`
+	MediaFormat OutputMediaFormatConfig `yaml:",inline"`
+	Download    OutputDownloadConfig    `yaml:",inline"`
 }
 
 // DatabaseConfig holds database configuration
@@ -219,21 +271,30 @@ type PerformanceConfig struct {
 	UpdateInterval int `yaml:"update_interval" json:"update_interval"` // UI update interval in milliseconds (default: 100)
 }
 
-// MediaInfoConfig holds MediaInfo functionality configuration
-type MediaInfoConfig struct {
+// mediaInfoConfig holds MediaInfo functionality configuration
+type mediaInfoConfig struct {
 	CLIEnabled bool   `yaml:"cli_enabled" json:"cli_enabled"` // Enable MediaInfo CLI fallback (default: false)
 	CLIPath    string `yaml:"cli_path" json:"cli_path"`       // Path to mediainfo binary (default: "mediainfo")
 	CLITimeout int    `yaml:"cli_timeout" json:"cli_timeout"` // Timeout in seconds for CLI execution (default: 30)
 }
 
-// Validate checks configuration values for validity
+// Validate checks configuration values for validity.
+// Structural/field-level checks run first, then cross-field validators in sequence.
 func (c *Config) Validate() error {
 	// Always normalize to pick up any changes from YAML load that haven't been applied yet.
-	// NormalizeScraperConfigs is idempotent and preserves existing Overrides values.
-	c.Scrapers.NormalizeScraperConfigs()
+	// Normalize is idempotent and preserves existing Overrides values.
+	c.Scrapers.Normalize()
+	return ValidateConfig(c)
+}
+
+// ValidateConfig validates a Config without mutating it.
+// Extracted from Config.Validate so that pure validation can be tested
+// independently of the Normalize side-effect.
+func ValidateConfig(cfg *Config) error {
+	// --- Structural / field-level checks ---
 
 	// Validate database settings
-	dbType := strings.ToLower(strings.TrimSpace(c.Database.Type))
+	dbType := strings.ToLower(strings.TrimSpace(cfg.Database.Type))
 	if dbType == "" {
 		// Backward compatibility: treat empty type as sqlite default.
 		dbType = "sqlite"
@@ -242,46 +303,30 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("database.type must be 'sqlite' (currently only sqlite is supported)")
 	}
 
-	if strings.TrimSpace(c.Database.DSN) == "" {
+	if strings.TrimSpace(cfg.Database.DSN) == "" {
 		return fmt.Errorf("database.dsn is required")
 	}
 
 	// Validate scraper timeouts
-	if c.Scrapers.TimeoutSeconds < 1 || c.Scrapers.TimeoutSeconds > 300 {
+	if cfg.Scrapers.TimeoutSeconds < 1 || cfg.Scrapers.TimeoutSeconds > 300 {
 		return fmt.Errorf("scrapers.timeout_seconds must be between 1 and 300")
 	}
-	if c.Scrapers.RequestTimeoutSeconds < 1 || c.Scrapers.RequestTimeoutSeconds > 600 {
+	if cfg.Scrapers.RequestTimeoutSeconds < 1 || cfg.Scrapers.RequestTimeoutSeconds > 600 {
 		return fmt.Errorf("scrapers.request_timeout_seconds must be between 1 and 600")
 	}
 
-	// CONF-04: Generic scraper config validation — uses flatConfigs map for interface dispatch.
-	// NO hardcoded scraper-name branches.
-	for name, sc := range c.Scrapers.Overrides {
-		// Interface dispatch via flatConfigs map (no switch on scraper name)
-		if validator, ok := c.Scrapers.flatConfigs[name]; ok {
-			if err := validator.ValidateConfig(sc); err != nil {
-				return err
-			}
-		}
-	}
-
-	// Validate proxy profiles (global + per-scraper)
-	if err := validateProxyProfileConfig(c); err != nil {
-		return err
-	}
-
 	// Validate FlareSolverr config (global)
-	if err := validateFlareSolverrConfig("scrapers.flaresolverr", c.Scrapers.FlareSolverr); err != nil {
+	if err := cfg.Scrapers.FlareSolverr.Validate("scrapers.flaresolverr"); err != nil {
 		return err
 	}
 
-	// NEW: Validate Browser config (global)
-	if err := validateBrowserConfig("scrapers.browser", c.Scrapers.Browser); err != nil {
+	// Validate Browser config (global)
+	if err := cfg.Scrapers.Browser.Validate("scrapers.browser"); err != nil {
 		return err
 	}
 
 	// Validate referer URL format
-	referer := strings.TrimSpace(c.Scrapers.Referer)
+	referer := strings.TrimSpace(cfg.Scrapers.Referer)
 	if referer == "" {
 		// Backward compatibility with old configs that omitted referer.
 		referer = "https://www.dmm.co.jp/"
@@ -291,39 +336,35 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("scrapers.referer must be a valid http(s) URL with a host")
 	}
 
-	if err := c.validateTranslationConfig(); err != nil {
-		return err
-	}
-
 	// Validate performance settings
-	if c.Performance.MaxWorkers < 1 || c.Performance.MaxWorkers > 100 {
+	if cfg.Performance.MaxWorkers < 1 || cfg.Performance.MaxWorkers > 100 {
 		return fmt.Errorf("performance.max_workers must be between 1 and 100")
 	}
-	if c.Performance.WorkerTimeout < 10 || c.Performance.WorkerTimeout > 3600 {
+	if cfg.Performance.WorkerTimeout < 10 || cfg.Performance.WorkerTimeout > 3600 {
 		return fmt.Errorf("performance.worker_timeout must be between 10 and 3600")
 	}
-	if c.Performance.UpdateInterval < 10 || c.Performance.UpdateInterval > 5000 {
+	if cfg.Performance.UpdateInterval < 10 || cfg.Performance.UpdateInterval > 5000 {
 		return fmt.Errorf("performance.update_interval must be between 10 and 5000")
 	}
 
 	// Validate update settings
 	// Allow 0 to mean "use default" (handled by DefaultConfig and migrations)
-	if c.System.VersionCheckIntervalHours != 0 && (c.System.VersionCheckIntervalHours < 1 || c.System.VersionCheckIntervalHours > 168) {
+	if cfg.System.VersionCheckIntervalHours != 0 && (cfg.System.VersionCheckIntervalHours < 1 || cfg.System.VersionCheckIntervalHours > 168) {
 		return fmt.Errorf("system.version_check_interval_hours must be between 1 and 168 (1 week), or 0 for default")
 	}
 
 	// Validate logging rotation settings
-	if c.Logging.MaxSizeMB < 0 {
+	if cfg.Logging.MaxSizeMB < 0 {
 		return fmt.Errorf("logging.max_size_mb must be >= 0")
 	}
-	if c.Logging.MaxBackups < 0 {
+	if cfg.Logging.MaxBackups < 0 {
 		return fmt.Errorf("logging.max_backups must be >= 0")
 	}
-	if c.Logging.MaxAgeDays < 0 {
+	if cfg.Logging.MaxAgeDays < 0 {
 		return fmt.Errorf("logging.max_age_days must be >= 0")
 	}
 
-	if v := c.WebUI.DefaultReviewView; v != "" {
+	if v := cfg.WebUI.DefaultReviewView; v != "" {
 		switch v {
 		case "detail", "grid-poster", "grid-cover":
 		default:
@@ -331,119 +372,24 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// --- Cross-field validators ---
+
+	if err := ValidateScraperOverrides(cfg); err != nil {
+		return err
+	}
+	if err := ValidateProxyProfiles(cfg); err != nil {
+		return err
+	}
+	if err := ValidateTranslationProvider(cfg); err != nil {
+		return err
+	}
+
 	return nil
 }
 
+// validateTranslationConfig is the internal implementation for ValidateTranslationProvider.
+//
+//nolint:unused
 func (c *Config) validateTranslationConfig() error {
-	t := c.Metadata.Translation
-
-	provider := strings.ToLower(strings.TrimSpace(t.Provider))
-	if provider == "" {
-		provider = "openai"
-	}
-
-	timeoutSeconds := t.TimeoutSeconds
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 60
-	}
-
-	openAIBaseURL := strings.TrimSpace(t.OpenAI.BaseURL)
-	if openAIBaseURL == "" {
-		openAIBaseURL = "https://api.openai.com/v1"
-	}
-
-	deepLMode := strings.ToLower(strings.TrimSpace(t.DeepL.Mode))
-	if deepLMode == "" {
-		deepLMode = "free"
-	}
-
-	googleMode := strings.ToLower(strings.TrimSpace(t.Google.Mode))
-	if googleMode == "" {
-		googleMode = "free"
-	}
-
-	if !t.Enabled {
-		return nil
-	}
-
-	if timeoutSeconds < 5 || timeoutSeconds > 300 {
-		return fmt.Errorf("metadata.translation.timeout_seconds must be between 5 and 300")
-	}
-
-	switch provider {
-	case "openai":
-		if err := validateHTTPBaseURL("metadata.translation.openai.base_url", openAIBaseURL); err != nil {
-			return err
-		}
-	case "deepl":
-		if deepLMode != "free" && deepLMode != "pro" {
-			return fmt.Errorf("metadata.translation.deepl.mode must be either 'free' or 'pro'")
-		}
-		if strings.TrimSpace(t.DeepL.BaseURL) != "" {
-			if err := validateHTTPBaseURL("metadata.translation.deepl.base_url", t.DeepL.BaseURL); err != nil {
-				return err
-			}
-		}
-	case "google":
-		if googleMode != "free" && googleMode != "paid" {
-			return fmt.Errorf("metadata.translation.google.mode must be either 'free' or 'paid'")
-		}
-		if strings.TrimSpace(t.Google.BaseURL) != "" {
-			if err := validateHTTPBaseURL("metadata.translation.google.base_url", t.Google.BaseURL); err != nil {
-				return err
-			}
-		}
-	case "openai-compatible":
-		if strings.TrimSpace(t.OpenAICompatible.BaseURL) == "" {
-			return fmt.Errorf("metadata.translation.openai_compatible.base_url is required when provider=openai-compatible")
-		}
-		if err := validateHTTPBaseURL("metadata.translation.openai_compatible.base_url", t.OpenAICompatible.BaseURL); err != nil {
-			return err
-		}
-		if strings.TrimSpace(t.OpenAICompatible.Model) == "" {
-			return fmt.Errorf("metadata.translation.openai_compatible.model is required when provider=openai-compatible")
-		}
-		switch t.OpenAICompatible.NormalizedBackendType() {
-		case "", "vllm", "ollama", "llama.cpp", "other":
-		default:
-			return fmt.Errorf("metadata.translation.openai_compatible.backend_type must be one of: auto, vllm, ollama, llama.cpp, other")
-		}
-	case "anthropic":
-		if strings.TrimSpace(t.Anthropic.BaseURL) == "" {
-			return fmt.Errorf("metadata.translation.anthropic.base_url is required when provider=anthropic")
-		}
-		if err := validateHTTPBaseURL("metadata.translation.anthropic.base_url", t.Anthropic.BaseURL); err != nil {
-			return err
-		}
-		if strings.TrimSpace(t.Anthropic.Model) == "" {
-			return fmt.Errorf("metadata.translation.anthropic.model is required when provider=anthropic")
-		}
-	default:
-		return fmt.Errorf("metadata.translation.provider must be one of: openai, openai-compatible, anthropic, deepl, google")
-	}
-
-	// REGV-04: Validate API key presence at config time
-	switch provider {
-	case "openai":
-		if strings.TrimSpace(t.OpenAI.APIKey) == "" {
-			return fmt.Errorf("metadata.translation.openai.api_key is required when provider=openai")
-		}
-	case "deepl":
-		if strings.TrimSpace(t.DeepL.APIKey) == "" {
-			return fmt.Errorf("metadata.translation.deepl.api_key is required when provider=deepl")
-		}
-	case "google":
-		// Google free mode doesn't require API key; paid mode does
-		if googleMode == "paid" && strings.TrimSpace(t.Google.APIKey) == "" {
-			return fmt.Errorf("metadata.translation.google.api_key is required when provider=google and mode=paid")
-		}
-	case "openai-compatible":
-		// API key is optional for self-hosted endpoints
-	case "anthropic":
-		if strings.TrimSpace(t.Anthropic.APIKey) == "" {
-			return fmt.Errorf("metadata.translation.anthropic.api_key is required when provider=anthropic")
-		}
-	}
-
-	return nil
+	return validateTranslationProviderInternal(c)
 }

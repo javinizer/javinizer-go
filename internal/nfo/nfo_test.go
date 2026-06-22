@@ -1,6 +1,7 @@
 package nfo
 
 import (
+	"context"
 	"encoding/xml"
 	"os"
 	"path/filepath"
@@ -39,7 +40,7 @@ func TestNFOXMLGeneration(t *testing.T) {
 				Series:        "Test Series Name",
 				RatingScore:   8.7,
 				RatingVotes:   250,
-				CoverURL:      "https://example.com/cover.jpg",
+				Poster:        models.PosterState{CoverURL: "https://example.com/cover.jpg"},
 				TrailerURL:    "https://example.com/trailer.mp4",
 				Screenshots: []string{
 					"https://example.com/screenshot1.jpg",
@@ -66,7 +67,7 @@ func TestNFOXMLGeneration(t *testing.T) {
 					{Name: "4HR+"},
 				},
 			},
-			config: DefaultConfig(),
+			config: defaultConfig(),
 			checks: []func(t *testing.T, nfo *Movie){
 				func(t *testing.T, nfo *Movie) {
 					assert.Equal(t, "IPX-123", nfo.ID)
@@ -140,7 +141,7 @@ func TestNFOXMLGeneration(t *testing.T) {
 				ID:    "MIN-001",
 				Title: "Minimal Movie",
 			},
-			config: DefaultConfig(),
+			config: defaultConfig(),
 			checks: []func(t *testing.T, nfo *Movie){
 				func(t *testing.T, nfo *Movie) {
 					assert.Equal(t, "MIN-001", nfo.ID)
@@ -162,7 +163,7 @@ func TestNFOXMLGeneration(t *testing.T) {
 				Description:   "Description with special chars: &<>\"'",
 				Director:      "Director with émojis 🎬",
 			},
-			config: DefaultConfig(),
+			config: defaultConfig(),
 			checks: []func(t *testing.T, nfo *Movie){
 				func(t *testing.T, nfo *Movie) {
 					// Verify struct contains unescaped characters
@@ -193,7 +194,7 @@ func TestNFOXMLGeneration(t *testing.T) {
 				RatingScore: 0,
 				RatingVotes: 0,
 			},
-			config: DefaultConfig(),
+			config: defaultConfig(),
 			checks: []func(t *testing.T, nfo *Movie){
 				func(t *testing.T, nfo *Movie) {
 					assert.Empty(t, nfo.Ratings.Rating)
@@ -207,7 +208,7 @@ func TestNFOXMLGeneration(t *testing.T) {
 				Title:     "Empty Content ID",
 				ContentID: "",
 			},
-			config: DefaultConfig(),
+			config: defaultConfig(),
 			checks: []func(t *testing.T, nfo *Movie){
 				func(t *testing.T, nfo *Movie) {
 					assert.Empty(t, nfo.UniqueID)
@@ -220,7 +221,7 @@ func TestNFOXMLGeneration(t *testing.T) {
 		tt := tt // Rebind for safe parallel execution
 		t.Run(tt.name, func(t *testing.T) {
 			gen := NewGenerator(afero.NewOsFs(), tt.config)
-			nfo := gen.MovieToNFO(tt.movie, "")
+			nfo := gen.movieToNFO(context.Background(), tt.movie, "", nil)
 
 			// Run all checks
 			for _, check := range tt.checks {
@@ -250,8 +251,8 @@ func TestNFOXMLMarshalling(t *testing.T) {
 		},
 	}
 
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
-	nfo := gen.MovieToNFO(movie, "")
+	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	// Marshal to XML
 	xmlData, err := xml.MarshalIndent(nfo, "", "  ")
@@ -315,8 +316,8 @@ func TestNFOFileWriteAndRead(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Rebind for safe parallel execution
 		t.Run(tt.name, func(t *testing.T) {
-			gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
-			nfo := gen.MovieToNFO(tt.movie, "")
+			gen := NewGenerator(afero.NewOsFs(), defaultConfig())
+			nfo := gen.movieToNFO(context.Background(), tt.movie, "", nil)
 
 			// Write to temp directory
 			tmpDir := t.TempDir()
@@ -365,15 +366,15 @@ func TestNFOWithEmptyOptionalFields(t *testing.T) {
 		Series:      "",
 		RatingScore: 0,
 		RatingVotes: 0,
-		CoverURL:    "",
+		Poster:      models.PosterState{CoverURL: ""},
 		TrailerURL:  "",
 		Screenshots: nil,
 		Actresses:   nil,
 		Genres:      nil,
 	}
 
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
-	nfo := gen.MovieToNFO(movie, "")
+	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	// Verify empty fields are not populated
 	assert.Equal(t, "EMP-001", nfo.ID)
@@ -413,8 +414,8 @@ func TestNFOWithMultipleActresses(t *testing.T) {
 		Actresses: actresses,
 	}
 
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
-	nfo := gen.MovieToNFO(movie, "")
+	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	require.Len(t, nfo.Actors, 10)
 	for i, actor := range nfo.Actors {
@@ -438,8 +439,8 @@ func TestNFOWithManyGenres(t *testing.T) {
 		Genres: genres,
 	}
 
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
-	nfo := gen.MovieToNFO(movie, "")
+	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	require.Len(t, nfo.Genres, 9)
 	assert.Contains(t, nfo.Genres, "Drama")
@@ -460,8 +461,8 @@ func TestNFOWithManyScreenshots(t *testing.T) {
 		Screenshots: screenshots,
 	}
 
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
-	nfo := gen.MovieToNFO(movie, "")
+	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	require.NotNil(t, nfo.Fanart)
 	require.Len(t, nfo.Fanart.Thumbs, 15)
@@ -478,19 +479,18 @@ func TestNFOFanartDisabled(t *testing.T) {
 		},
 	}
 
-	// Test disabled
-	cfg := DefaultConfig()
+	cfg := defaultConfig()
 	cfg.IncludeFanart = false
 
 	gen := NewGenerator(afero.NewOsFs(), cfg)
-	nfo := gen.MovieToNFO(movie, "")
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	assert.Nil(t, nfo.Fanart)
 
 	// Test enabled (default behavior)
-	cfgEnabled := DefaultConfig()
+	cfgEnabled := defaultConfig()
 	genEnabled := NewGenerator(afero.NewOsFs(), cfgEnabled)
-	nfoEnabled := genEnabled.MovieToNFO(movie, "")
+	nfoEnabled := genEnabled.movieToNFO(context.Background(), movie, "", nil)
 
 	require.NotNil(t, nfoEnabled.Fanart)
 	assert.Len(t, nfoEnabled.Fanart.Thumbs, 2)
@@ -504,19 +504,18 @@ func TestNFOTrailerDisabled(t *testing.T) {
 		TrailerURL: "https://example.com/trailer.mp4",
 	}
 
-	// Test disabled
-	cfg := DefaultConfig()
+	cfg := defaultConfig()
 	cfg.IncludeTrailer = false
 
 	gen := NewGenerator(afero.NewOsFs(), cfg)
-	nfo := gen.MovieToNFO(movie, "")
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	assert.Empty(t, nfo.Trailer)
 
 	// Test enabled (default behavior)
-	cfgEnabled := DefaultConfig()
+	cfgEnabled := defaultConfig()
 	genEnabled := NewGenerator(afero.NewOsFs(), cfgEnabled)
-	nfoEnabled := genEnabled.MovieToNFO(movie, "")
+	nfoEnabled := genEnabled.movieToNFO(context.Background(), movie, "", nil)
 
 	assert.Equal(t, "https://example.com/trailer.mp4", nfoEnabled.Trailer)
 }
@@ -530,11 +529,11 @@ func TestNFOCustomRatingSource(t *testing.T) {
 		RatingVotes: 1000,
 	}
 
-	cfg := DefaultConfig()
-	cfg.DefaultRatingSource = "imdb"
+	cfg := defaultConfig()
+	cfg.RatingSource = "imdb"
 
 	gen := NewGenerator(afero.NewOsFs(), cfg)
-	nfo := gen.MovieToNFO(movie, "")
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	require.Len(t, nfo.Ratings.Rating, 1)
 	assert.Equal(t, "imdb", nfo.Ratings.Rating[0].Name)
@@ -552,13 +551,13 @@ func TestGenerateWithComplexTemplate(t *testing.T) {
 		Maker:       "Test Studio",
 	}
 
-	cfg := DefaultConfig()
-	cfg.NFOFilenameTemplate = "<ID> [<STUDIO>].nfo"
+	cfg := defaultConfig()
+	cfg.FilenameTemplate = "<ID> [<STUDIO>].nfo"
 
 	gen := NewGenerator(afero.NewOsFs(), cfg)
 	tmpDir := t.TempDir()
 
-	err := gen.Generate(movie, tmpDir, "", "")
+	err := gen.Generate(context.Background(), movie, tmpDir, "", "", nil)
 	require.NoError(t, err)
 
 	// Verify file was created with correct template-based name
@@ -567,121 +566,151 @@ func TestGenerateWithComplexTemplate(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestScraperResultToNFO_EmptyRating tests scraper result with nil rating
-func TestScraperResultToNFO_EmptyRating(t *testing.T) {
-	result := &models.ScraperResult{
-		ID:     "SCR-001",
-		Title:  "No Rating",
-		Rating: nil,
-	}
-
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
-	nfo := gen.ScraperResultToNFO(result)
-
-	assert.Empty(t, nfo.Ratings.Rating)
-}
-
-// TestScraperResultToNFO_WithActresses tests actress conversion from scraper result
-func TestScraperResultToNFO_WithActresses(t *testing.T) {
-	result := &models.ScraperResult{
-		ID:    "SCR-002",
-		Title: "Actresses Test",
-		Actresses: []models.ActressInfo{
-			{
-				FirstName:    "Yui",
-				LastName:     "Hatano",
-				JapaneseName: "波多野結衣",
-				ThumbURL:     "https://example.com/actress.jpg",
+// TestMovieToNFO_EdgeCases tests edge cases for MovieToNFO that were
+// previously covered by TestScraperResultToNFO_* tests (now deleted).
+// These scenarios validate the same field-mapping logic using Movie inputs.
+func TestMovieToNFO_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name   string
+		movie  *models.Movie
+		config *Config
+		checks []func(t *testing.T, nfo *Movie)
+	}{
+		{
+			name: "zero rating should not include rating",
+			movie: &models.Movie{
+				ID:          "SCR-001",
+				Title:       "No Rating",
+				RatingScore: 0,
+				RatingVotes: 0,
+			},
+			config: defaultConfig(),
+			checks: []func(t *testing.T, nfo *Movie){
+				func(t *testing.T, nfo *Movie) {
+					assert.Empty(t, nfo.Ratings.Rating)
+				},
+			},
+		},
+		{
+			name: "actresses with JapaneseName and ThumbURL",
+			movie: &models.Movie{
+				ID:    "SCR-002",
+				Title: "Actresses Test",
+				Actresses: []models.Actress{
+					{
+						FirstName:    "Yui",
+						LastName:     "Hatano",
+						JapaneseName: "波多野結衣",
+						ThumbURL:     "https://example.com/actress.jpg",
+					},
+				},
+			},
+			config: defaultConfig(),
+			checks: []func(t *testing.T, nfo *Movie){
+				func(t *testing.T, nfo *Movie) {
+					require.Len(t, nfo.Actors, 1)
+					assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
+					assert.Equal(t, "https://example.com/actress.jpg", nfo.Actors[0].Thumb)
+				},
+			},
+		},
+		{
+			name: "actress with AddGenericRole config",
+			movie: &models.Movie{
+				ID:    "SCR-003",
+				Title: "Role Test",
+				Actresses: []models.Actress{
+					{FirstName: "Test", LastName: "Actress"},
+				},
+			},
+			config: func() *Config {
+				cfg := defaultConfig()
+				cfg.AddGenericRole = true
+				return cfg
+			}(),
+			checks: []func(t *testing.T, nfo *Movie){
+				func(t *testing.T, nfo *Movie) {
+					require.Len(t, nfo.Actors, 1)
+					assert.Equal(t, "Actress", nfo.Actors[0].Role)
+				},
+			},
+		},
+		{
+			name: "actress with AltNameRole config",
+			movie: &models.Movie{
+				ID:    "SCR-004",
+				Title: "Alt Name Role Test",
+				Actresses: []models.Actress{
+					{
+						FirstName:    "Yui",
+						LastName:     "Hatano",
+						JapaneseName: "波多野結衣",
+					},
+				},
+			},
+			config: func() *Config {
+				cfg := defaultConfig()
+				cfg.AltNameRole = true
+				return cfg
+			}(),
+			checks: []func(t *testing.T, nfo *Movie){
+				func(t *testing.T, nfo *Movie) {
+					require.Len(t, nfo.Actors, 1)
+					assert.Equal(t, "波多野結衣", nfo.Actors[0].Role)
+				},
+			},
+		},
+		{
+			name: "screenshots with IncludeFanart=false",
+			movie: &models.Movie{
+				ID:    "SCR-005",
+				Title: "No Fanart",
+				Screenshots: []string{
+					"https://example.com/screenshot.jpg",
+				},
+			},
+			config: func() *Config {
+				cfg := defaultConfig()
+				cfg.IncludeFanart = false
+				return cfg
+			}(),
+			checks: []func(t *testing.T, nfo *Movie){
+				func(t *testing.T, nfo *Movie) {
+					assert.Nil(t, nfo.Fanart)
+				},
+			},
+		},
+		{
+			name: "TrailerURL with IncludeTrailer=false",
+			movie: &models.Movie{
+				ID:         "SCR-006",
+				Title:      "No Trailer",
+				TrailerURL: "https://example.com/trailer.mp4",
+			},
+			config: func() *Config {
+				cfg := defaultConfig()
+				cfg.IncludeTrailer = false
+				return cfg
+			}(),
+			checks: []func(t *testing.T, nfo *Movie){
+				func(t *testing.T, nfo *Movie) {
+					assert.Empty(t, nfo.Trailer)
+				},
 			},
 		},
 	}
 
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
-	nfo := gen.ScraperResultToNFO(result)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			gen := NewGenerator(afero.NewOsFs(), tt.config)
+			nfo := gen.movieToNFO(context.Background(), tt.movie, "", nil)
 
-	require.Len(t, nfo.Actors, 1)
-	assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
-	assert.Equal(t, "https://example.com/actress.jpg", nfo.Actors[0].Thumb)
-}
-
-// TestScraperResultToNFO_WithGenericRole tests actress role generation
-func TestScraperResultToNFO_WithGenericRole(t *testing.T) {
-	result := &models.ScraperResult{
-		ID:    "SCR-003",
-		Title: "Role Test",
-		Actresses: []models.ActressInfo{
-			{FirstName: "Test", LastName: "Actress"},
-		},
+			for _, check := range tt.checks {
+				check(t, nfo)
+			}
+		})
 	}
-
-	cfg := DefaultConfig()
-	cfg.AddGenericRole = true
-
-	gen := NewGenerator(afero.NewOsFs(), cfg)
-	nfo := gen.ScraperResultToNFO(result)
-
-	require.Len(t, nfo.Actors, 1)
-	assert.Equal(t, "Actress", nfo.Actors[0].Role)
-}
-
-// TestScraperResultToNFO_WithAltNameRole tests alternate name in role field
-func TestScraperResultToNFO_WithAltNameRole(t *testing.T) {
-	result := &models.ScraperResult{
-		ID:    "SCR-004",
-		Title: "Alt Name Role Test",
-		Actresses: []models.ActressInfo{
-			{
-				FirstName:    "Yui",
-				LastName:     "Hatano",
-				JapaneseName: "波多野結衣",
-			},
-		},
-	}
-
-	cfg := DefaultConfig()
-	cfg.AltNameRole = true
-
-	gen := NewGenerator(afero.NewOsFs(), cfg)
-	nfo := gen.ScraperResultToNFO(result)
-
-	require.Len(t, nfo.Actors, 1)
-	assert.Equal(t, "波多野結衣", nfo.Actors[0].Role)
-}
-
-// TestScraperResultToNFO_FanartDisabled tests scraper result without fanart
-func TestScraperResultToNFO_FanartDisabled(t *testing.T) {
-	result := &models.ScraperResult{
-		ID:    "SCR-005",
-		Title: "No Fanart",
-		ScreenshotURL: []string{
-			"https://example.com/screenshot.jpg",
-		},
-	}
-
-	cfg := DefaultConfig()
-	cfg.IncludeFanart = false
-
-	gen := NewGenerator(afero.NewOsFs(), cfg)
-	nfo := gen.ScraperResultToNFO(result)
-
-	assert.Nil(t, nfo.Fanart)
-}
-
-// TestScraperResultToNFO_TrailerDisabled tests scraper result without trailer
-func TestScraperResultToNFO_TrailerDisabled(t *testing.T) {
-	result := &models.ScraperResult{
-		ID:         "SCR-006",
-		Title:      "No Trailer",
-		TrailerURL: "https://example.com/trailer.mp4",
-	}
-
-	cfg := DefaultConfig()
-	cfg.IncludeTrailer = false
-
-	gen := NewGenerator(afero.NewOsFs(), cfg)
-	nfo := gen.ScraperResultToNFO(result)
-
-	assert.Empty(t, nfo.Trailer)
 }
 
 // Helper function to create time pointer
@@ -695,7 +724,7 @@ func timePtr(t time.Time) *time.Time {
 func BenchmarkNFOGenerate(b *testing.B) {
 	// Setup: Create in-memory filesystem
 	fs := afero.NewMemMapFs()
-	cfg := DefaultConfig()
+	cfg := defaultConfig()
 	gen := NewGenerator(fs, cfg)
 
 	// Setup: Create test movie with 5 actresses and 10 genres
@@ -744,7 +773,7 @@ func BenchmarkNFOGenerate(b *testing.B) {
 
 	// Benchmark loop
 	for i := 0; i < b.N; i++ {
-		err := gen.Generate(movie, outputPath, partSuffix, videoFilePath)
+		err := gen.Generate(context.Background(), movie, outputPath, partSuffix, videoFilePath, nil)
 		if err != nil {
 			b.Fatalf("Generate failed: %v", err)
 		}

@@ -2,28 +2,22 @@ package caribbeancom
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/configutil"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-type CaribbeancomConfig struct {
-	config.BaseScraperConfig `yaml:",inline"`
-	Language                 string `yaml:"language" json:"language"`
-	BaseURL                  string `yaml:"base_url" json:"base_url"`
-}
-
-func (c *CaribbeancomConfig) ValidateConfig(sc *config.ScraperSettings) error {
-	if err := config.ValidateCommonSettings("caribbeancom", sc); err != nil {
-		return err
-	}
-	switch strings.ToLower(strings.TrimSpace(sc.Language)) {
+// validateScraperSettings performs scraper-specific validation for caribbeancom.
+// The framework calls ScraperSettings.Validate(name) as a base check first
+// (which trims and lowercases Language), so this function only checks
+// scraper-specific constraints.
+func validateScraperSettings(ss *models.ScraperSettings) error {
+	switch ss.Language {
 	case "", "ja", "en":
 	default:
-		return fmt.Errorf("caribbeancom: language must be 'ja' or 'en', got %q", sc.Language)
+		return fmt.Errorf("caribbeancom: language must be 'ja' or 'en', got %q", ss.Language)
 	}
-	if err := configutil.ValidateHTTPBaseURL("caribbeancom.base_url", sc.BaseURL); err != nil {
+	if err := config.ValidateHTTPBaseURL("caribbeancom.base_url", ss.BaseURL); err != nil {
 		return err
 	}
 	return nil

@@ -21,7 +21,7 @@ import (
     "github.com/javinizer/javinizer-go/internal/httpclient"
 )
 
-func NewHTTPClient(cfg *config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) (*resty.Client, error) {
+func NewHTTPClient(cfg *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) (*resty.Client, error) {
     return httpclient.FromScraperSettings(cfg, globalProxy, globalFlareSolverr,
         httpclient.WithHeaders(httpclient.CombineHeaders(
             httpclient.StandardHTMLHeaders(),
@@ -43,7 +43,7 @@ import (
     "github.com/javinizer/javinizer-go/internal/httpclient"
 )
 
-func NewHTTPClient(cfg *config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) (*resty.Client, *httpclient.FlareSolverr, error) {
+func NewHTTPClient(cfg *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) (*resty.Client, *httpclient.FlareSolverr, error) {
     builder := httpclient.FromScraperSettings(cfg, globalProxy, globalFlareSolverr,
         httpclient.WithHeaders(httpclient.StandardHTMLHeaders()),
         httpclient.WithHeaders(httpclient.UserAgentHeader(cfg.UserAgent)),
@@ -65,7 +65,7 @@ import (
     "github.com/javinizer/javinizer-go/internal/config"
 )
 
-func NewHTTPClient(cfg *config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) (*resty.Client, *config.ProxyProfile, error) {
+func NewHTTPClient(cfg *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) (*resty.Client, *config.ProxyProfile, error) {
     return httpclient.FromScraperSettings(cfg, globalProxy, globalFlareSolverr,
         httpclient.WithHeaders(httpclient.CombineHeaders(
             httpclient.DMMHeaders(),
@@ -190,7 +190,7 @@ func NewHTTPClient(cfg *config.Config) (*resty.Client, error) {
 ### After (Using Factory)
 
 ```go
-func NewHTTPClient(cfg *config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) (*resty.Client, error) {
+func NewHTTPClient(cfg *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) (*resty.Client, error) {
     return httpclient.FromScraperSettings(cfg, globalProxy, globalFlareSolverr,
         httpclient.WithHeaders(httpclient.StandardHTMLHeaders()),
     ).BuildClient()

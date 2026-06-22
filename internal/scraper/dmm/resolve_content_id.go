@@ -10,17 +10,27 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-func (s *Scraper) ResolveContentID(id string) (string, error) {
-	return s.ResolveContentIDCtx(context.Background(), id)
+// ResolveContentID resolves a content ID from a search ID using the DMM search.
+// Note: this method is not cancellable — it uses context.Background() internally,
+// so the scraper will continue making HTTP requests even if the caller's context
+// is cancelled. For cancellation support, use ResolveContentIDCtx instead.
+func (s *scraper) ResolveContentID(id string) (string, error) {
+	return s.resolveContentIDCtx(context.Background(), id)
 }
 
-func (s *Scraper) ResolveContentIDCtx(ctx context.Context, id string) (string, error) {
+// ResolveContentIDCtx is the context-aware variant of ResolveContentID.
+// It respects the caller's context for cancellation, rate limiting, and HTTP timeouts.
+func (s *scraper) ResolveContentIDCtx(ctx context.Context, id string) (string, error) {
+	return s.resolveContentIDCtx(ctx, id)
+}
+
+func (s *scraper) resolveContentIDCtx(ctx context.Context, id string) (string, error) {
 	if s.contentIDRepo == nil {
 		return "", fmt.Errorf("content ID repository not available")
 	}
 
 	normalizedID := strings.ToUpper(id)
-	if cached, err := s.contentIDRepo.FindBySearchID(normalizedID); err == nil {
+	if cached, err := s.contentIDRepo.FindBySearchID(ctx, normalizedID); err == nil {
 		logging.Debugf("DMM: Found cached content-id for %s: %s", id, cached.ContentID)
 		return cached.ContentID, nil
 	}
@@ -98,7 +108,7 @@ func (s *Scraper) ResolveContentIDCtx(ctx context.Context, id string) (string, e
 		Source:    "dmm",
 	}
 
-	if err := s.contentIDRepo.Create(mapping); err != nil {
+	if err := s.contentIDRepo.Create(ctx, mapping); err != nil {
 		logging.Debugf("DMM: Failed to cache content-id mapping for %s: %v", id, err)
 	} else {
 		logging.Debugf("DMM: Cached content-id mapping: %s -> %s", normalizedID, foundContentID)

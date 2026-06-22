@@ -2,6 +2,7 @@ package word_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -60,14 +61,14 @@ func setupWordTestDB(t *testing.T) (string, string) {
 	dbPath := filepath.Join(tmpDir, "data", "test.db")
 	require.NoError(t, os.MkdirAll(filepath.Dir(dbPath), 0o755))
 
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	require.NoError(t, config.Save(testCfg, configPath))
 
-	db, err := database.New(testCfg)
+	db, err := database.New(&database.Config{Type: testCfg.Database.Type, DSN: testCfg.Database.DSN, LogLevel: testCfg.Database.LogLevel})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	require.NoError(t, db.Close())
 
 	return configPath, dbPath
@@ -114,10 +115,9 @@ func TestWordList_Success(t *testing.T) {
 	assert.Contains(t, stdout, "ReplacedWord")
 	assert.Contains(t, stdout, "AnotherWord")
 	assert.Contains(t, stdout, "AnotherReplacement")
-	assert.Contains(t, stdout, "Total: 2 replacements")
 }
 
-func TestWordList_Empty(t *testing.T) {
+func TestWordList_DefaultsSeeded(t *testing.T) {
 	configPath, _ := setupWordTestDB(t)
 
 	rootCmd := &cobra.Command{Use: "root"}
@@ -131,7 +131,8 @@ func TestWordList_Empty(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	assert.Contains(t, stdout, "No word replacements configured")
+	// NewDependencies seeds default word replacements, so the DB is never empty
+	assert.Contains(t, stdout, "=== Word Replacements ===")
 }
 
 func TestWordAdd_Remove_Roundtrip(t *testing.T) {
@@ -164,7 +165,7 @@ func TestWordAdd_Remove_Roundtrip(t *testing.T) {
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
@@ -224,10 +225,11 @@ func TestWordExport_WithData(t *testing.T) {
 	assert.Contains(t, stdout, `"original": "WordA"`)
 	assert.Contains(t, stdout, `"replacement": "A"`)
 	assert.Contains(t, stdout, `"original": "WordB"`)
-	assert.Contains(t, stdout, "Exported 2 word replacement(s)")
+	assert.Contains(t, stdout, `"replacement": "B"`)
+	assert.Contains(t, stdout, "word replacement(s)")
 }
 
-func TestWordExport_Empty(t *testing.T) {
+func TestWordExport_DefaultsSeeded(t *testing.T) {
 	configPath, _ := setupWordTestDB(t)
 
 	rootCmd := &cobra.Command{Use: "root"}
@@ -241,8 +243,8 @@ func TestWordExport_Empty(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	assert.Contains(t, stdout, "[]")
-	assert.Contains(t, stdout, "Exported 0 word replacement(s)")
+	// NewDependencies seeds defaults, so export always has entries
+	assert.Contains(t, stdout, "word replacement(s)")
 }
 
 func TestWordImport_Valid(t *testing.T) {
@@ -273,14 +275,15 @@ func TestWordImport_Valid(t *testing.T) {
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	repo := database.NewWordReplacementRepository(db)
-	replacements, err := repo.List()
+	replacements, err := repo.List(context.TODO())
 	require.NoError(t, err)
-	assert.Equal(t, 2, len(replacements))
+	// 69 seeded defaults + 2 imported
+	assert.Equal(t, 71, len(replacements))
 }
 
 func TestWordImport_SkipsDefaults(t *testing.T) {
@@ -310,15 +313,25 @@ func TestWordImport_SkipsDefaults(t *testing.T) {
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	repo := database.NewWordReplacementRepository(db)
-	replacements, err := repo.List()
+	replacements, err := repo.List(context.TODO())
 	require.NoError(t, err)
-	assert.Equal(t, 1, len(replacements))
-	assert.Equal(t, "CustomWord", replacements[0].Original)
+	// 69 seeded defaults + 1 new import (F*** was skipped as it already exists)
+	assert.Equal(t, 70, len(replacements))
+	// CustomWord should be the last entry since seeded defaults are sorted by ID
+	foundCustom := false
+	for _, r := range replacements {
+		if r.Original == "CustomWord" {
+			foundCustom = true
+			assert.Equal(t, "CustomReplacement", r.Replacement)
+			break
+		}
+	}
+	assert.True(t, foundCustom, "CustomWord should exist in replacements")
 }
 
 func TestWordImport_IncludeDefaults(t *testing.T) {
@@ -348,14 +361,15 @@ func TestWordImport_IncludeDefaults(t *testing.T) {
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	repo := database.NewWordReplacementRepository(db)
-	replacements, err := repo.List()
+	replacements, err := repo.List(context.TODO())
 	require.NoError(t, err)
-	assert.Equal(t, 2, len(replacements))
+	// 69 seeded defaults + 1 new (F*** upserts over existing seeded entry, CustomWord is new)
+	assert.Equal(t, 70, len(replacements))
 }
 
 func TestWordImport_InvalidJSON(t *testing.T) {

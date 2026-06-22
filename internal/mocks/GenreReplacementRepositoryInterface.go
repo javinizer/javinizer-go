@@ -5,6 +5,8 @@
 package mocks
 
 import (
+	"context"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -37,16 +39,16 @@ func (_m *MockGenreReplacementRepositoryInterface) EXPECT() *MockGenreReplacemen
 }
 
 // Create provides a mock function for the type MockGenreReplacementRepositoryInterface
-func (_mock *MockGenreReplacementRepositoryInterface) Create(replacement *models.GenreReplacement) error {
-	ret := _mock.Called(replacement)
+func (_mock *MockGenreReplacementRepositoryInterface) Create(ctx context.Context, replacement *models.GenreReplacement) error {
+	ret := _mock.Called(ctx, replacement)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.GenreReplacement) error); ok {
-		r0 = returnFunc(replacement)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.GenreReplacement) error); ok {
+		r0 = returnFunc(ctx, replacement)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -59,19 +61,25 @@ type MockGenreReplacementRepositoryInterface_Create_Call struct {
 }
 
 // Create is a helper method to define mock.On call
+//   - ctx context.Context
 //   - replacement *models.GenreReplacement
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) Create(replacement interface{}) *MockGenreReplacementRepositoryInterface_Create_Call {
-	return &MockGenreReplacementRepositoryInterface_Create_Call{Call: _e.mock.On("Create", replacement)}
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) Create(ctx interface{}, replacement interface{}) *MockGenreReplacementRepositoryInterface_Create_Call {
+	return &MockGenreReplacementRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, replacement)}
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_Create_Call) Run(run func(replacement *models.GenreReplacement)) *MockGenreReplacementRepositoryInterface_Create_Call {
+func (_c *MockGenreReplacementRepositoryInterface_Create_Call) Run(run func(ctx context.Context, replacement *models.GenreReplacement)) *MockGenreReplacementRepositoryInterface_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.GenreReplacement
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.GenreReplacement)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.GenreReplacement
+		if args[1] != nil {
+			arg1 = args[1].(*models.GenreReplacement)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -82,22 +90,22 @@ func (_c *MockGenreReplacementRepositoryInterface_Create_Call) Return(err error)
 	return _c
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_Create_Call) RunAndReturn(run func(replacement *models.GenreReplacement) error) *MockGenreReplacementRepositoryInterface_Create_Call {
+func (_c *MockGenreReplacementRepositoryInterface_Create_Call) RunAndReturn(run func(ctx context.Context, replacement *models.GenreReplacement) error) *MockGenreReplacementRepositoryInterface_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Delete provides a mock function for the type MockGenreReplacementRepositoryInterface
-func (_mock *MockGenreReplacementRepositoryInterface) Delete(original string) error {
-	ret := _mock.Called(original)
+func (_mock *MockGenreReplacementRepositoryInterface) Delete(ctx context.Context, original string) error {
+	ret := _mock.Called(ctx, original)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string) error); ok {
-		r0 = returnFunc(original)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, original)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -110,19 +118,25 @@ type MockGenreReplacementRepositoryInterface_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
+//   - ctx context.Context
 //   - original string
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) Delete(original interface{}) *MockGenreReplacementRepositoryInterface_Delete_Call {
-	return &MockGenreReplacementRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", original)}
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) Delete(ctx interface{}, original interface{}) *MockGenreReplacementRepositoryInterface_Delete_Call {
+	return &MockGenreReplacementRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, original)}
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_Delete_Call) Run(run func(original string)) *MockGenreReplacementRepositoryInterface_Delete_Call {
+func (_c *MockGenreReplacementRepositoryInterface_Delete_Call) Run(run func(ctx context.Context, original string)) *MockGenreReplacementRepositoryInterface_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -133,14 +147,139 @@ func (_c *MockGenreReplacementRepositoryInterface_Delete_Call) Return(err error)
 	return _c
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_Delete_Call) RunAndReturn(run func(original string) error) *MockGenreReplacementRepositoryInterface_Delete_Call {
+func (_c *MockGenreReplacementRepositoryInterface_Delete_Call) RunAndReturn(run func(ctx context.Context, original string) error) *MockGenreReplacementRepositoryInterface_Delete_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteByID provides a mock function for the type MockGenreReplacementRepositoryInterface
+func (_mock *MockGenreReplacementRepositoryInterface) DeleteByID(ctx context.Context, id uint) error {
+	ret := _mock.Called(ctx, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteByID")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) error); ok {
+		r0 = returnFunc(ctx, id)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockGenreReplacementRepositoryInterface_DeleteByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteByID'
+type MockGenreReplacementRepositoryInterface_DeleteByID_Call struct {
+	*mock.Call
+}
+
+// DeleteByID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id uint
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) DeleteByID(ctx interface{}, id interface{}) *MockGenreReplacementRepositoryInterface_DeleteByID_Call {
+	return &MockGenreReplacementRepositoryInterface_DeleteByID_Call{Call: _e.mock.On("DeleteByID", ctx, id)}
+}
+
+func (_c *MockGenreReplacementRepositoryInterface_DeleteByID_Call) Run(run func(ctx context.Context, id uint)) *MockGenreReplacementRepositoryInterface_DeleteByID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGenreReplacementRepositoryInterface_DeleteByID_Call) Return(err error) *MockGenreReplacementRepositoryInterface_DeleteByID_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockGenreReplacementRepositoryInterface_DeleteByID_Call) RunAndReturn(run func(ctx context.Context, id uint) error) *MockGenreReplacementRepositoryInterface_DeleteByID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FindByID provides a mock function for the type MockGenreReplacementRepositoryInterface
+func (_mock *MockGenreReplacementRepositoryInterface) FindByID(ctx context.Context, id uint) (*models.GenreReplacement, error) {
+	ret := _mock.Called(ctx, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindByID")
+	}
+
+	var r0 *models.GenreReplacement
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) (*models.GenreReplacement, error)); ok {
+		return returnFunc(ctx, id)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) *models.GenreReplacement); ok {
+		r0 = returnFunc(ctx, id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*models.GenreReplacement)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uint) error); ok {
+		r1 = returnFunc(ctx, id)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockGenreReplacementRepositoryInterface_FindByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByID'
+type MockGenreReplacementRepositoryInterface_FindByID_Call struct {
+	*mock.Call
+}
+
+// FindByID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id uint
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockGenreReplacementRepositoryInterface_FindByID_Call {
+	return &MockGenreReplacementRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
+}
+
+func (_c *MockGenreReplacementRepositoryInterface_FindByID_Call) Run(run func(ctx context.Context, id uint)) *MockGenreReplacementRepositoryInterface_FindByID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGenreReplacementRepositoryInterface_FindByID_Call) Return(genreReplacement *models.GenreReplacement, err error) *MockGenreReplacementRepositoryInterface_FindByID_Call {
+	_c.Call.Return(genreReplacement, err)
+	return _c
+}
+
+func (_c *MockGenreReplacementRepositoryInterface_FindByID_Call) RunAndReturn(run func(ctx context.Context, id uint) (*models.GenreReplacement, error)) *MockGenreReplacementRepositoryInterface_FindByID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByOriginal provides a mock function for the type MockGenreReplacementRepositoryInterface
-func (_mock *MockGenreReplacementRepositoryInterface) FindByOriginal(original string) (*models.GenreReplacement, error) {
-	ret := _mock.Called(original)
+func (_mock *MockGenreReplacementRepositoryInterface) FindByOriginal(ctx context.Context, original string) (*models.GenreReplacement, error) {
+	ret := _mock.Called(ctx, original)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByOriginal")
@@ -148,18 +287,18 @@ func (_mock *MockGenreReplacementRepositoryInterface) FindByOriginal(original st
 
 	var r0 *models.GenreReplacement
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*models.GenreReplacement, error)); ok {
-		return returnFunc(original)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*models.GenreReplacement, error)); ok {
+		return returnFunc(ctx, original)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *models.GenreReplacement); ok {
-		r0 = returnFunc(original)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *models.GenreReplacement); ok {
+		r0 = returnFunc(ctx, original)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.GenreReplacement)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(original)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, original)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -172,19 +311,25 @@ type MockGenreReplacementRepositoryInterface_FindByOriginal_Call struct {
 }
 
 // FindByOriginal is a helper method to define mock.On call
+//   - ctx context.Context
 //   - original string
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) FindByOriginal(original interface{}) *MockGenreReplacementRepositoryInterface_FindByOriginal_Call {
-	return &MockGenreReplacementRepositoryInterface_FindByOriginal_Call{Call: _e.mock.On("FindByOriginal", original)}
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) FindByOriginal(ctx interface{}, original interface{}) *MockGenreReplacementRepositoryInterface_FindByOriginal_Call {
+	return &MockGenreReplacementRepositoryInterface_FindByOriginal_Call{Call: _e.mock.On("FindByOriginal", ctx, original)}
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_FindByOriginal_Call) Run(run func(original string)) *MockGenreReplacementRepositoryInterface_FindByOriginal_Call {
+func (_c *MockGenreReplacementRepositoryInterface_FindByOriginal_Call) Run(run func(ctx context.Context, original string)) *MockGenreReplacementRepositoryInterface_FindByOriginal_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -195,14 +340,14 @@ func (_c *MockGenreReplacementRepositoryInterface_FindByOriginal_Call) Return(ge
 	return _c
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_FindByOriginal_Call) RunAndReturn(run func(original string) (*models.GenreReplacement, error)) *MockGenreReplacementRepositoryInterface_FindByOriginal_Call {
+func (_c *MockGenreReplacementRepositoryInterface_FindByOriginal_Call) RunAndReturn(run func(ctx context.Context, original string) (*models.GenreReplacement, error)) *MockGenreReplacementRepositoryInterface_FindByOriginal_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetReplacementMap provides a mock function for the type MockGenreReplacementRepositoryInterface
-func (_mock *MockGenreReplacementRepositoryInterface) GetReplacementMap() (map[string]string, error) {
-	ret := _mock.Called()
+func (_mock *MockGenreReplacementRepositoryInterface) GetReplacementMap(ctx context.Context) (map[string]string, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetReplacementMap")
@@ -210,18 +355,18 @@ func (_mock *MockGenreReplacementRepositoryInterface) GetReplacementMap() (map[s
 
 	var r0 map[string]string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (map[string]string, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (map[string]string, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() map[string]string); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) map[string]string); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]string)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -234,13 +379,20 @@ type MockGenreReplacementRepositoryInterface_GetReplacementMap_Call struct {
 }
 
 // GetReplacementMap is a helper method to define mock.On call
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) GetReplacementMap() *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call {
-	return &MockGenreReplacementRepositoryInterface_GetReplacementMap_Call{Call: _e.mock.On("GetReplacementMap")}
+//   - ctx context.Context
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) GetReplacementMap(ctx interface{}) *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call {
+	return &MockGenreReplacementRepositoryInterface_GetReplacementMap_Call{Call: _e.mock.On("GetReplacementMap", ctx)}
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call) Run(run func()) *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call {
+func (_c *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call) Run(run func(ctx context.Context)) *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -250,14 +402,14 @@ func (_c *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call) Return
 	return _c
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call) RunAndReturn(run func() (map[string]string, error)) *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call {
+func (_c *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call) RunAndReturn(run func(ctx context.Context) (map[string]string, error)) *MockGenreReplacementRepositoryInterface_GetReplacementMap_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // List provides a mock function for the type MockGenreReplacementRepositoryInterface
-func (_mock *MockGenreReplacementRepositoryInterface) List() ([]models.GenreReplacement, error) {
-	ret := _mock.Called()
+func (_mock *MockGenreReplacementRepositoryInterface) List(ctx context.Context) ([]models.GenreReplacement, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -265,18 +417,18 @@ func (_mock *MockGenreReplacementRepositoryInterface) List() ([]models.GenreRepl
 
 	var r0 []models.GenreReplacement
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() ([]models.GenreReplacement, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]models.GenreReplacement, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() []models.GenreReplacement); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []models.GenreReplacement); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.GenreReplacement)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -289,13 +441,20 @@ type MockGenreReplacementRepositoryInterface_List_Call struct {
 }
 
 // List is a helper method to define mock.On call
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) List() *MockGenreReplacementRepositoryInterface_List_Call {
-	return &MockGenreReplacementRepositoryInterface_List_Call{Call: _e.mock.On("List")}
+//   - ctx context.Context
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) List(ctx interface{}) *MockGenreReplacementRepositoryInterface_List_Call {
+	return &MockGenreReplacementRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx)}
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_List_Call) Run(run func()) *MockGenreReplacementRepositoryInterface_List_Call {
+func (_c *MockGenreReplacementRepositoryInterface_List_Call) Run(run func(ctx context.Context)) *MockGenreReplacementRepositoryInterface_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -305,22 +464,22 @@ func (_c *MockGenreReplacementRepositoryInterface_List_Call) Return(genreReplace
 	return _c
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_List_Call) RunAndReturn(run func() ([]models.GenreReplacement, error)) *MockGenreReplacementRepositoryInterface_List_Call {
+func (_c *MockGenreReplacementRepositoryInterface_List_Call) RunAndReturn(run func(ctx context.Context) ([]models.GenreReplacement, error)) *MockGenreReplacementRepositoryInterface_List_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Upsert provides a mock function for the type MockGenreReplacementRepositoryInterface
-func (_mock *MockGenreReplacementRepositoryInterface) Upsert(replacement *models.GenreReplacement) error {
-	ret := _mock.Called(replacement)
+func (_mock *MockGenreReplacementRepositoryInterface) Upsert(ctx context.Context, replacement *models.GenreReplacement) error {
+	ret := _mock.Called(ctx, replacement)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.GenreReplacement) error); ok {
-		r0 = returnFunc(replacement)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.GenreReplacement) error); ok {
+		r0 = returnFunc(ctx, replacement)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -333,19 +492,25 @@ type MockGenreReplacementRepositoryInterface_Upsert_Call struct {
 }
 
 // Upsert is a helper method to define mock.On call
+//   - ctx context.Context
 //   - replacement *models.GenreReplacement
-func (_e *MockGenreReplacementRepositoryInterface_Expecter) Upsert(replacement interface{}) *MockGenreReplacementRepositoryInterface_Upsert_Call {
-	return &MockGenreReplacementRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", replacement)}
+func (_e *MockGenreReplacementRepositoryInterface_Expecter) Upsert(ctx interface{}, replacement interface{}) *MockGenreReplacementRepositoryInterface_Upsert_Call {
+	return &MockGenreReplacementRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, replacement)}
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_Upsert_Call) Run(run func(replacement *models.GenreReplacement)) *MockGenreReplacementRepositoryInterface_Upsert_Call {
+func (_c *MockGenreReplacementRepositoryInterface_Upsert_Call) Run(run func(ctx context.Context, replacement *models.GenreReplacement)) *MockGenreReplacementRepositoryInterface_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.GenreReplacement
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.GenreReplacement)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.GenreReplacement
+		if args[1] != nil {
+			arg1 = args[1].(*models.GenreReplacement)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -356,7 +521,7 @@ func (_c *MockGenreReplacementRepositoryInterface_Upsert_Call) Return(err error)
 	return _c
 }
 
-func (_c *MockGenreReplacementRepositoryInterface_Upsert_Call) RunAndReturn(run func(replacement *models.GenreReplacement) error) *MockGenreReplacementRepositoryInterface_Upsert_Call {
+func (_c *MockGenreReplacementRepositoryInterface_Upsert_Call) RunAndReturn(run func(ctx context.Context, replacement *models.GenreReplacement) error) *MockGenreReplacementRepositoryInterface_Upsert_Call {
 	_c.Call.Return(run)
 	return _c
 }

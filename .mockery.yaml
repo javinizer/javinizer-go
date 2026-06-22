@@ -20,7 +20,12 @@ packages:
       ActressAliasRepositoryInterface:
       ContentIDMappingRepositoryInterface:
       MovieTranslationRepositoryInterface:
+      GenreTranslationRepositoryInterface:
+      ActressTranslationRepositoryInterface:
       JobRepositoryInterface:
+      ApiTokenRepositoryInterface:
+      WordReplacementRepositoryInterface:
+      GenreRepositoryInterface:
 
   # HTTP client interface from internal/httpclient
   github.com/javinizer/javinizer-go/internal/httpclient:
@@ -39,6 +44,8 @@ packages:
       pkgname: "mocks"
     interfaces:
       Scraper:
+      URLHandler:
+      DownloadProxyResolver:
 
   # Aggregator interface from internal/aggregator
   github.com/javinizer/javinizer-go/internal/aggregator:
@@ -49,6 +56,26 @@ packages:
     interfaces:
       AggregatorInterface:
 
+  # ScraperInterface from internal/scrape
+  github.com/javinizer/javinizer-go/internal/scrape:
+    config:
+      dir: "internal/mocks"
+      filename: "{{.InterfaceName}}.go"
+      pkgname: "mocks"
+    interfaces:
+      ScraperInterface:
+
+  # WorkflowInterface from internal/workflow
+  # NOTE: Separate directory to avoid import cycle:
+  #   downloader_test → internal/mocks → workflow → downloader
+  github.com/javinizer/javinizer-go/internal/workflow:
+    config:
+      dir: "internal/mocks/workflow"
+      filename: "{{.InterfaceName}}.go"
+      pkgname: "workflowmocks"
+    interfaces:
+      WorkflowInterface:
+
   # EventEmitter interface from internal/eventlog
   github.com/javinizer/javinizer-go/internal/eventlog:
     config:
@@ -57,3 +84,15 @@ packages:
       pkgname: "mocks"
     interfaces:
       EventEmitter:
+
+  # EditableJob and ControlledJob from internal/worker (per ADR-0032)
+  # NOTE: Separate directory to avoid import cycle with API tests
+  github.com/javinizer/javinizer-go/internal/worker:
+    config:
+      dir: "internal/mocks/worker"
+      filename: "{{.InterfaceName}}.go"
+      pkgname: "workermocks"
+    interfaces:
+      EditableJob:
+      ControlledJob:
+      BatchJobInterface:

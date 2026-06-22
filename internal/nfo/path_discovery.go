@@ -1,26 +1,30 @@
 package nfo
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/spf13/afero"
 )
 
-var osStat = os.Stat
-
-// ResolveNFOPath builds the expected NFO file path and a list of legacy paths
+// resolveNFOPath builds the expected NFO file path and a list of legacy paths
 // to check for backward compatibility.
-func ResolveNFOPath(baseDir string, movie *models.Movie, nfoFilenameTemplate string, groupActress bool, groupActressName string, groupUnknownActressName string, firstNameOrder bool, actressLanguageJa bool, actressDelimiter string, perFile bool, isMultiPart bool, partSuffix string, videoFilePath string) (nfoPath string, legacyPaths []string) {
-	nfoFilename := ResolveNFOFilename(movie, nfoFilenameTemplate, groupActress, groupActressName, groupUnknownActressName, firstNameOrder, actressLanguageJa, actressDelimiter, perFile, isMultiPart, partSuffix)
+// The engine parameter is forwarded to ResolveNFOFilename for template rendering;
+// if nil, a default engine is created (no language config). Callers that have a
+// shared template engine should pass it to ensure consistent filename computation
+// with GenerateAtPath.
+func resolveNFOPath(baseDir string, movie *models.Movie, cfg NFONameConfig, videoFilePath string, engine template.EngineInterface) (nfoPath string, legacyPaths []string) {
+	nfoFilename := ResolveNFOFilename(engine, movie, cfg)
 	nfoPath = filepath.Join(baseDir, nfoFilename)
 
+	// Deprecated: Legacy NFO path fallback. Remove after v1.0 migration period.
 	if nfoFilename != movie.ID+".nfo" {
 		legacyPaths = append(legacyPaths, filepath.Join(baseDir, movie.ID+".nfo"))
 	}
 
-	if perFile && isMultiPart && videoFilePath != "" {
+	if cfg.PerFile && cfg.IsMultiPart && videoFilePath != "" {
 		videoName := strings.TrimSuffix(filepath.Base(videoFilePath), filepath.Ext(videoFilePath))
 		videoNFO := filepath.Join(baseDir, videoName+".nfo")
 		if videoNFO != nfoPath {
@@ -31,18 +35,19 @@ func ResolveNFOPath(baseDir string, movie *models.Movie, nfoFilenameTemplate str
 	return nfoPath, legacyPaths
 }
 
-// FindNFOFile resolves the NFO path and searches for an existing file,
+// findNFOFile resolves the NFO path and searches for an existing file,
 // trying the primary path first then legacy paths in order.
 // Returns the found path (empty string if none found).
-func FindNFOFile(baseDir string, movie *models.Movie, nfoFilenameTemplate string, groupActress bool, groupActressName string, groupUnknownActressName string, firstNameOrder bool, actressLanguageJa bool, actressDelimiter string, perFile bool, isMultiPart bool, partSuffix string, videoFilePath string) string {
-	nfoPath, legacyPaths := ResolveNFOPath(baseDir, movie, nfoFilenameTemplate, groupActress, groupActressName, groupUnknownActressName, firstNameOrder, actressLanguageJa, actressDelimiter, perFile, isMultiPart, partSuffix, videoFilePath)
+// The engine parameter is forwarded to resolveNFOPath/ResolveNFOFilename.
+func findNFOFile(fs afero.Fs, baseDir string, movie *models.Movie, cfg NFONameConfig, videoFilePath string, engine template.EngineInterface) string {
+	nfoPath, legacyPaths := resolveNFOPath(baseDir, movie, cfg, videoFilePath, engine)
 
-	if _, err := osStat(nfoPath); err == nil {
+	if _, err := fs.Stat(nfoPath); err == nil {
 		return nfoPath
 	}
 
 	for _, legacyPath := range legacyPaths {
-		if _, err := osStat(legacyPath); err == nil {
+		if _, err := fs.Stat(legacyPath); err == nil {
 			return legacyPath
 		}
 	}

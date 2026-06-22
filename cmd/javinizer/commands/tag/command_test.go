@@ -1,6 +1,7 @@
 package tag_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,16 +27,16 @@ func setupTagTestDB(t *testing.T) (configPath string, dbPath string) {
 	require.NoError(t, err)
 
 	// Create test config
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	configPath = filepath.Join(tmpDir, "config.yaml")
 	err = config.Save(testCfg, configPath)
 	require.NoError(t, err)
 
 	// Initialize database with migrations to ensure it exists
-	db, err := database.New(testCfg)
+	db, err := database.New(&database.Config{Type: testCfg.Database.Type, DSN: testCfg.Database.DSN, LogLevel: testCfg.Database.LogLevel})
 	require.NoError(t, err)
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 	_ = db.Close()
 
@@ -285,7 +286,7 @@ func TestRunTagAdd_DependencyInitError(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a config with invalid database path
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	// Use a file as if it were a directory - this will cause DB creation to fail
 	dbFilePath := filepath.Join(tmpDir, "blockfile")
 	// Create a regular file at this path
@@ -363,7 +364,7 @@ func TestRunTagList_InvalidConfig(t *testing.T) {
 func TestRunTagList_DependencyInitError(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	dbFilePath := filepath.Join(tmpDir, "blockfile")
 	err := os.WriteFile(dbFilePath, []byte("block"), 0444)
 	require.NoError(t, err)
@@ -442,7 +443,7 @@ func TestRunTagRemove_InvalidConfig(t *testing.T) {
 func TestRunTagRemove_DependencyInitError(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	dbFilePath := filepath.Join(tmpDir, "blockfile")
 	err := os.WriteFile(dbFilePath, []byte("block"), 0444)
 	require.NoError(t, err)
@@ -530,7 +531,7 @@ func TestRunTagSearch_InvalidConfig(t *testing.T) {
 func TestRunTagSearch_DependencyInitError(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	dbFilePath := filepath.Join(tmpDir, "blockfile")
 	err := os.WriteFile(dbFilePath, []byte("block"), 0444)
 	require.NoError(t, err)
@@ -591,7 +592,7 @@ func TestRunTagAllTags_InvalidConfig(t *testing.T) {
 func TestRunTagAllTags_DependencyInitError(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	dbFilePath := filepath.Join(tmpDir, "blockfile")
 	err := os.WriteFile(dbFilePath, []byte("block"), 0444)
 	require.NoError(t, err)

@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -60,20 +61,25 @@ func runLogsList(cmd *cobra.Command, args []string, configFile string) error {
 	eventRepo := database.NewEventRepository(deps.DB)
 
 	limit, _ := cmd.Flags().GetInt("limit")
-	eventType, _ := cmd.Flags().GetString("type")
-	severity, _ := cmd.Flags().GetString("severity")
+	eventTypeStr, _ := cmd.Flags().GetString("type")
+	severityStr, _ := cmd.Flags().GetString("severity")
 	source, _ := cmd.Flags().GetString("source")
 
-	if eventType != "" {
-		validTypes := map[string]bool{models.EventCategoryScraper: true, models.EventCategoryOrganize: true, models.EventCategorySystem: true}
+	var eventType models.EventCategory
+	if eventTypeStr != "" {
+		eventType = models.EventCategory(eventTypeStr)
+		validTypes := map[models.EventCategory]bool{models.EventCategoryScraper: true, models.EventCategoryOrganize: true, models.EventCategorySystem: true}
 		if !validTypes[eventType] {
-			return fmt.Errorf("invalid event type %q: must be one of scraper, organize, system", eventType)
+			return fmt.Errorf("invalid event type %q: must be one of scraper, organize, system", eventTypeStr)
 		}
 	}
-	if severity != "" {
-		validSeverities := map[string]bool{models.SeverityDebug: true, models.SeverityInfo: true, models.SeverityWarn: true, models.SeverityError: true}
+
+	var severity models.EventSeverity
+	if severityStr != "" {
+		severity = models.EventSeverity(severityStr)
+		validSeverities := map[models.EventSeverity]bool{models.SeverityDebug: true, models.SeverityInfo: true, models.SeverityWarn: true, models.SeverityError: true}
 		if !validSeverities[severity] {
-			return fmt.Errorf("invalid severity %q: must be one of debug, info, warn, error", severity)
+			return fmt.Errorf("invalid severity %q: must be one of debug, info, warn, error", severityStr)
 		}
 	}
 
@@ -83,7 +89,7 @@ func runLogsList(cmd *cobra.Command, args []string, configFile string) error {
 		Source:    source,
 	}
 
-	events, err := eventRepo.FindFiltered(filter, limit, 0)
+	events, err := eventRepo.FindFiltered(context.Background(), filter, limit, 0)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve events: %w", err)
 	}
@@ -115,7 +121,7 @@ func runLogsList(cmd *cobra.Command, args []string, configFile string) error {
 		)
 
 		if event.Context != "" {
-			var ctx map[string]interface{}
+			var ctx map[string]any
 			if err := json.Unmarshal([]byte(event.Context), &ctx); err == nil {
 				if jobID, ok := ctx["job_id"]; ok && jobID != nil {
 					fmt.Printf("       Job: %v\n", jobID)
@@ -153,7 +159,7 @@ func runLogsStats(cmd *cobra.Command, args []string, configFile string) error {
 
 	eventRepo := database.NewEventRepository(deps.DB)
 
-	total, err := eventRepo.Count()
+	total, err := eventRepo.Count(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to count events: %w", err)
 	}
@@ -164,7 +170,7 @@ func runLogsStats(cmd *cobra.Command, args []string, configFile string) error {
 	fmt.Println("\nBy Type:")
 	typeCounts := []struct {
 		name     string
-		category string
+		category models.EventCategory
 		emoji    string
 	}{
 		{"Scraper", models.EventCategoryScraper, "🌐"},
@@ -172,7 +178,7 @@ func runLogsStats(cmd *cobra.Command, args []string, configFile string) error {
 		{"System", models.EventCategorySystem, "⚙️"},
 	}
 	for _, tc := range typeCounts {
-		count, _ := eventRepo.CountByType(tc.category)
+		count, _ := eventRepo.CountFiltered(context.Background(), database.EventFilter{EventType: tc.category})
 		pct := percentage(count, total)
 		fmt.Printf("  %s %-10s %d (%.1f%%)\n", tc.emoji, tc.name+":", count, pct)
 	}
@@ -180,7 +186,7 @@ func runLogsStats(cmd *cobra.Command, args []string, configFile string) error {
 	fmt.Println("\nBy Severity:")
 	sevCounts := []struct {
 		name     string
-		severity string
+		severity models.EventSeverity
 		emoji    string
 	}{
 		{"Error", models.SeverityError, "❌"},
@@ -189,12 +195,12 @@ func runLogsStats(cmd *cobra.Command, args []string, configFile string) error {
 		{"Debug", models.SeverityDebug, "🐛"},
 	}
 	for _, sc := range sevCounts {
-		count, _ := eventRepo.CountBySeverity(sc.severity)
+		count, _ := eventRepo.CountFiltered(context.Background(), database.EventFilter{Severity: sc.severity})
 		pct := percentage(count, total)
 		fmt.Printf("  %s %-8s %d (%.1f%%)\n", sc.emoji, sc.name+":", count, pct)
 	}
 
-	sourceCounts, err := eventRepo.CountGroupBySource()
+	sourceCounts, err := eventRepo.CountGroupBySource(context.Background())
 	if err == nil && len(sourceCounts) > 0 {
 		fmt.Println("\nBy Source:")
 		for src, count := range sourceCounts {

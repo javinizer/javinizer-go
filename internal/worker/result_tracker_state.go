@@ -1,0 +1,167 @@
+package worker
+
+import (
+	"strings"
+	"sync"
+
+	"github.com/google/uuid"
+	"github.com/javinizer/javinizer-go/internal/models"
+)
+
+// resultTrackerState holds the shared mutable state for result tracking.
+type resultTrackerState struct {
+	mu            sync.RWMutex
+	Results       map[string]*MovieResult
+	Provenance    map[string]*ProvenanceData
+	FileMatchInfo map[string]models.FileMatchInfo
+	Completed     int
+	Failed        int
+	TotalFiles    int
+	Progress      float64
+	Files         []string
+	Excluded      map[string]bool
+	movieIDIndex  map[string][]string
+	resultIDIndex map[string]string
+	goneChecker   func() bool
+}
+
+func movieIDsForResult(r *MovieResult) []string {
+	if r == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var ids []string
+	if r.Movie != nil && r.Movie.ID != "" {
+		ids = append(ids, r.Movie.ID)
+		seen[r.Movie.ID] = true
+	}
+	if r.FileMatchInfo.MovieID != "" && !seen[r.FileMatchInfo.MovieID] {
+		ids = append(ids, r.FileMatchInfo.MovieID)
+	}
+	return ids
+}
+
+func indexKey(movieID string) string {
+	return strings.ToLower(movieID)
+}
+
+func stateAddToMovieIDIndexLocked(s *resultTrackerState, movieID string, filePath string) {
+	key := indexKey(movieID)
+	s.movieIDIndex[key] = append(s.movieIDIndex[key], filePath)
+}
+
+func stateRemoveFromMovieIDIndexLocked(s *resultTrackerState, movieID string, filePath string) {
+	key := indexKey(movieID)
+	paths := s.movieIDIndex[key]
+	for i, p := range paths {
+		if p == filePath {
+			s.movieIDIndex[key] = append(paths[:i], paths[i+1:]...)
+			if len(s.movieIDIndex[key]) == 0 {
+				delete(s.movieIDIndex, key)
+			}
+			return
+		}
+	}
+}
+
+func stateReindexFilePathLocked(s *resultTrackerState, filePath string, oldResult, newResult *MovieResult) {
+	if oldResult != nil {
+		for _, oldID := range movieIDsForResult(oldResult) {
+			stateRemoveFromMovieIDIndexLocked(s, oldID, filePath)
+		}
+		if oldResult.ResultID != "" {
+			delete(s.resultIDIndex, oldResult.ResultID)
+		}
+	}
+	if newResult != nil {
+		for _, newID := range movieIDsForResult(newResult) {
+			stateAddToMovieIDIndexLocked(s, newID, filePath)
+		}
+		if newResult.ResultID != "" {
+			if s.resultIDIndex == nil {
+				s.resultIDIndex = make(map[string]string)
+			}
+			s.resultIDIndex[newResult.ResultID] = filePath
+		}
+	}
+}
+
+func stateRebuildMovieIDIndexLocked(s *resultTrackerState) {
+	s.movieIDIndex = make(map[string][]string, len(s.Results))
+	s.resultIDIndex = make(map[string]string, len(s.Results))
+	for filePath, result := range s.Results {
+		if result == nil {
+			continue
+		}
+		if result.ResultID == "" {
+			result.ResultID = uuid.New().String()
+		}
+		for _, id := range movieIDsForResult(result) {
+			stateAddToMovieIDIndexLocked(s, id, filePath)
+		}
+		s.resultIDIndex[result.ResultID] = filePath
+	}
+}
+
+func stateUpdateProgressFromCounters(s *resultTrackerState) {
+	if s.TotalFiles == 0 {
+		s.Progress = 100
+	} else {
+		s.Progress = float64(s.Completed+s.Failed) / float64(s.TotalFiles) * 100
+	}
+}
+
+func stateRecalculateProgress(s *resultTrackerState) {
+	completed := 0
+	failed := 0
+	for filePath, r := range s.Results {
+		if r == nil || s.Excluded[filePath] {
+			continue
+		}
+		switch r.Status {
+		case models.JobStatusCompleted:
+			completed++
+		case models.JobStatusFailed:
+			failed++
+		}
+	}
+	s.Completed = completed
+	s.Failed = failed
+	if s.TotalFiles == 0 {
+		s.Progress = 100
+	} else {
+		s.Progress = float64(completed+failed) / float64(s.TotalFiles) * 100
+	}
+}
+
+func stateLookupFilePathsForMovieIDLocked(s *resultTrackerState, movieID string) []string {
+	key := indexKey(movieID)
+	return s.movieIDIndex[key]
+}
+
+func stateLookupFilePathForResultIDLocked(s *resultTrackerState, resultID string) (string, bool) {
+	if s.resultIDIndex == nil {
+		return "", false
+	}
+	fp, ok := s.resultIDIndex[resultID]
+	return fp, ok
+}
+
+func stateCloneResultsLocked(s *resultTrackerState) map[string]*MovieResult {
+	clone := make(map[string]*MovieResult, len(s.Results))
+	for k, v := range s.Results {
+		if v == nil {
+			continue
+		}
+		clone[k] = v.Clone()
+	}
+	return clone
+}
+
+func stateCloneFileMatchInfoLocked(s *resultTrackerState) map[string]models.FileMatchInfo {
+	clone := make(map[string]models.FileMatchInfo, len(s.FileMatchInfo))
+	for k, v := range s.FileMatchInfo {
+		clone[k] = v
+	}
+	return clone
+}

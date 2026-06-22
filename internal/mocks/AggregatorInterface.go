@@ -5,6 +5,9 @@
 package mocks
 
 import (
+	"context"
+
+	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -37,7 +40,7 @@ func (_m *MockAggregatorInterface) EXPECT() *MockAggregatorInterface_Expecter {
 }
 
 // Aggregate provides a mock function for the type MockAggregatorInterface
-func (_mock *MockAggregatorInterface) Aggregate(results []*models.ScraperResult) (*models.Movie, string, error) {
+func (_mock *MockAggregatorInterface) Aggregate(results []*models.ScraperResult) (*models.Movie, *aggregator.AggregateResult, error) {
 	ret := _mock.Called(results)
 
 	if len(ret) == 0 {
@@ -45,9 +48,9 @@ func (_mock *MockAggregatorInterface) Aggregate(results []*models.ScraperResult)
 	}
 
 	var r0 *models.Movie
-	var r1 string
+	var r1 *aggregator.AggregateResult
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func([]*models.ScraperResult) (*models.Movie, string, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func([]*models.ScraperResult) (*models.Movie, *aggregator.AggregateResult, error)); ok {
 		return returnFunc(results)
 	}
 	if returnFunc, ok := ret.Get(0).(func([]*models.ScraperResult) *models.Movie); ok {
@@ -57,10 +60,12 @@ func (_mock *MockAggregatorInterface) Aggregate(results []*models.ScraperResult)
 			r0 = ret.Get(0).(*models.Movie)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func([]*models.ScraperResult) string); ok {
+	if returnFunc, ok := ret.Get(1).(func([]*models.ScraperResult) *aggregator.AggregateResult); ok {
 		r1 = returnFunc(results)
 	} else {
-		r1 = ret.Get(1).(string)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*aggregator.AggregateResult)
+		}
 	}
 	if returnFunc, ok := ret.Get(2).(func([]*models.ScraperResult) error); ok {
 		r2 = returnFunc(results)
@@ -94,18 +99,18 @@ func (_c *MockAggregatorInterface_Aggregate_Call) Run(run func(results []*models
 	return _c
 }
 
-func (_c *MockAggregatorInterface_Aggregate_Call) Return(movie *models.Movie, warning string, err error) *MockAggregatorInterface_Aggregate_Call {
-	_c.Call.Return(movie, warning, err)
+func (_c *MockAggregatorInterface_Aggregate_Call) Return(movie *models.Movie, aggregateResult *aggregator.AggregateResult, err error) *MockAggregatorInterface_Aggregate_Call {
+	_c.Call.Return(movie, aggregateResult, err)
 	return _c
 }
 
-func (_c *MockAggregatorInterface_Aggregate_Call) RunAndReturn(run func(results []*models.ScraperResult) (*models.Movie, string, error)) *MockAggregatorInterface_Aggregate_Call {
+func (_c *MockAggregatorInterface_Aggregate_Call) RunAndReturn(run func(results []*models.ScraperResult) (*models.Movie, *aggregator.AggregateResult, error)) *MockAggregatorInterface_Aggregate_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // AggregateWithPriority provides a mock function for the type MockAggregatorInterface
-func (_mock *MockAggregatorInterface) AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, string, error) {
+func (_mock *MockAggregatorInterface) AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, *aggregator.AggregateResult, error) {
 	ret := _mock.Called(results, customPriority)
 
 	if len(ret) == 0 {
@@ -113,9 +118,9 @@ func (_mock *MockAggregatorInterface) AggregateWithPriority(results []*models.Sc
 	}
 
 	var r0 *models.Movie
-	var r1 string
+	var r1 *aggregator.AggregateResult
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func([]*models.ScraperResult, []string) (*models.Movie, string, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func([]*models.ScraperResult, []string) (*models.Movie, *aggregator.AggregateResult, error)); ok {
 		return returnFunc(results, customPriority)
 	}
 	if returnFunc, ok := ret.Get(0).(func([]*models.ScraperResult, []string) *models.Movie); ok {
@@ -125,10 +130,12 @@ func (_mock *MockAggregatorInterface) AggregateWithPriority(results []*models.Sc
 			r0 = ret.Get(0).(*models.Movie)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func([]*models.ScraperResult, []string) string); ok {
+	if returnFunc, ok := ret.Get(1).(func([]*models.ScraperResult, []string) *aggregator.AggregateResult); ok {
 		r1 = returnFunc(results, customPriority)
 	} else {
-		r1 = ret.Get(1).(string)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*aggregator.AggregateResult)
+		}
 	}
 	if returnFunc, ok := ret.Get(2).(func([]*models.ScraperResult, []string) error); ok {
 		r2 = returnFunc(results, customPriority)
@@ -168,58 +175,52 @@ func (_c *MockAggregatorInterface_AggregateWithPriority_Call) Run(run func(resul
 	return _c
 }
 
-func (_c *MockAggregatorInterface_AggregateWithPriority_Call) Return(movie *models.Movie, warning string, err error) *MockAggregatorInterface_AggregateWithPriority_Call {
-	_c.Call.Return(movie, warning, err)
+func (_c *MockAggregatorInterface_AggregateWithPriority_Call) Return(movie *models.Movie, aggregateResult *aggregator.AggregateResult, err error) *MockAggregatorInterface_AggregateWithPriority_Call {
+	_c.Call.Return(movie, aggregateResult, err)
 	return _c
 }
 
-func (_c *MockAggregatorInterface_AggregateWithPriority_Call) RunAndReturn(run func(results []*models.ScraperResult, customPriority []string) (*models.Movie, string, error)) *MockAggregatorInterface_AggregateWithPriority_Call {
+func (_c *MockAggregatorInterface_AggregateWithPriority_Call) RunAndReturn(run func(results []*models.ScraperResult, customPriority []string) (*models.Movie, *aggregator.AggregateResult, error)) *MockAggregatorInterface_AggregateWithPriority_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetResolvedPriorities provides a mock function for the type MockAggregatorInterface
-func (_mock *MockAggregatorInterface) GetResolvedPriorities() map[string][]string {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetResolvedPriorities")
-	}
-
-	var r0 map[string][]string
-	if returnFunc, ok := ret.Get(0).(func() map[string][]string); ok {
-		r0 = returnFunc()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string][]string)
-		}
-	}
-	return r0
+// ReloadReplacementCaches provides a mock function for the type MockAggregatorInterface
+func (_mock *MockAggregatorInterface) ReloadReplacementCaches(ctx context.Context) {
+	_mock.Called(ctx)
+	return
 }
 
-// MockAggregatorInterface_GetResolvedPriorities_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetResolvedPriorities'
-type MockAggregatorInterface_GetResolvedPriorities_Call struct {
+// MockAggregatorInterface_ReloadReplacementCaches_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReloadReplacementCaches'
+type MockAggregatorInterface_ReloadReplacementCaches_Call struct {
 	*mock.Call
 }
 
-// GetResolvedPriorities is a helper method to define mock.On call
-func (_e *MockAggregatorInterface_Expecter) GetResolvedPriorities() *MockAggregatorInterface_GetResolvedPriorities_Call {
-	return &MockAggregatorInterface_GetResolvedPriorities_Call{Call: _e.mock.On("GetResolvedPriorities")}
+// ReloadReplacementCaches is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockAggregatorInterface_Expecter) ReloadReplacementCaches(ctx interface{}) *MockAggregatorInterface_ReloadReplacementCaches_Call {
+	return &MockAggregatorInterface_ReloadReplacementCaches_Call{Call: _e.mock.On("ReloadReplacementCaches", ctx)}
 }
 
-func (_c *MockAggregatorInterface_GetResolvedPriorities_Call) Run(run func()) *MockAggregatorInterface_GetResolvedPriorities_Call {
+func (_c *MockAggregatorInterface_ReloadReplacementCaches_Call) Run(run func(ctx context.Context)) *MockAggregatorInterface_ReloadReplacementCaches_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
 
-func (_c *MockAggregatorInterface_GetResolvedPriorities_Call) Return(stringToStrings map[string][]string) *MockAggregatorInterface_GetResolvedPriorities_Call {
-	_c.Call.Return(stringToStrings)
+func (_c *MockAggregatorInterface_ReloadReplacementCaches_Call) Return() *MockAggregatorInterface_ReloadReplacementCaches_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockAggregatorInterface_GetResolvedPriorities_Call) RunAndReturn(run func() map[string][]string) *MockAggregatorInterface_GetResolvedPriorities_Call {
-	_c.Call.Return(run)
+func (_c *MockAggregatorInterface_ReloadReplacementCaches_Call) RunAndReturn(run func(ctx context.Context)) *MockAggregatorInterface_ReloadReplacementCaches_Call {
+	_c.Run(run)
 	return _c
 }

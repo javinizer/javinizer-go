@@ -10,72 +10,42 @@ import (
 	"testing"
 
 	api "github.com/javinizer/javinizer-go/cmd/javinizer/commands/api"
-	"github.com/javinizer/javinizer-go/internal/aggregator"
-	apicore "github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	apiserver "github.com/javinizer/javinizer-go/internal/api/server"
+	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraper"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	// Register scrapers via init() functions (standard Go plugin pattern)
-	_ "github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/caribbeancom"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/dmm"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/fc2"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/jav321"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/javbus"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/javdb"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/javlibrary"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/libredmm"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/mgstage"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/r18dev"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/tokyohot"
-
-	_ "github.com/javinizer/javinizer-go/internal/config/migrations"
 )
 
-// MockScraper is a mock scraper for testing
+func init() {
+	reg := scraperutil.NewScraperRegistry()
+	scraper.RegisterAll(reg)
+}
+
+// MockScraper implements models.Scraper for testing
 type MockScraper struct {
 	name string
 }
+
+func (m *MockScraper) Name() string { return m.name }
+func (m *MockScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
+	return nil, nil
+}
+func (m *MockScraper) GetURL(_ context.Context, id string) (string, error) { return "", nil }
+func (m *MockScraper) IsEnabled() bool                                     { return true }
+func (m *MockScraper) Config() *models.ScraperSettings                     { return nil }
+func (m *MockScraper) Close() error                                        { return nil }
 
 func NewMockScraper(name string) *MockScraper {
 	return &MockScraper{name: name}
 }
 
-func (m *MockScraper) Name() string {
-	return m.name
-}
-
-func (m *MockScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
-	return &models.ScraperResult{
-		ID:    id,
-		Title: "Test Movie",
-	}, nil
-}
-
-func (m *MockScraper) GetURL(id string) (string, error) {
-	return "http://test.com/" + id, nil
-}
-
-func (m *MockScraper) IsEnabled() bool {
-	return true
-}
-
-func (m *MockScraper) Close() error {
-	return nil
-}
-
-func (m *MockScraper) Config() *config.ScraperSettings {
-	return &config.ScraperSettings{Enabled: true}
-}
-
-// createTestMovie creates a test movie for database operations
 func createTestMovie(id, title string) *models.Movie {
 	return &models.Movie{
 		ID:    id,
@@ -83,7 +53,6 @@ func createTestMovie(id, title string) *models.Movie {
 	}
 }
 
-// setupTagTestDB creates a temporary database for testing
 func setupTagTestDB(t *testing.T) (string, *database.DB) {
 	t.Helper()
 
@@ -94,20 +63,6 @@ func setupTagTestDB(t *testing.T) (string, *database.DB) {
 database:
   dsn: ":memory:"
   type: sqlite
-scrapers:
-  priority: ["r18dev", "dmm"]
-  timeout_seconds: 30
-  request_timeout_seconds: 60
-  r18dev:
-    enabled: true
-    language: en
-  dmm:
-    enabled: true
-metadata:
-  priority: {}
-matching:
-  extensions: [".mp4"]
-  regex_enabled: false
 server:
   host: localhost
   port: 8080
@@ -119,7 +74,7 @@ system:
 	cfg, err := config.Load(tmpFile)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 
 	err = db.RunMigrationsOnStartup(context.Background())
@@ -133,7 +88,7 @@ system:
 }
 
 // createTestAPIServer creates a test API server with minimal dependencies
-func createTestAPIServer(t *testing.T) *apicore.ServerDependencies {
+func createTestAPIServer(t *testing.T) *core.APIDeps {
 	t.Helper()
 
 	// Create test config
@@ -162,32 +117,29 @@ func createTestAPIServer(t *testing.T) *apicore.ServerDependencies {
 	actressRepo := database.NewActressRepository(db)
 
 	// Initialize registry with mock scrapers
-	registry := models.NewScraperRegistry()
+	registry := scraperutil.NewScraperRegistry()
 	mockScraper := NewMockScraper("testscraper")
-	registry.Register(mockScraper)
-
-	// Initialize aggregator
-	agg := aggregator.NewWithDatabase(cfg, db)
-
-	// Initialize matcher
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry.RegisterInstance(mockScraper)
 
 	// Initialize job queue
-	jobQueue := worker.NewJobQueue(nil, "", nil)
+	jobStore := worker.NewJobStore(nil, nil, nil, "", nil, nil)
 
 	// Create server dependencies
-	deps := &apicore.ServerDependencies{
-		ConfigFile:  configPath,
-		Registry:    registry,
-		DB:          db,
-		Aggregator:  agg,
-		MovieRepo:   movieRepo,
-		ActressRepo: actressRepo,
-		Matcher:     mat,
-		JobQueue:    jobQueue,
+	deps := &core.APIDeps{
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+			DB:              db,
+		},
+		ConfigFile: configPath,
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   movieRepo,
+				ActressRepo: actressRepo,
+			},
+		},
+		JobStore: jobStore,
 	}
-	deps.SetConfig(cfg)
+	deps.CoreDeps.SetConfig(cfg)
 
 	return deps
 }
@@ -195,7 +147,7 @@ func createTestAPIServer(t *testing.T) *apicore.ServerDependencies {
 // TestAPIServer_HealthCheck tests the health check endpoint
 func TestAPIServer_HealthCheck(t *testing.T) {
 	deps := createTestAPIServer(t)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	router := apiserver.NewServer(deps)
 
@@ -215,11 +167,11 @@ func TestAPIServer_HealthCheck(t *testing.T) {
 // TestAPIServer_ListMovies tests the list movies endpoint
 func TestAPIServer_ListMovies(t *testing.T) {
 	deps := createTestAPIServer(t)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	// Insert test movie
 	movie := createTestMovie("IPX-123", "Test Movie")
-	_, err := deps.MovieRepo.Upsert(movie)
+	_, err := deps.Repos.MovieRepo.Upsert(context.TODO(), movie)
 	require.NoError(t, err)
 
 	router := apiserver.NewServer(deps)
@@ -242,11 +194,11 @@ func TestAPIServer_ListMovies(t *testing.T) {
 // TestAPIServer_GetMovie tests the get movie by ID endpoint
 func TestAPIServer_GetMovie(t *testing.T) {
 	deps := createTestAPIServer(t)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	// Insert test movie
 	movie := createTestMovie("IPX-123", "Test Movie")
-	_, err := deps.MovieRepo.Upsert(movie)
+	_, err := deps.Repos.MovieRepo.Upsert(context.TODO(), movie)
 	require.NoError(t, err)
 
 	router := apiserver.NewServer(deps)
@@ -269,7 +221,7 @@ func TestAPIServer_GetMovie(t *testing.T) {
 // TestAPIServer_GetMovie_NotFound tests 404 for non-existent movie
 func TestAPIServer_GetMovie_NotFound(t *testing.T) {
 	deps := createTestAPIServer(t)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	router := apiserver.NewServer(deps)
 
@@ -336,9 +288,9 @@ func TestRun_HostFlagOverride(t *testing.T) {
 
 	deps, err := api.Run(cmd, configPath, customHost, 0)
 	require.NoError(t, err)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
-	currentCfg := deps.GetConfig()
+	currentCfg := deps.CoreDeps.GetConfig()
 	assert.Equal(t, customHost, currentCfg.Server.Host, "host should be overridden")
 	assert.Equal(t, 8080, currentCfg.Server.Port, "port should remain from config")
 }
@@ -361,9 +313,9 @@ func TestRun_PortFlagOverride(t *testing.T) {
 
 	deps, err := api.Run(cmd, configPath, "", customPort)
 	require.NoError(t, err)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
-	currentCfg := deps.GetConfig()
+	currentCfg := deps.CoreDeps.GetConfig()
 	assert.Equal(t, "localhost", currentCfg.Server.Host, "host should remain from config")
 	assert.Equal(t, customPort, currentCfg.Server.Port, "port should be overridden")
 }
@@ -387,9 +339,9 @@ func TestRun_BothFlagsOverride(t *testing.T) {
 
 	deps, err := api.Run(cmd, configPath, customHost, customPort)
 	require.NoError(t, err)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
-	currentCfg := deps.GetConfig()
+	currentCfg := deps.CoreDeps.GetConfig()
 	assert.Equal(t, customHost, currentCfg.Server.Host)
 	assert.Equal(t, customPort, currentCfg.Server.Port)
 }
@@ -405,11 +357,11 @@ func TestRun_ConfigLoading(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	// Verify config is loaded
 	assert.Equal(t, configPath, deps.ConfigFile)
-	assert.NotNil(t, deps.GetConfig())
+	assert.NotNil(t, deps.CoreDeps.GetConfig())
 }
 
 // TestRun_DatabaseInit verifies database initialization and migrations
@@ -423,14 +375,14 @@ func TestRun_DatabaseInit(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	// Verify database is initialized
-	assert.NotNil(t, deps.DB)
+	assert.NotNil(t, deps.CoreDeps.DB)
 
 	// Verify tables exist (migrations ran)
 	var tableCount int
-	deps.DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").Scan(&tableCount)
+	deps.CoreDeps.DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").Scan(&tableCount)
 	assert.Greater(t, tableCount, 0, "should have tables after migrations")
 }
 
@@ -445,11 +397,11 @@ func TestRun_ScraperRegistry(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	// Verify scraper registry
-	assert.NotNil(t, deps.Registry)
-	scrapers := deps.Registry.GetAll()
+	assert.NotNil(t, deps.CoreDeps.ScraperRegistry)
+	scrapers := deps.CoreDeps.ScraperRegistry.GetAll()
 	assert.Greater(t, len(scrapers), 0, "should have registered scrapers")
 }
 
@@ -464,20 +416,20 @@ func TestRun_Repositories(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	// Verify repositories
-	assert.NotNil(t, deps.MovieRepo, "MovieRepository should be initialized")
-	assert.NotNil(t, deps.ActressRepo, "ActressRepository should be initialized")
+	assert.NotNil(t, deps.Repos.MovieRepo, "MovieRepository should be initialized")
+	assert.NotNil(t, deps.Repos.ActressRepo, "ActressRepository should be initialized")
 
 	// Verify functional
-	movies, err := deps.MovieRepo.List(10, 0)
+	movies, err := deps.Repos.MovieRepo.List(context.TODO(), 10, 0)
 	assert.NoError(t, err)
 	assert.NotNil(t, movies)
 }
 
-// TestRun_Aggregator verifies aggregator initialization
-func TestRun_Aggregator(t *testing.T) {
+// TestRun_ReloadConfig verifies that ReloadConfig works after initialization
+func TestRun_ReloadConfig(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
@@ -487,14 +439,17 @@ func TestRun_Aggregator(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
-	assert.NotNil(t, deps.Aggregator, "Aggregator should be initialized")
-	assert.NotNil(t, deps.Matcher, "Matcher should be initialized")
+	// Verify ReloadConfig can be called with a valid config
+	cfg := deps.CoreDeps.GetConfig()
+	require.NotNil(t, cfg)
+	err = core.NewAPIRuntime(deps).ReloadConfig(cfg)
+	assert.NoError(t, err, "ReloadConfig should succeed with valid config")
 }
 
-// TestRun_JobQueue verifies job queue initialization
-func TestRun_JobQueue(t *testing.T) {
+// TestRun_JobStore verifies job queue initialization
+func TestRun_JobStore(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
@@ -504,10 +459,10 @@ func TestRun_JobQueue(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
-	assert.NotNil(t, deps.JobQueue, "JobQueue should be initialized")
-	jobs := deps.JobQueue.ListJobs()
+	assert.NotNil(t, deps.JobStore, "JobStore should be initialized")
+	jobs := deps.JobStore.ListJobs()
 	assert.NotNil(t, jobs)
 	assert.Empty(t, jobs, "should start with no jobs")
 }
@@ -526,7 +481,7 @@ func TestRun_TokenStoreInitialized(t *testing.T) {
 	deps, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	defer func() { _ = deps.DB.Close() }()
+	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	assert.NotNil(t, deps.TokenStore, "TokenStore must be initialized for proxy verification")
 	assert.NotNil(t, deps.TokenStore, "TokenStore is required for backend save enforcement")
@@ -592,9 +547,9 @@ system:
 		deps, err := api.Run(cmd, configPath, "", 0)
 		require.NoError(t, err, "DEEPL_API_KEY env var should satisfy validation when config api_key is empty")
 		require.NotNil(t, deps)
-		defer func() { _ = deps.DB.Close() }()
+		defer func() { _ = deps.CoreDeps.DB.Close() }()
 
-		currentCfg := deps.GetConfig()
+		currentCfg := deps.CoreDeps.GetConfig()
 		assert.Equal(t, "test-deepl-key-from-env", currentCfg.Metadata.Translation.DeepL.APIKey,
 			"env var DEEPL_API_KEY should be applied to config")
 	})
@@ -682,9 +637,9 @@ system:
 		deps, err := api.Run(cmd, configPath, "", 0)
 		require.NoError(t, err, "OPENAI_API_KEY env var should satisfy validation")
 		require.NotNil(t, deps)
-		defer func() { _ = deps.DB.Close() }()
+		defer func() { _ = deps.CoreDeps.DB.Close() }()
 
-		currentCfg := deps.GetConfig()
+		currentCfg := deps.CoreDeps.GetConfig()
 		assert.Equal(t, "sk-test-openai-key-from-env", currentCfg.Metadata.Translation.OpenAI.APIKey)
 	})
 }

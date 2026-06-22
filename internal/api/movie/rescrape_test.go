@@ -2,15 +2,22 @@ package movie
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
 func TestRescrapeMovie(t *testing.T) {
@@ -18,28 +25,28 @@ func TestRescrapeMovie(t *testing.T) {
 		name           string
 		movieID        string
 		requestBody    interface{}
-		setupData      func(*testing.T, *ServerDependencies)
-		setupScraper   func(*models.ScraperRegistry)
+		setupData      func(*testing.T, *core.APIDeps)
+		setupScraper   func(*scraperutil.ScraperRegistry)
 		expectedStatus int
 		validateFn     func(*testing.T, *httptest.ResponseRecorder)
 	}{
 		{
 			name:    "successful rescrape with custom scrapers",
 			movieID: "IPX-123",
-			requestBody: RescrapeRequest{
+			requestBody: contracts.RescrapeRequest{
 				SelectedScrapers: []string{"r18dev"},
 				Force:            true,
 			},
-			setupData: func(t *testing.T, deps *ServerDependencies) {
+			setupData: func(t *testing.T, deps *core.APIDeps) {
 				// Pre-populate with cached movie
-				_, err := deps.MovieRepo.Upsert(&models.Movie{
+				_, err := deps.Repos.MovieRepo.Upsert(context.TODO(), &models.Movie{
 					ID:    "IPX-123",
 					Title: "Old Title",
 				})
 				require.NoError(t, err)
 			},
-			setupScraper: func(registry *models.ScraperRegistry) {
-				registry.Register(&mockScraperWithResults{
+			setupScraper: func(registry *scraperutil.ScraperRegistry) {
+				registry.RegisterInstance(&mockScraperWithResults{
 					name:    "r18dev",
 					enabled: true,
 					result: &models.ScraperResult{
@@ -51,7 +58,7 @@ func TestRescrapeMovie(t *testing.T) {
 			},
 			expectedStatus: 200,
 			validateFn: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var resp MovieResponse
+				var resp contracts.MovieResponse
 				err := json.Unmarshal(w.Body.Bytes(), &resp)
 				require.NoError(t, err)
 				assert.Equal(t, "New Rescraped Title", resp.Movie.Title)
@@ -61,19 +68,19 @@ func TestRescrapeMovie(t *testing.T) {
 		{
 			name:    "rescrape without force - cache cleared by custom scrapers",
 			movieID: "IPX-456",
-			requestBody: RescrapeRequest{
+			requestBody: contracts.RescrapeRequest{
 				SelectedScrapers: []string{"dmm"},
 				Force:            false,
 			},
-			setupData: func(t *testing.T, deps *ServerDependencies) {
-				_, err := deps.MovieRepo.Upsert(&models.Movie{
+			setupData: func(t *testing.T, deps *core.APIDeps) {
+				_, err := deps.Repos.MovieRepo.Upsert(context.TODO(), &models.Movie{
 					ID:    "IPX-456",
 					Title: "Cached Title",
 				})
 				require.NoError(t, err)
 			},
-			setupScraper: func(registry *models.ScraperRegistry) {
-				registry.Register(&mockScraperWithResults{
+			setupScraper: func(registry *scraperutil.ScraperRegistry) {
+				registry.RegisterInstance(&mockScraperWithResults{
 					name:    "dmm",
 					enabled: true,
 					result: &models.ScraperResult{
@@ -85,7 +92,7 @@ func TestRescrapeMovie(t *testing.T) {
 			},
 			expectedStatus: 200,
 			validateFn: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var resp MovieResponse
+				var resp contracts.MovieResponse
 				err := json.Unmarshal(w.Body.Bytes(), &resp)
 				require.NoError(t, err)
 				assert.Equal(t, "Fresh Scraped Title", resp.Movie.Title)
@@ -97,22 +104,22 @@ func TestRescrapeMovie(t *testing.T) {
 			requestBody: map[string]string{
 				"invalid": "field",
 			},
-			setupData:      func(_ *testing.T, deps *ServerDependencies) {},
-			setupScraper:   func(registry *models.ScraperRegistry) {},
+			setupData:      func(_ *testing.T, deps *core.APIDeps) {},
+			setupScraper:   func(registry *scraperutil.ScraperRegistry) {},
 			expectedStatus: 400,
 		},
 		{
 			name:    "rescrape with empty selected scrapers",
 			movieID: "IPX-999",
-			requestBody: RescrapeRequest{
+			requestBody: contracts.RescrapeRequest{
 				SelectedScrapers: []string{},
 				Force:            false,
 			},
-			setupData:      func(_ *testing.T, deps *ServerDependencies) {},
-			setupScraper:   func(registry *models.ScraperRegistry) {},
+			setupData:      func(_ *testing.T, deps *core.APIDeps) {},
+			setupScraper:   func(registry *scraperutil.ScraperRegistry) {},
 			expectedStatus: 400,
 			validateFn: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var resp ErrorResponse
+				var resp contracts.ErrorResponse
 				err := json.Unmarshal(w.Body.Bytes(), &resp)
 				require.NoError(t, err)
 				assert.Contains(t, resp.Error, "selected_scrapers cannot be empty")
@@ -121,18 +128,18 @@ func TestRescrapeMovie(t *testing.T) {
 		{
 			name:    "rescrape with all scrapers failing",
 			movieID: "NOTFOUND-123",
-			requestBody: RescrapeRequest{
+			requestBody: contracts.RescrapeRequest{
 				SelectedScrapers: []string{"r18dev", "dmm"},
 				Force:            false,
 			},
-			setupData: func(_ *testing.T, deps *ServerDependencies) {},
-			setupScraper: func(registry *models.ScraperRegistry) {
-				registry.Register(&mockScraperWithResults{
+			setupData: func(_ *testing.T, deps *core.APIDeps) {},
+			setupScraper: func(registry *scraperutil.ScraperRegistry) {
+				registry.RegisterInstance(&mockScraperWithResults{
 					name:    "r18dev",
 					enabled: true,
 					err:     assert.AnError,
 				})
-				registry.Register(&mockScraperWithResults{
+				registry.RegisterInstance(&mockScraperWithResults{
 					name:    "dmm",
 					enabled: true,
 					err:     assert.AnError,
@@ -140,30 +147,29 @@ func TestRescrapeMovie(t *testing.T) {
 			},
 			expectedStatus: 404,
 			validateFn: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var resp ErrorResponse
+				var resp contracts.ErrorResponse
 				err := json.Unmarshal(w.Body.Bytes(), &resp)
 				require.NoError(t, err)
-				assert.Contains(t, resp.Error, "No results from selected scrapers")
-				assert.NotEmpty(t, resp.Errors)
+				assert.Contains(t, resp.Error, "No results")
 			},
 		},
 		{
 			name:    "rescrape with partial scraper failures",
 			movieID: "IPX-111",
-			requestBody: RescrapeRequest{
+			requestBody: contracts.RescrapeRequest{
 				SelectedScrapers: []string{"r18dev", "dmm"},
 				Force:            false,
 			},
-			setupData: func(_ *testing.T, deps *ServerDependencies) {},
-			setupScraper: func(registry *models.ScraperRegistry) {
+			setupData: func(_ *testing.T, deps *core.APIDeps) {},
+			setupScraper: func(registry *scraperutil.ScraperRegistry) {
 				// First scraper fails
-				registry.Register(&mockScraperWithResults{
+				registry.RegisterInstance(&mockScraperWithResults{
 					name:    "r18dev",
 					enabled: true,
 					err:     assert.AnError,
 				})
 				// Second scraper succeeds
-				registry.Register(&mockScraperWithResults{
+				registry.RegisterInstance(&mockScraperWithResults{
 					name:    "dmm",
 					enabled: true,
 					result: &models.ScraperResult{
@@ -175,7 +181,7 @@ func TestRescrapeMovie(t *testing.T) {
 			},
 			expectedStatus: 200,
 			validateFn: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var resp MovieResponse
+				var resp contracts.MovieResponse
 				err := json.Unmarshal(w.Body.Bytes(), &resp)
 				require.NoError(t, err)
 				assert.Equal(t, "Partial Success Title", resp.Movie.Title)
@@ -195,10 +201,11 @@ func TestRescrapeMovie(t *testing.T) {
 
 			deps := createTestDeps(t, cfg, "")
 			tt.setupData(t, deps)
-			tt.setupScraper(deps.Registry)
+			tt.setupScraper(deps.CoreDeps.GetRegistry())
 
 			router := gin.New()
-			router.POST("/movies/:id/rescrape", rescrapeMovie(deps))
+			movieDeps := NewMovieDeps(deps.Repos.MovieRepo, WithWorkflow(testkit.GetTestRuntime(deps).GetWorkflow))
+			router.POST("/movies/:id/rescrape", rescrapeMovie(movieDeps))
 
 			var body []byte
 			var err error

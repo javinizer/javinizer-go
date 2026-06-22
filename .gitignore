@@ -13,6 +13,7 @@
 /dist/
 javinizer-go
 /javinizer
+/javinizer-e2e
 
 # Web build artifacts
 /web/frontend/node_modules/
@@ -55,6 +56,7 @@ Thumbs.db
 config.local.yaml
 configs/config.yaml
 configs/auth.credentials.json
+/auth.credentials.json
 auth.sessions.json
 
 # Docker configuration
@@ -63,10 +65,16 @@ auth.sessions.json
 # Test files
 /test-videos/
 /cli
+cmd/javinizer/commands/update/*.jpg
+cmd/javinizer/commands/update/*.mp4
+cmd/javinizer/commands/update/*.nfo
+cmd/javinizer/commands/update/.actors/
+cmd/javinizer/commands/update/extrafanart/
 
 # Coverage files
 *.out
 coverage*.out
+coveragecheck
 coverage.html
 *.coverprofile
 COVERAGE_REPORT.md
@@ -106,3 +114,6 @@ graphify-out/
 
 # Pi project-local packages (if using pi install -l)
 .pi/npm/
+
+# Agent scratch files
+.scratch/

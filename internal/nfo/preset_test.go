@@ -126,8 +126,10 @@ func TestApplyPreset_Integration(t *testing.T) {
 			scalarStr, arrayStr, err := ApplyPreset(tt.preset, "", "")
 			require.NoError(t, err)
 
-			gotScalarEnum := ParseScalarStrategy(scalarStr)
-			gotArrayMerge := ParseArrayStrategy(arrayStr)
+			gotScalarEnum, scalarErr := ParseScalarStrategy(scalarStr)
+			require.NoError(t, scalarErr)
+			gotArrayMerge, arrayErr := ParseArrayStrategy(arrayStr)
+			require.NoError(t, arrayErr)
 
 			assert.Equal(t, tt.wantScalarEnum, gotScalarEnum, "scalar enum mismatch")
 			assert.Equal(t, tt.wantArrayMerge, gotArrayMerge, "array merge flag mismatch")

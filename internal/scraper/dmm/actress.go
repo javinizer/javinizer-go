@@ -11,13 +11,12 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
-	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
-func (s *Scraper) extractActresses(ctx context.Context, doc *goquery.Document) []models.ActressInfo {
+func (s *scraper) extractActresses(ctx context.Context, doc *goquery.Document) []models.ActressInfo {
 	actresses := make([]models.ActressInfo, 0)
 	actressIndexByID := make(map[int]int)
 
@@ -61,7 +60,7 @@ func (s *Scraper) extractActresses(ctx context.Context, doc *goquery.Document) [
 	return actresses
 }
 
-func (s *Scraper) extractActressesFromStreamingPage(ctx context.Context, doc *goquery.Document) []models.ActressInfo {
+func (s *scraper) extractActressesFromStreamingPage(ctx context.Context, doc *goquery.Document) []models.ActressInfo {
 	actresses := make([]models.ActressInfo, 0)
 	actressIndexByID := make(map[int]int)
 
@@ -141,7 +140,7 @@ func (s *Scraper) extractActressesFromStreamingPage(ctx context.Context, doc *go
 	return actresses
 }
 
-func (s *Scraper) extractActressFromLink(ctx context.Context, sel *goquery.Selection) models.ActressInfo {
+func (s *scraper) extractActressFromLink(ctx context.Context, sel *goquery.Selection) models.ActressInfo {
 	href, exists := sel.Attr("href")
 	if !exists {
 		return models.ActressInfo{}
@@ -265,25 +264,33 @@ func extractActressThumbURL(sel *goquery.Selection) string {
 	return normalizeActressThumbURL(extractFrom(sel.Parent()))
 }
 
-func normalizeActressThumbURL(rawURL string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
+func normalizeActressThumbURL(url string) string {
+	url = strings.TrimSpace(url)
+	if url == "" {
 		return ""
 	}
 
-	rawURL = strings.ReplaceAll(rawURL, "&amp;", "&")
-	if commaIdx := strings.Index(rawURL, ","); commaIdx != -1 {
-		rawURL = strings.TrimSpace(rawURL[:commaIdx])
+	url = strings.ReplaceAll(url, "&amp;", "&")
+	if commaIdx := strings.Index(url, ","); commaIdx != -1 {
+		url = strings.TrimSpace(url[:commaIdx])
 	}
-	if whitespaceIdx := strings.IndexAny(rawURL, " \t\r\n"); whitespaceIdx != -1 {
-		rawURL = rawURL[:whitespaceIdx]
-	}
-
-	if strings.HasPrefix(rawURL, "/") && !strings.HasPrefix(rawURL, "//") {
-		rawURL = "https://video.dmm.co.jp" + rawURL
+	if whitespaceIdx := strings.IndexAny(url, " \t\r\n"); whitespaceIdx != -1 {
+		url = url[:whitespaceIdx]
 	}
 
-	return imageutil.NormalizeDMMScreenshotURL(rawURL)
+	if strings.HasPrefix(url, "//") {
+		url = "https:" + url
+	}
+	if strings.HasPrefix(url, "/") {
+		url = "https://video.dmm.co.jp" + url
+	}
+	url = strings.Replace(url, "awsimgsrc.dmm.co.jp/pics_dig", "pics.dmm.co.jp", 1)
+
+	if queryIdx := strings.Index(url, "?"); queryIdx != -1 {
+		url = url[:queryIdx]
+	}
+
+	return strings.TrimSpace(url)
 }
 
 func upsertActressInfo(actresses *[]models.ActressInfo, indexByID map[int]int, actress models.ActressInfo) bool {
@@ -313,7 +320,7 @@ func upsertActressInfo(actresses *[]models.ActressInfo, indexByID map[int]int, a
 	return true
 }
 
-func (s *Scraper) tryActressThumbURLs(ctx context.Context, firstName, lastName string, dmmID int) string {
+func (s *scraper) tryActressThumbURLs(ctx context.Context, firstName, lastName string, dmmID int) string {
 	candidates := make([]string, 0)
 
 	if firstName != "" && lastName != "" {
@@ -337,7 +344,7 @@ func (s *Scraper) tryActressThumbURLs(ctx context.Context, firstName, lastName s
 
 	testClient, err := httpclient.NewRestyClient(s.proxyProfile, 5*time.Second, 0)
 	if err != nil {
-		logging.Warnf("DMM: Failed to create thumbnail probe client with scraper proxy: %v, using explicit no-proxy fallback", err)
+		logging.Debugf("DMM: Failed to create thumbnail probe client with scraper proxy: %v, using explicit no-proxy fallback", err)
 		testClient = httpclient.NewRestyClientNoProxy(5*time.Second, 0)
 	}
 	testClient.SetRedirectPolicy(resty.NoRedirectPolicy())
@@ -358,7 +365,7 @@ func (s *Scraper) tryActressThumbURLs(ctx context.Context, firstName, lastName s
 	return ""
 }
 
-func (s *Scraper) extractRomajiVariantsFromActressPageCtx(ctx context.Context, dmmID int) []string {
+func (s *scraper) extractRomajiVariantsFromActressPageCtx(ctx context.Context, dmmID int) []string {
 	url := fmt.Sprintf("https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=%d/", dmmID)
 
 	if err := s.rateLimiter.Wait(ctx); err != nil {

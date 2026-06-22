@@ -1,17 +1,16 @@
 package organizer
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scanner"
-	"github.com/javinizer/javinizer-go/internal/types"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/spf13/afero"
 )
 
@@ -31,26 +30,22 @@ func createTestMovie() *models.Movie {
 }
 
 func TestOrganizer_Plan(t *testing.T) {
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      "/source/ipx-535.mp4",
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: "/source/ipx-535.mp4", Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
-	plan, err := org.Plan(match, movie, "/dest", false)
+	plan, err := org.plan(match, movie, "/dest", false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -88,34 +83,31 @@ func TestOrganizer_Execute_DryRun(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
-	plan, err := org.Plan(match, movie, tmpDir, false)
+	// Execute in dry run mode via Organize seam
+	result, err := org.Organize(context.Background(), OrganizeCmd{
+		Match:     match,
+		Movie:     movie,
+		DestDir:   tmpDir,
+		MoveFiles: true,
+		DryRun:    true,
+	})
 	if err != nil {
-		t.Fatalf("Plan failed: %v", err)
-	}
-
-	// Execute in dry run mode
-	result, err := org.Execute(plan, true)
-	if err != nil {
-		t.Fatalf("Execute failed: %v", err)
+		t.Fatalf("Organize dry-run failed: %v", err)
 	}
 
 	// File should NOT have moved
@@ -146,33 +138,29 @@ func TestOrganizer_Execute_ActualMove(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
-	plan, err := org.Plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
 
 	// Execute actual move
-	result, err := org.Execute(plan, false)
+	result, err := org.execute(plan)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -211,26 +199,22 @@ func TestOrganizer_Execute_Conflict(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
-	plan, err := org.Plan(match, movie, tmpDir, false)
+	plan, err := org.plan(match, movie, tmpDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -244,7 +228,7 @@ func TestOrganizer_Execute_Conflict(t *testing.T) {
 	}
 
 	// Recreate plan to detect conflict
-	plan, err = org.Plan(match, movie, tmpDir, false)
+	plan, err = org.plan(match, movie, tmpDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -255,7 +239,7 @@ func TestOrganizer_Execute_Conflict(t *testing.T) {
 	}
 
 	// Execute should fail
-	result, err := org.Execute(plan, false)
+	result, err := org.execute(plan)
 	if err == nil {
 		t.Error("Expected error due to conflict, got nil")
 	}
@@ -265,7 +249,7 @@ func TestOrganizer_Execute_Conflict(t *testing.T) {
 	}
 }
 
-func TestOrganizer_Copy(t *testing.T) {
+func TestOrganizer_Organize_CopyMode(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create source file
@@ -277,33 +261,31 @@ func TestOrganizer_Copy(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
-	plan, err := org.Plan(match, movie, destDir, false)
-	if err != nil {
-		t.Fatalf("Plan failed: %v", err)
-	}
 
-	// Copy instead of move
-	result, err := org.Copy(plan, false)
+	// Copy instead of move using the Organize seam
+	result, err := org.Organize(context.Background(), OrganizeCmd{
+		Match:     match,
+		Movie:     movie,
+		DestDir:   destDir,
+		MoveFiles: false,
+		LinkMode:  LinkModeNone,
+	})
 	if err != nil {
 		t.Fatalf("Copy failed: %v", err)
 	}
@@ -326,7 +308,7 @@ func TestOrganizer_Copy(t *testing.T) {
 	}
 }
 
-func TestOrganizer_CopyWithLinkMode_HardLink(t *testing.T) {
+func TestOrganizer_Organize_HardLink(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	sourceFile := filepath.Join(tmpDir, "source", "ipx-535.mp4")
@@ -337,33 +319,32 @@ func TestOrganizer_CopyWithLinkMode_HardLink(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
-	plan, err := org.Plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
 
-	result, err := org.CopyWithLinkMode(plan, false, LinkModeHard)
+	plan.LinkMode = LinkModeHard
+	plan.moveFiles = false
+	strategy := newOrganizeStrategy(afero.NewOsFs(), cfg, nil, OSLinker{})
+	result, err := strategy.Execute(plan)
 	if err != nil {
-		t.Fatalf("CopyWithLinkMode hard failed: %v", err)
+		t.Fatalf("Execute with hard link failed: %v", err)
 	}
 
 	srcInfo, err := os.Stat(sourceFile)
@@ -379,7 +360,7 @@ func TestOrganizer_CopyWithLinkMode_HardLink(t *testing.T) {
 	}
 }
 
-func TestOrganizer_CopyWithLinkMode_SoftLink(t *testing.T) {
+func TestOrganizer_Organize_SoftLink(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	sourceFile := filepath.Join(tmpDir, "source", "ipx-535.mp4")
@@ -390,36 +371,35 @@ func TestOrganizer_CopyWithLinkMode_SoftLink(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
-	plan, err := org.Plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
 
-	result, err := org.CopyWithLinkMode(plan, false, LinkModeSoft)
+	plan.LinkMode = LinkModeSoft
+	plan.moveFiles = false
+	strategy := newOrganizeStrategy(afero.NewOsFs(), cfg, nil, OSLinker{})
+	result, err := strategy.Execute(plan)
 	if err != nil {
 		if os.IsPermission(err) {
 			t.Skipf("Skipping symlink test due to permissions: %v", err)
 		}
-		t.Fatalf("CopyWithLinkMode soft failed: %v", err)
+		t.Fatalf("Execute with soft link failed: %v", err)
 	}
 
 	info, err := os.Lstat(result.NewPath)
@@ -439,7 +419,7 @@ func TestOrganizer_CopyWithLinkMode_SoftLink(t *testing.T) {
 	}
 }
 
-func TestOrganizer_CopyWithLinkMode_Copy(t *testing.T) {
+func TestOrganizer_Organize_LinkModeNone_Copy(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	sourceFile := filepath.Join(tmpDir, "source", "ipx-535.mp4")
@@ -450,33 +430,32 @@ func TestOrganizer_CopyWithLinkMode_Copy(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
-	plan, err := org.Plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
 
-	result, err := org.CopyWithLinkMode(plan, false, LinkModeNone)
+	plan.LinkMode = LinkModeNone
+	plan.moveFiles = false
+	strategy := newOrganizeStrategy(afero.NewOsFs(), cfg, nil, OSLinker{})
+	result, err := strategy.Execute(plan)
 	if err != nil {
-		t.Fatalf("CopyWithLinkMode copy failed: %v", err)
+		t.Fatalf("Execute with copy (LinkModeNone) failed: %v", err)
 	}
 
 	if !result.Moved {
@@ -503,7 +482,7 @@ func TestOrganizer_CopyWithLinkMode_Copy(t *testing.T) {
 	}
 }
 
-func TestOrganizer_CopyWithLinkMode_DryRun(t *testing.T) {
+func TestOrganizer_Organize_DryRun(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	sourceFile := filepath.Join(tmpDir, "source", "ipx-535.mp4")
@@ -514,33 +493,32 @@ func TestOrganizer_CopyWithLinkMode_DryRun(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
-	plan, err := org.Plan(match, movie, destDir, false)
-	if err != nil {
-		t.Fatalf("Plan failed: %v", err)
-	}
 
-	result, err := org.CopyWithLinkMode(plan, true, LinkModeHard)
+	result, err := org.Organize(context.Background(), OrganizeCmd{
+		Match:     match,
+		Movie:     movie,
+		DestDir:   destDir,
+		MoveFiles: false,
+		LinkMode:  LinkModeHard,
+		DryRun:    true,
+	})
 	if err != nil {
-		t.Fatalf("CopyWithLinkMode dry-run failed: %v", err)
+		t.Fatalf("Dry-run with link mode failed: %v", err)
 	}
 
 	if result.Moved {
@@ -548,7 +526,7 @@ func TestOrganizer_CopyWithLinkMode_DryRun(t *testing.T) {
 	}
 }
 
-func TestOrganizer_CopyWithLinkMode_Conflicts(t *testing.T) {
+func TestOrganizer_Organize_Conflicts(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	sourceFile := filepath.Join(tmpDir, "source", "ipx-535.mp4")
@@ -559,13 +537,12 @@ func TestOrganizer_CopyWithLinkMode_Conflicts(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: sourceFile,
@@ -576,7 +553,10 @@ func TestOrganizer_CopyWithLinkMode_Conflicts(t *testing.T) {
 		Conflicts:  []string{"target already exists"},
 	}
 
-	_, err := org.CopyWithLinkMode(plan, false, LinkModeNone)
+	plan.LinkMode = LinkModeNone
+	plan.moveFiles = false
+	strategy := newOrganizeStrategy(afero.NewOsFs(), cfg, nil, OSLinker{})
+	_, err := strategy.Execute(plan)
 	if err == nil {
 		t.Fatal("Expected error for conflicts")
 	}
@@ -585,16 +565,15 @@ func TestOrganizer_CopyWithLinkMode_Conflicts(t *testing.T) {
 	}
 }
 
-func TestOrganizer_CopyWithLinkMode_NoMove(t *testing.T) {
+func TestOrganizer_Organize_NoMove(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: filepath.Join(tmpDir, "source", "ipx-535.mp4"),
@@ -604,16 +583,19 @@ func TestOrganizer_CopyWithLinkMode_NoMove(t *testing.T) {
 		WillMove:   false,
 	}
 
-	result, err := org.CopyWithLinkMode(plan, false, LinkModeNone)
+	plan.LinkMode = LinkModeNone
+	plan.moveFiles = false
+	strategy := newOrganizeStrategy(afero.NewOsFs(), cfg, nil, OSLinker{})
+	result, err := strategy.Execute(plan)
 	if err != nil {
-		t.Fatalf("CopyWithLinkMode no-move failed: %v", err)
+		t.Fatalf("Execute no-move failed: %v", err)
 	}
 	if result.Moved {
 		t.Error("Expected Moved to be false when WillMove is false")
 	}
 }
 
-func TestOrganizer_CopyWithLinkMode_InvalidLinkMode(t *testing.T) {
+func TestOrganizer_Organize_InvalidLinkMode(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	sourceFile := filepath.Join(tmpDir, "source", "ipx-535.mp4")
@@ -624,13 +606,12 @@ func TestOrganizer_CopyWithLinkMode_InvalidLinkMode(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: sourceFile,
@@ -640,7 +621,10 @@ func TestOrganizer_CopyWithLinkMode_InvalidLinkMode(t *testing.T) {
 		WillMove:   true,
 	}
 
-	_, err := org.CopyWithLinkMode(plan, false, LinkMode("invalid"))
+	plan.LinkMode = LinkMode("invalid")
+	plan.moveFiles = false
+	strategy := newOrganizeStrategy(afero.NewOsFs(), cfg, nil, OSLinker{})
+	_, err := strategy.Execute(plan)
 	if err == nil {
 		t.Fatal("Expected error for invalid link mode")
 	}
@@ -649,16 +633,15 @@ func TestOrganizer_CopyWithLinkMode_InvalidLinkMode(t *testing.T) {
 	}
 }
 
-func TestOrganizer_CopyWithLinkMode_SourceNotFound(t *testing.T) {
+func TestOrganizer_Organize_SourceNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 
 	plan := &OrganizePlan{
 		SourcePath: filepath.Join(tmpDir, "nonexistent", "source.mp4"),
@@ -668,7 +651,10 @@ func TestOrganizer_CopyWithLinkMode_SourceNotFound(t *testing.T) {
 		WillMove:   true,
 	}
 
-	_, err := org.CopyWithLinkMode(plan, false, LinkModeNone)
+	plan.LinkMode = LinkModeNone
+	plan.moveFiles = false
+	strategy := newOrganizeStrategy(afero.NewOsFs(), cfg, nil, OSLinker{})
+	_, err := strategy.Execute(plan)
 	if err == nil {
 		t.Fatal("Expected error for missing source file")
 	}
@@ -706,8 +692,8 @@ func TestParseLinkMode(t *testing.T) {
 
 func TestValidatePlan(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfg := &config.OutputConfig{}
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	cfg := &Config{}
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 
 	// Create a valid source file
 	sourceFile := filepath.Join(tmpDir, "source.mp4")
@@ -725,7 +711,7 @@ func TestValidatePlan(t *testing.T) {
 			Conflicts:  []string{},
 		}
 
-		issues := org.ValidatePlan(plan)
+		issues := org.validatePlan(plan)
 		if len(issues) != 0 {
 			t.Errorf("Expected no issues, got %d: %v", len(issues), issues)
 		}
@@ -739,7 +725,7 @@ func TestValidatePlan(t *testing.T) {
 			TargetPath: filepath.Join(tmpDir, "target.mp4"),
 		}
 
-		issues := org.ValidatePlan(plan)
+		issues := org.validatePlan(plan)
 		if len(issues) == 0 {
 			t.Error("Expected issues for nonexistent source")
 		}
@@ -755,7 +741,7 @@ func TestValidatePlan(t *testing.T) {
 			WillMove:   true,
 		}
 
-		issues1 := org.ValidatePlan(plan1)
+		issues1 := org.validatePlan(plan1)
 		for _, issue := range issues1 {
 			if strings.Contains(issue, "WillMove") {
 				t.Errorf("Should not report WillMove issue for different paths, got: %s", issue)
@@ -771,7 +757,7 @@ func TestValidatePlan(t *testing.T) {
 			WillMove:   false,
 		}
 
-		issues2 := org.ValidatePlan(plan2)
+		issues2 := org.validatePlan(plan2)
 		for _, issue := range issues2 {
 			if strings.Contains(issue, "identical") {
 				t.Errorf("Should not report identical paths as issue for no-op, got: %s", issue)
@@ -788,7 +774,7 @@ func TestValidatePlan(t *testing.T) {
 			WillMove:   false,
 		}
 
-		issues := org.ValidatePlan(plan)
+		issues := org.validatePlan(plan)
 		for _, issue := range issues {
 			if strings.Contains(issue, "identical") {
 				t.Errorf("Should not report identical paths as issue when WillMove=false, got: %s", issue)
@@ -805,7 +791,7 @@ func TestValidatePlan(t *testing.T) {
 			Conflicts:  []string{"target exists"},
 		}
 
-		issues := org.ValidatePlan(plan)
+		issues := org.validatePlan(plan)
 		if len(issues) == 0 {
 			t.Error("Expected issues for plan with conflicts")
 		}
@@ -829,32 +815,24 @@ func TestOrganizer_OrganizeBatch(t *testing.T) {
 		}
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 
 	// Create matches
-	matches := []matcher.MatchResult{
+	matches := []models.FileMatchInfo{
 		{
-			File: scanner.FileInfo{
-				Path:      filepath.Join(sourceDir, "ipx-535.mp4"),
-				Name:      "ipx-535.mp4",
-				Extension: ".mp4",
-			},
-			ID: "IPX-535",
+			Path: filepath.Join(sourceDir, "ipx-535.mp4"), Name: "ipx-535.mp4", Extension: ".mp4",
+			MovieID: "IPX-535",
 		},
 		{
-			File: scanner.FileInfo{
-				Path:      filepath.Join(sourceDir, "abc-123.mp4"),
-				Name:      "abc-123.mp4",
-				Extension: ".mp4",
-			},
-			ID: "ABC-123",
+			Path: filepath.Join(sourceDir, "abc-123.mp4"), Name: "abc-123.mp4", Extension: ".mp4",
+			MovieID: "ABC-123",
 		},
 	}
 
@@ -868,9 +846,9 @@ func TestOrganizer_OrganizeBatch(t *testing.T) {
 	destDir := filepath.Join(tmpDir, "dest")
 
 	// Organize batch
-	results, err := org.OrganizeBatch(matches, movies, destDir, false, false, false)
+	results, err := organizeBatchViaOrganizeSimple(org, matches, movies, destDir, false, false, false)
 	if err != nil {
-		t.Fatalf("OrganizeBatch failed: %v", err)
+		t.Fatalf("organizeBatchViaOrganizeSimple failed: %v", err)
 	}
 
 	if len(results) != 2 {
@@ -888,17 +866,16 @@ func TestOrganizer_OrganizeBatch(t *testing.T) {
 	}
 }
 
-func TestOrganizer_Copy_SourceDoesNotExist(t *testing.T) {
+func TestOrganizer_Organize_CopyMode_SourceDoesNotExist(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
 	movie := createTestMovie()
 
 	// Create plan with nonexistent source
@@ -912,8 +889,11 @@ func TestOrganizer_Copy_SourceDoesNotExist(t *testing.T) {
 		Movie:      movie,
 	}
 
-	// Copy should fail
-	result, err := org.Copy(plan, false)
+	// Copy should fail — execute via strategy with LinkModeNone (copy path)
+	plan.LinkMode = LinkModeNone
+	plan.moveFiles = false
+	strategy := newOrganizeStrategy(afero.NewOsFs(), cfg, nil, OSLinker{})
+	result, err := strategy.Execute(plan)
 	if err == nil {
 		t.Error("Expected error for nonexistent source file")
 	}
@@ -925,15 +905,15 @@ func TestOrganizer_Copy_SourceDoesNotExist(t *testing.T) {
 func TestOrganizer_Plan_WithSubfolderFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:    "<ID> - <TITLE>",
 		FileFormat:      "<ID>",
 		RenameFile:      true,
-		OperationMode:   types.OperationModeOrganize,
+		OperationMode:   operationmode.OperationModeOrganize,
 		SubfolderFormat: []string{"<STUDIO>", "<YEAR>"},
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
 	sourceFile := filepath.Join(tmpDir, "ipx-535.mp4")
@@ -941,16 +921,12 @@ func TestOrganizer_Plan_WithSubfolderFormat(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
-	plan, err := org.Plan(match, movie, tmpDir, false)
+	plan, err := org.plan(match, movie, tmpDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -982,14 +958,14 @@ func TestOrganizer_Execute_InPlaceRename_DirectoryAlreadyExists(t *testing.T) {
 		t.Fatalf("Failed to create target directory: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
 	plan := &OrganizePlan{
@@ -1002,11 +978,11 @@ func TestOrganizer_Execute_InPlaceRename_DirectoryAlreadyExists(t *testing.T) {
 		InPlace:    true,
 		OldDir:     sourceDir,
 		Movie:      movie,
-		Strategy:   StrategyTypeInPlace,
+		strategy:   strategyInPlace,
 	}
 
 	// Execute should fail because target directory already exists
-	result, err := org.Execute(plan, false)
+	result, err := org.execute(plan)
 	if err == nil {
 		t.Error("Expected error when target directory already exists in in-place rename")
 	}
@@ -1033,31 +1009,23 @@ func TestOrganizer_OrganizeBatch_PartialFailure(t *testing.T) {
 	// file2 doesn't exist (will fail) - use XYZ so it sorts last
 	file2 := filepath.Join(sourceDir, "xyz-999.mp4")
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 
-	matches := []matcher.MatchResult{
+	matches := []models.FileMatchInfo{
 		{
-			File: scanner.FileInfo{
-				Path:      file1,
-				Name:      "abc-123.mp4",
-				Extension: ".mp4",
-			},
-			ID: "ABC-123",
+			Path: file1, Name: "abc-123.mp4", Extension: ".mp4",
+			MovieID: "ABC-123",
 		},
 		{
-			File: scanner.FileInfo{
-				Path:      file2,
-				Name:      "xyz-999.mp4",
-				Extension: ".mp4",
-			},
-			ID: "XYZ-999",
+			Path: file2, Name: "xyz-999.mp4", Extension: ".mp4",
+			MovieID: "XYZ-999",
 		},
 	}
 
@@ -1070,9 +1038,9 @@ func TestOrganizer_OrganizeBatch_PartialFailure(t *testing.T) {
 	destDir := filepath.Join(tmpDir, "dest")
 
 	// Organize batch (should continue despite one failure)
-	results, err := org.OrganizeBatch(matches, movies, destDir, false, false, false)
+	results, err := organizeBatchViaOrganizeSimple(org, matches, movies, destDir, false, false, false)
 	if err != nil {
-		t.Fatalf("OrganizeBatch failed: %v", err)
+		t.Fatalf("organizeBatchViaOrganizeSimple failed: %v", err)
 	}
 
 	if len(results) != 2 {
@@ -1099,23 +1067,19 @@ func TestOrganizer_OrganizeBatch_MissingMovieData(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 
-	matches := []matcher.MatchResult{
+	matches := []models.FileMatchInfo{
 		{
-			File: scanner.FileInfo{
-				Path:      sourceFile,
-				Name:      "ipx-535.mp4",
-				Extension: ".mp4",
-			},
-			ID: "IPX-535",
+			Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+			MovieID: "IPX-535",
 		},
 	}
 
@@ -1124,9 +1088,9 @@ func TestOrganizer_OrganizeBatch_MissingMovieData(t *testing.T) {
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	results, err := org.OrganizeBatch(matches, movies, destDir, false, false, false)
+	results, err := organizeBatchViaOrganizeSimple(org, matches, movies, destDir, false, false, false)
 	if err != nil {
-		t.Fatalf("OrganizeBatch failed: %v", err)
+		t.Fatalf("organizeBatchViaOrganizeSimple failed: %v", err)
 	}
 
 	if len(results) != 1 {
@@ -1152,36 +1116,29 @@ func TestOrganizer_Plan_InPlaceMode_DedicatedFolder(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeInPlace,
+		OperationMode: operationmode.OperationModeInPlace,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
-
-	fileMatcher, err := matcher.NewMatcher(&config.MatchingConfig{})
+	fileMatcher, err := matcher.NewMatcher(&matcher.Config{})
 	if err != nil {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
-	org.SetMatcher(fileMatcher)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, fileMatcher)
 
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-			Dir:       sourceDir,
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.Plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1214,36 +1171,29 @@ func TestOrganizer_Plan_InPlaceMode_BothFieldsReplacedByOperationMode(t *testing
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeInPlace,
+		OperationMode: operationmode.OperationModeInPlace,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
-
-	fileMatcher, err := matcher.NewMatcher(&config.MatchingConfig{})
+	fileMatcher, err := matcher.NewMatcher(&matcher.Config{})
 	if err != nil {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
-	org.SetMatcher(fileMatcher)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, fileMatcher)
 
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-			Dir:       sourceDir,
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.Plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1271,36 +1221,25 @@ func TestOrganizer_Plan_BothConfigsFalse_NoFolderChanges(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeMetadataArtwork,
+		OperationMode: operationmode.OperationModeMetadataArtwork,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
-
-	fileMatcher, err := matcher.NewMatcher(&config.MatchingConfig{})
-	if err != nil {
-		t.Fatalf("Failed to create matcher: %v", err)
-	}
-	org.SetMatcher(fileMatcher)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-			Dir:       sourceDir,
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.Plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1327,29 +1266,23 @@ func TestOrganizer_Plan_NoOpHasEmptyConflicts(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeMetadataArtwork,
+		OperationMode: operationmode.OperationModeMetadataArtwork,
 	}
-
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-			Dir:       sourceDir,
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "ipx-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.Plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1376,36 +1309,29 @@ func TestOrganizer_Plan_TruncationPreservesInPlaceSkip(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeInPlace,
+		OperationMode: operationmode.OperationModeInPlace,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
-
-	fileMatcher, err := matcher.NewMatcher(&config.MatchingConfig{})
+	fileMatcher, err := matcher.NewMatcher(&matcher.Config{})
 	if err != nil {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
-	org.SetMatcher(fileMatcher)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, fileMatcher)
 
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "IPX-535.mp4",
-			Extension: ".mp4",
-			Dir:       sourceDir,
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "IPX-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.Plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1445,36 +1371,29 @@ func TestOrganizer_Plan_TruncationPreservesMixedIdSkip(t *testing.T) {
 		t.Fatalf("Failed to create other file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeInPlace,
+		OperationMode: operationmode.OperationModeInPlace,
 	}
 
-	org := NewOrganizer(afero.NewOsFs(), cfg, nil)
-
-	fileMatcher, err := matcher.NewMatcher(&config.MatchingConfig{})
+	fileMatcher, err := matcher.NewMatcher(&matcher.Config{})
 	if err != nil {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
-	org.SetMatcher(fileMatcher)
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, fileMatcher)
 
 	movie := createTestMovie()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourceFile,
-			Name:      "IPX-535.mp4",
-			Extension: ".mp4",
-			Dir:       sourceDir,
-		},
-		ID: "IPX-535",
+	match := models.FileMatchInfo{
+		Path: sourceFile, Name: "IPX-535.mp4", Extension: ".mp4",
+		MovieID: "IPX-535",
 	}
 
 	destDir := filepath.Join(tmpDir, "dest")
 
-	plan, err := org.Plan(match, movie, destDir, false)
+	plan, err := org.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -1493,5 +1412,39 @@ func TestOrganizer_Plan_TruncationPreservesMixedIdSkip(t *testing.T) {
 
 	if plan.SkipInPlaceReason != "folder contains mixed IDs" {
 		t.Errorf("Expected SkipInPlaceReason='folder contains mixed IDs', got: %s", plan.SkipInPlaceReason)
+	}
+}
+
+func TestNewOrganizer_NilLinker_DefaultsToOSLinker(t *testing.T) {
+	cfg := &Config{
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: operationmode.OperationModeOrganize,
+	}
+	org := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
+	if org == nil {
+		t.Fatal("Expected non-nil Organizer")
+	}
+	_, ok := org.linker.(OSLinker)
+	if !ok {
+		t.Errorf("Expected linker to be OSLinker when nil passed, got %T", org.linker)
+	}
+}
+
+func TestNewOrganizer_CustomLinker_Used(t *testing.T) {
+	cfg := &Config{
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: operationmode.OperationModeOrganize,
+	}
+	memLinker := &MemLinker{}
+	org := newOrganizerWithLinker(afero.NewOsFs(), cfg, nil, nil, memLinker)
+	if org == nil {
+		t.Fatal("Expected non-nil Organizer")
+	}
+	if org.linker != memLinker {
+		t.Errorf("Expected linker to be the provided MemLinker, got %T", org.linker)
 	}
 }

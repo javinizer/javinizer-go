@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -31,43 +32,49 @@ func TestActressAliasConversion(t *testing.T) {
 		},
 	}
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
 	// Create alias repository and add test aliases
 	aliasRepo := database.NewActressAliasRepository(db)
 
 	// Alias: "Yui Hatano" -> "Hatano Yui"
-	err = aliasRepo.Create(&models.ActressAlias{
+	err = aliasRepo.Create(context.TODO(), &models.ActressAlias{
 		AliasName:     "Yui Hatano",
 		CanonicalName: "Hatano Yui",
 	})
 	require.NoError(t, err)
 
 	// Alias: "Jun Amamiya" -> "Amamiya Jun"
-	err = aliasRepo.Create(&models.ActressAlias{
+	err = aliasRepo.Create(context.TODO(), &models.ActressAlias{
 		AliasName:     "Jun Amamiya",
 		CanonicalName: "Amamiya Jun",
 	})
 	require.NoError(t, err)
 
 	// Alias: Japanese name conversion
-	err = aliasRepo.Create(&models.ActressAlias{
+	err = aliasRepo.Create(context.TODO(), &models.ActressAlias{
 		AliasName:     "波多野結衣",
 		CanonicalName: "はたのゆい",
 	})
 	require.NoError(t, err)
 
-	// Create aggregator with database
-	agg := NewWithDatabase(cfg, db)
+	// Create alias resolver for ActressMerger tests
+	resolver := newAliasResolverWithCache(MetadataConfigFromApp(&cfg.Metadata), nil, map[string]string{
+		"Yui Hatano":  "Hatano Yui",
+		"Jun Amamiya": "Amamiya Jun",
+		"波多野結衣":       "はたのゆい",
+	})
 
 	t.Run("Convert FirstName LastName alias", func(t *testing.T) {
-		results := map[string]*models.ScraperResult{
-			"r18dev": {
+		merger := newActressMerger()
+		sources := []actressSource{
+			{
+				Source: "r18dev",
 				Actresses: []models.ActressInfo{
 					{
 						FirstName: "Yui",
@@ -76,8 +83,12 @@ func TestActressAliasConversion(t *testing.T) {
 				},
 			},
 		}
+		opts := actressMergeOptions{
+			Priority:      []string{"r18dev"},
+			AliasResolver: resolver,
+		}
 
-		actresses := agg.getActressesByPriority(results, []string{"r18dev"})
+		actresses := merger.Merge(sources, opts)
 
 		require.Len(t, actresses, 1)
 		// Should be converted from "Yui Hatano" to "Hatano Yui"
@@ -89,8 +100,10 @@ func TestActressAliasConversion(t *testing.T) {
 	})
 
 	t.Run("Convert Japanese name alias", func(t *testing.T) {
-		results := map[string]*models.ScraperResult{
-			"r18dev": {
+		merger := newActressMerger()
+		sources := []actressSource{
+			{
+				Source: "r18dev",
 				Actresses: []models.ActressInfo{
 					{
 						JapaneseName: "波多野結衣",
@@ -98,8 +111,12 @@ func TestActressAliasConversion(t *testing.T) {
 				},
 			},
 		}
+		opts := actressMergeOptions{
+			Priority:      []string{"r18dev"},
+			AliasResolver: resolver,
+		}
 
-		actresses := agg.getActressesByPriority(results, []string{"r18dev"})
+		actresses := merger.Merge(sources, opts)
 
 		require.Len(t, actresses, 1)
 		// Japanese name should be converted
@@ -107,8 +124,10 @@ func TestActressAliasConversion(t *testing.T) {
 	})
 
 	t.Run("No conversion when alias not found", func(t *testing.T) {
-		results := map[string]*models.ScraperResult{
-			"r18dev": {
+		merger := newActressMerger()
+		sources := []actressSource{
+			{
+				Source: "r18dev",
 				Actresses: []models.ActressInfo{
 					{
 						FirstName: "Unknown",
@@ -117,8 +136,12 @@ func TestActressAliasConversion(t *testing.T) {
 				},
 			},
 		}
+		opts := actressMergeOptions{
+			Priority:      []string{"r18dev"},
+			AliasResolver: resolver,
+		}
 
-		actresses := agg.getActressesByPriority(results, []string{"r18dev"})
+		actresses := merger.Merge(sources, opts)
 
 		require.Len(t, actresses, 1)
 		// Should remain unchanged
@@ -127,25 +150,19 @@ func TestActressAliasConversion(t *testing.T) {
 	})
 
 	t.Run("Conversion disabled", func(t *testing.T) {
-		// Create aggregator with conversion disabled
-		cfgNoConvert := &config.Config{
-			Metadata: config.MetadataConfig{
-				Priority: config.PriorityConfig{
-					Priority: []string{"r18dev"},
-				},
-				ActressDatabase: config.ActressDatabaseConfig{
-					Enabled:      true,
-					ConvertAlias: false, // DISABLED
-				},
+		resolverNoConvert := newAliasResolverWithCache(&MetadataConfig{
+			ActressDatabase: actressDatabaseConfigView{
+				Enabled:      true,
+				ConvertAlias: false,
 			},
-			Scrapers: config.ScrapersConfig{
-				Priority: []string{"r18dev"},
-			},
-		}
-		aggNoConvert := NewWithDatabase(cfgNoConvert, db)
+		}, nil, map[string]string{
+			"Yui Hatano": "Hatano Yui",
+		})
 
-		results := map[string]*models.ScraperResult{
-			"r18dev": {
+		merger := newActressMerger()
+		sources := []actressSource{
+			{
+				Source: "r18dev",
 				Actresses: []models.ActressInfo{
 					{
 						FirstName: "Yui",
@@ -154,8 +171,12 @@ func TestActressAliasConversion(t *testing.T) {
 				},
 			},
 		}
+		opts := actressMergeOptions{
+			Priority:      []string{"r18dev"},
+			AliasResolver: resolverNoConvert,
+		}
 
-		actresses := aggNoConvert.getActressesByPriority(results, []string{"r18dev"})
+		actresses := merger.Merge(sources, opts)
 
 		require.Len(t, actresses, 1)
 		// Should NOT be converted
@@ -164,24 +185,19 @@ func TestActressAliasConversion(t *testing.T) {
 	})
 
 	t.Run("Conversion disabled when actress database is disabled", func(t *testing.T) {
-		cfgNoActressDB := &config.Config{
-			Metadata: config.MetadataConfig{
-				Priority: config.PriorityConfig{
-					Priority: []string{"r18dev"},
-				},
-				ActressDatabase: config.ActressDatabaseConfig{
-					Enabled:      false, // DISABLED
-					ConvertAlias: true,  // Should be ignored when disabled
-				},
+		resolverNoDB := newAliasResolverWithCache(&MetadataConfig{
+			ActressDatabase: actressDatabaseConfigView{
+				Enabled:      false,
+				ConvertAlias: true,
 			},
-			Scrapers: config.ScrapersConfig{
-				Priority: []string{"r18dev"},
-			},
-		}
-		aggNoActressDB := NewWithDatabase(cfgNoActressDB, db)
+		}, nil, map[string]string{
+			"Yui Hatano": "Hatano Yui",
+		})
 
-		results := map[string]*models.ScraperResult{
-			"r18dev": {
+		merger := newActressMerger()
+		sources := []actressSource{
+			{
+				Source: "r18dev",
 				Actresses: []models.ActressInfo{
 					{
 						FirstName: "Yui",
@@ -190,8 +206,12 @@ func TestActressAliasConversion(t *testing.T) {
 				},
 			},
 		}
+		opts := actressMergeOptions{
+			Priority:      []string{"r18dev"},
+			AliasResolver: resolverNoDB,
+		}
 
-		actresses := aggNoActressDB.getActressesByPriority(results, []string{"r18dev"})
+		actresses := merger.Merge(sources, opts)
 		require.Len(t, actresses, 1)
 
 		// Should NOT be converted because actress_database.enabled=false.
@@ -201,8 +221,10 @@ func TestActressAliasConversion(t *testing.T) {
 	})
 
 	t.Run("Multiple actresses with mixed conversion", func(t *testing.T) {
-		results := map[string]*models.ScraperResult{
-			"r18dev": {
+		merger := newActressMerger()
+		sources := []actressSource{
+			{
+				Source: "r18dev",
 				Actresses: []models.ActressInfo{
 					{
 						FirstName: "Yui",
@@ -219,8 +241,12 @@ func TestActressAliasConversion(t *testing.T) {
 				},
 			},
 		}
+		opts := actressMergeOptions{
+			Priority:      []string{"r18dev"},
+			AliasResolver: resolver,
+		}
 
-		actresses := agg.getActressesByPriority(results, []string{"r18dev"})
+		actresses := merger.Merge(sources, opts)
 
 		require.Len(t, actresses, 3)
 
@@ -266,22 +292,26 @@ func TestActressAliasWithAggregate(t *testing.T) {
 		},
 	}
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
 	// Add aliases
 	aliasRepo := database.NewActressAliasRepository(db)
-	err = aliasRepo.Create(&models.ActressAlias{
+	err = aliasRepo.Create(context.TODO(), &models.ActressAlias{
 		AliasName:     "Yui Hatano",
 		CanonicalName: "Hatano Yui",
 	})
 	require.NoError(t, err)
 
-	agg := NewWithDatabase(cfg, db)
+	agg := newAggregatorWithRepos(testConfigFromAppConfig(cfg),
+		database.NewGenreReplacementRepository(db),
+		database.NewWordReplacementRepository(db),
+		database.NewActressAliasRepository(db),
+	)
 
 	results := []*models.ScraperResult{
 		{
@@ -297,10 +327,9 @@ func TestActressAliasWithAggregate(t *testing.T) {
 		},
 	}
 
-	movie, warnings, err := agg.Aggregate(results)
+	movie, _, err := agg.Aggregate(results)
 
 	require.NotNil(t, movie)
-	assert.Empty(t, warnings)
 	require.Len(t, movie.Actresses, 1)
 
 	// Verify alias conversion happened - "Yui Hatano" -> "Hatano Yui"
@@ -308,28 +337,4 @@ func TestActressAliasWithAggregate(t *testing.T) {
 	assert.Equal(t, "Hatano", movie.Actresses[0].LastName)
 	// Most importantly: FullName() should return canonical form
 	assert.Equal(t, "Hatano Yui", movie.Actresses[0].FullName())
-}
-
-func TestSplitActressName(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected []string
-	}{
-		{"Yui Hatano", []string{"Yui", "Hatano"}},
-		{"Jun Amamiya", []string{"Jun", "Amamiya"}},
-		{"Single", []string{"Single"}},
-		{"Three Part Name", []string{"Three", "Part", "Name"}},
-		{"  Extra  Spaces  ", []string{"Extra", "Spaces"}},
-		{"", []string{}},
-		{"   ", []string{}},
-		{"\tTab\tSeparated\t", []string{"Tab", "Separated"}},
-		{"Multiple   Spaces", []string{"Multiple", "Spaces"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := splitActressName(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
 }

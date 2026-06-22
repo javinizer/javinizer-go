@@ -1,34 +1,26 @@
 package database
 
 import (
+	"context"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGenreRepository(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	require.NoError(t, db.AutoMigrate())
-	repo := NewGenreRepository(db)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	repo := newGenreRepository(db)
 
 	t.Run("FindOrCreate - creates new genre", func(t *testing.T) {
-		genre, err := repo.FindOrCreate("Action")
+		genre, err := repo.FindOrCreate(context.TODO(), "Action")
 		require.NoError(t, err)
 		assert.Equal(t, "Action", genre.Name)
 		assert.NotZero(t, genre.ID)
@@ -36,11 +28,11 @@ func TestGenreRepository(t *testing.T) {
 
 	t.Run("FindOrCreate - finds existing genre", func(t *testing.T) {
 		// Create first
-		genre1, err := repo.FindOrCreate("Drama")
+		genre1, err := repo.FindOrCreate(context.TODO(), "Drama")
 		require.NoError(t, err)
 
 		// Try to create again
-		genre2, err := repo.FindOrCreate("Drama")
+		genre2, err := repo.FindOrCreate(context.TODO(), "Drama")
 		require.NoError(t, err)
 
 		// Should be the same genre
@@ -52,12 +44,12 @@ func TestGenreRepository(t *testing.T) {
 		// Create multiple genres
 		genreNames := []string{"Comedy", "Romance", "Thriller", "Horror"}
 		for _, name := range genreNames {
-			_, err := repo.FindOrCreate(name)
+			_, err := repo.FindOrCreate(context.TODO(), name)
 			require.NoError(t, err)
 		}
 
 		// List all
-		genres, err := repo.List()
+		genres, err := repo.List(context.TODO())
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(genres), len(genreNames))
 
@@ -73,45 +65,29 @@ func TestGenreRepository(t *testing.T) {
 	})
 
 	t.Run("List with empty database", func(t *testing.T) {
-		cfg := &config.Config{
-			Database: config.DatabaseConfig{
-				Type: "sqlite",
-				DSN:  ":memory:",
-			},
-			Logging: config.LoggingConfig{
-				Level: "error",
-			},
-		}
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 		db2, err := New(cfg)
 		require.NoError(t, err)
 		defer func() { _ = db2.Close() }()
 
-		require.NoError(t, db2.AutoMigrate())
-		repo2 := NewGenreRepository(db2)
+		require.NoError(t, db2.RunMigrationsOnStartup(context.Background()))
+		repo2 := newGenreRepository(db2)
 
-		genres, err := repo2.List()
+		genres, err := repo2.List(context.TODO())
 		require.NoError(t, err)
 		assert.Len(t, genres, 0)
 	})
 }
 
 func TestGenreReplacementRepository(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewGenreReplacementRepository(db)
 
 	t.Run("Create genre replacement", func(t *testing.T) {
@@ -120,7 +96,7 @@ func TestGenreReplacementRepository(t *testing.T) {
 			Replacement: "Large Breasts",
 		}
 
-		err := repo.Create(replacement)
+		err := repo.Create(context.TODO(), replacement)
 		require.NoError(t, err)
 		assert.NotZero(t, replacement.ID)
 	})
@@ -131,17 +107,17 @@ func TestGenreReplacementRepository(t *testing.T) {
 			Replacement: "MILF",
 		}
 
-		err := repo.Create(replacement)
+		err := repo.Create(context.TODO(), replacement)
 		require.NoError(t, err)
 
-		found, err := repo.FindByOriginal("Mature Woman")
+		found, err := repo.FindByOriginal(context.TODO(), "Mature Woman")
 		require.NoError(t, err)
 		assert.Equal(t, "Mature Woman", found.Original)
 		assert.Equal(t, "MILF", found.Replacement)
 	})
 
 	t.Run("FindByOriginal not found", func(t *testing.T) {
-		_, err := repo.FindByOriginal("NonExistentGenre")
+		_, err := repo.FindByOriginal(context.TODO(), "NonExistentGenre")
 		assert.Error(t, err)
 	})
 
@@ -151,7 +127,7 @@ func TestGenreReplacementRepository(t *testing.T) {
 			Replacement: "Internal Finish",
 		}
 
-		err := repo.Upsert(replacement)
+		err := repo.Upsert(context.TODO(), replacement)
 		require.NoError(t, err)
 		assert.NotZero(t, replacement.ID)
 	})
@@ -162,7 +138,7 @@ func TestGenreReplacementRepository(t *testing.T) {
 			Replacement: "Pretty",
 		}
 
-		err := repo.Create(replacement)
+		err := repo.Create(context.TODO(), replacement)
 		require.NoError(t, err)
 		originalID := replacement.ID
 
@@ -172,12 +148,12 @@ func TestGenreReplacementRepository(t *testing.T) {
 			Replacement: "Attractive",
 		}
 
-		err = repo.Upsert(replacement2)
+		err = repo.Upsert(context.TODO(), replacement2)
 		require.NoError(t, err)
 		assert.Equal(t, originalID, replacement2.ID)
 
 		// Verify update
-		found, err := repo.FindByOriginal("Beautiful Girl")
+		found, err := repo.FindByOriginal(context.TODO(), "Beautiful Girl")
 		require.NoError(t, err)
 		assert.Equal(t, "Attractive", found.Replacement)
 	})
@@ -191,12 +167,12 @@ func TestGenreReplacementRepository(t *testing.T) {
 		}
 
 		for _, r := range replacements {
-			err := repo.Create(r)
+			err := repo.Create(context.TODO(), r)
 			require.NoError(t, err)
 		}
 
 		// List all
-		list, err := repo.List()
+		list, err := repo.List(context.TODO())
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(list), 3)
 	})
@@ -207,20 +183,20 @@ func TestGenreReplacementRepository(t *testing.T) {
 			Replacement: "WillBeDeleted",
 		}
 
-		err := repo.Create(replacement)
+		err := repo.Create(context.TODO(), replacement)
 		require.NoError(t, err)
 
 		// Delete
-		err = repo.Delete("ToDelete")
+		err = repo.Delete(context.TODO(), "ToDelete")
 		require.NoError(t, err)
 
 		// Verify deletion
-		_, err = repo.FindByOriginal("ToDelete")
+		_, err = repo.FindByOriginal(context.TODO(), "ToDelete")
 		assert.Error(t, err)
 	})
 
 	t.Run("Delete non-existent replacement", func(t *testing.T) {
-		err := repo.Delete("DoesNotExist")
+		err := repo.Delete(context.TODO(), "DoesNotExist")
 		assert.NoError(t, err, "Deleting non-existent replacement should not error")
 	})
 
@@ -233,12 +209,12 @@ func TestGenreReplacementRepository(t *testing.T) {
 		}
 
 		for _, r := range replacements {
-			err := repo.Upsert(r)
+			err := repo.Upsert(context.TODO(), r)
 			require.NoError(t, err)
 		}
 
 		// Get replacement map
-		replMap, err := repo.GetReplacementMap()
+		replMap, err := repo.GetReplacementMap(context.TODO())
 		require.NoError(t, err)
 
 		// Verify mappings
@@ -248,24 +224,16 @@ func TestGenreReplacementRepository(t *testing.T) {
 	})
 
 	t.Run("GetReplacementMap with empty database", func(t *testing.T) {
-		cfg := &config.Config{
-			Database: config.DatabaseConfig{
-				Type: "sqlite",
-				DSN:  ":memory:",
-			},
-			Logging: config.LoggingConfig{
-				Level: "error",
-			},
-		}
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 		db2, err := New(cfg)
 		require.NoError(t, err)
 		defer func() { _ = db2.Close() }()
 
-		require.NoError(t, db2.AutoMigrate())
+		require.NoError(t, db2.RunMigrationsOnStartup(context.Background()))
 		repo2 := NewGenreReplacementRepository(db2)
 
-		replMap, err := repo2.GetReplacementMap()
+		replMap, err := repo2.GetReplacementMap(context.TODO())
 		require.NoError(t, err)
 		assert.Len(t, replMap, 0)
 	})
@@ -276,11 +244,11 @@ func TestGenreReplacementRepository(t *testing.T) {
 			Original:    "OriginalGenre",
 			Replacement: "ReplacedGenre",
 		}
-		err := repo.Create(replacement)
+		err := repo.Create(context.TODO(), replacement)
 		require.NoError(t, err)
 
 		// List and verify we can update
-		replacements, err := repo.List()
+		replacements, err := repo.List(context.TODO())
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(replacements), 1)
 
@@ -288,35 +256,27 @@ func TestGenreReplacementRepository(t *testing.T) {
 		for i := range replacements {
 			if replacements[i].Original == "OriginalGenre" {
 				replacements[i].Replacement = "Updated After List"
-				err = repo.Upsert(&replacements[i])
+				err = repo.Upsert(context.TODO(), &replacements[i])
 				require.NoError(t, err)
 				break
 			}
 		}
 
 		// Verify update persisted
-		found, err := repo.FindByOriginal("OriginalGenre")
+		found, err := repo.FindByOriginal(context.TODO(), "OriginalGenre")
 		require.NoError(t, err)
 		assert.Equal(t, "Updated After List", found.Replacement)
 	})
 
 	t.Run("GetReplacementMap preserves all entries", func(t *testing.T) {
 		// Create a fresh database to avoid test pollution
-		cfg := &config.Config{
-			Database: config.DatabaseConfig{
-				Type: "sqlite",
-				DSN:  ":memory:",
-			},
-			Logging: config.LoggingConfig{
-				Level: "error",
-			},
-		}
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 		db2, err := New(cfg)
 		require.NoError(t, err)
 		defer func() { _ = db2.Close() }()
 
-		require.NoError(t, db2.AutoMigrate())
+		require.NoError(t, db2.RunMigrationsOnStartup(context.Background()))
 		repo2 := NewGenreReplacementRepository(db2)
 
 		// Create multiple replacements
@@ -326,12 +286,12 @@ func TestGenreReplacementRepository(t *testing.T) {
 		}
 
 		for _, r := range replacements {
-			err := repo2.Create(r)
+			err := repo2.Create(context.TODO(), r)
 			require.NoError(t, err)
 		}
 
 		// Get map
-		replMap, err := repo2.GetReplacementMap()
+		replMap, err := repo2.GetReplacementMap(context.TODO())
 		require.NoError(t, err)
 		assert.Equal(t, 2, len(replMap))
 		assert.Equal(t, "Replaced1", replMap["MapTest1"])

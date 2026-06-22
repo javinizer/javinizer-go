@@ -9,13 +9,17 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
 func TestCompareNFO_Security(t *testing.T) {
@@ -48,7 +52,7 @@ func TestCompareNFO_Security(t *testing.T) {
 		nfoPath        string
 		allowedDirs    []string
 		expectedStatus int
-		checkError     func(*testing.T, ErrorResponse)
+		checkError     func(*testing.T, contracts.ErrorResponse)
 	}{
 		{
 			name:           "access denied - path outside allowed directory",
@@ -56,7 +60,7 @@ func TestCompareNFO_Security(t *testing.T) {
 			nfoPath:        forbiddenNFO,
 			allowedDirs:    []string{allowedDir},
 			expectedStatus: 403,
-			checkError: func(t *testing.T, err ErrorResponse) {
+			checkError: func(t *testing.T, err contracts.ErrorResponse) {
 				assert.Contains(t, err.Error, "access denied")
 			},
 		},
@@ -66,7 +70,7 @@ func TestCompareNFO_Security(t *testing.T) {
 			nfoPath:        filepath.Join(allowedDir, "nonexistent.nfo"),
 			allowedDirs:    []string{allowedDir},
 			expectedStatus: 404,
-			checkError: func(t *testing.T, err ErrorResponse) {
+			checkError: func(t *testing.T, err contracts.ErrorResponse) {
 				assert.Contains(t, err.Error, "not found")
 			},
 		},
@@ -76,7 +80,7 @@ func TestCompareNFO_Security(t *testing.T) {
 			nfoPath:        allowedDir,
 			allowedDirs:    []string{tempDir},
 			expectedStatus: 400,
-			checkError: func(t *testing.T, err ErrorResponse) {
+			checkError: func(t *testing.T, err contracts.ErrorResponse) {
 				assert.Contains(t, err.Error, "directory")
 			},
 		},
@@ -86,7 +90,7 @@ func TestCompareNFO_Security(t *testing.T) {
 			nfoPath:        "",
 			allowedDirs:    []string{allowedDir},
 			expectedStatus: 400,
-			checkError: func(t *testing.T, err ErrorResponse) {
+			checkError: func(t *testing.T, err contracts.ErrorResponse) {
 				assert.Contains(t, err.Error, "required")
 			},
 		},
@@ -96,7 +100,7 @@ func TestCompareNFO_Security(t *testing.T) {
 			nfoPath:        filepath.Join(allowedDir, "..", "forbidden", "IPX-001.nfo"),
 			allowedDirs:    []string{allowedDir},
 			expectedStatus: 403,
-			checkError: func(t *testing.T, err ErrorResponse) {
+			checkError: func(t *testing.T, err contracts.ErrorResponse) {
 				assert.Contains(t, err.Error, "access denied")
 			},
 		},
@@ -117,9 +121,10 @@ func TestCompareNFO_Security(t *testing.T) {
 			}
 
 			deps := createTestDeps(t, cfg, "")
+			movieDeps := NewMovieDeps(deps.Repos.MovieRepo, WithWorkflow(testkit.GetTestRuntime(deps).GetWorkflow), WithAllowedDirs(testkit.GetTestRuntime(deps).GetAPIConfig().AllowedDirectories))
 
 			// Create request
-			reqBody := NFOComparisonRequest{
+			reqBody := contracts.NFOComparisonRequest{
 				NFOPath: tt.nfoPath,
 			}
 			bodyBytes, _ := json.Marshal(reqBody)
@@ -131,13 +136,13 @@ func TestCompareNFO_Security(t *testing.T) {
 			c.Params = gin.Params{{Key: "id", Value: tt.movieID}}
 
 			// Execute
-			compareNFO(deps)(c)
+			compareNFO(movieDeps)(c)
 
 			// Verify
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
 			if tt.checkError != nil {
-				var errResp ErrorResponse
+				var errResp contracts.ErrorResponse
 				err := json.Unmarshal(w.Body.Bytes(), &errResp)
 				require.NoError(t, err)
 				tt.checkError(t, errResp)
@@ -179,6 +184,7 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 	}
 
 	deps := createTestDeps(t, cfg, "")
+	movieDeps := NewMovieDeps(deps.Repos.MovieRepo, WithWorkflow(testkit.GetTestRuntime(deps).GetWorkflow), WithAllowedDirs(testkit.GetTestRuntime(deps).GetAPIConfig().AllowedDirectories))
 
 	// Mock scraper result
 	now := time.Now()
@@ -199,19 +205,19 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			Source: "r18dev",
 		},
 	}
-	deps.GetRegistry().Register(mockScraper)
+	deps.CoreDeps.GetRegistry().RegisterInstance(mockScraper)
 
 	tests := []struct {
 		name           string
 		scalarStrategy string
 		arrayStrategy  string
-		checkResponse  func(*testing.T, *NFOComparisonResponse)
+		checkResponse  func(*testing.T, *contracts.NFOComparisonResponse)
 	}{
 		{
 			name:           "prefer-scraper strategy",
 			scalarStrategy: "prefer-scraper",
 			arrayStrategy:  "replace",
-			checkResponse: func(t *testing.T, resp *NFOComparisonResponse) {
+			checkResponse: func(t *testing.T, resp *contracts.NFOComparisonResponse) {
 				assert.True(t, resp.NFOExists)
 				assert.NotNil(t, resp.NFOData)
 				assert.NotNil(t, resp.ScrapedData)
@@ -236,7 +242,7 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			name:           "prefer-nfo strategy",
 			scalarStrategy: "prefer-nfo",
 			arrayStrategy:  "merge",
-			checkResponse: func(t *testing.T, resp *NFOComparisonResponse) {
+			checkResponse: func(t *testing.T, resp *contracts.NFOComparisonResponse) {
 				// With prefer-nfo, NFO data should be preferred when available
 				assert.NotNil(t, resp.NFOData)
 				assert.NotNil(t, resp.ScrapedData)
@@ -251,7 +257,7 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			name:           "merge-arrays strategy",
 			scalarStrategy: "prefer-scraper",
 			arrayStrategy:  "merge",
-			checkResponse: func(t *testing.T, resp *NFOComparisonResponse) {
+			checkResponse: func(t *testing.T, resp *contracts.NFOComparisonResponse) {
 				// With merge-arrays, arrays should be combined
 				// Actresses should include both NFO and scraped
 				assert.GreaterOrEqual(t, len(resp.MergedData.Actresses), 1)
@@ -265,7 +271,7 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			name:           "default strategy (empty string)",
 			scalarStrategy: "",
 			arrayStrategy:  "",
-			checkResponse: func(t *testing.T, resp *NFOComparisonResponse) {
+			checkResponse: func(t *testing.T, resp *contracts.NFOComparisonResponse) {
 				// Default for compareNFO should be prefer-nfo (conservative, preserves existing data)
 				assert.Equal(t, "NFO Title", resp.MergedData.Title)
 			},
@@ -275,7 +281,7 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create request
-			reqBody := NFOComparisonRequest{
+			reqBody := contracts.NFOComparisonRequest{
 				NFOPath:        nfoPath,
 				ScalarStrategy: tt.scalarStrategy,
 				ArrayStrategy:  tt.arrayStrategy,
@@ -289,12 +295,12 @@ func TestCompareNFO_ValidComparison(t *testing.T) {
 			c.Params = gin.Params{{Key: "id", Value: "IPX-535"}}
 
 			// Execute
-			compareNFO(deps)(c)
+			compareNFO(movieDeps)(c)
 
 			// Verify
 			assert.Equal(t, 200, w.Code)
 
-			var resp NFOComparisonResponse
+			var resp contracts.NFOComparisonResponse
 			err := json.Unmarshal(w.Body.Bytes(), &resp)
 			require.NoError(t, err)
 
@@ -315,9 +321,9 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 		preset         string
 		scalarStrategy string
 		arrayStrategy  string
-		setupScraper   func(*models.ScraperRegistry)
+		setupScraper   func(*scraperutil.ScraperRegistry)
 		expectedStatus int
-		checkError     func(*testing.T, ErrorResponse)
+		checkError     func(*testing.T, contracts.ErrorResponse)
 	}{
 		{
 			name: "invalid preset",
@@ -329,7 +335,7 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 			},
 			movieID: "IPX-001",
 			preset:  "invalid-preset",
-			setupScraper: func(registry *models.ScraperRegistry) {
+			setupScraper: func(registry *scraperutil.ScraperRegistry) {
 				now := time.Now()
 				mockScraper := &mockScraperWithResults{
 					name:    "r18dev",
@@ -342,10 +348,10 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 						Source:      "r18dev",
 					},
 				}
-				registry.Register(mockScraper)
+				registry.RegisterInstance(mockScraper)
 			},
 			expectedStatus: 400,
-			checkError: func(t *testing.T, err ErrorResponse) {
+			checkError: func(t *testing.T, err contracts.ErrorResponse) {
 				assert.Contains(t, err.Error, "invalid preset")
 			},
 		},
@@ -360,7 +366,7 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 			movieID:        "IPX-001",
 			scalarStrategy: "prefer-scraper",
 			expectedStatus: 500,
-			checkError: func(t *testing.T, err ErrorResponse) {
+			checkError: func(t *testing.T, err contracts.ErrorResponse) {
 				assert.Contains(t, err.Error, "Failed to parse NFO")
 			},
 		},
@@ -374,17 +380,17 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 			},
 			movieID:        "INVALID-999",
 			scalarStrategy: "prefer-scraper",
-			setupScraper: func(registry *models.ScraperRegistry) {
+			setupScraper: func(registry *scraperutil.ScraperRegistry) {
 				// Register a scraper that will fail
 				mockScraper := &mockScraperWithResults{
 					name:    "r18dev",
 					enabled: true,
 					err:     fmt.Errorf("scraper error"),
 				}
-				registry.Register(mockScraper)
+				registry.RegisterInstance(mockScraper)
 			},
 			expectedStatus: 404,
-			checkError: func(t *testing.T, err ErrorResponse) {
+			checkError: func(t *testing.T, err contracts.ErrorResponse) {
 				assert.Contains(t, err.Error, "No scraped data available")
 			},
 		},
@@ -405,15 +411,16 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 			}
 
 			deps := createTestDeps(t, cfg, "")
+			movieDeps := NewMovieDeps(deps.Repos.MovieRepo, WithWorkflow(testkit.GetTestRuntime(deps).GetWorkflow), WithAllowedDirs(testkit.GetTestRuntime(deps).GetAPIConfig().AllowedDirectories))
 
 			if tt.setupScraper != nil {
-				tt.setupScraper(deps.GetRegistry())
+				tt.setupScraper(deps.CoreDeps.GetRegistry())
 			}
 
 			nfoPath := tt.setupNFO()
 
 			// Create request
-			reqBody := NFOComparisonRequest{
+			reqBody := contracts.NFOComparisonRequest{
 				NFOPath:        nfoPath,
 				Preset:         tt.preset,
 				ScalarStrategy: tt.scalarStrategy,
@@ -428,12 +435,12 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 			c.Params = gin.Params{{Key: "id", Value: tt.movieID}}
 
 			// Execute
-			compareNFO(deps)(c)
+			compareNFO(movieDeps)(c)
 
 			// Verify
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
-			var errResp ErrorResponse
+			var errResp contracts.ErrorResponse
 			err := json.Unmarshal(w.Body.Bytes(), &errResp)
 			require.NoError(t, err)
 			tt.checkError(t, errResp)
@@ -444,8 +451,9 @@ func TestCompareNFO_ErrorCases(t *testing.T) {
 func TestCompareNFO_ProvenanceTracking(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// This test verifies that the pointer aliasing bug is fixed
-	// All provenance timestamps should be unique, not pointing to the same memory
+	// Per ADR-0037: MergeProvenance zombie removed. Provenance is now derived
+	// from Differences. This test verifies that the derived provenance correctly
+	// classifies each field's source based on which value the merge chose.
 
 	tempDir := t.TempDir()
 	nfoPath := filepath.Join(tempDir, "IPX-001.nfo")
@@ -472,8 +480,9 @@ func TestCompareNFO_ProvenanceTracking(t *testing.T) {
 	}
 
 	deps := createTestDeps(t, cfg, "")
+	movieDeps := NewMovieDeps(deps.Repos.MovieRepo, WithWorkflow(testkit.GetTestRuntime(deps).GetWorkflow), WithAllowedDirs(testkit.GetTestRuntime(deps).GetAPIConfig().AllowedDirectories))
 
-	// Mock scraper with specific timestamps
+	// Mock scraper
 	now := time.Now()
 	mockScraper := &mockScraperWithResults{
 		name:    "r18dev",
@@ -487,10 +496,10 @@ func TestCompareNFO_ProvenanceTracking(t *testing.T) {
 			Source:      "r18dev",
 		},
 	}
-	deps.GetRegistry().Register(mockScraper)
+	deps.CoreDeps.GetRegistry().RegisterInstance(mockScraper)
 
-	// Create request
-	reqBody := NFOComparisonRequest{
+	// Create request — prefer-scraper means scraped values win the merge
+	reqBody := contracts.NFOComparisonRequest{
 		NFOPath:        nfoPath,
 		ScalarStrategy: "prefer-scraper",
 		ArrayStrategy:  "replace",
@@ -504,34 +513,23 @@ func TestCompareNFO_ProvenanceTracking(t *testing.T) {
 	c.Params = gin.Params{{Key: "id", Value: "IPX-001"}}
 
 	// Execute
-	compareNFO(deps)(c)
+	compareNFO(movieDeps)(c)
 
 	// Verify
 	assert.Equal(t, 200, w.Code)
 
-	var resp NFOComparisonResponse
+	var resp contracts.NFOComparisonResponse
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 
-	// CRITICAL: Verify each field has its own timestamp pointer
-	// This tests the fix for the string pointer reuse bug
-	timestamps := make(map[string]*string)
-	for field, prov := range resp.Provenance {
-		if prov.LastUpdated != nil {
-			timestamps[field] = prov.LastUpdated
+	// Per ADR-0037: provenance is now derived from Differences.
+	// With prefer-scraper strategy, fields where scraped data differs from NFO
+	// should have source="scraper".
+	if len(resp.Differences) > 0 {
+		assert.NotNil(t, resp.Provenance, "Provenance should be populated when Differences exist")
+		for field, prov := range resp.Provenance {
+			assert.Contains(t, []string{"scraper", "nfo", "merged"}, prov.Source,
+				"Field %s should have a valid provenance source", field)
 		}
-	}
-
-	// Verify we have multiple fields with timestamps
-	assert.Greater(t, len(timestamps), 1, "Should have multiple fields with timestamps")
-
-	// Verify each pointer is unique (not aliasing)
-	pointerAddresses := make(map[uintptr]bool)
-	for field, ts := range timestamps {
-		addr := uintptr(unsafe.Pointer(ts))
-		if pointerAddresses[addr] {
-			t.Errorf("Field %s has duplicate pointer address - pointer aliasing bug detected!", field)
-		}
-		pointerAddresses[addr] = true
 	}
 }

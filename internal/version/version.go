@@ -12,7 +12,7 @@ var (
 	Version   = "dev"
 	Commit    = unknown
 	BuildDate = unknown
-	GoVersion = runtime.Version()
+	goVersion = runtime.Version()
 )
 
 const unknown = "unknown"
@@ -86,19 +86,10 @@ func applyDevVersion() {
 // Info returns formatted version information
 func Info() string {
 	return fmt.Sprintf("javinizer %s (commit: %s, built: %s, go: %s)",
-		Version, Commit, BuildDate, GoVersion)
+		Version, Commit, BuildDate, goVersion)
 }
 
 // Short returns just the version number
 func Short() string {
 	return Version
-}
-
-// IsPrerelease returns true if the version is a prerelease.
-// A prerelease version contains a hyphen followed by identifiers (e.g., 1.6.0-rc1).
-func IsPrerelease(version string) bool {
-	// Remove leading 'v' if present
-	v := strings.TrimPrefix(version, "v")
-	// Prereleases contain a hyphen followed by identifiers (e.g., 1.6.0-rc1)
-	return strings.Contains(v, "-")
 }

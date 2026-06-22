@@ -3,7 +3,7 @@ import {
 	getScraperProxyMode,
 	isProxyConfigDirty,
 	isTestValid,
-	type ScraperProxyOverride
+	type ScraperProxyOverride,
 } from './proxy-logic';
 
 describe('getScraperProxyMode', () => {
@@ -67,19 +67,23 @@ describe('isTestValid', () => {
 	});
 
 	it('returns false for failed test', () => {
-		expect(isTestValid({ success: false, timestamp: Date.now() }, {}, TEST_VALIDITY_MS)).toBe(false);
+		expect(isTestValid({ success: false, timestamp: Date.now() }, {}, TEST_VALIDITY_MS)).toBe(
+			false,
+		);
 	});
 
 	it('returns false for expired test', () => {
 		const oldTimestamp = Date.now() - TEST_VALIDITY_MS - 1000;
-		expect(isTestValid({ success: true, timestamp: oldTimestamp }, {}, TEST_VALIDITY_MS)).toBe(false);
+		expect(isTestValid({ success: true, timestamp: oldTimestamp }, {}, TEST_VALIDITY_MS)).toBe(
+			false,
+		);
 	});
 
 	it('returns false when config changed since test', () => {
 		const result = {
 			success: true,
 			timestamp: Date.now(),
-			configSnapshot: JSON.stringify({ url: 'http://old.com' })
+			configSnapshot: JSON.stringify({ url: 'http://old.com' }),
 		};
 		expect(isTestValid(result, { url: 'http://new.com' }, TEST_VALIDITY_MS)).toBe(false);
 	});
@@ -89,7 +93,7 @@ describe('isTestValid', () => {
 		const result = {
 			success: true,
 			timestamp: Date.now(),
-			configSnapshot: JSON.stringify(config)
+			configSnapshot: JSON.stringify(config),
 		};
 		expect(isTestValid(result, config, TEST_VALIDITY_MS)).toBe(true);
 	});

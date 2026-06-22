@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,8 +85,8 @@ func TestMKVProber_Probe_InvalidFile(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMKVProber()
-	_, err = prober.Probe(f)
+	prober := newMKVProber()
+	_, err = prober.Probe(context.Background(), f)
 
 	// File doesn't start with MKV magic, so it should fail
 	assert.Error(t, err)
@@ -105,8 +106,8 @@ func TestMKVProber_Probe_EmptyFile(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMKVProber()
-	_, err = prober.Probe(f)
+	prober := newMKVProber()
+	_, err = prober.Probe(context.Background(), f)
 
 	// Empty file should return an error since no usable data can be extracted
 	assert.Error(t, err)
@@ -126,8 +127,8 @@ func TestMKVProber_Probe_SmallFile(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMKVProber()
-	_, err = prober.Probe(f)
+	prober := newMKVProber()
+	_, err = prober.Probe(context.Background(), f)
 
 	// Small files with valid MKV magic may still fail during parsing
 	// This is acceptable behavior
@@ -249,6 +250,6 @@ func TestMapMKVAudioCodec_Extended(t *testing.T) {
 }
 
 func TestMKVProber_Name(t *testing.T) {
-	prober := NewMKVProber()
+	prober := newMKVProber()
 	assert.Equal(t, "mkv", prober.Name())
 }

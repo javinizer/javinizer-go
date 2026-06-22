@@ -1,8 +1,11 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -13,6 +16,10 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
 func TestListJobs(t *testing.T) {
@@ -23,14 +30,14 @@ func TestListJobs(t *testing.T) {
 		queryParams    string
 		seedData       bool
 		expectedStatus int
-		validateFn     func(*testing.T, *JobListResponse)
+		validateFn     func(*testing.T, *contracts.JobListResponse)
 	}{
 		{
 			name:           "empty jobs list",
 			queryParams:    "",
 			seedData:       false,
 			expectedStatus: http.StatusOK,
-			validateFn: func(t *testing.T, resp *JobListResponse) {
+			validateFn: func(t *testing.T, resp *contracts.JobListResponse) {
 				assert.Empty(t, resp.Jobs)
 			},
 		},
@@ -39,13 +46,13 @@ func TestListJobs(t *testing.T) {
 			queryParams:    "",
 			seedData:       true,
 			expectedStatus: http.StatusOK,
-			validateFn: func(t *testing.T, resp *JobListResponse) {
+			validateFn: func(t *testing.T, resp *contracts.JobListResponse) {
 				assert.Len(t, resp.Jobs, 3)
 
 				// Find the organized job and verify operation_count
-				var organizedJob *JobListItem
+				var organizedJob *contracts.JobListItem
 				for i := range resp.Jobs {
-					if resp.Jobs[i].Status == "organized" {
+					if resp.Jobs[i].Status == models.JobStatusOrganized {
 						organizedJob = &resp.Jobs[i]
 						break
 					}
@@ -60,9 +67,9 @@ func TestListJobs(t *testing.T) {
 			queryParams:    "?status=organized",
 			seedData:       true,
 			expectedStatus: http.StatusOK,
-			validateFn: func(t *testing.T, resp *JobListResponse) {
+			validateFn: func(t *testing.T, resp *contracts.JobListResponse) {
 				assert.Len(t, resp.Jobs, 1)
-				assert.Equal(t, "organized", resp.Jobs[0].Status)
+				assert.Equal(t, models.JobStatusOrganized, resp.Jobs[0].Status)
 			},
 		},
 		{
@@ -70,7 +77,7 @@ func TestListJobs(t *testing.T) {
 			queryParams:    "?status=running",
 			seedData:       true,
 			expectedStatus: http.StatusOK,
-			validateFn: func(t *testing.T, resp *JobListResponse) {
+			validateFn: func(t *testing.T, resp *contracts.JobListResponse) {
 				assert.Empty(t, resp.Jobs)
 			},
 		},
@@ -86,7 +93,7 @@ func TestListJobs(t *testing.T) {
 			}
 
 			router := gin.New()
-			router.GET("/api/v1/jobs", listJobs(deps))
+			router.GET("/api/v1/jobs", listJobs(newTestJobDeps(deps)))
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs"+tt.queryParams, nil)
 			w := httptest.NewRecorder()
@@ -96,7 +103,7 @@ func TestListJobs(t *testing.T) {
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
 			if tt.validateFn != nil {
-				var resp JobListResponse
+				var resp contracts.JobListResponse
 				err := json.Unmarshal(w.Body.Bytes(), &resp)
 				require.NoError(t, err)
 				tt.validateFn(t, &resp)
@@ -110,24 +117,24 @@ func TestListOperations(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		setupFn        func(*testing.T, *ServerDependencies) string // returns the job ID to use
+		setupFn        func(*testing.T, *core.APIDeps) string // returns the job ID to use
 		expectedStatus int
 		validateFn     func(*testing.T, []byte)
 	}{
 		{
 			name: "valid job with operations",
-			setupFn: func(t *testing.T, deps *ServerDependencies) string {
+			setupFn: func(t *testing.T, deps *core.APIDeps) string {
 				return seedJobsData(t, deps)
 			},
 			expectedStatus: http.StatusOK,
 			validateFn: func(t *testing.T, body []byte) {
-				var resp OperationListResponse
+				var resp contracts.OperationListResponse
 				require.NoError(t, json.Unmarshal(body, &resp))
-				assert.Equal(t, "organized", resp.JobStatus)
+				assert.Equal(t, models.JobStatusOrganized, resp.JobStatus)
 				assert.Equal(t, int64(3), resp.Total)
 				assert.Len(t, resp.Operations, 3)
 
-				// Verify each OperationItem has required fields populated
+				// Verify each contracts.OperationItem has required fields populated
 				for _, op := range resp.Operations {
 					assert.NotZero(t, op.ID, "operation ID should be non-zero")
 					assert.NotEmpty(t, op.MovieID, "movie_id should be populated")
@@ -141,25 +148,25 @@ func TestListOperations(t *testing.T) {
 		},
 		{
 			name: "non-existent job",
-			setupFn: func(t *testing.T, deps *ServerDependencies) string {
+			setupFn: func(t *testing.T, deps *core.APIDeps) string {
 				return "nonexistent-id"
 			},
 			expectedStatus: http.StatusNotFound,
 			validateFn: func(t *testing.T, body []byte) {
-				var errResp ErrorResponse
+				var errResp contracts.ErrorResponse
 				require.NoError(t, json.Unmarshal(body, &errResp))
 				assert.Equal(t, "Job not found", errResp.Error)
 			},
 		},
 		{
 			name: "job with no operations",
-			setupFn: func(t *testing.T, deps *ServerDependencies) string {
-				job := createTestJob(t, deps, "organized")
+			setupFn: func(t *testing.T, deps *core.APIDeps) string {
+				job := createTestJob(t, deps, models.JobStatusOrganized)
 				return job.ID
 			},
 			expectedStatus: http.StatusOK,
 			validateFn: func(t *testing.T, body []byte) {
-				var resp OperationListResponse
+				var resp contracts.OperationListResponse
 				require.NoError(t, json.Unmarshal(body, &resp))
 				assert.Empty(t, resp.Operations)
 				assert.Equal(t, int64(0), resp.Total)
@@ -175,7 +182,7 @@ func TestListOperations(t *testing.T) {
 			jobID := tt.setupFn(t, deps)
 
 			router := gin.New()
-			router.GET("/api/v1/jobs/:id/operations", listOperations(deps))
+			router.GET("/api/v1/jobs/:id/operations", listOperations(newTestJobDeps(deps)))
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+jobID+"/operations", nil)
 			w := httptest.NewRecorder()
@@ -199,25 +206,25 @@ func TestRevertDisabled(t *testing.T) {
 		deps, db := setupJobsTestDeps(t)
 		// AllowRevert defaults to false in setupJobsTestDeps — but we explicitly
 		// set up with it disabled to be clear about intent
-		cfg := deps.GetConfig()
-		cfg.Output.AllowRevert = false
-		deps.SetConfig(cfg)
+		cfg := deps.CoreDeps.GetConfig()
+		cfg.Output.Operation.AllowRevert = false
+		testkit.GetTestRuntime(deps).InitAPIConfig() // Refresh APIConfig snapshot after mutating config
 		defer func() { _ = db.Close() }()
 
 		// Create an organized job (would normally be revertible)
-		_ = createTestJob(t, deps, "organized")
+		_ = createTestJob(t, deps, models.JobStatusOrganized)
 
 		router := gin.New()
-		router.POST("/api/v1/jobs/:id/revert", revertBatch(deps))
-		router.POST("/api/v1/jobs/:id/operations/:movieId/revert", revertOperation(deps))
-		router.GET("/api/v1/jobs/:id/revert-check", revertCheck(deps))
+		router.POST("/api/v1/jobs/:id/revert", revertBatch(newTestJobDeps(deps)))
+		router.POST("/api/v1/jobs/:id/operations/:movieId/revert", revertOperation(newTestJobDeps(deps)))
+		router.GET("/api/v1/jobs/:id/revert-check", revertCheck(newTestJobDeps(deps)))
 
 		// Test revertBatch
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/some-id/revert", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusForbidden, w.Code)
-		var errResp ErrorResponse
+		var errResp contracts.ErrorResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
 		assert.Equal(t, "Revert is disabled. Enable it in Settings > File Operations.", errResp.Error)
 
@@ -240,45 +247,45 @@ func TestRevertBatch(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		setupFn        func(*testing.T, *ServerDependencies, afero.Fs) string // returns jobID
+		setupFn        func(*testing.T, *core.APIDeps, afero.Fs) string // returns jobID
 		expectedStatus int
-		validateFn     func(*testing.T, []byte, *ServerDependencies)
+		validateFn     func(*testing.T, []byte, *core.APIDeps)
 	}{
 		{
 			name: "non-existent job",
-			setupFn: func(t *testing.T, deps *ServerDependencies, _ afero.Fs) string {
+			setupFn: func(t *testing.T, deps *core.APIDeps, _ afero.Fs) string {
 				return "nonexistent-id"
 			},
 			expectedStatus: http.StatusNotFound,
-			validateFn: func(t *testing.T, body []byte, _ *ServerDependencies) {
-				var errResp ErrorResponse
+			validateFn: func(t *testing.T, body []byte, _ *core.APIDeps) {
+				var errResp contracts.ErrorResponse
 				require.NoError(t, json.Unmarshal(body, &errResp))
 				assert.Equal(t, "Job not found", errResp.Error)
 			},
 		},
 		{
 			name: "non-organized status",
-			setupFn: func(t *testing.T, deps *ServerDependencies, _ afero.Fs) string {
-				job := createTestJob(t, deps, "completed")
+			setupFn: func(t *testing.T, deps *core.APIDeps, _ afero.Fs) string {
+				job := createTestJob(t, deps, models.JobStatusCompleted)
 				return job.ID
 			},
 			expectedStatus: http.StatusBadRequest,
-			validateFn: func(t *testing.T, body []byte, _ *ServerDependencies) {
-				var errResp ErrorResponse
+			validateFn: func(t *testing.T, body []byte, _ *core.APIDeps) {
+				var errResp contracts.ErrorResponse
 				require.NoError(t, json.Unmarshal(body, &errResp))
 				assert.Equal(t, "Job is not in organized status", errResp.Error)
 			},
 		},
 		{
 			name: "successful batch revert",
-			setupFn: func(t *testing.T, deps *ServerDependencies, fs afero.Fs) string {
+			setupFn: func(t *testing.T, deps *core.APIDeps, fs afero.Fs) string {
 				return seedRevertableJob(t, deps, fs, []string{"ABC-001", "ABC-002"})
 			},
 			expectedStatus: http.StatusOK,
-			validateFn: func(t *testing.T, body []byte, deps *ServerDependencies) {
-				var resp RevertResultResponse
+			validateFn: func(t *testing.T, body []byte, deps *core.APIDeps) {
+				var resp contracts.RevertResultResponse
 				require.NoError(t, json.Unmarshal(body, &resp))
-				assert.Equal(t, "reverted", resp.Status)
+				assert.Equal(t, models.JobStatusReverted, resp.Status)
 				assert.Equal(t, 2, resp.Total)
 				assert.Equal(t, 2, resp.Succeeded)
 				assert.Equal(t, 0, resp.Failed)
@@ -286,12 +293,12 @@ func TestRevertBatch(t *testing.T) {
 		},
 		{
 			name: "already reverted returns 400",
-			setupFn: func(t *testing.T, deps *ServerDependencies, fs afero.Fs) string {
+			setupFn: func(t *testing.T, deps *core.APIDeps, fs afero.Fs) string {
 				jobID := seedRevertableJob(t, deps, fs, []string{"DEF-001", "DEF-002"})
 
 				// Perform the revert first
 				router := gin.New()
-				router.POST("/api/v1/jobs/:id/revert", revertBatch(deps))
+				router.POST("/api/v1/jobs/:id/revert", revertBatch(newTestJobDeps(deps)))
 				req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+"/revert", nil)
 				w := httptest.NewRecorder()
 				router.ServeHTTP(w, req)
@@ -300,8 +307,8 @@ func TestRevertBatch(t *testing.T) {
 				return jobID
 			},
 			expectedStatus: http.StatusBadRequest,
-			validateFn: func(t *testing.T, body []byte, _ *ServerDependencies) {
-				var errResp ErrorResponse
+			validateFn: func(t *testing.T, body []byte, _ *core.APIDeps) {
+				var errResp contracts.ErrorResponse
 				require.NoError(t, json.Unmarshal(body, &errResp))
 				assert.Equal(t, "Job is not in organized status", errResp.Error)
 			},
@@ -316,7 +323,7 @@ func TestRevertBatch(t *testing.T) {
 			jobID := tt.setupFn(t, deps, fs)
 
 			router := gin.New()
-			router.POST("/api/v1/jobs/:id/revert", revertBatch(deps))
+			router.POST("/api/v1/jobs/:id/revert", revertBatch(newTestJobDeps(deps)))
 
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+"/revert", nil)
 			w := httptest.NewRecorder()
@@ -339,7 +346,7 @@ func TestListJobs_EmptyDatabase(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	router := gin.New()
-	router.GET("/api/v1/jobs", listJobs(deps))
+	router.GET("/api/v1/jobs", listJobs(newTestJobDeps(deps)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs", nil)
 	w := httptest.NewRecorder()
@@ -347,7 +354,7 @@ func TestListJobs_EmptyDatabase(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp JobListResponse
+	var resp contracts.JobListResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Empty(t, resp.Jobs)
 }
@@ -357,44 +364,44 @@ func TestRevertOperation(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		setupFn        func(*testing.T, *ServerDependencies, afero.Fs) (jobID string, movieID string)
+		setupFn        func(*testing.T, *core.APIDeps, afero.Fs) (jobID string, movieID string)
 		expectedStatus int
 		validateFn     func(*testing.T, []byte)
 	}{
 		{
 			name: "non-existent job",
-			setupFn: func(t *testing.T, _ *ServerDependencies, _ afero.Fs) (string, string) {
+			setupFn: func(t *testing.T, _ *core.APIDeps, _ afero.Fs) (string, string) {
 				return "nonexistent-id", "ABC-001"
 			},
 			expectedStatus: http.StatusNotFound,
 			validateFn: func(t *testing.T, body []byte) {
-				var errResp ErrorResponse
+				var errResp contracts.ErrorResponse
 				require.NoError(t, json.Unmarshal(body, &errResp))
 				assert.Equal(t, "Job not found", errResp.Error)
 			},
 		},
 		{
 			name: "non-revertible status",
-			setupFn: func(t *testing.T, deps *ServerDependencies, _ afero.Fs) (string, string) {
-				job := createTestJob(t, deps, "pending")
+			setupFn: func(t *testing.T, deps *core.APIDeps, _ afero.Fs) (string, string) {
+				job := createTestJob(t, deps, models.JobStatusPending)
 				return job.ID, "ABC-001"
 			},
 			expectedStatus: http.StatusBadRequest,
 			validateFn: func(t *testing.T, body []byte) {
-				var errResp ErrorResponse
+				var errResp contracts.ErrorResponse
 				require.NoError(t, json.Unmarshal(body, &errResp))
 				assert.Equal(t, "Job is not in a revertible status", errResp.Error)
 			},
 		},
 		{
 			name: "reverted status allows individual retry",
-			setupFn: func(t *testing.T, deps *ServerDependencies, fs afero.Fs) (string, string) {
+			setupFn: func(t *testing.T, deps *core.APIDeps, fs afero.Fs) (string, string) {
 				// Create a reverted job with one failed operation (simulating partially-reverted batch)
 				jobID := uuid.New().String()
 				now := time.Now()
 				job := &models.Job{
 					ID:          jobID,
-					Status:      string(models.JobStatusReverted),
+					Status:      models.JobStatusReverted,
 					TotalFiles:  2,
 					Completed:   2,
 					Failed:      0,
@@ -403,7 +410,7 @@ func TestRevertOperation(t *testing.T) {
 					StartedAt:   now.Add(-2 * time.Hour),
 					RevertedAt:  &now,
 				}
-				require.NoError(t, deps.JobRepo.Create(job))
+				require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), job))
 
 				// Create a failed operation that can be retried
 				dstPath := "/dest/RETRY-001/RETRY-001.mp4"
@@ -418,13 +425,13 @@ func TestRevertOperation(t *testing.T) {
 					OperationType: models.OperationTypeMove,
 					RevertStatus:  models.RevertStatusFailed,
 				}
-				require.NoError(t, deps.BatchFileOpRepo.Create(op))
+				require.NoError(t, deps.Repos.BatchFileOpRepo.Create(context.Background(), op))
 
 				return jobID, "RETRY-001"
 			},
 			expectedStatus: http.StatusOK,
 			validateFn: func(t *testing.T, body []byte) {
-				var resp RevertResultResponse
+				var resp contracts.RevertResultResponse
 				require.NoError(t, json.Unmarshal(body, &resp))
 				assert.Equal(t, 1, resp.Total)
 				assert.Equal(t, 1, resp.Succeeded)
@@ -432,13 +439,13 @@ func TestRevertOperation(t *testing.T) {
 		},
 		{
 			name: "successful individual revert",
-			setupFn: func(t *testing.T, deps *ServerDependencies, fs afero.Fs) (string, string) {
+			setupFn: func(t *testing.T, deps *core.APIDeps, fs afero.Fs) (string, string) {
 				jobID := seedRevertableJob(t, deps, fs, []string{"IND-001", "IND-002"})
 				return jobID, "IND-001"
 			},
 			expectedStatus: http.StatusOK,
 			validateFn: func(t *testing.T, body []byte) {
-				var resp RevertResultResponse
+				var resp contracts.RevertResultResponse
 				require.NoError(t, json.Unmarshal(body, &resp))
 				assert.Equal(t, 1, resp.Total)
 				assert.Equal(t, 1, resp.Succeeded)
@@ -455,7 +462,7 @@ func TestRevertOperation(t *testing.T) {
 			jobID, movieID := tt.setupFn(t, deps, fs)
 
 			router := gin.New()
-			router.POST("/api/v1/jobs/:id/operations/:movieId/revert", revertOperation(deps))
+			router.POST("/api/v1/jobs/:id/operations/:movieId/revert", revertOperation(newTestJobDeps(deps)))
 
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+"/operations/"+movieID+"/revert", nil)
 			w := httptest.NewRecorder()

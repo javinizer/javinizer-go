@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -52,14 +53,14 @@ func TestApiTokenRepo_Create(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := repo.Create(tc.token)
+			err := repo.Create(context.TODO(), tc.token)
 			if tc.wantErr {
 				assert.Error(t, err)
 				return
 			}
 			require.NoError(t, err)
 
-			found, err := repo.FindByID(tc.token.ID)
+			found, err := repo.FindByID(context.TODO(), tc.token.ID)
 			require.NoError(t, err)
 			assert.Equal(t, tc.token.ID, found.ID)
 			assert.Equal(t, tc.token.Name, found.Name)
@@ -75,23 +76,23 @@ func TestApiTokenRepo_FindByTokenHash(t *testing.T) {
 	repo := NewApiTokenRepository(db)
 
 	token := newTestApiToken(db)
-	require.NoError(t, repo.Create(token))
+	require.NoError(t, repo.Create(context.TODO(), token))
 
 	t.Run("found by hash", func(t *testing.T) {
-		found, err := repo.FindByTokenHash(token.TokenHash)
+		found, err := repo.FindByTokenHash(context.TODO(), token.TokenHash)
 		require.NoError(t, err)
 		assert.Equal(t, token.ID, found.ID)
 		assert.Equal(t, token.TokenHash, found.TokenHash)
 	})
 
 	t.Run("not found returns error", func(t *testing.T) {
-		_, err := repo.FindByTokenHash("nonexistent-hash-nonexistent-hash-nonexistent-hash-nonexi")
+		_, err := repo.FindByTokenHash(context.TODO(), "nonexistent-hash-nonexistent-hash-nonexistent-hash-nonexi")
 		assert.Error(t, err)
 	})
 
 	t.Run("excludes revoked tokens", func(t *testing.T) {
-		require.NoError(t, repo.Revoke(token.ID))
-		_, err := repo.FindByTokenHash(token.TokenHash)
+		require.NoError(t, repo.Revoke(context.TODO(), token.ID))
+		_, err := repo.FindByTokenHash(context.TODO(), token.TokenHash)
 		assert.Error(t, err)
 	})
 }
@@ -101,22 +102,22 @@ func TestApiTokenRepo_FindByPrefix(t *testing.T) {
 	repo := NewApiTokenRepository(db)
 
 	token := newTestApiToken(db)
-	require.NoError(t, repo.Create(token))
+	require.NoError(t, repo.Create(context.TODO(), token))
 
 	t.Run("found by prefix", func(t *testing.T) {
-		found, err := repo.FindByPrefix(token.TokenPrefix)
+		found, err := repo.FindByPrefix(context.TODO(), token.TokenPrefix)
 		require.NoError(t, err)
 		assert.Equal(t, token.ID, found.ID)
 	})
 
 	t.Run("not found returns error", func(t *testing.T) {
-		_, err := repo.FindByPrefix("notexist")
+		_, err := repo.FindByPrefix(context.TODO(), "notexist")
 		assert.Error(t, err)
 	})
 
 	t.Run("excludes revoked tokens", func(t *testing.T) {
-		require.NoError(t, repo.Revoke(token.ID))
-		_, err := repo.FindByPrefix(token.TokenPrefix)
+		require.NoError(t, repo.Revoke(context.TODO(), token.ID))
+		_, err := repo.FindByPrefix(context.TODO(), token.TokenPrefix)
 		assert.Error(t, err)
 	})
 }
@@ -126,16 +127,16 @@ func TestApiTokenRepo_UpdateLastUsed(t *testing.T) {
 	repo := NewApiTokenRepository(db)
 
 	token := newTestApiToken(db)
-	require.NoError(t, repo.Create(token))
+	require.NoError(t, repo.Create(context.TODO(), token))
 
-	before, err := repo.FindByID(token.ID)
+	before, err := repo.FindByID(context.TODO(), token.ID)
 	require.NoError(t, err)
 	assert.Nil(t, before.LastUsedAt)
 
-	err = repo.UpdateLastUsed(token.ID)
+	err = repo.UpdateLastUsed(context.TODO(), token.ID)
 	require.NoError(t, err)
 
-	after, err := repo.FindByID(token.ID)
+	after, err := repo.FindByID(context.TODO(), token.ID)
 	require.NoError(t, err)
 	assert.NotNil(t, after.LastUsedAt)
 	assert.WithinDuration(t, time.Now().UTC(), *after.LastUsedAt, 5*time.Second)
@@ -146,17 +147,17 @@ func TestApiTokenRepo_SoftDelete(t *testing.T) {
 	repo := NewApiTokenRepository(db)
 
 	token := newTestApiToken(db)
-	require.NoError(t, repo.Create(token))
+	require.NoError(t, repo.Create(context.TODO(), token))
 
-	err := repo.Revoke(token.ID)
+	err := repo.Revoke(context.TODO(), token.ID)
 	require.NoError(t, err)
 
-	found, err := repo.FindByID(token.ID)
+	found, err := repo.FindByID(context.TODO(), token.ID)
 	require.NoError(t, err)
 	assert.NotNil(t, found.RevokedAt)
 	assert.WithinDuration(t, time.Now().UTC(), *found.RevokedAt, 5*time.Second)
 
-	_, err = repo.FindByTokenHash(token.TokenHash)
+	_, err = repo.FindByTokenHash(context.TODO(), token.TokenHash)
 	assert.True(t, errors.Is(err, ErrNotFound) || IsNotFound(err),
 		"FindByTokenHash should exclude revoked tokens")
 }
@@ -165,7 +166,7 @@ func TestApiTokenRepo_Revoke_NotFound(t *testing.T) {
 	db := setupApiTokenTestDB(t)
 	repo := NewApiTokenRepository(db)
 
-	err := repo.Revoke("nonexistent-id")
+	err := repo.Revoke(context.TODO(), "nonexistent-id")
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound), "expected ErrNotFound, got %v", err)
 }
@@ -193,12 +194,12 @@ func TestApiTokenRepo_ListActive(t *testing.T) {
 		TokenPrefix: "pref0003",
 	}
 
-	require.NoError(t, repo.Create(token1))
-	require.NoError(t, repo.Create(token2))
-	require.NoError(t, repo.Create(token3))
-	require.NoError(t, repo.Revoke(token3.ID))
+	require.NoError(t, repo.Create(context.TODO(), token1))
+	require.NoError(t, repo.Create(context.TODO(), token2))
+	require.NoError(t, repo.Create(context.TODO(), token3))
+	require.NoError(t, repo.Revoke(context.TODO(), token3.ID))
 
-	tokens, err := repo.ListActive()
+	tokens, err := repo.ListActive(context.TODO())
 	require.NoError(t, err)
 	assert.Len(t, tokens, 2)
 
@@ -216,12 +217,12 @@ func TestApiTokenRepo_Regenerate(t *testing.T) {
 	repo := NewApiTokenRepository(db)
 
 	token := newTestApiToken(db)
-	require.NoError(t, repo.Create(token))
+	require.NoError(t, repo.Create(context.TODO(), token))
 
 	newHash := "newhash-newhash-newhash-newhash-newhash-newhash-newhash-newhash-n"
 	newPrefix := "newp0001"
 
-	regenerated, err := repo.Regenerate(token.ID, newHash, newPrefix)
+	regenerated, err := repo.Regenerate(context.TODO(), token.ID, newHash, newPrefix)
 	require.NoError(t, err)
 	assert.Equal(t, newHash, regenerated.TokenHash)
 	assert.Equal(t, newPrefix, regenerated.TokenPrefix)
@@ -234,10 +235,10 @@ func TestApiTokenRepo_Regenerate_RevokedFails(t *testing.T) {
 	repo := NewApiTokenRepository(db)
 
 	token := newTestApiToken(db)
-	require.NoError(t, repo.Create(token))
-	require.NoError(t, repo.Revoke(token.ID))
+	require.NoError(t, repo.Create(context.TODO(), token))
+	require.NoError(t, repo.Revoke(context.TODO(), token.ID))
 
-	_, err := repo.Regenerate(token.ID, "newhash", "newpref1")
+	_, err := repo.Regenerate(context.TODO(), token.ID, "newhash", "newpref1")
 	assert.Error(t, err)
 }
 
@@ -245,7 +246,7 @@ func TestApiTokenRepo_Regenerate_NotFound(t *testing.T) {
 	db := setupApiTokenTestDB(t)
 	repo := NewApiTokenRepository(db)
 
-	_, err := repo.Regenerate("nonexistent-id", "newhash", "newpref1")
+	_, err := repo.Regenerate(context.TODO(), "nonexistent-id", "newhash", "newpref1")
 	assert.Error(t, err)
 }
 
@@ -253,7 +254,7 @@ func TestApiTokenRepo_FindByID_NotFound(t *testing.T) {
 	db := setupApiTokenTestDB(t)
 	repo := NewApiTokenRepository(db)
 
-	_, err := repo.FindByID("nonexistent-id")
+	_, err := repo.FindByID(context.TODO(), "nonexistent-id")
 	assert.Error(t, err)
 }
 
@@ -261,7 +262,7 @@ func TestApiTokenRepo_ListActive_EmptyDB(t *testing.T) {
 	db := setupApiTokenTestDB(t)
 	repo := NewApiTokenRepository(db)
 
-	tokens, err := repo.ListActive()
+	tokens, err := repo.ListActive(context.TODO())
 	require.NoError(t, err)
 	assert.NotNil(t, tokens)
 	assert.Empty(t, tokens)
@@ -271,6 +272,6 @@ func TestApiTokenRepo_UpdateLastUsed_NotFound(t *testing.T) {
 	db := setupApiTokenTestDB(t)
 	repo := NewApiTokenRepository(db)
 
-	err := repo.UpdateLastUsed("nonexistent-id")
+	err := repo.UpdateLastUsed(context.TODO(), "nonexistent-id")
 	assert.NoError(t, err)
 }

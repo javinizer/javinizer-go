@@ -58,11 +58,11 @@ func AnalyzeProfile(path string) (Summary, error) {
 	}
 	defer func() { _ = file.Close() }()
 
-	return Analyze(file)
+	return analyze(file)
 }
 
-// Analyze parses a Go cover profile from r.
-func Analyze(r io.Reader) (Summary, error) {
+// analyze parses a Go cover profile from r.
+func analyze(r io.Reader) (Summary, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 

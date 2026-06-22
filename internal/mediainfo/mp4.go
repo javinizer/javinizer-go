@@ -1,27 +1,28 @@
 package mediainfo
 
 import (
+	"context"
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/Eyevinn/mp4ff/mp4"
 )
 
-// MP4Prober implements the Prober interface for MP4 containers
-type MP4Prober struct{}
+// mp4Prober implements the prober interface for MP4 containers
+type mp4Prober struct{}
 
-// NewMP4Prober creates a new MP4 prober
-func NewMP4Prober() *MP4Prober {
-	return &MP4Prober{}
+// newMP4Prober creates a new MP4 prober
+func newMP4Prober() *mp4Prober {
+	return &mp4Prober{}
 }
 
 // Name returns the prober identifier
-func (p *MP4Prober) Name() string {
+func (p *mp4Prober) Name() string {
 	return "mp4"
 }
 
-// CanProbe checks if this prober can handle the file based on header
-func (p *MP4Prober) CanProbe(header []byte) bool {
+// canProbe checks if this prober can handle the file based on header
+func (p *mp4Prober) canProbe(header []byte) bool {
 	// MP4/MOV: contains "ftyp" in first 12 bytes (at offset 4-7)
 	if len(header) >= 8 {
 		return header[4] == 'f' && header[5] == 't' && header[6] == 'y' && header[7] == 'p'
@@ -30,12 +31,12 @@ func (p *MP4Prober) CanProbe(header []byte) bool {
 }
 
 // Probe extracts metadata from the MP4 file
-func (p *MP4Prober) Probe(f *os.File) (*VideoInfo, error) {
+func (p *mp4Prober) Probe(_ context.Context, f FileReader) (*VideoInfo, error) {
 	return analyzeMP4(f)
 }
 
 // analyzeMP4 extracts metadata from MP4/MOV files
-func analyzeMP4(f *os.File) (*VideoInfo, error) {
+func analyzeMP4(f FileReader) (*VideoInfo, error) {
 	info := &VideoInfo{
 		Container: "mp4",
 	}
@@ -43,13 +44,17 @@ func analyzeMP4(f *os.File) (*VideoInfo, error) {
 	// Parse MP4 file
 	mp4File, err := mp4.DecodeFile(f, mp4.WithDecodeMode(mp4.DecModeLazyMdat))
 	if err != nil {
-		_, _ = f.Seek(0, 0)
+		_, _ = f.Seek(0, io.SeekStart)
 		return analyzeMP4Fallback(f)
 	}
 
 	// Get file size for bitrate calculation
-	stat, _ := f.Stat()
-	fileSize := stat.Size()
+	var fileSize int64
+	if stat, ok := f.(fileReaderStat); ok {
+		if fi, err := stat.Stat(); err == nil {
+			fileSize = fi.Size()
+		}
+	}
 
 	// Extract movie-level duration (in movie timescale)
 	var movieDuration uint64

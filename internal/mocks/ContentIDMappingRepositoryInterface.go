@@ -5,6 +5,8 @@
 package mocks
 
 import (
+	"context"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -37,16 +39,16 @@ func (_m *MockContentIDMappingRepositoryInterface) EXPECT() *MockContentIDMappin
 }
 
 // Create provides a mock function for the type MockContentIDMappingRepositoryInterface
-func (_mock *MockContentIDMappingRepositoryInterface) Create(mapping *models.ContentIDMapping) error {
-	ret := _mock.Called(mapping)
+func (_mock *MockContentIDMappingRepositoryInterface) Create(ctx context.Context, mapping *models.ContentIDMapping) error {
+	ret := _mock.Called(ctx, mapping)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.ContentIDMapping) error); ok {
-		r0 = returnFunc(mapping)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.ContentIDMapping) error); ok {
+		r0 = returnFunc(ctx, mapping)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -59,19 +61,25 @@ type MockContentIDMappingRepositoryInterface_Create_Call struct {
 }
 
 // Create is a helper method to define mock.On call
+//   - ctx context.Context
 //   - mapping *models.ContentIDMapping
-func (_e *MockContentIDMappingRepositoryInterface_Expecter) Create(mapping interface{}) *MockContentIDMappingRepositoryInterface_Create_Call {
-	return &MockContentIDMappingRepositoryInterface_Create_Call{Call: _e.mock.On("Create", mapping)}
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) Create(ctx interface{}, mapping interface{}) *MockContentIDMappingRepositoryInterface_Create_Call {
+	return &MockContentIDMappingRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, mapping)}
 }
 
-func (_c *MockContentIDMappingRepositoryInterface_Create_Call) Run(run func(mapping *models.ContentIDMapping)) *MockContentIDMappingRepositoryInterface_Create_Call {
+func (_c *MockContentIDMappingRepositoryInterface_Create_Call) Run(run func(ctx context.Context, mapping *models.ContentIDMapping)) *MockContentIDMappingRepositoryInterface_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.ContentIDMapping
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.ContentIDMapping)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.ContentIDMapping
+		if args[1] != nil {
+			arg1 = args[1].(*models.ContentIDMapping)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -82,22 +90,22 @@ func (_c *MockContentIDMappingRepositoryInterface_Create_Call) Return(err error)
 	return _c
 }
 
-func (_c *MockContentIDMappingRepositoryInterface_Create_Call) RunAndReturn(run func(mapping *models.ContentIDMapping) error) *MockContentIDMappingRepositoryInterface_Create_Call {
+func (_c *MockContentIDMappingRepositoryInterface_Create_Call) RunAndReturn(run func(ctx context.Context, mapping *models.ContentIDMapping) error) *MockContentIDMappingRepositoryInterface_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Delete provides a mock function for the type MockContentIDMappingRepositoryInterface
-func (_mock *MockContentIDMappingRepositoryInterface) Delete(searchID string) error {
-	ret := _mock.Called(searchID)
+func (_mock *MockContentIDMappingRepositoryInterface) Delete(ctx context.Context, searchID string) error {
+	ret := _mock.Called(ctx, searchID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string) error); ok {
-		r0 = returnFunc(searchID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, searchID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -110,19 +118,25 @@ type MockContentIDMappingRepositoryInterface_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
+//   - ctx context.Context
 //   - searchID string
-func (_e *MockContentIDMappingRepositoryInterface_Expecter) Delete(searchID interface{}) *MockContentIDMappingRepositoryInterface_Delete_Call {
-	return &MockContentIDMappingRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", searchID)}
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) Delete(ctx interface{}, searchID interface{}) *MockContentIDMappingRepositoryInterface_Delete_Call {
+	return &MockContentIDMappingRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, searchID)}
 }
 
-func (_c *MockContentIDMappingRepositoryInterface_Delete_Call) Run(run func(searchID string)) *MockContentIDMappingRepositoryInterface_Delete_Call {
+func (_c *MockContentIDMappingRepositoryInterface_Delete_Call) Run(run func(ctx context.Context, searchID string)) *MockContentIDMappingRepositoryInterface_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -133,14 +147,14 @@ func (_c *MockContentIDMappingRepositoryInterface_Delete_Call) Return(err error)
 	return _c
 }
 
-func (_c *MockContentIDMappingRepositoryInterface_Delete_Call) RunAndReturn(run func(searchID string) error) *MockContentIDMappingRepositoryInterface_Delete_Call {
+func (_c *MockContentIDMappingRepositoryInterface_Delete_Call) RunAndReturn(run func(ctx context.Context, searchID string) error) *MockContentIDMappingRepositoryInterface_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindBySearchID provides a mock function for the type MockContentIDMappingRepositoryInterface
-func (_mock *MockContentIDMappingRepositoryInterface) FindBySearchID(searchID string) (*models.ContentIDMapping, error) {
-	ret := _mock.Called(searchID)
+func (_mock *MockContentIDMappingRepositoryInterface) FindBySearchID(ctx context.Context, searchID string) (*models.ContentIDMapping, error) {
+	ret := _mock.Called(ctx, searchID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindBySearchID")
@@ -148,18 +162,18 @@ func (_mock *MockContentIDMappingRepositoryInterface) FindBySearchID(searchID st
 
 	var r0 *models.ContentIDMapping
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*models.ContentIDMapping, error)); ok {
-		return returnFunc(searchID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*models.ContentIDMapping, error)); ok {
+		return returnFunc(ctx, searchID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *models.ContentIDMapping); ok {
-		r0 = returnFunc(searchID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *models.ContentIDMapping); ok {
+		r0 = returnFunc(ctx, searchID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.ContentIDMapping)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(searchID)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, searchID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -172,19 +186,25 @@ type MockContentIDMappingRepositoryInterface_FindBySearchID_Call struct {
 }
 
 // FindBySearchID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - searchID string
-func (_e *MockContentIDMappingRepositoryInterface_Expecter) FindBySearchID(searchID interface{}) *MockContentIDMappingRepositoryInterface_FindBySearchID_Call {
-	return &MockContentIDMappingRepositoryInterface_FindBySearchID_Call{Call: _e.mock.On("FindBySearchID", searchID)}
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) FindBySearchID(ctx interface{}, searchID interface{}) *MockContentIDMappingRepositoryInterface_FindBySearchID_Call {
+	return &MockContentIDMappingRepositoryInterface_FindBySearchID_Call{Call: _e.mock.On("FindBySearchID", ctx, searchID)}
 }
 
-func (_c *MockContentIDMappingRepositoryInterface_FindBySearchID_Call) Run(run func(searchID string)) *MockContentIDMappingRepositoryInterface_FindBySearchID_Call {
+func (_c *MockContentIDMappingRepositoryInterface_FindBySearchID_Call) Run(run func(ctx context.Context, searchID string)) *MockContentIDMappingRepositoryInterface_FindBySearchID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -195,14 +215,14 @@ func (_c *MockContentIDMappingRepositoryInterface_FindBySearchID_Call) Return(co
 	return _c
 }
 
-func (_c *MockContentIDMappingRepositoryInterface_FindBySearchID_Call) RunAndReturn(run func(searchID string) (*models.ContentIDMapping, error)) *MockContentIDMappingRepositoryInterface_FindBySearchID_Call {
+func (_c *MockContentIDMappingRepositoryInterface_FindBySearchID_Call) RunAndReturn(run func(ctx context.Context, searchID string) (*models.ContentIDMapping, error)) *MockContentIDMappingRepositoryInterface_FindBySearchID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetAll provides a mock function for the type MockContentIDMappingRepositoryInterface
-func (_mock *MockContentIDMappingRepositoryInterface) GetAll() ([]models.ContentIDMapping, error) {
-	ret := _mock.Called()
+func (_mock *MockContentIDMappingRepositoryInterface) GetAll(ctx context.Context) ([]models.ContentIDMapping, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAll")
@@ -210,18 +230,18 @@ func (_mock *MockContentIDMappingRepositoryInterface) GetAll() ([]models.Content
 
 	var r0 []models.ContentIDMapping
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() ([]models.ContentIDMapping, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]models.ContentIDMapping, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() []models.ContentIDMapping); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []models.ContentIDMapping); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.ContentIDMapping)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -234,13 +254,20 @@ type MockContentIDMappingRepositoryInterface_GetAll_Call struct {
 }
 
 // GetAll is a helper method to define mock.On call
-func (_e *MockContentIDMappingRepositoryInterface_Expecter) GetAll() *MockContentIDMappingRepositoryInterface_GetAll_Call {
-	return &MockContentIDMappingRepositoryInterface_GetAll_Call{Call: _e.mock.On("GetAll")}
+//   - ctx context.Context
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) GetAll(ctx interface{}) *MockContentIDMappingRepositoryInterface_GetAll_Call {
+	return &MockContentIDMappingRepositoryInterface_GetAll_Call{Call: _e.mock.On("GetAll", ctx)}
 }
 
-func (_c *MockContentIDMappingRepositoryInterface_GetAll_Call) Run(run func()) *MockContentIDMappingRepositoryInterface_GetAll_Call {
+func (_c *MockContentIDMappingRepositoryInterface_GetAll_Call) Run(run func(ctx context.Context)) *MockContentIDMappingRepositoryInterface_GetAll_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -250,7 +277,149 @@ func (_c *MockContentIDMappingRepositoryInterface_GetAll_Call) Return(contentIDM
 	return _c
 }
 
-func (_c *MockContentIDMappingRepositoryInterface_GetAll_Call) RunAndReturn(run func() ([]models.ContentIDMapping, error)) *MockContentIDMappingRepositoryInterface_GetAll_Call {
+func (_c *MockContentIDMappingRepositoryInterface_GetAll_Call) RunAndReturn(run func(ctx context.Context) ([]models.ContentIDMapping, error)) *MockContentIDMappingRepositoryInterface_GetAll_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetAllChunked provides a mock function for the type MockContentIDMappingRepositoryInterface
+func (_mock *MockContentIDMappingRepositoryInterface) GetAllChunked(ctx context.Context, chunkSize int) ([]models.ContentIDMapping, error) {
+	ret := _mock.Called(ctx, chunkSize)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAllChunked")
+	}
+
+	var r0 []models.ContentIDMapping
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int) ([]models.ContentIDMapping, error)); ok {
+		return returnFunc(ctx, chunkSize)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int) []models.ContentIDMapping); ok {
+		r0 = returnFunc(ctx, chunkSize)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.ContentIDMapping)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int) error); ok {
+		r1 = returnFunc(ctx, chunkSize)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockContentIDMappingRepositoryInterface_GetAllChunked_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAllChunked'
+type MockContentIDMappingRepositoryInterface_GetAllChunked_Call struct {
+	*mock.Call
+}
+
+// GetAllChunked is a helper method to define mock.On call
+//   - ctx context.Context
+//   - chunkSize int
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) GetAllChunked(ctx interface{}, chunkSize interface{}) *MockContentIDMappingRepositoryInterface_GetAllChunked_Call {
+	return &MockContentIDMappingRepositoryInterface_GetAllChunked_Call{Call: _e.mock.On("GetAllChunked", ctx, chunkSize)}
+}
+
+func (_c *MockContentIDMappingRepositoryInterface_GetAllChunked_Call) Run(run func(ctx context.Context, chunkSize int)) *MockContentIDMappingRepositoryInterface_GetAllChunked_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockContentIDMappingRepositoryInterface_GetAllChunked_Call) Return(contentIDMappings []models.ContentIDMapping, err error) *MockContentIDMappingRepositoryInterface_GetAllChunked_Call {
+	_c.Call.Return(contentIDMappings, err)
+	return _c
+}
+
+func (_c *MockContentIDMappingRepositoryInterface_GetAllChunked_Call) RunAndReturn(run func(ctx context.Context, chunkSize int) ([]models.ContentIDMapping, error)) *MockContentIDMappingRepositoryInterface_GetAllChunked_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetAllPaginated provides a mock function for the type MockContentIDMappingRepositoryInterface
+func (_mock *MockContentIDMappingRepositoryInterface) GetAllPaginated(ctx context.Context, limit int, offset int) ([]models.ContentIDMapping, error) {
+	ret := _mock.Called(ctx, limit, offset)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAllPaginated")
+	}
+
+	var r0 []models.ContentIDMapping
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) ([]models.ContentIDMapping, error)); ok {
+		return returnFunc(ctx, limit, offset)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) []models.ContentIDMapping); ok {
+		r0 = returnFunc(ctx, limit, offset)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.ContentIDMapping)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int, int) error); ok {
+		r1 = returnFunc(ctx, limit, offset)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockContentIDMappingRepositoryInterface_GetAllPaginated_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAllPaginated'
+type MockContentIDMappingRepositoryInterface_GetAllPaginated_Call struct {
+	*mock.Call
+}
+
+// GetAllPaginated is a helper method to define mock.On call
+//   - ctx context.Context
+//   - limit int
+//   - offset int
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) GetAllPaginated(ctx interface{}, limit interface{}, offset interface{}) *MockContentIDMappingRepositoryInterface_GetAllPaginated_Call {
+	return &MockContentIDMappingRepositoryInterface_GetAllPaginated_Call{Call: _e.mock.On("GetAllPaginated", ctx, limit, offset)}
+}
+
+func (_c *MockContentIDMappingRepositoryInterface_GetAllPaginated_Call) Run(run func(ctx context.Context, limit int, offset int)) *MockContentIDMappingRepositoryInterface_GetAllPaginated_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockContentIDMappingRepositoryInterface_GetAllPaginated_Call) Return(contentIDMappings []models.ContentIDMapping, err error) *MockContentIDMappingRepositoryInterface_GetAllPaginated_Call {
+	_c.Call.Return(contentIDMappings, err)
+	return _c
+}
+
+func (_c *MockContentIDMappingRepositoryInterface_GetAllPaginated_Call) RunAndReturn(run func(ctx context.Context, limit int, offset int) ([]models.ContentIDMapping, error)) *MockContentIDMappingRepositoryInterface_GetAllPaginated_Call {
 	_c.Call.Return(run)
 	return _c
 }

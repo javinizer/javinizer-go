@@ -1,60 +1,40 @@
 package fc2
 
 import (
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
-func init() {
-	m := &scraperModule{}
-	m.StandardModule = scraperutil.StandardModule{
-		ScraperName:        "fc2",
-		ScraperDescription: "FC2",
-		ScraperOptions: []any{
-			models.ScraperOption{
-				Key:         "request_delay",
-				Label:       "Request Delay",
-				Description: "Delay between requests to avoid rate limiting",
+func Register(reg scraperutil.ScraperRegistrar) {
+	reg.Register(scraperutil.ScraperRegistration{
+		Name:        "fc2",
+		Description: "FC2",
+		Options: []models.ScraperOption{
+			{
+				Key:         "rate_limit",
+				Label:       "Rate Limit",
+				Description: "Delay between requests in milliseconds to avoid rate limiting",
 				Type:        "number",
 				Min:         scraperutil.IntPtr(0),
 				Max:         scraperutil.IntPtr(5000),
 				Unit:        "ms",
 			},
-			models.ScraperOption{
+			{
 				Key:         "base_url",
 				Label:       "Base URL",
 				Description: "FC2 base URL",
 				Type:        "string",
 			},
 		},
-		ScraperDefaults: config.ScraperSettings{
+		Defaults: models.ScraperSettings{
 			Enabled:   false,
 			RateLimit: 1000,
 			BaseURL:   "https://adult.contents.fc2.com",
 		},
-		ScraperPriority: 35,
-		ConfigType:      func() scraperutil.ScraperConfigInterface { return &FC2Config{} },
-		NewScraperFunc: func(settings config.ScraperSettings, db *database.DB, globalConfig *config.ScrapersConfig) (models.Scraper, error) {
-			var globalProxy *config.ProxyConfig
-			var globalFlareSolverr config.FlareSolverrConfig
-			if globalConfig != nil {
-				globalProxy = &globalConfig.Proxy
-				globalFlareSolverr = globalConfig.FlareSolverr
-			}
-			return New(settings, globalProxy, globalFlareSolverr), nil
+		Priority: 35,
+		Constructor: func(deps scraperutil.ScraperDeps) (models.Scraper, error) {
+			return newScraper(&deps.Settings, deps.GlobalProxy, deps.FlareSolverr), nil
 		},
-		FlatOverrides: scraperutil.FlattenOverrides{BaseURL: "https://adult.contents.fc2.com"},
-		FlatBuilder: func(fc *scraperutil.FlattenedConfig, o scraperutil.FlattenOverrides) any {
-			return &config.ScraperSettings{Enabled: fc.Enabled, RateLimit: fc.RateLimit, BaseURL: o.BaseURL, Proxy: config.ProxyAsConfig(fc.Proxy), DownloadProxy: config.ProxyAsConfig(fc.DownloadProxy)}
-		},
-	}
-	scraperutil.RegisterModule(m)
+		ValidateFn: validateScraperSettings,
+	})
 }
-
-type scraperModule struct {
-	scraperutil.StandardModule
-}
-
-var _ scraperutil.ScraperModule = (*scraperModule)(nil)

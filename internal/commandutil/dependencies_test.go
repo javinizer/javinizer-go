@@ -23,10 +23,10 @@ func TestNewDependencies_Success(t *testing.T) {
 	require.NotNil(t, deps)
 	defer func() { _ = deps.Close() }()
 
-	assert.NotNil(t, deps.Config)
+	assert.NotNil(t, deps.GetConfig())
 	assert.NotNil(t, deps.DB)
 	assert.NotNil(t, deps.ScraperRegistry)
-	assert.Equal(t, cfg, deps.Config)
+	assert.Equal(t, cfg, deps.GetConfig())
 }
 
 // TestNewDependencies_NilConfig tests error when config is nil
@@ -51,7 +51,7 @@ func TestNewDependencies_DBDirCreationFails(t *testing.T) {
 
 	// Try to create DB in a subdirectory of a file (will fail)
 	invalidDBPath := filepath.Join(readOnlyFile, "subdir", "test.db")
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.Database.DSN = invalidDBPath
 
 	deps, err := NewDependencies(cfg)
@@ -72,7 +72,7 @@ func TestNewDependencies_DBInitFails(t *testing.T) {
 	err := os.MkdirAll(dbDir, 0555) // Read-only directory
 	require.NoError(t, err)
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.Database.DSN = filepath.Join(dbDir, "test.db")
 
 	deps, err := NewDependencies(cfg)
@@ -117,7 +117,7 @@ func TestClose_Success(t *testing.T) {
 
 // TestClose_NilDB tests graceful handling when DB is nil
 func TestClose_NilDB(t *testing.T) {
-	deps := &Dependencies{
+	deps := &CoreDeps{
 		DB: nil,
 	}
 

@@ -1,11 +1,13 @@
 package jobs
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/history"
@@ -13,12 +15,26 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
-// setupJobsTestDeps creates in-memory SQLite DB and ServerDependencies for jobs handler tests.
-// It sets up JobQueue (needed by revert handlers) but NOT Reverter (set separately via setupJobsTestDepsWithReverter).
+// newTestJobDeps creates a JobDeps from the test deps.
+func newTestJobDeps(deps *core.APIDeps) JobDeps {
+	return NewJobDeps(
+		deps.Repos.JobRepo,
+		deps.Repos.BatchFileOpRepo,
+		deps.JobStore,
+		deps.Reverter,
+		deps.EventEmitter,
+		testkit.GetTestRuntime(deps).GetAPIConfig().AllowRevert,
+	)
+}
+
+// setupJobsTestDeps creates in-memory SQLite DB and core.APIDeps for jobs handler tests.
+// It sets up JobStore (needed by revert handlers) but NOT Reverter (set separately via setupJobsTestDepsWithReverter).
 // Caller must defer db.Close().
-func setupJobsTestDeps(t *testing.T) (*ServerDependencies, *database.DB) {
+func setupJobsTestDeps(t *testing.T) (*core.APIDeps, *database.DB) {
 	t.Helper()
 
 	cfg := &config.Config{
@@ -30,28 +46,34 @@ func setupJobsTestDeps(t *testing.T) (*ServerDependencies, *database.DB) {
 			Level: "error",
 		},
 		Output: config.OutputConfig{
-			AllowRevert: true, // Enable revert for handler tests
+			Operation: config.OutputOperationConfig{
+				AllowRevert: true, // Enable revert for handler tests
+			},
 		},
 	}
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	jobRepo := database.NewJobRepository(db)
 	batchFileOpRepo := database.NewBatchFileOperationRepository(db)
 
-	// JobQueue is needed by revert handlers (GetJobPointer call)
-	jobQueue := worker.NewJobQueue(jobRepo, "data/temp", nil)
+	// JobStore is needed by revert handlers (PersistJobByID call)
+	jobStore := worker.NewJobStore(jobRepo, batchFileOpRepo, nil, "data/temp", nil, nil)
 
-	deps := &ServerDependencies{
-		DB:              db,
-		JobRepo:         jobRepo,
-		BatchFileOpRepo: batchFileOpRepo,
-		JobQueue:        jobQueue,
-		Runtime:         nil, // not needed for handler tests
+	deps := &core.APIDeps{
+		Repos: database.Repositories{
+			HistoryRepos: database.HistoryRepos{
+				JobRepo:         jobRepo,
+				BatchFileOpRepo: batchFileOpRepo,
+			},
+		},
+		JobStore: jobStore,
 	}
-	deps.SetConfig(cfg)
+	rt := core.NewAPIRuntime(deps)
+	rt.SetConfig(cfg)
+	testkit.SetTestRuntime(deps, rt)
 
 	return deps, db
 }
@@ -59,7 +81,7 @@ func setupJobsTestDeps(t *testing.T) (*ServerDependencies, *database.DB) {
 // seedJobsData creates 3 Job records (organized, completed, reverted) and
 // associated BatchFileOperation records for the organized job (3 ops: 2 pending, 1 reverted).
 // Returns the organized job ID for use in tests.
-func seedJobsData(t *testing.T, deps *ServerDependencies) string {
+func seedJobsData(t *testing.T, deps *core.APIDeps) string {
 	t.Helper()
 
 	now := time.Now()
@@ -70,7 +92,7 @@ func seedJobsData(t *testing.T, deps *ServerDependencies) string {
 	organizedJobID := uuid.New().String()
 	organizedJob := &models.Job{
 		ID:          organizedJobID,
-		Status:      string(models.JobStatusOrganized),
+		Status:      models.JobStatusOrganized,
 		TotalFiles:  3,
 		Completed:   3,
 		Failed:      0,
@@ -79,7 +101,7 @@ func seedJobsData(t *testing.T, deps *ServerDependencies) string {
 		StartedAt:   twoHoursAgo,
 		OrganizedAt: &oneHourAgo,
 	}
-	require.NoError(t, deps.JobRepo.Create(organizedJob))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), organizedJob))
 
 	// BatchFileOperations for the organized job
 	ops := []*models.BatchFileOperation{
@@ -110,14 +132,14 @@ func seedJobsData(t *testing.T, deps *ServerDependencies) string {
 		},
 	}
 	for _, op := range ops {
-		require.NoError(t, deps.BatchFileOpRepo.Create(op))
+		require.NoError(t, deps.Repos.BatchFileOpRepo.Create(context.Background(), op))
 	}
 
 	// Job 2: completed (no operations)
 	completedJobID := uuid.New().String()
 	completedJob := &models.Job{
 		ID:          completedJobID,
-		Status:      string(models.JobStatusCompleted),
+		Status:      models.JobStatusCompleted,
 		TotalFiles:  5,
 		Completed:   4,
 		Failed:      1,
@@ -126,13 +148,13 @@ func seedJobsData(t *testing.T, deps *ServerDependencies) string {
 		StartedAt:   oneHourAgo,
 		CompletedAt: &now,
 	}
-	require.NoError(t, deps.JobRepo.Create(completedJob))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), completedJob))
 
 	// Job 3: reverted
 	revertedJobID := uuid.New().String()
 	revertedJob := &models.Job{
 		ID:          revertedJobID,
-		Status:      string(models.JobStatusReverted),
+		Status:      models.JobStatusReverted,
 		TotalFiles:  2,
 		Completed:   2,
 		Failed:      0,
@@ -141,13 +163,13 @@ func seedJobsData(t *testing.T, deps *ServerDependencies) string {
 		StartedAt:   twoHoursAgo,
 		RevertedAt:  &now,
 	}
-	require.NoError(t, deps.JobRepo.Create(revertedJob))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), revertedJob))
 
 	return organizedJobID
 }
 
 // createTestJob is a minimal helper to create a single job with given status and no operations.
-func createTestJob(t *testing.T, deps *ServerDependencies, status string) *models.Job {
+func createTestJob(t *testing.T, deps *core.APIDeps, status models.JobStatus) *models.Job {
 	t.Helper()
 
 	job := &models.Job{
@@ -160,19 +182,19 @@ func createTestJob(t *testing.T, deps *ServerDependencies, status string) *model
 		Destination: "/dest/test",
 		StartedAt:   time.Now(),
 	}
-	require.NoError(t, deps.JobRepo.Create(job))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), job))
 	return job
 }
 
 // setupJobsTestDepsWithReverter extends setupJobsTestDeps by also creating a Reverter
 // backed by an in-memory filesystem. This is needed for revert endpoint tests.
-func setupJobsTestDepsWithReverter(t *testing.T) (*ServerDependencies, *database.DB, afero.Fs) {
+func setupJobsTestDepsWithReverter(t *testing.T) (*core.APIDeps, *database.DB, afero.Fs) {
 	t.Helper()
 
 	deps, db := setupJobsTestDeps(t)
 
 	memFs := afero.NewMemMapFs()
-	reverter := history.NewReverter(memFs, deps.BatchFileOpRepo)
+	reverter := history.NewReverter(memFs, deps.Repos.BatchFileOpRepo)
 	deps.Reverter = reverter
 
 	return deps, db, memFs
@@ -181,7 +203,7 @@ func setupJobsTestDepsWithReverter(t *testing.T) (*ServerDependencies, *database
 // seedRevertableJob creates an organized job with move-type BatchFileOperation records
 // and seeds the files into the MemMapFs so the Reverter can find and move them.
 // Returns the job ID.
-func seedRevertableJob(t *testing.T, deps *ServerDependencies, fs afero.Fs, movieIDs []string) string {
+func seedRevertableJob(t *testing.T, deps *core.APIDeps, fs afero.Fs, movieIDs []string) string {
 	t.Helper()
 
 	jobID := uuid.New().String()
@@ -191,7 +213,7 @@ func seedRevertableJob(t *testing.T, deps *ServerDependencies, fs afero.Fs, movi
 	// Create the organized job
 	job := &models.Job{
 		ID:          jobID,
-		Status:      string(models.JobStatusOrganized),
+		Status:      models.JobStatusOrganized,
 		TotalFiles:  len(movieIDs),
 		Completed:   len(movieIDs),
 		Failed:      0,
@@ -200,7 +222,7 @@ func seedRevertableJob(t *testing.T, deps *ServerDependencies, fs afero.Fs, movi
 		StartedAt:   oneHourAgo,
 		OrganizedAt: &now,
 	}
-	require.NoError(t, deps.JobRepo.Create(job))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), job))
 
 	// Create operations + seed files in MemMapFs
 	for i, movieID := range movieIDs {
@@ -223,7 +245,7 @@ func seedRevertableJob(t *testing.T, deps *ServerDependencies, fs afero.Fs, movi
 			OperationType: models.OperationTypeMove,
 			RevertStatus:  models.RevertStatusApplied,
 		}
-		require.NoError(t, deps.BatchFileOpRepo.Create(op))
+		require.NoError(t, deps.Repos.BatchFileOpRepo.Create(context.Background(), op))
 
 		// Avoid unused variable warning for i
 		_ = i

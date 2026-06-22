@@ -1,9 +1,10 @@
 package caribbeancom
 
 import (
+	"context"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,10 +50,10 @@ func TestGetURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{Enabled: true, Language: tt.language}
-			scraper := New(settings, nil, config.FlareSolverrConfig{})
+			settings := models.ScraperSettings{Enabled: true, Language: tt.language}
+			scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
-			url, err := scraper.GetURL(tt.movieID)
+			url, err := scraper.GetURL(context.Background(), tt.movieID)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -65,26 +66,26 @@ func TestGetURL(t *testing.T) {
 
 // TestGetURL_InvalidID tests GetURL with invalid movie IDs
 func TestGetURL_InvalidID(t *testing.T) {
-	settings := config.ScraperSettings{Enabled: true, Language: "ja"}
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	settings := models.ScraperSettings{Enabled: true, Language: "ja"}
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
-	url, err := scraper.GetURL("invalid-id")
+	url, err := scraper.GetURL(context.Background(), "invalid-id")
 	assert.Error(t, err)
 	assert.Empty(t, url)
 }
 
 // TestGetURL_WithBaseURL tests GetURL with custom base URL
 func TestGetURL_WithBaseURL(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:   true,
 		Language:  "ja",
 		RateLimit: 0,
 	}
 	// Test with base URL that doesn't have trailing slash
 	settings.BaseURL = "https://www.caribbeancom.com"
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
-	url, err := scraper.GetURL("120614-753")
+	url, err := scraper.GetURL(context.Background(), "120614-753")
 	require.NoError(t, err)
 	// Should handle missing trailing slash
 	assert.Equal(t, "https://www.caribbeancom.com/moviepages/120614-753/index.html", url)

@@ -5,8 +5,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 // listJobs godoc
@@ -15,51 +16,37 @@ import (
 // @Tags jobs
 // @Produce json
 // @Param status query string false "Filter by job status (organized, reverted, completed, etc.)"
-// @Success 200 {object} JobListResponse
-// @Failure 500 {object} ErrorResponse
+// @Success 200 {object} contracts.JobListResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/jobs [get]
-func listJobs(deps *ServerDependencies) gin.HandlerFunc {
+func listJobs(deps JobDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		statusFilter := c.Query("status")
 
-		jobs, err := deps.JobRepo.List()
+		results, err := deps.ListJobsWithStats(c.Request.Context())
 		if err != nil {
-			logging.Errorf("Failed to list jobs: %v", err)
-			c.JSON(500, ErrorResponse{Error: "Failed to retrieve jobs"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve jobs"})
 			return
 		}
 
-		items := make([]JobListItem, 0)
+		items := make([]contracts.JobListItem, 0)
 
-		for _, job := range jobs {
+		for _, result := range results {
+			job := result.Job
+
 			// Apply status filter if provided
-			if statusFilter != "" && job.Status != statusFilter {
+			if statusFilter != "" && job.Status != models.JobStatus(statusFilter) {
 				continue
 			}
 
-			// Get operation count for this job
-			opCount, err := deps.BatchFileOpRepo.CountByBatchJobID(job.ID)
-			if err != nil {
-				logging.Errorf("Failed to count operations for job %s: %v", job.ID, err)
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve operation counts"})
-				return
-			}
-
-			revertedCount, err := deps.BatchFileOpRepo.CountByBatchJobIDAndRevertStatus(job.ID, models.RevertStatusReverted)
-			if err != nil {
-				logging.Errorf("Failed to count reverted operations for job %s: %v", job.ID, err)
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve revert counts"})
-				return
-			}
-
-			item := JobListItem{
+			item := contracts.JobListItem{
 				ID:             job.ID,
 				Status:         job.Status,
 				TotalFiles:     job.TotalFiles,
 				Completed:      job.Completed,
 				Failed:         job.Failed,
-				OperationCount: opCount,
-				RevertedCount:  revertedCount,
+				OperationCount: result.OpCount,
+				RevertedCount:  result.RevertedCount,
 				Progress:       job.Progress,
 				Destination:    job.Destination,
 				StartedAt:      job.StartedAt.Format(time.RFC3339),
@@ -81,6 +68,6 @@ func listJobs(deps *ServerDependencies) gin.HandlerFunc {
 			items = append(items, item)
 		}
 
-		c.JSON(200, JobListResponse{Jobs: items})
+		c.JSON(http.StatusOK, contracts.JobListResponse{Jobs: items})
 	}
 }

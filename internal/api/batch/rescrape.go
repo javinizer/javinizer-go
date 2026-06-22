@@ -5,9 +5,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
 // rescrapeBatchMovie godoc
@@ -18,21 +19,20 @@ import (
 // @Produce json
 // @Param id path string true "Job ID"
 // @Param resultId path string true "Result ID"
-// @Param request body BatchRescrapeRequest true "Rescrape options"
-// @Success 200 {object} BatchRescrapeResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 410 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Param request body contracts.BatchRescrapeRequest true "Rescrape options"
+// @Success 200 {object} contracts.BatchRescrapeResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 410 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/batch/{id}/results/{resultId}/rescrape [post]
-func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
+func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		jobID := c.Param("id")
 		resultID := c.Param("resultId")
 
-		var req BatchRescrapeRequest
+		var req contracts.BatchRescrapeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -41,85 +41,73 @@ func rescrapeBatchMovie(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		logging.Infof("Batch rescrape request for job %s, result %s: scrapers=%v, manual_input=%s, force=%v",
-			jobID, resultID, req.SelectedScrapers, req.ManualSearchInput, req.Force)
-
-		job, ok := deps.JobQueue.GetJobPointer(jobID)
-		if !ok {
-			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Job not found"})
-			return
-		}
-
-		isGone, httpStatus, errMsg := validateJobState(job)
-		if errMsg != "" {
-			writeErrorResponse(c, httpStatus, isGone, errMsg)
-			return
-		}
-
-		lookup, httpStatus, errMsg := findFileForResultID(job, resultID)
-		if errMsg != "" {
-			c.JSON(httpStatus, ErrorResponse{Error: errMsg})
-			return
-		}
-
-		cfg := deps.GetConfig()
-
-		// Check if job was deleted during rescrape (before starting work)
-		job.Lock()
-		if job.IsDeleted() {
-			job.Unlock()
-			writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
-			return
-		}
-		job.Unlock()
-
-		params, _ := resolveScrapeParams(&req, lookup.oldMovieID, deps)
-
-		result, err := executeRescrape(c.Request.Context(), params, job, lookup.foundFilePath, deps, &req, cfg)
+		job, err := prepareBatchRequest(rt.Deps(), rt, c, withSkipRunningCheck())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Rescrape failed: %v", err)})
 			return
 		}
 
-		if result == nil {
-			logging.Errorf("[Rescrape] RunBatchScrapeOnce returned nil result for %s", lookup.foundFilePath)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Rescrape produced no result"})
+		logging.Infof("Batch rescrape request for job %s, result %s: scrapers=%v, manual_input=%s, force=%v",
+			job.GetID(), resultID, req.SelectedScrapers, req.ManualSearchInput, req.Force)
+
+		// Resolve result by resultID to get movieID and filePath
+		result, filePath, found := job.GetFileResultByResultID(resultID)
+		if !found {
+			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: fmt.Sprintf("Result %s not found in job", resultID)})
 			return
 		}
 
-		if result.Status != worker.JobStatusCompleted {
-			errorMsg := "Unknown error"
-			if result.Error != "" {
-				errorMsg = result.Error
+		movieID := result.FileMatchInfo.MovieID
+
+		// Additional status check for rescrape-specific allowed states.
+		snap := job.GetStatus()
+		if snap.Status == models.JobStatusRunning || (snap.Status != models.JobStatusPending && snap.Status != models.JobStatusCompleted) {
+			if snap.IsDeleted {
+				writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
+			} else {
+				writeErrorResponse(c, http.StatusConflict, false, fmt.Sprintf("Cannot rescrape %s job", snap.Status))
 			}
-			c.JSON(http.StatusUnprocessableEntity, ErrorResponse{Error: fmt.Sprintf("Rescrape failed: %s", errorMsg)})
 			return
 		}
 
-		// Get movie from result data for response and poster cleanup
-		var movie *models.Movie
-		if result.Data != nil {
-			if m, ok := result.Data.(*models.Movie); ok {
-				movie = m
-			}
-		}
+		// Delegate to orchestrator for resolve→construct→execute pipeline
+		orch := NewRescrapeOrchestrator(RescrapeDeps{
+			JobStore:  rt.Deps().GetJobStore(),
+			WfFactory: &apiWorkflowFactory{rt: rt},
+			Factory:   rt.GetBatchJobFactory(),
+			Persist:   rt.Deps().GetJobStore(),
+			Broadcast: nil, // no progress broadcast for single rescrape
+			ServerCtx: rt.ServerCtx(),
+		})
 
-		updateRes := validateAndUpdateResult(job, result, lookup.foundFilePath, lookup.capturedRevision, movie, lookup.oldMovieID, cfg, jobID)
-		if updateRes.shouldAbort {
-			writeErrorResponse(c, updateRes.httpStatus, updateRes.isGone, updateRes.errorMessage)
+		rescrapeResult, err := orch.Rescrape(c.Request.Context(), job.GetID(), movieID, filePath, &req)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Rescrape failed: %v", err)})
 			return
 		}
 
-		cleanupPosterPaths(updateRes.posterPaths)
-		deps.JobQueue.PersistJob(job)
+		rr := rescrapeResult.RescrapeResult
+		if rr.Status == models.RescrapeStatusGone {
+			writeErrorResponse(c, http.StatusGone, true, "Job was deleted during rescrape")
+			return
+		}
 
-		logging.Infof("[Rescrape] Verified update for %s: movieID=%s, status=%s",
-			lookup.foundFilePath, result.MovieID, result.Status)
+		if rr.Status == models.RescrapeStatusConflict {
+			writeErrorResponse(c, http.StatusConflict, true, "File was concurrently rescraped, discarding stale result")
+			return
+		}
 
-		c.JSON(http.StatusOK, BatchRescrapeResponse{
-			Movie:          movie,
-			FieldSources:   result.FieldSources,
-			ActressSources: result.ActressSources,
+		if rr.Status == models.RescrapeStatusFailed {
+			c.JSON(http.StatusUnprocessableEntity, contracts.ErrorResponse{Error: fmt.Sprintf("Rescrape failed: %s", rr.Error)})
+			return
+		}
+
+		logging.Infof("[Rescrape] Verified update for job %s, result %s (movieID=%s): status=%s",
+			job.GetID(), resultID, movieID, rr.Status)
+
+		c.JSON(http.StatusOK, contracts.BatchRescrapeResponse{
+			Movie:          contracts.MovieViewFromModel(rr.Movie),
+			FieldSources:   rr.FieldSources,
+			ActressSources: rr.ActressSources,
 		})
 	}
 }

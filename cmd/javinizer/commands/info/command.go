@@ -3,8 +3,8 @@ package info
 import (
 	"fmt"
 
+	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/update"
 	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/spf13/cobra"
@@ -49,13 +49,17 @@ func run(cmd *cobra.Command, configFile string) error {
 	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  Priority: %v\n", cfg.Scrapers.Priority); err != nil {
 		return err
 	}
-	cfg.Scrapers.NormalizeScraperConfigs()
 
-	priorities := scraperutil.GetPriorities()
-	for _, name := range priorities {
+	deps, err := commandutil.NewDependencies(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize dependencies: %w", err)
+	}
+	defer func() { _ = deps.Close() }()
+
+	for _, name := range cfg.Scrapers.Priority {
 		if scraper, ok := cfg.Scrapers.Overrides[name]; ok && scraper != nil {
 			displayName := name
-			if provider, exists := scraperutil.GetScraperOptions(name); exists {
+			if provider, exists := deps.ScraperRegistry.GetOptions(name); exists {
 				displayName = provider.DisplayTitle
 			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - %s: %v\n", displayName, scraper.Enabled); err != nil {
@@ -70,16 +74,16 @@ func run(cmd *cobra.Command, configFile string) error {
 	if _, err := fmt.Fprintln(cmd.OutOrStdout(), "Output:"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - Folder format: %s\n", cfg.Output.FolderFormat); err != nil {
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - Folder format: %s\n", cfg.Output.Template.FolderFormat); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - File format: %s\n", cfg.Output.FileFormat); err != nil {
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - File format: %s\n", cfg.Output.Template.FileFormat); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - Download cover: %v\n", cfg.Output.DownloadCover); err != nil {
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - Download cover: %v\n", cfg.Output.Download.DownloadCover); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - Download extrafanart: %v\n", cfg.Output.DownloadExtrafanart); err != nil {
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  - Download extrafanart: %v\n", cfg.Output.Download.DownloadExtrafanart); err != nil {
 		return err
 	}
 
@@ -106,7 +110,10 @@ func printUpdateStatus(cmd *cobra.Command, cfg *config.Config) error {
 	}
 
 	// Use update service to get status
-	service := update.NewService(cfg)
+	service := update.NewService(update.UpdateConfig{
+		Enabled:                   cfg.System.VersionCheckEnabled,
+		VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+	})
 	ctx := cmd.Context()
 	state, err := service.GetStatus(ctx)
 	if err != nil {
@@ -114,12 +121,12 @@ func printUpdateStatus(cmd *cobra.Command, cfg *config.Config) error {
 		return werr
 	}
 
-	if state.Source == "disabled" {
+	if state.Source == update.UpdateSourceDisabled {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), "  - Updates are disabled in config")
 		return err
 	}
 
-	if state.Source == "none" || state.CheckedAt == "" {
+	if state.Source == update.UpdateSourceNone || state.CheckedAt == "" {
 		if _, err := fmt.Fprintln(cmd.OutOrStdout(), "  - Last checked: never"); err != nil {
 			return err
 		}

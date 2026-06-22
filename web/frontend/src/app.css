@@ -1,120 +1,169 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 @custom-variant dark (&:where(.dark, .dark *));
-@source inline("bg-red-100 bg-red-500 text-red-700 dark:bg-red-500/20 dark:text-red-300 dark:bg-red-900/30 dark:bg-red-900/20 dark:bg-red-900/15 dark:hover:bg-red-900/30 dark:text-red-400 dark:text-red-200 ring-red-500/40 dark:ring-red-400/30 dark:text-red-300/70 bg-amber-100 bg-amber-500 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 ring-amber-500/40 dark:ring-amber-400/30 dark:bg-amber-400 dark:text-amber-400 text-amber-500 bg-blue-100 bg-blue-500 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300 dark:bg-blue-900/30 dark:bg-blue-900/20 dark:bg-blue-500 dark:text-blue-400 dark:text-blue-100 dark:text-blue-300/70 bg-green-100 bg-green-500 text-green-700 dark:bg-green-500/20 dark:text-green-300 dark:bg-green-900/30 dark:bg-green-900/20 dark:bg-green-900/15 dark:hover:bg-green-900/30 dark:border-green-700 dark:text-green-400 ring-green-500/40 dark:ring-green-400/30 bg-violet-100 bg-violet-500 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-500/30 border-l-violet-500 bg-violet-500/[0.02] dark:bg-violet-500/[0.04] dark:border-orange-700 dark:text-orange-400 dark:bg-orange-900/40 text-orange-600 text-white");
+@source inline("bg-red-100 bg-red-500 text-red-700 dark:bg-red-500/20 dark:text-red-300 dark:bg-red-900/30 dark:bg-red-900/20 dark:bg-red-900/15 dark:hover:bg-red-900/30 dark:text-red-400 dark:text-red-200 dark:text-red-300/70 bg-amber-50 bg-amber-100 bg-amber-200 bg-amber-500 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 ring-amber-500/40 dark:ring-amber-400/30 bg-amber-500 dark:bg-amber-400 text-amber-500 dark:text-amber-400 text-amber-600 dark:text-amber-400 text-amber-800 dark:text-amber-300 dark:text-amber-200 dark:bg-amber-900/20 dark:bg-amber-900/30 border-amber-800 dark:border-amber-800 bg-blue-100 bg-blue-500 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300 dark:bg-blue-900/30 dark:bg-blue-900/20 dark:bg-blue-500 dark:text-blue-400 dark:text-blue-100 dark:text-blue-300/70 bg-green-100 bg-green-500 text-green-700 dark:bg-green-500/20 dark:text-green-300 dark:bg-green-900/30 dark:bg-green-900/20 dark:bg-green-900/15 dark:hover:bg-green-900/30 dark:border-green-700 dark:text-green-400 dark:text-green-200 bg-violet-100 bg-violet-500 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-500/30 border-l-violet-500 bg-violet-500/[0.02] dark:bg-violet-500/[0.04] dark:border-orange-700 dark:text-orange-400 dark:bg-orange-900/40 text-orange-600 text-white");
 
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 221.2 83.2% 53.3%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 221.2 83.2% 53.3%;
-  --radius: 0.5rem;
+	--background: 0 0% 100%;
+	--foreground: 222.2 84% 4.9%;
+	--card: 0 0% 100%;
+	--card-foreground: 222.2 84% 4.9%;
+	--popover: 0 0% 100%;
+	--popover-foreground: 222.2 84% 4.9%;
+	--primary: 221.2 83.2% 53.3%;
+	--primary-foreground: 210 40% 98%;
+	--secondary: 210 40% 96.1%;
+	--secondary-foreground: 222.2 47.4% 11.2%;
+	--muted: 210 40% 96.1%;
+	--muted-foreground: 215.4 16.3% 46.9%;
+	--accent: 210 40% 96.1%;
+	--accent-foreground: 222.2 47.4% 11.2%;
+	--destructive: 0 84.2% 60.2%;
+	--destructive-foreground: 210 40% 98%;
+	--border: 214.3 31.8% 91.4%;
+	--input: 214.3 31.8% 91.4%;
+	--ring: 221.2 83.2% 53.3%;
+	--radius: 0.5rem;
 }
 
 .dark {
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
-  --card-foreground: 210 40% 98%;
-  --popover: 222.2 84% 4.9%;
-  --popover-foreground: 210 40% 98%;
-  --primary: 217.2 91.2% 59.8%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 217.2 32.6% 17.5%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;
-  --accent: 217.2 32.6% 17.5%;
-  --accent-foreground: 210 40% 98%;
-  --destructive: 0 72.2% 50.6%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
-  --ring: 224.3 76.3% 48%;
+	--background: 222.2 84% 4.9%;
+	--foreground: 210 40% 98%;
+	--card: 222.2 84% 4.9%;
+	--card-foreground: 210 40% 98%;
+	--popover: 222.2 84% 4.9%;
+	--popover-foreground: 210 40% 98%;
+	--primary: 217.2 91.2% 59.8%;
+	--primary-foreground: 210 40% 98%;
+	--secondary: 217.2 32.6% 17.5%;
+	--secondary-foreground: 210 40% 98%;
+	--muted: 217.2 32.6% 17.5%;
+	--muted-foreground: 215 20.2% 65.1%;
+	--accent: 217.2 32.6% 17.5%;
+	--accent-foreground: 210 40% 98%;
+	--destructive: 0 72.2% 50.6%;
+	--destructive-foreground: 210 40% 98%;
+	--border: 217.2 32.6% 17.5%;
+	--input: 217.2 32.6% 17.5%;
+	--ring: 224.3 76.3% 48%;
 }
 
 * {
-  border-color: hsl(var(--border));
+	border-color: hsl(var(--border));
 }
 
 body {
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
+	background-color: hsl(var(--background));
+	color: hsl(var(--foreground));
 }
 
-.bg-background { background-color: hsl(var(--background)); }
-.bg-card { background-color: hsl(var(--card)); }
-.bg-primary { background-color: hsl(var(--primary)); }
-.bg-secondary { background-color: hsl(var(--secondary)); }
-.bg-muted { background-color: hsl(var(--muted)); }
-.bg-accent { background-color: hsl(var(--accent)); }
-.bg-destructive { background-color: hsl(var(--destructive)); }
+.bg-background {
+	background-color: hsl(var(--background));
+}
+.bg-card {
+	background-color: hsl(var(--card));
+}
+.bg-primary {
+	background-color: hsl(var(--primary));
+}
+.bg-secondary {
+	background-color: hsl(var(--secondary));
+}
+.bg-muted {
+	background-color: hsl(var(--muted));
+}
+.bg-accent {
+	background-color: hsl(var(--accent));
+}
+.bg-destructive {
+	background-color: hsl(var(--destructive));
+}
 
-.text-foreground { color: hsl(var(--foreground)); }
-.text-card-foreground { color: hsl(var(--card-foreground)); }
-.text-primary { color: hsl(var(--primary)); }
-.text-primary-foreground { color: hsl(var(--primary-foreground)); }
-.text-secondary-foreground { color: hsl(var(--secondary-foreground)); }
-.text-muted-foreground { color: hsl(var(--muted-foreground)); }
-.text-accent-foreground { color: hsl(var(--accent-foreground)); }
-.text-destructive { color: hsl(var(--destructive)); }
-.text-destructive-foreground { color: hsl(var(--destructive-foreground)); }
+.text-foreground {
+	color: hsl(var(--foreground));
+}
+.text-card-foreground {
+	color: hsl(var(--card-foreground));
+}
+.text-primary {
+	color: hsl(var(--primary));
+}
+.text-primary-foreground {
+	color: hsl(var(--primary-foreground));
+}
+.text-secondary-foreground {
+	color: hsl(var(--secondary-foreground));
+}
+.text-muted-foreground {
+	color: hsl(var(--muted-foreground));
+}
+.text-accent-foreground {
+	color: hsl(var(--accent-foreground));
+}
+.text-destructive {
+	color: hsl(var(--destructive));
+}
+.text-destructive-foreground {
+	color: hsl(var(--destructive-foreground));
+}
 
-.border { border-width: 1px; }
-.border-border { border-color: hsl(var(--border)); }
-.border-input { border-color: hsl(var(--input)); }
-.border-primary { border-color: hsl(var(--primary)); }
-.border-destructive { border-color: hsl(var(--destructive)); }
+.border {
+	border-width: 1px;
+}
+.border-border {
+	border-color: hsl(var(--border));
+}
+.border-input {
+	border-color: hsl(var(--input));
+}
+.border-primary {
+	border-color: hsl(var(--primary));
+}
+.border-destructive {
+	border-color: hsl(var(--destructive));
+}
 
-.ring-offset-background { --tw-ring-offset-color: hsl(var(--background)); }
-.ring-ring { --tw-ring-color: hsl(var(--ring)); }
+.ring-offset-background {
+	--tw-ring-offset-color: hsl(var(--background));
+}
+.ring-ring {
+	--tw-ring-color: hsl(var(--ring));
+}
 
-.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+.dark
+	input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not(
+		[type='file']
+	),
 .dark select,
 .dark textarea {
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
-  border-color: hsl(var(--input));
+	background-color: hsl(var(--background));
+	color: hsl(var(--foreground));
+	border-color: hsl(var(--input));
 }
 
 .dark input::placeholder,
 .dark textarea::placeholder {
-  color: hsl(var(--muted-foreground));
+	color: hsl(var(--muted-foreground));
 }
 
 .dark ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+	width: 8px;
+	height: 8px;
 }
 
 .dark ::-webkit-scrollbar-track {
-  background: hsl(var(--card));
+	background: hsl(var(--card));
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted));
-  border-radius: 4px;
+	background: hsl(var(--muted));
+	border-radius: 4px;
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground));
+	background: hsl(var(--muted-foreground));
 }
 
 .dark * {
-  scrollbar-color: hsl(var(--muted)) hsl(var(--card));
-  scrollbar-width: thin;
+	scrollbar-color: hsl(var(--muted)) hsl(var(--card));
+	scrollbar-width: thin;
 }

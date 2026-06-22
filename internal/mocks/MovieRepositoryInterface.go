@@ -5,6 +5,8 @@
 package mocks
 
 import (
+	"context"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -37,16 +39,16 @@ func (_m *MockMovieRepositoryInterface) EXPECT() *MockMovieRepositoryInterface_E
 }
 
 // Create provides a mock function for the type MockMovieRepositoryInterface
-func (_mock *MockMovieRepositoryInterface) Create(movie *models.Movie) error {
-	ret := _mock.Called(movie)
+func (_mock *MockMovieRepositoryInterface) Create(ctx context.Context, movie *models.Movie) error {
+	ret := _mock.Called(ctx, movie)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.Movie) error); ok {
-		r0 = returnFunc(movie)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Movie) error); ok {
+		r0 = returnFunc(ctx, movie)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -59,19 +61,25 @@ type MockMovieRepositoryInterface_Create_Call struct {
 }
 
 // Create is a helper method to define mock.On call
+//   - ctx context.Context
 //   - movie *models.Movie
-func (_e *MockMovieRepositoryInterface_Expecter) Create(movie interface{}) *MockMovieRepositoryInterface_Create_Call {
-	return &MockMovieRepositoryInterface_Create_Call{Call: _e.mock.On("Create", movie)}
+func (_e *MockMovieRepositoryInterface_Expecter) Create(ctx interface{}, movie interface{}) *MockMovieRepositoryInterface_Create_Call {
+	return &MockMovieRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, movie)}
 }
 
-func (_c *MockMovieRepositoryInterface_Create_Call) Run(run func(movie *models.Movie)) *MockMovieRepositoryInterface_Create_Call {
+func (_c *MockMovieRepositoryInterface_Create_Call) Run(run func(ctx context.Context, movie *models.Movie)) *MockMovieRepositoryInterface_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.Movie
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.Movie)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.Movie
+		if args[1] != nil {
+			arg1 = args[1].(*models.Movie)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -82,22 +90,22 @@ func (_c *MockMovieRepositoryInterface_Create_Call) Return(err error) *MockMovie
 	return _c
 }
 
-func (_c *MockMovieRepositoryInterface_Create_Call) RunAndReturn(run func(movie *models.Movie) error) *MockMovieRepositoryInterface_Create_Call {
+func (_c *MockMovieRepositoryInterface_Create_Call) RunAndReturn(run func(ctx context.Context, movie *models.Movie) error) *MockMovieRepositoryInterface_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Delete provides a mock function for the type MockMovieRepositoryInterface
-func (_mock *MockMovieRepositoryInterface) Delete(id string) error {
-	ret := _mock.Called(id)
+func (_mock *MockMovieRepositoryInterface) Delete(ctx context.Context, id string) error {
+	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string) error); ok {
-		r0 = returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, id)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -110,19 +118,25 @@ type MockMovieRepositoryInterface_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id string
-func (_e *MockMovieRepositoryInterface_Expecter) Delete(id interface{}) *MockMovieRepositoryInterface_Delete_Call {
-	return &MockMovieRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", id)}
+func (_e *MockMovieRepositoryInterface_Expecter) Delete(ctx interface{}, id interface{}) *MockMovieRepositoryInterface_Delete_Call {
+	return &MockMovieRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, id)}
 }
 
-func (_c *MockMovieRepositoryInterface_Delete_Call) Run(run func(id string)) *MockMovieRepositoryInterface_Delete_Call {
+func (_c *MockMovieRepositoryInterface_Delete_Call) Run(run func(ctx context.Context, id string)) *MockMovieRepositoryInterface_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -133,14 +147,14 @@ func (_c *MockMovieRepositoryInterface_Delete_Call) Return(err error) *MockMovie
 	return _c
 }
 
-func (_c *MockMovieRepositoryInterface_Delete_Call) RunAndReturn(run func(id string) error) *MockMovieRepositoryInterface_Delete_Call {
+func (_c *MockMovieRepositoryInterface_Delete_Call) RunAndReturn(run func(ctx context.Context, id string) error) *MockMovieRepositoryInterface_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByContentID provides a mock function for the type MockMovieRepositoryInterface
-func (_mock *MockMovieRepositoryInterface) FindByContentID(contentID string) (*models.Movie, error) {
-	ret := _mock.Called(contentID)
+func (_mock *MockMovieRepositoryInterface) FindByContentID(ctx context.Context, contentID string) (*models.Movie, error) {
+	ret := _mock.Called(ctx, contentID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByContentID")
@@ -148,18 +162,18 @@ func (_mock *MockMovieRepositoryInterface) FindByContentID(contentID string) (*m
 
 	var r0 *models.Movie
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*models.Movie, error)); ok {
-		return returnFunc(contentID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*models.Movie, error)); ok {
+		return returnFunc(ctx, contentID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *models.Movie); ok {
-		r0 = returnFunc(contentID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *models.Movie); ok {
+		r0 = returnFunc(ctx, contentID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.Movie)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(contentID)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, contentID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -172,19 +186,25 @@ type MockMovieRepositoryInterface_FindByContentID_Call struct {
 }
 
 // FindByContentID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - contentID string
-func (_e *MockMovieRepositoryInterface_Expecter) FindByContentID(contentID interface{}) *MockMovieRepositoryInterface_FindByContentID_Call {
-	return &MockMovieRepositoryInterface_FindByContentID_Call{Call: _e.mock.On("FindByContentID", contentID)}
+func (_e *MockMovieRepositoryInterface_Expecter) FindByContentID(ctx interface{}, contentID interface{}) *MockMovieRepositoryInterface_FindByContentID_Call {
+	return &MockMovieRepositoryInterface_FindByContentID_Call{Call: _e.mock.On("FindByContentID", ctx, contentID)}
 }
 
-func (_c *MockMovieRepositoryInterface_FindByContentID_Call) Run(run func(contentID string)) *MockMovieRepositoryInterface_FindByContentID_Call {
+func (_c *MockMovieRepositoryInterface_FindByContentID_Call) Run(run func(ctx context.Context, contentID string)) *MockMovieRepositoryInterface_FindByContentID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -195,14 +215,14 @@ func (_c *MockMovieRepositoryInterface_FindByContentID_Call) Return(movie *model
 	return _c
 }
 
-func (_c *MockMovieRepositoryInterface_FindByContentID_Call) RunAndReturn(run func(contentID string) (*models.Movie, error)) *MockMovieRepositoryInterface_FindByContentID_Call {
+func (_c *MockMovieRepositoryInterface_FindByContentID_Call) RunAndReturn(run func(ctx context.Context, contentID string) (*models.Movie, error)) *MockMovieRepositoryInterface_FindByContentID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByID provides a mock function for the type MockMovieRepositoryInterface
-func (_mock *MockMovieRepositoryInterface) FindByID(id string) (*models.Movie, error) {
-	ret := _mock.Called(id)
+func (_mock *MockMovieRepositoryInterface) FindByID(ctx context.Context, id string) (*models.Movie, error) {
+	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByID")
@@ -210,18 +230,18 @@ func (_mock *MockMovieRepositoryInterface) FindByID(id string) (*models.Movie, e
 
 	var r0 *models.Movie
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*models.Movie, error)); ok {
-		return returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*models.Movie, error)); ok {
+		return returnFunc(ctx, id)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *models.Movie); ok {
-		r0 = returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *models.Movie); ok {
+		r0 = returnFunc(ctx, id)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.Movie)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(id)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, id)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -234,19 +254,25 @@ type MockMovieRepositoryInterface_FindByID_Call struct {
 }
 
 // FindByID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id string
-func (_e *MockMovieRepositoryInterface_Expecter) FindByID(id interface{}) *MockMovieRepositoryInterface_FindByID_Call {
-	return &MockMovieRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", id)}
+func (_e *MockMovieRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockMovieRepositoryInterface_FindByID_Call {
+	return &MockMovieRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
-func (_c *MockMovieRepositoryInterface_FindByID_Call) Run(run func(id string)) *MockMovieRepositoryInterface_FindByID_Call {
+func (_c *MockMovieRepositoryInterface_FindByID_Call) Run(run func(ctx context.Context, id string)) *MockMovieRepositoryInterface_FindByID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -257,14 +283,14 @@ func (_c *MockMovieRepositoryInterface_FindByID_Call) Return(movie *models.Movie
 	return _c
 }
 
-func (_c *MockMovieRepositoryInterface_FindByID_Call) RunAndReturn(run func(id string) (*models.Movie, error)) *MockMovieRepositoryInterface_FindByID_Call {
+func (_c *MockMovieRepositoryInterface_FindByID_Call) RunAndReturn(run func(ctx context.Context, id string) (*models.Movie, error)) *MockMovieRepositoryInterface_FindByID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // List provides a mock function for the type MockMovieRepositoryInterface
-func (_mock *MockMovieRepositoryInterface) List(limit int, offset int) ([]models.Movie, error) {
-	ret := _mock.Called(limit, offset)
+func (_mock *MockMovieRepositoryInterface) List(ctx context.Context, limit int, offset int) ([]models.Movie, error) {
+	ret := _mock.Called(ctx, limit, offset)
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -272,18 +298,18 @@ func (_mock *MockMovieRepositoryInterface) List(limit int, offset int) ([]models
 
 	var r0 []models.Movie
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(int, int) ([]models.Movie, error)); ok {
-		return returnFunc(limit, offset)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) ([]models.Movie, error)); ok {
+		return returnFunc(ctx, limit, offset)
 	}
-	if returnFunc, ok := ret.Get(0).(func(int, int) []models.Movie); ok {
-		r0 = returnFunc(limit, offset)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) []models.Movie); ok {
+		r0 = returnFunc(ctx, limit, offset)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.Movie)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(int, int) error); ok {
-		r1 = returnFunc(limit, offset)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int, int) error); ok {
+		r1 = returnFunc(ctx, limit, offset)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -296,25 +322,31 @@ type MockMovieRepositoryInterface_List_Call struct {
 }
 
 // List is a helper method to define mock.On call
+//   - ctx context.Context
 //   - limit int
 //   - offset int
-func (_e *MockMovieRepositoryInterface_Expecter) List(limit interface{}, offset interface{}) *MockMovieRepositoryInterface_List_Call {
-	return &MockMovieRepositoryInterface_List_Call{Call: _e.mock.On("List", limit, offset)}
+func (_e *MockMovieRepositoryInterface_Expecter) List(ctx interface{}, limit interface{}, offset interface{}) *MockMovieRepositoryInterface_List_Call {
+	return &MockMovieRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx, limit, offset)}
 }
 
-func (_c *MockMovieRepositoryInterface_List_Call) Run(run func(limit int, offset int)) *MockMovieRepositoryInterface_List_Call {
+func (_c *MockMovieRepositoryInterface_List_Call) Run(run func(ctx context.Context, limit int, offset int)) *MockMovieRepositoryInterface_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 int
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(int)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 int
 		if args[1] != nil {
 			arg1 = args[1].(int)
 		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -325,22 +357,22 @@ func (_c *MockMovieRepositoryInterface_List_Call) Return(movies []models.Movie, 
 	return _c
 }
 
-func (_c *MockMovieRepositoryInterface_List_Call) RunAndReturn(run func(limit int, offset int) ([]models.Movie, error)) *MockMovieRepositoryInterface_List_Call {
+func (_c *MockMovieRepositoryInterface_List_Call) RunAndReturn(run func(ctx context.Context, limit int, offset int) ([]models.Movie, error)) *MockMovieRepositoryInterface_List_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Update provides a mock function for the type MockMovieRepositoryInterface
-func (_mock *MockMovieRepositoryInterface) Update(movie *models.Movie) error {
-	ret := _mock.Called(movie)
+func (_mock *MockMovieRepositoryInterface) Update(ctx context.Context, movie *models.Movie) error {
+	ret := _mock.Called(ctx, movie)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Update")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.Movie) error); ok {
-		r0 = returnFunc(movie)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Movie) error); ok {
+		r0 = returnFunc(ctx, movie)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -353,19 +385,25 @@ type MockMovieRepositoryInterface_Update_Call struct {
 }
 
 // Update is a helper method to define mock.On call
+//   - ctx context.Context
 //   - movie *models.Movie
-func (_e *MockMovieRepositoryInterface_Expecter) Update(movie interface{}) *MockMovieRepositoryInterface_Update_Call {
-	return &MockMovieRepositoryInterface_Update_Call{Call: _e.mock.On("Update", movie)}
+func (_e *MockMovieRepositoryInterface_Expecter) Update(ctx interface{}, movie interface{}) *MockMovieRepositoryInterface_Update_Call {
+	return &MockMovieRepositoryInterface_Update_Call{Call: _e.mock.On("Update", ctx, movie)}
 }
 
-func (_c *MockMovieRepositoryInterface_Update_Call) Run(run func(movie *models.Movie)) *MockMovieRepositoryInterface_Update_Call {
+func (_c *MockMovieRepositoryInterface_Update_Call) Run(run func(ctx context.Context, movie *models.Movie)) *MockMovieRepositoryInterface_Update_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.Movie
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.Movie)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.Movie
+		if args[1] != nil {
+			arg1 = args[1].(*models.Movie)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -376,14 +414,14 @@ func (_c *MockMovieRepositoryInterface_Update_Call) Return(err error) *MockMovie
 	return _c
 }
 
-func (_c *MockMovieRepositoryInterface_Update_Call) RunAndReturn(run func(movie *models.Movie) error) *MockMovieRepositoryInterface_Update_Call {
+func (_c *MockMovieRepositoryInterface_Update_Call) RunAndReturn(run func(ctx context.Context, movie *models.Movie) error) *MockMovieRepositoryInterface_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Upsert provides a mock function for the type MockMovieRepositoryInterface
-func (_mock *MockMovieRepositoryInterface) Upsert(movie *models.Movie) (*models.Movie, error) {
-	ret := _mock.Called(movie)
+func (_mock *MockMovieRepositoryInterface) Upsert(ctx context.Context, movie *models.Movie) (*models.Movie, error) {
+	ret := _mock.Called(ctx, movie)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
@@ -391,18 +429,18 @@ func (_mock *MockMovieRepositoryInterface) Upsert(movie *models.Movie) (*models.
 
 	var r0 *models.Movie
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(*models.Movie) (*models.Movie, error)); ok {
-		return returnFunc(movie)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Movie) (*models.Movie, error)); ok {
+		return returnFunc(ctx, movie)
 	}
-	if returnFunc, ok := ret.Get(0).(func(*models.Movie) *models.Movie); ok {
-		r0 = returnFunc(movie)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Movie) *models.Movie); ok {
+		r0 = returnFunc(ctx, movie)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.Movie)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(*models.Movie) error); ok {
-		r1 = returnFunc(movie)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, *models.Movie) error); ok {
+		r1 = returnFunc(ctx, movie)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -415,19 +453,25 @@ type MockMovieRepositoryInterface_Upsert_Call struct {
 }
 
 // Upsert is a helper method to define mock.On call
+//   - ctx context.Context
 //   - movie *models.Movie
-func (_e *MockMovieRepositoryInterface_Expecter) Upsert(movie interface{}) *MockMovieRepositoryInterface_Upsert_Call {
-	return &MockMovieRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", movie)}
+func (_e *MockMovieRepositoryInterface_Expecter) Upsert(ctx interface{}, movie interface{}) *MockMovieRepositoryInterface_Upsert_Call {
+	return &MockMovieRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, movie)}
 }
 
-func (_c *MockMovieRepositoryInterface_Upsert_Call) Run(run func(movie *models.Movie)) *MockMovieRepositoryInterface_Upsert_Call {
+func (_c *MockMovieRepositoryInterface_Upsert_Call) Run(run func(ctx context.Context, movie *models.Movie)) *MockMovieRepositoryInterface_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.Movie
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.Movie)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.Movie
+		if args[1] != nil {
+			arg1 = args[1].(*models.Movie)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -438,7 +482,87 @@ func (_c *MockMovieRepositoryInterface_Upsert_Call) Return(movie1 *models.Movie,
 	return _c
 }
 
-func (_c *MockMovieRepositoryInterface_Upsert_Call) RunAndReturn(run func(movie *models.Movie) (*models.Movie, error)) *MockMovieRepositoryInterface_Upsert_Call {
+func (_c *MockMovieRepositoryInterface_Upsert_Call) RunAndReturn(run func(ctx context.Context, movie *models.Movie) (*models.Movie, error)) *MockMovieRepositoryInterface_Upsert_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpsertWithTranslations provides a mock function for the type MockMovieRepositoryInterface
+func (_mock *MockMovieRepositoryInterface) UpsertWithTranslations(ctx context.Context, movie *models.Movie, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData) (*models.Movie, error) {
+	ret := _mock.Called(ctx, movie, genreTranslations, actressTranslations)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpsertWithTranslations")
+	}
+
+	var r0 *models.Movie
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Movie, []models.GenreTranslationData, []models.ActressTranslationData) (*models.Movie, error)); ok {
+		return returnFunc(ctx, movie, genreTranslations, actressTranslations)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Movie, []models.GenreTranslationData, []models.ActressTranslationData) *models.Movie); ok {
+		r0 = returnFunc(ctx, movie, genreTranslations, actressTranslations)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*models.Movie)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, *models.Movie, []models.GenreTranslationData, []models.ActressTranslationData) error); ok {
+		r1 = returnFunc(ctx, movie, genreTranslations, actressTranslations)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockMovieRepositoryInterface_UpsertWithTranslations_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpsertWithTranslations'
+type MockMovieRepositoryInterface_UpsertWithTranslations_Call struct {
+	*mock.Call
+}
+
+// UpsertWithTranslations is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movie *models.Movie
+//   - genreTranslations []models.GenreTranslationData
+//   - actressTranslations []models.ActressTranslationData
+func (_e *MockMovieRepositoryInterface_Expecter) UpsertWithTranslations(ctx interface{}, movie interface{}, genreTranslations interface{}, actressTranslations interface{}) *MockMovieRepositoryInterface_UpsertWithTranslations_Call {
+	return &MockMovieRepositoryInterface_UpsertWithTranslations_Call{Call: _e.mock.On("UpsertWithTranslations", ctx, movie, genreTranslations, actressTranslations)}
+}
+
+func (_c *MockMovieRepositoryInterface_UpsertWithTranslations_Call) Run(run func(ctx context.Context, movie *models.Movie, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData)) *MockMovieRepositoryInterface_UpsertWithTranslations_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.Movie
+		if args[1] != nil {
+			arg1 = args[1].(*models.Movie)
+		}
+		var arg2 []models.GenreTranslationData
+		if args[2] != nil {
+			arg2 = args[2].([]models.GenreTranslationData)
+		}
+		var arg3 []models.ActressTranslationData
+		if args[3] != nil {
+			arg3 = args[3].([]models.ActressTranslationData)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockMovieRepositoryInterface_UpsertWithTranslations_Call) Return(movie1 *models.Movie, err error) *MockMovieRepositoryInterface_UpsertWithTranslations_Call {
+	_c.Call.Return(movie1, err)
+	return _c
+}
+
+func (_c *MockMovieRepositoryInterface_UpsertWithTranslations_Call) RunAndReturn(run func(ctx context.Context, movie *models.Movie, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData) (*models.Movie, error)) *MockMovieRepositoryInterface_UpsertWithTranslations_Call {
 	_c.Call.Return(run)
 	return _c
 }

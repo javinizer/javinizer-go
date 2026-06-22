@@ -72,7 +72,7 @@ describe('computeJobProgress', () => {
 	describe('running jobs', () => {
 		it('counts finished files at 100% each', () => {
 			const messages = {
-				'a': makeMessage({ file_path: 'a', status: 'running', progress: 50 }),
+				a: makeMessage({ file_path: 'a', status: 'running', progress: 50 }),
 			};
 			const result = computeJobProgress(messages, 66, 0, true, 31);
 			expect(result).toBe(48);
@@ -80,11 +80,11 @@ describe('computeJobProgress', () => {
 
 		it('includes active file progress in the calculation', () => {
 			const messages = {
-				'a': makeMessage({ file_path: 'a', status: 'running', progress: 50 }),
-				'b': makeMessage({ file_path: 'b', status: 'running', progress: 50 }),
-				'c': makeMessage({ file_path: 'c', status: 'running', progress: 50 }),
-				'd': makeMessage({ file_path: 'd', status: 'running', progress: 50 }),
-				'e': makeMessage({ file_path: 'e', status: 'running', progress: 50 }),
+				a: makeMessage({ file_path: 'a', status: 'running', progress: 50 }),
+				b: makeMessage({ file_path: 'b', status: 'running', progress: 50 }),
+				c: makeMessage({ file_path: 'c', status: 'running', progress: 50 }),
+				d: makeMessage({ file_path: 'd', status: 'running', progress: 50 }),
+				e: makeMessage({ file_path: 'e', status: 'running', progress: 50 }),
 			};
 			const result = computeJobProgress(messages, 66, 0, true, 31);
 			expect(result).toBe(51);
@@ -92,11 +92,11 @@ describe('computeJobProgress', () => {
 
 		it('caps at 100%', () => {
 			const messages = {
-				'a': makeMessage({ file_path: 'a', status: 'running', progress: 100 }),
-				'b': makeMessage({ file_path: 'b', status: 'running', progress: 100 }),
-				'c': makeMessage({ file_path: 'c', status: 'running', progress: 100 }),
-				'd': makeMessage({ file_path: 'd', status: 'running', progress: 100 }),
-				'e': makeMessage({ file_path: 'e', status: 'running', progress: 100 }),
+				a: makeMessage({ file_path: 'a', status: 'running', progress: 100 }),
+				b: makeMessage({ file_path: 'b', status: 'running', progress: 100 }),
+				c: makeMessage({ file_path: 'c', status: 'running', progress: 100 }),
+				d: makeMessage({ file_path: 'd', status: 'running', progress: 100 }),
+				e: makeMessage({ file_path: 'e', status: 'running', progress: 100 }),
 			};
 			const result = computeJobProgress(messages, 10, 0, true, 8);
 			expect(result).toBe(100);
@@ -114,8 +114,8 @@ describe('computeJobProgress', () => {
 
 		it('clamps progress values to 0-100', () => {
 			const messages = {
-				'a': makeMessage({ file_path: 'a', status: 'running', progress: 150 }),
-				'b': makeMessage({ file_path: 'b', status: 'running', progress: -10 }),
+				a: makeMessage({ file_path: 'a', status: 'running', progress: 150 }),
+				b: makeMessage({ file_path: 'b', status: 'running', progress: -10 }),
 			};
 			const result = computeJobProgress(messages, 66, 0, true, 30);
 			expect(result).toBe(47);
@@ -129,11 +129,11 @@ describe('computeJobProgress', () => {
 	describe('regression: matches completed items count', () => {
 		it('31 finished out of 66 files with 5 active at 100% should be ~55%', () => {
 			const messages = {
-				'a': makeMessage({ file_path: 'a', status: 'running', progress: 100 }),
-				'b': makeMessage({ file_path: 'b', status: 'running', progress: 100 }),
-				'c': makeMessage({ file_path: 'c', status: 'running', progress: 100 }),
-				'd': makeMessage({ file_path: 'd', status: 'running', progress: 100 }),
-				'e': makeMessage({ file_path: 'e', status: 'running', progress: 100 }),
+				a: makeMessage({ file_path: 'a', status: 'running', progress: 100 }),
+				b: makeMessage({ file_path: 'b', status: 'running', progress: 100 }),
+				c: makeMessage({ file_path: 'c', status: 'running', progress: 100 }),
+				d: makeMessage({ file_path: 'd', status: 'running', progress: 100 }),
+				e: makeMessage({ file_path: 'e', status: 'running', progress: 100 }),
 			};
 			const result = computeJobProgress(messages, 66, 0, true, 31);
 			expect(result).toBe(55);
@@ -141,11 +141,11 @@ describe('computeJobProgress', () => {
 
 		it('31 finished out of 66 files with 5 active at 50% should be ~51%', () => {
 			const messages = {
-				'a': makeMessage({ file_path: 'a', status: 'running', progress: 50 }),
-				'b': makeMessage({ file_path: 'b', status: 'running', progress: 50 }),
-				'c': makeMessage({ file_path: 'c', status: 'running', progress: 50 }),
-				'd': makeMessage({ file_path: 'd', status: 'running', progress: 50 }),
-				'e': makeMessage({ file_path: 'e', status: 'running', progress: 50 }),
+				a: makeMessage({ file_path: 'a', status: 'running', progress: 50 }),
+				b: makeMessage({ file_path: 'b', status: 'running', progress: 50 }),
+				c: makeMessage({ file_path: 'c', status: 'running', progress: 50 }),
+				d: makeMessage({ file_path: 'd', status: 'running', progress: 50 }),
+				e: makeMessage({ file_path: 'e', status: 'running', progress: 50 }),
 			};
 			const result = computeJobProgress(messages, 66, 0, true, 31);
 			expect(result).toBe(51);

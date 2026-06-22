@@ -1,24 +1,23 @@
-package javlibrary_test
+package javlibrary
 
 import (
 	"context"
 	"os"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scraper/javlibrary"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCanHandleURL(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  false,
 		Language: "en",
 		BaseURL:  "http://www.javlibrary.com",
 	}
-	s := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -41,12 +40,12 @@ func TestCanHandleURL(t *testing.T) {
 }
 
 func TestExtractIDFromURL(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  false,
 		Language: "en",
 		BaseURL:  "http://www.javlibrary.com",
 	}
-	s := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -74,15 +73,14 @@ func TestExtractIDFromURL(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  false,
 		Language: "en",
 		BaseURL:  "http://www.javlibrary.com",
 	}
-	s := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 	var _ models.Scraper = s
-	var _ models.URLHandler = s
-	var _ models.DirectURLScraper = s
+	var _ models.Scraper = s
 }
 
 func requireJavLibraryIntegration(t *testing.T) {
@@ -100,59 +98,59 @@ func requireJavLibraryIntegration(t *testing.T) {
 func TestNewScraper(t *testing.T) {
 	tests := []struct {
 		name        string
-		settings    config.ScraperSettings
-		proxyCfg    *config.ProxyConfig
+		settings    models.ScraperSettings
+		proxyCfg    *models.ProxyConfig
 		wantEnabled bool
 	}{
 		{
 			name: "basic scraper",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled:   false,
 				Language:  "en",
 				RateLimit: 1000,
 				BaseURL:   "http://www.javlibrary.com",
 			},
-			proxyCfg:    &config.ProxyConfig{},
+			proxyCfg:    &models.ProxyConfig{},
 			wantEnabled: false,
 		},
 		{
 			name: "scraper with FlareSolverr enabled",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled:         false,
 				Language:        "en",
 				RateLimit:       1000,
 				BaseURL:         "http://www.javlibrary.com",
 				UseFlareSolverr: true,
 			},
-			proxyCfg:    &config.ProxyConfig{},
+			proxyCfg:    &models.ProxyConfig{},
 			wantEnabled: false,
 		},
 		{
 			name: "scraper disabled",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled:   false,
 				Language:  "en",
 				RateLimit: 1000,
 				BaseURL:   "http://www.javlibrary.com",
 			},
-			proxyCfg:    &config.ProxyConfig{},
+			proxyCfg:    &models.ProxyConfig{},
 			wantEnabled: false,
 		},
 		{
 			name: "default language when empty",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled:  false,
 				Language: "",
 				BaseURL:  "http://www.javlibrary.com",
 			},
-			proxyCfg:    &config.ProxyConfig{},
+			proxyCfg:    &models.ProxyConfig{},
 			wantEnabled: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scraper := javlibrary.New(tt.settings, tt.proxyCfg, config.FlareSolverrConfig{})
+			scraper := newScraper(&tt.settings, tt.proxyCfg, models.FlareSolverrConfig{})
 
 			assert.NotNil(t, scraper)
 			assert.Equal(t, "javlibrary", scraper.Name())
@@ -162,14 +160,14 @@ func TestNewScraper(t *testing.T) {
 }
 
 func TestScraper_GetURL(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:   false,
 		Language:  "en",
 		RateLimit: 1000,
 		BaseURL:   "http://www.javlibrary.com",
 	}
 
-	scraper := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name string
@@ -195,7 +193,7 @@ func TestScraper_GetURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			url, err := scraper.GetURL(tt.id)
+			url, err := scraper.GetURL(context.Background(), tt.id)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, url)
 		})
@@ -217,15 +215,15 @@ func TestScraper_GetURL_Languages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled:  false,
 				Language: tt.language,
 				BaseURL:  "http://www.javlibrary.com",
 			}
 
-			scraper := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
-			url, err := scraper.GetURL("IPX-123")
+			url, err := scraper.GetURL(context.Background(), "IPX-123")
 			require.NoError(t, err)
 			assert.Contains(t, url, tt.wantPath)
 			assert.Contains(t, url, "keyword=IPX-123")
@@ -248,14 +246,14 @@ func TestScraper_LanguageNormalization(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled:  false,
 				Language: tt.language,
 				BaseURL:  "http://www.javlibrary.com",
 			}
 
-			scraper := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
-			assert.Equal(t, tt.wantLang, scraper.GetLanguage())
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
+			assert.Equal(t, tt.wantLang, scraper.getLanguage())
 		})
 	}
 }
@@ -271,14 +269,14 @@ func TestScraper_IsEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled:   tt.enabled,
 				Language:  "en",
 				RateLimit: 1000,
 				BaseURL:   "http://www.javlibrary.com",
 			}
 
-			scraper := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 			assert.Equal(t, tt.enabled, scraper.IsEnabled())
 		})
 	}
@@ -286,13 +284,13 @@ func TestScraper_IsEnabled(t *testing.T) {
 
 // TestScraper_SearchDisabled verifies that Search returns an error when disabled
 func TestScraper_SearchDisabled(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  false,
 		Language: "en",
 		BaseURL:  "http://www.javlibrary.com",
 	}
 
-	scraper := javlibrary.New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	_, err := scraper.Search(context.Background(), "IPX-123")
 	assert.Error(t, err)
@@ -304,7 +302,7 @@ func TestScraper_SearchDisabled(t *testing.T) {
 func TestIntegration_Search(t *testing.T) {
 	requireJavLibraryIntegration(t)
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:         true,
 		Language:        "en",
 		RateLimit:       1000,
@@ -312,9 +310,9 @@ func TestIntegration_Search(t *testing.T) {
 		UseFlareSolverr: true,
 	}
 
-	proxyCfg := &config.ProxyConfig{}
+	proxyCfg := &models.ProxyConfig{}
 
-	scraper := javlibrary.New(settings, proxyCfg, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, proxyCfg, models.FlareSolverrConfig{})
 
 	result, err := scraper.Search(context.Background(), "IPX-123")
 	if err != nil {

@@ -3,11 +3,9 @@ package organizer
 import (
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/matcher"
-	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/testutil"
-	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,31 +73,27 @@ func TestOrganizerTemplate_ErrorHandling(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:   tt.template,
 				FileFormat:     "<ID>",
 				RenameFile:     true,
-				OperationMode:  types.OperationModeOrganize,
+				OperationMode:  operationmode.OperationModeOrganize,
 				MoveSubtitles:  false,
 				MaxTitleLength: 0,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			var movie *testutil.MovieBuilder
 			if tt.movieSetup != nil {
 				movie = tt.movieSetup()
 			}
 
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: "IPX-123",
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: "IPX-123",
 			}
 
-			plan, planErr := org.Plan(match, movie.Build(), "/movies", false)
+			plan, planErr := org.plan(match, movie.Build(), "/movies", false)
 
 			if tt.expectError {
 				assert.Error(t, planErr, tt.description)
@@ -119,7 +113,7 @@ func TestOrganizerTemplate_ErrorHandling(t *testing.T) {
 // Covers AC-3.5.3: Template rendering with nil context
 // NOTE: Current implementation panics on nil movie (line 66 of template/context.go).
 // This test documents that behavior. A production fix would add nil check in
-// organizer.Plan() before calling template.NewContextFromMovie().
+// organizer.plan() before calling template.NewContextFromMovie().
 func TestOrganizerTemplate_NilContext(t *testing.T) {
 	t.Skip("Nil movie causes panic in current implementation - known behavior, not a test failure")
 
@@ -128,23 +122,19 @@ func TestOrganizerTemplate_NilContext(t *testing.T) {
 	err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 	require.NoError(t, err)
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:   "<ID> - <TITLE>",
 		FileFormat:     "<ID>",
 		RenameFile:     true,
-		OperationMode:  types.OperationModeOrganize,
+		OperationMode:  operationmode.OperationModeOrganize,
 		MoveSubtitles:  false,
 		MaxTitleLength: 0,
 	}
-	org := NewOrganizer(fs, cfg, nil)
+	org := NewOrganizer(fs, cfg, nil, nil)
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "test.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-123",
+	match := models.FileMatchInfo{
+		Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+		MovieID: "IPX-123",
 	}
 
 	// Test with nil movie - THIS WILL PANIC
@@ -155,7 +145,7 @@ func TestOrganizerTemplate_NilContext(t *testing.T) {
 		}
 	}()
 
-	_, _ = org.Plan(match, nil, "/movies", false)
+	_, _ = org.plan(match, nil, "/movies", false)
 }
 
 // TestOrganizerTemplate_ConditionalErrors tests conditional template edge cases
@@ -207,15 +197,15 @@ func TestOrganizerTemplate_ConditionalErrors(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:   tt.template,
 				FileFormat:     "<ID>",
 				RenameFile:     true,
-				OperationMode:  types.OperationModeOrganize,
+				OperationMode:  operationmode.OperationModeOrganize,
 				MoveSubtitles:  false,
 				MaxTitleLength: 0,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			var movie *testutil.MovieBuilder
 			if tt.movieSetup != nil {
@@ -224,16 +214,12 @@ func TestOrganizerTemplate_ConditionalErrors(t *testing.T) {
 				movie = testutil.NewMovieBuilder().WithID("IPX-123")
 			}
 
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: "IPX-123",
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: "IPX-123",
 			}
 
-			plan, planErr := org.Plan(match, movie.Build(), "/movies", false)
+			plan, planErr := org.plan(match, movie.Build(), "/movies", false)
 
 			if tt.shouldWork {
 				assert.NoError(t, planErr, tt.description)

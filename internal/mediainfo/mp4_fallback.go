@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"os"
 )
 
 type mp4Box struct {
@@ -18,7 +17,7 @@ type mp4BoxReader struct {
 	r io.ReadSeeker
 }
 
-func newMP4BoxReader(f *os.File) *mp4BoxReader {
+func newMP4BoxReader(f FileReader) *mp4BoxReader {
 	return &mp4BoxReader{r: f}
 }
 
@@ -207,13 +206,17 @@ func parseStsdAudio(data []byte) (codec string, channels, sampleRate uint16) {
 	return codec, channels, sampleRate
 }
 
-func analyzeMP4Fallback(f *os.File) (*VideoInfo, error) {
+func analyzeMP4Fallback(f FileReader) (*VideoInfo, error) {
 	info := &VideoInfo{
 		Container: "mp4",
 	}
 
-	stat, _ := f.Stat()
-	fileSize := stat.Size()
+	var fileSize int64
+	if stat, ok := f.(fileReaderStat); ok {
+		if fi, err := stat.Stat(); err == nil {
+			fileSize = fi.Size()
+		}
+	}
 
 	_, _ = f.Seek(0, io.SeekStart)
 	mr := newMP4BoxReader(f)

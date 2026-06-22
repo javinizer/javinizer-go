@@ -152,7 +152,7 @@ func TestEngine_InputValidation(t *testing.T) {
 
 func TestEngine_ValidateLimitsAndStructure(t *testing.T) {
 	t.Run("template length limit exceeded", func(t *testing.T) {
-		engine := NewEngineWithOptions(EngineOptions{
+		engine := newEngineWithOptions(engineOptions{
 			MaxTemplateBytes: 10,
 		})
 		err := engine.Validate(strings.Repeat("A", 11))
@@ -161,7 +161,7 @@ func TestEngine_ValidateLimitsAndStructure(t *testing.T) {
 	})
 
 	t.Run("conditional depth limit exceeded", func(t *testing.T) {
-		engine := NewEngineWithOptions(EngineOptions{
+		engine := newEngineWithOptions(engineOptions{
 			MaxConditionalDepth: 2,
 		})
 		template := strings.Repeat("<IF:TITLE>", 3) + "x" + strings.Repeat("</IF>", 3)
@@ -196,7 +196,7 @@ func TestEngine_ExecuteWithContextCancellation(t *testing.T) {
 }
 
 func TestEngine_ExecuteOutputSizeLimitExceeded(t *testing.T) {
-	engine := NewEngineWithOptions(EngineOptions{
+	engine := newEngineWithOptions(engineOptions{
 		MaxOutputBytes: 8,
 	})
 

@@ -18,9 +18,9 @@ example.go:5.1,5.8 1 2
 other.go:10.1,10.4 1 0
 `)
 
-	summary, err := Analyze(profile)
+	summary, err := analyze(profile)
 	if err != nil {
-		t.Fatalf("Analyze() error = %v", err)
+		t.Fatalf("analyze() error = %v", err)
 	}
 
 	if summary.Line.Total != 6 {
@@ -53,9 +53,9 @@ other.go:10.1,10.4 1 0
 func TestAnalyzeRejectsInvalidHeader(t *testing.T) {
 	t.Parallel()
 
-	_, err := Analyze(strings.NewReader("not-a-profile\n"))
+	_, err := analyze(strings.NewReader("not-a-profile\n"))
 	if err == nil {
-		t.Fatal("Analyze() error = nil, want error")
+		t.Fatal("analyze() error = nil, want error")
 	}
 }
 
@@ -125,9 +125,9 @@ example.go:1,1.10 1 1
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Analyze(strings.NewReader(tt.profile))
+			_, err := analyze(strings.NewReader(tt.profile))
 			if err == nil {
-				t.Fatal("Analyze() error = nil, want error")
+				t.Fatal("analyze() error = nil, want error")
 			}
 		})
 	}

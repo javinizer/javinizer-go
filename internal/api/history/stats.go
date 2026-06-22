@@ -1,9 +1,13 @@
 package history
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
-	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/logging"
+	historypkg "github.com/javinizer/javinizer-go/internal/history"
+	"github.com/javinizer/javinizer-go/internal/models"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 // getHistoryStats godoc
@@ -12,55 +16,28 @@ import (
 // @Tags history
 // @Produce json
 // @Success 200 {object} HistoryStats
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/history/stats [get]
-func getHistoryStats(historyRepo *database.HistoryRepository) gin.HandlerFunc {
+func getHistoryStats(logger *historypkg.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		total, err := historyRepo.Count()
+		stats, err := logger.GetStats(c.Request.Context())
 		if err != nil {
-			logging.Errorf("Failed to count history: %v", err)
-			c.JSON(500, ErrorResponse{Error: "Failed to get statistics"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to get statistics"})
 			return
 		}
 
-		success, err := historyRepo.CountByStatus("success")
-		if err != nil {
-			logging.Errorf("Failed to count success history: %v", err)
-			c.JSON(500, ErrorResponse{Error: "Failed to get statistics"})
-			return
+		byOperation := map[string]int64{
+			string(models.HistoryOpScrape):   stats.Scrape,
+			string(models.HistoryOpOrganize): stats.Organize,
+			string(models.HistoryOpDownload): stats.Download,
+			string(models.HistoryOpNFO):      stats.NFO,
 		}
 
-		failed, err := historyRepo.CountByStatus("failed")
-		if err != nil {
-			logging.Errorf("Failed to count failed history: %v", err)
-			c.JSON(500, ErrorResponse{Error: "Failed to get statistics"})
-			return
-		}
-
-		reverted, err := historyRepo.CountByStatus("reverted")
-		if err != nil {
-			logging.Errorf("Failed to count reverted history: %v", err)
-			c.JSON(500, ErrorResponse{Error: "Failed to get statistics"})
-			return
-		}
-
-		// Get counts by operation
-		byOperation := make(map[string]int64)
-		operations := []string{"scrape", "organize", "download", "nfo"}
-		for _, op := range operations {
-			count, err := historyRepo.CountByOperation(op)
-			if err != nil {
-				logging.Errorf("Failed to count %s history: %v", op, err)
-				continue
-			}
-			byOperation[op] = count
-		}
-
-		c.JSON(200, HistoryStats{
-			Total:       total,
-			Success:     success,
-			Failed:      failed,
-			Reverted:    reverted,
+		c.JSON(http.StatusOK, HistoryStats{
+			Total:       stats.Total,
+			Success:     stats.Success,
+			Failed:      stats.Failed,
+			Reverted:    stats.Reverted,
 			ByOperation: byOperation,
 		})
 	}

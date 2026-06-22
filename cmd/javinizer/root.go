@@ -25,8 +25,9 @@ import (
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/word"
 	"github.com/javinizer/javinizer-go/internal/config"
 	_ "github.com/javinizer/javinizer-go/internal/config/migrations"
-	"github.com/javinizer/javinizer-go/internal/configutil"
+
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -145,7 +146,7 @@ func initConfig() {
 		} else {
 			_, applied := applyUmask(int(umaskValue))
 			if applied {
-				configutil.StoreUmask(int(umaskValue))
+				config.StoreUmask(int(umaskValue))
 			} else {
 				_, _ = fmt.Fprintf(os.Stderr, "Umask not supported on this platform\n")
 			}
@@ -226,7 +227,7 @@ func initConfig() {
 
 	// Validate proxy configuration
 	if cfg.Scrapers.Proxy.Enabled {
-		resolvedScraperProxy := config.ResolveGlobalProxy(cfg.Scrapers.Proxy)
+		resolvedScraperProxy := models.ResolveGlobalProxy(cfg.Scrapers.Proxy)
 		if resolvedScraperProxy.URL == "" {
 			logging.Warn("Scraper proxy is enabled but resolved profile URL is empty, disabling proxy")
 			cfg.Scrapers.Proxy.Enabled = false
@@ -235,11 +236,11 @@ func initConfig() {
 		}
 	}
 
-	if cfg.Output.DownloadProxy.Enabled {
-		resolvedDownloadProxy := config.ResolveScraperProxy(cfg.Scrapers.Proxy, &cfg.Output.DownloadProxy)
+	if cfg.Output.Download.DownloadProxy.Enabled {
+		resolvedDownloadProxy := models.ResolveScraperProxy(cfg.Scrapers.Proxy, &cfg.Output.Download.DownloadProxy)
 		if resolvedDownloadProxy.URL == "" {
 			logging.Warn("Download proxy is enabled but resolved profile URL is empty, disabling proxy")
-			cfg.Output.DownloadProxy.Enabled = false
+			cfg.Output.Download.DownloadProxy.Enabled = false
 		} else {
 			logging.Infof("Download proxy enabled: %s", sanitizeProxyURL(resolvedDownloadProxy.URL))
 		}

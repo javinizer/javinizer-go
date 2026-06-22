@@ -10,6 +10,6 @@ export function portalToBody(node: HTMLElement) {
 			if (node.parentNode) {
 				node.parentNode.removeChild(node);
 			}
-		}
+		},
 	};
 }

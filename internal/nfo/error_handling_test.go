@@ -1,6 +1,7 @@
 package nfo
 
 import (
+	"context"
 	"encoding/xml"
 	"path/filepath"
 	"strings"
@@ -52,14 +53,14 @@ func TestGenerator_NilFieldSafety(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fs := afero.NewMemMapFs()
-			gen := NewGenerator(fs, DefaultConfig())
+			gen := NewGenerator(fs, defaultConfig())
 
 			// Should not panic
-			nfo := gen.MovieToNFO(tt.movie, "")
+			nfo := gen.movieToNFO(context.Background(), tt.movie, "", nil)
 			assert.NotNil(t, nfo)
 
 			// Generate NFO to verify XML generation doesn't panic
-			err := gen.Generate(tt.movie, "/output", "", "")
+			err := gen.Generate(context.Background(), tt.movie, "/output", "", "", nil)
 			assert.NoError(t, err)
 
 			// Read and parse generated NFO
@@ -119,9 +120,9 @@ func TestGenerator_EmptyRequiredFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fs := afero.NewMemMapFs()
-			gen := NewGenerator(fs, DefaultConfig())
+			gen := NewGenerator(fs, defaultConfig())
 
-			err := gen.Generate(tt.movie, "/output", "", "")
+			err := gen.Generate(context.Background(), tt.movie, "/output", "", "", nil)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -173,10 +174,10 @@ func TestGenerator_VeryLongFields(t *testing.T) {
 			}
 
 			fs := afero.NewMemMapFs()
-			gen := NewGenerator(fs, DefaultConfig())
+			gen := NewGenerator(fs, defaultConfig())
 
 			// Should complete successfully
-			err := gen.Generate(movie, "/output", "", "")
+			err := gen.Generate(context.Background(), movie, "/output", "", "", nil)
 			assert.NoError(t, err)
 
 			// Verify XML is well-formed
@@ -227,10 +228,10 @@ func TestGenerator_InvalidXMLCharacters(t *testing.T) {
 			}
 
 			fs := afero.NewMemMapFs()
-			gen := NewGenerator(fs, DefaultConfig())
+			gen := NewGenerator(fs, defaultConfig())
 
 			// Generate NFO
-			err := gen.Generate(movie, "/output", "", "")
+			err := gen.Generate(context.Background(), movie, "/output", "", "", nil)
 			assert.NoError(t, err)
 
 			// Read generated XML
@@ -257,7 +258,7 @@ func TestGenerator_ReadOnlyFilesystem(t *testing.T) {
 		memFs := afero.NewMemMapFs()
 		roFs := afero.NewReadOnlyFs(memFs)
 
-		gen := NewGenerator(roFs, DefaultConfig())
+		gen := NewGenerator(roFs, defaultConfig())
 
 		movie := &models.Movie{
 			ID:    "RO-001",
@@ -265,7 +266,7 @@ func TestGenerator_ReadOnlyFilesystem(t *testing.T) {
 		}
 
 		// Should fail to write
-		err := gen.Generate(movie, "/output", "", "")
+		err := gen.Generate(context.Background(), movie, "/output", "", "", nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to create") // Either directory or file creation failed
 	})
@@ -275,7 +276,7 @@ func TestGenerator_ReadOnlyFilesystem(t *testing.T) {
 		memFs := afero.NewMemMapFs()
 		roFs := afero.NewReadOnlyFs(memFs)
 
-		gen := NewGenerator(roFs, DefaultConfig())
+		gen := NewGenerator(roFs, defaultConfig())
 
 		movie := &models.Movie{
 			ID:    "ERR-001",
@@ -283,7 +284,7 @@ func TestGenerator_ReadOnlyFilesystem(t *testing.T) {
 		}
 
 		// Attempt write (will fail)
-		err := gen.Generate(movie, "/output", "", "")
+		err := gen.Generate(context.Background(), movie, "/output", "", "", nil)
 		assert.Error(t, err)
 
 		// Verify no partial file in the read-only filesystem
@@ -312,11 +313,11 @@ func TestGenerator_LargeActressGenreLists(t *testing.T) {
 		}
 
 		fs := afero.NewMemMapFs()
-		gen := NewGenerator(fs, DefaultConfig())
+		gen := NewGenerator(fs, defaultConfig())
 
 		// Generate NFO
 		start := time.Now()
-		err := gen.Generate(movie, "/output", "", "")
+		err := gen.Generate(context.Background(), movie, "/output", "", "", nil)
 		duration := time.Since(start)
 
 		assert.NoError(t, err)
@@ -352,10 +353,10 @@ func TestGenerator_LargeActressGenreLists(t *testing.T) {
 		}
 
 		fs := afero.NewMemMapFs()
-		gen := NewGenerator(fs, DefaultConfig())
+		gen := NewGenerator(fs, defaultConfig())
 
 		// Generate NFO
-		err := gen.Generate(movie, "/output", "", "")
+		err := gen.Generate(context.Background(), movie, "/output", "", "", nil)
 		assert.NoError(t, err)
 
 		// Verify XML structure is valid
@@ -396,10 +397,10 @@ func TestGenerator_InvalidReleaseDates(t *testing.T) {
 			}
 
 			fs := afero.NewMemMapFs()
-			gen := NewGenerator(fs, DefaultConfig())
+			gen := NewGenerator(fs, defaultConfig())
 
 			// Should handle gracefully
-			err := gen.Generate(movie, "/output", "", "")
+			err := gen.Generate(context.Background(), movie, "/output", "", "", nil)
 			assert.NoError(t, err, "should handle edge case dates gracefully")
 
 			// Read and verify ISO 8601 format
@@ -431,9 +432,9 @@ func TestGenerator_DuplicateActresses(t *testing.T) {
 		}
 
 		fs := afero.NewMemMapFs()
-		gen := NewGenerator(fs, DefaultConfig())
+		gen := NewGenerator(fs, defaultConfig())
 
-		nfo := gen.MovieToNFO(movie, "")
+		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 		assert.Len(t, nfo.Actors, 2, "duplicate actress names should be deduplicated")
 		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -463,9 +464,9 @@ func TestGenerator_DuplicateActresses(t *testing.T) {
 		}
 
 		fs := afero.NewMemMapFs()
-		gen := NewGenerator(fs, DefaultConfig())
+		gen := NewGenerator(fs, defaultConfig())
 
-		nfo := gen.MovieToNFO(movie, "")
+		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 		assert.Len(t, nfo.Actors, 1, "duplicate DMMID entries should be deduplicated")
 		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -484,9 +485,9 @@ func TestGenerator_DuplicateActresses(t *testing.T) {
 		}
 
 		fs := afero.NewMemMapFs()
-		gen := NewGenerator(fs, DefaultConfig())
+		gen := NewGenerator(fs, defaultConfig())
 
-		nfo := gen.MovieToNFO(movie, "")
+		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 		assert.Len(t, nfo.Actors, 2, "name normalization should deduplicate mixed case/whitespace variants")
 		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)

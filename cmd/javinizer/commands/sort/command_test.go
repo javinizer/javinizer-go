@@ -83,9 +83,11 @@ func TestFlags_ShortForms(t *testing.T) {
 
 // Integration tests
 
-// TestRun_Integration_NoVideoFiles tests graceful handling when no video files exist
 func TestRun_Integration_NoVideoFiles(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir, err := os.MkdirTemp("", t.Name())
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
 	configPath, _ := testutil.CreateTestConfig(t, nil)
 
 	// Create a non-video file
@@ -93,10 +95,9 @@ func TestRun_Integration_NoVideoFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(textFile, []byte("not a video"), 0644))
 
 	cmd := sort.NewCommand()
-	err := sort.Run(cmd, []string{tmpDir}, configPath)
+	runErr := sort.Run(cmd, []string{tmpDir}, configPath)
 
-	// Should succeed (graceful exit when no videos found)
-	assert.NoError(t, err)
+	assert.NoError(t, runErr)
 }
 
 // TestRun_Integration_InvalidPath tests error handling for invalid paths
@@ -110,65 +111,70 @@ func TestRun_Integration_InvalidPath(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestRun_Integration_InvalidConfig tests error handling for invalid config
 func TestRun_Integration_InvalidConfig(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir, err := os.MkdirTemp("", t.Name())
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
 
 	cmd := sort.NewCommand()
-	err := sort.Run(cmd, []string{tmpDir}, "/nonexistent/config.yaml")
+	runErr := sort.Run(cmd, []string{tmpDir}, "/nonexistent/config.yaml")
 
-	// Should return error for invalid config
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to load config")
+	assert.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), "failed to load config")
 }
 
 func TestRun_LinkModeWithMoveRejected(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir, err := os.MkdirTemp("", t.Name())
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
 	cmd := sort.NewCommand()
 	require.NoError(t, cmd.Flags().Set("move", "true"))
 	require.NoError(t, cmd.Flags().Set("link-mode", "hard"))
 
-	err := sort.Run(cmd, []string{tmpDir}, "")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "--link-mode can only be used when --move is disabled")
+	runErr := sort.Run(cmd, []string{tmpDir}, "")
+	assert.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), "--link-mode can only be used when --move is disabled")
 }
 
-// TestRun_Integration_DryRunMode tests that dry-run mode doesn't modify files
 func TestRun_Integration_DryRunMode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test")
 	}
 
-	tmpDir := t.TempDir()
+	tmpDir, err := os.MkdirTemp("", t.Name())
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
 	configPath, _ := testutil.CreateTestConfig(t, nil)
 	videoFile := testutil.CreateTestVideoFile(t, tmpDir, "IPX-123.mp4")
 
 	cmd := sort.NewCommand()
 	cmd.SetArgs([]string{tmpDir, "--dry-run"})
-	err := sort.Run(cmd, []string{tmpDir}, configPath)
+	runErr := sort.Run(cmd, []string{tmpDir}, configPath)
 
-	// Should succeed
-	assert.NoError(t, err)
+	assert.NoError(t, runErr)
 	// File should still exist in original location (dry-run doesn't move)
 	assert.FileExists(t, videoFile)
 }
 
-// TestRun_Integration_FlagOverrides tests that flags override config values
 func TestRun_Integration_FlagOverrides(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test")
 	}
 
-	tmpDir := t.TempDir()
+	tmpDir, err := os.MkdirTemp("", t.Name())
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
 	configPath, _ := testutil.CreateTestConfig(t, func(c *config.Config) {
-		c.Output.DownloadExtrafanart = false // Config says false
+		c.Output.Download.DownloadExtrafanart = false
 	})
 	testutil.CreateTestVideoFile(t, tmpDir, "IPX-123.mp4")
 
 	cmd := sort.NewCommand()
 	cmd.SetArgs([]string{tmpDir, "--extrafanart", "--scrapers=r18dev,dmm"})
-	err := sort.Run(cmd, []string{tmpDir}, configPath)
+	err = sort.Run(cmd, []string{tmpDir}, configPath)
 
-	// Should succeed (flag overrides are applied)
 	assert.NoError(t, err)
 }

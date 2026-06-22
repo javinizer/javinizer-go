@@ -31,7 +31,7 @@ func validateHistory(h *History) error {
 	if h.Operation == "" {
 		return &HistoryValidationError{Field: "Operation", Message: "cannot be empty"}
 	}
-	validOperations := map[string]bool{"scrape": true, "organize": true, "download": true, "nfo": true}
+	validOperations := map[HistoryOperation]bool{HistoryOpScrape: true, HistoryOpOrganize: true, HistoryOpDownload: true, HistoryOpNFO: true}
 	if !validOperations[h.Operation] {
 		return &HistoryValidationError{Field: "Operation", Message: "invalid operation type"}
 	}
@@ -53,10 +53,10 @@ func TestHistoryCreation(t *testing.T) {
 				return &History{
 					ID:           1,
 					MovieID:      "IPX-123",
-					Operation:    "scrape",
+					Operation:    HistoryOpScrape,
 					OriginalPath: "/original/path/movie.mp4",
 					NewPath:      "/new/path/IPX-123.mp4",
-					Status:       "success",
+					Status:       HistoryStatusSuccess,
 					ErrorMessage: "",
 					Metadata:     `{"scraper":"r18dev","duration":120}`,
 					DryRun:       false,
@@ -71,10 +71,10 @@ func TestHistoryCreation(t *testing.T) {
 				return &History{
 					ID:           2,
 					MovieID:      "IPX-456",
-					Operation:    "organize",
+					Operation:    HistoryOpOrganize,
 					OriginalPath: "/source/file.mp4",
 					NewPath:      "/dest/file.mp4",
-					Status:       "success",
+					Status:       HistoryStatusSuccess,
 					Metadata:     "",
 					DryRun:       false,
 					CreatedAt:    time.Now(),
@@ -88,10 +88,10 @@ func TestHistoryCreation(t *testing.T) {
 				return &History{
 					ID:           3,
 					MovieID:      "IPX-789",
-					Operation:    "download",
+					Operation:    HistoryOpDownload,
 					OriginalPath: "",
 					NewPath:      "/downloads/cover.jpg",
-					Status:       "success",
+					Status:       HistoryStatusSuccess,
 					Metadata:     `{"urls":{"cover":"https://example.com/cover.jpg","poster":"https://example.com/poster.jpg"},"size":1024000}`,
 					DryRun:       false,
 					CreatedAt:    time.Now(),
@@ -106,10 +106,10 @@ func TestHistoryCreation(t *testing.T) {
 				return &History{
 					ID:           4,
 					MovieID:      "IPX-999",
-					Operation:    "organize",
+					Operation:    HistoryOpOrganize,
 					OriginalPath: longPath,
 					NewPath:      longPath + ".new",
-					Status:       "success",
+					Status:       HistoryStatusSuccess,
 					Metadata:     "",
 					DryRun:       false,
 					CreatedAt:    time.Now(),
@@ -123,10 +123,10 @@ func TestHistoryCreation(t *testing.T) {
 				return &History{
 					ID:           5,
 					MovieID:      "IPX-111",
-					Operation:    "scrape",
+					Operation:    HistoryOpScrape,
 					OriginalPath: "/path/with spaces/and 日本語/movie.mp4",
 					NewPath:      "/new/path/with spaces/IPX-111.mp4",
-					Status:       "success",
+					Status:       HistoryStatusSuccess,
 					Metadata:     "",
 					DryRun:       false,
 					CreatedAt:    time.Now(),
@@ -140,10 +140,10 @@ func TestHistoryCreation(t *testing.T) {
 				return &History{
 					ID:           6,
 					MovieID:      "IPX-222",
-					Operation:    "download",
+					Operation:    HistoryOpDownload,
 					OriginalPath: "",
 					NewPath:      "/downloads/failed.jpg",
-					Status:       "failed",
+					Status:       HistoryStatusFailed,
 					ErrorMessage: "HTTP 404: Not Found",
 					Metadata:     `{"url":"https://example.com/notfound.jpg"}`,
 					DryRun:       false,
@@ -161,7 +161,7 @@ func TestHistoryCreation(t *testing.T) {
 					Operation:    "",
 					OriginalPath: "/path/file.mp4",
 					NewPath:      "/new/path/file.mp4",
-					Status:       "success",
+					Status:       HistoryStatusSuccess,
 					Metadata:     "",
 					DryRun:       false,
 					CreatedAt:    time.Now(),
@@ -179,7 +179,7 @@ func TestHistoryCreation(t *testing.T) {
 					Operation:    "invalid_operation",
 					OriginalPath: "/path/file.mp4",
 					NewPath:      "/new/path/file.mp4",
-					Status:       "success",
+					Status:       HistoryStatusSuccess,
 					Metadata:     "",
 					DryRun:       false,
 					CreatedAt:    time.Now(),
@@ -226,10 +226,10 @@ func TestHistoryJSONMarshal(t *testing.T) {
 			h: &History{
 				ID:           1,
 				MovieID:      "IPX-123",
-				Operation:    "scrape",
+				Operation:    HistoryOpScrape,
 				OriginalPath: "/original/path/movie.mp4",
 				NewPath:      "/new/path/IPX-123.mp4",
-				Status:       "success",
+				Status:       HistoryStatusSuccess,
 				ErrorMessage: "",
 				Metadata:     `{"scraper":"r18dev","duration":120}`,
 				DryRun:       false,
@@ -241,10 +241,10 @@ func TestHistoryJSONMarshal(t *testing.T) {
 			h: &History{
 				ID:           2,
 				MovieID:      "IPX-456",
-				Operation:    "organize",
+				Operation:    HistoryOpOrganize,
 				OriginalPath: "/source/file.mp4",
 				NewPath:      "/dest/file.mp4",
-				Status:       "success",
+				Status:       HistoryStatusSuccess,
 				Metadata:     "",
 				DryRun:       false,
 				CreatedAt:    time.Date(2023, 5, 15, 10, 30, 0, 0, time.UTC),
@@ -255,10 +255,10 @@ func TestHistoryJSONMarshal(t *testing.T) {
 			h: &History{
 				ID:           3,
 				MovieID:      "IPX-789",
-				Operation:    "download",
+				Operation:    HistoryOpDownload,
 				OriginalPath: "",
 				NewPath:      "/downloads/cover.jpg",
-				Status:       "success",
+				Status:       HistoryStatusSuccess,
 				Metadata:     `{"urls":{"cover":"https://example.com/cover.jpg"},"size":1024000}`,
 				DryRun:       false,
 				CreatedAt:    time.Date(2023, 5, 15, 10, 30, 0, 0, time.UTC),
@@ -292,10 +292,10 @@ func TestHistoryJSONMarshal(t *testing.T) {
 // TestHistoryOperationTypes tests all valid operation types
 // AC-2.6.2: Operation serialization (move, copy, organize, scrape)
 func TestHistoryOperationTypes(t *testing.T) {
-	operations := []string{"scrape", "organize", "download", "nfo"}
+	operations := []HistoryOperation{HistoryOpScrape, HistoryOpOrganize, HistoryOpDownload, HistoryOpNFO}
 
 	for _, op := range operations {
-		t.Run("operation_"+op, func(t *testing.T) {
+		t.Run("operation_"+string(op), func(t *testing.T) {
 			t.Parallel()
 			h := &History{
 				ID:           1,
@@ -303,7 +303,7 @@ func TestHistoryOperationTypes(t *testing.T) {
 				Operation:    op,
 				OriginalPath: "/path/file.mp4",
 				NewPath:      "/new/path/file.mp4",
-				Status:       "success",
+				Status:       HistoryStatusSuccess,
 				DryRun:       false,
 				CreatedAt:    time.Now(),
 			}

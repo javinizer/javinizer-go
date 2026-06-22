@@ -29,7 +29,7 @@ func TestAuthManager_SetupLoginAndSession(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "admin", username)
 
-	credPath := CredentialPathForConfig(configFile)
+	credPath := credentialPathForConfig(configFile)
 	info, err := os.Stat(credPath)
 	require.NoError(t, err)
 	if runtime.GOOS != "windows" {
@@ -76,7 +76,7 @@ func TestAuthManager_LoadMalformedFile(t *testing.T) {
 	t.Parallel()
 
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
-	credPath := CredentialPathForConfig(configFile)
+	credPath := credentialPathForConfig(configFile)
 	require.NoError(t, os.WriteFile(credPath, []byte("{not-json"), 0o600))
 
 	_, err := NewAuthManager(configFile, time.Hour)
@@ -158,7 +158,7 @@ func TestAuthManager_LoadMalformedCredentialFields(t *testing.T) {
 	t.Parallel()
 
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
-	credPath := CredentialPathForConfig(configFile)
+	credPath := credentialPathForConfig(configFile)
 	payload := map[string]any{
 		"version":  1,
 		"username": "admin",
@@ -186,7 +186,7 @@ func TestAuthManager_LoadRepairsCredentialPermissions(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, manager.Setup("admin", "password123"))
 
-	credPath := CredentialPathForConfig(configFile)
+	credPath := credentialPathForConfig(configFile)
 	require.NoError(t, os.Chmod(credPath, 0o644))
 
 	reloaded, err := NewAuthManager(configFile, time.Hour)
@@ -211,7 +211,7 @@ func TestAuthManager_LoadRejectsCredentialSymlink(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, manager.Setup("admin", "password123"))
 
-	credPath := CredentialPathForConfig(configFile)
+	credPath := credentialPathForConfig(configFile)
 	targetPath := filepath.Join(configDir, "target.credentials.json")
 	require.NoError(t, os.Rename(credPath, targetPath))
 	require.NoError(t, os.Symlink(targetPath, credPath))
@@ -233,7 +233,7 @@ func TestAuthManager_SetupIgnoresPreexistingLegacyTmpSymlink(t *testing.T) {
 	manager, err := NewAuthManager(configFile, time.Hour)
 	require.NoError(t, err)
 
-	credPath := CredentialPathForConfig(configFile)
+	credPath := credentialPathForConfig(configFile)
 	legacyTmpPath := credPath + ".tmp"
 	targetPath := filepath.Join(configDir, "symlink-target.txt")
 	require.NoError(t, os.WriteFile(targetPath, []byte("original"), 0o600))

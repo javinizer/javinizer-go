@@ -2,19 +2,12 @@ package dlgetchu
 
 import (
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/configutil"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-type DLGetchuConfig struct {
-	config.BaseScraperConfig `yaml:",inline"`
-	BaseURL                  string `yaml:"base_url" json:"base_url"`
-}
-
-func (c *DLGetchuConfig) ValidateConfig(sc *config.ScraperSettings) error {
-	if err := config.ValidateCommonSettings("dlgetchu", sc); err != nil {
-		return err
-	}
-	if err := configutil.ValidateHTTPBaseURL("dlgetchu.base_url", sc.BaseURL); err != nil {
+// validateScraperSettings performs scraper-specific validation for dlgetchu.
+func validateScraperSettings(ss *models.ScraperSettings) error {
+	if err := config.ValidateHTTPBaseURL("dlgetchu.base_url", ss.BaseURL); err != nil {
 		return err
 	}
 	return nil

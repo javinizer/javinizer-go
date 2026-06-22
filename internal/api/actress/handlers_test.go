@@ -2,6 +2,7 @@ package actress
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,13 +16,15 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 // Test helper to populate actress data
 func setupActresses(t *testing.T, repo *database.ActressRepository, actresses []models.Actress) {
 	t.Helper()
 	for _, actress := range actresses {
-		err := repo.Create(&actress)
+		err := repo.Create(context.Background(), &actress)
 		require.NoError(t, err, "Failed to create actress in test setup")
 	}
 }
@@ -101,7 +104,7 @@ func TestSearchActresses(t *testing.T) {
 			tt.setupRepo(mockRepo)
 
 			router := gin.New()
-			router.GET("/actresses/search", searchActresses(mockRepo))
+			router.GET("/actresses/search", searchActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 			req := httptest.NewRequest("GET", "/actresses/search?q="+tt.query, nil)
 			w := httptest.NewRecorder()
@@ -128,7 +131,7 @@ func TestSearchActresses_SQLInjectionPrevention(t *testing.T) {
 	})
 
 	router := gin.New()
-	router.GET("/actresses/search", searchActresses(mockRepo))
+	router.GET("/actresses/search", searchActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	// URL-encoded malicious queries
 	maliciousQueries := []string{
@@ -149,7 +152,7 @@ func TestSearchActresses_SQLInjectionPrevention(t *testing.T) {
 				"Expected 200 (OK with empty) or 400 (Bad Request), got %d", w.Code)
 
 			// Verify database integrity - count should still be 1 (no new data leaked/altered)
-			allActresses, err := mockRepo.Search("")
+			allActresses, err := mockRepo.Search(context.Background(), "")
 			require.NoError(t, err)
 			assert.Equal(t, 1, len(allActresses), "Database should be unaffected by SQL injection attempt")
 
@@ -164,7 +167,7 @@ func TestSearchActresses_SQLInjectionPrevention(t *testing.T) {
 				assert.Empty(t, actresses, "Malicious query should not return data (would indicate SQL injection success)")
 			case 400:
 				// 400 response should be a valid error JSON
-				var errResp ErrorResponse
+				var errResp contracts.ErrorResponse
 				err = json.Unmarshal(w.Body.Bytes(), &errResp)
 				require.NoError(t, err, "400 response should be valid error JSON")
 				assert.NotEmpty(t, errResp.Error, "Error response should contain error message")
@@ -180,7 +183,7 @@ func TestSearchActresses_SpecialCharacters(t *testing.T) {
 	})
 
 	router := gin.New()
-	router.GET("/actresses/search", searchActresses(mockRepo))
+	router.GET("/actresses/search", searchActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	specialCharQueries := []string{
 		"%",            // SQL wildcard
@@ -211,7 +214,7 @@ func TestSearchActresses_CaseInsensitivity(t *testing.T) {
 	})
 
 	router := gin.New()
-	router.GET("/actresses/search", searchActresses(mockRepo))
+	router.GET("/actresses/search", searchActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	queries := []string{"yui", "YUI", "Yui", "yUi"}
 
@@ -235,7 +238,7 @@ func TestSearchActresses_URLEncoding(t *testing.T) {
 	})
 
 	router := gin.New()
-	router.GET("/actresses/search", searchActresses(mockRepo))
+	router.GET("/actresses/search", searchActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	// Test URL-encoded query
 	req := httptest.NewRequest("GET", "/actresses/search?q=Test%20Name", nil)
@@ -251,7 +254,7 @@ func TestSearchActresses_EmptyDatabase(t *testing.T) {
 	// Empty database
 
 	router := gin.New()
-	router.GET("/actresses/search", searchActresses(mockRepo))
+	router.GET("/actresses/search", searchActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	req := httptest.NewRequest("GET", "/actresses/search?q=test", nil)
 	w := httptest.NewRecorder()
@@ -280,14 +283,14 @@ func TestSearchActresses_LargeResultSet(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		actresses[i] = models.Actress{
 			DMMID:     i + 1, // Unique ID required (uniqueIndex constraint)
-			FirstName: "Actress",
+			FirstName: "models.Actress",
 			LastName:  "Test",
 		}
 	}
 	setupActresses(t, mockRepo, actresses)
 
 	router := gin.New()
-	router.GET("/actresses/search", searchActresses(mockRepo))
+	router.GET("/actresses/search", searchActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	req := httptest.NewRequest("GET", "/actresses/search?q=", nil)
 	w := httptest.NewRecorder()
@@ -307,11 +310,11 @@ func TestActressCRUDHandlers(t *testing.T) {
 	mockRepo := newMockActressRepo()
 
 	router := gin.New()
-	router.GET("/actresses", listActresses(mockRepo))
-	router.GET("/actresses/:id", getActress(mockRepo))
-	router.POST("/actresses", createActress(mockRepo))
-	router.PUT("/actresses/:id", updateActress(mockRepo))
-	router.DELETE("/actresses/:id", deleteActress(mockRepo))
+	router.GET("/actresses", listActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
+	router.GET("/actresses/:id", getActress(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
+	router.POST("/actresses", createActress(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
+	router.PUT("/actresses/:id", updateActress(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
+	router.DELETE("/actresses/:id", deleteActress(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	// Create
 	createPayload := map[string]interface{}{
@@ -464,15 +467,15 @@ func TestDeleteActress(t *testing.T) {
 
 			// Pre-populate with one actress for delete existing test
 			if tt.setupRepo != nil && tt.actressID == "1" {
-				_ = mockRepo.Create(&models.Actress{
+				_ = mockRepo.Create(context.Background(), &models.Actress{
 					DMMID:     100,
 					FirstName: "Test",
-					LastName:  "Actress",
+					LastName:  "models.Actress",
 				})
 			}
 
 			router := gin.New()
-			router.DELETE("/actresses/:id", deleteActress(mockRepo))
+			router.DELETE("/actresses/:id", deleteActress(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 			req := httptest.NewRequest(http.MethodDelete, "/actresses/"+tt.actressID, nil)
 			w := httptest.NewRecorder()
@@ -492,7 +495,7 @@ func TestCreateActress_Validation(t *testing.T) {
 	mockRepo := newMockActressRepo()
 
 	router := gin.New()
-	router.POST("/actresses", createActress(mockRepo))
+	router.POST("/actresses", createActress(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	payload := map[string]interface{}{
 		"first_name":    "",
@@ -518,7 +521,7 @@ func TestListActresses_Sorting(t *testing.T) {
 	})
 
 	router := gin.New()
-	router.GET("/actresses", listActresses(mockRepo))
+	router.GET("/actresses", listActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	req := httptest.NewRequest("GET", "/actresses?sort_by=dmm_id&sort_order=desc", nil)
 	w := httptest.NewRecorder()
@@ -545,7 +548,7 @@ func TestExportActresses(t *testing.T) {
 	})
 
 	router := gin.New()
-	router.GET("/actresses/export", exportActresses(repo))
+	router.GET("/actresses/export", exportActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	req := httptest.NewRequest("GET", "/actresses/export", nil)
 	w := httptest.NewRecorder()
@@ -564,7 +567,7 @@ func TestExportActresses_Empty(t *testing.T) {
 	repo := newMockActressRepo()
 
 	router := gin.New()
-	router.GET("/actresses/export", exportActresses(repo))
+	router.GET("/actresses/export", exportActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	req := httptest.NewRequest("GET", "/actresses/export", nil)
 	w := httptest.NewRecorder()
@@ -583,7 +586,7 @@ func TestImportActresses(t *testing.T) {
 	repo := newMockActressRepo()
 
 	router := gin.New()
-	router.POST("/actresses/import", importActresses(repo))
+	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	importPayload := map[string]interface{}{
 		"actresses": []map[string]interface{}{
@@ -613,7 +616,7 @@ func TestImportActresses_InvalidJSON(t *testing.T) {
 	repo := newMockActressRepo()
 
 	router := gin.New()
-	router.POST("/actresses/import", importActresses(repo))
+	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	req := httptest.NewRequest("POST", "/actresses/import", bytes.NewReader([]byte("invalid json")))
 	req.Header.Set("Content-Type", "application/json")
@@ -629,7 +632,7 @@ func TestImportActresses_SkipsInvalid(t *testing.T) {
 	repo := newMockActressRepo()
 
 	router := gin.New()
-	router.POST("/actresses/import", importActresses(repo))
+	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	importPayload := map[string]interface{}{
 		"actresses": []map[string]interface{}{
@@ -657,10 +660,10 @@ func TestImportActresses_ExistingUnchanged(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	repo := newMockActressRepo()
-	require.NoError(t, repo.Create(&models.Actress{DMMID: 400, FirstName: "Existing", JapaneseName: "既存"}))
+	require.NoError(t, repo.Create(context.Background(), &models.Actress{DMMID: 400, FirstName: "Existing", JapaneseName: "既存"}))
 
 	router := gin.New()
-	router.POST("/actresses/import", importActresses(repo))
+	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	importPayload := map[string]interface{}{
 		"actresses": []map[string]interface{}{
@@ -686,10 +689,10 @@ func TestImportActresses_ExistingUpdated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	repo := newMockActressRepo()
-	require.NoError(t, repo.Create(&models.Actress{DMMID: 500, FirstName: "OldName", JapaneseName: "旧名"}))
+	require.NoError(t, repo.Create(context.Background(), &models.Actress{DMMID: 500, FirstName: "OldName", JapaneseName: "旧名"}))
 
 	router := gin.New()
-	router.POST("/actresses/import", importActresses(repo))
+	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	importPayload := map[string]interface{}{
 		"actresses": []map[string]interface{}{
@@ -717,7 +720,7 @@ func TestListActresses_EmptyDatabase(t *testing.T) {
 	repo := newMockActressRepo()
 
 	router := gin.New()
-	router.GET("/actresses", listActresses(repo))
+	router.GET("/actresses", listActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	req := httptest.NewRequest("GET", "/actresses", nil)
 	w := httptest.NewRecorder()
@@ -736,14 +739,14 @@ func TestListActresses_Pagination(t *testing.T) {
 
 	repo := newMockActressRepo()
 	for i := 0; i < 5; i++ {
-		require.NoError(t, repo.Create(&models.Actress{
+		require.NoError(t, repo.Create(context.Background(), &models.Actress{
 			DMMID:     600 + i,
-			FirstName: fmt.Sprintf("Actress%d", i),
+			FirstName: fmt.Sprintf("models.Actress%d", i),
 		}))
 	}
 
 	router := gin.New()
-	router.GET("/actresses", listActresses(repo))
+	router.GET("/actresses", listActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	req := httptest.NewRequest("GET", "/actresses?limit=2&offset=0", nil)
 	w := httptest.NewRecorder()
@@ -765,7 +768,7 @@ func TestUpdateActress_NotFound(t *testing.T) {
 	repo := newMockActressRepo()
 
 	router := gin.New()
-	router.PUT("/actresses/:id", updateActress(repo))
+	router.PUT("/actresses/:id", updateActress(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	payload := map[string]interface{}{
 		"dmm_id":        999,
@@ -825,7 +828,7 @@ func TestActressMergePreviewAndApply(t *testing.T) {
 	target := &models.Actress{
 		DMMID:        70001,
 		FirstName:    "Target",
-		LastName:     "Actress",
+		LastName:     "models.Actress",
 		JapaneseName: "ターゲット",
 		ThumbURL:     "https://example.com/target.jpg",
 		Aliases:      "TargetAlias",
@@ -833,18 +836,18 @@ func TestActressMergePreviewAndApply(t *testing.T) {
 	source := &models.Actress{
 		DMMID:        70002,
 		FirstName:    "Source",
-		LastName:     "Actress",
+		LastName:     "models.Actress",
 		JapaneseName: "ソース",
 		ThumbURL:     "https://example.com/source.jpg",
 		Aliases:      "SourceAlias",
 	}
-	require.NoError(t, mockRepo.Create(target))
-	require.NoError(t, mockRepo.Create(source))
+	require.NoError(t, mockRepo.Create(context.Background(), target))
+	require.NoError(t, mockRepo.Create(context.Background(), source))
 
 	router := gin.New()
-	router.POST("/actresses/merge/preview", previewActressMerge(mockRepo))
-	router.POST("/actresses/merge", mergeActresses(mockRepo))
-	router.GET("/actresses/:id", getActress(mockRepo))
+	router.POST("/actresses/merge/preview", previewActressMerge(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
+	router.POST("/actresses/merge", mergeActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
+	router.GET("/actresses/:id", getActress(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	previewBody := map[string]interface{}{
 		"target_id": target.ID,
@@ -859,7 +862,7 @@ func TestActressMergePreviewAndApply(t *testing.T) {
 	router.ServeHTTP(previewW, previewReq)
 	require.Equal(t, http.StatusOK, previewW.Code)
 
-	var previewResp ActressMergePreviewResponse
+	var previewResp contracts.ActressMergePreviewResponse
 	require.NoError(t, json.Unmarshal(previewW.Body.Bytes(), &previewResp))
 	assert.Equal(t, target.ID, previewResp.Target.ID)
 	assert.Equal(t, source.ID, previewResp.Source.ID)
@@ -883,7 +886,7 @@ func TestActressMergePreviewAndApply(t *testing.T) {
 	router.ServeHTTP(mergeW, mergeReq)
 	require.Equal(t, http.StatusOK, mergeW.Code)
 
-	var mergeResp ActressMergeResponse
+	var mergeResp contracts.ActressMergeResponse
 	require.NoError(t, json.Unmarshal(mergeW.Body.Bytes(), &mergeResp))
 	assert.Equal(t, source.ID, mergeResp.MergedFromID)
 	assert.Equal(t, 70002, mergeResp.MergedActress.DMMID)
@@ -903,10 +906,10 @@ func TestActressMergeValidationAndNotFound(t *testing.T) {
 		FirstName:    "Target",
 		JapaneseName: "ターゲット",
 	}
-	require.NoError(t, mockRepo.Create(target))
+	require.NoError(t, mockRepo.Create(context.Background(), target))
 
 	router := gin.New()
-	router.POST("/actresses/merge", mergeActresses(mockRepo))
+	router.POST("/actresses/merge", mergeActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	// Same target/source should return 400.
 	sameBody := map[string]interface{}{
@@ -941,11 +944,11 @@ func TestActressMergeInvalidResolutionPayload(t *testing.T) {
 	mockRepo := newMockActressRepo()
 	target := &models.Actress{DMMID: 72001, FirstName: "Target", JapaneseName: "ターゲット"}
 	source := &models.Actress{DMMID: 72002, FirstName: "Source", JapaneseName: "ソース"}
-	require.NoError(t, mockRepo.Create(target))
-	require.NoError(t, mockRepo.Create(source))
+	require.NoError(t, mockRepo.Create(context.Background(), target))
+	require.NoError(t, mockRepo.Create(context.Background(), source))
 
 	router := gin.New()
-	router.POST("/actresses/merge", mergeActresses(mockRepo))
+	router.POST("/actresses/merge", mergeActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
 
 	tests := []struct {
 		name       string
@@ -985,16 +988,16 @@ func TestActressMergeConflictStatus409(t *testing.T) {
 		Database: config.DatabaseConfig{Type: "sqlite", DSN: ":memory:"},
 		Logging:  config.LoggingConfig{Level: "error"},
 	}
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := database.NewActressRepository(db)
 
 	target := &models.Actress{DMMID: 73001, FirstName: "Target", JapaneseName: "ターゲット"}
 	source := &models.Actress{DMMID: 73002, FirstName: "Source", JapaneseName: "ソース"}
-	require.NoError(t, repo.Create(target))
-	require.NoError(t, repo.Create(source))
+	require.NoError(t, repo.Create(context.Background(), target))
+	require.NoError(t, repo.Create(context.Background(), source))
 
 	// Drop unique dmm_id index so we can create a conflicting duplicate row in test DB.
 	var idxNames []string
@@ -1004,14 +1007,14 @@ func TestActressMergeConflictStatus409(t *testing.T) {
 	for _, idx := range idxNames {
 		require.NoError(t, db.DB.Exec(fmt.Sprintf("DROP INDEX IF EXISTS %s", idx)).Error)
 	}
-	require.NoError(t, repo.Create(&models.Actress{
+	require.NoError(t, repo.Create(context.Background(), &models.Actress{
 		DMMID:        73002,
 		FirstName:    "Other",
 		JapaneseName: "競合",
 	}))
 
 	router := gin.New()
-	router.POST("/actresses/merge", mergeActresses(repo))
+	router.POST("/actresses/merge", mergeActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	body := map[string]interface{}{
 		"target_id": target.ID,

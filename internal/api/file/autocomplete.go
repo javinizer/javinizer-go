@@ -2,6 +2,7 @@ package file
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,7 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/apperrors"
 	"github.com/javinizer/javinizer-go/internal/api/core"
-	"github.com/javinizer/javinizer-go/internal/config"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 const maxPathAutocompleteResults = 25
@@ -21,20 +23,20 @@ const maxPathAutocompleteResults = 25
 // @Tags web
 // @Accept json
 // @Produce json
-// @Param request body PathAutocompleteRequest true "Autocomplete parameters"
-// @Success 200 {object} PathAutocompleteResponse
-// @Failure 400 {object} ErrorResponse
+// @Param request body contracts.PathAutocompleteRequest true "Autocomplete parameters"
+// @Success 200 {object} contracts.PathAutocompleteResponse
+// @Failure 400 {object} contracts.ErrorResponse
 // @Router /api/v1/browse/autocomplete [post]
-func autocompletePath(deps *ServerDependencies) gin.HandlerFunc {
+func autocompletePath(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req PathAutocompleteRequest
+		var req contracts.PathAutocompleteRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		cfg := deps.GetConfig()
-		basePath, fragment, err := resolveAutocompleteBasePath(req.Path, &cfg.API.Security)
+		apiCfg := rt.GetAPIConfig()
+		basePath, fragment, err := resolveAutocompleteBasePath(req.Path, apiCfg.SecurityConfig())
 		if err != nil {
 			apperrors.WriteAPIError(c, err)
 			return
@@ -42,12 +44,12 @@ func autocompletePath(deps *ServerDependencies) gin.HandlerFunc {
 
 		entries, err := os.ReadDir(basePath)
 		if err != nil {
-			c.JSON(500, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
 		fragmentLower := strings.ToLower(fragment)
-		suggestions := make([]PathAutocompleteSuggestion, 0, len(entries))
+		suggestions := make([]contracts.PathAutocompleteSuggestion, 0, len(entries))
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				continue
@@ -58,7 +60,7 @@ func autocompletePath(deps *ServerDependencies) gin.HandlerFunc {
 				continue
 			}
 
-			suggestions = append(suggestions, PathAutocompleteSuggestion{
+			suggestions = append(suggestions, contracts.PathAutocompleteSuggestion{
 				Name:  name,
 				Path:  filepath.Join(basePath, name),
 				IsDir: true,
@@ -77,7 +79,7 @@ func autocompletePath(deps *ServerDependencies) gin.HandlerFunc {
 			suggestions = suggestions[:limit]
 		}
 
-		c.JSON(200, PathAutocompleteResponse{
+		c.JSON(http.StatusOK, contracts.PathAutocompleteResponse{
 			InputPath:   req.Path,
 			BasePath:    basePath,
 			Suggestions: suggestions,
@@ -85,7 +87,7 @@ func autocompletePath(deps *ServerDependencies) gin.HandlerFunc {
 	}
 }
 
-func resolveAutocompleteBasePath(userPath string, cfg *config.SecurityConfig) (string, string, error) {
+func resolveAutocompleteBasePath(userPath string, cfg *core.SecurityNarrowConfig) (string, string, error) {
 	trimmedPath := strings.TrimSpace(userPath)
 	if trimmedPath == "" {
 		return "", "", fmt.Errorf("path is required")

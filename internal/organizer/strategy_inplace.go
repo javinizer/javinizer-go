@@ -11,25 +11,25 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/template"
-	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 )
 
-type InPlaceStrategy struct {
+type inPlaceStrategy struct {
 	fs             afero.Fs
-	config         *config.OutputConfig
-	templateEngine *template.Engine
-	matcher        *matcher.Matcher
+	config         *Config
+	templateEngine template.EngineInterface
+	matcher        matcher.MatcherInterface
 }
 
-var _ OperationStrategy = (*InPlaceStrategy)(nil)
+var _ OperationStrategy = (*inPlaceStrategy)(nil)
 
-func NewInPlaceStrategy(fs afero.Fs, cfg *config.OutputConfig, m *matcher.Matcher, engine *template.Engine) *InPlaceStrategy {
+func newInPlaceStrategy(fs afero.Fs, cfg *Config, m matcher.MatcherInterface, engine template.EngineInterface) *inPlaceStrategy {
 	if engine == nil {
 		engine = template.NewEngine()
 	}
-	return &InPlaceStrategy{
+	return &inPlaceStrategy{
 		fs:             fs,
 		config:         cfg,
 		templateEngine: engine,
@@ -37,7 +37,7 @@ func NewInPlaceStrategy(fs afero.Fs, cfg *config.OutputConfig, m *matcher.Matche
 	}
 }
 
-func (s *InPlaceStrategy) isDedicatedFolder(dir string, id string, m *matcher.Matcher) bool {
+func (s *inPlaceStrategy) isDedicatedFolder(dir string, id string, m matcher.MatcherInterface) bool {
 	entries, err := afero.ReadDir(s.fs, dir)
 	if err != nil {
 		return false
@@ -68,62 +68,37 @@ func (s *InPlaceStrategy) isDedicatedFolder(dir string, id string, m *matcher.Ma
 	return videoCount > 0 && videoCount == matchingCount
 }
 
-func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
-	ctx := template.NewContextFromMovie(movie)
-	ctx.GroupActress = s.config.GroupActress
-	ctx.GroupActressName = s.config.GroupActressName
-	ctx.GroupUnknownActressName = s.config.GroupUnknownActressName
-	ctx.FirstNameOrder = s.config.FirstNameOrder
-	ctx.ActressLanguageJa = s.config.ActressLanguageJA
-	ctx.ActressDelimiter = s.config.ActressDelimiter
-
-	applyTitleTruncation(s.templateEngine, ctx, s.config.MaxTitleLength)
-
-	ctx.PartNumber = match.PartNumber
-	ctx.PartSuffix = match.PartSuffix
-	ctx.IsMultiPart = match.IsMultiPart
-
-	var err error
-	var fileName string
-	if s.config.RenameFile {
-		fileName, err = resolveFileName(s.config, s.templateEngine, ctx, match)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		fileName = match.File.Name
-		if fileName == "" && match.File.Path != "" {
-			fileName = filepath.Base(match.File.Path)
-		}
+func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
+	pc := buildPlanContext(s.config, s.templateEngine, movie, match)
+	if pc.Err != nil {
+		return nil, pc.Err
 	}
 
-	sourceDir := filepath.Dir(match.File.Path)
+	sourceDir := filepath.Dir(match.Path)
 	parentDir := filepath.Dir(sourceDir)
 	baseDirLen := len(parentDir)
 	if len(destDir) > baseDirLen {
 		baseDirLen = len(destDir)
 	}
-	overheadBytes := baseDirLen + 2 + len(fileName)
+	overheadBytes := baseDirLen + 2 + len(pc.FileName)
 	folderMaxBytes := 0
 	if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
 		folderMaxBytes = s.config.MaxPathLength - overheadBytes
 	}
 
-	var folderName string
+	folderName := pc.FolderName
 	if folderMaxBytes > 0 {
-		folderName, err = s.templateEngine.ExecuteWithMaxBytes(s.config.FolderFormat, ctx, folderMaxBytes)
-	} else {
-		folderName, err = s.templateEngine.Execute(s.config.FolderFormat, ctx)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate folder name: %w", err)
-	}
-
-	folderName = template.SanitizeFolderPath(folderName)
-	if folderName == "" {
-		folderName = template.SanitizeFolderPath(match.ID)
+		var err error
+		folderName, err = s.templateEngine.ExecuteWithMaxBytes(s.config.FolderFormat, pc.Ctx, folderMaxBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate folder name: %w", err)
+		}
+		folderName = template.SanitizeFolderPath(folderName)
 		if folderName == "" {
-			folderName = "unknown"
+			folderName = template.SanitizeFolderPath(match.MovieID)
+			if folderName == "" {
+				folderName = "unknown"
+			}
 		}
 	}
 
@@ -137,7 +112,7 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 	skipInPlaceReason := ""
 
 	if s.matcher != nil {
-		isDedicated = s.isDedicatedFolder(sourceDir, match.ID, s.matcher)
+		isDedicated = s.isDedicatedFolder(sourceDir, match.MovieID, s.matcher)
 
 		if isDedicated {
 			currentFolderName := filepath.Base(sourceDir)
@@ -145,7 +120,7 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 				inPlace = true
 				oldDir = sourceDir
 				targetDir = filepath.Join(filepath.Dir(sourceDir), folderName)
-				targetPath = filepath.Join(targetDir, fileName)
+				targetPath = filepath.Join(targetDir, pc.FileName)
 				willMove = true
 			} else {
 				skipInPlaceReason = "folder already has correct name"
@@ -157,18 +132,18 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 		skipInPlaceReason = "matcher not set"
 	}
 
-	if !inPlace && s.config.GetOperationMode() == types.OperationModeOrganize {
+	if !inPlace && s.config.OperationMode == operationmode.OperationModeOrganize {
 		pathParts := []string{destDir}
 		if folderName != "" {
 			pathParts = append(pathParts, folderName)
 		}
 		targetDir = filepath.Join(pathParts...)
-		targetPath = filepath.Join(targetDir, fileName)
-		willMove = filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
+		targetPath = filepath.Join(targetDir, pc.FileName)
+		willMove = filepath.ToSlash(match.Path) != filepath.ToSlash(targetPath)
 	} else if !inPlace {
 		targetDir = sourceDir
-		targetPath = filepath.Join(targetDir, fileName)
-		willMove = filepath.ToSlash(match.File.Path) != filepath.ToSlash(targetPath)
+		targetPath = filepath.Join(targetDir, pc.FileName)
+		willMove = filepath.ToSlash(match.Path) != filepath.ToSlash(targetPath)
 	}
 
 	if s.config.MaxPathLength > 0 {
@@ -177,37 +152,43 @@ func (s *InPlaceStrategy) Plan(match matcher.MatchResult, movie *models.Movie, d
 		}
 	}
 
-	conflicts := checkTargetConflict(s.fs, match.File.Path, targetPath, forceUpdate, willMove)
+	conflicts := checkTargetConflict(s.fs, match.Path, targetPath, forceUpdate, willMove)
 	if inPlace && !forceUpdate {
 		if stat, err := s.fs.Stat(targetDir); err == nil {
-			if oldStat, oldErr := s.fs.Stat(oldDir); oldErr != nil || !os.SameFile(oldStat, stat) {
+			oldStat, oldErr := s.fs.Stat(oldDir)
+			if oldErr != nil {
+				conflicts = append(conflicts, targetDir)
+			} else if !os.SameFile(oldStat, stat) {
 				conflicts = append(conflicts, targetDir)
 			}
 		}
 	}
 
 	return &OrganizePlan{
-		Match:             match,
-		Movie:             movie,
-		SourcePath:        match.File.Path,
-		TargetDir:         targetDir,
-		TargetFile:        fileName,
-		TargetPath:        targetPath,
-		WillMove:          willMove,
-		Conflicts:         conflicts,
-		InPlace:           inPlace,
-		OldDir:            oldDir,
-		IsDedicated:       isDedicated,
-		SkipInPlaceReason: skipInPlaceReason,
-		FolderName:        folderName,
-		SubfolderPath:     "",
-		BaseFileName:      resolveBaseFileName(s.config, s.templateEngine, movie, match),
-		Strategy:          StrategyTypeInPlace,
-		executeStrategy:   s,
+		Match:              match,
+		Movie:              movie,
+		SourcePath:         match.Path,
+		TargetDir:          targetDir,
+		TargetFile:         pc.FileName,
+		TargetPath:         targetPath,
+		WillMove:           willMove,
+		Conflicts:          conflicts,
+		InPlace:            inPlace,
+		OldDir:             oldDir,
+		IsDedicated:        isDedicated,
+		SkipInPlaceReason:  skipInPlaceReason,
+		FolderName:         folderName,
+		SubfolderPath:      "",
+		BaseFileName:       resolveBaseFileName(s.config, s.templateEngine, movie, match),
+		PreserveSourcePath: false,
+		RenameFolder:       inPlace,
+		strategy:           strategyInPlace,
+		executeStrategy:    s,
+		moveFiles:          true,
 	}, nil
 }
 
-func (s *InPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
+func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	result := &OrganizeResult{
 		OriginalPath:           plan.SourcePath,
 		NewPath:                plan.TargetPath,
@@ -229,6 +210,10 @@ func (s *InPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		}
 
 		if _, err := s.fs.Stat(plan.TargetDir); err == nil {
+			// NOTE: TOCTOU race — targetDir could be created between this Stat check and the
+			// Rename below. This is a known limitation mitigated by the Plan-phase conflict check,
+			// which validates exclusivity before Execute runs. A filesystem-level atomic rename
+			// would be required to fully eliminate this window.
 			oldInfo, oldErr := s.fs.Stat(plan.OldDir)
 			if oldErr == nil {
 				newInfo, newErr := s.fs.Stat(plan.TargetDir)
@@ -252,7 +237,7 @@ func (s *InPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		result.OldDirectoryPath = plan.OldDir
 		result.NewDirectoryPath = plan.TargetDir
 
-		oldFileName := plan.Match.File.Name
+		oldFileName := plan.Match.Name
 		if oldFileName == "" {
 			oldFileName = filepath.Base(plan.SourcePath)
 		}
@@ -276,7 +261,6 @@ func (s *InPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 
 		if err := fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
 			result.Error = fmt.Errorf("failed to move file: %w", err)
-			_ = s.fs.Remove(plan.TargetDir) // Best-effort cleanup: Remove fails silently on non-empty dirs
 			return result, result.Error
 		}
 

@@ -8,11 +8,11 @@ import (
 
 func TestOutputConfig_ActressLanguageJA_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	// config_version: 3 avoids the legacy "wipe + regenerate" migration path,
-	// which is intentional (the migration intentionally overwrites fields with
-	// defaults for configs that predate v3). We only want to verify parsing.
+	// config_version: 3 avoids the legacy "wipe + regenerate" migration path.
+	// In the refactored config layout, actress_language_ja lives under
+	// metadata.nfo.format (it was relocated from output.* by the refactor).
 	path := filepath.Join(dir, "config.yaml")
-	yaml := "config_version: 3\noutput:\n  actress_language_ja: true\n  first_name_order: true\n"
+	yaml := "config_version: 3\nmetadata:\n  nfo:\n    actress_language_ja: true\noutput:\n  first_name_order: true\n"
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -20,10 +20,10 @@ func TestOutputConfig_ActressLanguageJA_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !cfg.Output.ActressLanguageJA {
+	if !cfg.Metadata.NFO.Format.ActressLanguageJA {
 		t.Errorf("ActressLanguageJA = false, want true")
 	}
-	if !cfg.Output.FirstNameOrder {
+	if !cfg.Output.Template.FirstNameOrder {
 		t.Errorf("FirstNameOrder = false, want true (control case)")
 	}
 
@@ -34,7 +34,7 @@ func TestOutputConfig_ActressLanguageJA_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load path2: %v", err)
 	}
-	if cfg2.Output.ActressLanguageJA {
+	if cfg2.Metadata.NFO.Format.ActressLanguageJA {
 		t.Errorf("ActressLanguageJA default = true, want false")
 	}
 }
@@ -54,8 +54,8 @@ func TestOutputConfig_LegacyDelimiterShim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrCreate: %v", err)
 	}
-	if cfg.Output.ActressDelimiter != " | " {
-		t.Errorf("expected legacy 'delimiter: | ' to carry over to ActressDelimiter; got %q", cfg.Output.ActressDelimiter)
+	if cfg.Output.Template.ActressDelimiter != " | " {
+		t.Errorf("expected legacy 'delimiter: | ' to carry over to ActressDelimiter; got %q", cfg.Output.Template.ActressDelimiter)
 	}
 }
 
@@ -75,7 +75,7 @@ func TestOutputConfig_LegacyDelimiterDoesNotClobber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrCreate: %v", err)
 	}
-	if cfg.Output.ActressDelimiter != "explicit-value" {
-		t.Errorf("expected explicit actress_delimiter to win, got %q", cfg.Output.ActressDelimiter)
+	if cfg.Output.Template.ActressDelimiter != "explicit-value" {
+		t.Errorf("expected explicit actress_delimiter to win, got %q", cfg.Output.Template.ActressDelimiter)
 	}
 }

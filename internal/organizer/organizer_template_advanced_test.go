@@ -6,11 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/matcher"
-	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/testutil"
-	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,31 +63,27 @@ func TestOrganizerTemplate_LongTitles(t *testing.T) {
 			}
 			longTitle = longTitle[:tt.titleLength]
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:   "<ID> - <TITLE>",
 				FileFormat:     "<ID>",
 				RenameFile:     true,
-				OperationMode:  types.OperationModeOrganize,
+				OperationMode:  operationmode.OperationModeOrganize,
 				MoveSubtitles:  false,
 				MaxTitleLength: tt.maxTitleLength,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := testutil.NewMovieBuilder().
 				WithID("IPX-123").
 				WithTitle(longTitle).
 				Build()
 
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: "IPX-123",
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: "IPX-123",
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 			require.NoError(t, err)
 
 			// Extract folder name from path
@@ -207,26 +201,22 @@ func TestOrganizerTemplate_CustomFunctions(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				OperationMode: types.OperationModeOrganize,
+				OperationMode: operationmode.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := tt.movieSetup().Build()
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: movie.ID,
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: movie.ID,
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 			require.NoError(t, err)
 
 			folderName := filepath.Base(plan.TargetDir)
@@ -283,30 +273,26 @@ func TestOrganizerTemplate_MultipleActresses(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				OperationMode: types.OperationModeOrganize,
+				OperationMode: operationmode.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := testutil.NewMovieBuilder().
 				WithID("TEST-001").
 				WithActresses(tt.actresses).
 				Build()
 
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: "TEST-001",
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: "TEST-001",
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 			require.NoError(t, err)
 
 			folderName := filepath.Base(plan.TargetDir)
@@ -368,26 +354,22 @@ func TestOrganizerTemplate_FilenameTemplates(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:  tt.folderTemplate,
 				FileFormat:    tt.fileTemplate,
 				RenameFile:    true,
-				OperationMode: types.OperationModeOrganize,
+				OperationMode: operationmode.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := tt.movieSetup().Build()
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "original.mp4",
-					Extension: ".mp4",
-				},
-				ID: movie.ID,
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "original.mp4", Extension: ".mp4",
+				MovieID: movie.ID,
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.expectedFile, plan.TargetFile,
@@ -407,31 +389,27 @@ func TestOrganizerTemplate_PathLengthValidation(t *testing.T) {
 	// Create a very long title that would exceed path limits
 	veryLongTitle := strings.Repeat("This is a very long movie title with many words ", 10)
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 		MoveSubtitles: false,
 		MaxPathLength: 200, // Set path limit
 	}
-	org := NewOrganizer(fs, cfg, nil)
+	org := NewOrganizer(fs, cfg, nil, nil)
 
 	movie := testutil.NewMovieBuilder().
 		WithID("IPX-123").
 		WithTitle(veryLongTitle).
 		Build()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "test.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-123",
+	match := models.FileMatchInfo{
+		Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+		MovieID: "IPX-123",
 	}
 
-	plan, err := org.Plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false)
 	require.NoError(t, err)
 
 	// Path should be truncated to fit within limit
@@ -494,26 +472,22 @@ func TestOrganizerTemplate_EdgeCases(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				OperationMode: types.OperationModeOrganize,
+				OperationMode: operationmode.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := tt.movieSetup().Build()
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: movie.ID,
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: movie.ID,
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 
 			if tt.shouldError {
 				assert.Error(t, err, tt.description)
@@ -533,15 +507,15 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 
 	t.Run("YEAR preserved after truncation", func(t *testing.T) {
 		longTitle := "This is an extremely long movie title that goes on and on and should definitely be truncated"
-		cfg := &config.OutputConfig{
+		cfg := &Config{
 			FolderFormat:   "<ID> - <TITLE> (<YEAR>)",
 			FileFormat:     "<ID>",
 			RenameFile:     true,
-			OperationMode:  types.OperationModeOrganize,
+			OperationMode:  operationmode.OperationModeOrganize,
 			MoveSubtitles:  false,
 			MaxTitleLength: 30,
 		}
-		org := NewOrganizer(fs, cfg, nil)
+		org := NewOrganizer(fs, cfg, nil, nil)
 
 		movie := testutil.NewMovieBuilder().
 			WithID("IPX-123").
@@ -549,16 +523,12 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 			WithReleaseDate(time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC)).
 			Build()
 
-		match := matcher.MatchResult{
-			File: scanner.FileInfo{
-				Path:      sourcePath,
-				Name:      "test.mp4",
-				Extension: ".mp4",
-			},
-			ID: "IPX-123",
+		match := models.FileMatchInfo{
+			Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+			MovieID: "IPX-123",
 		}
 
-		plan, err := org.Plan(match, movie, "/movies", false)
+		plan, err := org.plan(match, movie, "/movies", false)
 		require.NoError(t, err)
 
 		folderName := filepath.Base(plan.TargetDir)
@@ -568,15 +538,15 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 
 	t.Run("STUDIO preserved after truncation", func(t *testing.T) {
 		longTitle := "This is an extremely long movie title that goes on and on and should definitely be truncated"
-		cfg := &config.OutputConfig{
+		cfg := &Config{
 			FolderFormat:   "<ID> [<STUDIO>] - <TITLE>",
 			FileFormat:     "<ID>",
 			RenameFile:     true,
-			OperationMode:  types.OperationModeOrganize,
+			OperationMode:  operationmode.OperationModeOrganize,
 			MoveSubtitles:  false,
 			MaxTitleLength: 30,
 		}
-		org := NewOrganizer(fs, cfg, nil)
+		org := NewOrganizer(fs, cfg, nil, nil)
 
 		movie := testutil.NewMovieBuilder().
 			WithID("IPX-123").
@@ -584,16 +554,12 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 			WithStudio("Prestige").
 			Build()
 
-		match := matcher.MatchResult{
-			File: scanner.FileInfo{
-				Path:      sourcePath,
-				Name:      "test.mp4",
-				Extension: ".mp4",
-			},
-			ID: "IPX-123",
+		match := models.FileMatchInfo{
+			Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+			MovieID: "IPX-123",
 		}
 
-		plan, err := org.Plan(match, movie, "/movies", false)
+		plan, err := org.plan(match, movie, "/movies", false)
 		require.NoError(t, err)
 
 		folderName := filepath.Base(plan.TargetDir)
@@ -603,15 +569,15 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 
 	t.Run("file format with TITLE truncation preserves other tags", func(t *testing.T) {
 		longTitle := "This is an extremely long movie title that goes on and on and should definitely be truncated"
-		cfg := &config.OutputConfig{
+		cfg := &Config{
 			FolderFormat:   "<ID>",
 			FileFormat:     "<ID> - <TITLE> (<YEAR>)",
 			RenameFile:     true,
-			OperationMode:  types.OperationModeOrganize,
+			OperationMode:  operationmode.OperationModeOrganize,
 			MoveSubtitles:  false,
 			MaxTitleLength: 30,
 		}
-		org := NewOrganizer(fs, cfg, nil)
+		org := NewOrganizer(fs, cfg, nil, nil)
 
 		movie := testutil.NewMovieBuilder().
 			WithID("IPX-123").
@@ -619,16 +585,12 @@ func TestOrganizerTemplate_MaxTitleLengthPreservesNonTitleTags(t *testing.T) {
 			WithReleaseDate(time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC)).
 			Build()
 
-		match := matcher.MatchResult{
-			File: scanner.FileInfo{
-				Path:      sourcePath,
-				Name:      "test.mp4",
-				Extension: ".mp4",
-			},
-			ID: "IPX-123",
+		match := models.FileMatchInfo{
+			Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+			MovieID: "IPX-123",
 		}
 
-		plan, err := org.Plan(match, movie, "/movies", false)
+		plan, err := org.plan(match, movie, "/movies", false)
 		require.NoError(t, err)
 
 		assert.Equal(t, "IPX-123 - This is an extremely long... (2024).mp4", plan.TargetFile,

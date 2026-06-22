@@ -4,38 +4,33 @@ import (
 	"path/filepath"
 	"testing"
 
-	tuicmd "github.com/javinizer/javinizer-go/cmd/javinizer/commands/tui"
-	"github.com/javinizer/javinizer-go/internal/matcher"
-	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/tui"
 	"github.com/stretchr/testify/assert"
 )
 
-// Access buildFileTree via reflection or testing export
-// Since buildFileTree is not exported, we need to test it indirectly
-// Or we can use a test-specific export
-
 func TestBuildFileTree_EmptyFiles(t *testing.T) {
 	basePath := t.TempDir()
-	files := []scanner.FileInfo{}
-	matchMap := make(map[string]matcher.MatchResult)
+	files := []models.FileMatchInfo{}
+	matchMap := make(map[string]models.FileMatchInfo)
 
-	result := tuicmd.BuildFileTree(basePath, files, matchMap)
+	result := tui.BuildFileTree(basePath, files, matchMap)
 
 	assert.Empty(t, result)
 }
 
 func TestBuildFileTree_SingleFile(t *testing.T) {
 	basePath := t.TempDir()
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{
 			Path: filepath.Join(basePath, "movie.mp4"),
 			Name: "movie.mp4",
 			Size: 1024,
 		},
 	}
-	matchMap := make(map[string]matcher.MatchResult)
+	matchMap := make(map[string]models.FileMatchInfo)
 
-	result := tuicmd.BuildFileTree(basePath, files, matchMap)
+	result := tui.BuildFileTree(basePath, files, matchMap)
 
 	assert.NotEmpty(t, result)
 	// Should have at least the file
@@ -52,24 +47,22 @@ func TestBuildFileTree_SingleFile(t *testing.T) {
 
 func TestBuildFileTree_WithMatches(t *testing.T) {
 	basePath := "/test/path"
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{
 			Path: "/test/path/IPX-535.mp4",
 			Name: "IPX-535.mp4",
 			Size: 2048,
 		},
 	}
-	matchMap := map[string]matcher.MatchResult{
+	matchMap := map[string]models.FileMatchInfo{
 		"/test/path/IPX-535.mp4": {
-			ID: "IPX-535",
-			File: scanner.FileInfo{
-				Path: "/test/path/IPX-535.mp4",
-				Name: "IPX-535.mp4",
-			},
+			MovieID: "IPX-535",
+			Path:    "/test/path/IPX-535.mp4",
+			Name:    "IPX-535.mp4",
 		},
 	}
 
-	result := tuicmd.BuildFileTree(basePath, files, matchMap)
+	result := tui.BuildFileTree(basePath, files, matchMap)
 
 	assert.NotEmpty(t, result)
 	// Find the file item
@@ -97,7 +90,7 @@ func TestBuildFileTree_WithMatches(t *testing.T) {
 
 func TestBuildFileTree_NestedDirectories(t *testing.T) {
 	basePath := "/test/path"
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{
 			Path: "/test/path/subdir1/movie1.mp4",
 			Name: "movie1.mp4",
@@ -114,9 +107,9 @@ func TestBuildFileTree_NestedDirectories(t *testing.T) {
 			Size: 3072,
 		},
 	}
-	matchMap := make(map[string]matcher.MatchResult)
+	matchMap := make(map[string]models.FileMatchInfo)
 
-	result := tuicmd.BuildFileTree(basePath, files, matchMap)
+	result := tui.BuildFileTree(basePath, files, matchMap)
 
 	assert.NotEmpty(t, result)
 
@@ -137,7 +130,7 @@ func TestBuildFileTree_NestedDirectories(t *testing.T) {
 
 func TestBuildFileTree_MultipleFilesInSameDir(t *testing.T) {
 	basePath := "/test/path"
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{
 			Path: "/test/path/movie1.mp4",
 			Name: "movie1.mp4",
@@ -154,9 +147,9 @@ func TestBuildFileTree_MultipleFilesInSameDir(t *testing.T) {
 			Size: 3072,
 		},
 	}
-	matchMap := make(map[string]matcher.MatchResult)
+	matchMap := make(map[string]models.FileMatchInfo)
 
-	result := tuicmd.BuildFileTree(basePath, files, matchMap)
+	result := tui.BuildFileTree(basePath, files, matchMap)
 
 	assert.NotEmpty(t, result)
 
@@ -173,7 +166,7 @@ func TestBuildFileTree_MultipleFilesInSameDir(t *testing.T) {
 
 func TestBuildFileTree_DepthCalculation(t *testing.T) {
 	basePath := "/test/path"
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{
 			Path: "/test/path/movie.mp4",
 			Name: "movie.mp4",
@@ -190,9 +183,9 @@ func TestBuildFileTree_DepthCalculation(t *testing.T) {
 			Size: 3072,
 		},
 	}
-	matchMap := make(map[string]matcher.MatchResult)
+	matchMap := make(map[string]models.FileMatchInfo)
 
-	result := tuicmd.BuildFileTree(basePath, files, matchMap)
+	result := tui.BuildFileTree(basePath, files, matchMap)
 
 	assert.NotEmpty(t, result)
 
@@ -212,16 +205,16 @@ func TestBuildFileTree_DepthCalculation(t *testing.T) {
 
 func TestBuildFileTree_ParentTracking(t *testing.T) {
 	basePath := "/test/path"
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{
 			Path: "/test/path/subdir/movie.mp4",
 			Name: "movie.mp4",
 			Size: 1024,
 		},
 	}
-	matchMap := make(map[string]matcher.MatchResult)
+	matchMap := make(map[string]models.FileMatchInfo)
 
-	result := tuicmd.BuildFileTree(basePath, files, matchMap)
+	result := tui.BuildFileTree(basePath, files, matchMap)
 
 	assert.NotEmpty(t, result)
 
@@ -240,7 +233,7 @@ func TestBuildFileTree_ParentTracking(t *testing.T) {
 
 func TestBuildFileTree_SortedOutput(t *testing.T) {
 	basePath := "/test/path"
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{
 			Path: "/test/path/zebra.mp4",
 			Name: "zebra.mp4",
@@ -257,9 +250,9 @@ func TestBuildFileTree_SortedOutput(t *testing.T) {
 			Size: 3072,
 		},
 	}
-	matchMap := make(map[string]matcher.MatchResult)
+	matchMap := make(map[string]models.FileMatchInfo)
 
-	result := tuicmd.BuildFileTree(basePath, files, matchMap)
+	result := tui.BuildFileTree(basePath, files, matchMap)
 
 	assert.NotEmpty(t, result)
 
@@ -277,7 +270,7 @@ func TestBuildFileTree_SortedOutput(t *testing.T) {
 
 func TestBuildFileTree_ComplexStructure(t *testing.T) {
 	basePath := "/test/path"
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{
 			Path: "/test/path/root1.mp4",
 			Name: "root1.mp4",
@@ -299,24 +292,20 @@ func TestBuildFileTree_ComplexStructure(t *testing.T) {
 			Size: 4096,
 		},
 	}
-	matchMap := map[string]matcher.MatchResult{
+	matchMap := map[string]models.FileMatchInfo{
 		"/test/path/root1.mp4": {
-			ID: "ABC-123",
-			File: scanner.FileInfo{
-				Path: "/test/path/root1.mp4",
-				Name: "root1.mp4",
-			},
+			MovieID: "ABC-123",
+			Path:    "/test/path/root1.mp4",
+			Name:    "root1.mp4",
 		},
 		"/test/path/dir1/file1.mp4": {
-			ID: "IPX-535",
-			File: scanner.FileInfo{
-				Path: "/test/path/dir1/file1.mp4",
-				Name: "file1.mp4",
-			},
+			MovieID: "IPX-535",
+			Path:    "/test/path/dir1/file1.mp4",
+			Name:    "file1.mp4",
 		},
 	}
 
-	result := tuicmd.BuildFileTree(basePath, files, matchMap)
+	result := tui.BuildFileTree(basePath, files, matchMap)
 
 	assert.NotEmpty(t, result)
 
@@ -343,16 +332,16 @@ func TestBuildFileTree_ComplexStructure(t *testing.T) {
 
 func TestBuildFileTree_EmptyMatchMap(t *testing.T) {
 	basePath := "/test/path"
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{
 			Path: "/test/path/movie.mp4",
 			Name: "movie.mp4",
 			Size: 1024,
 		},
 	}
-	matchMap := make(map[string]matcher.MatchResult)
+	matchMap := make(map[string]models.FileMatchInfo)
 
-	result := tuicmd.BuildFileTree(basePath, files, matchMap)
+	result := tui.BuildFileTree(basePath, files, matchMap)
 
 	assert.NotEmpty(t, result)
 

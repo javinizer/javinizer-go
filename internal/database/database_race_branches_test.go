@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -12,10 +13,10 @@ import (
 func TestMovieTranslationRepositoryUpsertTx_DuplicateCreateRace(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	movieRepo := NewMovieRepository(db)
-	translationRepo := NewMovieTranslationRepository(db)
+	translationRepo := newMovieTranslationRepository(db)
 
 	movie := createTestMovie("IPX-RACE-TX-001")
-	require.NoError(t, movieRepo.Create(movie))
+	require.NoError(t, movieRepo.Create(context.TODO(), movie))
 
 	cbName := "test:inject_translation_duplicate"
 	inserted := false
@@ -49,7 +50,7 @@ func TestMovieTranslationRepositoryUpsertTx_DuplicateCreateRace(t *testing.T) {
 	}
 	require.NoError(t, translationRepo.UpsertTx(db.DB, translation))
 
-	stored, err := translationRepo.FindByMovieAndLanguage(movie.ContentID, "en")
+	stored, err := translationRepo.FindByMovieAndLanguage(context.TODO(), movie.ContentID, "en")
 	require.NoError(t, err)
 	assert.Equal(t, "Updated Title", stored.Title)
 	assert.Equal(t, "Updated Description", stored.Description)
@@ -59,7 +60,7 @@ func TestMovieRepositoryUpsert_MissingIdentifiers(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewMovieRepository(db)
 
-	_, err := repo.Upsert(&models.Movie{Title: "No IDs"})
+	_, err := repo.Upsert(context.TODO(), &models.Movie{Title: "No IDs"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "content_id is required")
 }
@@ -71,16 +72,16 @@ func TestMovieRepositoryUpsert_FallbackByDisplayID(t *testing.T) {
 	existing := createTestMovie("LEG-001")
 	existing.ContentID = "legacy_content"
 	existing.Title = "Legacy Title"
-	require.NoError(t, repo.Create(existing))
+	require.NoError(t, repo.Create(context.TODO(), existing))
 
 	incoming := &models.Movie{
 		ID:        "LEG-001",
 		ContentID: "",
 		Title:     "Updated via ID fallback",
 	}
-	_, err := repo.Upsert(incoming)
+	_, err := repo.Upsert(context.TODO(), incoming)
 
-	loaded, err := repo.FindByContentID("legacy_content")
+	loaded, err := repo.FindByContentID(context.TODO(), "legacy_content")
 	require.NoError(t, err)
 	assert.Equal(t, "Updated via ID fallback", loaded.Title)
 	assert.Equal(t, "legacy_content", loaded.ContentID)
@@ -92,7 +93,7 @@ func TestMovieRepositoryEnsureGenresExistTx_DBError(t *testing.T) {
 
 	err := db.Transaction(func(tx *gorm.DB) error {
 		require.NoError(t, tx.Exec("DROP TABLE genres").Error)
-		return repo.ensureGenresExistTx(tx, []models.Genre{{Name: "Any"}})
+		return repo.upserter.ensureGenresExistTx(tx, []models.Genre{{Name: "Any"}})
 	})
 	require.Error(t, err)
 }
@@ -103,7 +104,7 @@ func TestMovieRepositoryEnsureActressesExistTx_DBError(t *testing.T) {
 
 	err := db.Transaction(func(tx *gorm.DB) error {
 		require.NoError(t, tx.Exec("DROP TABLE actresses").Error)
-		return repo.ensureActressesExistTx(tx, []models.Actress{{DMMID: 1, JapaneseName: "X"}})
+		return repo.upserter.ensureActressesExistTx(tx, []models.Actress{{DMMID: 1, JapaneseName: "X"}})
 	})
 	require.Error(t, err)
 }
@@ -140,7 +141,7 @@ func TestMovieRepositoryEnsureActressesExistTx_DuplicateCreateRetries(t *testing
 		defer func() { _ = db.DB.Callback().Create().Remove(cbName) }()
 
 		actresses := []models.Actress{{DMMID: 777001, JapaneseName: "Retry DMM", ThumbURL: "https://example.com/dmm.jpg"}}
-		err := repo.ensureActressesExistTx(db.DB, actresses)
+		err := repo.upserter.ensureActressesExistTx(db.DB, actresses)
 		require.NoError(t, err)
 		assert.NotZero(t, actresses[0].ID)
 
@@ -180,7 +181,7 @@ func TestMovieRepositoryEnsureActressesExistTx_DuplicateCreateRetries(t *testing
 		defer func() { _ = db.DB.Callback().Create().Remove(cbName) }()
 
 		actresses := []models.Actress{{JapaneseName: "Retry JP", ThumbURL: "https://example.com/jp.jpg"}}
-		err := repo.ensureActressesExistTx(db.DB, actresses)
+		err := repo.upserter.ensureActressesExistTx(db.DB, actresses)
 		require.NoError(t, err)
 		assert.NotZero(t, actresses[0].ID)
 
@@ -220,7 +221,7 @@ func TestMovieRepositoryEnsureActressesExistTx_DuplicateCreateRetries(t *testing
 		defer func() { _ = db.DB.Callback().Create().Remove(cbName) }()
 
 		actresses := []models.Actress{{FirstName: "Retry", LastName: "Pair", ThumbURL: "https://example.com/pair.jpg"}}
-		err := repo.ensureActressesExistTx(db.DB, actresses)
+		err := repo.upserter.ensureActressesExistTx(db.DB, actresses)
 		require.NoError(t, err)
 		assert.NotZero(t, actresses[0].ID)
 
@@ -255,7 +256,7 @@ func TestMovieRepositoryUpsert_OrphanedTranslationsDoNotBlockActressCreation(t *
 			{Language: "zh", Title: "Chinese Title"},
 		},
 	}
-	result, err := repo.Upsert(movie)
+	result, err := repo.Upsert(context.TODO(), movie)
 	require.NoError(t, err)
 
 	assert.Len(t, result.Actresses, 1)
@@ -271,14 +272,14 @@ func TestMovieRepositoryUpsert_OrphanedTranslationsDoNotBlockActressCreation(t *
 	assert.Equal(t, "Real English Title", langTitles["en"], "orphaned translation should be upserted-over")
 	assert.Equal(t, "Chinese Title", langTitles["zh"])
 
-	found, err := repo.FindByContentID(contentID)
+	found, err := repo.FindByContentID(context.TODO(), contentID)
 	require.NoError(t, err)
 	assert.Len(t, found.Actresses, 1)
 	assert.Equal(t, 88888, found.Actresses[0].DMMID)
 	assert.Len(t, found.Translations, 2)
 
 	actressRepo := NewActressRepository(db)
-	actress, err := actressRepo.FindByDMMID(88888)
+	actress, err := actressRepo.FindByDMMID(context.TODO(), 88888)
 	require.NoError(t, err)
 	assert.Equal(t, "OrphanTest Actress", actress.JapaneseName)
 }
@@ -293,7 +294,7 @@ func TestMovieRepositoryUpsert_OrphanedTranslationsOnExistingMovieUpdate(t *test
 	movie.Actresses = []models.Actress{
 		{DMMID: 77711, JapaneseName: "Original Actress"},
 	}
-	err := repo.Create(movie)
+	err := repo.Create(context.TODO(), movie)
 	require.NoError(t, err)
 
 	require.NoError(t, db.DB.Exec(
@@ -320,7 +321,7 @@ func TestMovieRepositoryUpsert_OrphanedTranslationsOnExistingMovieUpdate(t *test
 			{Language: "zh", Title: "New Chinese Title"},
 		},
 	}
-	result, err := repo.Upsert(updated)
+	result, err := repo.Upsert(context.TODO(), updated)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Updated Movie Title", result.Title)
@@ -337,7 +338,7 @@ func TestMovieRepositoryUpsert_OrphanedTranslationsOnExistingMovieUpdate(t *test
 	assert.Equal(t, "New Chinese Title", langTitles["zh"])
 	assert.NotContains(t, langTitles, "ja", "stale translation should be deleted")
 
-	found, err := repo.FindByContentID(contentID)
+	found, err := repo.FindByContentID(context.TODO(), contentID)
 	require.NoError(t, err)
 	assert.Len(t, found.Actresses, 1)
 	assert.Equal(t, 77712, found.Actresses[0].DMMID)
@@ -389,10 +390,10 @@ func TestMovieRepositoryUpsert_DuplicateCreateRaceFallbackUpdatePath(t *testing.
 			{Language: "en", Title: "Race Title EN"},
 		},
 	}
-	_, err := repo.Upsert(movie)
+	_, err := repo.Upsert(context.TODO(), movie)
 	require.NoError(t, err)
 
-	found, err := repo.FindByContentID(movie.ContentID)
+	found, err := repo.FindByContentID(context.TODO(), movie.ContentID)
 	require.NoError(t, err)
 	assert.Equal(t, "Updated by fallback", found.Title)
 	assert.Len(t, found.Genres, 1)

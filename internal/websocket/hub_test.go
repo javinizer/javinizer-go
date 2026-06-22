@@ -86,7 +86,7 @@ func TestBroadcast(t *testing.T) {
 			name: "valid progress message",
 			message: &ProgressMessage{
 				JobID:    "test-job",
-				Status:   "processing",
+				Status:   ProgressStatus("processing"),
 				Progress: 0.5,
 				Message:  "Test message",
 			},
@@ -146,7 +146,7 @@ func TestBroadcastProgress(t *testing.T) {
 		JobID:     "test-job-123",
 		FileIndex: 1,
 		FilePath:  "/path/to/file.mp4",
-		Status:    "completed",
+		Status:    ProgressStatus("completed"),
 		Progress:  1.0,
 		Message:   "Processing complete",
 	}
@@ -201,7 +201,7 @@ func TestProgressMessage_JSONMarshaling(t *testing.T) {
 		JobID:     "job-1",
 		FileIndex: 0,
 		FilePath:  "/test.mp4",
-		Status:    "processing",
+		Status:    ProgressStatus("processing"),
 		Progress:  0.75,
 		Message:   "Test",
 		Error:     "some error",

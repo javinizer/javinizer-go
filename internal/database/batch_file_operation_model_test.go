@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -16,27 +17,25 @@ func TestBatchFileOperation_TableName(t *testing.T) {
 
 func TestBatchFileOperation_Constants(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "applied", models.RevertStatusApplied)
-	assert.Equal(t, "reverted", models.RevertStatusReverted)
-	assert.Equal(t, "failed", models.RevertStatusFailed)
+	assert.Equal(t, models.RevertStatusEnum("applied"), models.RevertStatusApplied)
+	assert.Equal(t, models.RevertStatusEnum("reverted"), models.RevertStatusReverted)
+	assert.Equal(t, models.RevertStatusEnum("failed"), models.RevertStatusFailed)
 
-	// D-06: RevertOutcome constants
-	assert.Equal(t, "reverted", models.RevertOutcomeReverted)
-	assert.Equal(t, "skipped", models.RevertOutcomeSkipped)
-	assert.Equal(t, "failed", models.RevertOutcomeFailed)
+	assert.Equal(t, models.RevertOutcomeEnum("reverted"), models.RevertOutcomeReverted)
+	assert.Equal(t, models.RevertOutcomeEnum("skipped"), models.RevertOutcomeSkipped)
+	assert.Equal(t, models.RevertOutcomeEnum("failed"), models.RevertOutcomeFailed)
 
-	// D-06: RevertReason constants
-	assert.Equal(t, "anchor_missing", models.RevertReasonAnchorMissing)
-	assert.Equal(t, "destination_conflict", models.RevertReasonDestinationConflict)
-	assert.Equal(t, "access_denied", models.RevertReasonAccessDenied)
-	assert.Equal(t, "unexpected_path_state", models.RevertReasonUnexpectedPathState)
-	assert.Equal(t, "nfo_restore_failed", models.RevertReasonNFORestoreFailed)
-	assert.Equal(t, "generated_cleanup_failed", models.RevertReasonGeneratedCleanupFailed)
+	assert.Equal(t, models.RevertReasonEnum("anchor_missing"), models.RevertReasonAnchorMissing)
+	assert.Equal(t, models.RevertReasonEnum("destination_conflict"), models.RevertReasonDestinationConflict)
+	assert.Equal(t, models.RevertReasonEnum("access_denied"), models.RevertReasonAccessDenied)
+	assert.Equal(t, models.RevertReasonEnum("unexpected_path_state"), models.RevertReasonUnexpectedPathState)
+	assert.Equal(t, models.RevertReasonEnum("nfo_restore_failed"), models.RevertReasonNFORestoreFailed)
+	assert.Equal(t, models.RevertReasonEnum("generated_cleanup_failed"), models.RevertReasonGeneratedCleanupFailed)
 
-	assert.Equal(t, "move", models.OperationTypeMove)
-	assert.Equal(t, "copy", models.OperationTypeCopy)
-	assert.Equal(t, "hardlink", models.OperationTypeHardlink)
-	assert.Equal(t, "symlink", models.OperationTypeSymlink)
+	assert.Equal(t, models.OperationTypeEnum("move"), models.OperationTypeMove)
+	assert.Equal(t, models.OperationTypeEnum("copy"), models.OperationTypeCopy)
+	assert.Equal(t, models.OperationTypeEnum("hardlink"), models.OperationTypeHardlink)
+	assert.Equal(t, models.OperationTypeEnum("symlink"), models.OperationTypeSymlink)
 }
 
 func TestMigration_BatchFileOperationsTable(t *testing.T) {
@@ -66,15 +65,15 @@ func TestHistory_BatchJobID_RoundTrip(t *testing.T) {
 	history := &models.History{
 		MovieID:    "ABC-002",
 		BatchJobID: &batchJobID,
-		Operation:  "organize",
-		Status:     "success",
+		Operation:  models.HistoryOpOrganize,
+		Status:     models.HistoryStatusSuccess,
 	}
-	err := repo.Create(history)
+	err := repo.Create(context.TODO(), history)
 	require.NoError(t, err)
 	assert.NotZero(t, history.ID)
 
 	// Read it back
-	found, err := repo.FindByID(history.ID)
+	found, err := repo.FindByID(context.TODO(), history.ID)
 	require.NoError(t, err)
 	require.NotNil(t, found.BatchJobID)
 	assert.Equal(t, batchJobID, *found.BatchJobID)
@@ -88,14 +87,14 @@ func TestHistory_BatchJobID_Null(t *testing.T) {
 	history := &models.History{
 		MovieID:    "ABC-003",
 		BatchJobID: nil,
-		Operation:  "scrape",
-		Status:     "success",
+		Operation:  models.HistoryOpScrape,
+		Status:     models.HistoryStatusSuccess,
 	}
-	err := repo.Create(history)
+	err := repo.Create(context.TODO(), history)
 	require.NoError(t, err)
 
 	// Read it back — BatchJobID should be nil
-	found, err := repo.FindByID(history.ID)
+	found, err := repo.FindByID(context.TODO(), history.ID)
 	require.NoError(t, err)
 	assert.Nil(t, found.BatchJobID)
 }
@@ -108,8 +107,8 @@ func TestHistory_ExistingTestsStillPass(t *testing.T) {
 
 	history := &models.History{
 		MovieID:      "BACKCOMPAT-001",
-		Operation:    "scrape",
-		Status:       "success",
+		Operation:    models.HistoryOpScrape,
+		Status:       models.HistoryStatusSuccess,
 		OriginalPath: "/path/to/original.mp4",
 		NewPath:      "/path/to/new.mp4",
 		ErrorMessage: "",
@@ -117,14 +116,14 @@ func TestHistory_ExistingTestsStillPass(t *testing.T) {
 		DryRun:       false,
 	}
 
-	err := repo.Create(history)
+	err := repo.Create(context.TODO(), history)
 	require.NoError(t, err)
 	assert.NotZero(t, history.ID)
 
-	found, err := repo.FindByID(history.ID)
+	found, err := repo.FindByID(context.TODO(), history.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "BACKCOMPAT-001", found.MovieID)
-	assert.Equal(t, "scrape", found.Operation)
+	assert.Equal(t, models.HistoryOpScrape, found.Operation)
 	assert.Equal(t, "/path/to/original.mp4", found.OriginalPath)
 	assert.Equal(t, `/path/to/new.mp4`, found.NewPath)
 }

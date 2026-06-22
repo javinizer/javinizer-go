@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"context"
 	"encoding/binary"
 	"os"
 	"path/filepath"
@@ -146,7 +147,7 @@ func createTestAVI(t *testing.T, tmpDir string, videoCodec string, audioFormatTa
 }
 
 func TestAVIProber_Name(t *testing.T) {
-	prober := NewAVIProber()
+	prober := newAVIProber()
 	assert.Equal(t, "avi", prober.Name())
 }
 
@@ -187,10 +188,10 @@ func TestAVIProber_CanProbe(t *testing.T) {
 		},
 	}
 
-	prober := NewAVIProber()
+	prober := newAVIProber()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := prober.CanProbe(tt.header)
+			result := prober.canProbe(tt.header)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -215,8 +216,8 @@ func TestAVIProber_Probe_InvalidRIFF(t *testing.T) {
 		_ = f.Close()
 	}()
 
-	prober := NewAVIProber()
-	_, err = prober.Probe(f)
+	prober := newAVIProber()
+	_, err = prober.Probe(context.Background(), f)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid RIFF signature")
@@ -236,8 +237,8 @@ func TestAVIProber_Probe_NotAVI(t *testing.T) {
 		_ = f.Close()
 	}()
 
-	prober := NewAVIProber()
-	_, err = prober.Probe(f)
+	prober := newAVIProber()
+	_, err = prober.Probe(context.Background(), f)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not an AVI file")
@@ -255,8 +256,8 @@ func TestAVIProber_Probe_TruncatedFile(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewAVIProber()
-	info, err := prober.Probe(f)
+	prober := newAVIProber()
+	info, err := prober.Probe(context.Background(), f)
 
 	// Should handle gracefully and return partial info
 	require.NoError(t, err)

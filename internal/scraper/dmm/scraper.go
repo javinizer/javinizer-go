@@ -3,15 +3,16 @@ package dmm
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/spf13/afero"
 )
 
 const (
@@ -20,9 +21,9 @@ const (
 	searchURL           = baseURL + "/search/=/searchstr=%s/"
 	digitalURL          = baseURL + "/digital/videoa/-/detail/=/cid=%s/"
 	physicalURL         = baseURL + "/mono/dvd/-/detail/=/cid=%s/"
-	rentalURL           = baseURL + "/rental/ppr/-/detail/=/cid=%s/"
 	newDigitalURL       = newBaseURL + "/av/content/?id=%s"
 	newAmateurURL       = newBaseURL + "/amateur/content/?id=%s"
+	rentalURL           = baseURL + "/rental/ppr/-/detail/=/cid=%s/"
 	actressLinkSelector = `a[href*='?actress='], a[href*='&actress='], a[href*='/article=actress/id=']`
 )
 
@@ -39,18 +40,21 @@ var (
 	dmmIDRegex              = regexp.MustCompile(`[?&]id=([^/?&]+)`)
 )
 
-type Scraper struct {
+// scraper implements the DMM scraper.
+type scraper struct {
 	client        *resty.Client
 	enabled       bool
 	scrapeActress bool
 	useBrowser    bool
-	browserConfig config.BrowserConfig
-	contentIDRepo *database.ContentIDMappingRepository
-	proxyProfile  *config.ProxyProfile
-	proxyOverride *config.ProxyConfig
-	downloadProxy *config.ProxyConfig
+	browserConfig models.BrowserConfig
+	contentIDRepo models.ContentIDMappingRepositoryInterface
+	proxyProfile  *models.ProxyProfile
+	proxyOverride *models.ProxyConfig
+	downloadProxy *models.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings
+	settings      models.ScraperSettings
+	envLookup     func(string) string
+	fs            afero.Fs
 }
 
 func resolveTimeout(scraperTimeout, globalTimeout int) int {
@@ -63,15 +67,21 @@ func resolveTimeout(scraperTimeout, globalTimeout int) int {
 	return 30
 }
 
-func New(settings config.ScraperSettings, globalConfig *config.ScrapersConfig, contentIDRepo *database.ContentIDMappingRepository) *Scraper {
-	if globalConfig == nil {
-		globalConfig = &config.ScrapersConfig{}
-	}
+// dmmOptions holds DMM-specific construction parameters that differ from
+// the standard (settings, proxy, flaresolverr) pattern used by other scrapers.
+type dmmOptions struct {
+	TimeoutSeconds int
+	ScrapeActress  bool
+	Browser        models.BrowserConfig
+	ContentIDRepo  models.ContentIDMappingRepositoryInterface
+}
 
-	resolvedTimeout := resolveTimeout(settings.Timeout, globalConfig.TimeoutSeconds)
+// newScraper creates a new DMM scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig, opts dmmOptions) *scraper {
+	resolvedTimeout := resolveTimeout(settings.Timeout, opts.TimeoutSeconds)
 	settings.Timeout = resolvedTimeout
 
-	result := httpclient.InitScraperClient(&settings, &globalConfig.Proxy, globalConfig.FlareSolverr,
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
 			httpclient.DMMHeaders(),
 			httpclient.UserAgentHeader(settings.UserAgent),
@@ -81,38 +91,57 @@ func New(settings config.ScraperSettings, globalConfig *config.ScrapersConfig, c
 	client := result.Client
 	proxyProfile := result.ProxyProfile
 
-	return &Scraper{
+	return &scraper{
 		client:        client,
 		enabled:       settings.Enabled,
-		scrapeActress: settings.ShouldScrapeActress(globalConfig.ScrapeActress),
-		useBrowser:    settings.ShouldUseBrowser(globalConfig.Browser.Enabled),
-		browserConfig: globalConfig.Browser,
-		contentIDRepo: contentIDRepo,
+		scrapeActress: settings.ShouldScrapeActress(opts.ScrapeActress),
+		useBrowser:    settings.ShouldUseBrowser(opts.Browser.Enabled),
+		browserConfig: opts.Browser,
+		contentIDRepo: opts.ContentIDRepo,
 		proxyProfile:  proxyProfile,
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
-		settings:      settings,
+		settings:      *settings,
+		envLookup:     os.Getenv,
+		fs:            afero.NewOsFs(),
 	}
 }
 
-func (s *Scraper) Name() string {
+func (s *scraper) Name() string {
 	return "dmm"
 }
 
-func (s *Scraper) IsEnabled() bool {
+// getEnvLookup returns the injected env lookup function or os.Getenv as fallback.
+func (s *scraper) getEnvLookup() func(string) string {
+	if s.envLookup != nil {
+		return s.envLookup
+	}
+	return os.Getenv
+}
+
+// getFs returns the injected filesystem or afero.NewOsFs() as fallback.
+func (s *scraper) getFs() afero.Fs {
+	if s.fs != nil {
+		return s.fs
+	}
+	return afero.NewOsFs()
+}
+
+func (s *scraper) IsEnabled() bool {
 	return s.enabled
 }
 
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	return nil
 }
 
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -125,7 +154,7 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 		host == "dmm.com" || strings.HasSuffix(host, ".dmm.com")
 }
 
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	matches := dmmCIDRegex.FindStringSubmatch(urlStr)
 	if len(matches) > 1 {
 		return matches[1], nil
@@ -139,26 +168,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract content ID from DMM URL")
 }
 
-func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
-	if cfg == nil {
-		return fmt.Errorf("dmm: config is nil")
-	}
-	if !cfg.Enabled {
-		return nil
-	}
-	if cfg.RateLimit < 0 {
-		return fmt.Errorf("dmm: rate_limit must be non-negative, got %d", cfg.RateLimit)
-	}
-	if cfg.RetryCount < 0 {
-		return fmt.Errorf("dmm: retry_count must be non-negative, got %d", cfg.RetryCount)
-	}
-	if cfg.Timeout < 0 {
-		return fmt.Errorf("dmm: timeout must be non-negative, got %d", cfg.Timeout)
-	}
-	return nil
-}
-
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false

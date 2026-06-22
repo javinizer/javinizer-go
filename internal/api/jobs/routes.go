@@ -1,12 +1,21 @@
 package jobs
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/middleware"
+)
 
-func RegisterRoutes(protected *gin.RouterGroup, deps *ServerDependencies) {
+func RegisterRoutes(protected *gin.RouterGroup, deps JobDeps) {
 	protected.GET("/jobs", listJobs(deps))
-	protected.GET("/jobs/:id", getJob(deps))
-	protected.GET("/jobs/:id/operations", listOperations(deps))
-	protected.GET("/jobs/:id/revert-check", revertCheck(deps))
-	protected.POST("/jobs/:id/revert", revertBatch(deps))
-	protected.POST("/jobs/:id/operations/:movieId/revert", revertOperation(deps))
+
+	// All routes with :id param are protected by ValidateJobID middleware
+	// to prevent path traversal when jobID is used in filesystem operations.
+	jobs := protected.Group("/jobs", middleware.ValidateJobID())
+	{
+		jobs.GET("/:id", getJob(deps))
+		jobs.GET("/:id/operations", listOperations(deps))
+		jobs.GET("/:id/revert-check", revertCheck(deps))
+		jobs.POST("/:id/revert", revertBatch(deps))
+		jobs.POST("/:id/operations/:movieId/revert", revertOperation(deps))
+	}
 }

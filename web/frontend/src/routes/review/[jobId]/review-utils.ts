@@ -49,14 +49,14 @@ export function normalizeCropBox(box: PosterCropBox, metrics: PosterCropMetrics)
 		xRatio: box.x / metrics.sourceWidth,
 		yRatio: box.y / metrics.sourceHeight,
 		widthRatio: box.width / metrics.sourceWidth,
-		heightRatio: box.height / metrics.sourceHeight
+		heightRatio: box.height / metrics.sourceHeight,
 	};
 }
 
 export function restoreCropBox(
 	state: PosterCropState,
 	sourceWidth: number,
-	sourceHeight: number
+	sourceHeight: number,
 ): PosterCropBox {
 	const width = clamp(Math.round(state.widthRatio * sourceWidth), 1, sourceWidth);
 	const height = clamp(Math.round(state.heightRatio * sourceHeight), 1, sourceHeight);
@@ -67,7 +67,7 @@ export function restoreCropBox(
 		x: clamp(Math.round(state.xRatio * sourceWidth), 0, maxX),
 		y: clamp(Math.round(state.yRatio * sourceHeight), 0, maxY),
 		width,
-		height
+		height,
 	};
 }
 
@@ -80,7 +80,7 @@ export function getDefaultPosterCropBox(sourceWidth: number, sourceHeight: numbe
 			x: sourceWidth - width,
 			y: 0,
 			width,
-			height: sourceHeight
+			height: sourceHeight,
 		};
 	}
 
@@ -96,7 +96,7 @@ export function getDefaultPosterCropBox(sourceWidth: number, sourceHeight: numbe
 		x: Math.max(0, Math.floor((sourceWidth - width) / 2)),
 		y: Math.max(0, Math.floor((sourceHeight - height) / 2)),
 		width,
-		height
+		height,
 	};
 }
 
@@ -119,9 +119,14 @@ function gcd(a: number, b: number): number {
 // the source will be downscaled.
 export function computeCropPreview(
 	cropBox: PosterCropBox | null,
-	maxPosterHeight: number
+	maxPosterHeight: number,
 ): PreviewOutput {
-	const empty: PreviewOutput = { outputWidth: 0, outputHeight: 0, ratioLabel: '', willResize: false };
+	const empty: PreviewOutput = {
+		outputWidth: 0,
+		outputHeight: 0,
+		ratioLabel: '',
+		willResize: false,
+	};
 	if (!cropBox) return empty;
 
 	const sourceWidth = cropBox.width;
@@ -144,9 +149,8 @@ export function computeCropPreview(
 	const d = gcd(outputWidth, outputHeight);
 	const rw = outputWidth / d;
 	const rh = outputHeight / d;
-	const ratioLabel = rw > 20 || rh > 20
-		? `${(outputWidth / outputHeight).toFixed(3)}:1`
-		: `${rw}:${rh}`;
+	const ratioLabel =
+		rw > 20 || rh > 20 ? `${(outputWidth / outputHeight).toFixed(3)}:1` : `${rw}:${rh}`;
 
 	return { outputWidth, outputHeight, ratioLabel, willResize };
 }

@@ -3,6 +3,7 @@ package dmm
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
@@ -30,12 +31,12 @@ func sortCandidates(candidates []urlCandidate) {
 	})
 }
 
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
-	contentID, err := s.ResolveContentIDCtx(ctx, id)
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+	contentID, err := s.resolveContentIDCtx(ctx, id)
 
 	if err != nil {
 		logging.Debugf("DMM: Content-ID resolution failed for %s: %v", id, err)
@@ -134,7 +135,7 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	return foundURL, nil
 }
 
-func (s *Scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCandidate {
+func (s *scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCandidate {
 	strippedID := cleanPrefixRegex.ReplaceAllString(strings.ToLower(contentID), "$1")
 
 	// DMM rental PPR catalog prefixes: 1=general, 2=genre, 4=HD, 5=download. Prefix 3 not used for rental.
@@ -215,7 +216,7 @@ func urlPriority(rawURL string) int {
 	return 0
 }
 
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	url, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
@@ -226,7 +227,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := FetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile)
+		bodyHTML, err := fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
 		if err != nil {
 			return nil, fmt.Errorf("browser fetch failed: %w", err)
 		}
@@ -262,7 +263,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	return s.parseHTML(ctx, doc, url)
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(url) {
 		return nil, models.NewScraperNotFoundError("DMM", "URL not handled by DMM scraper")
 	}
@@ -272,7 +273,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM ScrapeURL: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := FetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile)
+		bodyHTML, err := fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
 		if err != nil {
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("browser fetch failed: %v", err))
 		}
@@ -296,7 +297,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 		}
 
 		if resp.StatusCode() == 429 {
-			return nil, models.NewScraperStatusError("DMM", 429, "rate limited")
+			return nil, models.NewScraperStatusError("DMM", http.StatusTooManyRequests, "rate limited")
 		}
 
 		if resp.StatusCode() == 403 || resp.StatusCode() == 451 {

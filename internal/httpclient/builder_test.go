@@ -1,15 +1,44 @@
 package httpclient
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+func mergeCookieHeader(existing, new map[string]string) string {
+	cookies := make(map[string]string)
+
+	for k, v := range existing {
+		cookies[k] = v
+	}
+	for k, v := range new {
+		cookies[k] = v
+	}
+
+	parts := make([]string, 0, len(cookies))
+	for name, value := range cookies {
+		parts = append(parts, fmt.Sprintf("%s=%s", name, value))
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "; ")
+}
+
+func withProxyProfileReturn(enabled bool) ScraperOption {
+	return func(c *scraperConfig) {
+		c.returnProxyProfile = enabled
+	}
+}
+
 func TestScraperClientBuilder_Defaults(t *testing.T) {
-	client, err := NewScraperClientBuilder().Build()
+	client, err := newScraperClientBuilder().build(false)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -31,7 +60,7 @@ func TestScraperClientBuilder_Options(t *testing.T) {
 	}{
 		{
 			name:      "retry count option",
-			opts:      []ScraperOption{WithRetryCount(5)},
+			opts:      []ScraperOption{withRetryCount(5)},
 			wantRetry: 5,
 		},
 		{
@@ -46,8 +75,7 @@ func TestScraperClientBuilder_Options(t *testing.T) {
 		{
 			name: "multiple headers",
 			opts: []ScraperOption{
-				WithHeader("X-One", "1"),
-				WithHeader("X-Two", "2"),
+				WithHeaders(map[string]string{"X-One": "1", "X-Two": "2"}),
 				WithHeaders(map[string]string{"X-Three": "3"}),
 			},
 			wantHeader: map[string]string{
@@ -58,14 +86,14 @@ func TestScraperClientBuilder_Options(t *testing.T) {
 		},
 		{
 			name:          "return proxy profile",
-			opts:          []ScraperOption{WithProxyProfileReturn(true)},
+			opts:          []ScraperOption{withProxyProfileReturn(true)},
 			wantProxyProf: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewScraperClientBuilder().Apply(tt.opts...).Build()
+			client, err := newScraperClientBuilder().Apply(tt.opts...).build(tt.wantProxyProf)
 
 			require.NoError(t, err)
 			require.NotNil(t, client)
@@ -86,8 +114,8 @@ func TestScraperClientBuilder_Options(t *testing.T) {
 }
 
 func TestScraperClientBuilder_BuildClient(t *testing.T) {
-	client, err := NewScraperClientBuilder().
-		Apply(WithRetryCount(7)).
+	client, err := newScraperClientBuilder().
+		Apply(withRetryCount(7)).
 		BuildClient()
 
 	require.NoError(t, err)
@@ -97,8 +125,8 @@ func TestScraperClientBuilder_BuildClient(t *testing.T) {
 
 func TestScraperClientBuilder_BuildWithFlareSolverr(t *testing.T) {
 	t.Run("disabled FlareSolverr", func(t *testing.T) {
-		client, fs, err := NewScraperClientBuilder().
-			Apply(WithFlareSolverr(true)).
+		client, fs, err := newScraperClientBuilder().
+			Apply(withFlareSolverr(true)).
 			BuildWithFlareSolverr()
 
 		require.NoError(t, err)
@@ -107,17 +135,17 @@ func TestScraperClientBuilder_BuildWithFlareSolverr(t *testing.T) {
 	})
 
 	t.Run("enabled FlareSolverr", func(t *testing.T) {
-		fsCfg := config.FlareSolverrConfig{
+		fsCfg := models.FlareSolverrConfig{
 			Enabled:    true,
 			URL:        "http://localhost:8191/v1",
 			Timeout:    30,
 			MaxRetries: 3,
 		}
 
-		client, fs, err := NewScraperClientBuilder().
+		client, fs, err := newScraperClientBuilder().
 			Apply(
-				WithFlareSolverr(true),
-				WithGlobalFlareSolverr(fsCfg),
+				withFlareSolverr(true),
+				withGlobalFlareSolverr(fsCfg),
 			).
 			BuildWithFlareSolverr()
 
@@ -127,27 +155,27 @@ func TestScraperClientBuilder_BuildWithFlareSolverr(t *testing.T) {
 	})
 
 	t.Run("direct proxy mode does not leak global proxy to FlareSolverr", func(t *testing.T) {
-		globalProxy := config.ProxyConfig{
+		globalProxy := models.ProxyConfig{
 			Enabled: true,
-			Profiles: map[string]config.ProxyProfile{
+			Profiles: map[string]models.ProxyProfile{
 				"default": {URL: "http://proxy.example.com:8080"},
 			},
 			DefaultProfile: "default",
 		}
-		scraperDirectProxy := &config.ProxyConfig{
+		scraperDirectProxy := &models.ProxyConfig{
 			Enabled: false,
 		}
-		fsCfg := config.FlareSolverrConfig{
+		fsCfg := models.FlareSolverrConfig{
 			Enabled:    true,
 			URL:        "http://localhost:8191/v1",
 			Timeout:    30,
 			MaxRetries: 3,
 		}
 
-		sc, err := FromScraperSettings(&config.ScraperSettings{
+		sc, err := FromScraperSettings(&models.ScraperSettings{
 			UseFlareSolverr: true,
 			Proxy:           scraperDirectProxy,
-		}, &globalProxy, fsCfg).Build()
+		}, &globalProxy, fsCfg).build(false)
 
 		require.NoError(t, err)
 		require.NotNil(t, sc)
@@ -157,23 +185,23 @@ func TestScraperClientBuilder_BuildWithFlareSolverr(t *testing.T) {
 	})
 
 	t.Run("inherit proxy mode passes global proxy to FlareSolverr", func(t *testing.T) {
-		globalProxy := config.ProxyConfig{
+		globalProxy := models.ProxyConfig{
 			Enabled: true,
-			Profiles: map[string]config.ProxyProfile{
+			Profiles: map[string]models.ProxyProfile{
 				"default": {URL: "http://proxy.example.com:8080"},
 			},
 			DefaultProfile: "default",
 		}
-		fsCfg := config.FlareSolverrConfig{
+		fsCfg := models.FlareSolverrConfig{
 			Enabled:    true,
 			URL:        "http://localhost:8191/v1",
 			Timeout:    30,
 			MaxRetries: 3,
 		}
 
-		sc, err := FromScraperSettings(&config.ScraperSettings{
+		sc, err := FromScraperSettings(&models.ScraperSettings{
 			UseFlareSolverr: true,
-		}, &globalProxy, fsCfg).Build()
+		}, &globalProxy, fsCfg).build(false)
 
 		require.NoError(t, err)
 		require.NotNil(t, sc)
@@ -186,7 +214,7 @@ func TestScraperClientBuilder_BuildWithFlareSolverr(t *testing.T) {
 
 func TestScraperClientBuilder_BuildWithProxy(t *testing.T) {
 	t.Run("no proxy configured", func(t *testing.T) {
-		client, proxy, err := NewScraperClientBuilder().
+		client, proxy, err := newScraperClientBuilder().
 			BuildWithProxy()
 
 		require.NoError(t, err)
@@ -196,16 +224,16 @@ func TestScraperClientBuilder_BuildWithProxy(t *testing.T) {
 	})
 
 	t.Run("proxy configured", func(t *testing.T) {
-		globalProxy := config.ProxyConfig{
+		globalProxy := models.ProxyConfig{
 			Enabled: true,
-			Profiles: map[string]config.ProxyProfile{
+			Profiles: map[string]models.ProxyProfile{
 				"default": {URL: "http://proxy.example.com:8080"},
 			},
 			DefaultProfile: "default",
 		}
 
-		client, proxy, err := NewScraperClientBuilder().
-			Apply(WithGlobalProxy(globalProxy)).
+		client, proxy, err := newScraperClientBuilder().
+			Apply(withGlobalProxy(globalProxy)).
 			BuildWithProxy()
 
 		require.NoError(t, err)
@@ -221,9 +249,9 @@ func TestScraperClientBuilder_Cookies(t *testing.T) {
 		"token":   "xyz789",
 	}
 
-	client, err := NewScraperClientBuilder().
-		Apply(WithCookies(cookies)).
-		Build()
+	client, err := newScraperClientBuilder().
+		Apply(withCookies(cookies)).
+		build(false)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -234,7 +262,7 @@ func TestScraperClientBuilder_Cookies(t *testing.T) {
 }
 
 func TestScraperClientBuilder_FromScraperSettings(t *testing.T) {
-	settings := &config.ScraperSettings{
+	settings := &models.ScraperSettings{
 		Timeout:    45,
 		RetryCount: 5,
 		Cookies: map[string]string{
@@ -242,21 +270,21 @@ func TestScraperClientBuilder_FromScraperSettings(t *testing.T) {
 		},
 	}
 
-	globalProxy := &config.ProxyConfig{
+	globalProxy := &models.ProxyConfig{
 		Enabled: true,
-		Profiles: map[string]config.ProxyProfile{
+		Profiles: map[string]models.ProxyProfile{
 			"default": {URL: "http://proxy.test:8080"},
 		},
 		DefaultProfile: "default",
 	}
 
-	fsCfg := config.FlareSolverrConfig{
+	fsCfg := models.FlareSolverrConfig{
 		Enabled: false,
 	}
 
 	client, err := FromScraperSettings(settings, globalProxy, fsCfg).
-		Apply(WithProxyProfileReturn(true)).
-		Build()
+		Apply(withProxyProfileReturn(true)).
+		build(true)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -279,8 +307,8 @@ func TestScraperClientBuilder_DefaultConfig(t *testing.T) {
 }
 
 func TestScraperClientBuilder_NilScraperSettings(t *testing.T) {
-	client, err := FromScraperSettings(nil, nil, config.FlareSolverrConfig{}).
-		Build()
+	client, err := FromScraperSettings(nil, nil, models.FlareSolverrConfig{}).
+		build(false)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -288,12 +316,12 @@ func TestScraperClientBuilder_NilScraperSettings(t *testing.T) {
 }
 
 func TestScraperClientBuilder_ZeroValuesUseDefaults(t *testing.T) {
-	client, err := NewScraperClientBuilder().
+	client, err := newScraperClientBuilder().
 		Apply(
-			WithTimeout(0),
-			WithRetryCount(0),
+			withTimeout(0),
+			withRetryCount(0),
 		).
-		Build()
+		build(false)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -317,11 +345,6 @@ func TestHeaderPresets(t *testing.T) {
 	t.Run("RefererHeader", func(t *testing.T) {
 		headers := RefererHeader("https://example.com/page")
 		assert.Equal(t, "https://example.com/page", headers["Referer"])
-	})
-
-	t.Run("JapaneseLanguageHeaders", func(t *testing.T) {
-		headers := JapaneseLanguageHeaders()
-		assert.Contains(t, headers["Accept-Language"], "ja")
 	})
 
 	t.Run("DMMHeaders", func(t *testing.T) {
@@ -355,11 +378,11 @@ func TestHeaderPresets(t *testing.T) {
 		assert.Contains(t, combined, "X-Custom")
 	})
 
-	t.Run("MergeCookieHeader", func(t *testing.T) {
+	t.Run("mergeCookieHeader", func(t *testing.T) {
 		existing := map[string]string{"a": "1", "b": "2"}
 		new := map[string]string{"b": "3", "c": "4"}
 
-		merged := MergeCookieHeader(existing, new)
+		merged := mergeCookieHeader(existing, new)
 
 		assert.Contains(t, merged, "a=1")
 		assert.Contains(t, merged, "b=3")
@@ -368,13 +391,13 @@ func TestHeaderPresets(t *testing.T) {
 }
 
 func TestScraperClientBuilder_ApplyChain(t *testing.T) {
-	builder := NewScraperClientBuilder()
+	builder := newScraperClientBuilder()
 
 	client, err := builder.
-		Apply(WithRetryCount(2)).
-		Apply(WithHeader("X-First", "1")).
-		Apply(WithHeader("X-Second", "2")).
-		Build()
+		Apply(withRetryCount(2)).
+		Apply(WithHeaders(map[string]string{"X-First": "1"})).
+		Apply(WithHeaders(map[string]string{"X-Second": "2"})).
+		build(false)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -385,62 +408,62 @@ func TestScraperClientBuilder_ApplyChain(t *testing.T) {
 
 func TestIsValidCookieName(t *testing.T) {
 	t.Run("empty name is invalid", func(t *testing.T) {
-		assert.False(t, IsValidCookieName(""))
+		assert.False(t, isValidCookieName(""))
 	})
 
 	t.Run("alphanumeric name is valid", func(t *testing.T) {
-		assert.True(t, IsValidCookieName("session_id"))
+		assert.True(t, isValidCookieName("session_id"))
 	})
 
 	t.Run("special token chars are valid", func(t *testing.T) {
-		assert.True(t, IsValidCookieName("my-cookie!"))
+		assert.True(t, isValidCookieName("my-cookie!"))
 	})
 
 	t.Run("space is invalid", func(t *testing.T) {
-		assert.False(t, IsValidCookieName("my cookie"))
+		assert.False(t, isValidCookieName("my cookie"))
 	})
 
 	t.Run("semicolon is invalid", func(t *testing.T) {
-		assert.False(t, IsValidCookieName("my;cookie"))
+		assert.False(t, isValidCookieName("my;cookie"))
 	})
 
 	t.Run("unicode is invalid", func(t *testing.T) {
-		assert.False(t, IsValidCookieName("クッキー"))
+		assert.False(t, isValidCookieName("クッキー"))
 	})
 }
 
 func TestSanitizeCookieValue(t *testing.T) {
 	t.Run("normal value unchanged", func(t *testing.T) {
-		assert.Equal(t, "abc123", SanitizeCookieValue("abc123"))
+		assert.Equal(t, "abc123", sanitizeCookieValue("abc123"))
 	})
 
 	t.Run("removes semicolons", func(t *testing.T) {
-		assert.Equal(t, "abc", SanitizeCookieValue("a;b;c"))
+		assert.Equal(t, "abc", sanitizeCookieValue("a;b;c"))
 	})
 
 	t.Run("removes quotes", func(t *testing.T) {
-		assert.Equal(t, "abc", SanitizeCookieValue(`a"b"c`))
+		assert.Equal(t, "abc", sanitizeCookieValue(`a"b"c`))
 	})
 
 	t.Run("removes backslashes", func(t *testing.T) {
-		assert.Equal(t, "abc", SanitizeCookieValue(`a\b\c`))
+		assert.Equal(t, "abc", sanitizeCookieValue(`a\b\c`))
 	})
 
 	t.Run("removes newlines", func(t *testing.T) {
-		assert.Equal(t, "abc", SanitizeCookieValue("a\nb\nc"))
+		assert.Equal(t, "abc", sanitizeCookieValue("a\nb\nc"))
 	})
 
 	t.Run("removes carriage returns", func(t *testing.T) {
-		assert.Equal(t, "abc", SanitizeCookieValue("a\rb\rc"))
+		assert.Equal(t, "abc", sanitizeCookieValue("a\rb\rc"))
 	})
 
 	t.Run("removes control characters", func(t *testing.T) {
-		assert.Equal(t, "abc", SanitizeCookieValue("a\x00b\x01c"))
+		assert.Equal(t, "abc", sanitizeCookieValue("a\x00b\x01c"))
 	})
 }
 
 func TestBuildCookieHeader(t *testing.T) {
-	builder := NewScraperClientBuilder()
+	builder := newScraperClientBuilder()
 
 	t.Run("builds valid cookie header", func(t *testing.T) {
 		result := builder.buildCookieHeader(map[string]string{

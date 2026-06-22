@@ -5,16 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/javinizer/javinizer-go/internal/configutil"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/spf13/afero"
 )
 
 func (m *AuthManager) loadCredentialsFromDisk() error {
-	if _, err := os.Lstat(m.credentialPath); err != nil {
+	if _, err := m.fs.Stat(m.credentialPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -25,7 +27,7 @@ func (m *AuthManager) loadCredentialsFromDisk() error {
 		return fmt.Errorf("failed to enforce auth credential permissions: %w", err)
 	}
 
-	data, err := os.ReadFile(m.credentialPath)
+	data, err := afero.ReadFile(m.fs, m.credentialPath)
 	if err != nil {
 		return fmt.Errorf("failed to read auth credential file: %w", err)
 	}
@@ -92,16 +94,16 @@ func (m *AuthManager) writeCredentialsToDisk(creds *storedCredentials) error {
 	}
 
 	dir := filepath.Dir(m.credentialPath)
-	if err := os.MkdirAll(dir, configutil.DirPermTemp); err != nil {
+	if err := m.fs.MkdirAll(dir, config.DirPermTemp); err != nil {
 		return fmt.Errorf("failed to create auth credential directory: %w", err)
 	}
 
-	tmpFile, err := os.CreateTemp(dir, credentialFilename+".tmp-*")
+	tmpFile, err := afero.TempFile(m.fs, dir, credentialFilename+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp auth credential file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
+	defer func() { _ = m.fs.Remove(tmpPath) }()
 
 	if _, err := tmpFile.Write(data); err != nil {
 		_ = tmpFile.Close()
@@ -115,7 +117,7 @@ func (m *AuthManager) writeCredentialsToDisk(creds *storedCredentials) error {
 		return fmt.Errorf("failed to enforce temp auth credential permissions: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, m.credentialPath); err != nil {
+	if err := m.fs.Rename(tmpPath, m.credentialPath); err != nil {
 		return fmt.Errorf("failed to persist auth credential file: %w", err)
 	}
 
@@ -131,7 +133,7 @@ func (m *AuthManager) loadSessionsFromDisk() {
 		return
 	}
 
-	if _, err := os.Lstat(m.sessionPath); err != nil {
+	if _, err := m.fs.Stat(m.sessionPath); err != nil {
 		return
 	}
 
@@ -139,14 +141,14 @@ func (m *AuthManager) loadSessionsFromDisk() {
 		return
 	}
 
-	data, err := os.ReadFile(m.sessionPath)
+	data, err := afero.ReadFile(m.fs, m.sessionPath)
 	if err != nil {
 		return
 	}
 
 	var payload sessionFile
 	if err := json.Unmarshal(data, &payload); err != nil {
-		_ = os.Remove(m.sessionPath)
+		_ = m.fs.Remove(m.sessionPath)
 		return
 	}
 
@@ -198,7 +200,7 @@ func (m *AuthManager) writePersistentSessionsLocked() error {
 	}
 
 	if len(items) == 0 {
-		if err := os.Remove(m.sessionPath); err != nil && !os.IsNotExist(err) {
+		if err := m.fs.Remove(m.sessionPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to remove auth session file: %w", err)
 		}
 		return nil
@@ -219,16 +221,16 @@ func (m *AuthManager) writePersistentSessionsLocked() error {
 	}
 
 	dir := filepath.Dir(m.sessionPath)
-	if err := os.MkdirAll(dir, configutil.DirPermTemp); err != nil {
+	if err := m.fs.MkdirAll(dir, config.DirPermTemp); err != nil {
 		return fmt.Errorf("failed to create auth session directory: %w", err)
 	}
 
-	tmpFile, err := os.CreateTemp(dir, sessionFilename+".tmp-*")
+	tmpFile, err := afero.TempFile(m.fs, dir, sessionFilename+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp auth session file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
+	defer func() { _ = m.fs.Remove(tmpPath) }()
 
 	if _, err := tmpFile.Write(data); err != nil {
 		_ = tmpFile.Close()
@@ -242,7 +244,7 @@ func (m *AuthManager) writePersistentSessionsLocked() error {
 		return fmt.Errorf("failed to enforce temp auth session permissions: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, m.sessionPath); err != nil {
+	if err := m.fs.Rename(tmpPath, m.sessionPath); err != nil {
 		return fmt.Errorf("failed to persist auth session file: %w", err)
 	}
 

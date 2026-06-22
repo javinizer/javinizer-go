@@ -22,7 +22,11 @@ const completeMovie = makeMovie('COMPLETE-1', {
 	director: 'Test Director',
 	runtime: 120,
 	trailer_url: 'https://example.com/trailer.mp4',
-	screenshot_urls: ['https://example.com/ss1.jpg', 'https://example.com/ss2.jpg', 'https://example.com/ss3.jpg'],
+	screenshot_urls: [
+		'https://example.com/ss1.jpg',
+		'https://example.com/ss2.jpg',
+		'https://example.com/ss3.jpg',
+	],
 	label: 'Test Label',
 	series: 'Test Series',
 });
@@ -49,18 +53,25 @@ const completeMovie2 = makeMovie('COMPLETE-2', {
 	maker: 'Another Maker',
 	release_date: '2024-03-20',
 	runtime: 90,
-	screenshot_urls: ['https://example.com/ss4.jpg', 'https://example.com/ss5.jpg', 'https://example.com/ss6.jpg'],
+	screenshot_urls: [
+		'https://example.com/ss4.jpg',
+		'https://example.com/ss5.jpg',
+		'https://example.com/ss6.jpg',
+	],
 });
 
 function makeFileResult(movie: Movie, filePath?: string): FileResult {
 	return {
-		result_id: crypto.randomUUID(),
+		result_id: `${movie.id}-result`,
 		file_path: filePath || `/videos/${movie.id}.mp4`,
 		movie_id: movie.id,
 		status: 'completed',
 		started_at: '2024-01-15T10:00:00Z',
 		ended_at: '2024-01-15T10:00:05Z',
-		data: movie,
+		movie: movie,
+		is_multi_part: false,
+		part_number: 0,
+		part_suffix: '',
 	};
 }
 
@@ -101,14 +112,25 @@ export const mockConfig = {
 		completeness: {
 			enabled: true,
 			tiers: {
-				essential: { weight: 3, fields: ['title', 'poster_url', 'cover_url', 'actresses', 'genres'] },
-				important: { weight: 2, fields: ['description', 'maker', 'release_date', 'director', 'runtime', 'trailer_url', 'screenshot_urls'] },
+				essential: {
+					weight: 3,
+					fields: ['title', 'poster_url', 'cover_url', 'actresses', 'genres'],
+				},
+				important: {
+					weight: 2,
+					fields: [
+						'description',
+						'maker',
+						'release_date',
+						'director',
+						'runtime',
+						'trailer_url',
+						'screenshot_urls',
+					],
+				},
 				nice_to_have: { weight: 1, fields: ['label', 'series', 'rating_score', 'original_title'] },
 			},
 		},
-	},
-	webui: {
-		default_review_view: 'grid-poster',
 	},
 };
 
@@ -208,8 +230,8 @@ export async function navigateToReviewPage(page: import('@playwright/test').Page
 }
 
 export async function switchToGridView(page: import('@playwright/test').Page): Promise<void> {
-	const posterButton = page.getByRole('button', { name: /^poster$/i });
-	await posterButton.click();
+	const gridButton = page.getByRole('button', { name: /^poster$/i });
+	await gridButton.click();
 	await page.waitForSelector('div[role="button"], div[role="checkbox"]', { timeout: 10_000 });
 }
 
@@ -217,7 +239,9 @@ export function getGridCardSelector(): string {
 	return 'div[role="button"], div[role="checkbox"]';
 }
 
-export async function getGridCards(page: import('@playwright/test').Page): Promise<import('@playwright/test').Locator[]> {
+export async function getGridCards(
+	page: import('@playwright/test').Page,
+): Promise<import('@playwright/test').Locator[]> {
 	const cards = page.locator(getGridCardSelector());
 	const count = await cards.count();
 	const result: import('@playwright/test').Locator[] = [];
@@ -227,7 +251,10 @@ export async function getGridCards(page: import('@playwright/test').Page): Promi
 	return result;
 }
 
-export function getGridCard(page: import('@playwright/test').Page, index: number): import('@playwright/test').Locator {
+export function getGridCard(
+	page: import('@playwright/test').Page,
+	index: number,
+): import('@playwright/test').Locator {
 	return page.locator(getGridCardSelector()).nth(index);
 }
 
@@ -240,35 +267,56 @@ export async function enableSelectionMode(page: import('@playwright/test').Page)
 	}
 }
 
-export function getSelectAllButton(page: import('@playwright/test').Page): import('@playwright/test').Locator {
+export function getSelectAllButton(
+	page: import('@playwright/test').Page,
+): import('@playwright/test').Locator {
 	return page.getByRole('button', { name: /select all|deselect all/i });
 }
 
-export function getCompletenessDial(page: import('@playwright/test').Page, cardIndex: number): import('@playwright/test').Locator {
+export function getCompletenessDial(
+	page: import('@playwright/test').Page,
+	cardIndex: number,
+): import('@playwright/test').Locator {
 	const card = page.locator(getGridCardSelector()).nth(cardIndex);
 	return card.locator('div[role="img"][aria-label*="complete"]');
 }
 
-export function getCompletenessFilterButton(page: import('@playwright/test').Page, tier: 'Incomplete' | 'Partial' | 'Complete'): import('@playwright/test').Locator {
+export function getCompletenessFilterButton(
+	page: import('@playwright/test').Page,
+	tier: 'Incomplete' | 'Partial' | 'Complete',
+): import('@playwright/test').Locator {
 	return page.getByRole('button', { name: new RegExp(`^${tier}\\s*\\(\\d+\\)`) }).first();
 }
 
-export function getBulkRemoveButton(page: import('@playwright/test').Page): import('@playwright/test').Locator {
+export function getBulkRemoveButton(
+	page: import('@playwright/test').Page,
+): import('@playwright/test').Locator {
 	return page.getByRole('button', { name: /remove/i });
 }
 
-export function getBulkRescrapeButton(page: import('@playwright/test').Page): import('@playwright/test').Locator {
+export function getBulkRescrapeButton(
+	page: import('@playwright/test').Page,
+): import('@playwright/test').Locator {
 	return page.getByRole('button', { name: /rescrape/i });
 }
 
-export function getDetailViewButton(page: import('@playwright/test').Page): import('@playwright/test').Locator {
+export function getDetailViewButton(
+	page: import('@playwright/test').Page,
+): import('@playwright/test').Locator {
 	return page.getByRole('button', { name: 'Detail', exact: true });
 }
 
-export function getGridViewButton(page: import('@playwright/test').Page): import('@playwright/test').Locator {
+export function getGridViewButton(
+	page: import('@playwright/test').Page,
+): import('@playwright/test').Locator {
 	return page.getByRole('button', { name: /^poster$/i });
 }
 
-export function getRescrapeModal(page: import('@playwright/test').Page): import('@playwright/test').Locator {
-	return page.locator('.fixed.inset-0.bg-black\\/50').filter({ hasText: /rescrape/i }).first();
+export function getRescrapeModal(
+	page: import('@playwright/test').Page,
+): import('@playwright/test').Locator {
+	return page
+		.locator('.fixed.inset-0.bg-black\\/50')
+		.filter({ hasText: /rescrape/i })
+		.first();
 }

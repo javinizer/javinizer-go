@@ -16,7 +16,7 @@ import (
 )
 
 func TestPrepare_NewerVersionReturnsError(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := DefaultConfig(nil, nil)
 	cfg.ConfigVersion = CurrentConfigVersion + 1
 	cfg.Scrapers.Priority = []string{"dmm"}
 
@@ -32,32 +32,32 @@ func TestPrepare_NewerVersionReturnsError(t *testing.T) {
 }
 
 func TestNormalize_Idempotent(t *testing.T) {
-	RegisterTestScraperConfigs()
-	cfg := DefaultConfig()
+	cfg := DefaultConfig(nil, nil)
+	cfg.Scrapers.Finalize(NewTestScraperConfigResolverInterface())
 	cfg.Database.Type = " SQLITE "
-	// Populate Overrides from scraperConfigs
-	cfg.Scrapers.NormalizeScraperConfigs()
+	// Set per-scraper override values
 	cfg.Scrapers.Overrides["r18dev"].Language = ""
 	cfg.Scrapers.Overrides["javlibrary"].Language = " JA "
 	cfg.Scrapers.Referer = ""
 	cfg.Metadata.Translation.Provider = " OpenAI "
 	cfg.Metadata.Translation.TimeoutSeconds = 0
 
-	changed := Normalize(cfg)
+	changed := normalize(cfg)
 	require.True(t, changed)
 	assert.Equal(t, "sqlite", cfg.Database.Type)
 	assert.Equal(t, "en", cfg.Scrapers.Overrides["r18dev"].Language)
-	assert.Equal(t, "ja", cfg.Scrapers.Overrides["javlibrary"].Language)
+	// Language trim/lowercase now happens in Validate(), not normalize()
+	assert.Equal(t, " JA ", cfg.Scrapers.Overrides["javlibrary"].Language)
 	assert.Equal(t, "https://www.dmm.co.jp/", cfg.Scrapers.Referer)
 	assert.Equal(t, "openai", cfg.Metadata.Translation.Provider)
 	assert.Equal(t, 60, cfg.Metadata.Translation.TimeoutSeconds)
 
-	changed = Normalize(cfg)
+	changed = normalize(cfg)
 	assert.False(t, changed)
 }
 
 func TestPrepare_RunsNormalizeAndValidate(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := DefaultConfig(nil, nil)
 	cfg.ConfigVersion = 0
 	cfg.Scrapers.Priority = []string{"dmm"}
 	cfg.Database.Type = " SQLITE "
@@ -73,9 +73,9 @@ func TestPrepare_RunsNormalizeAndValidate(t *testing.T) {
 }
 
 func TestValidate_DoesNotMutateConfig(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := DefaultConfig(nil, nil)
+	cfg.Scrapers.Finalize(NewTestScraperConfigResolverInterface())
 	cfg.Database.Type = " SQLITE "
-	cfg.Scrapers.NormalizeScraperConfigs()
 	cfg.Scrapers.Overrides["r18dev"].Language = ""
 	cfg.Scrapers.Referer = ""
 
@@ -92,7 +92,7 @@ func TestSave_NoOpWhenContentUnchanged(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
-	cfg := DefaultConfig()
+	cfg := DefaultConfig(nil, nil)
 	cfg.Server.Port = 9099
 
 	require.NoError(t, Save(cfg, cfgPath))
@@ -113,7 +113,7 @@ func TestSave_RewritesWhenContentChanges(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
-	cfg := DefaultConfig()
+	cfg := DefaultConfig(nil, nil)
 	cfg.Server.Port = 9099
 
 	require.NoError(t, Save(cfg, cfgPath))
@@ -151,7 +151,7 @@ func TestSave_ConcurrentWritersProduceValidYAML(t *testing.T) {
 		i := i
 		go func() {
 			defer wg.Done()
-			cfg := DefaultConfig()
+			cfg := DefaultConfig(nil, nil)
 			cfg.Server.Port = 9000 + i
 			cfg.Logging.Level = "debug"
 			if err := Save(cfg, cfgPath); err != nil {

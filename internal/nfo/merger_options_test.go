@@ -457,20 +457,26 @@ func TestMergeActresses_PreservesDMMIDFromScraper(t *testing.T) {
 // TestParseScalarStrategy tests the scalar strategy parsing
 func TestParseScalarStrategy(t *testing.T) {
 	tests := []struct {
-		input    string
-		expected MergeStrategy
+		input       string
+		expected    MergeStrategy
+		expectError bool
 	}{
-		{"prefer-scraper", PreferScraper},
-		{"prefer-nfo", PreferNFO},
-		{"PREFER-NFO", PreferNFO}, // Should handle case
-		{"invalid", PreferNFO},    // Default to PreferNFO
-		{"", PreferNFO},           // Default to PreferNFO
+		{"prefer-scraper", PreferScraper, false},
+		{"prefer-nfo", PreferNFO, false},
+		{"PREFER-NFO", PreferNFO, false}, // Should handle case
+		{"invalid", PreferNFO, true},     // Returns error for unknown
+		{"", PreferNFO, false},           // Empty string returns default
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := ParseScalarStrategy(tt.input)
-			assert.Equal(t, tt.expected, result)
+			result, err := ParseScalarStrategy(tt.input)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
 		})
 	}
 }
@@ -478,21 +484,27 @@ func TestParseScalarStrategy(t *testing.T) {
 // TestParseArrayStrategy tests the array strategy parsing
 func TestParseArrayStrategy(t *testing.T) {
 	tests := []struct {
-		input    string
-		expected bool
+		input       string
+		expected    bool
+		expectError bool
 	}{
-		{"merge", true},
-		{"replace", false},
-		{"MERGE", true},    // Should handle case
-		{"REPLACE", false}, // Should handle case
-		{"invalid", true},  // Default to merge (true)
-		{"", true},         // Default to merge (true)
+		{"merge", true, false},
+		{"replace", false, false},
+		{"MERGE", true, false},    // Should handle case
+		{"REPLACE", false, false}, // Should handle case
+		{"invalid", true, true},   // Now returns error for unknown
+		{"", true, false},         // Empty string defaults to merge
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := ParseArrayStrategy(tt.input)
-			assert.Equal(t, tt.expected, result)
+			result, err := ParseArrayStrategy(tt.input)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
 		})
 	}
 }

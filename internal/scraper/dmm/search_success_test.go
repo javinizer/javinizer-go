@@ -45,7 +45,7 @@ func (rt *dmmSearchSuccessRoundTripper) RoundTrip(req *http.Request) (*http.Resp
 	}, nil
 }
 
-func newDMMTestRepo(t *testing.T) *database.ContentIDMappingRepository {
+func newDMMTestRepo(t *testing.T) database.ContentIDMappingRepositoryInterface {
 	t.Helper()
 
 	dbCfg := &config.Config{
@@ -58,30 +58,30 @@ func newDMMTestRepo(t *testing.T) *database.ContentIDMappingRepository {
 		},
 	}
 
-	db, err := database.New(dbCfg)
+	db, err := database.New(&database.Config{Type: dbCfg.Database.Type, DSN: dbCfg.Database.DSN, LogLevel: dbCfg.Database.LogLevel})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = db.Close()
 	})
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	return database.NewContentIDMappingRepository(db)
 }
 
 func TestGetURLAndSearch_SuccessWithCachedContentID(t *testing.T) {
 	repo := newDMMTestRepo(t)
-	require.NoError(t, repo.Create(&models.ContentIDMapping{
+	require.NoError(t, repo.Create(context.TODO(), &models.ContentIDMapping{
 		SearchID:  "IPX-535",
 		ContentID: "ipx00535",
 		Source:    "dmm",
 	}))
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:       true,
 		ScrapeActress: ptrBool(true),
 	}
 
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), repo)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, dmmOptions{ScrapeActress: true, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
 	searchPage := `<html><body>
 		<a href="/digital/videoa/-/detail/=/cid=ipx00535/">IPX-535 result</a>
@@ -126,7 +126,7 @@ func TestGetURLAndSearch_SuccessWithCachedContentID(t *testing.T) {
 	}
 	scraper.client.SetTransport(transport)
 
-	foundURL, err := scraper.GetURL("IPX-535")
+	foundURL, err := scraper.GetURL(context.Background(), "IPX-535")
 	require.NoError(t, err)
 	assert.Equal(t, digitalURLFor("ipx00535"), foundURL)
 
@@ -153,17 +153,17 @@ func TestGetURLAndSearch_SuccessWithCachedContentID(t *testing.T) {
 
 func TestSearch_ReturnsStatusErrorForDetailPage(t *testing.T) {
 	repo := newDMMTestRepo(t)
-	require.NoError(t, repo.Create(&models.ContentIDMapping{
+	require.NoError(t, repo.Create(context.TODO(), &models.ContentIDMapping{
 		SearchID:  "IPX-777",
 		ContentID: "ipx00777",
 		Source:    "dmm",
 	}))
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled: true,
 	}
 
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), repo)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
 	transport := &dmmSearchSuccessRoundTripper{
 		responses: map[string]struct {
@@ -193,16 +193,16 @@ func TestSearch_ReturnsStatusErrorForDetailPage(t *testing.T) {
 
 func TestGetURL_PrefersSearchResultOverDirectURL(t *testing.T) {
 	repo := newDMMTestRepo(t)
-	require.NoError(t, repo.Create(&models.ContentIDMapping{
+	require.NoError(t, repo.Create(context.TODO(), &models.ContentIDMapping{
 		SearchID:  "MDB-087",
 		ContentID: "61mdb087",
 		Source:    "dmm",
 	}))
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled: true,
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), repo)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
 	searchPage := `<html><body>
 		<a href="/monthly/standard/-/detail/=/cid=61mdb087/">Low priority monthly result</a>
@@ -242,7 +242,7 @@ func TestGetURL_PrefersSearchResultOverDirectURL(t *testing.T) {
 	}
 	scraper.client.SetTransport(transport)
 
-	foundURL, err := scraper.GetURL("MDB-087")
+	foundURL, err := scraper.GetURL(context.Background(), "MDB-087")
 	require.NoError(t, err)
 	assert.Equal(t, "https://www.dmm.co.jp/monthly/standard/-/detail/=/cid=61mdb087/", foundURL)
 
@@ -272,14 +272,14 @@ func rentalURLFor(contentID string) string {
 
 func TestTryDirectURLs_RentalOnly(t *testing.T) {
 	repo := newDMMTestRepo(t)
-	require.NoError(t, repo.Create(&models.ContentIDMapping{
+	require.NoError(t, repo.Create(context.TODO(), &models.ContentIDMapping{
 		SearchID:  "FSDSS-879",
 		ContentID: "fsdss879",
 		Source:    "dmm",
 	}))
 
-	settings := config.ScraperSettings{Enabled: true}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), repo)
+	settings := models.ScraperSettings{Enabled: true}
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
 	transport := &dmmSearchSuccessRoundTripper{
 		responses: map[string]struct {
@@ -295,21 +295,21 @@ func TestTryDirectURLs_RentalOnly(t *testing.T) {
 	}
 	scraper.client.SetTransport(transport)
 
-	foundURL, err := scraper.GetURL("FSDSS-879")
+	foundURL, err := scraper.GetURL(context.Background(), "FSDSS-879")
 	require.NoError(t, err)
 	assert.Equal(t, rentalURLFor("1fsdss879r"), foundURL)
 }
 
 func TestTryDirectURLs_NonRentalPriority(t *testing.T) {
 	repo := newDMMTestRepo(t)
-	require.NoError(t, repo.Create(&models.ContentIDMapping{
+	require.NoError(t, repo.Create(context.TODO(), &models.ContentIDMapping{
 		SearchID:  "IPX-535",
 		ContentID: "ipx00535",
 		Source:    "dmm",
 	}))
 
-	settings := config.ScraperSettings{Enabled: true}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), repo)
+	settings := models.ScraperSettings{Enabled: true}
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
 	transport := &dmmSearchSuccessRoundTripper{
 		responses: map[string]struct {
@@ -326,7 +326,7 @@ func TestTryDirectURLs_NonRentalPriority(t *testing.T) {
 	}
 	scraper.client.SetTransport(transport)
 
-	foundURL, err := scraper.GetURL("IPX-535")
+	foundURL, err := scraper.GetURL(context.Background(), "IPX-535")
 	require.NoError(t, err)
 	assert.Equal(t, digitalURLFor("ipx00535"), foundURL)
 }

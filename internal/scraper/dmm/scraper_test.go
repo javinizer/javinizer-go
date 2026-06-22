@@ -3,7 +3,6 @@ package dmm
 import (
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,7 +12,7 @@ import (
 // This test ensures compile-time interface compliance.
 func TestScraperImplementsInterface(t *testing.T) {
 	// Create a minimal scraper instance
-	scraper := &Scraper{}
+	scraper := &scraper{}
 
 	// Compile-time assertion: if this compiles, the interface is satisfied
 	var _ models.Scraper = scraper
@@ -25,7 +24,7 @@ func TestScraperImplementsInterface(t *testing.T) {
 
 // TestScraperNameMethod verifies that Name() returns the correct identifier.
 func TestScraperNameMethod(t *testing.T) {
-	scraper := &Scraper{}
+	scraper := &scraper{}
 
 	name := scraper.Name()
 
@@ -51,7 +50,7 @@ func TestScraperIsEnabledMethod(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scraper := &Scraper{
+			scraper := &scraper{
 				enabled: tt.enabled,
 			}
 
@@ -62,29 +61,29 @@ func TestScraperIsEnabledMethod(t *testing.T) {
 	}
 }
 
-// TestNewScraperWithConfig verifies that New() creates a properly initialized Scraper.
+// TestNewScraperWithConfig verifies that newScraper() creates a properly initialized Scraper.
 func TestNewScraperWithConfig(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled: true,
 		// Note: DMM-specific fields (scrape_actress, enable_browser, browser_timeout)
-		// were previously in Extra, now in DMMConfig
+		// were previously in Extra, now in ScraperSettings
 	}
 
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 	assert.NotNil(t, scraper, "New should return a non-nil scraper")
 	assert.Equal(t, "dmm", scraper.Name(), "Scraper should have correct name")
 	assert.True(t, scraper.IsEnabled(), "Scraper should be enabled when config.Enabled=true")
 }
 
-// TestNewScraperDisabledConfig verifies that New() respects the enabled configuration.
+// TestNewScraperDisabledConfig verifies that newScraper() respects the enabled configuration.
 func TestNewScraperDisabledConfig(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled: false,
-		// Note: DMM-specific fields moved to DMMConfig
+		// Note: DMM-specific fields moved to ScraperSettings
 	}
 
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 	assert.NotNil(t, scraper, "New should return a non-nil scraper")
 	assert.False(t, scraper.IsEnabled(), "Scraper should be disabled when config.Enabled=false")
@@ -93,7 +92,7 @@ func TestNewScraperDisabledConfig(t *testing.T) {
 // TestScraperInterfaceMethodSignatures verifies that all interface methods have correct signatures.
 // This is a documentation test that demonstrates the interface contract.
 func TestScraperInterfaceMethodSignatures(t *testing.T) {
-	scraper := &Scraper{}
+	scraper := &scraper{}
 
 	// Name() string
 	name := scraper.Name()
@@ -123,7 +122,7 @@ func TestScraperNilSafety(t *testing.T) {
 	// accesses fields. This test documents the expected behavior.
 
 	// A properly initialized scraper should never be nil
-	scraper := &Scraper{}
+	scraper := &scraper{}
 	assert.NotNil(t, scraper, "Scraper should be a valid pointer")
 
 	// Methods that don't access fields should work even with minimal initialization
@@ -136,26 +135,26 @@ func TestScraperNilSafety(t *testing.T) {
 	}, "IsEnabled() should not panic on minimally initialized scraper")
 }
 
-// TestScraperFieldInitialization verifies that New() initializes all required fields.
+// TestScraperFieldInitialization verifies that newScraper() initializes all required fields.
 func TestScraperFieldInitialization(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled: true,
-		// Note: DMM-specific fields moved to DMMConfig
-		Proxy: &config.ProxyConfig{
+		// Note: DMM-specific fields moved to ScraperSettings
+		Proxy: &models.ProxyConfig{
 			Enabled: true,
 			Profile: "main",
 		},
 	}
 
-	globalProxy := config.ProxyConfig{
+	globalProxy := models.ProxyConfig{
 		Enabled:        true,
 		DefaultProfile: "main",
-		Profiles: map[string]config.ProxyProfile{
+		Profiles: map[string]models.ProxyProfile{
 			"main": {URL: "http://proxy.example.com:8080"},
 		},
 	}
 
-	scraper := New(settings, createTestGlobalConfig(&globalProxy, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := newScraper(&settings, &globalProxy, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 	// Verify all fields are properly initialized
 	assert.NotNil(t, scraper.client, "HTTP client should be initialized")
@@ -170,13 +169,13 @@ func TestScraperFieldInitialization(t *testing.T) {
 	assert.NotNil(t, scraper.proxyProfile, "proxyProfile should be initialized")
 }
 
-// TestScraperConfigDefaults verifies that New() applies sensible defaults.
+// TestScraperConfigDefaults verifies that newScraper() applies sensible defaults.
 func TestScraperConfigDefaults(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled: true,
 	}
 
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 	assert.NotNil(t, scraper, "New should return a non-nil scraper even with minimal config")
 	assert.NotNil(t, scraper.client, "HTTP client should always be initialized")
@@ -188,7 +187,7 @@ func TestScraperConfigDefaults(t *testing.T) {
 func TestNewSettingsPassthrough(t *testing.T) {
 	tests := []struct {
 		name           string
-		settings       config.ScraperSettings
+		settings       models.ScraperSettings
 		globalTimeout  int
 		wantRetryCount int
 		wantRateLimit  int
@@ -196,7 +195,7 @@ func TestNewSettingsPassthrough(t *testing.T) {
 	}{
 		{
 			name: "retry_count passthrough",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled:    true,
 				RetryCount: 5,
 			},
@@ -207,7 +206,7 @@ func TestNewSettingsPassthrough(t *testing.T) {
 		},
 		{
 			name: "rate_limit passthrough",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled:   true,
 				RateLimit: 100,
 			},
@@ -218,7 +217,7 @@ func TestNewSettingsPassthrough(t *testing.T) {
 		},
 		{
 			name: "timeout from settings",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled: true,
 				Timeout: 60,
 			},
@@ -229,7 +228,7 @@ func TestNewSettingsPassthrough(t *testing.T) {
 		},
 		{
 			name: "timeout fallback to global config",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled: true,
 				Timeout: 0,
 			},
@@ -242,10 +241,10 @@ func TestNewSettingsPassthrough(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			globalConfig := createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false)
-			globalConfig.TimeoutSeconds = tt.globalTimeout
+			opts := createTestDMMOptions(false, false)
+			opts.TimeoutSeconds = tt.globalTimeout
 
-			scraper := New(tt.settings, globalConfig, nil)
+			scraper := newScraper(&tt.settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, opts)
 			require.NotNil(t, scraper, "New should return a non-nil scraper")
 
 			cfg := scraper.Config()
@@ -258,65 +257,61 @@ func TestNewSettingsPassthrough(t *testing.T) {
 
 func TestNewProxySettingsPassthrough(t *testing.T) {
 	tests := []struct {
-		name         string
-		settings     config.ScraperSettings
-		globalConfig *config.ScrapersConfig
-		wantProxy    bool
-		wantProfile  string
+		name        string
+		settings    models.ScraperSettings
+		wantProxy   bool
+		wantProfile string
 	}{
 		{
 			name: "scraper proxy with profile",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled: true,
-				Proxy: &config.ProxyConfig{
+				Proxy: &models.ProxyConfig{
 					Enabled: true,
 					Profile: "test-profile",
-					Profiles: map[string]config.ProxyProfile{
+					Profiles: map[string]models.ProxyProfile{
 						"test-profile": {
 							URL: "http://test-proxy:8080",
 						},
 					},
 				},
 			},
-			globalConfig: createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false),
-			wantProxy:    true,
-			wantProfile:  "test-profile",
+			wantProxy:   true,
+			wantProfile: "test-profile",
 		},
 		{
 			name: "scraper proxy without profile disabled",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled: true,
-				Proxy: &config.ProxyConfig{
+				Proxy: &models.ProxyConfig{
 					Enabled: false,
 				},
 			},
-			globalConfig: createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false),
-			wantProxy:    false,
-			wantProfile:  "",
+			wantProxy:   false,
+			wantProfile: "",
 		},
 		{
 			name: "download_proxy preserved in config",
-			settings: config.ScraperSettings{
+			settings: models.ScraperSettings{
 				Enabled: true,
-				DownloadProxy: &config.ProxyConfig{
+				DownloadProxy: &models.ProxyConfig{
 					Enabled: true,
 					Profile: "download-profile",
-					Profiles: map[string]config.ProxyProfile{
+					Profiles: map[string]models.ProxyProfile{
 						"download-profile": {
 							URL: "http://download-proxy:8080",
 						},
 					},
 				},
 			},
-			globalConfig: createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false),
-			wantProxy:    false,
-			wantProfile:  "",
+			wantProxy:   false,
+			wantProfile: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scraper := New(tt.settings, tt.globalConfig, nil)
+			scraper := newScraper(&tt.settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 			require.NotNil(t, scraper, "New should return a non-nil scraper")
 
 			cfg := scraper.Config()

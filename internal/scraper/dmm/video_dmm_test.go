@@ -3,7 +3,7 @@ package dmm
 import (
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,10 +45,10 @@ func TestExtractDescriptionNewSite(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled: true,
 			}
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -137,10 +137,10 @@ func TestExtractCoverURLNewSite(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled: true,
 			}
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -211,10 +211,10 @@ func TestExtractScreenshotsNewSite(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled: true,
 			}
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -254,10 +254,10 @@ func TestExtractSeriesNewSite(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled: true,
 			}
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -289,10 +289,10 @@ func TestExtractMakerNewSite(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled: true,
 			}
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -333,10 +333,10 @@ func TestExtractRatingNewSite(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled: true,
 			}
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -545,10 +545,10 @@ func TestExtractTrailerURLNewSite(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled: true,
 			}
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)

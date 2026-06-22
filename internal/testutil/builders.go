@@ -104,7 +104,7 @@ func (b *MovieBuilder) WithReleaseDate(date time.Time) *MovieBuilder {
 
 // WithCoverURL sets the cover URL and returns the builder for chaining.
 func (b *MovieBuilder) WithCoverURL(url string) *MovieBuilder {
-	b.movie.CoverURL = url
+	b.movie.Poster.CoverURL = url
 	return b
 }
 
@@ -197,7 +197,7 @@ func (b *ActressBuilder) Build() *models.Actress {
 //
 // Required fields validation on Build():
 //   - Source (panics if empty)
-//   - ContentID (panics if empty or invalid format)
+//   - ContentID (panics if empty)
 //   - Title (panics if empty)
 //
 // Example usage:
@@ -348,26 +348,8 @@ func (b *ScraperResultBuilder) Build() *models.ScraperResult {
 		panic("ScraperResultBuilder: Title is required (use WithTitle)")
 	}
 
-	// Validate ContentID format (regex: ^[A-Z]{2,5}-\d{3,5}$)
-	// Simple validation: check for hyphen, letters before hyphen, numbers after
-	var hasHyphen bool
-	var beforeHyphen, afterHyphen string
-	for _, c := range b.result.ContentID {
-		if c == '-' {
-			hasHyphen = true
-			continue
-		}
-		if !hasHyphen {
-			beforeHyphen += string(c)
-		} else {
-			afterHyphen += string(c)
-		}
-	}
-
-	if !hasHyphen || len(beforeHyphen) < 2 || len(beforeHyphen) > 5 ||
-		len(afterHyphen) < 3 || len(afterHyphen) > 5 {
-		panic("ScraperResultBuilder: ContentID must match format ^[A-Z]{2,5}-\\d{3,5}$ (e.g., 'ABC-123' or 'IPXYZ-12345')")
-	}
+	// ContentID must not be empty — format validation is intentionally permissive
+	// to support varied JAV ID formats (FC2-PPV-1234567, HEYZO-1234, 1PONDO-123, etc.)
 
 	return b.result
 }

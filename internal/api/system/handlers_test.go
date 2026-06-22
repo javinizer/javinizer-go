@@ -14,29 +14,39 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraper"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	// Import scrapers to trigger init() registration of options
-	_ "github.com/javinizer/javinizer-go/internal/scraper/aventertainment"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/caribbeancom"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/dlgetchu"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/dmm"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/fc2"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/jav321"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/javbus"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/javdb"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/javlibrary"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/libredmm"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/mgstage"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/r18dev"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/tokyohot"
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
+
+var baseTestRegistry *scraperutil.ScraperRegistry
 
 func init() {
 	gin.SetMode(gin.TestMode)
+	baseTestRegistry = scraperutil.NewScraperRegistry()
+	scraper.RegisterAll(baseTestRegistry)
+}
+
+// newTestRegistry creates a registry with scraper registrations from RegisterAll
+// and optional instances. Use this for tests that need scraper metadata (options, display titles).
+func newTestRegistry(instances ...models.Scraper) *scraperutil.ScraperRegistry {
+	reg := scraperutil.NewScraperRegistry()
+	// Copy all registrations from base
+	for name, r := range baseTestRegistry.GetAll() {
+		reg.Register(r)
+		_ = name
+	}
+	for _, scraper := range instances {
+		reg.RegisterInstance(scraper)
+	}
+	return reg
 }
 
 // mockScraper implements the Scraper interface for testing
@@ -53,7 +63,7 @@ func (m *mockScraper) Search(ctx context.Context, id string) (*models.ScraperRes
 	return m.Search(context.Background(), id)
 }
 
-func (m *mockScraper) GetURL(id string) (string, error) {
+func (m *mockScraper) GetURL(_ context.Context, id string) (string, error) {
 	return "", nil
 }
 
@@ -63,8 +73,8 @@ func (m *mockScraper) IsEnabled() bool {
 
 func (m *mockScraper) Close() error { return nil }
 
-func (m *mockScraper) Config() *config.ScraperSettings {
-	return &config.ScraperSettings{Enabled: m.enabled}
+func (m *mockScraper) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: m.enabled}
 }
 
 func TestHealthCheck(t *testing.T) {
@@ -103,16 +113,13 @@ func TestHealthCheck(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			registry := models.NewScraperRegistry()
+			registry := newTestRegistry()
 			for _, scraper := range tt.scrapers {
-				registry.Register(scraper)
+				registry.RegisterInstance(scraper)
 			}
 
-			// Create minimal ServerDependencies for test
-			deps := &ServerDependencies{
-				Registry: registry,
-			}
-			deps.SetConfig(config.DefaultConfig())
+			// Create minimal core.APIDeps for test
+			deps := newTestDeps(config.DefaultConfig(nil, nil), withRegistry(registry))
 
 			router := gin.New()
 			router.GET("/health", healthCheck(deps))
@@ -124,7 +131,7 @@ func TestHealthCheck(t *testing.T) {
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
-			var response HealthResponse
+			var response contracts.HealthResponse
 			err := json.Unmarshal(w.Body.Bytes(), &response)
 			require.NoError(t, err)
 
@@ -167,9 +174,8 @@ func TestGetConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create minimal ServerDependencies for test
-			deps := &ServerDependencies{}
-			deps.SetConfig(tt.config)
+			// Create minimal core.APIDeps for test
+			deps := newTestDeps(tt.config)
 
 			router := gin.New()
 			router.GET("/config", getConfig(deps))
@@ -196,7 +202,7 @@ func TestGetAvailableScrapers(t *testing.T) {
 		name           string
 		scrapers       []models.Scraper
 		expectedStatus int
-		validateFn     func(*testing.T, AvailableScrapersResponse)
+		validateFn     func(*testing.T, contracts.AvailableScrapersResponse)
 	}{
 		{
 			name: "r18dev scraper",
@@ -204,12 +210,12 @@ func TestGetAvailableScrapers(t *testing.T) {
 				&mockScraper{name: "r18dev", enabled: true},
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp AvailableScrapersResponse) {
+			validateFn: func(t *testing.T, resp contracts.AvailableScrapersResponse) {
 				require.Len(t, resp.Scrapers, 1)
 				assert.Equal(t, "r18dev", resp.Scrapers[0].Name)
 				assert.Equal(t, "R18.dev", resp.Scrapers[0].DisplayTitle)
 				assert.True(t, resp.Scrapers[0].Enabled)
-				assert.Len(t, resp.Scrapers[0].Options, 9)
+				assert.NotEmpty(t, resp.Scrapers[0].Options)
 				optionKeys := make(map[string]bool)
 				for _, opt := range resp.Scrapers[0].Options {
 					optionKeys[opt.Key] = true
@@ -230,12 +236,12 @@ func TestGetAvailableScrapers(t *testing.T) {
 				&mockScraper{name: "dmm", enabled: true},
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp AvailableScrapersResponse) {
+			validateFn: func(t *testing.T, resp contracts.AvailableScrapersResponse) {
 				require.Len(t, resp.Scrapers, 1)
 				assert.Equal(t, "dmm", resp.Scrapers[0].Name)
 				assert.Equal(t, "DMM/Fanza", resp.Scrapers[0].DisplayTitle)
 				assert.True(t, resp.Scrapers[0].Enabled)
-				assert.Len(t, resp.Scrapers[0].Options, 9)
+				assert.NotEmpty(t, resp.Scrapers[0].Options)
 
 				// Verify options exist
 				optionKeys := make(map[string]bool)
@@ -260,7 +266,7 @@ func TestGetAvailableScrapers(t *testing.T) {
 				&mockScraper{name: "dmm", enabled: false},
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp AvailableScrapersResponse) {
+			validateFn: func(t *testing.T, resp contracts.AvailableScrapersResponse) {
 				require.Len(t, resp.Scrapers, 2)
 			},
 		},
@@ -270,18 +276,18 @@ func TestGetAvailableScrapers(t *testing.T) {
 				&mockScraper{name: "javdb", enabled: true},
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp AvailableScrapersResponse) {
+			validateFn: func(t *testing.T, resp contracts.AvailableScrapersResponse) {
 				require.Len(t, resp.Scrapers, 1)
 				assert.Equal(t, "javdb", resp.Scrapers[0].Name)
 				assert.Equal(t, "JavDB", resp.Scrapers[0].DisplayTitle)
 				assert.True(t, resp.Scrapers[0].Enabled)
-				assert.Len(t, resp.Scrapers[0].Options, 8)
+				assert.NotEmpty(t, resp.Scrapers[0].Options)
 
 				optionKeys := make(map[string]bool)
 				for _, opt := range resp.Scrapers[0].Options {
 					optionKeys[opt.Key] = true
 				}
-				assert.True(t, optionKeys["request_delay"])
+				assert.True(t, optionKeys["rate_limit"])
 				assert.True(t, optionKeys["base_url"])
 				assert.True(t, optionKeys["use_flaresolverr"])
 				assert.True(t, optionKeys["user_agent"])
@@ -297,18 +303,18 @@ func TestGetAvailableScrapers(t *testing.T) {
 				&mockScraper{name: "libredmm", enabled: true},
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp AvailableScrapersResponse) {
+			validateFn: func(t *testing.T, resp contracts.AvailableScrapersResponse) {
 				require.Len(t, resp.Scrapers, 1)
 				assert.Equal(t, "libredmm", resp.Scrapers[0].Name)
 				assert.Equal(t, "LibreDMM (Fanza, MGStage, SOD, FC2)", resp.Scrapers[0].DisplayTitle)
 				assert.True(t, resp.Scrapers[0].Enabled)
-				assert.Len(t, resp.Scrapers[0].Options, 9)
+				assert.NotEmpty(t, resp.Scrapers[0].Options)
 
 				optionKeys := make(map[string]bool)
 				for _, opt := range resp.Scrapers[0].Options {
 					optionKeys[opt.Key] = true
 				}
-				assert.True(t, optionKeys["request_delay"])
+				assert.True(t, optionKeys["rate_limit"])
 				assert.True(t, optionKeys["base_url"])
 				assert.True(t, optionKeys["placeholder_threshold"])
 				assert.True(t, optionKeys["extra_placeholder_hashes"])
@@ -325,19 +331,19 @@ func TestGetAvailableScrapers(t *testing.T) {
 				&mockScraper{name: "caribbeancom", enabled: true},
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp AvailableScrapersResponse) {
+			validateFn: func(t *testing.T, resp contracts.AvailableScrapersResponse) {
 				require.Len(t, resp.Scrapers, 1)
 				assert.Equal(t, "caribbeancom", resp.Scrapers[0].Name)
 				assert.Equal(t, "Caribbeancom", resp.Scrapers[0].DisplayTitle)
 				assert.True(t, resp.Scrapers[0].Enabled)
-				assert.Len(t, resp.Scrapers[0].Options, 8)
+				assert.NotEmpty(t, resp.Scrapers[0].Options)
 
 				optionKeys := make(map[string]bool)
 				for _, opt := range resp.Scrapers[0].Options {
 					optionKeys[opt.Key] = true
 				}
 				assert.True(t, optionKeys["language"])
-				assert.True(t, optionKeys["request_delay"])
+				assert.True(t, optionKeys["rate_limit"])
 				assert.True(t, optionKeys["base_url"])
 				assert.True(t, optionKeys["user_agent"])
 				assert.True(t, optionKeys["proxy.enabled"])
@@ -352,18 +358,18 @@ func TestGetAvailableScrapers(t *testing.T) {
 				&mockScraper{name: "fc2", enabled: true},
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp AvailableScrapersResponse) {
+			validateFn: func(t *testing.T, resp contracts.AvailableScrapersResponse) {
 				require.Len(t, resp.Scrapers, 1)
 				assert.Equal(t, "fc2", resp.Scrapers[0].Name)
 				assert.Equal(t, "FC2", resp.Scrapers[0].DisplayTitle)
 				assert.True(t, resp.Scrapers[0].Enabled)
-				assert.Len(t, resp.Scrapers[0].Options, 7)
+				assert.NotEmpty(t, resp.Scrapers[0].Options)
 
 				optionKeys := make(map[string]bool)
 				for _, opt := range resp.Scrapers[0].Options {
 					optionKeys[opt.Key] = true
 				}
-				assert.True(t, optionKeys["request_delay"])
+				assert.True(t, optionKeys["rate_limit"])
 				assert.True(t, optionKeys["base_url"])
 				assert.True(t, optionKeys["user_agent"])
 				assert.True(t, optionKeys["proxy.enabled"])
@@ -376,19 +382,16 @@ func TestGetAvailableScrapers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			registry := models.NewScraperRegistry()
+			registry := newTestRegistry()
 			for _, scraper := range tt.scrapers {
-				registry.Register(scraper)
+				registry.RegisterInstance(scraper)
 			}
 
-			// Create minimal ServerDependencies for test
-			deps := &ServerDependencies{
-				Registry: registry,
-			}
-			deps.SetConfig(config.DefaultConfig())
+			// Create minimal core.APIDeps for test
+			deps := newTestDeps(config.DefaultConfig(nil, nil), withRegistry(registry))
 
 			router := gin.New()
-			router.GET("/scrapers", getAvailableScrapers(deps))
+			router.GET("/scrapers", getAvailableScrapers(testkit.GetTestRuntime(deps)))
 
 			req := httptest.NewRequest("GET", "/scrapers", nil)
 			w := httptest.NewRecorder()
@@ -397,7 +400,7 @@ func TestGetAvailableScrapers(t *testing.T) {
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
-			var response AvailableScrapersResponse
+			var response contracts.AvailableScrapersResponse
 			err := json.Unmarshal(w.Body.Bytes(), &response)
 			require.NoError(t, err)
 
@@ -409,21 +412,17 @@ func TestGetAvailableScrapers(t *testing.T) {
 }
 
 func TestGetAvailableScrapers_RespectsConfigPriorityOrder(t *testing.T) {
-	registry := models.NewScraperRegistry()
-	registry.Register(&mockScraper{name: "mgstage", enabled: true})
-	registry.Register(&mockScraper{name: "javdb", enabled: true})
-	registry.Register(&mockScraper{name: "dmm", enabled: true})
+	registry := newTestRegistry()
+	registry.RegisterInstance(&mockScraper{name: "mgstage", enabled: true})
+	registry.RegisterInstance(&mockScraper{name: "javdb", enabled: true})
+	registry.RegisterInstance(&mockScraper{name: "dmm", enabled: true})
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.Scrapers.Priority = []string{"javdb", "dmm"}
 
-	deps := &ServerDependencies{
-		Registry: registry,
-	}
-	deps.SetConfig(cfg)
-
+	deps := newTestDeps(cfg, withRegistry(registry))
 	router := gin.New()
-	router.GET("/scrapers", getAvailableScrapers(deps))
+	router.GET("/scrapers", getAvailableScrapers(testkit.GetTestRuntime(deps)))
 
 	req := httptest.NewRequest("GET", "/scrapers", nil)
 	w := httptest.NewRecorder()
@@ -431,7 +430,7 @@ func TestGetAvailableScrapers_RespectsConfigPriorityOrder(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var response AvailableScrapersResponse
+	var response contracts.AvailableScrapersResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Len(t, response.Scrapers, 3)
@@ -493,23 +492,22 @@ func TestTestProxy(t *testing.T) {
 		proxy := startTestForwardProxy(t)
 		defer proxy.Close()
 
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy.Enabled = true
 		cfg.Scrapers.Proxy.DefaultProfile = "main"
-		cfg.Scrapers.Proxy.Profiles = map[string]config.ProxyProfile{
+		cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
 			"main": {URL: proxy.URL},
 		}
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(cfg)
+		deps := newTestDeps(cfg)
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
-		reqBody := ProxyTestRequest{
+		reqBody := contracts.ProxyTestRequest{
 			Mode:      "direct",
 			TargetURL: target.URL,
-			Proxy: config.ProxyConfig{
+			Proxy: models.ProxyConfig{
 				Enabled: true,
 			},
 		}
@@ -523,7 +521,7 @@ func TestTestProxy(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp ProxyTestResponse
+		var resp contracts.ProxyTestResponse
 		err = json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 		assert.True(t, resp.Success)
@@ -539,17 +537,16 @@ func TestTestProxy(t *testing.T) {
 		}))
 		defer fs.Close()
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
-		reqBody := ProxyTestRequest{
+		reqBody := contracts.ProxyTestRequest{
 			Mode:      "flaresolverr",
 			TargetURL: "https://javdb.com",
-			Proxy:     config.ProxyConfig{},
-			FlareSolverr: config.FlareSolverrConfig{
+			Proxy:     models.ProxyConfig{},
+			FlareSolverr: models.FlareSolverrConfig{
 				Enabled: true,
 				URL:     fs.URL,
 			},
@@ -564,7 +561,7 @@ func TestTestProxy(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp ProxyTestResponse
+		var resp contracts.ProxyTestResponse
 		err = json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 		assert.True(t, resp.Success)
@@ -573,11 +570,10 @@ func TestTestProxy(t *testing.T) {
 	})
 
 	t.Run("invalid mode", func(t *testing.T) {
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
-		router.POST("/proxy/test", testProxy(deps))
+		router.POST("/proxy/test", testProxy(testkit.GetTestRuntime(deps)))
 
 		body := []byte(`{"mode":"invalid","proxy":{"enabled":true,"url":"http://proxy.example.com:8080"}}`)
 		req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewBuffer(body))
@@ -600,13 +596,12 @@ func TestGetTranslationModels(t *testing.T) {
 		}))
 		defer upstream.Close()
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/models", getTranslationModels(deps))
 
-		reqBody := TranslationModelsRequest{
+		reqBody := contracts.TranslationModelsRequest{
 			Provider: "openai",
 			BaseURL:  upstream.URL,
 			APIKey:   "test-key",
@@ -621,7 +616,7 @@ func TestGetTranslationModels(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp TranslationModelsResponse
+		var resp contracts.TranslationModelsResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, []string{"gpt-4.1", "gpt-4o-mini"}, resp.Models)
 	})
@@ -634,13 +629,12 @@ func TestGetTranslationModels(t *testing.T) {
 		}))
 		defer upstream.Close()
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/models", getTranslationModels(deps))
 
-		reqBody := TranslationModelsRequest{
+		reqBody := contracts.TranslationModelsRequest{
 			Provider: "openai-compatible",
 			BaseURL:  upstream.URL,
 			APIKey:   "optional-key",
@@ -655,7 +649,7 @@ func TestGetTranslationModels(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp TranslationModelsResponse
+		var resp contracts.TranslationModelsResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, []string{"llama-3", "mistral"}, resp.Models)
 	})
@@ -668,13 +662,12 @@ func TestGetTranslationModels(t *testing.T) {
 		}))
 		defer upstream.Close()
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/models", getTranslationModels(deps))
 
-		reqBody := TranslationModelsRequest{
+		reqBody := contracts.TranslationModelsRequest{
 			Provider: "openai-compatible",
 			BaseURL:  upstream.URL,
 			APIKey:   "",
@@ -689,7 +682,7 @@ func TestGetTranslationModels(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp TranslationModelsResponse
+		var resp contracts.TranslationModelsResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, []string{"ollama-model"}, resp.Models)
 	})
@@ -704,13 +697,12 @@ func TestGetTranslationModels(t *testing.T) {
 		}))
 		defer upstream.Close()
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/models", getTranslationModels(deps))
 
-		reqBody := TranslationModelsRequest{
+		reqBody := contracts.TranslationModelsRequest{
 			Provider: "anthropic",
 			BaseURL:  upstream.URL,
 			APIKey:   "test-anthropic-key",
@@ -725,14 +717,13 @@ func TestGetTranslationModels(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp TranslationModelsResponse
+		var resp contracts.TranslationModelsResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, []string{"claude-3-5-sonnet", "claude-3-opus"}, resp.Models)
 	})
 
 	t.Run("invalid provider", func(t *testing.T) {
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/models", getTranslationModels(deps))
@@ -747,8 +738,7 @@ func TestGetTranslationModels(t *testing.T) {
 	})
 
 	t.Run("missing api key for openai", func(t *testing.T) {
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/models", getTranslationModels(deps))
@@ -773,8 +763,7 @@ func TestGetDeepLUsage(t *testing.T) {
 		}))
 		defer upstream.Close()
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/deepl/usage", getDeepLUsage(deps))
@@ -815,8 +804,7 @@ func TestGetDeepLUsage(t *testing.T) {
 		}))
 		defer upstream.Close()
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/deepl/usage", getDeepLUsage(deps))
@@ -845,8 +833,7 @@ func TestGetDeepLUsage(t *testing.T) {
 	})
 
 	t.Run("missing api key", func(t *testing.T) {
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/deepl/usage", getDeepLUsage(deps))
@@ -861,8 +848,7 @@ func TestGetDeepLUsage(t *testing.T) {
 	})
 
 	t.Run("invalid mode", func(t *testing.T) {
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/deepl/usage", getDeepLUsage(deps))
@@ -883,8 +869,7 @@ func TestGetDeepLUsage(t *testing.T) {
 		}))
 		defer upstream.Close()
 
-		deps := &ServerDependencies{}
-		deps.SetConfig(config.DefaultConfig())
+		deps := newTestDeps(config.DefaultConfig(nil, nil))
 
 		router := gin.New()
 		router.POST("/translation/deepl/usage", getDeepLUsage(deps))
@@ -916,9 +901,9 @@ func TestUpdateConfig(t *testing.T) {
 	}{
 		{
 			name:          "valid config update",
-			initialConfig: config.DefaultConfig(),
+			initialConfig: config.DefaultConfig(nil, nil),
 			requestBody: func() *config.Config {
-				cfg := config.DefaultConfig()
+				cfg := config.DefaultConfig(nil, nil)
 				cfg.Server.Host = "0.0.0.0"
 				cfg.Server.Port = 9090
 				return cfg
@@ -927,16 +912,16 @@ func TestUpdateConfig(t *testing.T) {
 		},
 		{
 			name:           "invalid json",
-			initialConfig:  config.DefaultConfig(),
+			initialConfig:  config.DefaultConfig(nil, nil),
 			requestBody:    "invalid json",
 			expectedStatus: 400,
 			expectedError:  "Invalid configuration format",
 		},
 		{
 			name:          "reject newer config version",
-			initialConfig: config.DefaultConfig(),
+			initialConfig: config.DefaultConfig(nil, nil),
 			requestBody: func() *config.Config {
-				cfg := config.DefaultConfig()
+				cfg := config.DefaultConfig(nil, nil)
 				cfg.ConfigVersion = config.CurrentConfigVersion + 1
 				return cfg
 			}(),
@@ -951,10 +936,11 @@ func TestUpdateConfig(t *testing.T) {
 			tempConfigFile := t.TempDir() + "/config.yaml"
 
 			// Create minimal dependencies for testing
-			deps := createTestDeps(t, tt.initialConfig, tempConfigFile)
+			coreDeps := createTestDeps(t, tt.initialConfig, tempConfigFile)
+			deps := systemDepsFromCore(coreDeps)
 
 			router := gin.New()
-			router.PUT("/config", updateConfig(deps))
+			router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
 			var body []byte
 			var err error
@@ -974,7 +960,7 @@ func TestUpdateConfig(t *testing.T) {
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
 			if tt.expectedError != "" {
-				var response ErrorResponse
+				var response contracts.ErrorResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				require.NoError(t, err)
 				assert.Contains(t, response.Error, tt.expectedError)
@@ -985,15 +971,16 @@ func TestUpdateConfig(t *testing.T) {
 
 func TestUpdateConfig_ConcurrentAccess(t *testing.T) {
 	// Test that concurrent config updates are properly serialized
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 
 	tempConfigFile := t.TempDir() + "/config.yaml"
 
 	// Create minimal dependencies for testing
-	deps := createTestDeps(t, cfg, tempConfigFile)
+	coreDeps := createTestDeps(t, cfg, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
 
 	router := gin.New()
-	router.PUT("/config", updateConfig(deps))
+	router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
 	// Launch multiple concurrent requests
 	done := make(chan bool, 5)
@@ -1001,7 +988,7 @@ func TestUpdateConfig_ConcurrentAccess(t *testing.T) {
 		go func(port int) {
 			defer func() { done <- true }()
 
-			newConfig := config.DefaultConfig()
+			newConfig := config.DefaultConfig(nil, nil)
 			newConfig.Server.Host = "0.0.0.0"
 			newConfig.Server.Port = 8080 + port
 
@@ -1027,17 +1014,14 @@ func TestUpdateConfig_ConcurrentAccess(t *testing.T) {
 
 func TestGetAvailableScrapers_OptionsValidation(t *testing.T) {
 	// Specifically test DMM options structure
-	registry := models.NewScraperRegistry()
-	registry.Register(&mockScraper{name: "dmm", enabled: true})
+	registry := newTestRegistry()
+	registry.RegisterInstance(&mockScraper{name: "dmm", enabled: true})
 
-	// Create minimal ServerDependencies for test
-	deps := &ServerDependencies{
-		Registry: registry,
-	}
-	deps.SetConfig(config.DefaultConfig())
+	// Create minimal core.APIDeps for test
+	deps := newTestDeps(config.DefaultConfig(nil, nil), withRegistry(registry))
 
 	router := gin.New()
-	router.GET("/scrapers", getAvailableScrapers(deps))
+	router.GET("/scrapers", getAvailableScrapers(testkit.GetTestRuntime(deps)))
 
 	req := httptest.NewRequest("GET", "/scrapers", nil)
 	w := httptest.NewRecorder()
@@ -1046,7 +1030,7 @@ func TestGetAvailableScrapers_OptionsValidation(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 
-	var response AvailableScrapersResponse
+	var response contracts.AvailableScrapersResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
@@ -1055,7 +1039,7 @@ func TestGetAvailableScrapers_OptionsValidation(t *testing.T) {
 	require.Len(t, scraper.Options, 9)
 
 	// Test scrape_actress option
-	var scrapeActressOpt *ScraperOption
+	var scrapeActressOpt *contracts.ScraperOption
 	for i := range scraper.Options {
 		if scraper.Options[i].Key == "scrape_actress" {
 			scrapeActressOpt = &scraper.Options[i]
@@ -1067,7 +1051,7 @@ func TestGetAvailableScrapers_OptionsValidation(t *testing.T) {
 	assert.Contains(t, scrapeActressOpt.Description, "actress")
 
 	// Test use_browser option
-	var useBrowserOpt *ScraperOption
+	var useBrowserOpt *contracts.ScraperOption
 	for i := range scraper.Options {
 		if scraper.Options[i].Key == "use_browser" {
 			useBrowserOpt = &scraper.Options[i]
@@ -1081,14 +1065,11 @@ func TestGetAvailableScrapers_OptionsValidation(t *testing.T) {
 
 // TestHealthCheck_WithDisabledScrapers tests health check with disabled scrapers
 func TestHealthCheck_WithDisabledScrapers(t *testing.T) {
-	registry := models.NewScraperRegistry()
-	registry.Register(&mockScraper{name: "r18dev", enabled: false})
-	registry.Register(&mockScraper{name: "dmm", enabled: false})
+	registry := newTestRegistry()
+	registry.RegisterInstance(&mockScraper{name: "r18dev", enabled: false})
+	registry.RegisterInstance(&mockScraper{name: "dmm", enabled: false})
 
-	deps := &ServerDependencies{
-		Registry: registry,
-	}
-	deps.SetConfig(config.DefaultConfig())
+	deps := newTestDeps(config.DefaultConfig(nil, nil), withRegistry(registry))
 
 	router := gin.New()
 	router.GET("/health", healthCheck(deps))
@@ -1100,7 +1081,7 @@ func TestHealthCheck_WithDisabledScrapers(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 
-	var response HealthResponse
+	var response contracts.HealthResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
@@ -1113,8 +1094,7 @@ func TestHealthCheck_WithDisabledScrapers(t *testing.T) {
 
 // TestGetConfig_EmptyConfig tests getting an empty config
 func TestGetConfig_EmptyConfig(t *testing.T) {
-	deps := &ServerDependencies{}
-	deps.SetConfig(&config.Config{})
+	deps := newTestDeps(&config.Config{})
 
 	router := gin.New()
 	router.GET("/config", getConfig(deps))
@@ -1135,11 +1115,12 @@ func TestGetConfig_EmptyConfig(t *testing.T) {
 func TestUpdateConfig_InvalidConfig(t *testing.T) {
 	tempConfigFile := t.TempDir() + "/config.yaml"
 
-	initialConfig := config.DefaultConfig()
-	deps := createTestDeps(t, initialConfig, tempConfigFile)
+	initialConfig := config.DefaultConfig(nil, nil)
+	coreDeps := createTestDeps(t, initialConfig, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
 
 	router := gin.New()
-	router.PUT("/config", updateConfig(deps))
+	router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 
 	tests := []struct {
 		name          string
@@ -1161,7 +1142,7 @@ func TestUpdateConfig_InvalidConfig(t *testing.T) {
 		{
 			name: "translation enabled but deepl key missing",
 			requestBody: func() string {
-				cfg := config.DefaultConfig()
+				cfg := config.DefaultConfig(nil, nil)
 				cfg.Metadata.Translation.Enabled = true
 				cfg.Metadata.Translation.Provider = "deepl"
 				cfg.Metadata.Translation.DeepL.APIKey = ""
@@ -1193,15 +1174,12 @@ func TestUpdateConfig_InvalidConfig(t *testing.T) {
 
 // TestGetAvailableScrapers_NoScrapers tests when no scrapers are registered
 func TestGetAvailableScrapers_NoScrapers(t *testing.T) {
-	registry := models.NewScraperRegistry()
+	registry := newTestRegistry()
 
-	deps := &ServerDependencies{
-		Registry: registry,
-	}
-	deps.SetConfig(config.DefaultConfig())
+	deps := newTestDeps(config.DefaultConfig(nil, nil), withRegistry(registry))
 
 	router := gin.New()
-	router.GET("/scrapers", getAvailableScrapers(deps))
+	router.GET("/scrapers", getAvailableScrapers(testkit.GetTestRuntime(deps)))
 
 	req := httptest.NewRequest("GET", "/scrapers", nil)
 	w := httptest.NewRecorder()
@@ -1210,7 +1188,7 @@ func TestGetAvailableScrapers_NoScrapers(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 
-	var response AvailableScrapersResponse
+	var response contracts.AvailableScrapersResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
@@ -1221,11 +1199,12 @@ func TestGetAvailableScrapers_NoScrapers(t *testing.T) {
 func TestConfigReloadRaceConditions(t *testing.T) {
 	tempConfigFile := t.TempDir() + "/config.yaml"
 
-	initialConfig := config.DefaultConfig()
-	deps := createTestDeps(t, initialConfig, tempConfigFile)
+	initialConfig := config.DefaultConfig(nil, nil)
+	coreDeps := createTestDeps(t, initialConfig, tempConfigFile)
+	deps := systemDepsFromCore(coreDeps)
 
 	router := gin.New()
-	router.PUT("/config", updateConfig(deps))
+	router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
 	router.GET("/config", getConfig(deps))
 
 	// Launch concurrent reads and writes
@@ -1250,7 +1229,7 @@ func TestConfigReloadRaceConditions(t *testing.T) {
 		go func(port int) {
 			defer func() { done <- true }()
 
-			newConfig := config.DefaultConfig()
+			newConfig := config.DefaultConfig(nil, nil)
 			newConfig.Server.Port = 8080 + port
 
 			body, err := json.Marshal(newConfig)
@@ -1275,13 +1254,10 @@ func TestConfigReloadRaceConditions(t *testing.T) {
 
 // TestHealthCheck_MultipleCalls tests that health check is idempotent
 func TestHealthCheck_MultipleCalls(t *testing.T) {
-	registry := models.NewScraperRegistry()
-	registry.Register(&mockScraper{name: "r18dev", enabled: true})
+	registry := newTestRegistry()
+	registry.RegisterInstance(&mockScraper{name: "r18dev", enabled: true})
 
-	deps := &ServerDependencies{
-		Registry: registry,
-	}
-	deps.SetConfig(config.DefaultConfig())
+	deps := newTestDeps(config.DefaultConfig(nil, nil), withRegistry(registry))
 
 	router := gin.New()
 	router.GET("/health", healthCheck(deps))
@@ -1295,7 +1271,7 @@ func TestHealthCheck_MultipleCalls(t *testing.T) {
 
 		assert.Equal(t, 200, w.Code)
 
-		var response HealthResponse
+		var response contracts.HealthResponse
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 

@@ -1,33 +1,25 @@
 package database
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestActressRepository(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewActressRepository(db)
 
 	t.Run("Create actress", func(t *testing.T) {
@@ -39,7 +31,7 @@ func TestActressRepository(t *testing.T) {
 			ThumbURL:     "http://example.com/thumb.jpg",
 		}
 
-		err := repo.Create(actress)
+		err := repo.Create(context.TODO(), actress)
 		require.NoError(t, err)
 		assert.NotZero(t, actress.ID)
 	})
@@ -52,17 +44,17 @@ func TestActressRepository(t *testing.T) {
 			JapaneseName: "オリジナル",
 		}
 
-		err := repo.Create(actress)
+		err := repo.Create(context.TODO(), actress)
 		require.NoError(t, err)
 
 		// Update
 		actress.FirstName = "Updated"
 		actress.LastName = "Updated Name"
-		err = repo.Update(actress)
+		err = repo.Update(context.TODO(), actress)
 		require.NoError(t, err)
 
 		// Verify update (we'll need to search by DMMID or Japanese name)
-		found, err := repo.FindByJapaneseName("オリジナル")
+		found, err := repo.FindByJapaneseName(context.TODO(), "オリジナル")
 		require.NoError(t, err)
 		assert.Equal(t, "Updated", found.FirstName)
 		assert.Equal(t, "Updated Name", found.LastName)
@@ -76,17 +68,17 @@ func TestActressRepository(t *testing.T) {
 			LastName:     "Actress",
 		}
 
-		err := repo.Create(actress)
+		err := repo.Create(context.TODO(), actress)
 		require.NoError(t, err)
 
-		found, err := repo.FindByJapaneseName("テスト女優")
+		found, err := repo.FindByJapaneseName(context.TODO(), "テスト女優")
 		require.NoError(t, err)
 		assert.Equal(t, "テスト女優", found.JapaneseName)
 		assert.Equal(t, "Test", found.FirstName)
 	})
 
 	t.Run("FindByJapaneseName not found", func(t *testing.T) {
-		_, err := repo.FindByJapaneseName("存在しない女優")
+		_, err := repo.FindByJapaneseName(context.TODO(), "存在しない女優")
 		assert.Error(t, err)
 	})
 
@@ -98,7 +90,7 @@ func TestActressRepository(t *testing.T) {
 			LastName:     "Actress",
 		}
 
-		err := repo.Create(existing)
+		err := repo.Create(context.TODO(), existing)
 		require.NoError(t, err)
 
 		// Try to FindOrCreate with same Japanese name
@@ -108,7 +100,7 @@ func TestActressRepository(t *testing.T) {
 			LastName:     "Name",
 		}
 
-		err = repo.FindOrCreate(actress)
+		err = repo.FindOrCreate(context.TODO(), actress)
 		require.NoError(t, err)
 
 		// Should have found existing actress
@@ -124,7 +116,7 @@ func TestActressRepository(t *testing.T) {
 			LastName:     "Actress",
 		}
 
-		err := repo.FindOrCreate(actress)
+		err := repo.FindOrCreate(context.TODO(), actress)
 		require.NoError(t, err)
 		assert.NotZero(t, actress.ID)
 	})
@@ -138,17 +130,17 @@ func TestActressRepository(t *testing.T) {
 				FirstName:    "First" + string(rune('A'+i)),
 				LastName:     "Last" + string(rune('A'+i)),
 			}
-			err := repo.Create(actress)
+			err := repo.Create(context.TODO(), actress)
 			require.NoError(t, err)
 		}
 
 		// Get first 3
-		actresses, err := repo.List(3, 0)
+		actresses, err := repo.List(context.TODO(), 3, 0)
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(actresses), 3)
 
 		// Get next batch
-		actresses, err = repo.List(3, 3)
+		actresses, err = repo.List(context.TODO(), 3, 3)
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(actresses), 0)
 	})
@@ -162,12 +154,12 @@ func TestActressRepository(t *testing.T) {
 		}
 
 		for _, a := range actresses {
-			err := repo.Create(a)
+			err := repo.Create(context.TODO(), a)
 			require.NoError(t, err)
 		}
 
 		// Search by first name
-		results, err := repo.Search("Hanako")
+		results, err := repo.Search(context.TODO(), "Hanako")
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(results), 1)
 
@@ -181,7 +173,7 @@ func TestActressRepository(t *testing.T) {
 		assert.True(t, found, "Should find actress by first name")
 
 		// Search by last name
-		results, err = repo.Search("Sato")
+		results, err = repo.Search(context.TODO(), "Sato")
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(results), 1)
 
@@ -195,7 +187,7 @@ func TestActressRepository(t *testing.T) {
 		assert.True(t, found, "Should find actress by last name")
 
 		// Search by Japanese name
-		results, err = repo.Search("田中")
+		results, err = repo.Search(context.TODO(), "田中")
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(results), 1)
 
@@ -216,35 +208,35 @@ func TestActressRepository(t *testing.T) {
 			{DMMID: 31003, JapaneseName: "佐々木あい", FirstName: "Ai", LastName: "Sasaki"},
 		}
 		for _, a := range seed {
-			err := repo.Create(a)
+			err := repo.Create(context.TODO(), a)
 			require.NoError(t, err)
 		}
 
-		page1, err := repo.SearchPaged("小川", 1, 0)
+		page1, err := repo.SearchPaged(context.TODO(), "小川", 1, 0)
 		require.NoError(t, err)
 		require.Len(t, page1, 1)
 		assert.Contains(t, page1[0].JapaneseName, "小川")
 
-		page2, err := repo.SearchPaged("小川", 1, 1)
+		page2, err := repo.SearchPaged(context.TODO(), "小川", 1, 1)
 		require.NoError(t, err)
 		require.Len(t, page2, 1)
 		assert.Contains(t, page2[0].JapaneseName, "小川")
 		assert.NotEqual(t, page1[0].ID, page2[0].ID)
 
-		noMatch, err := repo.SearchPaged("no-such-actress", 10, 0)
+		noMatch, err := repo.SearchPaged(context.TODO(), "no-such-actress", 10, 0)
 		require.NoError(t, err)
 		assert.Len(t, noMatch, 0)
 	})
 
 	t.Run("Search with empty query", func(t *testing.T) {
-		results, err := repo.Search("")
+		results, err := repo.Search(context.TODO(), "")
 		require.NoError(t, err)
 		// Should return all actresses (limited to 100)
 		assert.Greater(t, len(results), 0)
 	})
 
 	t.Run("Search no results", func(t *testing.T) {
-		results, err := repo.Search("NonExistentActress12345")
+		results, err := repo.Search(context.TODO(), "NonExistentActress12345")
 		require.NoError(t, err)
 		assert.Len(t, results, 0)
 	})
@@ -286,19 +278,11 @@ func TestActress_FullName(t *testing.T) {
 
 // TestActressRepository_Crud tests CRUD operations
 func TestActressRepository_Crud(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewActressRepository(db)
 
 	t.Run("FindByID", func(t *testing.T) {
@@ -309,18 +293,18 @@ func TestActressRepository_Crud(t *testing.T) {
 			LastName:     "Actress",
 			JapaneseName: "テスト女優",
 		}
-		err := repo.Create(actress)
+		err := repo.Create(context.TODO(), actress)
 		require.NoError(t, err)
 
 		// Find by ID
-		found, err := repo.FindByID(actress.ID)
+		found, err := repo.FindByID(context.TODO(), actress.ID)
 		require.NoError(t, err)
 		assert.NotNil(t, found)
 		assert.Equal(t, "Test", found.FirstName)
 		assert.Equal(t, "Actress", found.LastName)
 
 		// Not found
-		notFound, err := repo.FindByID(99999)
+		notFound, err := repo.FindByID(context.TODO(), 99999)
 		require.Error(t, err)
 		assert.Nil(t, notFound)
 	})
@@ -332,15 +316,15 @@ func TestActressRepository_Crud(t *testing.T) {
 			FirstName: "Delete",
 			LastName:  "Test",
 		}
-		err := repo.Create(actress)
+		err := repo.Create(context.TODO(), actress)
 		require.NoError(t, err)
 
 		// Delete
-		err = repo.Delete(actress.ID)
+		err = repo.Delete(context.TODO(), actress.ID)
 		require.NoError(t, err)
 
 		// Verify deleted
-		_, err = repo.FindByID(actress.ID)
+		_, err = repo.FindByID(context.TODO(), actress.ID)
 		require.Error(t, err)
 	})
 
@@ -352,12 +336,12 @@ func TestActressRepository_Crud(t *testing.T) {
 				FirstName: fmt.Sprintf("Count%d", i),
 				LastName:  "Test",
 			}
-			err := repo.Create(actress)
+			err := repo.Create(context.TODO(), actress)
 			require.NoError(t, err)
 		}
 
 		// Count only actresses with DMMID >= 20000
-		count, err := repo.Count()
+		count, err := repo.Count(context.TODO())
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, count, int64(5))
 	})
@@ -365,19 +349,11 @@ func TestActressRepository_Crud(t *testing.T) {
 
 // TestActressRepository_Sorting tests sorting operations
 func TestActressRepository_Sorting(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewActressRepository(db)
 
 	// Create actresses
@@ -387,12 +363,12 @@ func TestActressRepository_Sorting(t *testing.T) {
 		{DMMID: 3, FirstName: "Bob", LastName: "Test"},
 	}
 	for _, a := range actresses {
-		err := repo.Create(a)
+		err := repo.Create(context.TODO(), a)
 		require.NoError(t, err)
 	}
 
 	t.Run("ListSorted by name ascending", func(t *testing.T) {
-		list, err := repo.ListSorted(10, 0, "name", "asc")
+		list, err := repo.ListSorted(context.TODO(), 10, 0, "name", "asc")
 		require.NoError(t, err)
 		assert.Len(t, list, 3)
 		assert.Equal(t, "Alice", list[0].FirstName)
@@ -401,7 +377,7 @@ func TestActressRepository_Sorting(t *testing.T) {
 	})
 
 	t.Run("ListSorted by name descending", func(t *testing.T) {
-		list, err := repo.ListSorted(10, 0, "name", "desc")
+		list, err := repo.ListSorted(context.TODO(), 10, 0, "name", "desc")
 		require.NoError(t, err)
 		assert.Len(t, list, 3)
 		assert.Equal(t, "Zara", list[0].FirstName)
@@ -410,26 +386,18 @@ func TestActressRepository_Sorting(t *testing.T) {
 	})
 
 	t.Run("ListSorted by last updated", func(t *testing.T) {
-		list, err := repo.ListSorted(10, 0, "updated_at", "asc")
+		list, err := repo.ListSorted(context.TODO(), 10, 0, "updated_at", "asc")
 		require.NoError(t, err)
 		assert.Len(t, list, 3)
 	})
 }
 
 func TestActressRepository_FindByDMMID(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewActressRepository(db)
 
 	t.Run("FindByDMMID found", func(t *testing.T) {
@@ -440,48 +408,40 @@ func TestActressRepository_FindByDMMID(t *testing.T) {
 			JapaneseName: "波多野結衣",
 			ThumbURL:     "http://example.com/thumb.jpg",
 		}
-		err := repo.Create(actress)
+		err := repo.Create(context.TODO(), actress)
 		require.NoError(t, err)
 
-		found, err := repo.FindByDMMID(12345)
+		found, err := repo.FindByDMMID(context.TODO(), 12345)
 		require.NoError(t, err)
 		assert.Equal(t, "波多野結衣", found.JapaneseName)
 		assert.Equal(t, "http://example.com/thumb.jpg", found.ThumbURL)
 	})
 
 	t.Run("FindByDMMID not found", func(t *testing.T) {
-		_, err := repo.FindByDMMID(99999)
+		_, err := repo.FindByDMMID(context.TODO(), 99999)
 		require.Error(t, err)
 		assert.True(t, IsNotFound(err))
 	})
 
 	t.Run("FindByDMMID zero id returns not found", func(t *testing.T) {
-		_, err := repo.FindByDMMID(0)
+		_, err := repo.FindByDMMID(context.TODO(), 0)
 		require.Error(t, err)
 		assert.True(t, IsNotFound(err))
 	})
 
 	t.Run("FindByDMMID negative id returns invalid lookup", func(t *testing.T) {
-		_, err := repo.FindByDMMID(-1)
+		_, err := repo.FindByDMMID(context.TODO(), -1)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrInvalidLookup))
 	})
 }
 
 func TestActressRepository_FindByFirstNameLastName(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewActressRepository(db)
 
 	t.Run("FindByFirstNameLastName found", func(t *testing.T) {
@@ -492,16 +452,16 @@ func TestActressRepository_FindByFirstNameLastName(t *testing.T) {
 			JapaneseName: "波多野結衣",
 			ThumbURL:     "http://example.com/thumb-yui.jpg",
 		}
-		err := repo.Create(actress)
+		err := repo.Create(context.TODO(), actress)
 		require.NoError(t, err)
 
-		found, err := repo.FindByFirstNameLastName("Yui", "Hatano")
+		found, err := repo.FindByFirstNameLastName(context.TODO(), "Yui", "Hatano")
 		require.NoError(t, err)
 		assert.Equal(t, "波多野結衣", found.JapaneseName)
 	})
 
 	t.Run("FindByFirstNameLastName not found", func(t *testing.T) {
-		_, err := repo.FindByFirstNameLastName("Nonexistent", "Person")
+		_, err := repo.FindByFirstNameLastName(context.TODO(), "Nonexistent", "Person")
 		require.Error(t, err)
 		assert.True(t, IsNotFound(err))
 	})
@@ -509,19 +469,11 @@ func TestActressRepository_FindByFirstNameLastName(t *testing.T) {
 
 // TestActressRepository_Search tests search operations
 func TestActressRepository_Search(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewActressRepository(db)
 
 	// Create actresses with unique DMMID
@@ -531,18 +483,18 @@ func TestActressRepository_Search(t *testing.T) {
 		{DMMID: 30003, FirstName: "Bob", LastName: "Johnson"},
 	}
 	for _, a := range actresses {
-		err := repo.Create(a)
+		err := repo.Create(context.TODO(), a)
 		require.NoError(t, err)
 	}
 
 	t.Run("CountSearch", func(t *testing.T) {
-		count, err := repo.CountSearch("Doe")
+		count, err := repo.CountSearch(context.TODO(), "Doe")
 		require.NoError(t, err)
 		assert.Equal(t, int64(1), count)
 	})
 
 	t.Run("SearchPagedSorted", func(t *testing.T) {
-		list, err := repo.SearchPagedSorted("John", 10, 0, "name", "asc")
+		list, err := repo.SearchPagedSorted(context.TODO(), "John", 10, 0, "name", "asc")
 		require.NoError(t, err)
 		// total is not returned by SearchPagedSorted
 		// Search might match partial names, so we just verify it returns results
@@ -551,14 +503,11 @@ func TestActressRepository_Search(t *testing.T) {
 }
 
 func TestActressRepository_PreviewMerge(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{Type: "sqlite", DSN: ":memory:"},
-		Logging:  config.LoggingConfig{Level: "error"},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewActressRepository(db)
 
 	target := &models.Actress{
@@ -577,10 +526,10 @@ func TestActressRepository_PreviewMerge(t *testing.T) {
 		ThumbURL:     "https://example.com/source.jpg",
 		Aliases:      "SourceAlias|TargetAlias",
 	}
-	require.NoError(t, repo.Create(target))
-	require.NoError(t, repo.Create(source))
+	require.NoError(t, repo.Create(context.TODO(), target))
+	require.NoError(t, repo.Create(context.TODO(), source))
 
-	preview, err := repo.PreviewMerge(target.ID, source.ID)
+	preview, err := repo.PreviewMerge(context.TODO(), target.ID, source.ID)
 	require.NoError(t, err)
 	require.NotNil(t, preview)
 
@@ -593,14 +542,11 @@ func TestActressRepository_PreviewMerge(t *testing.T) {
 }
 
 func TestActressRepository_Merge_WithAssociationsAndAliases(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{Type: "sqlite", DSN: ":memory:"},
-		Logging:  config.LoggingConfig{Level: "error"},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewActressRepository(db)
 
 	target := &models.Actress{
@@ -618,8 +564,8 @@ func TestActressRepository_Merge_WithAssociationsAndAliases(t *testing.T) {
 		ThumbURL:     "https://example.com/source.jpg",
 		Aliases:      "SourceAlias|ExistingAlias",
 	}
-	require.NoError(t, repo.Create(target))
-	require.NoError(t, repo.Create(source))
+	require.NoError(t, repo.Create(context.TODO(), target))
+	require.NoError(t, repo.Create(context.TODO(), source))
 
 	movie1 := &models.Movie{ContentID: "ipx001", ID: "IPX-001", Title: "Movie 1"}
 	movie2 := &models.Movie{ContentID: "ipx002", ID: "IPX-002", Title: "Movie 2"}
@@ -637,7 +583,7 @@ func TestActressRepository_Merge_WithAssociationsAndAliases(t *testing.T) {
 		"first_name": "target",
 		"last_name":  "target",
 	}
-	result, err := repo.Merge(target.ID, source.ID, resolutions)
+	result, err := repo.Merge(context.TODO(), target.ID, source.ID, resolutions)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -645,14 +591,14 @@ func TestActressRepository_Merge_WithAssociationsAndAliases(t *testing.T) {
 	assert.Equal(t, 2, result.UpdatedMovies)
 	assert.Greater(t, result.AliasesAdded, 0)
 
-	merged, err := repo.FindByID(target.ID)
+	merged, err := repo.FindByID(context.TODO(), target.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 50002, merged.DMMID, "target should adopt source dmm_id when requested")
 	assert.Equal(t, "https://example.com/source.jpg", merged.ThumbURL)
 	assert.Contains(t, merged.Aliases, "SourceAlias")
 	assert.Contains(t, merged.Aliases, "ExistingAlias")
 
-	_, err = repo.FindByID(source.ID)
+	_, err = repo.FindByID(context.TODO(), source.ID)
 	require.Error(t, err, "source actress should be deleted")
 
 	var loadedMovie1 models.Movie
@@ -671,20 +617,17 @@ func TestActressRepository_Merge_WithAssociationsAndAliases(t *testing.T) {
 }
 
 func TestActressRepository_Merge_DMMIDCollision(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{Type: "sqlite", DSN: ":memory:"},
-		Logging:  config.LoggingConfig{Level: "error"},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewActressRepository(db)
 
 	target := &models.Actress{DMMID: 90001, FirstName: "Target", LastName: "Actor", JapaneseName: "重複A"}
 	source := &models.Actress{DMMID: 90002, FirstName: "Source", LastName: "Actor", JapaneseName: "重複B"}
-	require.NoError(t, repo.Create(target))
-	require.NoError(t, repo.Create(source))
+	require.NoError(t, repo.Create(context.TODO(), target))
+	require.NoError(t, repo.Create(context.TODO(), source))
 
 	// Drop unique index in test DB so we can simulate corrupted/legacy duplicate rows.
 	var idxNames []string
@@ -696,22 +639,19 @@ func TestActressRepository_Merge_DMMIDCollision(t *testing.T) {
 	}
 
 	duplicate := &models.Actress{DMMID: 90002, FirstName: "Other", LastName: "Actor", JapaneseName: "重複C"}
-	require.NoError(t, repo.Create(duplicate))
+	require.NoError(t, repo.Create(context.TODO(), duplicate))
 
-	_, err = repo.Merge(target.ID, source.ID, map[string]string{"dmm_id": "source"})
+	_, err = repo.Merge(context.TODO(), target.ID, source.ID, map[string]string{"dmm_id": "source"})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrActressMergeUniqueConstraint) || strings.Contains(err.Error(), ErrActressMergeUniqueConstraint.Error()))
 }
 
 func TestActressRepository_Merge_UpsertsSourceAliasEvenWhenAlreadyOnTarget(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{Type: "sqlite", DSN: ":memory:"},
-		Logging:  config.LoggingConfig{Level: "error"},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := NewActressRepository(db)
 
 	target := &models.Actress{
@@ -728,8 +668,8 @@ func TestActressRepository_Merge_UpsertsSourceAliasEvenWhenAlreadyOnTarget(t *te
 		JapaneseName: "ソース",
 		Aliases:      "SourceAlias",
 	}
-	require.NoError(t, repo.Create(target))
-	require.NoError(t, repo.Create(source))
+	require.NoError(t, repo.Create(context.TODO(), target))
+	require.NoError(t, repo.Create(context.TODO(), source))
 
 	// Seed outdated alias mapping that should be corrected by merge.
 	stale := &models.ActressAlias{
@@ -738,7 +678,7 @@ func TestActressRepository_Merge_UpsertsSourceAliasEvenWhenAlreadyOnTarget(t *te
 	}
 	require.NoError(t, db.DB.Create(stale).Error)
 
-	_, err = repo.Merge(target.ID, source.ID, map[string]string{
+	_, err = repo.Merge(context.TODO(), target.ID, source.ID, map[string]string{
 		"dmm_id": "target",
 	})
 	require.NoError(t, err)

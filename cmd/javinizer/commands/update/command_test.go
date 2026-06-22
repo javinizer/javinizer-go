@@ -6,9 +6,8 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/update"
-	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -223,82 +222,56 @@ func TestRun_Integration_PresetApplication(t *testing.T) {
 	}
 }
 
-// TestConstructNFOPath tests NFO path construction
+// TestConstructNFOPath tests NFO path construction via nfo.ResolveNFOFilename
 func TestConstructNFOPath(t *testing.T) {
 	tests := []struct {
-		name     string
-		match    matcher.MatchResult
-		movie    *models.Movie
-		perFile  bool
-		expected string
+		name        string
+		movie       *models.Movie
+		perFile     bool
+		isMultiPart bool
+		partSuffix  string
+		expected    string
 	}{
 		{
-			name: "simple ID",
-			match: matcher.MatchResult{
-				ID: "IPX-123",
-				File: scanner.FileInfo{
-					Dir: "/videos",
-				},
-				IsMultiPart: false,
-			},
-			movie: &models.Movie{
-				ID: "IPX-123",
-			},
-			perFile:  false,
-			expected: "/videos/IPX-123.nfo",
+			name:        "simple ID",
+			movie:       &models.Movie{ID: "IPX-123"},
+			perFile:     false,
+			isMultiPart: false,
+			expected:    "IPX-123.nfo",
 		},
 		{
-			name: "multi-part with per-file enabled",
-			match: matcher.MatchResult{
-				ID: "IPX-123",
-				File: scanner.FileInfo{
-					Dir: "/videos",
-				},
-				IsMultiPart: true,
-				PartSuffix:  "-cd1",
-			},
-			movie: &models.Movie{
-				ID: "IPX-123",
-			},
-			perFile:  true,
-			expected: "/videos/IPX-123-cd1.nfo",
+			name:        "multi-part with per-file enabled",
+			movie:       &models.Movie{ID: "IPX-123"},
+			perFile:     true,
+			isMultiPart: true,
+			partSuffix:  "-cd1",
+			expected:    "IPX-123-cd1.nfo",
 		},
 		{
-			name: "multi-part with per-file disabled",
-			match: matcher.MatchResult{
-				ID: "IPX-123",
-				File: scanner.FileInfo{
-					Dir: "/videos",
-				},
-				IsMultiPart: true,
-				PartSuffix:  "-cd1",
-			},
-			movie: &models.Movie{
-				ID: "IPX-123",
-			},
-			perFile:  false,
-			expected: "/videos/IPX-123.nfo",
+			name:        "multi-part with per-file disabled",
+			movie:       &models.Movie{ID: "IPX-123"},
+			perFile:     false,
+			isMultiPart: true,
+			partSuffix:  "-cd1",
+			expected:    "IPX-123.nfo",
 		},
 		{
-			name: "ID with special characters",
-			match: matcher.MatchResult{
-				ID: "ABC-123/XYZ",
-				File: scanner.FileInfo{
-					Dir: "/videos",
-				},
-				IsMultiPart: false,
-			},
-			movie: &models.Movie{
-				ID: "ABC-123/XYZ",
-			},
-			perFile:  false,
-			expected: "/videos/ABC-123-XYZ.nfo",
+			name:        "ID with special characters",
+			movie:       &models.Movie{ID: "ABC-123/XYZ"},
+			perFile:     false,
+			isMultiPart: false,
+			expected:    "ABC-123-XYZ.nfo",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := update.ConstructNFOPath(tt.match, tt.movie, tt.perFile)
+			result := nfo.ResolveNFOFilename(nil, tt.movie, nfo.NFONameConfig{
+				FilenameTemplate: "<ID>.nfo",
+				PerFile:          tt.perFile,
+				IsMultiPart:      tt.isMultiPart,
+				PartSuffix:       tt.partSuffix,
+			})
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -306,44 +279,26 @@ func TestConstructNFOPath(t *testing.T) {
 
 // TestConstructNFOPath_PathTraversalPrevention tests security against path traversal
 func TestConstructNFOPath_PathTraversalPrevention(t *testing.T) {
-	match := matcher.MatchResult{
-		ID: "../../../etc/passwd",
-		File: scanner.FileInfo{
-			Dir: "/videos",
-		},
-		IsMultiPart: false,
-	}
 	movie := &models.Movie{
 		ID: "../../../etc/passwd",
 	}
 
-	result := update.ConstructNFOPath(match, movie, false)
+	result := nfo.ResolveNFOFilename(nil, movie, nfo.NFONameConfig{FilenameTemplate: "<ID>.nfo"})
 
-	// Should sanitize path traversal attempts
 	assert.NotContains(t, result, "../")
-	assert.Contains(t, result, "/videos")
+	assert.Contains(t, result, ".nfo")
 }
 
 // TestConstructNFOPath_EmptyIDFallback tests fallback when ID sanitization results in empty string
 func TestConstructNFOPath_EmptyIDFallback(t *testing.T) {
-	match := matcher.MatchResult{
-		ID: "///", // Will sanitize to empty string
-		File: scanner.FileInfo{
-			Dir: "/videos",
-		},
-		IsMultiPart: false,
-	}
 	movie := &models.Movie{
 		ID: "///",
 	}
 
-	result := update.ConstructNFOPath(match, movie, false)
+	result := nfo.ResolveNFOFilename(nil, movie, nfo.NFONameConfig{FilenameTemplate: "<ID>.nfo"})
 
-	// Should use fallback "metadata" when sanitization results in empty
-	assert.Contains(t, result, "/videos/")
 	assert.Contains(t, result, ".nfo")
-	// Should not be empty filename
-	assert.NotEqual(t, "/videos/.nfo", result)
+	assert.NotEqual(t, ".nfo", result)
 }
 
 // TestRun_Integration_WithExistingNFO tests NFO merge with existing file
@@ -512,19 +467,16 @@ func TestConstructNFOPath_MultiPartSuffixVariations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			match := matcher.MatchResult{
-				ID: "IPX-123",
-				File: scanner.FileInfo{
-					Dir: "/videos",
-				},
-				IsMultiPart: true,
-				PartSuffix:  tt.suffix,
-			}
 			movie := &models.Movie{
 				ID: "IPX-123",
 			}
 
-			result := update.ConstructNFOPath(match, movie, tt.perFile)
+			result := nfo.ResolveNFOFilename(nil, movie, nfo.NFONameConfig{
+				FilenameTemplate: "<ID>.nfo",
+				PerFile:          tt.perFile,
+				IsMultiPart:      true,
+				PartSuffix:       tt.suffix,
+			})
 
 			if tt.shouldIncludeSuffix {
 				assert.Contains(t, result, tt.suffix)

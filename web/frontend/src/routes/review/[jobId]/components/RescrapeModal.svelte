@@ -8,7 +8,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
 
-	type ScalarStrategy = '' | 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
+	type ScalarStrategy = '' | 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only' | 'merge-arrays';
 
 	interface Props {
 		show: boolean;

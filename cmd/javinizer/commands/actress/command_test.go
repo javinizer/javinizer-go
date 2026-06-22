@@ -2,6 +2,7 @@ package actress_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -62,14 +63,14 @@ func setupActressTestDB(t *testing.T) (string, string) {
 	dbPath := filepath.Join(tmpDir, "data", "test.db")
 	require.NoError(t, os.MkdirAll(filepath.Dir(dbPath), 0o755))
 
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	require.NoError(t, config.Save(testCfg, configPath))
 
-	db, err := database.New(testCfg)
+	db, err := database.New(&database.Config{Type: testCfg.Database.Type, DSN: testCfg.Database.DSN, LogLevel: testCfg.Database.LogLevel})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	require.NoError(t, db.Close())
 
 	return configPath, dbPath
@@ -79,13 +80,13 @@ func seedActresses(t *testing.T, configPath string, actresses ...*models.Actress
 	t.Helper()
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	repo := database.NewActressRepository(db)
 	for _, actress := range actresses {
-		require.NoError(t, repo.Create(actress))
+		require.NoError(t, repo.Create(context.TODO(), actress))
 	}
 }
 
@@ -128,16 +129,16 @@ func TestActressCommand_MergeNonInteractive(t *testing.T) {
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 	repo := database.NewActressRepository(db)
 
-	merged, err := repo.FindByID(target.ID)
+	merged, err := repo.FindByID(context.TODO(), target.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 80002, merged.DMMID)
 
-	_, err = repo.FindByID(source.ID)
+	_, err = repo.FindByID(context.TODO(), source.ID)
 	require.Error(t, err)
 }
 
@@ -168,12 +169,12 @@ func TestActressCommand_MergeInteractive(t *testing.T) {
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 	repo := database.NewActressRepository(db)
 
-	merged, err := repo.FindByID(target.ID)
+	merged, err := repo.FindByID(context.TODO(), target.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Source", merged.FirstName)
 }
@@ -270,12 +271,12 @@ func TestActressImport_WithIDs(t *testing.T) {
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 	repo := database.NewActressRepository(db)
 
-	updated, err := repo.FindByID(1)
+	updated, err := repo.FindByID(context.TODO(), 1)
 	require.NoError(t, err)
 	assert.Equal(t, "Updated", updated.FirstName)
 	assert.Equal(t, "オリジナル更新", updated.JapaneseName)
@@ -307,7 +308,7 @@ func TestActressImport_WithoutIDs(t *testing.T) {
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 

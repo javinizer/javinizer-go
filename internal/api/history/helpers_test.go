@@ -15,10 +15,10 @@ func TestToHistoryRecord(t *testing.T) {
 		h := models.History{
 			ID:           42,
 			MovieID:      "ABC-123",
-			Operation:    "scrape",
+			Operation:    models.HistoryOpScrape,
 			OriginalPath: "/src/ABC-123.mp4",
 			NewPath:      "/dst/ABC-123.mp4",
-			Status:       "success",
+			Status:       models.HistoryStatusSuccess,
 			ErrorMessage: "",
 			Metadata:     `{"source":"jav"}`,
 			DryRun:       false,
@@ -29,10 +29,10 @@ func TestToHistoryRecord(t *testing.T) {
 
 		assert.Equal(t, uint(42), got.ID)
 		assert.Equal(t, "ABC-123", got.MovieID)
-		assert.Equal(t, "scrape", got.Operation)
+		assert.Equal(t, models.HistoryOpScrape, got.Operation)
 		assert.Equal(t, "/src/ABC-123.mp4", got.OriginalPath)
 		assert.Equal(t, "/dst/ABC-123.mp4", got.NewPath)
-		assert.Equal(t, "success", got.Status)
+		assert.Equal(t, models.HistoryStatusSuccess, got.Status)
 		assert.Equal(t, "", got.ErrorMessage)
 		assert.Equal(t, `{"source":"jav"}`, got.Metadata)
 		assert.False(t, got.DryRun)
@@ -65,8 +65,8 @@ func TestPaginateAndConvert(t *testing.T) {
 		return models.History{
 			ID:        id,
 			MovieID:   movieID,
-			Operation: "scrape",
-			Status:    "success",
+			Operation: models.HistoryOpScrape,
+			Status:    models.HistoryStatusSuccess,
 			CreatedAt: ts,
 		}
 	}

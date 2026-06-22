@@ -28,7 +28,7 @@ func TestAggregateWithPerFieldOverrideExcludingSource(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 	t.Logf("resolvedPriorities[ID] = %v", agg.resolvedPriorities["ID"])
 	t.Logf("resolvedPriorities[Title] = %v", agg.resolvedPriorities["Title"])
 	t.Logf("resolvedPriorities[Actress] = %v", agg.resolvedPriorities["Actress"])
@@ -74,7 +74,7 @@ func TestAggregatePerFieldPreference(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -103,12 +103,14 @@ func TestUnknownActressFilteredFromScraperResults(t *testing.T) {
 		},
 		Metadata: config.MetadataConfig{
 			NFO: config.NFOConfig{
-				UnknownActressText: "Unknown",
+				Format: config.NFOFormatConfig{
+					UnknownActressText: "Unknown",
+				}, // UNKNOWN: ['Format: config.NFOFormatConfig{', '},']
 			},
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -135,12 +137,14 @@ func TestUnknownActressJapaneseNameFiltered(t *testing.T) {
 		},
 		Metadata: config.MetadataConfig{
 			NFO: config.NFOConfig{
-				UnknownActressText: "Unknown",
+				Format: config.NFOFormatConfig{
+					UnknownActressText: "Unknown",
+				}, // UNKNOWN: ['Format: config.NFOFormatConfig{', '},']
 			},
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -169,13 +173,15 @@ func TestUnknownActressFallbackModeKeepsFromScraper(t *testing.T) {
 		},
 		Metadata: config.MetadataConfig{
 			NFO: config.NFOConfig{
-				UnknownActressMode: "fallback",
-				UnknownActressText: "Unknown",
+				Format: config.NFOFormatConfig{
+					UnknownActressMode: models.UnknownActressModeFallback,
+					UnknownActressText: "Unknown",
+				}, // UNKNOWN: ['Format: config.NFOFormatConfig{', '},']
 			},
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -202,13 +208,15 @@ func TestUnknownActressFallbackModeAddsPlaceholder(t *testing.T) {
 		},
 		Metadata: config.MetadataConfig{
 			NFO: config.NFOConfig{
-				UnknownActressMode: "fallback",
-				UnknownActressText: "Unknown",
+				Format: config.NFOFormatConfig{
+					UnknownActressMode: models.UnknownActressModeFallback,
+					UnknownActressText: "Unknown",
+				}, // UNKNOWN: ['Format: config.NFOFormatConfig{', '},']
 			},
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -233,13 +241,15 @@ func TestUnknownActressSkipModeNoPlaceholder(t *testing.T) {
 		},
 		Metadata: config.MetadataConfig{
 			NFO: config.NFOConfig{
-				UnknownActressMode: "skip",
-				UnknownActressText: "Unknown",
+				Format: config.NFOFormatConfig{
+					UnknownActressMode: models.UnknownActressModeSkip,
+					UnknownActressText: "Unknown",
+				}, // UNKNOWN: ['Format: config.NFOFormatConfig{', '},']
 			},
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{

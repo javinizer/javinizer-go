@@ -5,27 +5,18 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"sort"
 	"strings"
 	"syscall"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/javinizer/javinizer-go/internal/aggregator"
+	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
-	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/nfo"
-	"github.com/javinizer/javinizer-go/internal/organizer"
-	"github.com/javinizer/javinizer-go/internal/scanner"
-	"github.com/javinizer/javinizer-go/internal/scraper"
-	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/javinizer/javinizer-go/internal/tui"
 	"github.com/javinizer/javinizer-go/internal/worker"
-	"github.com/spf13/afero"
+	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -83,14 +74,18 @@ func run(cmd *cobra.Command, args []string) error {
 	arrayStrategy, _ := cmd.Flags().GetString("array-strategy")
 	verboseFlag, _ := cmd.Flags().GetBool("verbose")
 
-	linkMode, err := organizer.ParseLinkMode(linkModeRaw)
+	linkMode, err := workflow.ResolveLinkMode(linkModeRaw)
 	if err != nil {
 		return err
 	}
+	if moveFiles && linkModeRaw != "" && !strings.EqualFold(linkModeRaw, "none") {
+		return fmt.Errorf("--link-mode can only be used when --move is disabled")
+	}
 	if preset != "" {
-		scalarStrategy, arrayStrategy, err = nfo.ApplyPreset(preset, scalarStrategy, arrayStrategy)
-		if err != nil {
-			return err
+		var presetErr error
+		scalarStrategy, arrayStrategy, presetErr = nfo.ApplyPreset(preset, scalarStrategy, arrayStrategy)
+		if presetErr != nil {
+			return presetErr
 		}
 	}
 
@@ -102,20 +97,19 @@ func run(cmd *cobra.Command, args []string) error {
 	// Load config
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	config.ApplyEnvironmentOverrides(cfg)
 
 	// Override config with flag if extrafanart is explicitly enabled
 	if downloadExtrafanart {
-		cfg.Output.DownloadExtrafanart = true
+		cfg.Output.Download.DownloadExtrafanart = true
 	}
 
 	// Resolve effective move mode: an explicit --move flag overrides config.yaml (issue #36).
 	// Without --move, the TUI loads move_files from config so the setting persists across restarts.
-	effectiveMove := tui.ResolveMoveMode(cfg.Output.MoveFiles, cmd.Flags().Changed("move"), moveFiles)
+	effectiveMove := tui.ResolveMoveMode(cfg.Output.Operation.MoveFiles, cmd.Flags().Changed("move"), moveFiles)
 	// --link-mode is incompatible with move mode, whether move mode came from the
 	// --move flag or from move_files in config (issue #36).
 	if err := tui.ValidateMoveLinkMode(effectiveMove, linkMode); err != nil {
@@ -128,8 +122,7 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	if _, err := config.Prepare(cfg); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Invalid configuration: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	// For TUI mode, log to file only — strip stdout/stderr targets so logs don't
@@ -145,7 +138,7 @@ func run(cmd *cobra.Command, args []string) error {
 	logging.Infof("Starting TUI mode for path: %s", sourcePath)
 
 	// Create context with cancellation
-	_, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Handle signals
@@ -157,162 +150,133 @@ func run(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	// Create TUI model
-	model := tui.New(cfg)
+	// Create TUI model with narrow config
+	model := tui.New(tui.TUIModelConfig{
+		DownloadExtrafanart: cfg.Output.Download.DownloadExtrafanart,
+		MaxWorkers:          cfg.Performance.MaxWorkers,
+	})
 	model.SetConfigPath(configFile)
 
-	// Scan for files before starting TUI
-	logging.Info("Scanning for video files...")
-	fileScanner := scanner.NewScanner(afero.NewOsFs(), &cfg.Matching)
-
-	var scanResult *scanner.ScanResult
-
-	if recursive {
-		scanResult, err = fileScanner.Scan(sourcePath)
-	} else {
-		scanResult, err = fileScanner.ScanSingle(sourcePath)
+	bs, err := commandutil.Bootstrap(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to bootstrap: %w", err)
 	}
+	defer func() { _ = bs.Close() }()
+
+	// Scan for files before starting TUI — route through the seam
+	// (ValidateMultipartInDirectory is called inside the seam)
+	logging.Info("Scanning for video files...")
+
+	scanResult, err := bs.Workflow.ScanAndMatch(ctx, workflow.ScanAndMatchCmd{
+		Directory: sourcePath,
+		Recursive: recursive,
+	})
 
 	if err != nil {
 		logging.Errorf("Scan failed: %v", err)
-		_, _ = fmt.Fprintf(os.Stderr, "Failed to scan directory: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to scan directory: %w", err)
 	}
 
 	logging.Infof("Found %d video files", len(scanResult.Files))
 
-	// Match JAV IDs
-	fileMatcher, err := matcher.NewMatcher(&cfg.Matching)
-	if err != nil {
-		logging.Errorf("Failed to create matcher: %v", err)
-		_, _ = fmt.Fprintf(os.Stderr, "Failed to create matcher: %v\n", err)
-		os.Exit(1)
+	// Build match map and file refs from seam result
+	// Convert workflow.ScanAndMatchResult → tui.ScanResult for the TUI
+	tuiScanResult := &tui.ScanResult{
+		Files:   scanResult.Files,
+		Skipped: scanResult.Skipped,
 	}
-
-	matches := fileMatcher.Match(scanResult.Files)
-	logging.Infof("Matched %d files", len(matches))
-
-	// Convert to TUI file items with tree structure
-	matchMap := make(map[string]matcher.MatchResult)
-	for _, match := range matches {
-		matchMap[match.File.Path] = match
-	}
+	matchMap, fileRefs := tui.BuildMatchMapFromScanResult(tuiScanResult)
 
 	// Build tree structure
-	fileItems := BuildFileTree(sourcePath, scanResult.Files, matchMap)
+	fileItems := tui.BuildFileTree(sourcePath, fileRefs, matchMap)
 
-	// Set files, match results, source path, and destination in model
+	// Set files, match results, source path in model
 	model.SetFiles(fileItems)
 	model.SetMatchResults(matchMap)
 	model.SetSourcePath(sourcePath)
-	model.SetScanner(fileScanner, fileMatcher, recursive)
-	// Note: destPath will be set after processor is initialized
 
-	// Initialize database
-	db, err := database.New(cfg)
-	if err != nil {
-		logging.Errorf("Failed to connect to database: %v", err)
-		_, _ = fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
-		os.Exit(1)
-	}
-	defer func() { _ = db.Close() }()
-
-	if err := db.RunMigrationsOnStartup(context.Background()); err != nil {
-		logging.Errorf("Failed to run migrations: %v", err)
-		_, _ = fmt.Fprintf(os.Stderr, "Failed to run migrations: %v\n", err)
-		os.Exit(1)
-	}
+	// Set scan service (wraps workflow.WorkflowInterface) for rescan operations
+	model.SetScanService(tui.NewWorkflowScanService(bs.Workflow, recursive), recursive)
 
 	// Initialize repositories
-	movieRepo := database.NewMovieRepository(db)
-	actressRepo := database.NewActressRepository(db)
+	actressRepo := database.NewActressRepository(bs.DB)
 	model.SetActressRepo(actressRepo)
 
-	// Initialize scraper registry using centralized function
-	registry, err := scraper.NewDefaultScraperRegistry(cfg, db)
-	if err != nil {
-		return fmt.Errorf("failed to initialize scraper registry: %w", err)
+	// --- Construct SortService (the TUI→worker seam) ---
+	bgRunner := tui.NewSimpleRunner(ctx)
+
+	processorCfg := tui.TUIProcessorConfig{
+		BatchJobConfig:      commandutil.BatchJobConfigFromAppConfig(cfg),
+		DownloadExtrafanart: cfg.Output.Download.DownloadExtrafanart,
 	}
 
-	// Initialize aggregator
-	agg := aggregator.NewWithDatabase(cfg, db)
-
-	// Initialize HTTP client for downloader
-	httpClient, err := downloader.NewHTTPClientForDownloaderWithRegistry(cfg, registry)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP client: %w", err)
-	}
-
-	// Initialize downloader
-	sharedEngine := template.NewEngine()
-	dl := downloader.NewDownloaderWithNFOConfig(httpClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, cfg.Metadata.NFO.ActressLanguageJA, cfg.Metadata.NFO.FirstNameOrder, sharedEngine)
-
-	// Initialize organizer
-	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output, sharedEngine)
-	org.SetMatcher(fileMatcher)
-
-	// Initialize NFO generator
-	nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfo.ConfigFromAppConfig(&cfg.Metadata.NFO, &cfg.Output, &cfg.Metadata, db))
-
-	// Create progress tracker and worker pool
-	progressChan := make(chan worker.ProgressUpdate, cfg.Performance.BufferSize)
-	progressTracker := worker.NewProgressTracker(progressChan)
-	workerPool := worker.NewPool(
-		cfg.Performance.MaxWorkers,
-		time.Duration(cfg.Performance.WorkerTimeout)*time.Second,
-		progressTracker,
-	)
-
-	// Create processing coordinator
-	processor := tui.NewProcessingCoordinator(
-		workerPool,
-		progressTracker,
-		movieRepo,
-		registry,
-		agg,
-		dl,
-		org,
-		nfoGen,
+	sortSvc, sortEventCh, err := tui.NewSortService(
+		bgRunner,
+		worker.NewBatchJobFactory(
+			nil, // no JobStore — TUI doesn't need persistence
+			bs.Workflow,
+			bs.Matcher,
+			bs.PosterGen,
+			worker.BatchJobConfig{
+				MaxWorkers:      processorCfg.MaxWorkers,
+				WorkerTimeout:   processorCfg.WorkerTimeout,
+				ScraperPriority: processorCfg.ScraperPriority,
+				NFOEnabled:      processorCfg.NFOEnabled,
+			},
+			nil, // no emitter for TUI
+		),
+		bs.ScraperRegistry,
+		processorCfg,
 		destPath,
 		effectiveMove,
 	)
-	processor.SetConfig(cfg)
-	processor.SetOptionsFromConfig(cfg)
-	processor.SetLinkMode(linkMode)
-	processor.SetTemplateEngine(sharedEngine)
-	processor.SetUpdateMode(updateMode)
-	processor.SetMergeStrategies(scalarStrategy, arrayStrategy)
+	if err != nil {
+		return fmt.Errorf("failed to create sort service: %w", err)
+	}
+	sortSvc.SetConfig(processorCfg)
 
-	// Set worker pool and progress channel in model
-	model.SetWorkerPool(workerPool, progressChan)
+	// Apply initial options from config + CLI flags
+	opts := sortSvc.LoadOptions()
+	opts.NFOEnabled = processorCfg.NFOEnabled
+	opts.DownloadExtrafanartOverride = processorCfg.DownloadExtrafanart
+	opts.LinkMode = linkModeRaw
+	opts.UpdateMode = updateMode
+	opts.ScalarStrategy = scalarStrategy
+	opts.ArrayStrategy = arrayStrategy
+	sortSvc.SetOptions(opts)
 
-	// Set the resolved move mode on the model BEFORE the processor so SetProcessor's
-	// defensive sync propagates the correct value (no transient mismatch when --move
-	// overrides config) (issue #36).
+	// Set the resolved move mode on the model BEFORE the sort service so
+	// settings propagate correctly (issue #36).
 	model.SetMoveFiles(effectiveMove)
 	// Record link mode so the runtime move-files toggle can guard against the
 	// move+link combo rejected at startup (ValidateMoveLinkMode) (issue #36).
 	model.SetLinkMode(linkMode)
 	// Set processor in model (syncs moveFiles, dryRun, updateMode to the processor)
-	model.SetProcessor(processor)
+	// Set event subscriber on model — reads SortEvents from the sort service
+	model.SetEventSubscriber(tui.NewChannelSortEventSubscriber(sortEventCh))
 
-	// Set destination path AFTER processor is set
+	// Set sort service in model
+	model.SetSortService(sortSvc)
+
+	// Set destination path AFTER sort service is set
 	model.SetDestPath(destPath)
 
-	// Set dry-run mode AFTER processor is set so it propagates correctly
+	// Set dry-run mode AFTER sort service is set so it propagates correctly
 	model.SetDryRun(dryRun)
 	model.SetUpdateMode(updateMode)
 
 	// Log initial state
-	model.AddLog("info", fmt.Sprintf("Scanned %d files", len(scanResult.Files)))
-	model.AddLog("info", fmt.Sprintf("Matched %d JAV IDs", len(matches)))
-
-	if len(scanResult.Skipped) > 0 {
-		model.AddLog("warn", fmt.Sprintf("Skipped %d files", len(scanResult.Skipped)))
+	matchedCount := 0
+	for _, mr := range matchMap {
+		if mr.MovieID != "" {
+			matchedCount++
+		}
 	}
+	model.AddLog("info", fmt.Sprintf("Scanned %d files", len(scanResult.Files)))
+	model.AddLog("info", fmt.Sprintf("Matched %d JAV IDs", matchedCount))
 
-	if len(scanResult.Errors) > 0 {
-		model.AddLog("error", fmt.Sprintf("%d errors during scan", len(scanResult.Errors)))
+	if scanResult.Skipped > 0 {
+		model.AddLog("warn", fmt.Sprintf("Skipped %d files", scanResult.Skipped))
 	}
 
 	// Start TUI
@@ -326,156 +290,19 @@ func run(cmd *cobra.Command, args []string) error {
 	finalModel, err := p.Run()
 	if err != nil {
 		logging.Errorf("TUI error: %v", err)
-		_, _ = fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("TUI error: %w", err)
 	}
 
 	// Check for errors in final model
 	if m, ok := finalModel.(*tui.Model); ok {
 		if m.Error() != nil {
 			logging.Errorf("TUI exited with error: %v", m.Error())
-			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", m.Error())
-			os.Exit(1)
+			return fmt.Errorf("TUI exited with error: %w", m.Error())
 		}
 	}
 
 	logging.Info("TUI exited successfully")
 	return nil
-}
-
-// BuildFileTree constructs a tree structure of files and directories
-func BuildFileTree(basePath string, files []scanner.FileInfo, matchMap map[string]matcher.MatchResult) []tui.FileItem {
-	absBasePath, err := filepath.Abs(filepath.FromSlash(basePath))
-	if err != nil {
-		absBasePath = filepath.FromSlash(basePath)
-	}
-
-	dirFiles := make(map[string][]scanner.FileInfo)
-	allDirs := make(map[string]bool)
-
-	for _, file := range files {
-		normalizedPath := filepath.FromSlash(file.Path)
-		absPath, err := filepath.Abs(normalizedPath)
-		if err != nil {
-			absPath = normalizedPath
-		}
-		dir := filepath.Dir(absPath)
-		dirFiles[dir] = append(dirFiles[dir], file)
-
-		current := dir
-		for current != absBasePath && current != "." && current != string(os.PathSeparator) && strings.HasPrefix(current, absBasePath) {
-			allDirs[current] = true
-			parent := filepath.Dir(current)
-			if parent == current {
-				break
-			}
-			current = parent
-		}
-	}
-
-	// Build sorted list of directories
-	dirs := make([]string, 0, len(allDirs))
-	for dir := range allDirs {
-		dirs = append(dirs, dir)
-	}
-	sort.Strings(dirs)
-
-	// Calculate relative depth
-	getDepth := func(path string) int {
-		rel, err := filepath.Rel(absBasePath, path)
-		if err != nil || rel == "." {
-			return 0
-		}
-		return strings.Count(rel, string(filepath.Separator)) + 1
-	}
-
-	result := []tui.FileItem{}
-
-	// Process each directory
-	for _, dir := range dirs {
-		depth := getDepth(dir) - 1
-		if depth < 0 {
-			depth = 0
-		}
-
-		// Add directory item
-		result = append(result, tui.FileItem{
-			Path:     dir,
-			Name:     filepath.Base(dir),
-			Size:     0,
-			IsDir:    true,
-			Selected: false,
-			Matched:  false,
-			Depth:    depth,
-			Parent:   filepath.Dir(dir),
-		})
-
-		// Add files in this directory
-		if fileList, ok := dirFiles[dir]; ok {
-			sort.Slice(fileList, func(i, j int) bool {
-				return fileList[i].Name < fileList[j].Name
-			})
-
-			for _, file := range fileList {
-				item := tui.FileItem{
-					Path:     file.Path,
-					Name:     file.Name,
-					Size:     file.Size,
-					IsDir:    false,
-					Selected: false,
-					Matched:  false,
-					Depth:    depth + 1,
-					Parent:   dir,
-				}
-
-				lookupPath := file.Path
-				normalizedLookup := filepath.FromSlash(file.Path)
-				if match, found := matchMap[lookupPath]; found {
-					item.Matched = true
-					item.ID = match.ID
-				} else if match, found := matchMap[normalizedLookup]; found {
-					item.Matched = true
-					item.ID = match.ID
-				}
-
-				result = append(result, item)
-			}
-		}
-	}
-
-	// Add files in the base directory itself
-	if baseFiles, ok := dirFiles[absBasePath]; ok {
-		sort.Slice(baseFiles, func(i, j int) bool {
-			return baseFiles[i].Name < baseFiles[j].Name
-		})
-
-		for _, file := range baseFiles {
-			item := tui.FileItem{
-				Path:     file.Path,
-				Name:     file.Name,
-				Size:     file.Size,
-				IsDir:    false,
-				Selected: false,
-				Matched:  false,
-				Depth:    0,
-				Parent:   absBasePath,
-			}
-
-			lookupPath := file.Path
-			normalizedLookup := filepath.FromSlash(file.Path)
-			if match, found := matchMap[lookupPath]; found {
-				item.Matched = true
-				item.ID = match.ID
-			} else if match, found := matchMap[normalizedLookup]; found {
-				item.Matched = true
-				item.ID = match.ID
-			}
-
-			result = append(result, item)
-		}
-	}
-
-	return result
 }
 
 // resolveConfigPath returns the config file path to load and persist, honoring

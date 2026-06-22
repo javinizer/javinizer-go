@@ -1,21 +1,31 @@
 package batch
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/api/middleware"
+)
 
-func RegisterRoutes(protected *gin.RouterGroup, deps *ServerDependencies) {
-	protected.GET("/batch", listBatchJobs(deps))
-	protected.POST("/batch/scrape", batchScrape(deps))
-	protected.GET("/batch/:id", getBatchJob(deps))
-	protected.DELETE("/batch/:id", deleteBatchJob(deps))
-	protected.POST("/batch/:id/cancel", cancelBatchJob(deps))
-	protected.PATCH("/batch/:id/results/:resultId", updateBatchMovie(deps))
-	protected.POST("/batch/:id/movies/batch-exclude", batchExcludeMovies(deps))
-	protected.POST("/batch/:id/movies/batch-rescrape", batchRescrapeMovies(deps))
-	protected.POST("/batch/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(deps))
-	protected.POST("/batch/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(deps))
-	protected.POST("/batch/:id/results/:resultId/exclude", excludeBatchMovie(deps))
-	protected.POST("/batch/:id/results/:resultId/preview", previewOrganize(deps))
-	protected.POST("/batch/:id/results/:resultId/rescrape", rescrapeBatchMovie(deps))
-	protected.POST("/batch/:id/organize", organizeJob(deps))
-	protected.POST("/batch/:id/update", updateBatchJob(deps))
+func RegisterRoutes(protected *gin.RouterGroup, rt *core.APIRuntime) {
+	protected.GET("/batch", listBatchJobs(rt))
+	protected.POST("/batch/scrape", batchScrape(rt))
+
+	// All routes with :id param are protected by ValidateJobID middleware
+	// to prevent path traversal when jobID is used in filesystem operations.
+	batch := protected.Group("/batch", middleware.ValidateJobID())
+	{
+		batch.GET("/:id", getBatchJob(rt))
+		batch.DELETE("/:id", deleteBatchJob(rt))
+		batch.POST("/:id/cancel", cancelBatchJob(rt))
+		batch.PATCH("/:id/results/:resultId", updateBatchMovie(rt))
+		batch.POST("/:id/movies/batch-exclude", batchExcludeMovies(rt))
+		batch.POST("/:id/movies/batch-rescrape", batchRescrapeMovies(rt))
+		batch.POST("/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(rt))
+		batch.POST("/:id/results/:resultId/poster-from-url", updateBatchMoviePosterFromURL(rt))
+		batch.POST("/:id/results/:resultId/exclude", excludeBatchMovie(rt))
+		batch.POST("/:id/results/:resultId/preview", previewOrganize(rt))
+		batch.POST("/:id/results/:resultId/rescrape", rescrapeBatchMovie(rt))
+		batch.POST("/:id/organize", organizeJob(rt))
+		batch.POST("/:id/update", updateBatchJob(rt))
+	}
 }

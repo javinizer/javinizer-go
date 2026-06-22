@@ -13,22 +13,22 @@ import (
 
 // TestEmbeddedConfigNotEmpty verifies the embedded config is not empty
 func TestEmbeddedConfigNotEmpty(t *testing.T) {
-	content := GetEmbeddedConfig()
+	content := string(embeddedConfigBytes())
 	assert.NotEmpty(t, content, "embedded config should not be empty")
 	assert.Greater(t, len(content), 1000, "embedded config should be substantial ( > 1000 chars)")
 }
 
 // TestEmbeddedConfigBytesNotEmpty verifies the embedded config bytes are not empty
 func TestEmbeddedConfigBytesNotEmpty(t *testing.T) {
-	bytes := EmbeddedConfigBytes()
+	bytes := embeddedConfigBytes()
 	assert.NotEmpty(t, bytes, "embedded config bytes should not be empty")
 	assert.Greater(t, len(bytes), 1000, "embedded config should be substantial ( > 1000 bytes)")
 }
 
-// TestEmbeddedConfigBytesReturnsCopy verifies that EmbeddedConfigBytes returns a copy
+// TestEmbeddedConfigBytesReturnsCopy verifies that embeddedConfigBytes returns a copy
 func TestEmbeddedConfigBytesReturnsCopy(t *testing.T) {
-	bytes1 := EmbeddedConfigBytes()
-	bytes2 := EmbeddedConfigBytes()
+	bytes1 := embeddedConfigBytes()
+	bytes2 := embeddedConfigBytes()
 
 	// Modify bytes1
 	if len(bytes1) > 0 {
@@ -36,7 +36,7 @@ func TestEmbeddedConfigBytesReturnsCopy(t *testing.T) {
 	}
 
 	// bytes2 should be unchanged
-	assert.NotEqual(t, bytes1[0], bytes2[0], "EmbeddedConfigBytes should return independent copies")
+	assert.NotEqual(t, bytes1[0], bytes2[0], "embeddedConfigBytes should return independent copies")
 }
 
 // TestEmbeddedConfigMatchesSourceFile verifies embedded content matches the source file
@@ -52,7 +52,7 @@ func TestEmbeddedConfigMatchesSourceFile(t *testing.T) {
 	require.NoError(t, err, "failed to read source config.yaml.example")
 
 	// Get embedded content
-	embedded := EmbeddedConfigBytes()
+	embedded := embeddedConfigBytes()
 
 	// Compare (normalize line endings for Windows compatibility)
 	sourceNormalized := strings.ReplaceAll(string(sourceBytes), "\r\n", "\n")
@@ -63,7 +63,7 @@ func TestEmbeddedConfigMatchesSourceFile(t *testing.T) {
 
 // TestEmbeddedConfigContainsExpectedSections verifies key sections are present
 func TestEmbeddedConfigContainsExpectedSections(t *testing.T) {
-	content := GetEmbeddedConfig()
+	content := string(embeddedConfigBytes())
 
 	// Check for key sections
 	assert.Contains(t, content, "config_version:", "should contain config_version")

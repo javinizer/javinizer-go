@@ -25,12 +25,12 @@ func TestMockMovieRepositoryExample(t *testing.T) {
 
 	// Set up expectation using EXPECT() fluent API (expecter pattern)
 	mockRepo.EXPECT().
-		FindByID("IPX-123").
+		FindByID(mock.Anything, "IPX-123").
 		Return(expectedMovie, nil).
 		Once()
 
 	// Call the mock
-	movie, err := mockRepo.FindByID("IPX-123")
+	movie, err := mockRepo.FindByID(context.TODO(), "IPX-123")
 
 	// Assertions
 	assert.NoError(t, err)

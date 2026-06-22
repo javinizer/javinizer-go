@@ -9,7 +9,54 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
+
+type genreListResponse struct {
+	Genres []models.Genre `json:"genres"`
+	Count  int            `json:"count"`
+}
+
+// listGenres godoc
+// @Summary List genres
+// @Description Get a list of all genres, optionally including translations
+// @Tags genres
+// @Produce json
+// @Param include_translations query string false "Language code to include translations for (e.g., 'en')"
+// @Success 200 {object} genreListResponse
+// @Failure 500 {object} contracts.ErrorResponse
+// @Router /api/v1/genres [get]
+func listGenres(deps GenreDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		genres, err := deps.GenreRepo.List(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		includeLang := strings.TrimSpace(c.Query("include_translations"))
+		if includeLang != "" {
+			genreIDs := make([]uint, len(genres))
+			for i, g := range genres {
+				genreIDs[i] = g.ID
+			}
+			transMap, err := deps.safeFindTranslationsByIDsAndLanguage(c.Request.Context(), genreIDs, includeLang)
+			if err != nil {
+				// Translation lookup is best-effort; continue without translations
+			} else if transMap != nil {
+				for i := range genres {
+					genres[i].Translations = transMap[genres[i].ID]
+				}
+			}
+		}
+
+		c.JSON(http.StatusOK, genreListResponse{
+			Genres: genres,
+			Count:  len(genres),
+		})
+	}
+}
 
 type genreReplacementCreateRequest struct {
 	Original    string `json:"original"`
@@ -37,15 +84,15 @@ type genreReplacementListResponse struct {
 // @Param limit query int false "Max results" default(50)
 // @Param offset query int false "Skip results" default(0)
 // @Success 200 {object} genreReplacementListResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/replacements [get]
-func listGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
+func listGenreReplacements(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit, offset := core.ParsePagination(c, 500, 1000)
 
-		replacements, err := deps.GenreReplacementRepo.List()
+		replacements, err := deps.GenreReplacementRepo.List(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -71,11 +118,11 @@ func listGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 	}
 }
 
-func updateGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
+func updateGenreReplacement(deps GenreDeps, invalidate invalidateCaches) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req genreReplacementUpdateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -83,30 +130,31 @@ func updateGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 		req.Replacement = strings.TrimSpace(req.Replacement)
 
 		if req.Original == "" {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "original is required"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "original is required"})
 			return
 		}
 
-		existing, err := deps.GenreReplacementRepo.FindByOriginal(req.Original)
+		existing, err := deps.GenreReplacementRepo.FindByOriginal(c.Request.Context(), req.Original)
 		if err != nil {
 			if !database.IsNotFound(err) {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 		}
 		if existing == nil {
-			c.JSON(http.StatusNotFound, ErrorResponse{Error: "genre replacement not found"})
+			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "genre replacement not found"})
 			return
 		}
 
 		existing.Replacement = req.Replacement
 
-		if err := deps.GenreReplacementRepo.Upsert(existing); err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		if err := deps.GenreReplacementRepo.Upsert(c.Request.Context(), existing); err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		deps.ReloadReplacementCaches()
+		invalidate()
+
 		c.JSON(http.StatusOK, existing)
 	}
 }
@@ -118,16 +166,16 @@ func updateGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 // @Accept json
 // @Produce json
 // @Param request body genreReplacementCreateRequest true "Genre replacement details"
-// @Success 201 {object} GenreReplacement
-// @Success 200 {object} GenreReplacement "Already exists"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Success 201 {object} models.GenreReplacement
+// @Success 200 {object} models.GenreReplacement "Already exists"
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/replacements [post]
-func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
+func createGenreReplacement(deps GenreDeps, invalidate invalidateCaches) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req genreReplacementCreateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -135,13 +183,13 @@ func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 		req.Replacement = strings.TrimSpace(req.Replacement)
 
 		if req.Original == "" {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "original is required"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "original is required"})
 			return
 		}
 
-		existing, err := deps.GenreReplacementRepo.FindByOriginal(req.Original)
+		existing, err := deps.GenreReplacementRepo.FindByOriginal(c.Request.Context(), req.Original)
 		if err != nil && !database.IsNotFound(err) {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		if existing != nil {
@@ -154,12 +202,13 @@ func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 			Replacement: req.Replacement,
 		}
 
-		if err := deps.GenreReplacementRepo.Create(replacement); err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		if err := deps.GenreReplacementRepo.Create(c.Request.Context(), replacement); err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		deps.ReloadReplacementCaches()
+		invalidate()
+
 		c.JSON(http.StatusCreated, replacement)
 	}
 }
@@ -172,11 +221,11 @@ func createGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 // @Param id query int false "Replacement ID to delete"
 // @Param original query string false "Original genre name to delete (alternative to id)"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/genres/replacements [delete]
-func deleteGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
+func deleteGenreReplacement(deps GenreDeps, invalidate invalidateCaches) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Query("id")
 		original := strings.TrimSpace(c.Query("original"))
@@ -184,52 +233,54 @@ func deleteGenreReplacement(deps *core.ServerDependencies) gin.HandlerFunc {
 		if idStr != "" {
 			var id uint64
 			if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-				c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id must be a number"})
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "id must be a number"})
 				return
 			}
 
-			replacement, err := deps.GenreReplacementRepo.FindByID(uint(id))
+			replacement, err := deps.GenreReplacementRepo.FindByID(c.Request.Context(), uint(id))
 			if err != nil {
 				if database.IsNotFound(err) {
-					c.JSON(http.StatusNotFound, ErrorResponse{Error: "genre replacement not found"})
+					c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "genre replacement not found"})
 					return
 				}
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 
-			if err := deps.GenreReplacementRepo.DeleteByID(uint(id)); err != nil {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			if err := deps.GenreReplacementRepo.DeleteByID(c.Request.Context(), uint(id)); err != nil {
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 
-			deps.ReloadReplacementCaches()
+			invalidate()
+
 			c.JSON(http.StatusOK, gin.H{"message": "genre replacement deleted", "original": replacement.Original})
 			return
 		}
 
 		if original != "" {
-			existing, err := deps.GenreReplacementRepo.FindByOriginal(original)
+			existing, err := deps.GenreReplacementRepo.FindByOriginal(c.Request.Context(), original)
 			if err != nil {
 				if database.IsNotFound(err) {
-					c.JSON(http.StatusNotFound, ErrorResponse{Error: "genre replacement not found"})
+					c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "genre replacement not found"})
 					return
 				}
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 
-			if err := deps.GenreReplacementRepo.Delete(original); err != nil {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			if err := deps.GenreReplacementRepo.Delete(c.Request.Context(), original); err != nil {
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 
-			deps.ReloadReplacementCaches()
+			invalidate()
+
 			c.JSON(http.StatusOK, gin.H{"message": "genre replacement deleted", "original": existing.Original})
 			return
 		}
 
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id or original query parameter is required"})
+		c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "id or original query parameter is required"})
 	}
 }
 
@@ -243,11 +294,11 @@ type importSummaryResponse struct {
 	Errors   int `json:"errors"`
 }
 
-func exportGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
+func exportGenreReplacements(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		replacements, err := deps.GenreReplacementRepo.List()
+		replacements, err := deps.GenreReplacementRepo.List(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -255,13 +306,13 @@ func exportGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 	}
 }
 
-func importGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
+func importGenreReplacements(deps GenreDeps, invalidate invalidateCaches) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
 
 		var req genreReplacementImportRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -276,7 +327,7 @@ func importGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 				continue
 			}
 
-			existing, err := deps.GenreReplacementRepo.FindByOriginal(orig)
+			existing, err := deps.GenreReplacementRepo.FindByOriginal(c.Request.Context(), orig)
 			if err != nil && !database.IsNotFound(err) {
 				errorsCount++
 				continue
@@ -289,14 +340,14 @@ func importGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 					Original:    orig,
 					Replacement: repl,
 				}
-				if err := deps.GenreReplacementRepo.Create(replacement); err != nil {
+				if err := deps.GenreReplacementRepo.Create(c.Request.Context(), replacement); err != nil {
 					errorsCount++
 					continue
 				}
 				changed = true
 			} else if existing.Replacement != repl {
 				existing.Replacement = repl
-				if err := deps.GenreReplacementRepo.Upsert(existing); err != nil {
+				if err := deps.GenreReplacementRepo.Upsert(c.Request.Context(), existing); err != nil {
 					errorsCount++
 					continue
 				}
@@ -311,7 +362,7 @@ func importGenreReplacements(deps *core.ServerDependencies) gin.HandlerFunc {
 		}
 
 		if imported > 0 {
-			deps.ReloadReplacementCaches()
+			invalidate()
 		}
 
 		c.JSON(http.StatusOK, importSummaryResponse{

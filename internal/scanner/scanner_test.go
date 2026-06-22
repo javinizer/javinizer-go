@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/spf13/afero"
-
-	"github.com/javinizer/javinizer-go/internal/config"
 )
 
 func TestScanner_Scan(t *testing.T) {
@@ -53,7 +51,7 @@ func TestScanner_Scan(t *testing.T) {
 	}
 
 	t.Run("Scan with default config", func(t *testing.T) {
-		cfg := &config.MatchingConfig{
+		cfg := &Config{
 			Extensions:      []string{".mp4", ".mkv", ".avi"},
 			MinSizeMB:       0,
 			ExcludePatterns: []string{"*-trailer*", "*-sample*"},
@@ -84,7 +82,7 @@ func TestScanner_Scan(t *testing.T) {
 	})
 
 	t.Run("Scan with minimum size filter", func(t *testing.T) {
-		cfg := &config.MatchingConfig{
+		cfg := &Config{
 			Extensions:      []string{".mp4", ".mkv", ".avi"},
 			MinSizeMB:       50, // 50MB minimum
 			ExcludePatterns: []string{"*-trailer*", "*-sample*"},
@@ -113,7 +111,7 @@ func TestScanner_Scan(t *testing.T) {
 	})
 
 	t.Run("Scan with specific extensions", func(t *testing.T) {
-		cfg := &config.MatchingConfig{
+		cfg := &Config{
 			Extensions:      []string{".mp4"}, // Only MP4 files
 			MinSizeMB:       0,
 			ExcludePatterns: []string{"*-trailer*", "*-sample*"},
@@ -158,7 +156,7 @@ func TestScanner_ScanSingle(t *testing.T) {
 		}
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4", ".mkv"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{"*-trailer*"},
@@ -229,7 +227,7 @@ func TestScanner_ScanSingleFromHandle(t *testing.T) {
 		}
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4", ".mkv"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{"*-trailer*"},
@@ -292,7 +290,7 @@ func TestScanner_ScanSingleFromHandle(t *testing.T) {
 		}
 	})
 
-	t.Run("FileInfo contains correct paths", func(t *testing.T) {
+	t.Run("fileInfo contains correct paths", func(t *testing.T) {
 		dirFile, err := os.Open(tmpDir)
 		if err != nil {
 			t.Fatalf("Failed to open directory: %v", err)
@@ -304,13 +302,10 @@ func TestScanner_ScanSingleFromHandle(t *testing.T) {
 			t.Fatalf("ScanSingleFromHandle failed: %v", err)
 		}
 
-		// Verify FileInfo fields use canonicalPath
+		// Verify FileMatchInfo fields use canonicalPath
 		for _, f := range result.Files {
 			if !filepath.IsAbs(f.Path) {
 				t.Errorf("Expected absolute path, got %s", f.Path)
-			}
-			if f.Dir != tmpDir {
-				t.Errorf("Expected Dir to be %s, got %s", tmpDir, f.Dir)
 			}
 			if filepath.Dir(f.Path) != tmpDir {
 				t.Errorf("Expected path parent to be %s, got %s", tmpDir, filepath.Dir(f.Path))
@@ -339,7 +334,7 @@ func TestScanner_Filter(t *testing.T) {
 		filePaths = append(filePaths, path)
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4", ".mkv"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{"*-trailer*"},
@@ -390,7 +385,7 @@ func TestScanner_ExcludePatterns(t *testing.T) {
 				t.Fatalf("Failed to create file: %v", err)
 			}
 
-			cfg := &config.MatchingConfig{
+			cfg := &Config{
 				Extensions:      []string{".mp4"},
 				MinSizeMB:       0,
 				ExcludePatterns: tc.excludePatterns,
@@ -422,7 +417,7 @@ func TestScanner_ExcludePatterns(t *testing.T) {
 	}
 }
 
-func TestScanner_FileInfo(t *testing.T) {
+func TestScanner_fileInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a test file
@@ -433,7 +428,7 @@ func TestScanner_FileInfo(t *testing.T) {
 		t.Fatalf("Failed to create file: %v", err)
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -451,7 +446,7 @@ func TestScanner_FileInfo(t *testing.T) {
 
 	info := result.Files[0]
 
-	// Verify FileInfo fields
+	// Verify fileInfo fields
 	if info.Name != filename {
 		t.Errorf("Expected name %s, got %s", filename, info.Name)
 	}
@@ -464,9 +459,7 @@ func TestScanner_FileInfo(t *testing.T) {
 		t.Errorf("Expected size %d, got %d", len(content), info.Size)
 	}
 
-	if info.Dir != tmpDir {
-		t.Errorf("Expected dir %s, got %s", tmpDir, info.Dir)
-	}
+	// Per ADR-0034: Dir field removed from FileMatchInfo. Path contains full path.
 
 	if info.Path != filepath {
 		t.Errorf("Expected path %s, got %s", filepath, info.Path)
@@ -476,7 +469,7 @@ func TestScanner_FileInfo(t *testing.T) {
 func TestScanner_EmptyDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4", ".mkv"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -498,7 +491,7 @@ func TestScanner_EmptyDirectory(t *testing.T) {
 }
 
 func TestScanner_NonExistentPath(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -522,7 +515,7 @@ func TestScanner_ScanWithLimits_MaxFiles(t *testing.T) {
 		}
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -571,7 +564,7 @@ func TestScanner_ScanWithLimits_Timeout(t *testing.T) {
 		}
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -610,7 +603,7 @@ func TestScanner_ScanWithLimits_ContextTimeout(t *testing.T) {
 		}
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -672,7 +665,7 @@ func TestScanner_ScanWithLimits_Errors(t *testing.T) {
 		_ = os.Chmod(unreadableDir, 0755)
 	}() // Restore for cleanup
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -696,7 +689,7 @@ func TestScanner_ScanWithLimits_Errors(t *testing.T) {
 }
 
 func TestScanner_ScanSingle_NonExistentPath(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -724,7 +717,7 @@ func TestScanner_ScanSingle_FileIsDirectory(t *testing.T) {
 		t.Fatalf("Failed to create file: %v", err)
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -747,7 +740,7 @@ func TestScanner_ScanSingle_FileIsDirectory(t *testing.T) {
 	}
 }
 
-func TestScanner_ScanSingle_ErrorGettingFileInfo(t *testing.T) {
+func TestScanner_ScanSingle_ErrorGettingfileInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a valid file
@@ -771,7 +764,7 @@ func TestScanner_ScanSingle_ErrorGettingFileInfo(t *testing.T) {
 		_ = os.Chmod(unreadableFile, 0644)
 	}() // Restore for cleanup
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -794,7 +787,7 @@ func TestScanner_ScanSingle_ErrorGettingFileInfo(t *testing.T) {
 }
 
 func TestScanner_Filter_EmptyList(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -809,7 +802,7 @@ func TestScanner_Filter_EmptyList(t *testing.T) {
 }
 
 func TestScanner_Filter_NonExistentFiles(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -844,7 +837,7 @@ func TestScanner_Filter_DirectoriesIgnored(t *testing.T) {
 		t.Fatalf("Failed to create file: %v", err)
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -881,7 +874,7 @@ func TestScanner_shouldIncludeFile_CaseInsensitiveExtensions(t *testing.T) {
 		{"movie.txt", false},
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4", ".mkv"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -915,7 +908,7 @@ func TestScanner_shouldIncludeFile_FilesWithoutExtension(t *testing.T) {
 		t.Fatalf("Failed to create file: %v", err)
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -941,7 +934,7 @@ func TestScanner_shouldIncludeFile_MultipleDotsInFilename(t *testing.T) {
 		{"movie.part1.part2.mkv", true},
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4", ".mkv"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -976,7 +969,7 @@ func TestScanner_shouldIncludeFile_InvalidGlobPattern(t *testing.T) {
 	}
 
 	// Use an invalid glob pattern that will cause filepath.Match to error
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{"[invalid"}, // Invalid pattern (unclosed bracket)
@@ -1016,7 +1009,7 @@ func TestScanner_shouldIncludeFile_MinSizeWithEntry(t *testing.T) {
 	}
 	_ = f2.Close()
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       50, // 50MB minimum
 		ExcludePatterns: []string{},
@@ -1059,7 +1052,7 @@ func TestScanner_shouldIncludeFile_MinSizeWithoutEntry(t *testing.T) {
 	}
 	_ = f.Close()
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       50, // 50MB minimum
 		ExcludePatterns: []string{},
@@ -1091,7 +1084,7 @@ func TestScanner_TotalScanned(t *testing.T) {
 		}
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -1133,7 +1126,7 @@ func TestScanner_MaxSkippedFiles(t *testing.T) {
 		}
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"}, // No MP4 files, all .txt files will be skipped
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -1176,7 +1169,7 @@ func TestScanner_RelativePath(t *testing.T) {
 		t.Fatalf("Failed to create file: %v", err)
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -1228,7 +1221,7 @@ func TestScanner_Symlinks(t *testing.T) {
 		t.Skip("Cannot create symlinks (possibly Windows or restricted permissions)")
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -1332,7 +1325,7 @@ func TestScanner_ScanSingle_WithNestedDirectory(t *testing.T) {
 		}
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -1372,7 +1365,7 @@ func TestScanner_ScanSingle_ErrorReadingDirectory(t *testing.T) {
 	}
 	defer func() { _ = os.Chmod(unreadableDir, 0755) }() // Restore for cleanup
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -1404,7 +1397,7 @@ func TestScanner_DeepNestedStructure(t *testing.T) {
 		}
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{},
@@ -1451,7 +1444,7 @@ func TestScanner_MixedContentDirectory(t *testing.T) {
 		}
 	}
 
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		Extensions:      []string{".mp4", ".mkv"},
 		MinSizeMB:       0,
 		ExcludePatterns: []string{"*-trailer*", "*-sample*"},
@@ -1510,7 +1503,7 @@ func TestScanner_ExtensionMapLookup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.MatchingConfig{Extensions: tt.extensions}
+			cfg := &Config{Extensions: tt.extensions}
 			scanner := NewScanner(fs, cfg)
 
 			path := filepath.Join("/test", tt.fileName)
@@ -1524,7 +1517,7 @@ func TestScanner_ExtensionMapLookup(t *testing.T) {
 
 func TestScanner_EmptyExtensionSet(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.MatchingConfig{Extensions: []string{}}
+	cfg := &Config{Extensions: []string{}}
 	scanner := NewScanner(fs, cfg)
 
 	path := filepath.Join("/test", "video.mp4")
@@ -1533,3 +1526,6 @@ func TestScanner_EmptyExtensionSet(t *testing.T) {
 		t.Errorf("shouldIncludeFile with empty extension set should return false, got %v", got)
 	}
 }
+
+// Per ADR-0034: fileInfo type and ToFileMatchInfo() method removed.
+// ScanResult.Files is now []models.FileMatchInfo directly.

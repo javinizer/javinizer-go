@@ -4,10 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,8 +12,8 @@ import (
 
 func TestNewOrganizeStrategy(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	cfg := &Config{}
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 	assert.NotNil(t, strategy)
 	assert.NotNil(t, strategy.fs)
 	assert.NotNil(t, strategy.config)
@@ -25,26 +22,22 @@ func TestNewOrganizeStrategy(t *testing.T) {
 
 func TestOrganizeStrategy_ImplementsInterface(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{}
-	var _ OperationStrategy = NewOrganizeStrategy(fs, cfg, nil)
+	cfg := &Config{}
+	var _ OperationStrategy = newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 }
 
 func TestOrganizeStrategy_Plan(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat: "<ID>",
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/ABC-123.mp4",
-			Name:      "ABC-123.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID: "ABC-123",
@@ -57,28 +50,24 @@ func TestOrganizeStrategy_Plan(t *testing.T) {
 	assert.Equal(t, filepath.ToSlash("/dest/ABC-123/ABC-123.mp4"), filepath.ToSlash(plan.TargetPath))
 	assert.Equal(t, filepath.ToSlash("/dest/ABC-123"), filepath.ToSlash(plan.TargetDir))
 	assert.Equal(t, "ABC-123.mp4", plan.TargetFile)
-	assert.False(t, plan.InPlace, "OrganizeStrategy should never set InPlace=true")
-	assert.False(t, plan.IsDedicated, "OrganizeStrategy should never set IsDedicated=true")
+	assert.False(t, plan.InPlace, "organizeStrategy should never set InPlace=true")
+	assert.False(t, plan.IsDedicated, "organizeStrategy should never set IsDedicated=true")
 	assert.True(t, plan.WillMove, "Should move when source != target")
 }
 
 func TestOrganizeStrategy_Plan_WithSubfolders(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:    "<ID>",
 		FileFormat:      "<ID>",
 		RenameFile:      true,
 		SubfolderFormat: []string{"<LABEL>"},
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/ABC-123.mp4",
-			Name:      "ABC-123.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID:    "ABC-123",
@@ -92,19 +81,15 @@ func TestOrganizeStrategy_Plan_WithSubfolders(t *testing.T) {
 
 func TestOrganizeStrategy_Plan_NoRename(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat: "<ID>",
 		RenameFile:   false,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/original-name.mp4",
-			Name:      "original-name.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/original-name.mp4", Name: "original-name.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID: "ABC-123",
@@ -118,21 +103,17 @@ func TestOrganizeStrategy_Plan_NoRename(t *testing.T) {
 
 func TestOrganizeStrategy_Plan_TitleTruncation(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:   "<ID> <TITLE>",
 		FileFormat:     "<ID> <TITLE>",
 		RenameFile:     true,
 		MaxTitleLength: 20,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/ABC-123.mp4",
-			Name:      "ABC-123.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID:    "ABC-123",
@@ -149,24 +130,20 @@ func TestOrganizeStrategy_Plan_TitleTruncation(t *testing.T) {
 
 func TestOrganizeStrategy_Plan_ConflictDetection(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat: "<ID>",
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
 	// Create existing target file
 	_ = fs.MkdirAll("/dest/ABC-123", 0777)
 	_ = afero.WriteFile(fs, "/dest/ABC-123/ABC-123.mp4", []byte("existing"), 0644)
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/ABC-123.mp4",
-			Name:      "ABC-123.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID: "ABC-123",
@@ -187,10 +164,10 @@ func TestOrganizeStrategy_Plan_ConflictDetection(t *testing.T) {
 
 func TestOrganizeStrategy_Execute(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		MoveSubtitles: false,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
 	// Create source file
 	_ = fs.MkdirAll("/source", 0777)
@@ -203,6 +180,7 @@ func TestOrganizeStrategy_Execute(t *testing.T) {
 		TargetPath: "/dest/ABC-123/ABC-123.mp4",
 		WillMove:   true,
 		Conflicts:  []string{},
+		moveFiles:  true,
 	}
 
 	result, err := strategy.Execute(plan)
@@ -220,23 +198,19 @@ func TestOrganizeStrategy_Execute(t *testing.T) {
 
 func TestOrganizeStrategy_Plan_ForceUpdate(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat: "<ID>",
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
 	_ = fs.MkdirAll("/dest/ABC-123", 0777)
 	_ = afero.WriteFile(fs, "/dest/ABC-123/ABC-123.mp4", []byte("existing"), 0644)
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/ABC-123.mp4",
-			Name:      "ABC-123.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID: "ABC-123",
@@ -249,21 +223,17 @@ func TestOrganizeStrategy_Plan_ForceUpdate(t *testing.T) {
 
 func TestOrganizeStrategy_Plan_MaxPathLength(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MaxPathLength: 40,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/ABC-123.mp4",
-			Name:      "ABC-123.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID:    "ABC-123",
@@ -280,21 +250,17 @@ func TestOrganizeStrategy_Plan_MaxPathLength(t *testing.T) {
 
 func TestOrganizeStrategy_Plan_MaxPathLengthTooShort(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MaxPathLength: 10,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/ABC-123.mp4",
-			Name:      "ABC-123.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID:    "ABC-123",
@@ -308,21 +274,17 @@ func TestOrganizeStrategy_Plan_MaxPathLengthTooShort(t *testing.T) {
 
 func TestOrganizeStrategy_Plan_SubfolderEmpty(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:    "<ID>",
 		FileFormat:      "<ID>",
 		RenameFile:      true,
 		SubfolderFormat: []string{""},
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/ABC-123.mp4",
-			Name:      "ABC-123.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID: "ABC-123",
@@ -335,8 +297,8 @@ func TestOrganizeStrategy_Plan_SubfolderEmpty(t *testing.T) {
 
 func TestOrganizeStrategy_Execute_MkdirError(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	cfg := &Config{}
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
 	fs = afero.NewReadOnlyFs(fs)
 	strategy.fs = fs
@@ -348,6 +310,7 @@ func TestOrganizeStrategy_Execute_MkdirError(t *testing.T) {
 		TargetPath: "/dest/ABC-123/ABC-123.mp4",
 		WillMove:   true,
 		Conflicts:  []string{},
+		moveFiles:  true,
 	}
 
 	result, err := strategy.Execute(plan)
@@ -358,16 +321,17 @@ func TestOrganizeStrategy_Execute_MkdirError(t *testing.T) {
 
 func TestOrganizeStrategy_Execute_RenameError(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	cfg := &Config{}
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
 	plan := &OrganizePlan{
-		SourcePath: "/source/nonexistent.mp4",
+		SourcePath: "/source/ABC-123.mp4",
 		TargetDir:  "/dest/ABC-123",
 		TargetFile: "ABC-123.mp4",
 		TargetPath: "/dest/ABC-123/ABC-123.mp4",
 		WillMove:   true,
 		Conflicts:  []string{},
+		moveFiles:  true,
 	}
 
 	result, err := strategy.Execute(plan)
@@ -378,20 +342,16 @@ func TestOrganizeStrategy_Execute_RenameError(t *testing.T) {
 
 func TestOrganizeStrategy_Plan_MultiPart(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat: "<ID>",
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/ABC-123-pt1.mp4",
-			Name:      "ABC-123-pt1.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/ABC-123-pt1.mp4", Name: "ABC-123-pt1.mp4", Extension: ".mp4",
 		PartNumber:  1,
 		PartSuffix:  "-pt1",
 		IsMultiPart: true,
@@ -407,20 +367,16 @@ func TestOrganizeStrategy_Plan_MultiPart(t *testing.T) {
 
 func TestOrganizeStrategy_Plan_SameFileNoConflict(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat: "<ID>",
 		FileFormat:   "<ID>",
 		RenameFile:   true,
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/dest/ABC-123/ABC-123.mp4",
-			Name:      "ABC-123.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/dest/ABC-123/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID: "ABC-123",
@@ -434,21 +390,17 @@ func TestOrganizeStrategy_Plan_SameFileNoConflict(t *testing.T) {
 
 func TestOrganizeStrategy_Plan_SubfolderWithMultiple(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:    "<ID>",
 		FileFormat:      "<ID>",
 		RenameFile:      true,
 		SubfolderFormat: []string{"<LABEL>", "<ID>"},
 	}
-	strategy := NewOrganizeStrategy(fs, cfg, nil)
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
 
-	match := matcher.MatchResult{
-		ID: "ABC-123",
-		File: scanner.FileInfo{
-			Path:      "/source/ABC-123.mp4",
-			Name:      "ABC-123.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "ABC-123",
+		Path:    "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 	}
 	movie := &models.Movie{
 		ID:    "ABC-123",
@@ -459,4 +411,64 @@ func TestOrganizeStrategy_Plan_SubfolderWithMultiple(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, filepath.ToSlash(plan.TargetPath), "JAV")
 	assert.Contains(t, filepath.ToSlash(plan.TargetPath), "ABC-123")
+}
+
+func TestOrganizeStrategy_Execute_ConflictsDetected(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &Config{FileFormat: "<ID>"}
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
+
+	plan := &OrganizePlan{
+		SourcePath: "/src/ABC-123.mp4",
+		TargetPath: "/dest/ABC-123.mp4",
+		TargetDir:  "/dest",
+		WillMove:   true,
+		Conflicts:  []string{"/dest/ABC-123.mp4"},
+		moveFiles:  false,
+		LinkMode:   LinkModeSoft,
+	}
+
+	result, err := strategy.Execute(plan)
+	assert.Error(t, err)
+	require.NotNil(t, result)
+	assert.Contains(t, result.Error.Error(), "conflicts detected")
+}
+
+func TestOrganizeStrategy_Execute_UnsupportedLinkMode(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &Config{FileFormat: "<ID>"}
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
+
+	plan := &OrganizePlan{
+		SourcePath: "/src/ABC-123.mp4",
+		TargetPath: "/dest/ABC-123.mp4",
+		TargetDir:  "/dest",
+		WillMove:   true,
+		Conflicts:  nil,
+		moveFiles:  false,
+		LinkMode:   LinkMode("invalid"),
+	}
+
+	result, err := strategy.Execute(plan)
+	assert.Error(t, err)
+	require.NotNil(t, result)
+	assert.Contains(t, result.Error.Error(), "unsupported link mode")
+}
+
+func TestOrganizeStrategy_Execute_NoMoveNeeded(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &Config{FileFormat: "<ID>"}
+	strategy := newOrganizeStrategy(fs, cfg, nil, &MemLinker{})
+
+	plan := &OrganizePlan{
+		SourcePath: "/src/ABC-123.mp4",
+		TargetPath: "/src/ABC-123.mp4",
+		TargetDir:  "/src",
+		WillMove:   false,
+	}
+
+	result, err := strategy.Execute(plan)
+	assert.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.Moved)
 }

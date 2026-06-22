@@ -1,9 +1,9 @@
 package database
 
 import (
+	"context"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -11,22 +11,14 @@ import (
 
 func TestContentIDMappingRepository(t *testing.T) {
 	// Create in-memory database
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	// Run migrations
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
 	repo := NewContentIDMappingRepository(db)
@@ -38,12 +30,12 @@ func TestContentIDMappingRepository(t *testing.T) {
 			Source:    "r18dev",
 		}
 
-		err := repo.Create(mapping)
+		err := repo.Create(context.TODO(), mapping)
 		require.NoError(t, err)
 		assert.NotZero(t, mapping.ID)
 
 		// Find by search ID (should be case-insensitive)
-		found, err := repo.FindBySearchID("ipx-535")
+		found, err := repo.FindBySearchID(context.TODO(), "ipx-535")
 		require.NoError(t, err)
 		assert.Equal(t, "IPX-535", found.SearchID)
 		assert.Equal(t, "ipx00535", found.ContentID)
@@ -57,11 +49,11 @@ func TestContentIDMappingRepository(t *testing.T) {
 			Source:    "dmm",
 		}
 
-		err := repo.Create(mapping)
+		err := repo.Create(context.TODO(), mapping)
 		require.NoError(t, err)
 
 		// Search ID should be normalized to uppercase
-		found, err := repo.FindBySearchID("ABC-123")
+		found, err := repo.FindBySearchID(context.TODO(), "ABC-123")
 		require.NoError(t, err)
 		assert.Equal(t, "ABC-123", found.SearchID)
 	})
@@ -74,7 +66,7 @@ func TestContentIDMappingRepository(t *testing.T) {
 		}
 
 		// First create
-		err := repo.Create(mapping)
+		err := repo.Create(context.TODO(), mapping)
 		require.NoError(t, err)
 		originalID := mapping.ID
 
@@ -84,11 +76,11 @@ func TestContentIDMappingRepository(t *testing.T) {
 			ContentID: "updated_mdb087",
 			Source:    "dmm_updated",
 		}
-		err = repo.Create(mapping2)
+		err = repo.Create(context.TODO(), mapping2)
 		require.NoError(t, err)
 
 		// Verify update
-		found, err := repo.FindBySearchID("MDB-087")
+		found, err := repo.FindBySearchID(context.TODO(), "MDB-087")
 		require.NoError(t, err)
 		assert.Equal(t, "updated_mdb087", found.ContentID)
 		assert.Equal(t, "dmm_updated", found.Source)
@@ -96,7 +88,7 @@ func TestContentIDMappingRepository(t *testing.T) {
 	})
 
 	t.Run("FindBySearchID with non-existent ID", func(t *testing.T) {
-		_, err := repo.FindBySearchID("NONEXISTENT-999")
+		_, err := repo.FindBySearchID(context.TODO(), "NONEXISTENT-999")
 		assert.Error(t, err, "Should return error for non-existent mapping")
 	})
 
@@ -107,21 +99,21 @@ func TestContentIDMappingRepository(t *testing.T) {
 			Source:    "test",
 		}
 
-		err := repo.Create(mapping)
+		err := repo.Create(context.TODO(), mapping)
 		require.NoError(t, err)
 
 		// Delete
-		err = repo.Delete("delete-test")
+		err = repo.Delete(context.TODO(), "delete-test")
 		require.NoError(t, err)
 
 		// Verify deletion
-		_, err = repo.FindBySearchID("DELETE-TEST")
+		_, err = repo.FindBySearchID(context.TODO(), "DELETE-TEST")
 		assert.Error(t, err, "Should not find deleted mapping")
 	})
 
 	t.Run("Delete non-existent mapping", func(t *testing.T) {
 		// Should not error on deleting non-existent mapping
-		err := repo.Delete("NONEXISTENT-999")
+		err := repo.Delete(context.TODO(), "NONEXISTENT-999")
 		assert.NoError(t, err)
 	})
 
@@ -134,12 +126,12 @@ func TestContentIDMappingRepository(t *testing.T) {
 		}
 
 		for _, m := range mappings {
-			err := repo.Create(m)
+			err := repo.Create(context.TODO(), m)
 			require.NoError(t, err)
 		}
 
 		// Get all mappings
-		all, err := repo.GetAll()
+		all, err := repo.GetAll(context.TODO())
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(all), 3, "Should have at least 3 mappings")
 
@@ -165,26 +157,18 @@ func TestContentIDMappingRepository(t *testing.T) {
 
 	t.Run("GetAll with empty database", func(t *testing.T) {
 		// Create fresh database
-		cfg := &config.Config{
-			Database: config.DatabaseConfig{
-				Type: "sqlite",
-				DSN:  ":memory:",
-			},
-			Logging: config.LoggingConfig{
-				Level: "error",
-			},
-		}
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 		db2, err := New(cfg)
 		require.NoError(t, err)
 		defer func() { _ = db2.Close() }()
 
-		err = db2.AutoMigrate()
+		err = db2.RunMigrationsOnStartup(context.Background())
 		require.NoError(t, err)
 
 		repo2 := NewContentIDMappingRepository(db2)
 
-		all, err := repo2.GetAll()
+		all, err := repo2.GetAll(context.TODO())
 		require.NoError(t, err)
 		assert.Len(t, all, 0)
 	})

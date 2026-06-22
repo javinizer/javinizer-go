@@ -1,7 +1,7 @@
 // Package matcher tests demonstrate the canonical table-driven test pattern for javinizer-go.
 //
 // This file serves as the reference implementation with 76 test cases showing best practices.
-// For the standardized template and documentation, see internal/testutil/template.go.
+// Matcher test utilities.
 //
 // Key patterns demonstrated:
 //   - Multiple test functions, each testing a specific aspect
@@ -15,12 +15,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 func TestMatcher_MatchFile(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 		RegexPattern: "",
 	}
@@ -96,7 +95,7 @@ func TestMatcher_MatchFile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -135,7 +134,7 @@ func TestMatcher_MatchFile(t *testing.T) {
 func TestMatcher_CustomRegex(t *testing.T) {
 	// Custom regex that only matches 3-letter prefixes
 	// Note: If custom regex doesn't match, it falls back to builtin pattern
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: true,
 		RegexPattern: `([A-Z]{3}-\d+)`,
 	}
@@ -158,7 +157,7 @@ func TestMatcher_CustomRegex(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.filename, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -181,7 +180,7 @@ func TestMatcher_CustomRegex(t *testing.T) {
 }
 
 func TestMatcher_Match(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -190,7 +189,7 @@ func TestMatcher_Match(t *testing.T) {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
 
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{Name: "IPX-535.mp4", Extension: ".mp4"},
 		{Name: "ABC-123.mkv", Extension: ".mkv"},
 		{Name: "random_file.mp4", Extension: ".mp4"},
@@ -228,7 +227,7 @@ func TestMatcher_Match(t *testing.T) {
 }
 
 func TestMatcher_MatchString(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -262,80 +261,8 @@ func TestMatcher_MatchString(t *testing.T) {
 	}
 }
 
-func TestGroupByID(t *testing.T) {
-	results := []MatchResult{
-		{ID: "IPX-535", PartNumber: 0},
-		{ID: "ABC-123", PartNumber: 0},
-		{ID: "IPX-535", PartNumber: 1},
-		{ID: "IPX-535", PartNumber: 2},
-		{ID: "DEF-456", PartNumber: 0},
-	}
-
-	grouped := GroupByID(results)
-
-	if len(grouped) != 3 {
-		t.Errorf("Expected 3 groups, got %d", len(grouped))
-	}
-
-	if len(grouped["IPX-535"]) != 3 {
-		t.Errorf("Expected 3 files for IPX-535, got %d", len(grouped["IPX-535"]))
-	}
-
-	if len(grouped["ABC-123"]) != 1 {
-		t.Errorf("Expected 1 file for ABC-123, got %d", len(grouped["ABC-123"]))
-	}
-
-	if len(grouped["DEF-456"]) != 1 {
-		t.Errorf("Expected 1 file for DEF-456, got %d", len(grouped["DEF-456"]))
-	}
-}
-
-func TestFilterMultiPart(t *testing.T) {
-	results := []MatchResult{
-		{ID: "IPX-535", IsMultiPart: false},
-		{ID: "ABC-123", IsMultiPart: true, PartNumber: 1},
-		{ID: "ABC-123", IsMultiPart: true, PartNumber: 2},
-		{ID: "DEF-456", IsMultiPart: false},
-	}
-
-	filtered := FilterMultiPart(results)
-
-	expectedCount := 2
-	if len(filtered) != expectedCount {
-		t.Errorf("Expected %d multi-part files, got %d", expectedCount, len(filtered))
-	}
-
-	for _, result := range filtered {
-		if !result.IsMultiPart {
-			t.Errorf("FilterMultiPart returned non-multi-part file: %s", result.ID)
-		}
-	}
-}
-
-func TestFilterSinglePart(t *testing.T) {
-	results := []MatchResult{
-		{ID: "IPX-535", IsMultiPart: false},
-		{ID: "ABC-123", IsMultiPart: true, PartNumber: 1},
-		{ID: "ABC-123", IsMultiPart: true, PartNumber: 2},
-		{ID: "DEF-456", IsMultiPart: false},
-	}
-
-	filtered := FilterSinglePart(results)
-
-	expectedCount := 2
-	if len(filtered) != expectedCount {
-		t.Errorf("Expected %d single-part files, got %d", expectedCount, len(filtered))
-	}
-
-	for _, result := range filtered {
-		if result.IsMultiPart {
-			t.Errorf("FilterSinglePart returned multi-part file: %s", result.ID)
-		}
-	}
-}
-
 func TestMatcher_InvalidRegex(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: true,
 		RegexPattern: `[invalid(regex`,
 	}
@@ -347,7 +274,7 @@ func TestMatcher_InvalidRegex(t *testing.T) {
 }
 
 func TestMatcher_RealWorldFilenames(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -385,7 +312,7 @@ func TestMatcher_RealWorldFilenames(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.filename, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -516,7 +443,7 @@ func TestMatcher_MatchString_EdgeCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &config.MatchingConfig{
+			cfg := &Config{
 				RegexEnabled: tc.regexEnabled,
 				RegexPattern: tc.regexPattern,
 			}
@@ -543,7 +470,7 @@ func TestMatcher_MatchString_EdgeCases(t *testing.T) {
 
 // TestMatcher_EmptyResults tests handling of empty file lists
 func TestMatcher_EmptyResults(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -553,7 +480,7 @@ func TestMatcher_EmptyResults(t *testing.T) {
 	}
 
 	// Empty file list
-	results := matcher.Match([]scanner.FileInfo{})
+	results := matcher.Match([]models.FileMatchInfo{})
 	if len(results) != 0 {
 		t.Errorf("Expected 0 results for empty file list, got %d", len(results))
 	}
@@ -565,119 +492,12 @@ func TestMatcher_EmptyResults(t *testing.T) {
 	}
 }
 
-// TestGroupByID_EdgeCases tests edge cases for GroupByID
-func TestGroupByID_EdgeCases(t *testing.T) {
-	t.Run("Empty results", func(t *testing.T) {
-		grouped := GroupByID([]MatchResult{})
-		if len(grouped) != 0 {
-			t.Errorf("Expected 0 groups for empty results, got %d", len(grouped))
-		}
-	})
-
-	t.Run("Nil results", func(t *testing.T) {
-		grouped := GroupByID(nil)
-		if len(grouped) != 0 {
-			t.Errorf("Expected 0 groups for nil results, got %d", len(grouped))
-		}
-	})
-
-	t.Run("Single ID multiple times", func(t *testing.T) {
-		results := []MatchResult{
-			{ID: "IPX-535"},
-			{ID: "IPX-535"},
-			{ID: "IPX-535"},
-		}
-		grouped := GroupByID(results)
-		if len(grouped) != 1 {
-			t.Errorf("Expected 1 group, got %d", len(grouped))
-		}
-		if len(grouped["IPX-535"]) != 3 {
-			t.Errorf("Expected 3 files in group, got %d", len(grouped["IPX-535"]))
-		}
-	})
-}
-
-// TestFilterMultiPart_EdgeCases tests edge cases for FilterMultiPart
-func TestFilterMultiPart_EdgeCases(t *testing.T) {
-	t.Run("Empty results", func(t *testing.T) {
-		filtered := FilterMultiPart([]MatchResult{})
-		if len(filtered) != 0 {
-			t.Errorf("Expected 0 filtered results for empty input, got %d", len(filtered))
-		}
-	})
-
-	t.Run("Nil results", func(t *testing.T) {
-		filtered := FilterMultiPart(nil)
-		if len(filtered) != 0 {
-			t.Errorf("Expected 0 filtered results for nil input, got %d", len(filtered))
-		}
-	})
-
-	t.Run("All single-part", func(t *testing.T) {
-		results := []MatchResult{
-			{ID: "IPX-535", IsMultiPart: false},
-			{ID: "ABC-123", IsMultiPart: false},
-		}
-		filtered := FilterMultiPart(results)
-		if len(filtered) != 0 {
-			t.Errorf("Expected 0 filtered results for all single-part, got %d", len(filtered))
-		}
-	})
-
-	t.Run("All multi-part", func(t *testing.T) {
-		results := []MatchResult{
-			{ID: "IPX-535", IsMultiPart: true},
-			{ID: "ABC-123", IsMultiPart: true},
-		}
-		filtered := FilterMultiPart(results)
-		if len(filtered) != 2 {
-			t.Errorf("Expected 2 filtered results for all multi-part, got %d", len(filtered))
-		}
-	})
-}
-
-// TestFilterSinglePart_EdgeCases tests edge cases for FilterSinglePart
-func TestFilterSinglePart_EdgeCases(t *testing.T) {
-	t.Run("Empty results", func(t *testing.T) {
-		filtered := FilterSinglePart([]MatchResult{})
-		if len(filtered) != 0 {
-			t.Errorf("Expected 0 filtered results for empty input, got %d", len(filtered))
-		}
-	})
-
-	t.Run("Nil results", func(t *testing.T) {
-		filtered := FilterSinglePart(nil)
-		if len(filtered) != 0 {
-			t.Errorf("Expected 0 filtered results for nil input, got %d", len(filtered))
-		}
-	})
-
-	t.Run("All multi-part", func(t *testing.T) {
-		results := []MatchResult{
-			{ID: "IPX-535", IsMultiPart: true},
-			{ID: "ABC-123", IsMultiPart: true},
-		}
-		filtered := FilterSinglePart(results)
-		if len(filtered) != 0 {
-			t.Errorf("Expected 0 filtered results for all multi-part, got %d", len(filtered))
-		}
-	})
-
-	t.Run("All single-part", func(t *testing.T) {
-		results := []MatchResult{
-			{ID: "IPX-535", IsMultiPart: false},
-			{ID: "ABC-123", IsMultiPart: false},
-		}
-		filtered := FilterSinglePart(results)
-		if len(filtered) != 2 {
-			t.Errorf("Expected 2 filtered results for all single-part, got %d", len(filtered))
-		}
-	})
-}
-
+// TestgroupByID_EdgeCases tests edge cases for groupByID
+// TestfilterMultiPart_EdgeCases tests edge cases for filterMultiPart
+// TestfilterSinglePart_EdgeCases tests edge cases for filterSinglePart
 // TestMatcher_VariousExtensions tests matching with different file extensions
 func TestMatcher_VariousExtensions(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -690,7 +510,7 @@ func TestMatcher_VariousExtensions(t *testing.T) {
 
 	for _, ext := range extensions {
 		t.Run(ext, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      "IPX-535" + ext,
 				Extension: ext,
 			}
@@ -709,7 +529,7 @@ func TestMatcher_VariousExtensions(t *testing.T) {
 
 // TestMatcher_PathSeparators tests that path separators don't break matching
 func TestMatcher_PathSeparators(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -731,7 +551,7 @@ func TestMatcher_PathSeparators(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -750,7 +570,7 @@ func TestMatcher_PathSeparators(t *testing.T) {
 
 // TestMatcher_LongStudioCodes tests studio codes of varying lengths
 func TestMatcher_LongStudioCodes(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -777,7 +597,7 @@ func TestMatcher_LongStudioCodes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.filename, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -796,7 +616,7 @@ func TestMatcher_LongStudioCodes(t *testing.T) {
 
 // TestMatcher_PartSuffixVariations tests various multi-part suffix formats
 func TestMatcher_PartSuffixVariations(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -845,7 +665,7 @@ func TestMatcher_PartSuffixVariations(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -876,7 +696,7 @@ func TestMatcher_PartSuffixVariations(t *testing.T) {
 
 // TestMatcher_FC2Formats tests FC2-PPV format matching
 func TestMatcher_FC2Formats(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -903,7 +723,7 @@ func TestMatcher_FC2Formats(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -928,7 +748,7 @@ func TestMatcher_FC2Formats(t *testing.T) {
 
 // TestMatcher_ComplexFilenames tests filenames with complex metadata
 func TestMatcher_ComplexFilenames(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -977,7 +797,7 @@ func TestMatcher_ComplexFilenames(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -996,7 +816,7 @@ func TestMatcher_ComplexFilenames(t *testing.T) {
 
 // TestMatcher_EdgeCaseIDs tests edge cases in ID patterns
 func TestMatcher_EdgeCaseIDs(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -1039,7 +859,7 @@ func TestMatcher_EdgeCaseIDs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -1116,7 +936,7 @@ func TestMatcher_CustomRegexPriority(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &config.MatchingConfig{
+			cfg := &Config{
 				RegexEnabled: true,
 				RegexPattern: tc.regexPattern,
 			}
@@ -1134,7 +954,7 @@ func TestMatcher_CustomRegexPriority(t *testing.T) {
 				t.Fatalf("Failed to create matcher: %v", err)
 			}
 
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -1157,7 +977,7 @@ func TestMatcher_CustomRegexPriority(t *testing.T) {
 
 // TestMatcher_NilAndEmptyInputs tests handling of nil and empty inputs
 func TestMatcher_NilAndEmptyInputs(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -1167,7 +987,7 @@ func TestMatcher_NilAndEmptyInputs(t *testing.T) {
 	}
 
 	t.Run("Empty filename", func(t *testing.T) {
-		file := scanner.FileInfo{
+		file := models.FileMatchInfo{
 			Name:      "",
 			Extension: "",
 		}
@@ -1178,7 +998,7 @@ func TestMatcher_NilAndEmptyInputs(t *testing.T) {
 	})
 
 	t.Run("Filename with only extension", func(t *testing.T) {
-		file := scanner.FileInfo{
+		file := models.FileMatchInfo{
 			Name:      ".mp4",
 			Extension: ".mp4",
 		}
@@ -1189,7 +1009,7 @@ func TestMatcher_NilAndEmptyInputs(t *testing.T) {
 	})
 
 	t.Run("Match with empty slice", func(t *testing.T) {
-		results := matcher.Match([]scanner.FileInfo{})
+		results := matcher.Match([]models.FileMatchInfo{})
 		if len(results) != 0 {
 			t.Errorf("Expected 0 results for empty slice, got %d", len(results))
 		}
@@ -1219,7 +1039,7 @@ func TestMatcher_NilAndEmptyInputs(t *testing.T) {
 
 // TestMatcher_CaseNormalization tests that IDs are normalized to uppercase
 func TestMatcher_CaseNormalization(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -1245,7 +1065,7 @@ func TestMatcher_CaseNormalization(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.input, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.input,
 				Extension: ".mp4",
 			}
@@ -1264,7 +1084,7 @@ func TestMatcher_CaseNormalization(t *testing.T) {
 
 // TestMatcher_SpecialStudioCodes tests special studio code patterns
 func TestMatcher_SpecialStudioCodes(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -1297,7 +1117,7 @@ func TestMatcher_SpecialStudioCodes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -1316,7 +1136,7 @@ func TestMatcher_SpecialStudioCodes(t *testing.T) {
 
 // TestMatcher_PartSuffixEdgeCases tests edge cases in part suffix detection
 func TestMatcher_PartSuffixEdgeCases(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -1391,7 +1211,7 @@ func TestMatcher_PartSuffixEdgeCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -1426,7 +1246,7 @@ func TestMatcher_PartSuffixEdgeCases(t *testing.T) {
 
 // TestMatcher_RegressionCases tests specific regression cases from real-world usage
 func TestMatcher_RegressionCases(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -1453,7 +1273,7 @@ func TestMatcher_RegressionCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			file := scanner.FileInfo{
+			file := models.FileMatchInfo{
 				Name:      tc.filename,
 				Extension: ".mp4",
 			}
@@ -1487,7 +1307,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-C",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/ABW-121-C.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/ABW-121-C.mp4"},
 				},
 			},
 			expectedMulti: []bool{false},
@@ -1502,7 +1322,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-A",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/ABW-121-A.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/ABW-121-A.mp4"},
 				},
 				{
 					ID:               "ABW-121",
@@ -1510,7 +1330,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-B",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/ABW-121-B.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/ABW-121-B.mp4"},
 				},
 			},
 			expectedMulti: []bool{true, true},
@@ -1525,7 +1345,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-pt1",
 					MultipartPattern: PatternExplicit,
 					IsMultiPart:      true,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-pt1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-pt1.mp4"},
 				},
 			},
 			expectedMulti: []bool{true},
@@ -1540,7 +1360,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-pt1",
 					MultipartPattern: PatternExplicit,
 					IsMultiPart:      true,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-pt1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-pt1.mp4"},
 				},
 				{
 					ID:               "ABW-121",
@@ -1548,7 +1368,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-C",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/ABW-121-C.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/ABW-121-C.mp4"},
 				},
 			},
 			expectedMulti: []bool{true, false},
@@ -1563,7 +1383,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-A",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/dir1/ABW-121-A.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/dir1/ABW-121-A.mp4"},
 				},
 				{
 					ID:               "ABW-121",
@@ -1571,7 +1391,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-B",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/dir2/ABW-121-B.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/dir2/ABW-121-B.mp4"},
 				},
 			},
 			expectedMulti: []bool{false, false},
@@ -1586,7 +1406,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-A",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/MDB-087-A.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/MDB-087-A.mp4"},
 				},
 				{
 					ID:               "MDB-087",
@@ -1594,7 +1414,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-B",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/MDB-087-B.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/MDB-087-B.mp4"},
 				},
 				{
 					ID:               "MDB-087",
@@ -1602,7 +1422,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-C",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/MDB-087-C.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/MDB-087-C.mp4"},
 				},
 			},
 			expectedMulti: []bool{true, true, true},
@@ -1618,7 +1438,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-uncen",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-uncen-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-uncen-1.mp4"},
 				},
 			},
 			expectedMulti: []bool{false},
@@ -1634,7 +1454,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-un-javgg.net",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/SGKI-071-un-javgg.net-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/SGKI-071-un-javgg.net-1.mp4"},
 				},
 				{
 					ID:               "SGKI-071",
@@ -1643,7 +1463,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-un-javgg.net",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/SGKI-071-un-javgg.net-2.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/SGKI-071-un-javgg.net-2.mp4"},
 				},
 			},
 			expectedMulti: []bool{true, true},
@@ -1659,7 +1479,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-1.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1668,7 +1488,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-2.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-2.mp4"},
 				},
 			},
 			expectedMulti: []bool{true, true},
@@ -1689,7 +1509,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-A",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-A.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-A.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1697,7 +1517,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-pt2",
 					MultipartPattern: PatternExplicit,
 					IsMultiPart:      true,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-pt2.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-pt2.mp4"},
 				},
 			},
 			expectedMulti: []bool{false, true},
@@ -1712,7 +1532,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "",
 					MultipartPattern: PatternNone,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535.mp4"},
 				},
 			},
 			expectedMulti: []bool{false},
@@ -1730,7 +1550,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-1.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1739,7 +1559,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-2.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-2.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1748,7 +1568,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-3.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-3.mp4"},
 				},
 			},
 			expectedMulti: []bool{true, true, true},
@@ -1764,7 +1584,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-uncen",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-uncen-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-uncen-1.mp4"},
 				},
 			},
 			expectedMulti: []bool{false},
@@ -1780,7 +1600,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/dir1/IPX-535-HD-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/dir1/IPX-535-HD-1.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1789,7 +1609,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-uncen",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/dir2/IPX-535-uncen-2.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/dir2/IPX-535-uncen-2.mp4"},
 				},
 			},
 			expectedMulti: []bool{false, false},
@@ -1805,7 +1625,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-1.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1813,7 +1633,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-B",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-B.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-B.mp4"},
 				},
 			},
 			expectedMulti: []bool{false, false},
@@ -1829,7 +1649,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-1.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1837,7 +1657,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-pt2",
 					MultipartPattern: PatternExplicit,
 					IsMultiPart:      true,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-pt2.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-pt2.mp4"},
 				},
 			},
 			expectedMulti: []bool{false, true},
@@ -1853,7 +1673,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-1.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1861,7 +1681,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "",
 					MultipartPattern: PatternNone,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535.mp4"},
 				},
 			},
 			expectedMulti: []bool{false, false},
@@ -1877,7 +1697,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-1.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1886,7 +1706,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-2.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-2.mp4"},
 				},
 				{
 					ID:               "ABC-123",
@@ -1894,7 +1714,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-C",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/ABC-123-C.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/ABC-123-C.mp4"},
 				},
 			},
 			expectedMulti: []bool{true, true, false},
@@ -1910,7 +1730,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-uncen",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-uncen-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-uncen-1.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1919,7 +1739,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-leak",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-leak-2.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-leak-2.mp4"},
 				},
 			},
 			expectedMulti: []bool{false, false},
@@ -1935,7 +1755,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-uncen",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-uncen-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-uncen-1.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1943,7 +1763,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					PartSuffix:       "-C",
 					MultipartPattern: PatternLetter,
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-C.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-C.mp4"},
 				},
 			},
 			expectedMulti: []bool{false, false},
@@ -1959,7 +1779,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-1.mp4"},
 				},
 				{
 					ID:               "IPX-535",
@@ -1968,7 +1788,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-HD",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-2.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-2.mp4"},
 				},
 			},
 			expectedMulti: []bool{true, true},
@@ -1984,7 +1804,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-un-javgg.net",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/SGKI-071-un-javgg.net-1.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/SGKI-071-un-javgg.net-1.mp4"},
 				},
 				{
 					ID:               "SGKI-071",
@@ -1993,7 +1813,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-un-javgg.net",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/SGKI-071-un-javgg.net-2.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/SGKI-071-un-javgg.net-2.mp4"},
 				},
 				{
 					ID:               "SGKI-071",
@@ -2002,7 +1822,7 @@ func TestValidateMultipartInDirectory(t *testing.T) {
 					MultipartPattern: PatternTrailing,
 					TrailingPrefix:   "-un-javgg.net",
 					IsMultiPart:      false,
-					File:             scanner.FileInfo{Path: "/videos/SGKI-071-un-javgg.net-3.mp4"},
+					File:             models.FileMatchInfo{Path: "/videos/SGKI-071-un-javgg.net-3.mp4"},
 				},
 			},
 			expectedMulti: []bool{true, true, true},
@@ -2037,7 +1857,7 @@ func TestValidateMultipartInDirectory_DoesNotModifyInput(t *testing.T) {
 			PartSuffix:       "-A",
 			MultipartPattern: PatternLetter,
 			IsMultiPart:      false,
-			File:             scanner.FileInfo{Path: "/videos/ABW-121-A.mp4"},
+			File:             models.FileMatchInfo{Path: "/videos/ABW-121-A.mp4"},
 		},
 		{
 			ID:               "ABW-121",
@@ -2045,7 +1865,7 @@ func TestValidateMultipartInDirectory_DoesNotModifyInput(t *testing.T) {
 			PartSuffix:       "-B",
 			MultipartPattern: PatternLetter,
 			IsMultiPart:      false,
-			File:             scanner.FileInfo{Path: "/videos/ABW-121-B.mp4"},
+			File:             models.FileMatchInfo{Path: "/videos/ABW-121-B.mp4"},
 		},
 	}
 
@@ -2066,7 +1886,7 @@ func TestValidateMultipartInDirectory_DoesNotModifyInput(t *testing.T) {
 
 // TestValidateMultipartInDirectory_RealWorldScenario tests the main use case: Chinese subtitle files
 func TestValidateMultipartInDirectory_RealWorldScenario(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -2076,7 +1896,7 @@ func TestValidateMultipartInDirectory_RealWorldScenario(t *testing.T) {
 	}
 
 	// Scenario: User has ABW-121-C.mp4 where -C means Chinese subtitles, NOT part 3
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{Name: "ABW-121-C.mp4", Extension: ".mp4", Path: "/videos/ABW-121-C.mp4"},
 	}
 
@@ -2103,7 +1923,7 @@ func TestValidateMultipartInDirectory_RealWorldScenario(t *testing.T) {
 
 // TestValidateMultipartInDirectory_ActualMultipart tests genuine multipart detection
 func TestValidateMultipartInDirectory_ActualMultipart(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -2113,7 +1933,7 @@ func TestValidateMultipartInDirectory_ActualMultipart(t *testing.T) {
 	}
 
 	// Scenario: User has ABW-121-A.mp4 and ABW-121-B.mp4 - these are genuine multipart
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{Name: "ABW-121-A.mp4", Extension: ".mp4", Path: "/videos/ABW-121-A.mp4"},
 		{Name: "ABW-121-B.mp4", Extension: ".mp4", Path: "/videos/ABW-121-B.mp4"},
 	}
@@ -2147,7 +1967,7 @@ func TestValidateMultipartInDirectory_ActualMultipart(t *testing.T) {
 // that motivated the PatternTrailing implementation: SGKI-071-un-javgg.net-{1,2}.mp4
 // producing duplicate filenames in the preview.
 func TestValidateMultipartInDirectory_SGKI071EndToEnd(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -2156,7 +1976,7 @@ func TestValidateMultipartInDirectory_SGKI071EndToEnd(t *testing.T) {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
 
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{Name: "SGKI-071-un-javgg.net-1.mp4", Extension: ".mp4", Path: "/videos/SGKI-071-un-javgg.net-1.mp4"},
 		{Name: "SGKI-071-un-javgg.net-2.mp4", Extension: ".mp4", Path: "/videos/SGKI-071-un-javgg.net-2.mp4"},
 	}
@@ -2200,7 +2020,7 @@ func TestValidateMultipartInDirectory_SGKI071EndToEnd(t *testing.T) {
 // file with a trailing-number pattern (e.g. IPX-535-uncen-1.mp4) is NOT falsely
 // confirmed as multipart.
 func TestValidateMultipartInDirectory_SingleTrailingFalsePositive(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -2209,7 +2029,7 @@ func TestValidateMultipartInDirectory_SingleTrailingFalsePositive(t *testing.T) 
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
 
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{Name: "IPX-535-uncen-1.mp4", Extension: ".mp4", Path: "/videos/IPX-535-uncen-1.mp4"},
 	}
 
@@ -2231,7 +2051,7 @@ func TestValidateMultipartInDirectory_SingleTrailingFalsePositive(t *testing.T) 
 // TestValidateMultipartInDirectory_DotSeparatorEndToEnd tests dot-separated multipart
 // files (e.g. IPX-535.part1.mp4 / IPX-535.part2.mp4).
 func TestValidateMultipartInDirectory_DotSeparatorEndToEnd(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -2240,7 +2060,7 @@ func TestValidateMultipartInDirectory_DotSeparatorEndToEnd(t *testing.T) {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
 
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{Name: "IPX-535.part1.mp4", Extension: ".mp4", Path: "/videos/IPX-535.part1.mp4"},
 		{Name: "IPX-535.part2.mp4", Extension: ".mp4", Path: "/videos/IPX-535.part2.mp4"},
 	}
@@ -2267,7 +2087,7 @@ func TestValidateMultipartInDirectory_DotSeparatorEndToEnd(t *testing.T) {
 // trailing-number and letter-pattern files do NOT cross-validate each other,
 // since they represent different conventions.
 func TestValidateMultipartInDirectory_TrailingLetterNoCrossValidation(t *testing.T) {
-	cfg := &config.MatchingConfig{
+	cfg := &Config{
 		RegexEnabled: false,
 	}
 
@@ -2276,7 +2096,7 @@ func TestValidateMultipartInDirectory_TrailingLetterNoCrossValidation(t *testing
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
 
-	files := []scanner.FileInfo{
+	files := []models.FileMatchInfo{
 		{Name: "IPX-535-HD-1.mp4", Extension: ".mp4", Path: "/videos/IPX-535-HD-1.mp4"},
 		{Name: "IPX-535-B.mp4", Extension: ".mp4", Path: "/videos/IPX-535-B.mp4"},
 	}
@@ -2303,7 +2123,7 @@ func TestValidateMultipartInDirectory_CaseInsensitivePrefix(t *testing.T) {
 			MultipartPattern: PatternTrailing,
 			TrailingPrefix:   "-un-javgg.net",
 			IsMultiPart:      false,
-			File:             scanner.FileInfo{Path: "/videos/SGKI-071-un-javgg.net-1.mp4"},
+			File:             models.FileMatchInfo{Path: "/videos/SGKI-071-un-javgg.net-1.mp4"},
 		},
 		{
 			ID:               "SGKI-071",
@@ -2312,7 +2132,7 @@ func TestValidateMultipartInDirectory_CaseInsensitivePrefix(t *testing.T) {
 			MultipartPattern: PatternTrailing,
 			TrailingPrefix:   "-UN-JAVGG.NET",
 			IsMultiPart:      false,
-			File:             scanner.FileInfo{Path: "/videos/SGKI-071-UN-JAVGG.NET-2.mp4"},
+			File:             models.FileMatchInfo{Path: "/videos/SGKI-071-UN-JAVGG.NET-2.mp4"},
 		},
 	}
 
@@ -2334,7 +2154,7 @@ func TestValidateMultipartInDirectory_MultiplePrefixGroupsSameDir(t *testing.T) 
 			MultipartPattern: PatternTrailing,
 			TrailingPrefix:   "-HD",
 			IsMultiPart:      false,
-			File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-1.mp4"},
+			File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-1.mp4"},
 		},
 		{
 			ID:               "IPX-535",
@@ -2343,7 +2163,7 @@ func TestValidateMultipartInDirectory_MultiplePrefixGroupsSameDir(t *testing.T) 
 			MultipartPattern: PatternTrailing,
 			TrailingPrefix:   "-HD",
 			IsMultiPart:      false,
-			File:             scanner.FileInfo{Path: "/videos/IPX-535-HD-2.mp4"},
+			File:             models.FileMatchInfo{Path: "/videos/IPX-535-HD-2.mp4"},
 		},
 		{
 			ID:               "IPX-535",
@@ -2352,7 +2172,7 @@ func TestValidateMultipartInDirectory_MultiplePrefixGroupsSameDir(t *testing.T) 
 			MultipartPattern: PatternTrailing,
 			TrailingPrefix:   "-uncen",
 			IsMultiPart:      false,
-			File:             scanner.FileInfo{Path: "/videos/IPX-535-uncen-1.mp4"},
+			File:             models.FileMatchInfo{Path: "/videos/IPX-535-uncen-1.mp4"},
 		},
 		{
 			ID:               "IPX-535",
@@ -2361,7 +2181,7 @@ func TestValidateMultipartInDirectory_MultiplePrefixGroupsSameDir(t *testing.T) 
 			MultipartPattern: PatternTrailing,
 			TrailingPrefix:   "-uncen",
 			IsMultiPart:      false,
-			File:             scanner.FileInfo{Path: "/videos/IPX-535-uncen-2.mp4"},
+			File:             models.FileMatchInfo{Path: "/videos/IPX-535-uncen-2.mp4"},
 		},
 	}
 

@@ -5,21 +5,21 @@ import (
 	"testing"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewScraper(t *testing.T) {
-	scraper := New(config.ScraperSettings{Enabled: true}, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	scraper := newScraper(&models.ScraperSettings{Enabled: true}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 	require.NotNil(t, scraper)
 	assert.Equal(t, "javdb", scraper.Name())
 	assert.True(t, scraper.IsEnabled())
 }
 
 func TestSearch_Disabled(t *testing.T) {
-	scraper := New(config.ScraperSettings{Enabled: false}, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	scraper := newScraper(&models.ScraperSettings{Enabled: false}, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 	_, err := scraper.Search(context.Background(), "IPX-123")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "disabled")
@@ -76,12 +76,12 @@ func TestSearch_Success(t *testing.T) {
 		},
 	})
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      client,
 		enabled:     true,
 		baseURL:     "https://javdb.test",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{Enabled: true},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	result, err := scraper.Search(context.Background(), "IPX-123")
@@ -152,12 +152,12 @@ func TestSearch_Success_EnglishLabels(t *testing.T) {
 		},
 	})
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      client,
 		enabled:     true,
 		baseURL:     "https://javdb.test",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{Enabled: true},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	result, err := scraper.Search(context.Background(), "SSNI-344")
@@ -206,12 +206,12 @@ func TestSearch_ActorNAIsIgnored(t *testing.T) {
 		},
 	})
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      client,
 		enabled:     true,
 		baseURL:     "https://javdb.test",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{Enabled: true},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	result, err := scraper.Search(context.Background(), "GPTPJ-018")
@@ -247,12 +247,12 @@ func TestSearch_ScreenshotSkipsLoginLink(t *testing.T) {
 		},
 	})
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      client,
 		enabled:     true,
 		baseURL:     "https://javdb.test",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{Enabled: true},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	result, err := scraper.Search(context.Background(), "ABC-123")
@@ -313,12 +313,12 @@ func TestSearch_PrefersExactIDOverVariant(t *testing.T) {
 		},
 	})
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      client,
 		enabled:     true,
 		baseURL:     "https://javdb.test",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{Enabled: true},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	result, err := scraper.Search(context.Background(), "ABP-880")
@@ -372,12 +372,12 @@ func TestSearch_FiltersMaleActorsFromActresses(t *testing.T) {
 		},
 	})
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      client,
 		enabled:     true,
 		baseURL:     "https://javdb.test",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{Enabled: true},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	result, err := scraper.Search(context.Background(), "ABP-880")
@@ -423,12 +423,12 @@ func TestSearch_PrefersFemaleActressRowOverGenericCast(t *testing.T) {
 		},
 	})
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      client,
 		enabled:     true,
 		baseURL:     "https://javdb.test",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{Enabled: true},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	result, err := scraper.Search(context.Background(), "ABP-880")
@@ -481,12 +481,12 @@ func TestSearch_UsesSymbolGenderMarkersForCast(t *testing.T) {
 		},
 	})
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      client,
 		enabled:     true,
 		baseURL:     "https://javdb.test",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{Enabled: true},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	result, err := scraper.Search(context.Background(), "ABP-880")

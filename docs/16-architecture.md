@@ -87,7 +87,7 @@ type Scraper interface {
     Search(id string) (*ScraperResult, error) // Scrape by JAV ID
     GetURL(id string) (string, error)          // Resolve URL for ID
     IsEnabled() bool                           // Check if enabled in config
-    Config() *config.ScraperSettings           // Scraper-specific config
+    Config() *models.ScraperSettings           // Scraper-specific config
     Close() error                              // Cleanup resources
 }
 ```

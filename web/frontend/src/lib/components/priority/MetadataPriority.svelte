@@ -35,7 +35,7 @@
 		{ key: 'description', label: 'Description', category: 'Primary', description: 'Movie plot summary' },
 		{ key: 'release_date', label: 'Release Date', category: 'Primary', description: 'Official release date' },
 		{ key: 'runtime', label: 'Runtime', category: 'Primary', description: 'Movie duration in minutes' },
-		{ key: 'content_id', label: 'Content ID', category: 'Primary', description: 'Alternative content identifier' },
+		{ key: 'code', label: 'Content ID', category: 'Primary', description: 'Alternative content identifier' },
 		{ key: 'actress', label: 'Actresses', category: 'Metadata', description: 'Cast members and performers' },
 		{ key: 'genre', label: 'Genres', category: 'Metadata', description: 'Movie categories and tags' },
 		{ key: 'director', label: 'Director', category: 'Metadata', description: 'Movie director' },

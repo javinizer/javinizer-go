@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -95,7 +96,7 @@ func TestVideoInfo_GetAudioChannelDescription(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			v := &VideoInfo{AudioChannels: tt.channels}
-			if got := v.GetAudioChannelDescription(); got != tt.expected {
+			if got := v.getAudioChannelDescription(); got != tt.expected {
 				t.Errorf("GetAudioChannelDescription() = %v, want %v", got, tt.expected)
 			}
 		})
@@ -103,9 +104,9 @@ func TestVideoInfo_GetAudioChannelDescription(t *testing.T) {
 }
 
 func TestAnalyze_InvalidFile(t *testing.T) {
-	_, err := Analyze("/nonexistent/file.mp4")
+	_, err := Analyze(context.Background(), "/nonexistent/file.mp4")
 	if err == nil {
-		t.Error("Analyze() should return error for nonexistent file")
+		t.Error("Analyze(context.Background(), ) should return error for nonexistent file")
 	}
 }
 
@@ -118,13 +119,13 @@ func TestAnalyze_TooSmallFile(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	_, err := Analyze(tmpFile)
+	_, err := Analyze(context.Background(), tmpFile)
 	if err == nil {
-		t.Error("Analyze() should return error for too small file")
+		t.Error("Analyze(context.Background(), ) should return error for too small file")
 	}
 }
 
-// TestAnalyzeWithConfig_CustomConfig tests with custom MediaInfoConfig
+// TestAnalyzeWithConfig_CustomConfig tests with custom mediaInfoConfig
 func TestAnalyzeWithConfig_CustomConfig(t *testing.T) {
 	// Arrange: Create temp video file with valid MKV header
 	tmpDir := t.TempDir()
@@ -138,21 +139,21 @@ func TestAnalyzeWithConfig_CustomConfig(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	cfg := &MediaInfoConfig{
+	cfg := &mediaInfoConfig{
 		CLIEnabled: false,
 		CLIPath:    "mediainfo",
 		CLITimeout: 30,
 	}
 
-	info, err := AnalyzeWithConfig(tmpFile, cfg)
+	info, err := analyzeWithConfig(context.Background(), tmpFile, cfg)
 
 	if err != nil {
-		t.Logf("AnalyzeWithConfig returned error (acceptable for minimal header): %v", err)
+		t.Logf("analyzeWithConfig returned error (acceptable for minimal header): %v", err)
 		return
 	}
 
 	if info == nil {
-		t.Fatal("AnalyzeWithConfig returned nil info without error")
+		t.Fatal("analyzeWithConfig returned nil info without error")
 	}
 
 	if info.Container != "mkv" {
@@ -176,12 +177,12 @@ func TestProbeWithFallback_NoProberFound(t *testing.T) {
 	}
 
 	// Config with CLI disabled (forces error on unsupported format)
-	cfg := &MediaInfoConfig{
+	cfg := &mediaInfoConfig{
 		CLIEnabled: false,
 	}
 
-	// Act: Call AnalyzeWithConfig
-	_, err := AnalyzeWithConfig(tmpFile, cfg)
+	// Act: Call analyzeWithConfig
+	_, err := analyzeWithConfig(context.Background(), tmpFile, cfg)
 
 	// Assert: Error contains "unsupported container format"
 	if err == nil {
@@ -207,7 +208,7 @@ func TestProbeWithFallback_NativeProberSuccess(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	info, err := Analyze(tmpFile)
+	info, err := Analyze(context.Background(), tmpFile)
 
 	if err != nil {
 		t.Logf("Native prober failed on minimal file (acceptable): %v", err)
@@ -237,15 +238,15 @@ func TestAnalyzeWithConfig_DefaultConfig(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	info, err := AnalyzeWithConfig(tmpFile, nil)
+	info, err := analyzeWithConfig(context.Background(), tmpFile, nil)
 
 	if err != nil {
-		t.Logf("AnalyzeWithConfig with nil config returned error (acceptable for minimal file): %v", err)
+		t.Logf("analyzeWithConfig with nil config returned error (acceptable for minimal file): %v", err)
 		return
 	}
 
 	if info == nil {
-		t.Fatal("AnalyzeWithConfig with nil config returned nil info without error")
+		t.Fatal("analyzeWithConfig with nil config returned nil info without error")
 	}
 }
 

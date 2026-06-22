@@ -12,12 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	swaggerPkg "github.com/javinizer/javinizer-go/docs/swagger"
-	"github.com/javinizer/javinizer-go/internal/aggregator"
+	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/matcher"
-	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
 func TestNewServer(t *testing.T) {
@@ -35,22 +37,26 @@ func TestNewServer(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		DB:          nil, // Not needed for route testing
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   newMockMovieRepo(),
-		ActressRepo: newMockActressRepo(),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+			DB:              nil, // Not needed for route testing
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
 	}
+	testkit.GetTestRuntime(deps)
 	// Initialize atomic config pointer
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
@@ -113,6 +119,7 @@ func TestNewServer(t *testing.T) {
 		"/api/v1/history",
 		"/api/v1/history/stats",
 		"/api/v1/history/:id",
+		"/api/v1/genres",
 		"/api/v1/genres/replacements",
 		"/api/v1/genres/replacements",
 		"/api/v1/temp/posters/:jobId/:filename",
@@ -138,20 +145,24 @@ func TestNewServer_RouteParity(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   newMockMovieRepo(),
-		ActressRepo: newMockActressRepo(),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
 	}
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
@@ -181,6 +192,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"GET /api/v1/cwd",
 		"GET /api/v1/events",
 		"GET /api/v1/events/stats",
+		"GET /api/v1/genres",
 		"GET /api/v1/genres/replacements",
 		"GET /api/v1/genres/replacements/export",
 		"GET /api/v1/history",
@@ -309,21 +321,25 @@ func TestNewServer_CORSHeaders(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   newMockMovieRepo(),
-		ActressRepo: newMockActressRepo(),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
 	}
+	testkit.GetTestRuntime(deps)
 	// Initialize atomic config pointer
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
@@ -353,21 +369,25 @@ func TestNewServer_StaticFiles(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   newMockMovieRepo(),
-		ActressRepo: newMockActressRepo(),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
 	}
+	testkit.GetTestRuntime(deps)
 	// Initialize atomic config pointer
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
@@ -393,21 +413,25 @@ func TestServeScalarDocs(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   newMockMovieRepo(),
-		ActressRepo: newMockActressRepo(),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
 	}
+	testkit.GetTestRuntime(deps)
 	// Initialize atomic config pointer
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
@@ -471,21 +495,24 @@ func TestNewServer_GinMode(t *testing.T) {
 				},
 			}
 
-			registry := models.NewScraperRegistry()
-			mat, err := matcher.NewMatcher(&cfg.Matching)
-			require.NoError(t, err)
+			registry := scraperutil.NewScraperRegistry()
 
 			deps := &ServerDependencies{
-				ConfigFile:  "/tmp/config.yaml",
-				Registry:    registry,
-				Aggregator:  aggregator.New(cfg),
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
-				Matcher:     mat,
-				JobQueue:    worker.NewJobQueue(nil, "", nil),
+				CoreDeps: &commandutil.CoreDeps{
+					ScraperRegistry: registry,
+				},
+				ConfigFile: "/tmp/config.yaml",
+				JobStore:   worker.NewJobStore(nil, nil, nil, "", nil, nil),
+				Repos: database.Repositories{
+					ContentRepos: database.ContentRepos{
+						MovieRepo:   newMockMovieRepo(),
+						ActressRepo: newMockActressRepo(),
+					},
+				},
 			}
+			testkit.GetTestRuntime(deps)
 			// Initialize atomic config pointer
-			deps.SetConfig(cfg)
+			testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 			router := NewServer(deps)
 			defer cleanupServerHub(t, deps)
@@ -510,11 +537,8 @@ func TestNewServer_AllEndpointsAccessible(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	registry.Register(&mockScraper{name: "r18dev", enabled: true})
-
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(&mockScraper{name: "r18dev", enabled: true})
 
 	// Use in-memory database for testing
 	dbCfg := &config.Config{
@@ -526,21 +550,27 @@ func TestNewServer_AllEndpointsAccessible(t *testing.T) {
 			Level: "error",
 		},
 	}
-	db, err := database.New(dbCfg)
+	db, err := database.New(&database.Config{Type: dbCfg.Database.Type, DSN: dbCfg.Database.DSN, LogLevel: dbCfg.Database.LogLevel})
 	require.NoError(t, err)
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		DB:          db,
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   database.NewMovieRepository(db),
-		ActressRepo: database.NewActressRepository(db),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+			DB:              db,
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   database.NewMovieRepository(db),
+				ActressRepo: database.NewActressRepository(db),
+			},
+		},
 	}
+	testkit.GetTestRuntime(deps)
 	// Initialize atomic config pointer
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
@@ -584,21 +614,25 @@ func TestNewServer_SecurityHeaders(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   newMockMovieRepo(),
-		ActressRepo: newMockActressRepo(),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
 	}
+	testkit.GetTestRuntime(deps)
 	// Initialize atomic config pointer
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
@@ -638,21 +672,25 @@ func TestNewServer_InvalidRoutes(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   newMockMovieRepo(),
-		ActressRepo: newMockActressRepo(),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
 	}
+	testkit.GetTestRuntime(deps)
 	// Initialize atomic config pointer
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
@@ -687,20 +725,24 @@ func TestNewServer_SPARouteFallbackForHTML(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   newMockMovieRepo(),
-		ActressRepo: newMockActressRepo(),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
 	}
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
@@ -738,20 +780,24 @@ func TestNewServer_RobotsTxtServed(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   newMockMovieRepo(),
-		ActressRepo: newMockActressRepo(),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
 	}
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	router := NewServer(deps)
 	defer cleanupServerHub(t, deps)
@@ -775,47 +821,62 @@ func TestServerDependencies_Shutdown(t *testing.T) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		Aggregator:  aggregator.New(cfg),
-		MovieRepo:   newMockMovieRepo(),
-		ActressRepo: newMockActressRepo(),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+		},
+		ConfigFile: "/tmp/config.yaml",
+
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
 	}
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	// Create server to initialize wsCancel
 	_ = NewServer(deps)
 
 	// Test that Shutdown doesn't panic
 	assert.NotPanics(t, func() {
-		deps.Shutdown()
+		rt := testkit.GetTestRuntime(deps).GetRuntime()
+		if rt != nil {
+			rt.Shutdown()
+		}
 	})
 
 	// Test calling Shutdown again (should be idempotent)
 	assert.NotPanics(t, func() {
-		deps.Shutdown()
+		rt := testkit.GetTestRuntime(deps).GetRuntime()
+		if rt != nil {
+			rt.Shutdown()
+		}
 	})
 }
 
 func TestServerDependencies_ShutdownWithNilCancel(t *testing.T) {
 	// Test Shutdown with nil wsCancel
 	deps := &ServerDependencies{}
+	testkit.GetTestRuntime(deps)
 
-	// Should not panic even if wsCancel is nil
+	// Should not panic even if runtime is nil
 	assert.NotPanics(t, func() {
-		deps.Shutdown()
+		rt := testkit.GetTestRuntime(deps).GetRuntime()
+		if rt != nil {
+			rt.Shutdown()
+		}
 	})
 }
 
 func TestServerDependencies_GetSetConfig(t *testing.T) {
 	deps := &ServerDependencies{}
+	testkit.GetTestRuntime(deps)
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{
@@ -825,30 +886,27 @@ func TestServerDependencies_GetSetConfig(t *testing.T) {
 	}
 
 	// Test SetConfig
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	// Test GetConfig
-	got := deps.GetConfig()
+	got := deps.CoreDeps.GetConfig()
 	assert.Equal(t, cfg.Server.Host, got.Server.Host)
 	assert.Equal(t, cfg.Server.Port, got.Server.Port)
 }
 
-func TestServerDependencies_GetConfigPanic(t *testing.T) {
+func TestServerDependencies_GetConfigPanicsOnNil(t *testing.T) {
 	deps := &ServerDependencies{}
-
-	// GetConfig should panic when config is not set
 	assert.Panics(t, func() {
-		deps.GetConfig()
-	})
+		deps.CoreDeps.GetConfig()
+	}, "GetConfig should panic when CoreDeps is nil")
 }
 
-func TestServerDependencies_SetConfigNilPanic(t *testing.T) {
+func TestServerDependencies_SetConfigPanicsOnNil(t *testing.T) {
 	deps := &ServerDependencies{}
-
-	// SetConfig should panic when given nil config
+	rt := testkit.GetTestRuntime(deps)
 	assert.Panics(t, func() {
-		deps.SetConfig(nil)
-	})
+		rt.SetConfig(nil)
+	}, "SetConfig should panic when called with nil config")
 }
 
 // TestIsSameOrigin and TestIsOriginAllowed are in handlers_security_test.go
@@ -959,4 +1017,39 @@ func TestDocsOpenAPIJSON(t *testing.T) {
 func setupTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	return gin.New()
+}
+
+func TestNewServer_GenreDepsCallbackWired(t *testing.T) {
+	// The GenreDeps invalidateCaches callback is a silent-failure contract:
+	// if someone removes the wiring in routes.go, genre/word replacement
+	// mutations silently stop refreshing the aggregator's caches until
+	// server restart. This test catches that regression.
+	cfg := &config.Config{
+		Server:   config.ServerConfig{Host: "localhost", Port: 8080},
+		Logging:  config.LoggingConfig{Level: "info"},
+		Matching: config.MatchingConfig{RegexEnabled: false},
+	}
+	registry := scraperutil.NewScraperRegistry()
+	deps := &ServerDependencies{
+		CoreDeps: &commandutil.CoreDeps{ScraperRegistry: registry},
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   newMockMovieRepo(),
+				ActressRepo: newMockActressRepo(),
+			},
+		},
+	}
+	testkit.GetTestRuntime(deps)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
+
+	_ = NewServer(deps)
+	defer cleanupServerHub(t, deps)
+
+	// Verify cache invalidation callback is producible from deps.
+	// Genre handlers call this explicitly after mutations.
+	invalidateFn := core.InvalidateWorkflowCachesOnRuntime(testkit.GetTestRuntime(deps))
+	assert.NotNil(t, invalidateFn,
+		"InvalidateWorkflowCachesOnRuntime must return a valid callback — "+
+			"without it, genre/word replacement mutations silently fail to refresh caches")
 }

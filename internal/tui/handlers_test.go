@@ -5,197 +5,217 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestHandleProgressUpdate(t *testing.T) {
+func calculateTotalProgress(tasks map[string]*taskState) float64 {
+	if len(tasks) == 0 {
+		return 0.0
+	}
+
+	total := 0.0
+	for _, task := range tasks {
+		total += task.Progress
+	}
+
+	return total / float64(len(tasks))
+}
+
+func handleLogMessage(level, message string) logEntry {
+	return logEntry{
+		Level:   level,
+		Message: message,
+	}
+}
+
+func handleError(err error) logEntry {
+	return logEntry{
+		Level:   "error",
+		Message: err.Error(),
+	}
+}
+
+func TestHandleSortEvent(t *testing.T) {
 	baseTime := time.Now()
 
 	tests := []struct {
 		name     string
-		tasks    map[string]*worker.TaskProgress
-		update   worker.ProgressUpdate
-		wantTask *worker.TaskProgress // Expected state of the updated task
+		tasks    map[string]*taskState
+		event    SortEvent
+		wantTask *taskState // Expected state of the updated task
 	}{
 		{
 			name: "update existing task progress",
-			tasks: map[string]*worker.TaskProgress{
-				"task1": {
-					ID:       "task1",
+			tasks: map[string]*taskState{
+				"IPX-123": {
+					ID:       "IPX-123",
 					Progress: 0.0,
 					Message:  "Starting",
-					Status:   worker.TaskStatusPending,
+					Step:     sortStepScrape,
+					Phase:    SortEventPhaseScrape,
 				},
 			},
-			update: worker.ProgressUpdate{
-				TaskID:    "task1",
+			event: SortEvent{
+				MovieID:   "IPX-123",
 				Progress:  0.5,
 				Message:   "Halfway",
-				Status:    worker.TaskStatusRunning,
-				BytesDone: 1024,
+				Step:      sortStepScrape,
+				Phase:     SortEventPhaseScrape,
 				Timestamp: baseTime,
-				Type:      worker.TaskTypeScrape,
 			},
-			wantTask: &worker.TaskProgress{
-				ID:        "task1",
+			wantTask: &taskState{
+				ID:        "IPX-123",
 				Progress:  0.5,
 				Message:   "Halfway",
-				Status:    worker.TaskStatusRunning,
-				BytesDone: 1024,
+				Step:      sortStepScrape,
+				Phase:     SortEventPhaseScrape,
 				UpdatedAt: baseTime,
-				Type:      worker.TaskTypeScrape,
 			},
 		},
 		{
-			name: "update nonexistent task - no-op",
-			tasks: map[string]*worker.TaskProgress{
-				"task1": {
-					ID:       "task1",
-					Progress: 0.5,
-					Message:  "Existing",
-				},
+			name:  "create new task from event",
+			tasks: map[string]*taskState{},
+			event: SortEvent{
+				MovieID:   "IPX-456",
+				Progress:  0.0,
+				Message:   "Queued",
+				Step:      sortStepQueued,
+				Phase:     SortEventPhaseScrape,
+				Timestamp: baseTime,
 			},
-			update: worker.ProgressUpdate{
-				TaskID:   "task2",
-				Progress: 0.8,
-				Message:  "Should not appear",
-			},
-			wantTask: nil, // Task2 should not be added
-		},
-		{
-			name: "progress boundary - 0.0",
-			tasks: map[string]*worker.TaskProgress{
-				"task1": {
-					ID:       "task1",
-					Progress: 0.5,
-				},
-			},
-			update: worker.ProgressUpdate{
-				TaskID:   "task1",
-				Progress: 0.0,
-				Status:   worker.TaskStatusPending,
-			},
-			wantTask: &worker.TaskProgress{
-				ID:       "task1",
-				Progress: 0.0,
-				Status:   worker.TaskStatusPending,
+			wantTask: &taskState{
+				ID:        "IPX-456",
+				Progress:  0.0,
+				Message:   "Queued",
+				Step:      sortStepQueued,
+				Phase:     SortEventPhaseScrape,
+				UpdatedAt: baseTime,
 			},
 		},
 		{
 			name: "progress boundary - 1.0 complete",
-			tasks: map[string]*worker.TaskProgress{
-				"task1": {
-					ID:       "task1",
+			tasks: map[string]*taskState{
+				"IPX-123": {
+					ID:       "IPX-123",
 					Progress: 0.9,
+					Step:     sortStepScrape,
 				},
 			},
-			update: worker.ProgressUpdate{
-				TaskID:   "task1",
-				Progress: 1.0,
-				Status:   worker.TaskStatusSuccess,
-				Message:  "Complete",
+			event: SortEvent{
+				MovieID:   "IPX-123",
+				Progress:  1.0,
+				Step:      sortStepComplete,
+				Message:   "Complete",
+				Timestamp: baseTime,
 			},
-			wantTask: &worker.TaskProgress{
-				ID:       "task1",
-				Progress: 1.0,
-				Status:   worker.TaskStatusSuccess,
-				Message:  "Complete",
+			wantTask: &taskState{
+				ID:        "IPX-123",
+				Progress:  1.0,
+				Step:      sortStepComplete,
+				Message:   "Complete",
+				UpdatedAt: baseTime,
 			},
 		},
 		{
 			name: "update one task, verify others unchanged",
-			tasks: map[string]*worker.TaskProgress{
-				"task1": {
-					ID:       "task1",
+			tasks: map[string]*taskState{
+				"IPX-123": {
+					ID:       "IPX-123",
 					Progress: 0.3,
 					Message:  "Task 1",
 				},
-				"task2": {
-					ID:       "task2",
+				"IPX-456": {
+					ID:       "IPX-456",
 					Progress: 0.7,
 					Message:  "Task 2",
 				},
 			},
-			update: worker.ProgressUpdate{
-				TaskID:   "task1",
+			event: SortEvent{
+				MovieID:  "IPX-123",
 				Progress: 0.6,
 				Message:  "Updated Task 1",
 			},
-			wantTask: &worker.TaskProgress{
-				ID:       "task1",
+			wantTask: &taskState{
+				ID:       "IPX-123",
 				Progress: 0.6,
 				Message:  "Updated Task 1",
 			},
 		},
 		{
-			name: "update with error",
-			tasks: map[string]*worker.TaskProgress{
-				"task1": {
-					ID:       "task1",
+			name: "failed task",
+			tasks: map[string]*taskState{
+				"IPX-123": {
+					ID:       "IPX-123",
 					Progress: 0.5,
+					Step:     sortStepScrape,
 				},
 			},
-			update: worker.ProgressUpdate{
-				TaskID:   "task1",
-				Progress: 0.5, // Preserve existing progress
-				Status:   worker.TaskStatusFailed,
-				Message:  "Failed",
-				Error:    errors.New("scrape failed"),
-			},
-			wantTask: &worker.TaskProgress{
-				ID:       "task1",
+			event: SortEvent{
+				MovieID:  "IPX-123",
 				Progress: 0.5,
-				Status:   worker.TaskStatusFailed,
-				Message:  "Failed",
-				Error:    errors.New("scrape failed"),
+				Step:     sortStepFailed,
+				Message:  "Scrape failed",
 			},
+			wantTask: &taskState{
+				ID:       "IPX-123",
+				Progress: 0.5,
+				Step:     sortStepFailed,
+				Message:  "Scrape failed",
+			},
+		},
+		{
+			name:     "empty MovieID is no-op",
+			tasks:    map[string]*taskState{"IPX-123": {ID: "IPX-123"}},
+			event:    SortEvent{MovieID: "", Message: "orphan"},
+			wantTask: nil, // Should not add a task with empty MovieID
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Save copy of original task for immutability check
-			var originalTask *worker.TaskProgress
-			if task, exists := tt.tasks[tt.update.TaskID]; exists {
+			var originalTask *taskState
+			if task, exists := tt.tasks[tt.event.MovieID]; exists {
 				copy := *task
 				originalTask = &copy
 			}
 
 			// Run the handler
-			got := HandleProgressUpdate(tt.tasks, tt.update)
+			got := handleSortEvent(tt.tasks, tt.event)
+
+			if tt.wantTask == nil && tt.event.MovieID == "" {
+				// Empty MovieID — original map should be unchanged
+				assert.Equal(t, len(tt.tasks), len(got))
+				return
+			}
 
 			if tt.wantTask == nil {
 				// Verify task was not added
-				_, exists := got[tt.update.TaskID]
+				_, exists := got[tt.event.MovieID]
 				assert.False(t, exists, "nonexistent task should not be added")
 			} else {
 				// Verify the updated task
-				task, exists := got[tt.update.TaskID]
+				task, exists := got[tt.event.MovieID]
 				assert.True(t, exists, "task should exist")
 				assert.Equal(t, tt.wantTask.ID, task.ID)
 				assert.InDelta(t, tt.wantTask.Progress, task.Progress, 0.001)
 				assert.Equal(t, tt.wantTask.Message, task.Message)
-				assert.Equal(t, tt.wantTask.Status, task.Status)
-				assert.Equal(t, tt.wantTask.BytesDone, task.BytesDone)
-				assert.Equal(t, tt.wantTask.Type, task.Type)
-
-				if tt.wantTask.Error != nil {
-					assert.EqualError(t, task.Error, tt.wantTask.Error.Error())
-				}
+				assert.Equal(t, tt.wantTask.Step, task.Step)
 
 				// Verify immutability - original task not mutated
 				if originalTask != nil {
-					origFromMap := tt.tasks[tt.update.TaskID]
-					assert.Equal(t, originalTask.Progress, origFromMap.Progress, "original task should not be mutated")
-					assert.Equal(t, originalTask.Message, origFromMap.Message, "original task should not be mutated")
+					origFromMap := tt.tasks[tt.event.MovieID]
+					if origFromMap != nil {
+						assert.Equal(t, originalTask.Progress, origFromMap.Progress, "original task should not be mutated")
+						assert.Equal(t, originalTask.Message, origFromMap.Message, "original task should not be mutated")
+					}
 				}
 			}
 
 			// Verify other tasks unchanged (if multiple tasks)
 			if len(tt.tasks) > 1 && tt.wantTask != nil {
 				for id, originalTask := range tt.tasks {
-					if id != tt.update.TaskID {
+					if id != tt.event.MovieID {
 						assert.Same(t, originalTask, got[id],
 							"other tasks should reference same pointers (not copied)")
 					}
@@ -208,38 +228,38 @@ func TestHandleProgressUpdate(t *testing.T) {
 func TestCalculateTotalProgress(t *testing.T) {
 	tests := []struct {
 		name  string
-		tasks map[string]*worker.TaskProgress
+		tasks map[string]*taskState
 		want  float64
 	}{
 		{
 			name:  "empty tasks map",
-			tasks: map[string]*worker.TaskProgress{},
+			tasks: map[string]*taskState{},
 			want:  0.0,
 		},
 		{
 			name: "single task at 50%",
-			tasks: map[string]*worker.TaskProgress{
+			tasks: map[string]*taskState{
 				"task1": {Progress: 0.5},
 			},
 			want: 0.5,
 		},
 		{
 			name: "single task at 100%",
-			tasks: map[string]*worker.TaskProgress{
+			tasks: map[string]*taskState{
 				"task1": {Progress: 1.0},
 			},
 			want: 1.0,
 		},
 		{
 			name: "single task at 0%",
-			tasks: map[string]*worker.TaskProgress{
+			tasks: map[string]*taskState{
 				"task1": {Progress: 0.0},
 			},
 			want: 0.0,
 		},
 		{
 			name: "two tasks - average 50%",
-			tasks: map[string]*worker.TaskProgress{
+			tasks: map[string]*taskState{
 				"task1": {Progress: 0.0},
 				"task2": {Progress: 1.0},
 			},
@@ -247,16 +267,16 @@ func TestCalculateTotalProgress(t *testing.T) {
 		},
 		{
 			name: "three tasks - mixed progress",
-			tasks: map[string]*worker.TaskProgress{
+			tasks: map[string]*taskState{
 				"task1": {Progress: 0.0},
 				"task2": {Progress: 0.5},
 				"task3": {Progress: 1.0},
 			},
-			want: 0.5, // (0.0 + 0.5 + 1.0) / 3 = 0.5
+			want: 0.5,
 		},
 		{
 			name: "multiple tasks all complete",
-			tasks: map[string]*worker.TaskProgress{
+			tasks: map[string]*taskState{
 				"task1": {Progress: 1.0},
 				"task2": {Progress: 1.0},
 				"task3": {Progress: 1.0},
@@ -265,7 +285,7 @@ func TestCalculateTotalProgress(t *testing.T) {
 		},
 		{
 			name: "multiple tasks all pending",
-			tasks: map[string]*worker.TaskProgress{
+			tasks: map[string]*taskState{
 				"task1": {Progress: 0.0},
 				"task2": {Progress: 0.0},
 				"task3": {Progress: 0.0},
@@ -274,88 +294,82 @@ func TestCalculateTotalProgress(t *testing.T) {
 		},
 		{
 			name: "four tasks - varying progress",
-			tasks: map[string]*worker.TaskProgress{
+			tasks: map[string]*taskState{
 				"task1": {Progress: 0.25},
 				"task2": {Progress: 0.5},
 				"task3": {Progress: 0.75},
 				"task4": {Progress: 1.0},
 			},
-			want: 0.625, // (0.25 + 0.5 + 0.75 + 1.0) / 4 = 0.625
+			want: 0.625,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := CalculateTotalProgress(tt.tasks)
+			got := calculateTotalProgress(tt.tasks)
 			assert.InDelta(t, tt.want, got, 0.001, "progress should match within 0.001 delta")
 		})
 	}
 }
 
-func TestHandleStats(t *testing.T) {
+func TestCalculateStats(t *testing.T) {
 	tests := []struct {
-		name         string
-		currentStats worker.ProgressStats
-		poolStats    worker.PoolStats
-		want         worker.ProgressStats
+		name  string
+		tasks map[string]*taskState
+		want  jobStats
 	}{
 		{
-			name: "update all fields",
-			currentStats: worker.ProgressStats{
-				Total:   0,
-				Pending: 0,
-			},
-			poolStats: worker.PoolStats{
-				TotalTasks:      10,
-				Pending:         5,
-				Running:         3,
-				Success:         1,
-				Failed:          1,
-				Canceled:        0,
-				OverallProgress: 0.3,
-			},
-			want: worker.ProgressStats{
-				Total:           10,
-				Pending:         5,
-				Running:         3,
-				Success:         1,
-				Failed:          1,
-				Canceled:        0,
-				OverallProgress: 0.3,
-			},
+			name:  "empty tasks",
+			tasks: map[string]*taskState{},
+			want:  jobStats{},
 		},
 		{
-			name:         "zero stats",
-			currentStats: worker.ProgressStats{},
-			poolStats: worker.PoolStats{
-				TotalTasks: 0,
+			name: "all pending",
+			tasks: map[string]*taskState{
+				"task1": {Step: SortEventStep("queued"), Progress: 0},
+				"task2": {Step: SortEventStep("queued"), Progress: 0},
 			},
-			want: worker.ProgressStats{
-				Total: 0,
-			},
+			want: jobStats{Total: 2, Pending: 2},
 		},
 		{
-			name: "complete batch - 100% progress",
-			currentStats: worker.ProgressStats{
-				Total:   5,
-				Running: 2,
+			name: "all running",
+			tasks: map[string]*taskState{
+				"task1": {Step: sortStepScrape, Progress: 0.5},
+				"task2": {Step: sortStepApply, Progress: 0.3},
 			},
-			poolStats: worker.PoolStats{
-				TotalTasks:      5,
-				Success:         5,
-				OverallProgress: 1.0,
+			want: jobStats{Total: 2, Running: 2},
+		},
+		{
+			name: "all complete",
+			tasks: map[string]*taskState{
+				"task1": {Step: sortStepComplete, Progress: 1.0},
+				"task2": {Step: sortStepComplete, Progress: 1.0},
 			},
-			want: worker.ProgressStats{
-				Total:           5,
-				Success:         5,
-				OverallProgress: 1.0,
+			want: jobStats{Total: 2, success: 2, OverallProgress: 1.0},
+		},
+		{
+			name: "all failed",
+			tasks: map[string]*taskState{
+				"task1": {Step: sortStepFailed, Progress: 0.5},
+				"task2": {Step: sortStepFailed, Progress: 0.3},
 			},
+			want: jobStats{Total: 2, Failed: 2, OverallProgress: 1.0},
+		},
+		{
+			name: "mixed states",
+			tasks: map[string]*taskState{
+				"task1": {Step: sortStepComplete, Progress: 1.0},
+				"task2": {Step: sortStepFailed, Progress: 0.5},
+				"task3": {Step: sortStepScrape, Progress: 0.3},
+				"task4": {Step: SortEventStep("queued"), Progress: 0},
+			},
+			want: jobStats{Total: 4, success: 1, Failed: 1, Running: 1, Pending: 1, OverallProgress: 0.5},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := HandleStats(tt.currentStats, tt.poolStats)
+			got := calculateStats(tt.tasks)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -366,13 +380,13 @@ func TestHandleLogMessage(t *testing.T) {
 		name    string
 		level   string
 		message string
-		want    LogEntry
+		want    logEntry
 	}{
 		{
 			name:    "info log",
 			level:   "info",
 			message: "Processing started",
-			want: LogEntry{
+			want: logEntry{
 				Level:   "info",
 				Message: "Processing started",
 			},
@@ -381,7 +395,7 @@ func TestHandleLogMessage(t *testing.T) {
 			name:    "warn log",
 			level:   "warn",
 			message: "Scraper timeout",
-			want: LogEntry{
+			want: logEntry{
 				Level:   "warn",
 				Message: "Scraper timeout",
 			},
@@ -390,7 +404,7 @@ func TestHandleLogMessage(t *testing.T) {
 			name:    "error log",
 			level:   "error",
 			message: "Failed to download",
-			want: LogEntry{
+			want: logEntry{
 				Level:   "error",
 				Message: "Failed to download",
 			},
@@ -399,7 +413,7 @@ func TestHandleLogMessage(t *testing.T) {
 			name:    "debug log",
 			level:   "debug",
 			message: "Cache hit",
-			want: LogEntry{
+			want: logEntry{
 				Level:   "debug",
 				Message: "Cache hit",
 			},
@@ -408,7 +422,7 @@ func TestHandleLogMessage(t *testing.T) {
 			name:    "empty message",
 			level:   "info",
 			message: "",
-			want: LogEntry{
+			want: logEntry{
 				Level:   "info",
 				Message: "",
 			},
@@ -417,7 +431,7 @@ func TestHandleLogMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := HandleLogMessage(tt.level, tt.message)
+			got := handleLogMessage(tt.level, tt.message)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -427,12 +441,12 @@ func TestHandleError(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		want LogEntry
+		want logEntry
 	}{
 		{
 			name: "standard error",
 			err:  errors.New("connection failed"),
-			want: LogEntry{
+			want: logEntry{
 				Level:   "error",
 				Message: "connection failed",
 			},
@@ -440,7 +454,7 @@ func TestHandleError(t *testing.T) {
 		{
 			name: "formatted error",
 			err:  errors.New("scraper timeout: 30s exceeded"),
-			want: LogEntry{
+			want: logEntry{
 				Level:   "error",
 				Message: "scraper timeout: 30s exceeded",
 			},
@@ -449,7 +463,7 @@ func TestHandleError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := HandleError(tt.err)
+			got := handleError(tt.err)
 			assert.Equal(t, tt.want, got)
 		})
 	}

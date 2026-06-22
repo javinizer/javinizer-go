@@ -22,13 +22,11 @@ interface WebSocketState {
 	error?: string;
 }
 
-const MAX_MESSAGES = 200;
-
 function createWebSocketStore() {
 	const { subscribe, set, update } = writable<WebSocketState>({
 		connected: false,
 		messages: [],
-		messagesByFile: {}
+		messagesByFile: {},
 	});
 
 	let ws: WebSocket | null = null;
@@ -92,15 +90,16 @@ function createWebSocketStore() {
 					update((state) => {
 						const newMessagesByFile = { ...state.messagesByFile };
 						if (message.file_path && message.job_id) {
-							newMessagesByFile[message.job_id] = {
-								...(newMessagesByFile[message.job_id] || {}),
-								[message.file_path]: message,
-							};
+							// Deduplicate by keeping only the latest message per file per job
+							if (!newMessagesByFile[message.job_id]) {
+								newMessagesByFile[message.job_id] = {};
+							}
+							newMessagesByFile[message.job_id][message.file_path] = message;
 						}
 						return {
 							...state,
-							messages: [...state.messages.slice(-(MAX_MESSAGES - 1)), message],
-							messagesByFile: newMessagesByFile
+							messages: [...state.messages.slice(-999), message],
+							messagesByFile: newMessagesByFile,
 						};
 					});
 				} catch (error) {
@@ -139,20 +138,11 @@ function createWebSocketStore() {
 		update((state) => ({ ...state, messages: [], messagesByFile: {} }));
 	}
 
-	function clearJobMessages(jobId: string) {
-		update((state) => {
-			const newMessagesByFile = { ...state.messagesByFile };
-			delete newMessagesByFile[jobId];
-			return { ...state, messagesByFile: newMessagesByFile };
-		});
-	}
-
 	return {
 		subscribe,
 		connect,
 		disconnect,
 		clearMessages,
-		clearJobMessages
 	};
 }
 

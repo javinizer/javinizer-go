@@ -19,9 +19,9 @@ func TestInitLogger_DefaultConfig(t *testing.T) {
 		t.Fatalf("InitLogger with nil config failed: %v", err)
 	}
 
-	logger := L()
+	logger := getLogger()
 	if logger == nil {
-		t.Fatal("L() returned nil after initialization")
+		t.Fatal("getLogger() returned nil after initialization")
 	}
 }
 
@@ -91,7 +91,7 @@ func TestInitLogger_FileOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitLogger with file output failed: %v", err)
 	}
-	defer CloseLogger()
+	defer closeLogger()
 
 	Info("Test log message")
 
@@ -123,7 +123,7 @@ func TestInitLogger_MultipleOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitLogger with multiple outputs failed: %v", err)
 	}
-	defer CloseLogger()
+	defer closeLogger()
 
 	Info("Multi-output test")
 
@@ -155,7 +155,7 @@ func TestInitLogger_AutoCreateDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitLogger failed to auto-create directories: %v", err)
 	}
-	defer CloseLogger()
+	defer closeLogger()
 
 	dir := filepath.Dir(logFile)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -235,7 +235,7 @@ func TestLogLevels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitLogger failed: %v", err)
 	}
-	defer CloseLogger()
+	defer closeLogger()
 
 	Debug("Debug message")
 	Debugf("Debug %s", "formatted")
@@ -271,93 +271,16 @@ func TestLogLevels(t *testing.T) {
 	}
 }
 
-func TestWithField(t *testing.T) {
-	tmpDir := t.TempDir()
-	logFile := filepath.Join(tmpDir, "fields.log")
-
-	cfg := &Config{
-		Level:  "info",
-		Format: "text",
-		Output: logFile,
-	}
-
-	err := InitLogger(cfg)
-	if err != nil {
-		t.Fatalf("InitLogger failed: %v", err)
-	}
-	defer CloseLogger()
-
-	WithField("key", "value").Info("Field test")
-
-	content, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("Failed to read log file: %v", err)
-	}
-
-	contentStr := string(content)
-
-	if !strings.Contains(contentStr, "Field test") {
-		t.Error("Log file missing field test message")
-	}
-
-	if !strings.Contains(contentStr, "key") {
-		t.Error("Log file missing field key")
-	}
-}
-
-func TestWithFields(t *testing.T) {
-	tmpDir := t.TempDir()
-	logFile := filepath.Join(tmpDir, "fields_multiple.log")
-
-	cfg := &Config{
-		Level:  "info",
-		Format: "text",
-		Output: logFile,
-	}
-
-	err := InitLogger(cfg)
-	if err != nil {
-		t.Fatalf("InitLogger failed: %v", err)
-	}
-	defer CloseLogger()
-
-	fields := map[string]interface{}{
-		"user_id": "12345",
-		"action":  "test",
-		"count":   42,
-	}
-	WithFields(fields).Info("Multiple fields test")
-
-	content, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("Failed to read log file: %v", err)
-	}
-
-	contentStr := string(content)
-
-	if !strings.Contains(contentStr, "Multiple fields test") {
-		t.Error("Log file missing fields test message")
-	}
-
-	if !strings.Contains(contentStr, "user_id") {
-		t.Error("Log file missing user_id field")
-	}
-
-	if !strings.Contains(contentStr, "action") {
-		t.Error("Log file missing action field")
-	}
-}
-
 func TestL_UninitializedReturnsDefault(t *testing.T) {
 	current.Store((*loggerState)(nil))
 
-	logger := L()
+	logger := getLogger()
 	if logger == nil {
-		t.Fatal("L() returned nil when uninitialized")
+		t.Fatal("getLogger() returned nil when uninitialized")
 	}
 }
 
-func TestCloseLogger(t *testing.T) {
+func Test_CloseLogger(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "close_test.log")
 
@@ -378,7 +301,7 @@ func TestCloseLogger(t *testing.T) {
 		t.Fatal("Log file was not created")
 	}
 
-	CloseLogger()
+	closeLogger()
 
 	newLogFile := filepath.Join(tmpDir, "new.log")
 	cfg.Output = newLogFile
@@ -386,7 +309,7 @@ func TestCloseLogger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitLogger after close failed: %v", err)
 	}
-	defer CloseLogger()
+	defer closeLogger()
 
 	Info("After close")
 
@@ -404,7 +327,7 @@ func TestCloseLogger(t *testing.T) {
 	}
 }
 
-func TestCloseLogger_MultipleCallsSafe(t *testing.T) {
+func Test_CloseLogger_MultipleCallsSafe(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "multi_close.log")
 
@@ -419,8 +342,8 @@ func TestCloseLogger_MultipleCallsSafe(t *testing.T) {
 		t.Fatalf("InitLogger failed: %v", err)
 	}
 
-	CloseLogger()
-	CloseLogger()
+	closeLogger()
+	closeLogger()
 }
 
 func TestInitLogger_MkdirAllFailure(t *testing.T) {
@@ -482,7 +405,7 @@ func TestInitLogger_ConfigReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitLogger (reload) failed: %v", err)
 	}
-	defer CloseLogger()
+	defer closeLogger()
 
 	Info("Message to file2")
 

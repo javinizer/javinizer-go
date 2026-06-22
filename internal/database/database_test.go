@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,15 +44,7 @@ func TestParseLogLevel(t *testing.T) {
 }
 
 func TestDBClose(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
@@ -68,22 +59,14 @@ func TestDBClose(t *testing.T) {
 }
 
 func TestDBAutoMigrate(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	// Test AutoMigrate creates all tables
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
 	// Verify tables exist by checking if we can create records
@@ -93,10 +76,10 @@ func TestDBAutoMigrate(t *testing.T) {
 		ID:        "TEST-MIGRATE",
 		Title:     "Migration Test",
 	}
-	err = repo.Create(movie)
+	err = repo.Create(context.TODO(), movie)
 	require.NoError(t, err)
 
-	found, err := repo.FindByID("TEST-MIGRATE")
+	found, err := repo.FindByID(context.TODO(), "TEST-MIGRATE")
 	require.NoError(t, err)
 	assert.Equal(t, "Migration Test", found.Title)
 }
@@ -121,20 +104,12 @@ func TestParseLogLevelEdgeCases(t *testing.T) {
 }
 
 func TestDBAutoMigrate_DMMIDPartialUniqueIndex(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	// Ensure partial unique index exists for dmm_id > 0.
 	var count int
@@ -147,25 +122,17 @@ func TestDBAutoMigrate_DMMIDPartialUniqueIndex(t *testing.T) {
 	repo := NewActressRepository(db)
 
 	// Multiple unknown DMM IDs (0) should be allowed.
-	require.NoError(t, repo.Create(&models.Actress{DMMID: 0, JapaneseName: "零A"}))
-	require.NoError(t, repo.Create(&models.Actress{DMMID: 0, JapaneseName: "零B"}))
+	require.NoError(t, repo.Create(context.TODO(), &models.Actress{DMMID: 0, JapaneseName: "零A"}))
+	require.NoError(t, repo.Create(context.TODO(), &models.Actress{DMMID: 0, JapaneseName: "零B"}))
 
 	// Real DMM IDs (>0) must remain unique.
-	require.NoError(t, repo.Create(&models.Actress{DMMID: 123456, JapaneseName: "正A"}))
-	err = repo.Create(&models.Actress{DMMID: 123456, JapaneseName: "正B"})
+	require.NoError(t, repo.Create(context.TODO(), &models.Actress{DMMID: 123456, JapaneseName: "正A"}))
+	err = repo.Create(context.TODO(), &models.Actress{DMMID: 123456, JapaneseName: "正B"})
 	require.Error(t, err)
 }
 
 func TestRunMigrationsOnStartup_PreservesConstraintCollationOnRebuild(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
@@ -198,15 +165,7 @@ func TestRunMigrationsOnStartup_PreservesConstraintCollationOnRebuild(t *testing
 }
 
 func TestRunMigrationsOnStartup_PreservesNonIndexConstraintsOnRebuild(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
@@ -238,15 +197,7 @@ func TestRunMigrationsOnStartup_PreservesNonIndexConstraintsOnRebuild(t *testing
 }
 
 func TestRunMigrationsOnStartup_SupportsInlineUniqueDMMConstraintWithConflictClause(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
@@ -287,15 +238,8 @@ func TestRunMigrationsOnStartup_CreatesBackupAndIsIdempotent(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "javinizer.db")
 
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  dbPath,
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite",
+		DSN: dbPath}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
@@ -319,15 +263,8 @@ func TestRunMigrationsOnStartup_FileURIRestoreHintUsesFilesystemPath(t *testing.
 	dbPath := filepath.Join(tmpDir, "javinizer.db")
 	uriDSN := "file:" + dbPath + "?cache=shared"
 
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  uriDSN,
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite",
+		DSN: uriDSN}
 
 	db, err := New(cfg)
 	require.NoError(t, err)

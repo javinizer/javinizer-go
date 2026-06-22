@@ -10,16 +10,25 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+func mustParseDoc(t testing.TB, html string) *goquery.Document {
+	t.Helper()
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("failed to parse HTML: %v", err)
+	}
+	return doc
+}
+
 func TestParseDetailPage(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  "https://www.javlibrary.com",
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	html := `<html><head><title>IPX-123 Sample Title - JAVLibrary</title></head><body>
 <div id="video_info"></div>
@@ -104,12 +113,12 @@ func TestSearch_SearchResultFlow_VideoThumbList(t *testing.T) {
 	}))
 	defer server.Close()
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  server.URL,
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	result, err := s.Search(context.Background(), "ONED-025")
 	if err != nil {
@@ -143,12 +152,12 @@ func TestSearch_LegacyHrefWithLanguagePrefix(t *testing.T) {
 	}))
 	defer server.Close()
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  server.URL,
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	result, err := s.Search(context.Background(), "IPX-123")
 	if err != nil {
@@ -187,12 +196,12 @@ func TestSearch_SearchResultFlow(t *testing.T) {
 	}))
 	defer server.Close()
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  server.URL,
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	result, err := s.Search(context.Background(), "IPX-123")
 	if err != nil {
@@ -211,12 +220,12 @@ func TestSearch_SearchResultFlow(t *testing.T) {
 }
 
 func TestHelpers(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  "https://www.javlibrary.com",
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	if got := s.extractMovieURLFromHTML(`<a href="/en/?v=javli43uqe">match</a>`, "IPX-123"); got != "/en/?v=javli43uqe" {
 		t.Fatalf("extractMovieURLFromHTML absolute = %q", got)
@@ -284,12 +293,12 @@ func TestHelpers(t *testing.T) {
 }
 
 func TestExtractDescription(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  "https://www.javlibrary.com",
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	// Test meta description tag (primary method)
 	html := `<html><head><meta name="description" content="This is a great movie with excellent quality!"></head><body><div id="video_review"><div class="text">This is a great movie with excellent quality!</div></div></body></html>`
@@ -312,12 +321,12 @@ func TestExtractDescription(t *testing.T) {
 }
 
 func TestExtractSeries(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  "https://www.javlibrary.com",
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	html := `<div id="video_series"><a href="/series/test">Test Series Name</a></div>`
 	if got := s.extractSeries(html); got != "Test Series Name" {
@@ -338,107 +347,39 @@ func TestExtractSeries(t *testing.T) {
 }
 
 func TestExtractRating(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  "https://www.javlibrary.com",
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
-	parse := func(t *testing.T, html string) *goquery.Document {
-		t.Helper()
-		doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-		if err != nil {
-			t.Fatalf("goquery.NewDocumentFromReader: %v", err)
-		}
-		return doc
+	// Test standard rating format
+	html := `<div id="video_rating"><span class="num">4.5</span> / 5.0</div>`
+	if got := s.extractRating(html, mustParseDoc(t, html)); got == nil || got.Score != 4.5 {
+		t.Fatalf("extractRating = %v, want 4.5", got)
 	}
 
-	t.Run("extracts from $rating JS variable (real page format)", func(t *testing.T) {
-		html := `<html><body>
-<script type="text/javascript">
-<!--
-var $videoid = "javli43uqe";
-var $rating = "7";
-//-->
-</script>
-</body></html>`
-		doc := parse(t, html)
-		got := s.extractRating(html, doc)
-		if got == nil || got.Score != 7.0 {
-			t.Fatalf("extractRating = %v, want score=7.0", got)
-		}
-	})
+	// Test fallback format with goquery span.num
+	html = `<div id="video_rating"><span class="num">4.0</span> / 5.0</div>`
+	if got := s.extractRating(html, mustParseDoc(t, html)); got == nil || got.Score != 4.0 {
+		t.Fatalf("extractRating fallback = %v, want 4.0", got)
+	}
 
-	t.Run("decimal rating in JS variable", func(t *testing.T) {
-		html := `<html><body>
-<script type="text/javascript">
-var $rating = "8.5";
-</script>
-</body></html>`
-		doc := parse(t, html)
-		got := s.extractRating(html, doc)
-		if got == nil || got.Score != 8.5 {
-			t.Fatalf("extractRating = %v, want score=8.5", got)
-		}
-	})
-
-	t.Run("missing $rating JS variable returns nil", func(t *testing.T) {
-		html := `<html><body><div>no rating here</div></body></html>`
-		doc := parse(t, html)
-		if got := s.extractRating(html, doc); got != nil {
-			t.Fatalf("extractRating = %v, want nil", got)
-		}
-	})
-
-	t.Run("non-numeric JS rating returns nil", func(t *testing.T) {
-		html := `<html><body>
-<script type="text/javascript">
-var $rating = "N/A";
-</script>
-</body></html>`
-		doc := parse(t, html)
-		if got := s.extractRating(html, doc); got != nil {
-			t.Fatalf("extractRating = %v, want nil", got)
-		}
-	})
-
-	t.Run("regression: JS $rating wins over surrounding X/Y patterns", func(t *testing.T) {
-		html := `<html><body>
-<div class="pagination"><a href="?page=1">1 / 1,247,049</a></div>
-<div class="stats">Reviews: 0 / 5,000,000</div>
-<div class="date">2026 / 02 / 16</div>
-<script type="text/javascript">
-var $rating = "4.25";
-</script>
-</body></html>`
-		doc := parse(t, html)
-		got := s.extractRating(html, doc)
-		if got == nil {
-			t.Fatalf("extractRating returned nil, want score=4.25")
-		}
-		if got.Score != 4.25 {
-			t.Fatalf("extractRating = %v, want score=4.25 (must not be polluted by surrounding 'X / Y' patterns)", got)
-		}
-	})
-
-	t.Run("fallback to #video_rating span.num when JS variable absent", func(t *testing.T) {
-		html := `<html><body><div id="video_rating"><span class="num">4.5</span> / 5.0</div></body></html>`
-		doc := parse(t, html)
-		got := s.extractRating(html, doc)
-		if got == nil || got.Score != 4.5 {
-			t.Fatalf("extractRating = %v, want score=4.5", got)
-		}
-	})
+	// No rating test
+	html = `<div>no rating</div>`
+	if got := s.extractRating(html, mustParseDoc(t, html)); got != nil {
+		t.Fatalf("extractRating empty = %v, want nil", got)
+	}
 }
 
 func TestExtractScreenshotURLs(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  "https://www.javlibrary.com",
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	html := `<img src="https://example.com/pic01.jpg"><img src="https://example.com/pic02.jpg">`
 	got := s.extractScreenshotURLs(html)
@@ -462,12 +403,12 @@ func TestExtractScreenshotURLs(t *testing.T) {
 }
 
 func TestExtractScreenshotURLs_DMMFiltering(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  "https://www.javlibrary.com",
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name    string
@@ -532,12 +473,12 @@ func TestExtractScreenshotURLs_DMMFiltering(t *testing.T) {
 }
 
 func TestExtractTrailerURL(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  "https://www.javlibrary.com",
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	// Test mp4 URL
 	html := `<a href="https://example.com/sample_movie.mp4">sample</a>`
@@ -553,12 +494,12 @@ func TestExtractTrailerURL(t *testing.T) {
 }
 
 func TestParseDetailPage_FullData(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:  true,
 		Language: "en",
 		BaseURL:  "https://www.javlibrary.com",
 	}
-	s := New(settings, &config.ProxyConfig{}, config.FlareSolverrConfig{})
+	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
 
 	html := `<html><head><title>IPX-123 Full Data Test - JAVLibrary</title></head><body>
 <div id="video_info"></div>

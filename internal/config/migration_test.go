@@ -6,8 +6,26 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func getMigration(fromVersion int) (Migration, bool) {
+	m, ok := migrations[fromVersion]
+	return m, ok
+}
+
+func resetMigrations() {
+	migrations = make(map[int]Migration)
+	migrationContext = MigrationContext{}
+}
+
+// restoreRealMigrations re-registers the production LegacyMigration.
+// Must be called in deferred cleanup after resetMigrations() in tests
+// that need a clean slate, so that subsequent tests aren't broken.
+func restoreRealMigrations() {
+	RegisterMigration(NewLegacyMigration())
+}
+
 func TestRegisterMigration(t *testing.T) {
-	ResetMigrations()
+	resetMigrations()
+	defer restoreRealMigrations()
 
 	mock := &mockMigration{
 		fromVersions: []int{0, 1, 2},
@@ -29,7 +47,8 @@ func TestRegisterMigration(t *testing.T) {
 }
 
 func TestMigrateToCurrent(t *testing.T) {
-	ResetMigrations()
+	resetMigrations()
+	defer restoreRealMigrations()
 
 	mock := &mockMigration{
 		fromVersions: []int{0, 1, 2},
@@ -51,7 +70,8 @@ func TestMigrateToCurrent(t *testing.T) {
 }
 
 func TestMigrateToCurrent_NoMigration(t *testing.T) {
-	ResetMigrations()
+	resetMigrations()
+	defer restoreRealMigrations()
 
 	cfg := &Config{ConfigVersion: 5}
 	err := MigrateToCurrent(cfg)
@@ -61,7 +81,8 @@ func TestMigrateToCurrent_NoMigration(t *testing.T) {
 }
 
 func TestMigrateToCurrent_AlreadyCurrent(t *testing.T) {
-	ResetMigrations()
+	resetMigrations()
+	defer restoreRealMigrations()
 
 	cfg := &Config{ConfigVersion: CurrentConfigVersion}
 	err := MigrateToCurrent(cfg)

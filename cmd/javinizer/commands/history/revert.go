@@ -63,24 +63,24 @@ func runHistoryRevert(cmd *cobra.Command, args []string, configFile string) erro
 	jobRepo := database.NewJobRepository(deps.DB)
 	batchFileOpRepo := database.NewBatchFileOperationRepository(deps.DB)
 
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	// Validate job exists
-	job, err := jobRepo.FindByID(batchID)
+	job, err := jobRepo.FindByID(ctx, batchID)
 	if err != nil {
 		return fmt.Errorf("batch job not found: %s", batchID)
 	}
 
 	// Validate job status is "organized" — T-04-05: prevents reverting non-organized jobs
-	if job.Status != string(models.JobStatusOrganized) {
+	if job.Status != models.JobStatusOrganized {
 		return fmt.Errorf("job is not in organized status (current: %s). Only organized jobs can be reverted", job.Status)
 	}
 
 	// Create Reverter
 	reverter := historypkg.NewReverter(afero.NewOsFs(), batchFileOpRepo)
-
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	var totalSucceeded, totalFailed, totalSkipped int
 	var allOutcomes []historypkg.RevertFileResult
@@ -106,19 +106,19 @@ func runHistoryRevert(cmd *cobra.Command, args []string, configFile string) erro
 		}
 
 		// After all individual scrapes, check if ALL operations for the batch are now reverted
-		appliedCount, err := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(batchID, models.RevertStatusApplied)
+		appliedCount, err := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(ctx, batchID, models.RevertStatusApplied)
 		if err != nil {
 			fmt.Printf("⚠️  Failed to verify revert completion: %v\n", err)
 		} else {
-			failedCount, err := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(batchID, models.RevertStatusFailed)
+			failedCount, err := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(ctx, batchID, models.RevertStatusFailed)
 			if err != nil {
 				fmt.Printf("⚠️  Failed to verify revert completion: %v\n", err)
 			} else if appliedCount == 0 && failedCount == 0 {
 				// All operations reverted — update job status
 				now := time.Now()
-				job.Status = string(models.JobStatusReverted)
+				job.Status = models.JobStatusReverted
 				job.RevertedAt = &now
-				if err := jobRepo.Update(job); err != nil {
+				if err := jobRepo.Update(ctx, job); err != nil {
 					fmt.Printf("⚠️  Failed to update job status: %v\n", err)
 				}
 			}
@@ -147,9 +147,9 @@ func runHistoryRevert(cmd *cobra.Command, args []string, configFile string) erro
 		// (skipped ops remain "applied" and can be retried later)
 		if totalFailed == 0 && totalSkipped == 0 {
 			now := time.Now()
-			job.Status = string(models.JobStatusReverted)
+			job.Status = models.JobStatusReverted
 			job.RevertedAt = &now
-			if err := jobRepo.Update(job); err != nil {
+			if err := jobRepo.Update(ctx, job); err != nil {
 				fmt.Printf("⚠️  Failed to update job status: %v\n", err)
 			}
 		}

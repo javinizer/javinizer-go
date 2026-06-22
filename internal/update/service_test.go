@@ -6,18 +6,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	appversion "github.com/javinizer/javinizer-go/internal/version"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockChecker struct {
-	version *VersionInfo
+	version *versionInfo
 	err     error
 }
 
-func (m *mockChecker) CheckLatestVersion(_ context.Context) (*VersionInfo, error) {
+func (m *mockChecker) CheckLatestVersion(_ context.Context) (*versionInfo, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -25,11 +25,10 @@ func (m *mockChecker) CheckLatestVersion(_ context.Context) (*VersionInfo, error
 }
 
 func TestNewService(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.System.VersionCheckEnabled = true
-	cfg.System.VersionCheckIntervalHours = 24
-
-	service := NewService(cfg)
+	service := NewService(UpdateConfig{
+		Enabled:                   true,
+		VersionCheckIntervalHours: 24,
+	})
 
 	assert.NotNil(t, service)
 	assert.True(t, service.enabled)
@@ -41,15 +40,11 @@ func TestService_GetStatus_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	cfg := config.DefaultConfig()
-	cfg.System.VersionCheckEnabled = false
-	cfg.System.VersionCheckIntervalHours = 24
-
 	// Override the state path for testing
-	store := NewStateStore(statePath, DefaultCheckInterval)
+	store := newStateStore(statePath, defaultCheckInterval)
 
-	service := &Service{
-		checker:   NewGitHubChecker("javinizer/Javinizer"),
+	service := &service{
+		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
 		interval:  24 * time.Hour,
@@ -58,7 +53,7 @@ func TestService_GetStatus_Disabled(t *testing.T) {
 
 	status, err := service.GetStatus(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, "disabled", status.Source)
+	assert.Equal(t, UpdateSourceDisabled, status.Source)
 	assert.False(t, status.Available)
 }
 
@@ -66,12 +61,9 @@ func TestService_ForceCheck(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	cfg := config.DefaultConfig()
-	cfg.System.VersionCheckEnabled = true
-
-	service := &Service{
-		checker:   NewGitHubChecker("javinizer/Javinizer"),
-		store:     NewStateStore(statePath, DefaultCheckInterval),
+	service := &service{
+		checker:   newGitHubChecker("javinizer/Javinizer"),
+		store:     newStateStore(statePath, defaultCheckInterval),
 		statePath: statePath,
 		interval:  24 * time.Hour,
 		enabled:   true,
@@ -96,12 +88,9 @@ func TestService_BackgroundCheck(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	cfg := config.DefaultConfig()
-	cfg.System.VersionCheckEnabled = true
-
-	store := NewStateStore(statePath, DefaultCheckInterval)
-	service := &Service{
-		checker:   NewGitHubChecker("javinizer/Javinizer"),
+	store := newStateStore(statePath, defaultCheckInterval)
+	service := &service{
+		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
 		interval:  24 * time.Hour,
@@ -111,7 +100,7 @@ func TestService_BackgroundCheck(t *testing.T) {
 	// Background check should not block (no context argument now)
 	done := make(chan struct{})
 	go func() {
-		service.BackgroundCheck()
+		service.BackgroundCheck(context.Background())
 		close(done)
 	}()
 
@@ -136,28 +125,18 @@ func TestFormatUpdateMessage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := FormatUpdateMessage(tt.current, tt.latest)
+		got := formatUpdateMessage(tt.current, tt.latest)
 		assert.Equal(t, tt.want, got)
 	}
-}
-
-func TestDefaultUpdateConfig(t *testing.T) {
-	cfg := DefaultUpdateConfig()
-
-	assert.True(t, cfg.Enabled)
-	assert.Equal(t, 24, cfg.UpdateCheckIntervalHours)
 }
 
 func TestService_IsUpdateAvailable(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	cfg := config.DefaultConfig()
-	cfg.System.VersionCheckEnabled = true
-
-	service := &Service{
-		checker:   NewGitHubChecker("javinizer/Javinizer"),
-		store:     NewStateStore(statePath, DefaultCheckInterval),
+	service := &service{
+		checker:   newGitHubChecker("javinizer/Javinizer"),
+		store:     newStateStore(statePath, defaultCheckInterval),
 		statePath: statePath,
 		interval:  24 * time.Hour,
 		enabled:   true,
@@ -174,12 +153,9 @@ func TestService_GetLatestVersion(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	cfg := config.DefaultConfig()
-	cfg.System.VersionCheckEnabled = true
-
-	service := &Service{
-		checker:   NewGitHubChecker("javinizer/Javinizer"),
-		store:     NewStateStore(statePath, DefaultCheckInterval),
+	service := &service{
+		checker:   newGitHubChecker("javinizer/Javinizer"),
+		store:     newStateStore(statePath, defaultCheckInterval),
 		statePath: statePath,
 		interval:  24 * time.Hour,
 		enabled:   true,
@@ -203,12 +179,9 @@ func TestService_StartBackgroundCheck(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	cfg := config.DefaultConfig()
-	cfg.System.VersionCheckEnabled = true
-
-	store := NewStateStore(statePath, DefaultCheckInterval)
-	service := &Service{
-		checker:   NewGitHubChecker("javinizer/Javinizer"),
+	store := newStateStore(statePath, defaultCheckInterval)
+	service := &service{
+		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
 		interval:  24 * time.Hour,
@@ -235,9 +208,9 @@ func TestService_StartBackgroundCheck_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	store := NewStateStore(statePath, DefaultCheckInterval)
-	service := &Service{
-		checker:   NewGitHubChecker("javinizer/Javinizer"),
+	store := newStateStore(statePath, defaultCheckInterval)
+	service := &service{
+		checker:   newGitHubChecker("javinizer/Javinizer"),
 		store:     store,
 		statePath: statePath,
 		interval:  24 * time.Hour,
@@ -261,8 +234,8 @@ func TestService_ShouldCheck(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	store := NewStateStore(statePath, 24*time.Hour)
-	service := &Service{
+	store := newStateStore(statePath, 24*time.Hour)
+	service := &service{
 		store:    store,
 		interval: 24 * time.Hour,
 		enabled:  true,
@@ -272,14 +245,14 @@ func TestService_ShouldCheck(t *testing.T) {
 	assert.True(t, service.ShouldCheck(nil))
 
 	// Test with state from now (should not check)
-	state := &UpdateState{
-		CheckedAt: NowISO8601(),
+	state := &updateState{
+		CheckedAt: nowISO8601(),
 	}
 	store.SetState(state)
 	assert.False(t, service.ShouldCheck(state))
 
 	// Test with old state (should check)
-	state = &UpdateState{
+	state = &updateState{
 		CheckedAt: time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339),
 	}
 	store.SetState(state)
@@ -291,21 +264,18 @@ func TestService_GetStatus_WithExistingState(t *testing.T) {
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
 	// Pre-populate state
-	initialState := &UpdateState{
+	initialState := &updateState{
 		Version:   "v1.5.0",
 		CheckedAt: time.Now().Add(-12 * time.Hour).UTC().Format(time.RFC3339),
 		Available: false,
-		Source:    "cached",
+		Source:    UpdateSourceCached,
 	}
-	err := SaveStateToFile(statePath, initialState)
+	err := saveStateToFile(afero.NewOsFs(), statePath, initialState)
 	require.NoError(t, err)
 
-	cfg := config.DefaultConfig()
-	cfg.System.VersionCheckEnabled = true
-
-	service := &Service{
-		checker:   NewGitHubChecker("javinizer/Javinizer"),
-		store:     NewStateStore(statePath, 24*time.Hour),
+	service := &service{
+		checker:   newGitHubChecker("javinizer/Javinizer"),
+		store:     newStateStore(statePath, 24*time.Hour),
 		statePath: statePath,
 		interval:  24 * time.Hour,
 		enabled:   true,
@@ -314,7 +284,7 @@ func TestService_GetStatus_WithExistingState(t *testing.T) {
 	status, err := service.GetStatus(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, "v1.5.0", status.Version)
-	assert.Equal(t, "cached", status.Source)
+	assert.Equal(t, UpdateSourceCached, status.Source)
 }
 
 func TestService_ForceCheck_PrereleaseToStableIsAvailable(t *testing.T) {
@@ -327,15 +297,15 @@ func TestService_ForceCheck_PrereleaseToStableIsAvailable(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath := filepath.Join(tmpDir, "update_cache.json")
 
-	service := &Service{
+	service := &service{
 		checker: &mockChecker{
-			version: &VersionInfo{
+			version: &versionInfo{
 				Version:    "v1.6.0",
 				TagName:    "v1.6.0",
 				Prerelease: false,
 			},
 		},
-		store:     NewStateStore(statePath, DefaultCheckInterval),
+		store:     newStateStore(statePath, defaultCheckInterval),
 		statePath: statePath,
 		interval:  24 * time.Hour,
 		enabled:   true,

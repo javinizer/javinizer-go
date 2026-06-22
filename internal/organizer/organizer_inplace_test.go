@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,18 +9,16 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scanner"
-	"github.com/javinizer/javinizer-go/internal/types"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 )
 
 func TestPlan_InPlaceDetection(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create matcher
-	matcherCfg := &config.MatchingConfig{
+	matcherCfg := &matcher.Config{
 		RegexEnabled: false,
 	}
 	m, err := matcher.NewMatcher(matcherCfg)
@@ -29,7 +28,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 
 	tests := []struct {
 		name              string
-		operationMode     types.OperationMode
+		operationMode     operationmode.OperationMode
 		sourceFolder      string
 		sourceFile        string
 		destDir           string
@@ -40,7 +39,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 	}{
 		{
 			name:            "In-place enabled, dedicated folder, needs rename",
-			operationMode:   types.OperationModeInPlace,
+			operationMode:   operationmode.OperationModeInPlace,
 			sourceFolder:    "old_folder_name",
 			sourceFile:      "IPX-535.mp4",
 			destDir:         tmpDir,
@@ -49,7 +48,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 		},
 		{
 			name:            "Organize mode - no in-place",
-			operationMode:   types.OperationModeOrganize,
+			operationMode:   operationmode.OperationModeOrganize,
 			sourceFolder:    "old_folder_name",
 			sourceFile:      "IPX-535.mp4",
 			destDir:         tmpDir,
@@ -58,7 +57,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 		},
 		{
 			name:            "Folder already has correct name",
-			operationMode:   types.OperationModeInPlace,
+			operationMode:   operationmode.OperationModeInPlace,
 			sourceFolder:    "IPX-535 [IdeaPocket] - Beautiful Day",
 			sourceFile:      "IPX-535.mp4",
 			destDir:         tmpDir,
@@ -67,7 +66,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 		},
 		{
 			name:            "Mixed IDs in folder",
-			operationMode:   types.OperationModeInPlace,
+			operationMode:   operationmode.OperationModeInPlace,
 			sourceFolder:    "mixed_folder",
 			sourceFile:      "IPX-535.mp4",
 			destDir:         tmpDir,
@@ -77,7 +76,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 		},
 		{
 			name:            "Folder already correct, in-place mode, stays in source",
-			operationMode:   types.OperationModeInPlace,
+			operationMode:   operationmode.OperationModeInPlace,
 			sourceFolder:    "IPX-535 [IdeaPocket] - Beautiful Day",
 			sourceFile:      "IPX-535.mp4",
 			destDir:         filepath.Join(tmpDir, "dest"),
@@ -86,7 +85,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 		},
 		{
 			name:            "Not dedicated folder, in-place mode, stays in source",
-			operationMode:   types.OperationModeInPlace,
+			operationMode:   operationmode.OperationModeInPlace,
 			sourceFolder:    "mixed_folder_no_move",
 			sourceFile:      "IPX-535.mp4",
 			destDir:         filepath.Join(tmpDir, "dest"),
@@ -98,13 +97,12 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			orgCfg := &config.OutputConfig{
+			orgCfg := &Config{
 				OperationMode: tt.operationMode,
 				FolderFormat:  "<ID> [<STUDIO>] - <TITLE>",
 				FileFormat:    "<ID>",
 			}
-			o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
-			o.SetMatcher(m)
+			o := NewOrganizer(afero.NewOsFs(), orgCfg, nil, m)
 
 			sourceDir := filepath.Join(tmpDir, tt.sourceFolder)
 			if err := os.MkdirAll(sourceDir, 0755); err != nil {
@@ -123,13 +121,9 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 				}
 			}
 
-			match := matcher.MatchResult{
-				ID: "IPX-535",
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      tt.sourceFile,
-					Extension: ".mp4",
-				},
+			match := models.FileMatchInfo{
+				MovieID: "IPX-535",
+				Path:    sourcePath, Name: tt.sourceFile, Extension: ".mp4",
 			}
 
 			movie := &models.Movie{
@@ -138,7 +132,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 				Title: "Beautiful Day",
 			}
 
-			plan, err := o.Plan(match, movie, tt.destDir, false)
+			plan, err := o.plan(match, movie, tt.destDir, false)
 			if err != nil {
 				t.Fatalf("Plan failed: %v", err)
 			}
@@ -160,7 +154,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 				}
 			}
 
-			if tt.operationMode == types.OperationModeInPlace && !tt.expectedInPlace {
+			if tt.operationMode == operationmode.OperationModeInPlace && !tt.expectedInPlace {
 				if plan.TargetDir != sourceDir {
 					t.Errorf("Expected TargetDir=%q (sourceDir), got %q", sourceDir, plan.TargetDir)
 				}
@@ -172,7 +166,7 @@ func TestPlan_InPlaceDetection(t *testing.T) {
 func TestPlan_InPlaceFallbackToOrganize(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	matcherCfg := &config.MatchingConfig{RegexEnabled: false}
+	matcherCfg := &matcher.Config{RegexEnabled: false}
 	m, err := matcher.NewMatcher(matcherCfg)
 	if err != nil {
 		t.Fatalf("Failed to create matcher: %v", err)
@@ -201,25 +195,20 @@ func TestPlan_InPlaceFallbackToOrganize(t *testing.T) {
 			t.Fatalf("Failed to create mixed file: %v", err)
 		}
 
-		cfg := &config.OutputConfig{
-			OperationMode: types.OperationModeInPlace,
+		cfg := &Config{
+			OperationMode: operationmode.OperationModeInPlace,
 			FolderFormat:  "<ID> - <TITLE>",
 			FileFormat:    "<ID>",
 			RenameFile:    true,
 		}
-		o := NewOrganizer(afero.NewOsFs(), cfg, nil)
-		o.SetMatcher(m)
+		o := NewOrganizer(afero.NewOsFs(), cfg, nil, m)
 
-		match := matcher.MatchResult{
-			ID: "IPX-535",
-			File: scanner.FileInfo{
-				Path:      filepath.Join(sourceDir, "IPX-535.mp4"),
-				Name:      "IPX-535.mp4",
-				Extension: ".mp4",
-			},
+		match := models.FileMatchInfo{
+			MovieID: "IPX-535",
+			Path:    filepath.Join(sourceDir, "IPX-535.mp4"), Name: "IPX-535.mp4", Extension: ".mp4",
 		}
 
-		plan, err := o.Plan(match, movie, destDir, false)
+		plan, err := o.plan(match, movie, destDir, false)
 		if err != nil {
 			t.Fatalf("Plan failed: %v", err)
 		}
@@ -237,25 +226,20 @@ func TestPlan_InPlaceFallbackToOrganize(t *testing.T) {
 			t.Fatalf("Failed to create source file: %v", err)
 		}
 
-		cfg := &config.OutputConfig{
-			OperationMode: types.OperationModeOrganize,
+		cfg := &Config{
+			OperationMode: operationmode.OperationModeOrganize,
 			FolderFormat:  "<ID> - <TITLE>",
 			FileFormat:    "<ID>",
 			RenameFile:    true,
 		}
-		o := NewOrganizer(afero.NewOsFs(), cfg, nil)
-		o.SetMatcher(m)
+		o := NewOrganizer(afero.NewOsFs(), cfg, nil, m)
 
-		match := matcher.MatchResult{
-			ID: "IPX-535",
-			File: scanner.FileInfo{
-				Path:      filepath.Join(sourceDir, "IPX-535.mp4"),
-				Name:      "IPX-535.mp4",
-				Extension: ".mp4",
-			},
+		match := models.FileMatchInfo{
+			MovieID: "IPX-535",
+			Path:    filepath.Join(sourceDir, "IPX-535.mp4"), Name: "IPX-535.mp4", Extension: ".mp4",
 		}
 
-		plan, err := o.Plan(match, movie, destDir, false)
+		plan, err := o.plan(match, movie, destDir, false)
 		if err != nil {
 			t.Fatalf("Plan failed: %v", err)
 		}
@@ -279,25 +263,20 @@ func TestPlan_InPlaceFallbackToOrganize(t *testing.T) {
 			t.Fatalf("Failed to create mixed file: %v", err)
 		}
 
-		cfg := &config.OutputConfig{
-			OperationMode: types.OperationModeMetadataArtwork,
+		cfg := &Config{
+			OperationMode: operationmode.OperationModeMetadataArtwork,
 			FolderFormat:  "<ID> - <TITLE>",
 			FileFormat:    "<ID>",
 			RenameFile:    true,
 		}
-		o := NewOrganizer(afero.NewOsFs(), cfg, nil)
-		o.SetMatcher(m)
+		o := NewOrganizer(afero.NewOsFs(), cfg, nil, m)
 
-		match := matcher.MatchResult{
-			ID: "IPX-535",
-			File: scanner.FileInfo{
-				Path:      filepath.Join(sourceDir, "IPX-535.mp4"),
-				Name:      "IPX-535.mp4",
-				Extension: ".mp4",
-			},
+		match := models.FileMatchInfo{
+			MovieID: "IPX-535",
+			Path:    filepath.Join(sourceDir, "IPX-535.mp4"), Name: "IPX-535.mp4", Extension: ".mp4",
 		}
 
-		plan, err := o.Plan(match, movie, destDir, false)
+		plan, err := o.plan(match, movie, destDir, false)
 		if err != nil {
 			t.Fatalf("Plan failed: %v", err)
 		}
@@ -314,7 +293,7 @@ func TestExecute_InPlaceRename(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create matcher
-	matcherCfg := &config.MatchingConfig{
+	matcherCfg := &matcher.Config{
 		RegexEnabled: false,
 	}
 	m, err := matcher.NewMatcher(matcherCfg)
@@ -322,13 +301,12 @@ func TestExecute_InPlaceRename(t *testing.T) {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
 
-	orgCfg := &config.OutputConfig{
-		OperationMode: types.OperationModeInPlace,
+	orgCfg := &Config{
+		OperationMode: operationmode.OperationModeInPlace,
 		FolderFormat:  "<ID> [<STUDIO>] - <TITLE>",
 		FileFormat:    "<ID>",
 	}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
-	o.SetMatcher(m)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil, m)
 
 	// Create source directory and file
 	sourceFolder := "old_folder_name"
@@ -344,13 +322,9 @@ func TestExecute_InPlaceRename(t *testing.T) {
 	}
 
 	// Create match result
-	match := matcher.MatchResult{
-		ID: "IPX-535",
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      sourceFile,
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "IPX-535",
+		Path:    sourcePath, Name: sourceFile, Extension: ".mp4",
 	}
 
 	// Create movie metadata
@@ -361,7 +335,7 @@ func TestExecute_InPlaceRename(t *testing.T) {
 	}
 
 	// Plan the organization
-	plan, err := o.Plan(match, movie, tmpDir, false)
+	plan, err := o.plan(match, movie, tmpDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -372,7 +346,7 @@ func TestExecute_InPlaceRename(t *testing.T) {
 	}
 
 	// Execute the plan
-	result, err := o.Execute(plan, false)
+	result, err := o.execute(plan)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -412,7 +386,7 @@ func TestExecute_InPlaceMultiPart(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create matcher
-	matcherCfg := &config.MatchingConfig{
+	matcherCfg := &matcher.Config{
 		RegexEnabled: false,
 	}
 	m, err := matcher.NewMatcher(matcherCfg)
@@ -420,13 +394,12 @@ func TestExecute_InPlaceMultiPart(t *testing.T) {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
 
-	orgCfg := &config.OutputConfig{
-		OperationMode: types.OperationModeInPlace,
+	orgCfg := &Config{
+		OperationMode: operationmode.OperationModeInPlace,
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 	}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
-	o.SetMatcher(m)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil, m)
 
 	// Create source directory with multi-part files
 	sourceFolder := "old_folder"
@@ -453,33 +426,25 @@ func TestExecute_InPlaceMultiPart(t *testing.T) {
 	}
 
 	// Process both parts
-	matches := []matcher.MatchResult{
+	matches := []models.FileMatchInfo{
 		{
-			ID:          "IPX-535",
+			MovieID:     "IPX-535",
 			IsMultiPart: true,
 			PartNumber:  1,
 			PartSuffix:  "-pt1",
-			File: scanner.FileInfo{
-				Path:      part1Path,
-				Name:      "IPX-535-pt1.mp4",
-				Extension: ".mp4",
-			},
+			Path:        part1Path, Name: "IPX-535-pt1.mp4", Extension: ".mp4",
 		},
 		{
-			ID:          "IPX-535",
+			MovieID:     "IPX-535",
 			IsMultiPart: true,
 			PartNumber:  2,
 			PartSuffix:  "-pt2",
-			File: scanner.FileInfo{
-				Path:      part2Path,
-				Name:      "IPX-535-pt2.mp4",
-				Extension: ".mp4",
-			},
+			Path:        part2Path, Name: "IPX-535-pt2.mp4", Extension: ".mp4",
 		},
 	}
 
 	// Plan for first part (should trigger in-place rename)
-	plan1, err := o.Plan(matches[0], movie, tmpDir, false)
+	plan1, err := o.plan(matches[0], movie, tmpDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed for part1: %v", err)
 	}
@@ -489,7 +454,7 @@ func TestExecute_InPlaceMultiPart(t *testing.T) {
 	}
 
 	// Execute part 1 - this renames the directory
-	result1, err := o.Execute(plan1, false)
+	result1, err := o.execute(plan1)
 	if err != nil {
 		t.Fatalf("Execute failed for part1: %v", err)
 	}
@@ -501,11 +466,11 @@ func TestExecute_InPlaceMultiPart(t *testing.T) {
 	// After directory rename, part2 is now at the new location
 	// We need to plan for it from its new location
 	newPart2Path := filepath.Join(tmpDir, "IPX-535", "IPX-535-pt2.mp4")
-	matches[1].File.Path = newPart2Path
+	matches[1].Path = newPart2Path
 
 	// Plan for part 2 - it should only rename the file (not the directory again)
 	// Use forceUpdate=true to allow renaming the file even though directory already exists
-	plan2, err := o.Plan(matches[1], movie, tmpDir, true)
+	plan2, err := o.plan(matches[1], movie, tmpDir, true)
 	if err != nil {
 		t.Fatalf("Plan failed for part2: %v", err)
 	}
@@ -518,7 +483,7 @@ func TestExecute_InPlaceMultiPart(t *testing.T) {
 	// The file is already named correctly, so it shouldn't need to move
 	if plan2.WillMove {
 		// Execute part 2 - should just rename the file
-		result2, err := o.Execute(plan2, false)
+		result2, err := o.execute(plan2)
 		if err != nil {
 			t.Fatalf("Execute failed for part2: %v", err)
 		}
@@ -546,7 +511,7 @@ func TestExecute_InPlaceWithSubtitles(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create matcher
-	matcherCfg := &config.MatchingConfig{
+	matcherCfg := &matcher.Config{
 		RegexEnabled: false,
 	}
 	m, err := matcher.NewMatcher(matcherCfg)
@@ -554,15 +519,14 @@ func TestExecute_InPlaceWithSubtitles(t *testing.T) {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
 
-	orgCfg := &config.OutputConfig{
-		OperationMode:      types.OperationModeInPlace,
+	orgCfg := &Config{
+		OperationMode:      operationmode.OperationModeInPlace,
 		FolderFormat:       "<ID>",
 		FileFormat:         "<ID>",
 		MoveSubtitles:      true,
 		SubtitleExtensions: []string{".srt", ".ass"},
 	}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
-	o.SetMatcher(m)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil, m)
 
 	// Create source directory with video and subtitle files
 	sourceFolder := "old_folder"
@@ -588,13 +552,9 @@ func TestExecute_InPlaceWithSubtitles(t *testing.T) {
 		t.Fatalf("Failed to create subtitle2: %v", err)
 	}
 
-	match := matcher.MatchResult{
-		ID: "IPX-535",
-		File: scanner.FileInfo{
-			Path:      videoPath,
-			Name:      "IPX-535.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "IPX-535",
+		Path:    videoPath, Name: "IPX-535.mp4", Extension: ".mp4",
 	}
 
 	movie := &models.Movie{
@@ -603,7 +563,7 @@ func TestExecute_InPlaceWithSubtitles(t *testing.T) {
 	}
 
 	// Plan and execute
-	plan, err := o.Plan(match, movie, tmpDir, false)
+	plan, err := o.plan(match, movie, tmpDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -612,7 +572,7 @@ func TestExecute_InPlaceWithSubtitles(t *testing.T) {
 		t.Fatal("Expected in-place rename")
 	}
 
-	result, err := o.Execute(plan, false)
+	result, err := o.execute(plan)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -655,7 +615,7 @@ func TestExecute_InPlaceDryRun(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create matcher
-	matcherCfg := &config.MatchingConfig{
+	matcherCfg := &matcher.Config{
 		RegexEnabled: false,
 	}
 	m, err := matcher.NewMatcher(matcherCfg)
@@ -663,13 +623,12 @@ func TestExecute_InPlaceDryRun(t *testing.T) {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
 
-	orgCfg := &config.OutputConfig{
-		OperationMode: types.OperationModeInPlace,
+	orgCfg := &Config{
+		OperationMode: operationmode.OperationModeInPlace,
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 	}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
-	o.SetMatcher(m)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil, m)
 
 	// Create source directory and file
 	sourceFolder := "old_folder"
@@ -683,13 +642,9 @@ func TestExecute_InPlaceDryRun(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	match := matcher.MatchResult{
-		ID: "IPX-535",
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "IPX-535.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "IPX-535",
+		Path:    sourcePath, Name: "IPX-535.mp4", Extension: ".mp4",
 	}
 
 	movie := &models.Movie{
@@ -697,15 +652,17 @@ func TestExecute_InPlaceDryRun(t *testing.T) {
 		Title: "Test",
 	}
 
-	// Plan and execute in dry-run mode
-	plan, err := o.Plan(match, movie, tmpDir, false)
+	// Execute in dry-run mode via Organize seam
+	result, err := o.Organize(context.Background(), OrganizeCmd{
+		Match:       match,
+		Movie:       movie,
+		DestDir:     tmpDir,
+		MoveFiles:   true,
+		DryRun:      true,
+		ForceUpdate: false,
+	})
 	if err != nil {
-		t.Fatalf("Plan failed: %v", err)
-	}
-
-	result, err := o.Execute(plan, true)
-	if err != nil {
-		t.Fatalf("Execute failed: %v", err)
+		t.Fatalf("Organize dry-run failed: %v", err)
 	}
 
 	if result.Moved {
@@ -727,7 +684,7 @@ func TestExecute_InPlaceDryRun(t *testing.T) {
 func TestPlan_InPlaceTruncation_UsesSourceParent(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	matcherCfg := &config.MatchingConfig{
+	matcherCfg := &matcher.Config{
 		RegexEnabled: false,
 	}
 	m, err := matcher.NewMatcher(matcherCfg)
@@ -750,22 +707,17 @@ func TestPlan_InPlaceTruncation_UsesSourceParent(t *testing.T) {
 
 	// Use a MaxPathLength that will trigger truncation but still allow success
 	maxPathLen := 150
-	orgCfg := &config.OutputConfig{
-		OperationMode: types.OperationModeInPlace,
+	orgCfg := &Config{
+		OperationMode: operationmode.OperationModeInPlace,
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		MaxPathLength: maxPathLen,
 	}
-	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil)
-	o.SetMatcher(m)
+	o := NewOrganizer(afero.NewOsFs(), orgCfg, nil, m)
 
-	match := matcher.MatchResult{
-		ID: "IPX-535",
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "IPX-535.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "IPX-535",
+		Path:    sourcePath, Name: "IPX-535.mp4", Extension: ".mp4",
 	}
 
 	// Create a very long title to ensure truncation is needed
@@ -778,7 +730,7 @@ func TestPlan_InPlaceTruncation_UsesSourceParent(t *testing.T) {
 	untruncatedFolderName := "IPX-535 - " + movie.Title
 	untruncatedPath := filepath.Join(sourceParent, untruncatedFolderName, "IPX-535.mp4")
 
-	plan, err := o.Plan(match, movie, destDir, false)
+	plan, err := o.plan(match, movie, destDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -825,7 +777,7 @@ func TestExecute_CaseOnlyDirectoryRename(t *testing.T) {
 	}
 	os.Remove(caseFile)
 
-	matcherCfg := &config.MatchingConfig{
+	matcherCfg := &matcher.Config{
 		RegexEnabled: false,
 	}
 	m, err := matcher.NewMatcher(matcherCfg)
@@ -844,22 +796,17 @@ func TestExecute_CaseOnlyDirectoryRename(t *testing.T) {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 
-	cfg := &config.OutputConfig{
-		OperationMode: types.OperationModeInPlace,
+	cfg := &Config{
+		OperationMode: operationmode.OperationModeInPlace,
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 	}
-	o := NewOrganizer(afero.NewOsFs(), cfg, nil)
-	o.SetMatcher(m)
+	o := NewOrganizer(afero.NewOsFs(), cfg, nil, m)
 
-	match := matcher.MatchResult{
-		ID: "IPX-535",
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "ipx-535.mp4",
-			Extension: ".mp4",
-		},
+	match := models.FileMatchInfo{
+		MovieID: "IPX-535",
+		Path:    sourcePath, Name: "ipx-535.mp4", Extension: ".mp4",
 	}
 
 	movie := &models.Movie{
@@ -867,7 +814,7 @@ func TestExecute_CaseOnlyDirectoryRename(t *testing.T) {
 		Title: "Beautiful Day",
 	}
 
-	plan, err := o.Plan(match, movie, tmpDir, false)
+	plan, err := o.plan(match, movie, tmpDir, false)
 	if err != nil {
 		t.Fatalf("Plan failed: %v", err)
 	}
@@ -881,7 +828,7 @@ func TestExecute_CaseOnlyDirectoryRename(t *testing.T) {
 		t.Errorf("Expected TargetDir=%q, got %q", expectedTargetDir, plan.TargetDir)
 	}
 
-	result, err := o.Execute(plan, false)
+	result, err := o.execute(plan)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}

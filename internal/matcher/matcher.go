@@ -5,20 +5,19 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 // Matcher identifies JAV IDs from filenames
 type Matcher struct {
-	config         *config.MatchingConfig
+	config         *Config
 	regexPattern   *regexp.Regexp
 	builtinPattern *regexp.Regexp
 }
 
 // MatchResult represents a matched file with extracted ID
 type MatchResult struct {
-	File             scanner.FileInfo
+	File             models.FileMatchInfo
 	ID               string // Extracted JAV ID (e.g., "IPX-535")
 	PartNumber       int    // 0 = single-part, 1..N = part index
 	PartSuffix       string // "-A", "-pt1", "-part2" (always with leading dash)
@@ -29,7 +28,7 @@ type MatchResult struct {
 }
 
 // NewMatcher creates a new file matcher
-func NewMatcher(cfg *config.MatchingConfig) (*Matcher, error) {
+func NewMatcher(cfg *Config) (*Matcher, error) {
 	m := &Matcher{
 		config: cfg,
 	}
@@ -74,7 +73,7 @@ func NewMatcher(cfg *config.MatchingConfig) (*Matcher, error) {
 }
 
 // Match extracts JAV IDs from a list of files
-func (m *Matcher) Match(files []scanner.FileInfo) []MatchResult {
+func (m *Matcher) Match(files []models.FileMatchInfo) []MatchResult {
 	results := make([]MatchResult, 0)
 
 	for _, file := range files {
@@ -87,7 +86,7 @@ func (m *Matcher) Match(files []scanner.FileInfo) []MatchResult {
 }
 
 // MatchFile attempts to extract a JAV ID from a single file
-func (m *Matcher) MatchFile(file scanner.FileInfo) *MatchResult {
+func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 	// Get filename without extension
 	basename := filepath.Base(file.Name)
 	nameWithoutExt := strings.TrimSuffix(basename, file.Extension)
@@ -104,7 +103,7 @@ func (m *Matcher) MatchFile(file scanner.FileInfo) *MatchResult {
 }
 
 // matchWithRegex attempts to match a filename with a specific regex pattern
-func (m *Matcher) matchWithRegex(file scanner.FileInfo, filename string, pattern *regexp.Regexp, matchType string) *MatchResult {
+func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pattern *regexp.Regexp, matchType string) *MatchResult {
 	matches := pattern.FindStringSubmatch(filename)
 	if len(matches) == 0 {
 		return nil
@@ -160,43 +159,6 @@ func (m *Matcher) MatchString(s string) string {
 	}
 
 	return ""
-}
-
-// GroupByID groups match results by their ID
-func GroupByID(results []MatchResult) map[string][]MatchResult {
-	grouped := make(map[string][]MatchResult)
-
-	for _, result := range results {
-		grouped[result.ID] = append(grouped[result.ID], result)
-	}
-
-	return grouped
-}
-
-// FilterMultiPart filters results to only include multi-part files
-func FilterMultiPart(results []MatchResult) []MatchResult {
-	filtered := make([]MatchResult, 0)
-
-	for _, result := range results {
-		if result.IsMultiPart {
-			filtered = append(filtered, result)
-		}
-	}
-
-	return filtered
-}
-
-// FilterSinglePart filters results to only include single-part files
-func FilterSinglePart(results []MatchResult) []MatchResult {
-	filtered := make([]MatchResult, 0)
-
-	for _, result := range results {
-		if !result.IsMultiPart {
-			filtered = append(filtered, result)
-		}
-	}
-
-	return filtered
 }
 
 // ValidateMultipartInDirectory validates ambiguous multipart patterns

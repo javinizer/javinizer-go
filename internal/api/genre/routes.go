@@ -2,23 +2,32 @@ package genre
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/javinizer/javinizer-go/internal/api/core"
 )
 
-func RegisterRoutes(protected *gin.RouterGroup, deps *core.ServerDependencies) {
+// invalidateCaches is called by handlers after successful mutations to refresh
+// the aggregator's replacement caches. This keeps GenreDeps as a pure
+// data-access module — cache orchestration belongs to the handler layer.
+type invalidateCaches func()
+
+// RegisterRoutes registers all genre and word replacement routes.
+// The invalidateCaches callback is called after each successful mutation
+// so the aggregator picks up replacement changes.
+func RegisterRoutes(protected *gin.RouterGroup, deps GenreDeps, invalidate invalidateCaches) {
+	protected.GET("/genres", listGenres(deps))
+
 	replacements := protected.Group("/genres/replacements")
 	replacements.GET("", listGenreReplacements(deps))
-	replacements.POST("", createGenreReplacement(deps))
-	replacements.PUT("", updateGenreReplacement(deps))
-	replacements.DELETE("", deleteGenreReplacement(deps))
+	replacements.POST("", createGenreReplacement(deps, invalidate))
+	replacements.PUT("", updateGenreReplacement(deps, invalidate))
+	replacements.DELETE("", deleteGenreReplacement(deps, invalidate))
 	replacements.GET("/export", exportGenreReplacements(deps))
-	replacements.POST("/import", importGenreReplacements(deps))
+	replacements.POST("/import", importGenreReplacements(deps, invalidate))
 
 	wordReplacements := protected.Group("/words/replacements")
 	wordReplacements.GET("", listWordReplacements(deps))
-	wordReplacements.POST("", createWordReplacement(deps))
-	wordReplacements.PUT("", updateWordReplacement(deps))
-	wordReplacements.DELETE("", deleteWordReplacement(deps))
+	wordReplacements.POST("", createWordReplacement(deps, invalidate))
+	wordReplacements.PUT("", updateWordReplacement(deps, invalidate))
+	wordReplacements.DELETE("", deleteWordReplacement(deps, invalidate))
 	wordReplacements.GET("/export", exportWordReplacements(deps))
-	wordReplacements.POST("/import", importWordReplacements(deps))
+	wordReplacements.POST("/import", importWordReplacements(deps, invalidate))
 }

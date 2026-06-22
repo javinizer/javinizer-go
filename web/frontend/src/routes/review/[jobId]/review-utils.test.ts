@@ -12,7 +12,7 @@ describe('computeCropPreview', () => {
 			outputWidth: 0,
 			outputHeight: 0,
 			ratioLabel: '',
-			willResize: false
+			willResize: false,
 		});
 	});
 

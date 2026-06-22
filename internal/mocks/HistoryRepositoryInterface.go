@@ -5,6 +5,7 @@
 package mocks
 
 import (
+	"context"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -39,8 +40,8 @@ func (_m *MockHistoryRepositoryInterface) EXPECT() *MockHistoryRepositoryInterfa
 }
 
 // Count provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) Count() (int64, error) {
-	ret := _mock.Called()
+func (_mock *MockHistoryRepositoryInterface) Count(ctx context.Context) (int64, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Count")
@@ -48,16 +49,16 @@ func (_mock *MockHistoryRepositoryInterface) Count() (int64, error) {
 
 	var r0 int64
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (int64, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (int64, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() int64); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) int64); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -70,13 +71,20 @@ type MockHistoryRepositoryInterface_Count_Call struct {
 }
 
 // Count is a helper method to define mock.On call
-func (_e *MockHistoryRepositoryInterface_Expecter) Count() *MockHistoryRepositoryInterface_Count_Call {
-	return &MockHistoryRepositoryInterface_Count_Call{Call: _e.mock.On("Count")}
+//   - ctx context.Context
+func (_e *MockHistoryRepositoryInterface_Expecter) Count(ctx interface{}) *MockHistoryRepositoryInterface_Count_Call {
+	return &MockHistoryRepositoryInterface_Count_Call{Call: _e.mock.On("Count", ctx)}
 }
 
-func (_c *MockHistoryRepositoryInterface_Count_Call) Run(run func()) *MockHistoryRepositoryInterface_Count_Call {
+func (_c *MockHistoryRepositoryInterface_Count_Call) Run(run func(ctx context.Context)) *MockHistoryRepositoryInterface_Count_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -86,14 +94,14 @@ func (_c *MockHistoryRepositoryInterface_Count_Call) Return(n int64, err error) 
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_Count_Call) RunAndReturn(run func() (int64, error)) *MockHistoryRepositoryInterface_Count_Call {
+func (_c *MockHistoryRepositoryInterface_Count_Call) RunAndReturn(run func(ctx context.Context) (int64, error)) *MockHistoryRepositoryInterface_Count_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // CountByOperation provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) CountByOperation(operation string) (int64, error) {
-	ret := _mock.Called(operation)
+func (_mock *MockHistoryRepositoryInterface) CountByOperation(ctx context.Context, operation models.HistoryOperation) (int64, error) {
+	ret := _mock.Called(ctx, operation)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CountByOperation")
@@ -101,16 +109,16 @@ func (_mock *MockHistoryRepositoryInterface) CountByOperation(operation string) 
 
 	var r0 int64
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (int64, error)); ok {
-		return returnFunc(operation)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryOperation) (int64, error)); ok {
+		return returnFunc(ctx, operation)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) int64); ok {
-		r0 = returnFunc(operation)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryOperation) int64); ok {
+		r0 = returnFunc(ctx, operation)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(operation)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, models.HistoryOperation) error); ok {
+		r1 = returnFunc(ctx, operation)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -123,19 +131,25 @@ type MockHistoryRepositoryInterface_CountByOperation_Call struct {
 }
 
 // CountByOperation is a helper method to define mock.On call
-//   - operation string
-func (_e *MockHistoryRepositoryInterface_Expecter) CountByOperation(operation interface{}) *MockHistoryRepositoryInterface_CountByOperation_Call {
-	return &MockHistoryRepositoryInterface_CountByOperation_Call{Call: _e.mock.On("CountByOperation", operation)}
+//   - ctx context.Context
+//   - operation models.HistoryOperation
+func (_e *MockHistoryRepositoryInterface_Expecter) CountByOperation(ctx interface{}, operation interface{}) *MockHistoryRepositoryInterface_CountByOperation_Call {
+	return &MockHistoryRepositoryInterface_CountByOperation_Call{Call: _e.mock.On("CountByOperation", ctx, operation)}
 }
 
-func (_c *MockHistoryRepositoryInterface_CountByOperation_Call) Run(run func(operation string)) *MockHistoryRepositoryInterface_CountByOperation_Call {
+func (_c *MockHistoryRepositoryInterface_CountByOperation_Call) Run(run func(ctx context.Context, operation models.HistoryOperation)) *MockHistoryRepositoryInterface_CountByOperation_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 models.HistoryOperation
+		if args[1] != nil {
+			arg1 = args[1].(models.HistoryOperation)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -146,14 +160,14 @@ func (_c *MockHistoryRepositoryInterface_CountByOperation_Call) Return(n int64, 
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_CountByOperation_Call) RunAndReturn(run func(operation string) (int64, error)) *MockHistoryRepositoryInterface_CountByOperation_Call {
+func (_c *MockHistoryRepositoryInterface_CountByOperation_Call) RunAndReturn(run func(ctx context.Context, operation models.HistoryOperation) (int64, error)) *MockHistoryRepositoryInterface_CountByOperation_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // CountByStatus provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) CountByStatus(status string) (int64, error) {
-	ret := _mock.Called(status)
+func (_mock *MockHistoryRepositoryInterface) CountByStatus(ctx context.Context, status models.HistoryStatus) (int64, error) {
+	ret := _mock.Called(ctx, status)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CountByStatus")
@@ -161,16 +175,16 @@ func (_mock *MockHistoryRepositoryInterface) CountByStatus(status string) (int64
 
 	var r0 int64
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (int64, error)); ok {
-		return returnFunc(status)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryStatus) (int64, error)); ok {
+		return returnFunc(ctx, status)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) int64); ok {
-		r0 = returnFunc(status)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryStatus) int64); ok {
+		r0 = returnFunc(ctx, status)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(status)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, models.HistoryStatus) error); ok {
+		r1 = returnFunc(ctx, status)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -183,19 +197,25 @@ type MockHistoryRepositoryInterface_CountByStatus_Call struct {
 }
 
 // CountByStatus is a helper method to define mock.On call
-//   - status string
-func (_e *MockHistoryRepositoryInterface_Expecter) CountByStatus(status interface{}) *MockHistoryRepositoryInterface_CountByStatus_Call {
-	return &MockHistoryRepositoryInterface_CountByStatus_Call{Call: _e.mock.On("CountByStatus", status)}
+//   - ctx context.Context
+//   - status models.HistoryStatus
+func (_e *MockHistoryRepositoryInterface_Expecter) CountByStatus(ctx interface{}, status interface{}) *MockHistoryRepositoryInterface_CountByStatus_Call {
+	return &MockHistoryRepositoryInterface_CountByStatus_Call{Call: _e.mock.On("CountByStatus", ctx, status)}
 }
 
-func (_c *MockHistoryRepositoryInterface_CountByStatus_Call) Run(run func(status string)) *MockHistoryRepositoryInterface_CountByStatus_Call {
+func (_c *MockHistoryRepositoryInterface_CountByStatus_Call) Run(run func(ctx context.Context, status models.HistoryStatus)) *MockHistoryRepositoryInterface_CountByStatus_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 models.HistoryStatus
+		if args[1] != nil {
+			arg1 = args[1].(models.HistoryStatus)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -206,22 +226,22 @@ func (_c *MockHistoryRepositoryInterface_CountByStatus_Call) Return(n int64, err
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_CountByStatus_Call) RunAndReturn(run func(status string) (int64, error)) *MockHistoryRepositoryInterface_CountByStatus_Call {
+func (_c *MockHistoryRepositoryInterface_CountByStatus_Call) RunAndReturn(run func(ctx context.Context, status models.HistoryStatus) (int64, error)) *MockHistoryRepositoryInterface_CountByStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Create provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) Create(history *models.History) error {
-	ret := _mock.Called(history)
+func (_mock *MockHistoryRepositoryInterface) Create(ctx context.Context, history *models.History) error {
+	ret := _mock.Called(ctx, history)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.History) error); ok {
-		r0 = returnFunc(history)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.History) error); ok {
+		r0 = returnFunc(ctx, history)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -234,19 +254,25 @@ type MockHistoryRepositoryInterface_Create_Call struct {
 }
 
 // Create is a helper method to define mock.On call
+//   - ctx context.Context
 //   - history *models.History
-func (_e *MockHistoryRepositoryInterface_Expecter) Create(history interface{}) *MockHistoryRepositoryInterface_Create_Call {
-	return &MockHistoryRepositoryInterface_Create_Call{Call: _e.mock.On("Create", history)}
+func (_e *MockHistoryRepositoryInterface_Expecter) Create(ctx interface{}, history interface{}) *MockHistoryRepositoryInterface_Create_Call {
+	return &MockHistoryRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, history)}
 }
 
-func (_c *MockHistoryRepositoryInterface_Create_Call) Run(run func(history *models.History)) *MockHistoryRepositoryInterface_Create_Call {
+func (_c *MockHistoryRepositoryInterface_Create_Call) Run(run func(ctx context.Context, history *models.History)) *MockHistoryRepositoryInterface_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.History
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.History)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.History
+		if args[1] != nil {
+			arg1 = args[1].(*models.History)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -257,22 +283,22 @@ func (_c *MockHistoryRepositoryInterface_Create_Call) Return(err error) *MockHis
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_Create_Call) RunAndReturn(run func(history *models.History) error) *MockHistoryRepositoryInterface_Create_Call {
+func (_c *MockHistoryRepositoryInterface_Create_Call) RunAndReturn(run func(ctx context.Context, history *models.History) error) *MockHistoryRepositoryInterface_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Delete provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) Delete(id uint) error {
-	ret := _mock.Called(id)
+func (_mock *MockHistoryRepositoryInterface) Delete(ctx context.Context, id uint) error {
+	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(uint) error); ok {
-		r0 = returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) error); ok {
+		r0 = returnFunc(ctx, id)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -285,19 +311,25 @@ type MockHistoryRepositoryInterface_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id uint
-func (_e *MockHistoryRepositoryInterface_Expecter) Delete(id interface{}) *MockHistoryRepositoryInterface_Delete_Call {
-	return &MockHistoryRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", id)}
+func (_e *MockHistoryRepositoryInterface_Expecter) Delete(ctx interface{}, id interface{}) *MockHistoryRepositoryInterface_Delete_Call {
+	return &MockHistoryRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, id)}
 }
 
-func (_c *MockHistoryRepositoryInterface_Delete_Call) Run(run func(id uint)) *MockHistoryRepositoryInterface_Delete_Call {
+func (_c *MockHistoryRepositoryInterface_Delete_Call) Run(run func(ctx context.Context, id uint)) *MockHistoryRepositoryInterface_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 uint
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(uint)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -308,22 +340,22 @@ func (_c *MockHistoryRepositoryInterface_Delete_Call) Return(err error) *MockHis
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_Delete_Call) RunAndReturn(run func(id uint) error) *MockHistoryRepositoryInterface_Delete_Call {
+func (_c *MockHistoryRepositoryInterface_Delete_Call) RunAndReturn(run func(ctx context.Context, id uint) error) *MockHistoryRepositoryInterface_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // DeleteByMovieID provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) DeleteByMovieID(movieID string) error {
-	ret := _mock.Called(movieID)
+func (_mock *MockHistoryRepositoryInterface) DeleteByMovieID(ctx context.Context, movieID string) error {
+	ret := _mock.Called(ctx, movieID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteByMovieID")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string) error); ok {
-		r0 = returnFunc(movieID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, movieID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -336,19 +368,25 @@ type MockHistoryRepositoryInterface_DeleteByMovieID_Call struct {
 }
 
 // DeleteByMovieID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - movieID string
-func (_e *MockHistoryRepositoryInterface_Expecter) DeleteByMovieID(movieID interface{}) *MockHistoryRepositoryInterface_DeleteByMovieID_Call {
-	return &MockHistoryRepositoryInterface_DeleteByMovieID_Call{Call: _e.mock.On("DeleteByMovieID", movieID)}
+func (_e *MockHistoryRepositoryInterface_Expecter) DeleteByMovieID(ctx interface{}, movieID interface{}) *MockHistoryRepositoryInterface_DeleteByMovieID_Call {
+	return &MockHistoryRepositoryInterface_DeleteByMovieID_Call{Call: _e.mock.On("DeleteByMovieID", ctx, movieID)}
 }
 
-func (_c *MockHistoryRepositoryInterface_DeleteByMovieID_Call) Run(run func(movieID string)) *MockHistoryRepositoryInterface_DeleteByMovieID_Call {
+func (_c *MockHistoryRepositoryInterface_DeleteByMovieID_Call) Run(run func(ctx context.Context, movieID string)) *MockHistoryRepositoryInterface_DeleteByMovieID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -359,22 +397,22 @@ func (_c *MockHistoryRepositoryInterface_DeleteByMovieID_Call) Return(err error)
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_DeleteByMovieID_Call) RunAndReturn(run func(movieID string) error) *MockHistoryRepositoryInterface_DeleteByMovieID_Call {
+func (_c *MockHistoryRepositoryInterface_DeleteByMovieID_Call) RunAndReturn(run func(ctx context.Context, movieID string) error) *MockHistoryRepositoryInterface_DeleteByMovieID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // DeleteOlderThan provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) DeleteOlderThan(date time.Time) error {
-	ret := _mock.Called(date)
+func (_mock *MockHistoryRepositoryInterface) DeleteOlderThan(ctx context.Context, date time.Time) error {
+	ret := _mock.Called(ctx, date)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteOlderThan")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(time.Time) error); ok {
-		r0 = returnFunc(date)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time) error); ok {
+		r0 = returnFunc(ctx, date)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -387,141 +425,17 @@ type MockHistoryRepositoryInterface_DeleteOlderThan_Call struct {
 }
 
 // DeleteOlderThan is a helper method to define mock.On call
+//   - ctx context.Context
 //   - date time.Time
-func (_e *MockHistoryRepositoryInterface_Expecter) DeleteOlderThan(date interface{}) *MockHistoryRepositoryInterface_DeleteOlderThan_Call {
-	return &MockHistoryRepositoryInterface_DeleteOlderThan_Call{Call: _e.mock.On("DeleteOlderThan", date)}
+func (_e *MockHistoryRepositoryInterface_Expecter) DeleteOlderThan(ctx interface{}, date interface{}) *MockHistoryRepositoryInterface_DeleteOlderThan_Call {
+	return &MockHistoryRepositoryInterface_DeleteOlderThan_Call{Call: _e.mock.On("DeleteOlderThan", ctx, date)}
 }
 
-func (_c *MockHistoryRepositoryInterface_DeleteOlderThan_Call) Run(run func(date time.Time)) *MockHistoryRepositoryInterface_DeleteOlderThan_Call {
+func (_c *MockHistoryRepositoryInterface_DeleteOlderThan_Call) Run(run func(ctx context.Context, date time.Time)) *MockHistoryRepositoryInterface_DeleteOlderThan_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 time.Time
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(time.Time)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockHistoryRepositoryInterface_DeleteOlderThan_Call) Return(err error) *MockHistoryRepositoryInterface_DeleteOlderThan_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *MockHistoryRepositoryInterface_DeleteOlderThan_Call) RunAndReturn(run func(date time.Time) error) *MockHistoryRepositoryInterface_DeleteOlderThan_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FindByBatchJobID provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) FindByBatchJobID(batchJobID string) ([]models.History, error) {
-	ret := _mock.Called(batchJobID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FindByBatchJobID")
-	}
-
-	var r0 []models.History
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) ([]models.History, error)); ok {
-		return returnFunc(batchJobID)
-	}
-	if returnFunc, ok := ret.Get(0).(func(string) []models.History); ok {
-		r0 = returnFunc(batchJobID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]models.History)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(batchJobID)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockHistoryRepositoryInterface_FindByBatchJobID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByBatchJobID'
-type MockHistoryRepositoryInterface_FindByBatchJobID_Call struct {
-	*mock.Call
-}
-
-// FindByBatchJobID is a helper method to define mock.On call
-//   - batchJobID string
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByBatchJobID(batchJobID interface{}) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
-	return &MockHistoryRepositoryInterface_FindByBatchJobID_Call{Call: _e.mock.On("FindByBatchJobID", batchJobID)}
-}
-
-func (_c *MockHistoryRepositoryInterface_FindByBatchJobID_Call) Run(run func(batchJobID string)) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockHistoryRepositoryInterface_FindByBatchJobID_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
-	_c.Call.Return(historys, err)
-	return _c
-}
-
-func (_c *MockHistoryRepositoryInterface_FindByBatchJobID_Call) RunAndReturn(run func(batchJobID string) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FindByDateRange provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) FindByDateRange(start time.Time, end time.Time) ([]models.History, error) {
-	ret := _mock.Called(start, end)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FindByDateRange")
-	}
-
-	var r0 []models.History
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(time.Time, time.Time) ([]models.History, error)); ok {
-		return returnFunc(start, end)
-	}
-	if returnFunc, ok := ret.Get(0).(func(time.Time, time.Time) []models.History); ok {
-		r0 = returnFunc(start, end)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]models.History)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(time.Time, time.Time) error); ok {
-		r1 = returnFunc(start, end)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockHistoryRepositoryInterface_FindByDateRange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByDateRange'
-type MockHistoryRepositoryInterface_FindByDateRange_Call struct {
-	*mock.Call
-}
-
-// FindByDateRange is a helper method to define mock.On call
-//   - start time.Time
-//   - end time.Time
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByDateRange(start interface{}, end interface{}) *MockHistoryRepositoryInterface_FindByDateRange_Call {
-	return &MockHistoryRepositoryInterface_FindByDateRange_Call{Call: _e.mock.On("FindByDateRange", start, end)}
-}
-
-func (_c *MockHistoryRepositoryInterface_FindByDateRange_Call) Run(run func(start time.Time, end time.Time)) *MockHistoryRepositoryInterface_FindByDateRange_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 time.Time
-		if args[0] != nil {
-			arg0 = args[0].(time.Time)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 time.Time
 		if args[1] != nil {
@@ -535,19 +449,161 @@ func (_c *MockHistoryRepositoryInterface_FindByDateRange_Call) Run(run func(star
 	return _c
 }
 
+func (_c *MockHistoryRepositoryInterface_DeleteOlderThan_Call) Return(err error) *MockHistoryRepositoryInterface_DeleteOlderThan_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_DeleteOlderThan_Call) RunAndReturn(run func(ctx context.Context, date time.Time) error) *MockHistoryRepositoryInterface_DeleteOlderThan_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FindByBatchJobID provides a mock function for the type MockHistoryRepositoryInterface
+func (_mock *MockHistoryRepositoryInterface) FindByBatchJobID(ctx context.Context, batchJobID string) ([]models.History, error) {
+	ret := _mock.Called(ctx, batchJobID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindByBatchJobID")
+	}
+
+	var r0 []models.History
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]models.History, error)); ok {
+		return returnFunc(ctx, batchJobID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []models.History); ok {
+		r0 = returnFunc(ctx, batchJobID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.History)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, batchJobID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockHistoryRepositoryInterface_FindByBatchJobID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByBatchJobID'
+type MockHistoryRepositoryInterface_FindByBatchJobID_Call struct {
+	*mock.Call
+}
+
+// FindByBatchJobID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - batchJobID string
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByBatchJobID(ctx interface{}, batchJobID interface{}) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
+	return &MockHistoryRepositoryInterface_FindByBatchJobID_Call{Call: _e.mock.On("FindByBatchJobID", ctx, batchJobID)}
+}
+
+func (_c *MockHistoryRepositoryInterface_FindByBatchJobID_Call) Run(run func(ctx context.Context, batchJobID string)) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_FindByBatchJobID_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
+	_c.Call.Return(historys, err)
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_FindByBatchJobID_Call) RunAndReturn(run func(ctx context.Context, batchJobID string) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByBatchJobID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FindByDateRange provides a mock function for the type MockHistoryRepositoryInterface
+func (_mock *MockHistoryRepositoryInterface) FindByDateRange(ctx context.Context, start time.Time, end time.Time) ([]models.History, error) {
+	ret := _mock.Called(ctx, start, end)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindByDateRange")
+	}
+
+	var r0 []models.History
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time, time.Time) ([]models.History, error)); ok {
+		return returnFunc(ctx, start, end)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time, time.Time) []models.History); ok {
+		r0 = returnFunc(ctx, start, end)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.History)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, time.Time, time.Time) error); ok {
+		r1 = returnFunc(ctx, start, end)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockHistoryRepositoryInterface_FindByDateRange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByDateRange'
+type MockHistoryRepositoryInterface_FindByDateRange_Call struct {
+	*mock.Call
+}
+
+// FindByDateRange is a helper method to define mock.On call
+//   - ctx context.Context
+//   - start time.Time
+//   - end time.Time
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByDateRange(ctx interface{}, start interface{}, end interface{}) *MockHistoryRepositoryInterface_FindByDateRange_Call {
+	return &MockHistoryRepositoryInterface_FindByDateRange_Call{Call: _e.mock.On("FindByDateRange", ctx, start, end)}
+}
+
+func (_c *MockHistoryRepositoryInterface_FindByDateRange_Call) Run(run func(ctx context.Context, start time.Time, end time.Time)) *MockHistoryRepositoryInterface_FindByDateRange_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 time.Time
+		if args[1] != nil {
+			arg1 = args[1].(time.Time)
+		}
+		var arg2 time.Time
+		if args[2] != nil {
+			arg2 = args[2].(time.Time)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
 func (_c *MockHistoryRepositoryInterface_FindByDateRange_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_FindByDateRange_Call {
 	_c.Call.Return(historys, err)
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_FindByDateRange_Call) RunAndReturn(run func(start time.Time, end time.Time) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByDateRange_Call {
+func (_c *MockHistoryRepositoryInterface_FindByDateRange_Call) RunAndReturn(run func(ctx context.Context, start time.Time, end time.Time) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByDateRange_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByID provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) FindByID(id uint) (*models.History, error) {
-	ret := _mock.Called(id)
+func (_mock *MockHistoryRepositoryInterface) FindByID(ctx context.Context, id uint) (*models.History, error) {
+	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByID")
@@ -555,18 +611,18 @@ func (_mock *MockHistoryRepositoryInterface) FindByID(id uint) (*models.History,
 
 	var r0 *models.History
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(uint) (*models.History, error)); ok {
-		return returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) (*models.History, error)); ok {
+		return returnFunc(ctx, id)
 	}
-	if returnFunc, ok := ret.Get(0).(func(uint) *models.History); ok {
-		r0 = returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) *models.History); ok {
+		r0 = returnFunc(ctx, id)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.History)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(uint) error); ok {
-		r1 = returnFunc(id)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uint) error); ok {
+		r1 = returnFunc(ctx, id)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -579,19 +635,25 @@ type MockHistoryRepositoryInterface_FindByID_Call struct {
 }
 
 // FindByID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id uint
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByID(id interface{}) *MockHistoryRepositoryInterface_FindByID_Call {
-	return &MockHistoryRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", id)}
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockHistoryRepositoryInterface_FindByID_Call {
+	return &MockHistoryRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
-func (_c *MockHistoryRepositoryInterface_FindByID_Call) Run(run func(id uint)) *MockHistoryRepositoryInterface_FindByID_Call {
+func (_c *MockHistoryRepositoryInterface_FindByID_Call) Run(run func(ctx context.Context, id uint)) *MockHistoryRepositoryInterface_FindByID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 uint
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(uint)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -602,14 +664,14 @@ func (_c *MockHistoryRepositoryInterface_FindByID_Call) Return(history *models.H
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_FindByID_Call) RunAndReturn(run func(id uint) (*models.History, error)) *MockHistoryRepositoryInterface_FindByID_Call {
+func (_c *MockHistoryRepositoryInterface_FindByID_Call) RunAndReturn(run func(ctx context.Context, id uint) (*models.History, error)) *MockHistoryRepositoryInterface_FindByID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByMovieID provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) FindByMovieID(movieID string) ([]models.History, error) {
-	ret := _mock.Called(movieID)
+func (_mock *MockHistoryRepositoryInterface) FindByMovieID(ctx context.Context, movieID string) ([]models.History, error) {
+	ret := _mock.Called(ctx, movieID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByMovieID")
@@ -617,18 +679,18 @@ func (_mock *MockHistoryRepositoryInterface) FindByMovieID(movieID string) ([]mo
 
 	var r0 []models.History
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) ([]models.History, error)); ok {
-		return returnFunc(movieID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]models.History, error)); ok {
+		return returnFunc(ctx, movieID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) []models.History); ok {
-		r0 = returnFunc(movieID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []models.History); ok {
+		r0 = returnFunc(ctx, movieID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.History)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(movieID)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, movieID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -641,19 +703,25 @@ type MockHistoryRepositoryInterface_FindByMovieID_Call struct {
 }
 
 // FindByMovieID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - movieID string
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByMovieID(movieID interface{}) *MockHistoryRepositoryInterface_FindByMovieID_Call {
-	return &MockHistoryRepositoryInterface_FindByMovieID_Call{Call: _e.mock.On("FindByMovieID", movieID)}
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByMovieID(ctx interface{}, movieID interface{}) *MockHistoryRepositoryInterface_FindByMovieID_Call {
+	return &MockHistoryRepositoryInterface_FindByMovieID_Call{Call: _e.mock.On("FindByMovieID", ctx, movieID)}
 }
 
-func (_c *MockHistoryRepositoryInterface_FindByMovieID_Call) Run(run func(movieID string)) *MockHistoryRepositoryInterface_FindByMovieID_Call {
+func (_c *MockHistoryRepositoryInterface_FindByMovieID_Call) Run(run func(ctx context.Context, movieID string)) *MockHistoryRepositoryInterface_FindByMovieID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -664,14 +732,14 @@ func (_c *MockHistoryRepositoryInterface_FindByMovieID_Call) Return(historys []m
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_FindByMovieID_Call) RunAndReturn(run func(movieID string) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByMovieID_Call {
+func (_c *MockHistoryRepositoryInterface_FindByMovieID_Call) RunAndReturn(run func(ctx context.Context, movieID string) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByMovieID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByOperation provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) FindByOperation(operation string, limit int) ([]models.History, error) {
-	ret := _mock.Called(operation, limit)
+func (_mock *MockHistoryRepositoryInterface) FindByOperation(ctx context.Context, operation models.HistoryOperation, limit int) ([]models.History, error) {
+	ret := _mock.Called(ctx, operation, limit)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByOperation")
@@ -679,18 +747,18 @@ func (_mock *MockHistoryRepositoryInterface) FindByOperation(operation string, l
 
 	var r0 []models.History
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string, int) ([]models.History, error)); ok {
-		return returnFunc(operation, limit)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryOperation, int) ([]models.History, error)); ok {
+		return returnFunc(ctx, operation, limit)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string, int) []models.History); ok {
-		r0 = returnFunc(operation, limit)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryOperation, int) []models.History); ok {
+		r0 = returnFunc(ctx, operation, limit)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.History)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string, int) error); ok {
-		r1 = returnFunc(operation, limit)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, models.HistoryOperation, int) error); ok {
+		r1 = returnFunc(ctx, operation, limit)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -703,25 +771,31 @@ type MockHistoryRepositoryInterface_FindByOperation_Call struct {
 }
 
 // FindByOperation is a helper method to define mock.On call
-//   - operation string
+//   - ctx context.Context
+//   - operation models.HistoryOperation
 //   - limit int
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByOperation(operation interface{}, limit interface{}) *MockHistoryRepositoryInterface_FindByOperation_Call {
-	return &MockHistoryRepositoryInterface_FindByOperation_Call{Call: _e.mock.On("FindByOperation", operation, limit)}
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByOperation(ctx interface{}, operation interface{}, limit interface{}) *MockHistoryRepositoryInterface_FindByOperation_Call {
+	return &MockHistoryRepositoryInterface_FindByOperation_Call{Call: _e.mock.On("FindByOperation", ctx, operation, limit)}
 }
 
-func (_c *MockHistoryRepositoryInterface_FindByOperation_Call) Run(run func(operation string, limit int)) *MockHistoryRepositoryInterface_FindByOperation_Call {
+func (_c *MockHistoryRepositoryInterface_FindByOperation_Call) Run(run func(ctx context.Context, operation models.HistoryOperation, limit int)) *MockHistoryRepositoryInterface_FindByOperation_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
 		}
-		var arg1 int
+		var arg1 models.HistoryOperation
 		if args[1] != nil {
-			arg1 = args[1].(int)
+			arg1 = args[1].(models.HistoryOperation)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
 		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -732,14 +806,14 @@ func (_c *MockHistoryRepositoryInterface_FindByOperation_Call) Return(historys [
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_FindByOperation_Call) RunAndReturn(run func(operation string, limit int) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByOperation_Call {
+func (_c *MockHistoryRepositoryInterface_FindByOperation_Call) RunAndReturn(run func(ctx context.Context, operation models.HistoryOperation, limit int) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByOperation_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByStatus provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) FindByStatus(status string, limit int) ([]models.History, error) {
-	ret := _mock.Called(status, limit)
+func (_mock *MockHistoryRepositoryInterface) FindByStatus(ctx context.Context, status models.HistoryStatus, limit int) ([]models.History, error) {
+	ret := _mock.Called(ctx, status, limit)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByStatus")
@@ -747,18 +821,18 @@ func (_mock *MockHistoryRepositoryInterface) FindByStatus(status string, limit i
 
 	var r0 []models.History
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string, int) ([]models.History, error)); ok {
-		return returnFunc(status, limit)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryStatus, int) ([]models.History, error)); ok {
+		return returnFunc(ctx, status, limit)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string, int) []models.History); ok {
-		r0 = returnFunc(status, limit)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryStatus, int) []models.History); ok {
+		r0 = returnFunc(ctx, status, limit)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.History)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string, int) error); ok {
-		r1 = returnFunc(status, limit)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, models.HistoryStatus, int) error); ok {
+		r1 = returnFunc(ctx, status, limit)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -771,25 +845,31 @@ type MockHistoryRepositoryInterface_FindByStatus_Call struct {
 }
 
 // FindByStatus is a helper method to define mock.On call
-//   - status string
+//   - ctx context.Context
+//   - status models.HistoryStatus
 //   - limit int
-func (_e *MockHistoryRepositoryInterface_Expecter) FindByStatus(status interface{}, limit interface{}) *MockHistoryRepositoryInterface_FindByStatus_Call {
-	return &MockHistoryRepositoryInterface_FindByStatus_Call{Call: _e.mock.On("FindByStatus", status, limit)}
+func (_e *MockHistoryRepositoryInterface_Expecter) FindByStatus(ctx interface{}, status interface{}, limit interface{}) *MockHistoryRepositoryInterface_FindByStatus_Call {
+	return &MockHistoryRepositoryInterface_FindByStatus_Call{Call: _e.mock.On("FindByStatus", ctx, status, limit)}
 }
 
-func (_c *MockHistoryRepositoryInterface_FindByStatus_Call) Run(run func(status string, limit int)) *MockHistoryRepositoryInterface_FindByStatus_Call {
+func (_c *MockHistoryRepositoryInterface_FindByStatus_Call) Run(run func(ctx context.Context, status models.HistoryStatus, limit int)) *MockHistoryRepositoryInterface_FindByStatus_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
 		}
-		var arg1 int
+		var arg1 models.HistoryStatus
 		if args[1] != nil {
-			arg1 = args[1].(int)
+			arg1 = args[1].(models.HistoryStatus)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
 		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -800,14 +880,14 @@ func (_c *MockHistoryRepositoryInterface_FindByStatus_Call) Return(historys []mo
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_FindByStatus_Call) RunAndReturn(run func(status string, limit int) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByStatus_Call {
+func (_c *MockHistoryRepositoryInterface_FindByStatus_Call) RunAndReturn(run func(ctx context.Context, status models.HistoryStatus, limit int) ([]models.History, error)) *MockHistoryRepositoryInterface_FindByStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindRecent provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) FindRecent(limit int) ([]models.History, error) {
-	ret := _mock.Called(limit)
+func (_mock *MockHistoryRepositoryInterface) FindRecent(ctx context.Context, limit int) ([]models.History, error) {
+	ret := _mock.Called(ctx, limit)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindRecent")
@@ -815,18 +895,18 @@ func (_mock *MockHistoryRepositoryInterface) FindRecent(limit int) ([]models.His
 
 	var r0 []models.History
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(int) ([]models.History, error)); ok {
-		return returnFunc(limit)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int) ([]models.History, error)); ok {
+		return returnFunc(ctx, limit)
 	}
-	if returnFunc, ok := ret.Get(0).(func(int) []models.History); ok {
-		r0 = returnFunc(limit)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int) []models.History); ok {
+		r0 = returnFunc(ctx, limit)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.History)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(int) error); ok {
-		r1 = returnFunc(limit)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int) error); ok {
+		r1 = returnFunc(ctx, limit)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -839,79 +919,17 @@ type MockHistoryRepositoryInterface_FindRecent_Call struct {
 }
 
 // FindRecent is a helper method to define mock.On call
+//   - ctx context.Context
 //   - limit int
-func (_e *MockHistoryRepositoryInterface_Expecter) FindRecent(limit interface{}) *MockHistoryRepositoryInterface_FindRecent_Call {
-	return &MockHistoryRepositoryInterface_FindRecent_Call{Call: _e.mock.On("FindRecent", limit)}
+func (_e *MockHistoryRepositoryInterface_Expecter) FindRecent(ctx interface{}, limit interface{}) *MockHistoryRepositoryInterface_FindRecent_Call {
+	return &MockHistoryRepositoryInterface_FindRecent_Call{Call: _e.mock.On("FindRecent", ctx, limit)}
 }
 
-func (_c *MockHistoryRepositoryInterface_FindRecent_Call) Run(run func(limit int)) *MockHistoryRepositoryInterface_FindRecent_Call {
+func (_c *MockHistoryRepositoryInterface_FindRecent_Call) Run(run func(ctx context.Context, limit int)) *MockHistoryRepositoryInterface_FindRecent_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 int
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(int)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockHistoryRepositoryInterface_FindRecent_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_FindRecent_Call {
-	_c.Call.Return(historys, err)
-	return _c
-}
-
-func (_c *MockHistoryRepositoryInterface_FindRecent_Call) RunAndReturn(run func(limit int) ([]models.History, error)) *MockHistoryRepositoryInterface_FindRecent_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// List provides a mock function for the type MockHistoryRepositoryInterface
-func (_mock *MockHistoryRepositoryInterface) List(limit int, offset int) ([]models.History, error) {
-	ret := _mock.Called(limit, offset)
-
-	if len(ret) == 0 {
-		panic("no return value specified for List")
-	}
-
-	var r0 []models.History
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(int, int) ([]models.History, error)); ok {
-		return returnFunc(limit, offset)
-	}
-	if returnFunc, ok := ret.Get(0).(func(int, int) []models.History); ok {
-		r0 = returnFunc(limit, offset)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]models.History)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(int, int) error); ok {
-		r1 = returnFunc(limit, offset)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockHistoryRepositoryInterface_List_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'List'
-type MockHistoryRepositoryInterface_List_Call struct {
-	*mock.Call
-}
-
-// List is a helper method to define mock.On call
-//   - limit int
-//   - offset int
-func (_e *MockHistoryRepositoryInterface_Expecter) List(limit interface{}, offset interface{}) *MockHistoryRepositoryInterface_List_Call {
-	return &MockHistoryRepositoryInterface_List_Call{Call: _e.mock.On("List", limit, offset)}
-}
-
-func (_c *MockHistoryRepositoryInterface_List_Call) Run(run func(limit int, offset int)) *MockHistoryRepositoryInterface_List_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 int
-		if args[0] != nil {
-			arg0 = args[0].(int)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 int
 		if args[1] != nil {
@@ -925,12 +943,86 @@ func (_c *MockHistoryRepositoryInterface_List_Call) Run(run func(limit int, offs
 	return _c
 }
 
+func (_c *MockHistoryRepositoryInterface_FindRecent_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_FindRecent_Call {
+	_c.Call.Return(historys, err)
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_FindRecent_Call) RunAndReturn(run func(ctx context.Context, limit int) ([]models.History, error)) *MockHistoryRepositoryInterface_FindRecent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// List provides a mock function for the type MockHistoryRepositoryInterface
+func (_mock *MockHistoryRepositoryInterface) List(ctx context.Context, limit int, offset int) ([]models.History, error) {
+	ret := _mock.Called(ctx, limit, offset)
+
+	if len(ret) == 0 {
+		panic("no return value specified for List")
+	}
+
+	var r0 []models.History
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) ([]models.History, error)); ok {
+		return returnFunc(ctx, limit, offset)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) []models.History); ok {
+		r0 = returnFunc(ctx, limit, offset)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.History)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int, int) error); ok {
+		r1 = returnFunc(ctx, limit, offset)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockHistoryRepositoryInterface_List_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'List'
+type MockHistoryRepositoryInterface_List_Call struct {
+	*mock.Call
+}
+
+// List is a helper method to define mock.On call
+//   - ctx context.Context
+//   - limit int
+//   - offset int
+func (_e *MockHistoryRepositoryInterface_Expecter) List(ctx interface{}, limit interface{}, offset interface{}) *MockHistoryRepositoryInterface_List_Call {
+	return &MockHistoryRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx, limit, offset)}
+}
+
+func (_c *MockHistoryRepositoryInterface_List_Call) Run(run func(ctx context.Context, limit int, offset int)) *MockHistoryRepositoryInterface_List_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
 func (_c *MockHistoryRepositoryInterface_List_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_List_Call {
 	_c.Call.Return(historys, err)
 	return _c
 }
 
-func (_c *MockHistoryRepositoryInterface_List_Call) RunAndReturn(run func(limit int, offset int) ([]models.History, error)) *MockHistoryRepositoryInterface_List_Call {
+func (_c *MockHistoryRepositoryInterface_List_Call) RunAndReturn(run func(ctx context.Context, limit int, offset int) ([]models.History, error)) *MockHistoryRepositoryInterface_List_Call {
 	_c.Call.Return(run)
 	return _c
 }

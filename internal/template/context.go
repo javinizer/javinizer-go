@@ -1,6 +1,7 @@
 package template
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -36,7 +37,7 @@ type Context struct {
 	// People
 	Director       string
 	Actresses      []string        // Pre-formatted actress names (LastName FirstName via FullName). Legacy: use ActressDetails for FirstNameOrder-aware formatting.
-	ActressDetails []ActressDetail // Source of truth for name formatting; formatActressNameLang uses this first, falls back to Actresses.
+	ActressDetails []ActressDetail // Source of truth for name formatting; formatActressName/formatActressNames uses this first, falls back to Actresses.
 	FirstName      string          // For single actress context
 	LastName       string          // For single actress context
 	ActressName    string          // Explicit actress name for .actors image filenames
@@ -85,13 +86,34 @@ type Context struct {
 	GroupActress            bool   // Replace multiple actresses with group name
 	GroupActressName        string // Folder name when GroupActress is enabled and multiple actresses (default: "@Group")
 	GroupUnknownActressName string // Replacement when GroupActress is enabled and the actress list is empty or unknown (default: "@Unknown")
-	FirstNameOrder          bool   // true = FirstName LastName, false = LastName FirstName (default: false for backward compat)
-	ActressLanguageJa       bool   // true = prefer JapaneseName over First/Last when available (mirrors nfo.actress_language_ja)
-	ActressDelimiter        string // Delimiter between actress names when <ACTORS> has no DELIM= modifier (default: ", ")
+
+	// Name formatting
+	FirstNameOrder    bool   // true = FirstName LastName, false = LastName FirstName (default: false for backward compat)
+	ActressLanguageJa bool   // true = prefer JapaneseName over First/Last when available (mirrors nfo.actress_language_ja)
+	ActressDelimiter  string // Delimiter between actress names when <ACTORS> has no DELIM= modifier (default: ", ")
 }
 
-// NewContextFromMovie creates a template context from a Movie model
+// ContextOptions holds optional configuration for building a template Context.
+// Zero-value options produce the same result as NewContextFromMovie (LastName-first names).
+type ContextOptions struct {
+	// FirstNameOrder controls actress name order in the Actresses list.
+	// When true, names use FirstName LastName order (e.g., "Yui Hatano").
+	// When false (default), names use LastName FirstName order (e.g., "Hatano Yui").
+	FirstNameOrder bool
+}
+
+// NewContextFromMovie creates a template context from a Movie model.
+// Actress names use LastName-first format. Use NewContextFromMovieWithOptions
+// for config-aware name formatting.
 func NewContextFromMovie(movie *models.Movie) *Context {
+	return NewContextFromMovieWithOptions(movie, ContextOptions{})
+}
+
+// NewContextFromMovieWithOptions creates a template context from a Movie model
+// with the given options. When opts.FirstNameOrder is true, actress names in
+// the Actresses list use FirstName LastName order, matching the NFO generator's
+// config-aware formatting.
+func NewContextFromMovieWithOptions(movie *models.Movie, opts ContextOptions) *Context {
 	ctx := &Context{
 		ID:               movie.ID,
 		ContentID:        movie.ContentID,
@@ -106,9 +128,10 @@ func NewContextFromMovie(movie *models.Movie) *Context {
 		Series:           movie.Series,
 		OriginalFilename: movie.OriginalFileName,
 		Description:      movie.Description,
-		CoverURL:         movie.CoverURL,
+		CoverURL:         movie.Poster.CoverURL,
 		TrailerURL:       movie.TrailerURL,
 		Translations:     buildTranslationMap(movie.Translations),
+		FirstNameOrder:   opts.FirstNameOrder,
 	}
 
 	// Extract rating
@@ -116,12 +139,14 @@ func NewContextFromMovie(movie *models.Movie) *Context {
 		ctx.Rating = movie.RatingScore
 	}
 
-	// Build actress list
+	// Build actress list using config-aware name formatting
 	if len(movie.Actresses) > 0 {
 		ctx.Actresses = make([]string, 0, len(movie.Actresses))
 		ctx.ActressDetails = make([]ActressDetail, 0, len(movie.Actresses))
 		for _, actress := range movie.Actresses {
-			ctx.Actresses = append(ctx.Actresses, actress.FullName())
+			ctx.Actresses = append(ctx.Actresses, models.FormatActressName(actress, models.FormatActressNameOptions{
+				FirstNameOrder: opts.FirstNameOrder,
+			}))
 			ctx.ActressDetails = append(ctx.ActressDetails, ActressDetail{
 				FirstName:    actress.FirstName,
 				LastName:     actress.LastName,
@@ -130,10 +155,8 @@ func NewContextFromMovie(movie *models.Movie) *Context {
 		}
 
 		// Set first/last name from first actress for single-actress templates
-		if len(movie.Actresses) > 0 {
-			ctx.FirstName = movie.Actresses[0].FirstName
-			ctx.LastName = movie.Actresses[0].LastName
-		}
+		ctx.FirstName = movie.Actresses[0].FirstName
+		ctx.LastName = movie.Actresses[0].LastName
 	}
 
 	// Build genre list
@@ -143,60 +166,6 @@ func NewContextFromMovie(movie *models.Movie) *Context {
 			ctx.Genres = append(ctx.Genres, genre.Name)
 		}
 	}
-
-	return ctx
-}
-
-// NewContextFromScraperResult creates a template context from a ScraperResult
-func NewContextFromScraperResult(result *models.ScraperResult) *Context {
-	ctx := &Context{
-		ID:            result.ID,
-		ContentID:     result.ContentID,
-		Title:         result.Title,
-		OriginalTitle: result.OriginalTitle,
-		ReleaseDate:   result.ReleaseDate,
-		Runtime:       result.Runtime,
-		Director:      result.Director,
-		Maker:         result.Maker,
-		Label:         result.Label,
-		Series:        result.Series,
-		Description:   result.Description,
-		CoverURL:      result.CoverURL,
-		TrailerURL:    result.TrailerURL,
-		Translations:  buildTranslationMap(result.Translations),
-	}
-
-	if result.ReleaseDate != nil {
-		ctx.ReleaseYear = result.ReleaseDate.Year()
-	}
-
-	// Extract rating
-	if result.Rating != nil {
-		ctx.Rating = result.Rating.Score
-	}
-
-	// Build actress list
-	if len(result.Actresses) > 0 {
-		ctx.Actresses = make([]string, 0, len(result.Actresses))
-		ctx.ActressDetails = make([]ActressDetail, 0, len(result.Actresses))
-		for _, actress := range result.Actresses {
-			ctx.Actresses = append(ctx.Actresses, actress.FullName())
-			ctx.ActressDetails = append(ctx.ActressDetails, ActressDetail{
-				FirstName:    actress.FirstName,
-				LastName:     actress.LastName,
-				JapaneseName: actress.JapaneseName,
-			})
-		}
-
-		// Set first/last name from first actress
-		if len(result.Actresses) > 0 {
-			ctx.FirstName = result.Actresses[0].FirstName
-			ctx.LastName = result.Actresses[0].LastName
-		}
-	}
-
-	// Build genre list
-	ctx.Genres = result.Genres
 
 	return ctx
 }
@@ -265,10 +234,10 @@ func (c *Context) Clone() *Context {
 	return &clone
 }
 
-// GetMediaInfo lazy-loads and caches video metadata.
+// getMediaInfo lazy-loads and caches video metadata.
 // Thread-safe: uses sync.Once to ensure single initialization even under concurrent access.
 // Preserves pre-existing cached values from Clone() to avoid duplicate expensive analysis.
-func (c *Context) GetMediaInfo() *mediainfo.VideoInfo {
+func (c *Context) getMediaInfo() *mediainfo.VideoInfo {
 	c.mediaInfoOnce.Do(func() {
 		if c.cachedMediaInfo != nil || c.mediaInfoError != nil {
 			return
@@ -277,7 +246,7 @@ func (c *Context) GetMediaInfo() *mediainfo.VideoInfo {
 			c.mediaInfoError = fmt.Errorf("no video file path")
 			return
 		}
-		c.cachedMediaInfo, c.mediaInfoError = mediainfo.Analyze(c.VideoFilePath)
+		c.cachedMediaInfo, c.mediaInfoError = mediainfo.Analyze(context.Background(), c.VideoFilePath)
 	})
 	return c.cachedMediaInfo
 }
@@ -370,4 +339,16 @@ func (c *Context) formatActressNamesLang(preferJa bool, firstNameOrderHint *bool
 		names[i] = c.formatActressNameLang(detail, preferJa, firstNameOrderHint)
 	}
 	return names
+}
+
+// formatActressName formats a single ActressDetail into a display name,
+// respecting the Context's ActressLanguageJa and FirstNameOrder settings.
+func (c *Context) formatActressName(detail ActressDetail) string {
+	return c.formatActressNameLang(detail, c.ActressLanguageJa, nil)
+}
+
+// formatActressNames returns a slice of formatted actress names using ActressDetails.
+// Falls back to the pre-formatted Actresses slice if ActressDetails is empty.
+func (c *Context) formatActressNames() []string {
+	return c.formatActressNamesLang(c.ActressLanguageJa, nil)
 }

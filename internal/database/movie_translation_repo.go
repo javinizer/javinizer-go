@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -8,23 +9,23 @@ import (
 	"gorm.io/gorm"
 )
 
-type MovieTranslationRepository struct {
+type movieTranslationRepository struct {
 	db *DB
 }
 
-func NewMovieTranslationRepository(db *DB) *MovieTranslationRepository {
-	return &MovieTranslationRepository{db: db}
+func newMovieTranslationRepository(db *DB) *movieTranslationRepository {
+	return &movieTranslationRepository{db: db}
 }
 
 func translationEntityID(movieID, language string) string {
 	return fmt.Sprintf("translation %s/%s", movieID, language)
 }
 
-func (r *MovieTranslationRepository) Upsert(translation *models.MovieTranslation) error {
-	return r.UpsertTx(r.db.DB, translation)
+func (r *movieTranslationRepository) Upsert(ctx context.Context, translation *models.MovieTranslation) error {
+	return r.UpsertTx(r.db.WithContext(ctx), translation)
 }
 
-func (r *MovieTranslationRepository) UpsertTx(tx *gorm.DB, translation *models.MovieTranslation) error {
+func (r *movieTranslationRepository) UpsertTx(tx *gorm.DB, translation *models.MovieTranslation) error {
 	var existing models.MovieTranslation
 	err := tx.First(&existing, "movie_id = ? AND language = ?", translation.MovieID, translation.Language).Error
 	if err != nil {
@@ -55,26 +56,26 @@ func (r *MovieTranslationRepository) UpsertTx(tx *gorm.DB, translation *models.M
 	return nil
 }
 
-func (r *MovieTranslationRepository) FindByMovieAndLanguage(movieID, language string) (*models.MovieTranslation, error) {
+func (r *movieTranslationRepository) FindByMovieAndLanguage(ctx context.Context, movieID, language string) (*models.MovieTranslation, error) {
 	var translation models.MovieTranslation
-	err := r.db.First(&translation, "movie_id = ? AND language = ?", movieID, language).Error
+	err := r.db.WithContext(ctx).First(&translation, "movie_id = ? AND language = ?", movieID, language).Error
 	if err != nil {
 		return nil, wrapDBErr("find", translationEntityID(movieID, language), err)
 	}
 	return &translation, nil
 }
 
-func (r *MovieTranslationRepository) FindAllByMovie(movieID string) ([]models.MovieTranslation, error) {
+func (r *movieTranslationRepository) FindAllByMovie(ctx context.Context, movieID string) ([]models.MovieTranslation, error) {
 	var translations []models.MovieTranslation
-	err := r.db.Where("movie_id = ?", movieID).Find(&translations).Error
+	err := r.db.WithContext(ctx).Where("movie_id = ?", movieID).Find(&translations).Error
 	if err != nil {
 		return nil, wrapDBErr("find", fmt.Sprintf("translations for movie %s", movieID), err)
 	}
 	return translations, nil
 }
 
-func (r *MovieTranslationRepository) Delete(movieID, language string) error {
-	if err := r.db.Delete(&models.MovieTranslation{}, "movie_id = ? AND language = ?", movieID, language).Error; err != nil {
+func (r *movieTranslationRepository) Delete(ctx context.Context, movieID, language string) error {
+	if err := r.db.WithContext(ctx).Delete(&models.MovieTranslation{}, "movie_id = ? AND language = ?", movieID, language).Error; err != nil {
 		return wrapDBErr("delete", translationEntityID(movieID, language), err)
 	}
 	return nil

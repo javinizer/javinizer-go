@@ -1,6 +1,7 @@
 package system
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,8 +13,27 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
+
+// ProxyTestResult holds the outcome of a proxy connectivity test,
+// decoupled from the HTTP response layer so it can be tested independently.
+type ProxyTestResult struct {
+	Success           bool
+	StatusCode        int
+	DurationMS        int64
+	Message           string
+	ProxyURL          string
+	FlareSolverrURL   string
+	VerificationToken string
+	TokenExpiresAt    int64
+}
+
+const defaultProxyTestURL = "https://httpbin.org/ip"
 
 // testProxy godoc
 // @Summary Test proxy connectivity
@@ -21,15 +41,15 @@ import (
 // @Tags system
 // @Accept json
 // @Produce json
-// @Param request body ProxyTestRequest true "Proxy test request"
-// @Success 200 {object} ProxyTestResponse
-// @Failure 400 {object} ErrorResponse
+// @Param request body contracts.ProxyTestRequest true "Proxy test request"
+// @Success 200 {object} contracts.ProxyTestResponse
+// @Failure 400 {object} contracts.ErrorResponse
 // @Router /api/v1/proxy/test [post]
-func testProxy(deps *ServerDependencies) gin.HandlerFunc {
+func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req ProxyTestRequest
+		var req contracts.ProxyTestRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, ErrorResponse{Error: "Invalid proxy test request"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid proxy test request"})
 			return
 		}
 
@@ -38,125 +58,165 @@ func testProxy(deps *ServerDependencies) gin.HandlerFunc {
 			targetURL = defaultProxyTestURL
 		}
 		if !isValidHTTPURL(targetURL) {
-			c.JSON(400, ErrorResponse{Error: "target_url must be a valid http(s) URL"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "target_url must be a valid http(s) URL"})
 			return
 		}
-
 		if err := ssrf.CheckURL(targetURL); err != nil {
-			c.JSON(http.StatusForbidden, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		start := time.Now()
-		resp := ProxyTestResponse{
-			Mode:      req.Mode,
-			TargetURL: targetURL,
-		}
-
+		var result ProxyTestResult
 		switch req.Mode {
 		case "direct":
-			globalProxy := deps.GetConfig().Scrapers.Proxy
-			proxyProfile := config.ResolveScraperProxy(globalProxy, &req.Proxy)
+			apiCfg := rt.GetAPIConfig()
+			globalProxy := &apiCfg.ProxyConfig
+			scraperProxy := &req.Proxy
+			proxyProfile := models.ResolveScraperProxy(*globalProxy, scraperProxy)
 
 			if !req.Proxy.Enabled || strings.TrimSpace(proxyProfile.URL) == "" {
-				c.JSON(400, ErrorResponse{Error: "proxy.enabled=true and proxy profile with url are required for direct proxy test"})
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "proxy.enabled=true and proxy profile with url are required for direct proxy test"})
 				return
 			}
-			resp.ProxyURL = httpclient.SanitizeProxyURL(proxyProfile.URL)
+			result = TestDirectProxy(c.Request.Context(), targetURL, proxyProfile, apiCfg.ScraperUserAgent)
 
-			transport, err := httpclient.NewTransport(proxyProfile)
-			if err != nil {
-				resp.Success = false
-				resp.DurationMS = time.Since(start).Milliseconds()
-				resp.Message = fmt.Sprintf("failed to create proxy transport: %v", err)
-				c.JSON(200, resp)
-				return
-			}
-			ssrf.WrapTransportWithSSRFCheck(transport)
-
-			client := resty.New()
-			client.SetTimeout(30 * time.Second)
-			client.SetTransport(transport)
-			client.SetRedirectPolicy(resty.NoRedirectPolicy())
-
-			httpResp, err := client.R().
-				SetHeader("User-Agent", config.ResolveScraperUserAgent(deps.GetConfig().Scrapers.UserAgent)).
-				SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").
-				Get(targetURL)
-
-			resp.DurationMS = time.Since(start).Milliseconds()
-			if err != nil {
-				resp.Success = false
-				resp.Message = formatDirectProxyError(err)
-				c.JSON(200, resp)
-				return
-			}
-
-			resp.StatusCode = httpResp.StatusCode()
-			resp.Success = httpResp.StatusCode() >= 200 && httpResp.StatusCode() < 400
-			if resp.Success {
-				resp.Message = fmt.Sprintf("direct proxy request succeeded with status %d", httpResp.StatusCode())
-				// Issue verification token for successful test
-				if deps.TokenStore != nil {
-					vt := deps.TokenStore.Create("global", core.HashProxyConfig(req.Proxy))
-					resp.VerificationToken = vt.Token
-					resp.TokenExpiresAt = vt.ExpiresAt.Unix()
-				}
-			} else {
-				resp.Message = fmt.Sprintf("direct proxy request returned status %d", httpResp.StatusCode())
-			}
-			c.JSON(200, resp)
 		case "flaresolverr":
 			if !req.FlareSolverr.Enabled || strings.TrimSpace(req.FlareSolverr.URL) == "" {
-				c.JSON(400, ErrorResponse{Error: "flaresolverr.enabled=true and flaresolverr.url are required for flaresolverr test"})
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "flaresolverr.enabled=true and flaresolverr.url are required for flaresolverr test"})
 				return
 			}
+			apiCfg := rt.GetAPIConfig()
+			globalProxy := &apiCfg.ProxyConfig
+			scraperProxy := &req.Proxy
+			proxyProfile := models.ResolveScraperProxy(*globalProxy, scraperProxy)
 
-			// Resolve proxy profile for FlareSolverr request proxy
-			globalProxy := deps.GetConfig().Scrapers.Proxy
-			proxyProfile := config.ResolveScraperProxy(globalProxy, &req.Proxy)
+			result = TestFlareSolverr(targetURL, req.FlareSolverr, proxyProfile)
 
-			resp.ProxyURL = httpclient.SanitizeProxyURL(proxyProfile.URL)
-			resp.FlareSolverrURL = req.FlareSolverr.URL
-
-			_, fs, err := httpclient.NewRestyClientWithFlareSolverr(proxyProfile, req.FlareSolverr, 45*time.Second, 0)
-			if err != nil {
-				resp.Success = false
-				resp.DurationMS = time.Since(start).Milliseconds()
-				resp.Message = fmt.Sprintf("failed to create flaresolverr client: %v", err)
-				c.JSON(200, resp)
-				return
-			}
-			if fs == nil {
-				resp.Success = false
-				resp.DurationMS = time.Since(start).Milliseconds()
-				resp.Message = "flaresolverr client is not enabled in proxy config"
-				c.JSON(200, resp)
-				return
-			}
-
-			html, cookies, err := fs.ResolveURL(targetURL)
-			resp.DurationMS = time.Since(start).Milliseconds()
-			if err != nil {
-				resp.Success = false
-				resp.Message = fmt.Sprintf("flaresolverr request failed: %v", err)
-				c.JSON(200, resp)
-				return
-			}
-
-			resp.Success = true
-			resp.Message = fmt.Sprintf("flaresolverr resolved page successfully (%d bytes, %d cookies)", len(html), len(cookies))
-			// Issue verification token for successful test
-			if deps.TokenStore != nil {
-				vt := deps.TokenStore.Create("flaresolverr", core.HashProxyConfig(req.FlareSolverr))
-				resp.VerificationToken = vt.Token
-				resp.TokenExpiresAt = vt.ExpiresAt.Unix()
-			}
-			c.JSON(200, resp)
 		default:
-			c.JSON(400, ErrorResponse{Error: "mode must be 'direct' or 'flaresolverr'"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "mode must be 'direct' or 'flaresolverr'"})
+			return
 		}
+
+		// Issue verification token for successful tests
+		if result.Success {
+			deps := rt.Deps()
+			if deps.TokenStore != nil {
+				var configHash string
+				var hashErr error
+				if req.Mode == "direct" {
+					configHash, hashErr = core.HashProxyConfig(req.Proxy)
+				} else {
+					configHash, hashErr = core.HashProxyConfig(req.FlareSolverr)
+				}
+				if hashErr != nil {
+					logging.Warnf("failed to hash %s config: %v", req.Mode, hashErr)
+				} else {
+					token, expiresAt, createErr := deps.TokenStore.Create(req.Mode, configHash)
+					if createErr != nil {
+						logging.Warnf("failed to generate verification token: %v", createErr)
+					} else {
+						result.VerificationToken = token
+						result.TokenExpiresAt = expiresAt.Unix()
+					}
+				}
+			}
+		}
+
+		// Map domain result to HTTP response
+		c.JSON(http.StatusOK, contracts.ProxyTestResponse{
+			Success:           result.Success,
+			Mode:              req.Mode,
+			TargetURL:         targetURL,
+			StatusCode:        result.StatusCode,
+			DurationMS:        result.DurationMS,
+			Message:           result.Message,
+			ProxyURL:          result.ProxyURL,
+			FlareSolverrURL:   result.FlareSolverrURL,
+			VerificationToken: result.VerificationToken,
+			TokenExpiresAt:    result.TokenExpiresAt,
+		})
 	}
+}
+
+// TestDirectProxy tests direct proxy connectivity to a target URL.
+// It creates a transport, sends an HTTP GET, and returns a ProxyTestResult
+// with the outcome. This function is side-effect-free and testable in isolation.
+func TestDirectProxy(ctx context.Context, targetURL string, proxyProfile *models.ProxyProfile, userAgent string) ProxyTestResult {
+	start := time.Now()
+	result := ProxyTestResult{
+		ProxyURL: httpclient.SanitizeProxyURL(proxyProfile.URL),
+	}
+
+	transport, err := httpclient.NewTransport(proxyProfile)
+	if err != nil {
+		result.DurationMS = time.Since(start).Milliseconds()
+		result.Message = fmt.Sprintf("failed to create proxy transport: %v", err)
+		return result
+	}
+	ssrf.WrapTransportWithSSRFCheck(transport)
+
+	client := resty.New()
+	client.SetTimeout(30 * time.Second)
+	client.SetTransport(transport)
+	client.SetRedirectPolicy(resty.NoRedirectPolicy())
+
+	if userAgent == "" {
+		userAgent = config.DefaultUserAgent
+	}
+
+	httpResp, err := client.R().
+		SetHeader("User-Agent", userAgent).
+		SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").
+		Get(targetURL)
+
+	result.DurationMS = time.Since(start).Milliseconds()
+	if err != nil {
+		result.Message = formatDirectProxyError(err)
+		return result
+	}
+
+	result.StatusCode = httpResp.StatusCode()
+	result.Success = httpResp.StatusCode() >= 200 && httpResp.StatusCode() < 400
+	if result.Success {
+		result.Message = fmt.Sprintf("direct proxy request succeeded with status %d", httpResp.StatusCode())
+	} else {
+		result.Message = fmt.Sprintf("direct proxy request returned status %d", httpResp.StatusCode())
+	}
+	return result
+}
+
+// TestFlareSolverr tests FlareSolverr connectivity to a target URL.
+// It creates a FlareSolverr client, resolves the URL, and returns a ProxyTestResult
+// with the outcome. This function is side-effect-free and testable in isolation.
+func TestFlareSolverr(targetURL string, flareCfg models.FlareSolverrConfig, proxyProfile *models.ProxyProfile) ProxyTestResult {
+	start := time.Now()
+	result := ProxyTestResult{
+		ProxyURL:        httpclient.SanitizeProxyURL(proxyProfile.URL),
+		FlareSolverrURL: flareCfg.URL,
+	}
+
+	restyResult, err := httpclient.NewRestyClientWithFlareSolverr(proxyProfile, flareCfg, 45*time.Second, 0)
+	if err != nil {
+		result.DurationMS = time.Since(start).Milliseconds()
+		result.Message = fmt.Sprintf("failed to create flaresolverr client: %v", err)
+		return result
+	}
+	if restyResult.FlareSolverr == nil {
+		result.DurationMS = time.Since(start).Milliseconds()
+		result.Message = "flaresolverr client is not enabled in proxy config"
+		return result
+	}
+
+	html, cookies, err := restyResult.FlareSolverr.ResolveURL(targetURL)
+	result.DurationMS = time.Since(start).Milliseconds()
+	if err != nil {
+		result.Message = fmt.Sprintf("flaresolverr request failed: %v", err)
+		return result
+	}
+
+	result.Success = true
+	result.Message = fmt.Sprintf("flaresolverr resolved page successfully (%d bytes, %d cookies)", len(html), len(cookies))
+	return result
 }
 
 func isValidHTTPURL(rawURL string) bool {

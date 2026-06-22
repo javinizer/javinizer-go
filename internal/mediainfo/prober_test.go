@@ -5,8 +5,8 @@ import (
 )
 
 func TestProberRegistry_Register(t *testing.T) {
-	cfg := DefaultMediaInfoConfig()
-	registry := NewProberRegistry(cfg)
+	cfg := defaultMediaInfoConfig()
+	registry := newProberRegistry(cfg)
 
 	// Should have all native probers registered
 	expectedCount := 4 // MP4, MKV, MOV, AVI
@@ -16,8 +16,8 @@ func TestProberRegistry_Register(t *testing.T) {
 }
 
 func TestProberRegistry_FindProber(t *testing.T) {
-	cfg := DefaultMediaInfoConfig()
-	registry := NewProberRegistry(cfg)
+	cfg := defaultMediaInfoConfig()
+	registry := newProberRegistry(cfg)
 
 	tests := []struct {
 		name     string
@@ -53,7 +53,7 @@ func TestProberRegistry_FindProber(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prober := registry.FindProber(tt.header)
+			prober := registry.findProber(tt.header)
 			if tt.expected == "" {
 				if prober != nil {
 					t.Errorf("Expected no prober, but got %s", prober.Name())
@@ -70,7 +70,7 @@ func TestProberRegistry_FindProber(t *testing.T) {
 }
 
 func TestMP4Prober_CanProbe(t *testing.T) {
-	prober := NewMP4Prober()
+	prober := newMP4Prober()
 
 	tests := []struct {
 		name     string
@@ -101,7 +101,7 @@ func TestMP4Prober_CanProbe(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := prober.CanProbe(tt.header)
+			result := prober.canProbe(tt.header)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
 			}
@@ -110,7 +110,7 @@ func TestMP4Prober_CanProbe(t *testing.T) {
 }
 
 func TestMKVProber_CanProbe(t *testing.T) {
-	prober := NewMKVProber()
+	prober := newMKVProber()
 
 	tests := []struct {
 		name     string
@@ -141,7 +141,7 @@ func TestMKVProber_CanProbe(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := prober.CanProbe(tt.header)
+			result := prober.canProbe(tt.header)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
 			}
@@ -150,7 +150,7 @@ func TestMKVProber_CanProbe(t *testing.T) {
 }
 
 func TestMOVProber_CanProbe(t *testing.T) {
-	prober := NewMOVProber()
+	prober := newMOVProber()
 
 	tests := []struct {
 		name     string
@@ -201,7 +201,7 @@ func TestMOVProber_CanProbe(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := prober.CanProbe(tt.header)
+			result := prober.canProbe(tt.header)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v for header %v", tt.expected, result, tt.header)
 			}

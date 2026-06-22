@@ -6,6 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/database"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 type createTokenRequest struct {
@@ -42,20 +44,19 @@ type tokenListItem struct {
 // @Produce json
 // @Param request body createTokenRequest true "Token details"
 // @Success 201 {object} tokenResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/tokens [post]
-func createToken(deps *ServerDependencies) gin.HandlerFunc {
+func createToken(svc *TokenService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req createTokenRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		service := NewTokenService(deps.ApiTokenRepo)
-		token, fullToken, err := service.Create(req.Name)
+		token, fullToken, err := svc.Create(c.Request.Context(), req.Name)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -76,14 +77,13 @@ func createToken(deps *ServerDependencies) gin.HandlerFunc {
 // @Tags tokens
 // @Produce json
 // @Success 200 {object} tokenListResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/tokens [get]
-func listTokens(deps *ServerDependencies) gin.HandlerFunc {
+func listTokens(svc *TokenService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		service := NewTokenService(deps.ApiTokenRepo)
-		tokens, err := service.List()
+		tokens, err := svc.List(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -112,20 +112,19 @@ func listTokens(deps *ServerDependencies) gin.HandlerFunc {
 // @Produce json
 // @Param id path string true "Token ID"
 // @Success 200 {object} map[string]string
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/tokens/{id} [delete]
-func revokeToken(deps *ServerDependencies) gin.HandlerFunc {
+func revokeToken(svc *TokenService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 
-		service := NewTokenService(deps.ApiTokenRepo)
-		if err := service.Revoke(id); err != nil {
+		if err := svc.Revoke(c.Request.Context(), id); err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, ErrorResponse{Error: "token not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "token not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -140,21 +139,20 @@ func revokeToken(deps *ServerDependencies) gin.HandlerFunc {
 // @Produce json
 // @Param id path string true "Token ID"
 // @Success 200 {object} tokenResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/tokens/{id}/regenerate [post]
-func regenerateToken(deps *ServerDependencies) gin.HandlerFunc {
+func regenerateToken(svc *TokenService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 
-		service := NewTokenService(deps.ApiTokenRepo)
-		token, fullToken, err := service.Regenerate(id)
+		token, fullToken, err := svc.Regenerate(c.Request.Context(), id)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, ErrorResponse{Error: "token not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "token not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 

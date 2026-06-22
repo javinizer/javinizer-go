@@ -29,16 +29,19 @@ func NewCommand() *cobra.Command {
 					return fmt.Errorf("failed to load config: %w", err)
 				}
 
-				service := update.NewService(cfg)
+				service := update.NewService(update.UpdateConfig{
+					Enabled:                   cfg.System.VersionCheckEnabled,
+					VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+				})
 				state, err := service.ForceCheck(ctx)
 
-				if state != nil && state.Source == "disabled" {
+				if state != nil && state.Source == update.UpdateSourceDisabled {
 					_, werr := fmt.Fprintln(cmd.OutOrStdout(), "Update checks are disabled in configuration")
 					return werr
 				}
 
-				// Check for errors - ForceCheck may return err OR set state.Source to "error"
-				if err != nil || state.Source == "error" || state.Version == "" {
+				// Check for errors - ForceCheck may return err OR set state.Source to UpdateSourceError.
+				if err != nil || state == nil || state.Version == "" || state.Source == update.UpdateSourceError {
 					// Print error to stderr
 					var errorMsg string
 					if err != nil {

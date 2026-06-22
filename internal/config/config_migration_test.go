@@ -33,8 +33,8 @@ scrapers:
 	require.NoError(t, err)
 
 	assert.Equal(t, CurrentConfigVersion, cfg.ConfigVersion)
-	assert.Equal(t, 8080, cfg.Server.Port)                                    // Reset to default port
-	assert.Equal(t, DefaultConfig().Scrapers.Priority, cfg.Scrapers.Priority) // Reset to default priorities
+	assert.Equal(t, 8080, cfg.Server.Port)                                            // Reset to default port
+	assert.Equal(t, DefaultConfig(nil, nil).Scrapers.Priority, cfg.Scrapers.Priority) // Reset to default priorities
 
 	saved, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
@@ -86,8 +86,8 @@ system:
 	require.NoError(t, err)
 	assert.Equal(t, CurrentConfigVersion, cfg.ConfigVersion)
 	// Legacy configs are reset to defaults, so user settings are not preserved
-	assert.Equal(t, DefaultConfig().System.VersionCheckEnabled, cfg.System.VersionCheckEnabled)
-	assert.Equal(t, DefaultConfig().System.VersionCheckIntervalHours, cfg.System.VersionCheckIntervalHours)
+	assert.Equal(t, DefaultConfig(nil, nil).System.VersionCheckEnabled, cfg.System.VersionCheckEnabled)
+	assert.Equal(t, DefaultConfig(nil, nil).System.VersionCheckIntervalHours, cfg.System.VersionCheckIntervalHours)
 
 	saved, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)

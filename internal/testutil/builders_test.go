@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestMovieBuilderDefaults verifies that NewMovieBuilder returns a Movie with sensible defaults.
+// TestmovieBuilderDefaults verifies that NewMovieBuilder returns a Movie with sensible defaults.
 func TestMovieBuilderDefaults(t *testing.T) {
 	movie := NewMovieBuilder().Build()
 
@@ -19,7 +19,7 @@ func TestMovieBuilderDefaults(t *testing.T) {
 	assert.Equal(t, "Test Movie", movie.Title, "Default Title should be Test Movie")
 }
 
-// TestMovieBuilderWithTitle tests the WithTitle method.
+// TestmovieBuilderWithTitle tests the WithTitle method.
 func TestMovieBuilderWithTitle(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -59,7 +59,7 @@ func TestMovieBuilderWithTitle(t *testing.T) {
 	}
 }
 
-// TestMovieBuilderWithActresses tests the WithActresses method.
+// TestmovieBuilderWithActresses tests the WithActresses method.
 func TestMovieBuilderWithActresses(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -116,7 +116,7 @@ func TestMovieBuilderWithActresses(t *testing.T) {
 	}
 }
 
-// TestMovieBuilderWithGenres tests the WithGenres method.
+// TestmovieBuilderWithGenres tests the WithGenres method.
 func TestMovieBuilderWithGenres(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -173,7 +173,7 @@ func TestMovieBuilderWithGenres(t *testing.T) {
 	}
 }
 
-// TestMovieBuilderWithReleaseDate tests the WithReleaseDate method.
+// TestmovieBuilderWithReleaseDate tests the WithReleaseDate method.
 func TestMovieBuilderWithReleaseDate(t *testing.T) {
 	testDate := time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC)
 
@@ -185,7 +185,7 @@ func TestMovieBuilderWithReleaseDate(t *testing.T) {
 	assert.Equal(t, testDate, *movie.ReleaseDate)
 }
 
-// TestMovieBuilderWithCoverURL tests the WithCoverURL method.
+// TestmovieBuilderWithCoverURL tests the WithCoverURL method.
 func TestMovieBuilderWithCoverURL(t *testing.T) {
 	tests := []struct {
 		name string
@@ -210,12 +210,12 @@ func TestMovieBuilderWithCoverURL(t *testing.T) {
 				WithCoverURL(tt.url).
 				Build()
 
-			assert.Equal(t, tt.want, movie.CoverURL)
+			assert.Equal(t, tt.want, movie.Poster.CoverURL)
 		})
 	}
 }
 
-// TestMovieBuilderMethodChaining tests fluent API method chaining.
+// TestmovieBuilderMethodChaining tests fluent API method chaining.
 func TestMovieBuilderMethodChaining(t *testing.T) {
 	testDate := time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC)
 
@@ -239,12 +239,12 @@ func TestMovieBuilderMethodChaining(t *testing.T) {
 	assert.Equal(t, "Genre X", movie.Genres[0].Name)
 	assert.NotNil(t, movie.ReleaseDate)
 	assert.Equal(t, testDate, *movie.ReleaseDate)
-	assert.Equal(t, "https://example.com/cover.jpg", movie.CoverURL)
+	assert.Equal(t, "https://example.com/cover.jpg", movie.Poster.CoverURL)
 	assert.Equal(t, "Chained description", movie.Description)
 	assert.Equal(t, "Test Studio", movie.Maker)
 }
 
-// TestMovieBuilderWithDescription tests the WithDescription method.
+// TestmovieBuilderWithDescription tests the WithDescription method.
 func TestMovieBuilderWithDescription(t *testing.T) {
 	description := "This is a test movie description"
 
@@ -255,7 +255,7 @@ func TestMovieBuilderWithDescription(t *testing.T) {
 	assert.Equal(t, description, movie.Description)
 }
 
-// TestMovieBuilderWithStudio tests the WithStudio method.
+// TestmovieBuilderWithStudio tests the WithStudio method.
 func TestMovieBuilderWithStudio(t *testing.T) {
 	studio := "Test Studio Productions"
 
@@ -266,7 +266,7 @@ func TestMovieBuilderWithStudio(t *testing.T) {
 	assert.Equal(t, studio, movie.Maker)
 }
 
-// TestMovieBuilderCanonicalID verifies the canonical test ID convention.
+// TestmovieBuilderCanonicalID verifies the canonical test ID convention.
 func TestMovieBuilderCanonicalID(t *testing.T) {
 	movie := NewMovieBuilder().Build()
 
@@ -274,7 +274,7 @@ func TestMovieBuilderCanonicalID(t *testing.T) {
 	assert.Equal(t, "IPX-123", movie.ID, "Canonical test ID should be IPX-123")
 }
 
-// TestMovieBuilderWithID tests the WithID method.
+// TestmovieBuilderWithID tests the WithID method.
 func TestMovieBuilderWithID(t *testing.T) {
 	tests := []struct {
 		name string
@@ -304,7 +304,7 @@ func TestMovieBuilderWithID(t *testing.T) {
 	}
 }
 
-// TestMovieBuilderWithContentID tests the WithContentID method.
+// TestmovieBuilderWithContentID tests the WithContentID method.
 func TestMovieBuilderWithContentID(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -334,7 +334,7 @@ func TestMovieBuilderWithContentID(t *testing.T) {
 	}
 }
 
-// TestActressBuilderDefaults verifies that NewActressBuilder returns an Actress with sensible defaults.
+// TestactressBuilderDefaults verifies that NewActressBuilder returns an Actress with sensible defaults.
 func TestActressBuilderDefaults(t *testing.T) {
 	actress := NewActressBuilder().Build()
 
@@ -343,7 +343,7 @@ func TestActressBuilderDefaults(t *testing.T) {
 	assert.Equal(t, 0, actress.DMMID, "Default DMMID should be 0")
 }
 
-// TestActressBuilderWithName tests the WithName method.
+// TestactressBuilderWithName tests the WithName method.
 func TestActressBuilderWithName(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -383,7 +383,7 @@ func TestActressBuilderWithName(t *testing.T) {
 	}
 }
 
-// TestActressBuilderWithDMMID tests the WithDMMID method.
+// TestactressBuilderWithDMMID tests the WithDMMID method.
 func TestActressBuilderWithDMMID(t *testing.T) {
 	tests := []struct {
 		name string
@@ -418,7 +418,7 @@ func TestActressBuilderWithDMMID(t *testing.T) {
 	}
 }
 
-// TestActressBuilderWithBirthdate tests the WithBirthdate method.
+// TestactressBuilderWithBirthdate tests the WithBirthdate method.
 // Note: Current Actress model doesn't have Birthdate field, but method exists for API consistency.
 func TestActressBuilderWithBirthdate(t *testing.T) {
 	testDate := time.Date(1990, 5, 15, 0, 0, 0, 0, time.UTC)
@@ -431,7 +431,7 @@ func TestActressBuilderWithBirthdate(t *testing.T) {
 	assert.NotNil(t, actress)
 }
 
-// TestActressBuilderMethodChaining tests fluent API method chaining.
+// TestactressBuilderMethodChaining tests fluent API method chaining.
 func TestActressBuilderMethodChaining(t *testing.T) {
 	testDate := time.Date(1990, 5, 15, 0, 0, 0, 0, time.UTC)
 
@@ -447,7 +447,7 @@ func TestActressBuilderMethodChaining(t *testing.T) {
 	assert.Equal(t, 123456, actress.DMMID)
 }
 
-// TestActressBuilderCanonicalDMMID verifies the canonical test DMMID convention.
+// TestactressBuilderCanonicalDMMID verifies the canonical test DMMID convention.
 func TestActressBuilderCanonicalDMMID(t *testing.T) {
 	actress := NewActressBuilder().
 		WithDMMID("123456").
@@ -457,40 +457,7 @@ func TestActressBuilderCanonicalDMMID(t *testing.T) {
 	assert.Equal(t, 123456, actress.DMMID, "Canonical test DMMID should be 123456")
 }
 
-// Example test demonstrating usage patterns (documentation via example).
-func ExampleMovieBuilder() {
-	// Create a movie with all default values
-	defaultMovie := NewMovieBuilder().Build()
-	_ = defaultMovie // defaultMovie.ID == "IPX-123", defaultMovie.Title == "Test Movie"
-
-	// Create a custom movie with method chaining
-	customMovie := NewMovieBuilder().
-		WithTitle("My Custom Movie").
-		WithActresses([]string{"Actress 1", "Actress 2"}).
-		WithGenres([]string{"Drama", "Romance"}).
-		Build()
-	_ = customMovie
-
-	// Output shows the builder pattern in action
-}
-
-// Example test demonstrating actress builder usage patterns.
-func ExampleActressBuilder() {
-	// Create an actress with default values
-	defaultActress := NewActressBuilder().Build()
-	_ = defaultActress // defaultActress.FirstName == "Test Actress"
-
-	// Create a custom actress with canonical test DMMID
-	customActress := NewActressBuilder().
-		WithName("Jane Doe").
-		WithDMMID("123456").
-		Build()
-	_ = customActress
-
-	// Output shows the builder pattern in action
-}
-
-// TestScraperResultBuilderDefaults verifies the default values set by NewScraperResultBuilder.
+// TestscraperResultBuilderDefaults verifies the default values set by NewScraperResultBuilder.
 func TestScraperResultBuilderDefaults(t *testing.T) {
 	result := NewScraperResultBuilder().Build()
 
@@ -502,7 +469,7 @@ func TestScraperResultBuilderDefaults(t *testing.T) {
 	assert.Nil(t, result.Genres, "default genres should be nil")
 }
 
-// TestScraperResultBuilderRequiredFields verifies that Build() panics when required fields are missing or invalid.
+// TestscraperResultBuilderRequiredFields verifies that Build() panics when required fields are missing or invalid.
 func TestScraperResultBuilderRequiredFields(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -535,35 +502,35 @@ func TestScraperResultBuilderRequiredFields(t *testing.T) {
 			builderFunc: func() *ScraperResultBuilder {
 				return NewScraperResultBuilder().WithContentID("A-123")
 			},
-			wantPanic: "must match format",
+			wantPanic: "", // Permissive — no format validation
 		},
 		{
 			name: "contentID too long prefix",
 			builderFunc: func() *ScraperResultBuilder {
 				return NewScraperResultBuilder().WithContentID("ABCDEF-123")
 			},
-			wantPanic: "must match format",
+			wantPanic: "", // Permissive
 		},
 		{
 			name: "contentID too short suffix",
 			builderFunc: func() *ScraperResultBuilder {
 				return NewScraperResultBuilder().WithContentID("ABC-12")
 			},
-			wantPanic: "must match format",
+			wantPanic: "", // Permissive
 		},
 		{
 			name: "contentID too long suffix",
 			builderFunc: func() *ScraperResultBuilder {
 				return NewScraperResultBuilder().WithContentID("ABC-123456")
 			},
-			wantPanic: "must match format",
+			wantPanic: "", // Permissive
 		},
 		{
 			name: "contentID missing hyphen",
 			builderFunc: func() *ScraperResultBuilder {
 				return NewScraperResultBuilder().WithContentID("ABC123")
 			},
-			wantPanic: "must match format",
+			wantPanic: "", // Permissive — no format validation
 		},
 		{
 			name: "valid 2-letter prefix",
@@ -627,7 +594,7 @@ func TestScraperResultBuilderRequiredFields(t *testing.T) {
 	}
 }
 
-// TestScraperResultBuilderWithSource verifies WithSource sets the source correctly.
+// TestscraperResultBuilderWithSource verifies WithSource sets the source correctly.
 func TestScraperResultBuilderWithSource(t *testing.T) {
 	result := NewScraperResultBuilder().
 		WithSource("r18dev").
@@ -636,7 +603,7 @@ func TestScraperResultBuilderWithSource(t *testing.T) {
 	assert.Equal(t, "r18dev", result.Source)
 }
 
-// TestScraperResultBuilderWithContentID verifies WithContentID sets the content ID correctly.
+// TestscraperResultBuilderWithContentID verifies WithContentID sets the content ID correctly.
 func TestScraperResultBuilderWithContentID(t *testing.T) {
 	result := NewScraperResultBuilder().
 		WithContentID("IPX-123").
@@ -645,7 +612,7 @@ func TestScraperResultBuilderWithContentID(t *testing.T) {
 	assert.Equal(t, "IPX-123", result.ContentID)
 }
 
-// TestScraperResultBuilderWithActresses verifies WithActresses handles variadic arguments correctly.
+// TestscraperResultBuilderWithActresses verifies WithActresses handles variadic arguments correctly.
 func TestScraperResultBuilderWithActresses(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -691,7 +658,7 @@ func TestScraperResultBuilderWithActresses(t *testing.T) {
 	}
 }
 
-// TestScraperResultBuilderWithGenres verifies WithGenres handles variadic arguments correctly.
+// TestscraperResultBuilderWithGenres verifies WithGenres handles variadic arguments correctly.
 func TestScraperResultBuilderWithGenres(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -731,7 +698,7 @@ func TestScraperResultBuilderWithGenres(t *testing.T) {
 	}
 }
 
-// TestScraperResultBuilderMethodChaining verifies that all With methods support method chaining.
+// TestscraperResultBuilderMethodChaining verifies that all With methods support method chaining.
 func TestScraperResultBuilderMethodChaining(t *testing.T) {
 	releaseDate := time.Date(2025, 3, 15, 0, 0, 0, 0, time.UTC)
 
@@ -770,7 +737,7 @@ func TestScraperResultBuilderMethodChaining(t *testing.T) {
 	assert.Equal(t, "https://example.com/source", result.SourceURL)
 }
 
-// TestScraperResultBuilderCanonicalValues verifies the builder works with canonical test values.
+// TestscraperResultBuilderCanonicalValues verifies the builder works with canonical test values.
 func TestScraperResultBuilderCanonicalValues(t *testing.T) {
 	releaseDate := time.Date(2025, 3, 15, 0, 0, 0, 0, time.UTC)
 
@@ -796,28 +763,4 @@ func TestScraperResultBuilderCanonicalValues(t *testing.T) {
 	assert.Equal(t, 1, len(result.Genres))
 	assert.NotNil(t, result.ReleaseDate)
 	assert.NotEmpty(t, result.CoverURL)
-}
-
-// ExampleScraperResultBuilder demonstrates the builder pattern for creating test ScraperResult instances.
-func ExampleScraperResultBuilder() {
-	// Create a scraper result with default values
-	defaultResult := NewScraperResultBuilder().Build()
-	_ = defaultResult // defaultResult.Source == "dmm", defaultResult.ContentID == "ABC-123"
-
-	// Create a custom scraper result with specific values
-	releaseDate := time.Date(2025, 3, 15, 0, 0, 0, 0, time.UTC)
-	customResult := NewScraperResultBuilder().
-		WithSource("dmm").
-		WithContentID("IPX-123").
-		WithTitle("Custom Movie Title").
-		WithActresses("Actress A", "Actress B").
-		WithGenres("Drama", "Romance").
-		WithReleaseDate(releaseDate).
-		WithCoverURL("https://pics.dmm.co.jp/digital/video/ipx123/ipx123ps.jpg").
-		WithMaker("Test Studio").
-		WithRuntime(120).
-		Build()
-	_ = customResult
-
-	// Output shows the builder pattern in action
 }

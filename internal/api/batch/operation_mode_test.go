@@ -8,8 +8,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,11 +46,10 @@ func TestOrganizeJob_OperationMode(t *testing.T) {
 			expectedError:  "Preview mode should use the preview endpoint",
 		},
 		{
-			name:           "invalid operation mode rejected",
+			name:           "invalid operation mode returns 400",
 			operationMode:  "invalid-mode",
 			configMode:     "organize",
 			expectedStatus: 400,
-			expectedError:  "Invalid operation_mode",
 		},
 		{
 			name:           "no operation mode uses config default",
@@ -66,7 +68,9 @@ func TestOrganizeJob_OperationMode(t *testing.T) {
 					RegexEnabled: false,
 				},
 				Output: config.OutputConfig{
-					OperationMode: config.GetOperationMode(tt.configMode),
+					Operation: config.OutputOperationConfig{
+						OperationMode: config.GetOperationMode(tt.configMode),
+					},
 				},
 				API: config.APIConfig{
 					Security: config.SecurityConfig{
@@ -77,28 +81,27 @@ func TestOrganizeJob_OperationMode(t *testing.T) {
 
 			deps := createTestDeps(t, cfg, "")
 
-			job := deps.JobQueue.CreateJob([]string{"/path/to/file.mp4"})
-			result := &worker.FileResult{
-				FilePath:  "/path/to/file.mp4",
-				MovieID:   "TEST-001",
-				Status:    worker.JobStatusCompleted,
-				Data:      &models.Movie{ID: "TEST-001", Title: "Test"},
-				StartedAt: time.Now(),
+			job := createJobWithWF(deps, cfg, []string{"/path/to/file.mp4"})
+			result := &worker.MovieResult{
+				FileMatchInfo: models.FileMatchInfo{Path: "/path/to/file.mp4", MovieID: "TEST-001"},
+				Status:        models.JobStatusCompleted,
+				Movie:         &models.Movie{ID: "TEST-001", Title: "Test"},
+				StartedAt:     time.Now(),
 			}
-			job.UpdateFileResult("/path/to/file.mp4", result)
-			job.MarkCompleted()
+			setJobResult(job, "/path/to/file.mp4", result)
+			setJobStatus(job, models.JobStatusCompleted)
 
 			router := gin.New()
-			router.POST("/batch/:id/organize", organizeJob(deps))
+			router.POST("/batch/:id/organize", organizeJob(testkit.GetTestRuntime(deps)))
 
-			reqBody := OrganizeRequest{
+			reqBody := contracts.OrganizeRequest{
 				Destination:   "/output",
 				OperationMode: tt.operationMode,
 			}
 			body, err := json.Marshal(reqBody)
 			require.NoError(t, err)
 
-			req := httptest.NewRequest("POST", "/batch/"+job.ID+"/organize", bytes.NewBuffer(body))
+			req := httptest.NewRequest("POST", "/batch/"+job.GetID()+"/organize", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -156,11 +159,17 @@ func TestPreviewOrganize_OperationMode(t *testing.T) {
 
 			cfg := &config.Config{
 				Output: config.OutputConfig{
-					FolderFormat:        "<ID>",
-					FileFormat:          "<ID>",
-					OperationMode:       config.GetOperationMode("organize"),
-					DownloadPoster:      true,
-					DownloadExtrafanart: true,
+					Template: config.OutputTemplateConfig{
+						FolderFormat: "<ID>",
+						FileFormat:   "<ID>",
+					},
+					Operation: config.OutputOperationConfig{
+						OperationMode: config.GetOperationMode("organize"),
+					},
+					Download: config.OutputDownloadConfig{
+						DownloadPoster:      true,
+						DownloadExtrafanart: true,
+					},
 				},
 				API: config.APIConfig{
 					Security: config.SecurityConfig{
@@ -171,30 +180,26 @@ func TestPreviewOrganize_OperationMode(t *testing.T) {
 
 			deps := createTestDeps(t, cfg, "")
 
-			job := deps.JobQueue.CreateJob([]string{"/path/to/TEST-001.mp4"})
-			result := &worker.FileResult{
-				FilePath:  "/path/to/TEST-001.mp4",
-				MovieID:   "TEST-001",
-				Status:    worker.JobStatusCompleted,
-				Data:      &models.Movie{ID: "TEST-001", Title: "Test Movie"},
-				StartedAt: time.Now(),
+			job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
+			result := &worker.MovieResult{
+				FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
+				Status:        models.JobStatusCompleted,
+				Movie:         &models.Movie{ID: "TEST-001", Title: "Test Movie"},
+				StartedAt:     time.Now(),
 			}
-			job.UpdateFileResult("/path/to/TEST-001.mp4", result)
-
-			status := job.GetStatus()
-			resultID := status.Results["/path/to/TEST-001.mp4"].ResultID
+			setJobResult(job, "/path/to/TEST-001.mp4", result)
 
 			router := gin.New()
-			router.POST("/batch/:id/results/:resultId/preview", previewOrganize(deps))
+			router.POST("/batch/:id/results/:resultId/preview", previewOrganize(testkit.GetTestRuntime(deps)))
 
-			reqBody := OrganizePreviewRequest{
+			reqBody := contracts.OrganizePreviewRequest{
 				Destination:   "/output",
 				OperationMode: tt.operationMode,
 			}
 			body, err := json.Marshal(reqBody)
 			require.NoError(t, err)
 
-			req := httptest.NewRequest("POST", "/batch/"+job.ID+"/results/"+resultID+"/preview", bytes.NewBuffer(body))
+			req := httptest.NewRequest("POST", "/batch/"+job.GetID()+"/results/TEST-001/preview", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -202,10 +207,10 @@ func TestPreviewOrganize_OperationMode(t *testing.T) {
 
 			assert.Equal(t, 200, w.Code, "Response body: %s", w.Body.String())
 
-			var resp OrganizePreviewResponse
+			var resp contracts.OrganizePreviewResponse
 			err = json.Unmarshal(w.Body.Bytes(), &resp)
 			require.NoError(t, err)
-			assert.Equal(t, tt.expectedInResp, resp.OperationMode, "operation_mode in response should match")
+			assert.Equal(t, operationmode.OperationMode(tt.expectedInResp), resp.OperationMode, "operation_mode in response should match")
 		})
 	}
 }
@@ -215,8 +220,10 @@ func TestPreviewOrganize_InvalidOperationMode(t *testing.T) {
 
 	cfg := &config.Config{
 		Output: config.OutputConfig{
-			FolderFormat: "<ID>",
-			FileFormat:   "<ID>",
+			Template: config.OutputTemplateConfig{
+				FolderFormat: "<ID>",
+				FileFormat:   "<ID>",
+			},
 		},
 		API: config.APIConfig{
 			Security: config.SecurityConfig{
@@ -227,35 +234,31 @@ func TestPreviewOrganize_InvalidOperationMode(t *testing.T) {
 
 	deps := createTestDeps(t, cfg, "")
 
-	job := deps.JobQueue.CreateJob([]string{"/path/to/TEST-001.mp4"})
-	result := &worker.FileResult{
-		FilePath:  "/path/to/TEST-001.mp4",
-		MovieID:   "TEST-001",
-		Status:    worker.JobStatusCompleted,
-		Data:      &models.Movie{ID: "TEST-001", Title: "Test Movie"},
-		StartedAt: time.Now(),
+	job := createJobWithWF(deps, cfg, []string{"/path/to/TEST-001.mp4"})
+	result := &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/TEST-001.mp4", MovieID: "TEST-001"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "TEST-001", Title: "Test Movie"},
+		StartedAt:     time.Now(),
 	}
-	job.UpdateFileResult("/path/to/TEST-001.mp4", result)
-
-	status := job.GetStatus()
-	resultID := status.Results["/path/to/TEST-001.mp4"].ResultID
+	setJobResult(job, "/path/to/TEST-001.mp4", result)
 
 	router := gin.New()
-	router.POST("/batch/:id/results/:resultId/preview", previewOrganize(deps))
+	router.POST("/batch/:id/results/:resultId/preview", previewOrganize(testkit.GetTestRuntime(deps)))
 
-	reqBody := OrganizePreviewRequest{
+	reqBody := contracts.OrganizePreviewRequest{
 		Destination:   "/output",
 		OperationMode: "invalid-mode",
 	}
 	body, err := json.Marshal(reqBody)
 	require.NoError(t, err)
 
-	req := httptest.NewRequest("POST", "/batch/"+job.ID+"/results/"+resultID+"/preview", bytes.NewBuffer(body))
+	req := httptest.NewRequest("POST", "/batch/"+job.GetID()+"/results/TEST-001/preview", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 400, w.Code, "Response body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "Invalid operation_mode")
+	assert.Contains(t, w.Body.String(), "invalid operation mode")
 }

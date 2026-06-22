@@ -5,27 +5,27 @@ export default defineConfig({
 	plugins: [sveltekit()],
 	build: {
 		rollupOptions: {
-			maxParallelFileOps: 1000
-		}
+			maxParallelFileOps: 1000,
+		},
 	},
 	server: {
 		proxy: {
 			// Proxy API requests to Go backend during development
 			'/api': {
 				target: 'http://localhost:8080',
-				changeOrigin: true
+				changeOrigin: true,
 			},
 			// Proxy WebSocket connections to Go backend during development
 			'/ws': {
 				target: 'http://localhost:8080',
 				ws: true,
-				changeOrigin: true
+				changeOrigin: true,
 			},
 			// Proxy health check
 			'/health': {
 				target: 'http://localhost:8080',
-				changeOrigin: true
-			}
-		}
-	}
+				changeOrigin: true,
+			},
+		},
+	},
 });

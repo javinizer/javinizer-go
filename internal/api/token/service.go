@@ -1,11 +1,11 @@
 package token
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -17,7 +17,7 @@ func NewTokenService(repo database.ApiTokenRepositoryInterface) *TokenService {
 	return &TokenService{repo: repo}
 }
 
-func (s *TokenService) Create(name string) (*models.ApiToken, string, error) {
+func (s *TokenService) Create(ctx context.Context, name string) (*models.ApiToken, string, error) {
 	fullToken, prefix, err := GenerateToken()
 	if err != nil {
 		return nil, "", err
@@ -37,22 +37,22 @@ func (s *TokenService) Create(name string) (*models.ApiToken, string, error) {
 		TokenPrefix: prefix,
 	}
 
-	if err := s.repo.Create(token); err != nil {
+	if err := s.repo.Create(ctx, token); err != nil {
 		return nil, "", err
 	}
 
 	return token, fullToken, nil
 }
 
-func (s *TokenService) Revoke(id string) error {
-	return s.repo.Revoke(id)
+func (s *TokenService) Revoke(ctx context.Context, id string) error {
+	return s.repo.Revoke(ctx, id)
 }
 
-func (s *TokenService) List() ([]models.ApiToken, error) {
-	return s.repo.ListActive()
+func (s *TokenService) List(ctx context.Context) ([]models.ApiToken, error) {
+	return s.repo.ListActive(ctx)
 }
 
-func (s *TokenService) Regenerate(id string) (*models.ApiToken, string, error) {
+func (s *TokenService) Regenerate(ctx context.Context, id string) (*models.ApiToken, string, error) {
 	fullToken, prefix, err := GenerateToken()
 	if err != nil {
 		return nil, "", err
@@ -60,27 +60,12 @@ func (s *TokenService) Regenerate(id string) (*models.ApiToken, string, error) {
 
 	newHash := HashToken(fullToken)
 
-	token, err := s.repo.Regenerate(id, newHash, prefix)
+	token, err := s.repo.Regenerate(ctx, id, newHash, prefix)
 	if err != nil {
 		return nil, "", err
 	}
 
 	return token, fullToken, nil
-}
-
-func (s *TokenService) Validate(rawToken string) (*models.ApiToken, error) {
-	hash := HashToken(rawToken)
-
-	token, err := s.repo.FindByTokenHash(hash)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := s.repo.UpdateLastUsed(token.ID); err != nil {
-		logging.Warnf("failed to update token last_used_at for %s: %v", token.ID, err)
-	}
-
-	return token, nil
 }
 
 func generateUUID() (string, error) {

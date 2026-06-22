@@ -1,51 +1,9 @@
 package models
 
-import "strings"
+import "github.com/javinizer/javinizer-go/internal/challengedetect"
 
-// IsCloudflareChallengePage detects Cloudflare anti-bot/interstitial challenge pages
-// from HTML content. These pages are often returned with HTTP 200.
-func IsCloudflareChallengePage(body string) bool {
-	lower := strings.ToLower(strings.TrimSpace(body))
-	if lower == "" {
-		return false
-	}
-
-	// High confidence markers for actual Cloudflare challenge pages.
-	// Note: /cdn-cgi/challenge-platform/scripts/jsd/ is used by legitimate pages,
-	// so we check for the challenge orchestration endpoint specifically.
-	highConfidence := []string{
-		"/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1",
-		"/cdn-cgi/challenge-platform/h/b/orchestrate/chl_hr/v1",
-		"/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page",
-		"cf-browser-verification",
-		"cf_chl_",
-		"cf-challenge",
-		"checking your browser before accessing",
-		"enable javascript and cookies to continue",
-		"ddos protection by cloudflare",
-	}
-	for _, marker := range highConfidence {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-
-	// Fallback scoring for softer variants.
-	score := 0
-	for _, marker := range []string{
-		"cloudflare",
-		"attention required",
-		"just a moment",
-		"ray id",
-		"cf-ray",
-		"/cdn-cgi/",
-		"captcha",
-		"turnstile",
-	} {
-		if strings.Contains(lower, marker) {
-			score++
-		}
-	}
-
-	return score >= 3
-}
+// IsCloudflareChallengePage detects Cloudflare anti-bot/interstitial challenge pages.
+//
+// Deprecated: Use challengedetect.IsCloudflareChallengePage directly.
+// This alias is kept for backward compatibility with existing callers.
+var IsCloudflareChallengePage = challengedetect.IsCloudflareChallengePage

@@ -1,6 +1,7 @@
 package nfo
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,27 +9,24 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestConfigFromAppConfig_NilConfig tests the nil config path
-func TestConfigFromAppConfig_NilConfig(t *testing.T) {
-	cfg := ConfigFromAppConfig(nil, nil, nil, nil)
+// TestDefaultConfig tests that DefaultConfig returns sensible defaults
+func TestDefaultConfig(t *testing.T) {
+	cfg := defaultConfig()
 
-	// Should return default config when nil
 	assert.NotNil(t, cfg)
-	assert.Equal(t, true, cfg.ActorFirstNameOrder)
-	assert.Equal(t, false, cfg.ActorJapaneseNames)
-	assert.Equal(t, "Unknown", cfg.UnknownActress)
+	assert.Equal(t, true, cfg.FirstNameOrder)
+	assert.Equal(t, false, cfg.ActressLanguageJA)
+	assert.Equal(t, "Unknown", cfg.UnknownActressText)
 }
 
-// TestConfigFromAppConfig_WithGroupActress tests group actress config
-func TestConfigFromAppConfig_WithGroupActress(t *testing.T) {
-	appCfg := &config.NFOConfig{
+// TestConfigGroupActress tests GroupActress config field
+func TestConfigGroupActress(t *testing.T) {
+	cfg := &Config{
 		FilenameTemplate:     "<ID>.nfo",
 		FirstNameOrder:       true,
 		ActressLanguageJA:    false,
@@ -37,86 +35,36 @@ func TestConfigFromAppConfig_WithGroupActress(t *testing.T) {
 		IncludeTrailer:       true,
 		RatingSource:         "themoviedb",
 		IncludeStreamDetails: false,
+		GroupActress:         true,
 	}
-
-	outputCfg := &config.OutputConfig{
-		GroupActress:     true,
-		GroupActressName: "@Group",
-	}
-
-	cfg := ConfigFromAppConfig(appCfg, outputCfg, nil, nil)
 
 	assert.True(t, cfg.GroupActress)
-	assert.Equal(t, "@Group", cfg.GroupActressName)
 }
 
-// TestConfigFromAppConfig_WithDatabase tests database integration
-func TestConfigFromAppConfig_WithDatabase(t *testing.T) {
-	// Create in-memory database
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
-	db, err := database.New(cfg)
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
-
-	appCfg := &config.NFOConfig{
+// TestConfigMinimal tests Config with minimal settings — tags are passed
+// via Generate/MovieToNFO, not via Config.TagDatabase.
+func TestConfigMinimal(t *testing.T) {
+	nfoCfg := &Config{
 		FilenameTemplate: "<ID>.nfo",
 	}
 
-	metadataCfg := &config.MetadataConfig{
-		TagDatabase: config.TagDatabaseConfig{
-			Enabled: true,
-		},
-	}
-
-	nfoCfg := ConfigFromAppConfig(appCfg, nil, metadataCfg, db)
-
-	// Should have tag database repository set
-	assert.NotNil(t, nfoCfg.TagDatabase)
+	// Config should be valid without TagDatabase — tags are passed via Generate/MovieToNFO
+	assert.NotNil(t, nfoCfg)
 }
 
-// TestConfigFromAppConfig_DatabaseDisabled tests when tag database is disabled
-func TestConfigFromAppConfig_DatabaseDisabled(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
-	db, err := database.New(cfg)
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-
-	appCfg := &config.NFOConfig{
+// TestConfigMinimalDisabled tests Config with minimal settings and no NFO generation
+func TestConfigMinimalDisabled(t *testing.T) {
+	nfoCfg := &Config{
 		FilenameTemplate: "<ID>.nfo",
 	}
 
-	metadataCfg := &config.MetadataConfig{
-		TagDatabase: config.TagDatabaseConfig{
-			Enabled: false, // Explicitly disabled
-		},
-	}
-
-	nfoCfg := ConfigFromAppConfig(appCfg, nil, metadataCfg, db)
-
-	// Should NOT have tag database repository set
-	assert.Nil(t, nfoCfg.TagDatabase)
+	// Config should be valid without TagDatabase — tags are passed via Generate/MovieToNFO
+	assert.NotNil(t, nfoCfg)
 }
 
-// TestConfigFromAppConfig_AllFields tests all field mappings
-func TestConfigFromAppConfig_AllFields(t *testing.T) {
-	appCfg := &config.NFOConfig{
+// TestConfigAllFields tests direct Config struct with all fields
+func TestConfigAllFields(t *testing.T) {
+	cfg := &Config{
 		FilenameTemplate:     "<ID> - <TITLE>.nfo",
 		FirstNameOrder:       false,
 		ActressLanguageJA:    true,
@@ -133,20 +81,13 @@ func TestConfigFromAppConfig_AllFields(t *testing.T) {
 		Tag:                  []string{"tag1", "tag2"},
 		Tagline:              "Test Tagline",
 		Credits:              []string{"credit1", "credit2"},
+		GroupActress:         true,
 	}
 
-	outputCfg := &config.OutputConfig{
-		GroupActress:     true,
-		GroupActressName: "@Group",
-	}
-
-	cfg := ConfigFromAppConfig(appCfg, outputCfg, nil, nil)
-
-	// Verify all fields are mapped
-	assert.Equal(t, false, cfg.ActorFirstNameOrder)
-	assert.Equal(t, true, cfg.ActorJapaneseNames)
-	assert.Equal(t, "不明", cfg.UnknownActress)
-	assert.Equal(t, "<ID> - <TITLE>.nfo", cfg.NFOFilenameTemplate)
+	assert.Equal(t, false, cfg.FirstNameOrder)
+	assert.Equal(t, true, cfg.ActressLanguageJA)
+	assert.Equal(t, "不明", cfg.UnknownActressText)
+	assert.Equal(t, "<ID> - <TITLE>.nfo", cfg.FilenameTemplate)
 	assert.Equal(t, true, cfg.PerFile)
 	assert.Equal(t, true, cfg.ActressAsTag)
 	assert.Equal(t, true, cfg.AddGenericRole)
@@ -155,16 +96,16 @@ func TestConfigFromAppConfig_AllFields(t *testing.T) {
 	assert.Equal(t, true, cfg.IncludeStreamDetails)
 	assert.Equal(t, false, cfg.IncludeFanart)
 	assert.Equal(t, false, cfg.IncludeTrailer)
-	assert.Equal(t, "custom-source", cfg.DefaultRatingSource)
-	assert.Equal(t, []string{"tag1", "tag2"}, cfg.StaticTags)
-	assert.Equal(t, "Test Tagline", cfg.StaticTagline)
-	assert.Equal(t, []string{"credit1", "credit2"}, cfg.StaticCredits)
+	assert.Equal(t, "custom-source", cfg.RatingSource)
+	assert.Equal(t, []string{"tag1", "tag2"}, cfg.Tag)
+	assert.Equal(t, "Test Tagline", cfg.Tagline)
+	assert.Equal(t, []string{"credit1", "credit2"}, cfg.Credits)
 	assert.Equal(t, true, cfg.GroupActress)
 }
 
 // TestWriteNFO_ErrorPaths tests error handling in WriteNFO
 func TestWriteNFO_ErrorPaths(t *testing.T) {
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
+	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
 
 	t.Run("Invalid directory path", func(t *testing.T) {
 		if runtime.GOOS == "windows" {
@@ -230,7 +171,7 @@ func TestExtractStreamDetails(t *testing.T) {
 		}
 
 		// Pass non-existent video file path
-		nfo := gen.MovieToNFO(movie, "/nonexistent/video.mp4")
+		nfo := gen.movieToNFO(context.Background(), movie, "/nonexistent/video.mp4", nil)
 
 		// Should handle error gracefully (no stream details)
 		assert.Nil(t, nfo.FileInfo)
@@ -243,7 +184,7 @@ func TestExtractStreamDetails(t *testing.T) {
 		}
 
 		// Pass empty path
-		nfo := gen.MovieToNFO(movie, "")
+		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 		// Should not attempt to extract stream details
 		assert.Nil(t, nfo.FileInfo)
@@ -263,7 +204,7 @@ func TestExtractStreamDetails(t *testing.T) {
 		tmpFile := filepath.Join(t.TempDir(), "video.mp4")
 		_ = os.WriteFile(tmpFile, []byte("fake video"), 0644)
 
-		nfo := genNoStream.MovieToNFO(movie, tmpFile)
+		nfo := genNoStream.movieToNFO(context.Background(), movie, tmpFile, nil)
 
 		// Should not include stream details when disabled
 		assert.Nil(t, nfo.FileInfo)
@@ -280,32 +221,10 @@ func TestExtractStreamDetails(t *testing.T) {
 		err := os.WriteFile(tmpFile, []byte("This is not a video file"), 0644)
 		require.NoError(t, err)
 
-		nfo := gen.MovieToNFO(movie, tmpFile)
+		nfo := gen.movieToNFO(context.Background(), movie, tmpFile, nil)
 
 		// Should handle invalid video file gracefully (mediainfo will fail)
 		assert.Nil(t, nfo.FileInfo)
-	})
-}
-
-// TestGenerateFromScraperResult_ErrorPaths tests error handling
-func TestGenerateFromScraperResult_ErrorPaths(t *testing.T) {
-	t.Run("Invalid write location", func(t *testing.T) {
-		if runtime.GOOS == "windows" {
-			t.Skip("/dev/null is not a special path on Windows")
-		}
-
-		gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
-
-		result := &models.ScraperResult{
-			ID:    "TEST-001",
-			Title: "Test Movie",
-		}
-
-		// Try to write to invalid location
-		err := gen.GenerateFromScraperResult(result, "/dev/null/invalid")
-
-		// Should fail to write
-		assert.Error(t, err)
 	})
 }
 
@@ -316,7 +235,7 @@ func TestGenerate_ErrorPaths(t *testing.T) {
 			t.Skip("/dev/null is not a special path on Windows")
 		}
 
-		gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
+		gen := NewGenerator(afero.NewOsFs(), defaultConfig())
 
 		movie := &models.Movie{
 			ID:    "TEST-001",
@@ -324,7 +243,7 @@ func TestGenerate_ErrorPaths(t *testing.T) {
 		}
 
 		// Try to write to invalid directory
-		err := gen.Generate(movie, "/dev/null/invalid", "", "")
+		err := gen.Generate(context.Background(), movie, "/dev/null/invalid", "", "", nil)
 
 		// Should fail to write
 		assert.Error(t, err)
@@ -344,9 +263,9 @@ func TestFormatActressNameFromInfo_EdgeCases(t *testing.T) {
 		{
 			name: "LastName FirstName order - only last name",
 			config: &Config{
-				ActorFirstNameOrder: false,
-				ActorJapaneseNames:  false,
-				UnknownActress:      "Unknown",
+				FirstNameOrder:     false,
+				ActressLanguageJA:  false,
+				UnknownActressText: "Unknown",
 			},
 			firstName:    "",
 			lastName:     "OnlyLast",
@@ -356,9 +275,9 @@ func TestFormatActressNameFromInfo_EdgeCases(t *testing.T) {
 		{
 			name: "LastName FirstName order - only first name",
 			config: &Config{
-				ActorFirstNameOrder: false,
-				ActorJapaneseNames:  false,
-				UnknownActress:      "Unknown",
+				FirstNameOrder:     false,
+				ActressLanguageJA:  false,
+				UnknownActressText: "Unknown",
 			},
 			firstName:    "OnlyFirst",
 			lastName:     "",
@@ -368,9 +287,9 @@ func TestFormatActressNameFromInfo_EdgeCases(t *testing.T) {
 		{
 			name: "FirstName LastName order - only last name",
 			config: &Config{
-				ActorFirstNameOrder: true,
-				ActorJapaneseNames:  false,
-				UnknownActress:      "Unknown",
+				FirstNameOrder:     true,
+				ActressLanguageJA:  false,
+				UnknownActressText: "Unknown",
 			},
 			firstName:    "",
 			lastName:     "OnlyLast",
@@ -407,9 +326,9 @@ func TestNewGenerator_ConfigDefaults(t *testing.T) {
 
 	t.Run("Empty UnknownActress field", func(t *testing.T) {
 		cfg := &Config{
-			UnknownActress:      "",
-			UnknownActressMode:  "fallback",
-			NFOFilenameTemplate: "<ID>.nfo",
+			UnknownActressText: "",
+			UnknownActressMode: models.UnknownActressModeFallback,
+			FilenameTemplate:   "<ID>.nfo",
 		}
 
 		gen := NewGenerator(afero.NewOsFs(), cfg)
@@ -421,14 +340,14 @@ func TestNewGenerator_ConfigDefaults(t *testing.T) {
 			},
 		}
 
-		nfo := gen.MovieToNFO(movie, "")
+		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 		assert.Equal(t, "Unknown", nfo.Actors[0].Name)
 	})
 
 	t.Run("Empty NFOFilenameTemplate", func(t *testing.T) {
 		cfg := &Config{
-			NFOFilenameTemplate: "", // Empty, should default
-			UnknownActress:      "Unknown",
+			FilenameTemplate:   "",
+			UnknownActressText: "Unknown",
 		}
 
 		gen := NewGenerator(afero.NewOsFs(), cfg)
@@ -439,7 +358,7 @@ func TestNewGenerator_ConfigDefaults(t *testing.T) {
 		}
 
 		tmpDir := t.TempDir()
-		err := gen.Generate(movie, tmpDir, "", "")
+		err := gen.Generate(context.Background(), movie, tmpDir, "", "", nil)
 
 		require.NoError(t, err)
 
@@ -450,72 +369,28 @@ func TestNewGenerator_ConfigDefaults(t *testing.T) {
 	})
 }
 
-// TestMovieToNFO_DatabaseTags tests tag database integration
-func TestMovieToNFO_DatabaseTags(t *testing.T) {
-	// Create in-memory database
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
-	db, err := database.New(cfg)
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
-
-	// Create tag repository
-	tagRepo := database.NewMovieTagRepository(db)
-
-	// Insert test movie with tags
+// TestMovieToNFO_PreResolvedTags tests tag passing via the tags parameter
+func TestMovieToNFO_PreResolvedTags(t *testing.T) {
 	movie := &models.Movie{
 		ID:    "TEST-001",
 		Title: "Test Movie",
 	}
 
-	// Add tags to database (use AddTag, not AddTagToMovie)
-	err = tagRepo.AddTag(movie.ID, "Tag1")
-	require.NoError(t, err)
-	err = tagRepo.AddTag(movie.ID, "Tag2")
-	require.NoError(t, err)
-
-	// Create generator with tag database
 	nfoCfg := &Config{
-		ActorFirstNameOrder: true,
-		DefaultRatingSource: "themoviedb",
-		TagDatabase:         tagRepo,
+		FirstNameOrder: true,
+		RatingSource:   "themoviedb",
 	}
 
 	gen := NewGenerator(afero.NewOsFs(), nfoCfg)
 
-	nfo := gen.MovieToNFO(movie, "")
+	nfo := gen.movieToNFO(context.Background(), movie, "", []string{"Tag1", "Tag2"})
 
-	// Should include database tags
 	assert.Contains(t, nfo.Tags, "Tag1")
 	assert.Contains(t, nfo.Tags, "Tag2")
 }
 
 // TestMovieToNFO_TagDeduplication tests that duplicate tags are not added
 func TestMovieToNFO_TagDeduplication(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
-	db, err := database.New(cfg)
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
-
-	tagRepo := database.NewMovieTagRepository(db)
-
 	movie := &models.Movie{
 		ID:    "TEST-001",
 		Title: "Test Movie",
@@ -524,21 +399,17 @@ func TestMovieToNFO_TagDeduplication(t *testing.T) {
 		},
 	}
 
-	// Add actress name as database tag (should deduplicate)
-	err = tagRepo.AddTag(movie.ID, "Yui Hatano")
-	require.NoError(t, err)
-
 	nfoCfg := &Config{
-		ActorFirstNameOrder: true,
-		DefaultRatingSource: "themoviedb",
-		ActressAsTag:        true,
-		StaticTags:          []string{"Yui Hatano", "JAV"}, // Also in static tags
-		TagDatabase:         tagRepo,
+		FirstNameOrder: true,
+		RatingSource:   "themoviedb",
+		ActressAsTag:   true,
+		Tag:            []string{"Yui Hatano", "JAV"},
 	}
 
 	gen := NewGenerator(afero.NewOsFs(), nfoCfg)
 
-	nfo := gen.MovieToNFO(movie, "")
+	// Pass "Yui Hatano" as pre-resolved tag — should deduplicate with actress-as-tag and config tag
+	nfo := gen.movieToNFO(context.Background(), movie, "", []string{"Yui Hatano"})
 
 	// Count occurrences of "Yui Hatano"
 	count := 0
@@ -553,11 +424,11 @@ func TestMovieToNFO_TagDeduplication(t *testing.T) {
 	assert.Contains(t, nfo.Tags, "JAV")
 }
 
-// TestScraperResultToNFO_AllFields tests comprehensive scraper result conversion
-func TestScraperResultToNFO_AllFields(t *testing.T) {
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
+// TestMovieToNFO_AllFields tests comprehensive Movie-to-NFO conversion
+func TestMovieToNFO_AllFields(t *testing.T) {
+	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
 
-	result := &models.ScraperResult{
+	movie := &models.Movie{
 		ID:            "IPX-001",
 		ContentID:     "ipx00001",
 		Title:         "Test Title",
@@ -568,15 +439,16 @@ func TestScraperResultToNFO_AllFields(t *testing.T) {
 		Maker:         "Test Maker",
 		Label:         "Test Label",
 		Series:        "Test Series",
-		CoverURL:      "https://example.com/cover.jpg",
-		ScreenshotURL: []string{"https://example.com/ss1.jpg"},
+		Poster:        models.PosterState{CoverURL: "https://example.com/cover.jpg"},
+		Screenshots:   []string{"https://example.com/ss1.jpg"},
 		TrailerURL:    "https://example.com/trailer.mp4",
-		Genres:        []string{"Genre1", "Genre2"},
-		Actresses:     []models.ActressInfo{},
-		Rating:        &models.Rating{Score: 9.0, Votes: 100},
+		Genres:        []models.Genre{{Name: "Genre1"}, {Name: "Genre2"}},
+		Actresses:     []models.Actress{},
+		RatingScore:   9.0,
+		RatingVotes:   100,
 	}
 
-	nfo := gen.ScraperResultToNFO(result)
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	// Verify all fields
 	assert.Equal(t, "IPX-001", nfo.ID)

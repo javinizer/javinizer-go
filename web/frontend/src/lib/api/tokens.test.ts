@@ -4,8 +4,8 @@ import { apiClient } from './client';
 
 vi.mock('./client', () => ({
 	apiClient: {
-		request: vi.fn()
-	}
+		request: vi.fn(),
+	},
 }));
 
 const mockRequest = vi.mocked(apiClient.request);
@@ -19,9 +19,16 @@ describe('tokens API client', () => {
 		it('calls GET /api/v1/tokens and returns typed response', async () => {
 			const mockResponse = {
 				tokens: [
-					{ id: 'abc123', token_prefix: 'abcd1234', name: 'test', created_at: '2026-01-01T00:00:00Z', last_used_at: null, revoked_at: null }
+					{
+						id: 'abc123',
+						token_prefix: 'abcd1234',
+						name: 'test',
+						created_at: '2026-01-01T00:00:00Z',
+						last_used_at: null,
+						revoked_at: null,
+					},
 				],
-				count: 1
+				count: 1,
 			};
 			mockRequest.mockResolvedValue(mockResponse);
 
@@ -46,7 +53,7 @@ describe('tokens API client', () => {
 				token: 'jv_abcd1234567890',
 				id: 'new-id',
 				name: 'my-token',
-				created_at: '2026-01-01T00:00:00Z'
+				created_at: '2026-01-01T00:00:00Z',
 			};
 			mockRequest.mockResolvedValue(mockResponse);
 
@@ -54,7 +61,7 @@ describe('tokens API client', () => {
 
 			expect(mockRequest).toHaveBeenCalledWith('/api/v1/tokens', {
 				method: 'POST',
-				body: JSON.stringify({ name: 'my-token' })
+				body: JSON.stringify({ name: 'my-token' }),
 			});
 			expect(result).toEqual(mockResponse);
 		});
@@ -64,7 +71,7 @@ describe('tokens API client', () => {
 				token: 'jv_abcd1234567890',
 				id: 'new-id',
 				name: '',
-				created_at: '2026-01-01T00:00:00Z'
+				created_at: '2026-01-01T00:00:00Z',
 			};
 			mockRequest.mockResolvedValue(mockResponse);
 
@@ -72,7 +79,7 @@ describe('tokens API client', () => {
 
 			expect(mockRequest).toHaveBeenCalledWith('/api/v1/tokens', {
 				method: 'POST',
-				body: JSON.stringify({ name: '' })
+				body: JSON.stringify({ name: '' }),
 			});
 		});
 
@@ -90,7 +97,7 @@ describe('tokens API client', () => {
 			await revokeToken('token-id-123');
 
 			expect(mockRequest).toHaveBeenCalledWith('/api/v1/tokens/token-id-123', {
-				method: 'DELETE'
+				method: 'DELETE',
 			});
 		});
 	});
@@ -101,14 +108,14 @@ describe('tokens API client', () => {
 				token: 'jv_newtoken123456',
 				id: 'existing-id',
 				name: 'regenerated',
-				created_at: '2026-01-01T00:00:00Z'
+				created_at: '2026-01-01T00:00:00Z',
 			};
 			mockRequest.mockResolvedValue(mockResponse);
 
 			const result = await regenerateToken('existing-id');
 
 			expect(mockRequest).toHaveBeenCalledWith('/api/v1/tokens/existing-id/regenerate', {
-				method: 'POST'
+				method: 'POST',
 			});
 			expect(result).toEqual(mockResponse);
 			expect(result.token).toContain('jv_');

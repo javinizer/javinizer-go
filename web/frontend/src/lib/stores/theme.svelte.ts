@@ -4,7 +4,9 @@ const STORAGE_KEY = 'javinizer-theme';
 
 let current: Theme = $state<Theme>('system');
 let resolved: 'light' | 'dark' = $state<'light' | 'dark'>(
-	typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+	typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+		? 'dark'
+		: 'light',
 );
 let mediaQueryHandler: (() => void) | null = null;
 
@@ -55,7 +57,9 @@ function initTheme(): void {
 
 	if (typeof window !== 'undefined') {
 		if (mediaQueryHandler) {
-			window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', mediaQueryHandler);
+			window
+				.matchMedia('(prefers-color-scheme: dark)')
+				.removeEventListener('change', mediaQueryHandler);
 		}
 		const handler = () => {
 			if (current === 'system') {
@@ -69,7 +73,9 @@ function initTheme(): void {
 
 function destroyTheme(): void {
 	if (typeof window !== 'undefined' && mediaQueryHandler) {
-		window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', mediaQueryHandler);
+		window
+			.matchMedia('(prefers-color-scheme: dark)')
+			.removeEventListener('change', mediaQueryHandler);
 		mediaQueryHandler = null;
 	}
 }
@@ -81,8 +87,12 @@ function cycleTheme(): void {
 
 export function getThemeStore() {
 	return {
-		get current() { return current; },
-		get resolved() { return resolved; },
+		get current() {
+			return current;
+		},
+		get resolved() {
+			return resolved;
+		},
 		setTheme,
 		initTheme,
 		destroyTheme,

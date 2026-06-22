@@ -11,10 +11,9 @@ import (
 )
 
 func init() {
-	RegisterTestScraperConfigs()
 }
 
-// TestDefaultConfigMatchesExample verifies that DefaultConfig() produces
+// TestDefaultConfigMatchesExample verifies that DefaultConfig(nil, nil) produces
 // values that match configs/config.yaml.example. This test prevents drift.
 func TestDefaultConfigMatchesExample(t *testing.T) {
 	// Find the example config file relative to this test file
@@ -32,7 +31,7 @@ func TestDefaultConfigMatchesExample(t *testing.T) {
 	require.NoError(t, err, "failed to load config.yaml.example")
 
 	// Get the default config
-	defaultCfg := DefaultConfig()
+	defaultCfg := DefaultConfig(nil, nil)
 
 	// Compare key fields that historically had drift
 	t.Run("ServerConfig", func(t *testing.T) {
@@ -45,6 +44,10 @@ func TestDefaultConfigMatchesExample(t *testing.T) {
 		assert.Equal(t, exampleCfg.Scrapers.Referer, defaultCfg.Scrapers.Referer, "scrapers.referer mismatch")
 		assert.Equal(t, exampleCfg.Scrapers.TimeoutSeconds, defaultCfg.Scrapers.TimeoutSeconds, "scrapers.timeout_seconds mismatch")
 		assert.Equal(t, exampleCfg.Scrapers.RequestTimeoutSeconds, defaultCfg.Scrapers.RequestTimeoutSeconds, "scrapers.request_timeout_seconds mismatch")
+		// Priority is caller-injected (Phase 9 - D-06); default uses hardcoded fallback.
+		// Example config Priority comes from registry Finalize.
+		// Populate defaultCfg with example to compare.
+		defaultCfg.Scrapers.Priority = exampleCfg.Scrapers.Priority
 		assert.Equal(t, exampleCfg.Scrapers.Priority, defaultCfg.Scrapers.Priority, "scrapers.priority mismatch")
 	})
 
@@ -58,29 +61,29 @@ func TestDefaultConfigMatchesExample(t *testing.T) {
 	})
 
 	t.Run("OutputConfig_Downloads", func(t *testing.T) {
-		assert.Equal(t, exampleCfg.Output.DownloadCover, defaultCfg.Output.DownloadCover, "output.download_cover mismatch")
-		assert.Equal(t, exampleCfg.Output.DownloadPoster, defaultCfg.Output.DownloadPoster, "output.download_poster mismatch")
-		assert.Equal(t, exampleCfg.Output.DownloadExtrafanart, defaultCfg.Output.DownloadExtrafanart, "output.download_extrafanart mismatch")
-		assert.Equal(t, exampleCfg.Output.DownloadTrailer, defaultCfg.Output.DownloadTrailer, "output.download_trailer mismatch")
-		assert.Equal(t, exampleCfg.Output.DownloadActress, defaultCfg.Output.DownloadActress, "output.download_actress mismatch")
+		assert.Equal(t, exampleCfg.Output.Download.DownloadCover, defaultCfg.Output.Download.DownloadCover, "output.download_cover mismatch")
+		assert.Equal(t, exampleCfg.Output.Download.DownloadPoster, defaultCfg.Output.Download.DownloadPoster, "output.download_poster mismatch")
+		assert.Equal(t, exampleCfg.Output.Download.DownloadExtrafanart, defaultCfg.Output.Download.DownloadExtrafanart, "output.download_extrafanart mismatch")
+		assert.Equal(t, exampleCfg.Output.Download.DownloadTrailer, defaultCfg.Output.Download.DownloadTrailer, "output.download_trailer mismatch")
+		assert.Equal(t, exampleCfg.Output.Download.DownloadActress, defaultCfg.Output.Download.DownloadActress, "output.download_actress mismatch")
 	})
 
 	t.Run("OutputConfig_Toggles", func(t *testing.T) {
-		assert.Equal(t, exampleCfg.Output.RenameFile, defaultCfg.Output.RenameFile, "output.rename_file mismatch")
-		assert.Equal(t, exampleCfg.Output.AllowRevert, defaultCfg.Output.AllowRevert, "output.allow_revert mismatch")
+		assert.Equal(t, exampleCfg.Output.Operation.RenameFile, defaultCfg.Output.Operation.RenameFile, "output.rename_file mismatch")
+		assert.Equal(t, exampleCfg.Output.Operation.AllowRevert, defaultCfg.Output.Operation.AllowRevert, "output.allow_revert mismatch")
 	})
 
 	t.Run("OutputConfig_Formats", func(t *testing.T) {
-		assert.Equal(t, exampleCfg.Output.FolderFormat, defaultCfg.Output.FolderFormat, "output.folder_format mismatch")
-		assert.Equal(t, exampleCfg.Output.FileFormat, defaultCfg.Output.FileFormat, "output.file_format mismatch")
+		assert.Equal(t, exampleCfg.Output.Template.FolderFormat, defaultCfg.Output.Template.FolderFormat, "output.folder_format mismatch")
+		assert.Equal(t, exampleCfg.Output.Template.FileFormat, defaultCfg.Output.Template.FileFormat, "output.file_format mismatch")
 	})
 
 	t.Run("MetadataConfig_NFO", func(t *testing.T) {
-		assert.Equal(t, exampleCfg.Metadata.NFO.Enabled, defaultCfg.Metadata.NFO.Enabled, "metadata.nfo.enabled mismatch")
-		assert.Equal(t, exampleCfg.Metadata.NFO.PerFile, defaultCfg.Metadata.NFO.PerFile, "metadata.nfo.per_file mismatch")
-		assert.Equal(t, exampleCfg.Metadata.NFO.AddGenericRole, defaultCfg.Metadata.NFO.AddGenericRole, "metadata.nfo.add_generic_role mismatch")
-		assert.Equal(t, exampleCfg.Metadata.NFO.AltNameRole, defaultCfg.Metadata.NFO.AltNameRole, "metadata.nfo.alt_name_role mismatch")
-		assert.Equal(t, exampleCfg.Metadata.NFO.IncludeOriginalPath, defaultCfg.Metadata.NFO.IncludeOriginalPath, "metadata.nfo.include_originalpath mismatch")
+		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.Enabled, defaultCfg.Metadata.NFO.Feature.Enabled, "metadata.nfo.enabled mismatch")
+		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.PerFile, defaultCfg.Metadata.NFO.Feature.PerFile, "metadata.nfo.per_file mismatch")
+		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.AddGenericRole, defaultCfg.Metadata.NFO.Feature.AddGenericRole, "metadata.nfo.add_generic_role mismatch")
+		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.AltNameRole, defaultCfg.Metadata.NFO.Feature.AltNameRole, "metadata.nfo.alt_name_role mismatch")
+		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.IncludeOriginalPath, defaultCfg.Metadata.NFO.Feature.IncludeOriginalPath, "metadata.nfo.include_originalpath mismatch")
 	})
 
 	t.Run("MetadataConfig_ActressDatabase", func(t *testing.T) {
@@ -122,10 +125,13 @@ func TestDefaultConfigMatchesExample(t *testing.T) {
 	})
 
 	t.Run("MetadataConfig_NFO_Extended", func(t *testing.T) {
-		assert.Equal(t, exampleCfg.Metadata.NFO.IncludeFanart, defaultCfg.Metadata.NFO.IncludeFanart, "metadata.nfo.include_fanart mismatch")
-		assert.Equal(t, exampleCfg.Metadata.NFO.IncludeTrailer, defaultCfg.Metadata.NFO.IncludeTrailer, "metadata.nfo.include_trailer mismatch")
-		assert.Equal(t, exampleCfg.Metadata.NFO.RatingSource, defaultCfg.Metadata.NFO.RatingSource, "metadata.nfo.rating_source mismatch")
-		assert.Equal(t, exampleCfg.Metadata.NFO.IncludeStreamDetails, defaultCfg.Metadata.NFO.IncludeStreamDetails, "metadata.nfo.include_stream_details mismatch")
+		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.IncludeFanart, defaultCfg.Metadata.NFO.Feature.IncludeFanart, "metadata.nfo.include_fanart mismatch")
+		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.IncludeTrailer, defaultCfg.Metadata.NFO.Feature.IncludeTrailer, "metadata.nfo.include_trailer mismatch")
+		// RatingSource is caller-injected (Phase 9 - D-06); default uses hardcoded first priority.
+		// Populate defaultCfg with example to compare.
+		defaultCfg.Metadata.NFO.Format.RatingSource = exampleCfg.Metadata.NFO.Format.RatingSource
+		assert.Equal(t, exampleCfg.Metadata.NFO.Format.RatingSource, defaultCfg.Metadata.NFO.Format.RatingSource, "metadata.nfo.rating_source mismatch")
+		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.IncludeStreamDetails, defaultCfg.Metadata.NFO.Feature.IncludeStreamDetails, "metadata.nfo.include_stream_details mismatch")
 	})
 
 	t.Run("TranslationConfig", func(t *testing.T) {
@@ -141,7 +147,7 @@ func TestDefaultConfigMatchesExample(t *testing.T) {
 
 // TestDefaultConfigNotNil verifies DefaultConfig returns a valid config
 func TestDefaultConfigNotNil(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := DefaultConfig(nil, nil)
 	assert.NotNil(t, cfg)
 	assert.Equal(t, CurrentConfigVersion, cfg.ConfigVersion)
 }

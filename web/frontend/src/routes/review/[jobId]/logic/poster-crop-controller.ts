@@ -5,7 +5,7 @@ import {
 	restoreCropBox,
 	type PosterCropBox,
 	type PosterCropMetrics,
-	type PosterCropState
+	type PosterCropState,
 } from '../review-utils';
 
 export interface PosterCropDragState {
@@ -59,7 +59,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			displayWidth,
 			displayHeight,
 			imageOffsetX: cropImageElement.offsetLeft,
-			imageOffsetY: cropImageElement.offsetTop
+			imageOffsetY: cropImageElement.offsetTop,
 		});
 	}
 
@@ -90,7 +90,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			displayWidth,
 			displayHeight,
 			imageOffsetX: imageElement.offsetLeft,
-			imageOffsetY: imageElement.offsetTop
+			imageOffsetY: imageElement.offsetTop,
 		});
 
 		const currentResult = deps.getCurrentResult();
@@ -101,7 +101,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		deps.setCropBox(
 			savedCrop
 				? restoreCropBox(savedCrop, sourceWidth, sourceHeight)
-				: getDefaultPosterCropBox(sourceWidth, sourceHeight)
+				: getDefaultPosterCropBox(sourceWidth, sourceHeight),
 		);
 
 		refreshPosterCropMetrics();
@@ -110,8 +110,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 	function handlePosterCropImageError() {
 		const currentMovie = deps.getCurrentMovie();
 		if (currentMovie && deps.getCropSourceURL().includes('-full.jpg')) {
-			const currentResult = deps.getCurrentResult();
-			const posterMovieId = currentResult?.movie_id ?? currentMovie.id;
+			const posterMovieId = currentMovie.id;
 			const fallbackURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}.jpg`;
 			deps.setCropSourceURL(`${fallbackURL}?v=${now()}`);
 			return;
@@ -124,11 +123,15 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 
 	function openPosterCropModal() {
 		const currentMovie = deps.getCurrentMovie();
-		const currentResult = deps.getCurrentResult();
 		if (!currentMovie) return;
 
+		const currentResult = deps.getCurrentResult();
 		let sourceURL: string;
-		if (currentMovie.poster_url && currentResult?.data && currentMovie.poster_url !== currentResult.data.poster_url) {
+		if (
+			currentMovie.poster_url &&
+			currentResult?.movie &&
+			currentMovie.poster_url !== currentResult.movie.poster_url
+		) {
 			sourceURL = `/api/v1/temp/image?url=${encodeURIComponent(currentMovie.poster_url)}`;
 		} else {
 			const posterMovieId = currentResult?.movie_id ?? currentMovie.id;
@@ -167,7 +170,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		deps.setCropBox({
 			...cropBox,
 			x: clamp(Math.round(cropDragState.originX + deltaXSource), 0, maxX),
-			y: clamp(Math.round(cropDragState.originY + deltaYSource), 0, maxY)
+			y: clamp(Math.round(cropDragState.originY + deltaYSource), 0, maxY),
 		});
 	}
 
@@ -193,7 +196,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			startX: event.clientX,
 			startY: event.clientY,
 			originX: cropBox.x,
-			originY: cropBox.y
+			originY: cropBox.y,
 		});
 
 		window.addEventListener('mousemove', movePosterCropBox);
@@ -235,7 +238,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			// poster that still lives server-side. Without this, the crop modal
 			// shows the edited URL (via the image proxy) but the backend would
 			// crop the original scraped image, reverting the preview.
-			const serverPosterUrl = currentResult.data?.poster_url;
+			const serverPosterUrl = currentResult.movie?.poster_url;
 			if (currentMovie.poster_url && serverPosterUrl && currentMovie.poster_url !== serverPosterUrl) {
 				await deps.applyPosterFromUrlAsync(currentResult.result_id, currentMovie.poster_url);
 			}
@@ -270,6 +273,6 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		getPosterCropOverlayStyle,
 		applyPosterCrop,
 		handleWindowResize,
-		cleanup
+		cleanup,
 	};
 }

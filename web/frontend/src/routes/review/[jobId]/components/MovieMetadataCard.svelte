@@ -3,7 +3,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import MovieEditor from '$lib/components/MovieEditor.svelte';
-	import { AlertTriangle, LoaderCircle, RotateCcw } from 'lucide-svelte';
+	import { LoaderCircle, RotateCcw } from 'lucide-svelte';
 
 	interface Props {
 		currentMovie: Movie;
@@ -61,16 +61,9 @@
 			</div>
 		</div>
 
-		{#if currentResult.translation_warning}
-			<div class="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-600 dark:text-yellow-400">
-				<AlertTriangle class="h-4 w-4 mt-0.5 shrink-0" />
-				<span>{currentResult.translation_warning}</span>
-			</div>
-		{/if}
-
 		<MovieEditor
 			movie={currentMovie}
-			originalMovie={currentResult.data!}
+			originalMovie={currentResult.movie!}
 			onUpdate={onUpdateCurrentMovie}
 			fieldSources={currentResult.field_sources}
 			showFieldSources={showFieldScraperSources}

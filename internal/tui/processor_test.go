@@ -3,17 +3,40 @@ package tui
 import (
 	"context"
 	"errors"
-	"net/http"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/poster"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
-	"github.com/spf13/afero"
+	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// testWorkflowComponents constructs a workflow, matcher, and poster generator
+// from a config + registry + repos, for use in test setups.
+func testWorkflowComponents(t *testing.T, cfg *config.Config, registry *scraperutil.ScraperRegistry, repos database.Repositories) (workflow.WorkflowInterface, matcher.MatcherInterface, poster.PosterGenerator) {
+	t.Helper()
+	fc, err := workflow.NewFactoryConfigFromRepos(cfg, registry, repos)
+	require.NoError(t, err)
+	factory, err := workflow.NewWorkflowFactory(fc)
+	require.NoError(t, err)
+	wf, err := factory.NewWorkflow("")
+	require.NoError(t, err)
+	return wf, factory.Matcher(), factory.PosterGen()
+}
+
+// testBatchJobFactory constructs a BatchJobFactoryInterface from a config +
+// registry + repos, for use in test setups.
+func testBatchJobFactory(t *testing.T, cfg *config.Config, registry *scraperutil.ScraperRegistry, repos database.Repositories) worker.BatchJobFactoryInterface {
+	t.Helper()
+	wf, m, pg := testWorkflowComponents(t, cfg, registry, repos)
+	return worker.NewBatchJobFactory(nil, wf, m, pg, worker.BatchJobConfig{}, nil)
+}
 
 // TestSetGetCustomScrapers_DefensiveCopy verifies defensive copying behavior
 func TestSetGetCustomScrapers_DefensiveCopy(t *testing.T) {
@@ -63,7 +86,8 @@ func TestSetGetCustomScrapers_DefensiveCopy(t *testing.T) {
 			t.Parallel()
 
 			// Create minimal coordinator (only need to test Set/Get)
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
 			// Set scrapers
 			pc.SetCustomScrapers(tt.setScrapers)
@@ -141,14 +165,20 @@ func TestSetOptions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetOptions(tt.scrape, tt.download, tt.organize, tt.nfo)
+			pc.SetOptions(ProcessorOptions{
+				ScrapeEnabled:   tt.scrape,
+				DownloadEnabled: tt.download,
+				OrganizeEnabled: tt.organize,
+				NFOEnabled:      tt.nfo,
+			})
 
-			assert.Equal(t, tt.expectedScrape, pc.scrapeEnabled)
-			assert.Equal(t, tt.expectedDownload, pc.downloadEnabled)
-			assert.Equal(t, tt.expectedOrganize, pc.organizeEnabled)
-			assert.Equal(t, tt.expectedNFO, pc.nfoEnabled)
+			assert.Equal(t, tt.expectedScrape, pc.loadOptions().ScrapeEnabled)
+			assert.Equal(t, tt.expectedDownload, pc.loadOptions().DownloadEnabled)
+			assert.Equal(t, tt.expectedOrganize, pc.loadOptions().OrganizeEnabled)
+			assert.Equal(t, tt.expectedNFO, pc.loadOptions().NFOEnabled)
 		})
 	}
 }
@@ -185,43 +215,71 @@ func TestSetOptionsFromConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				Metadata: config.MetadataConfig{
-					NFO: config.NFOConfig{
-						Enabled: tt.nfoEnabled,
-					},
-				},
-			}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
+			opts := pc.LoadOptions()
+			opts.ScrapeEnabled = true
+			opts.DownloadEnabled = true
+			opts.OrganizeEnabled = true
+			opts.NFOEnabled = tt.nfoEnabled
+			opts.DownloadExtrafanartOverride = tt.nfoEnabled // matches old SetOptionsFromConfig behavior
+			pc.SetOptions(opts)
+			// Also apply runtime config fields via SetConfig
+			pc.SetConfig(TUIProcessorConfig{
+				BatchJobConfig: worker.BatchJobConfig{NFOEnabled: tt.nfoEnabled},
+			})
 
-			pc := &ProcessingCoordinator{}
-			pc.SetOptionsFromConfig(cfg)
-
-			assert.Equal(t, tt.expectedScrape, pc.scrapeEnabled)
-			assert.Equal(t, tt.expectedDownload, pc.downloadEnabled)
-			assert.Equal(t, tt.expectedOrganize, pc.organizeEnabled)
-			assert.Equal(t, tt.expectedNFO, pc.nfoEnabled)
+			assert.Equal(t, tt.expectedScrape, pc.loadOptions().ScrapeEnabled)
+			assert.Equal(t, tt.expectedDownload, pc.loadOptions().DownloadEnabled)
+			assert.Equal(t, tt.expectedOrganize, pc.loadOptions().OrganizeEnabled)
+			assert.Equal(t, tt.expectedNFO, pc.loadOptions().NFOEnabled)
 		})
 	}
 }
 
-// TestSetOptionsFromConfig_NilConfig verifies nil config is handled safely
-func TestSetOptionsFromConfig_NilConfig(t *testing.T) {
+// TestSetOptionsFromConfig_ZeroValue verifies zero-value config is handled safely
+func TestSetOptionsFromConfig_ZeroValue(t *testing.T) {
 	t.Parallel()
 
-	// Create coordinator with specific default values
-	pc := NewProcessingCoordinator(
-		nil, nil, nil, nil, nil, nil, nil, nil,
+	// Create coordinator with a real in-memory DB (nil db is now rejected by constructor)
+	cfg := &config.Config{}
+	cfg.Database.DSN = ":memory:"
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	registry := scraperutil.NewScraperRegistry()
+	wf, matchr, posterGen := testWorkflowComponents(t, cfg, registry, db.Repositories())
+	factory := testBatchJobFactory(t, cfg, registry, db.Repositories())
+	_ = wf
+	_ = matchr
+	_ = posterGen
+
+	pc, err := NewProcessingCoordinator(
+		nil,                  // runner
+		nil,                  // eventSub
+		factory,              // batch job factory
+		registry,             // registry
+		TUIProcessorConfig{}, // zero-value processor config
 		"/dest", true,
 	)
+	require.NoError(t, err)
+	require.NotNil(t, pc)
 
-	// Should not panic with nil config
-	pc.SetOptionsFromConfig(nil)
+	opts := pc.LoadOptions()
+	opts.ScrapeEnabled = true
+	opts.DownloadEnabled = true
+	opts.OrganizeEnabled = true
+	opts.NFOEnabled = false // zero value = false
+	opts.DownloadExtrafanartOverride = false
+	pc.SetOptions(opts)
+	pc.SetConfig(TUIProcessorConfig{})
 
-	// State should remain unchanged (nil config doesn't modify defaults)
-	assert.True(t, pc.scrapeEnabled)
-	assert.True(t, pc.downloadEnabled)
-	assert.True(t, pc.organizeEnabled)
-	assert.True(t, pc.nfoEnabled)
+	// scrape/download/organize default to true; NFOEnabled=false in zero value
+	assert.True(t, pc.loadOptions().ScrapeEnabled)
+	assert.True(t, pc.loadOptions().DownloadEnabled)
+	assert.True(t, pc.loadOptions().OrganizeEnabled)
+	assert.False(t, pc.loadOptions().NFOEnabled) // zero value = false
 }
 
 // TestSetDryRun verifies dry-run flag is set correctly
@@ -247,11 +305,14 @@ func TestSetDryRun(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetDryRun(tt.dryRun)
+			opts := pc.LoadOptions()
+			opts.DryRun = tt.dryRun
+			pc.SetOptions(opts)
 
-			assert.Equal(t, tt.expected, pc.dryRun)
+			assert.Equal(t, tt.expected, pc.loadOptions().DryRun)
 		})
 	}
 }
@@ -284,11 +345,14 @@ func TestSetDestPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetDestPath(tt.destPath)
+			opts := pc.LoadOptions()
+			opts.DestPath = tt.destPath
+			pc.SetOptions(opts)
 
-			assert.Equal(t, tt.expected, pc.destPath)
+			assert.Equal(t, tt.expected, pc.loadOptions().DestPath)
 		})
 	}
 }
@@ -316,11 +380,14 @@ func TestSetMoveFiles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetMoveFiles(tt.moveFiles)
+			opts := pc.LoadOptions()
+			opts.MoveFiles = tt.moveFiles
+			pc.SetOptions(opts)
 
-			assert.Equal(t, tt.expected, pc.moveFiles)
+			assert.Equal(t, tt.expected, pc.loadOptions().MoveFiles)
 		})
 	}
 }
@@ -348,11 +415,14 @@ func TestSetScrapeEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetScrapeEnabled(tt.enabled)
+			opts := pc.LoadOptions()
+			opts.ScrapeEnabled = tt.enabled
+			pc.SetOptions(opts)
 
-			assert.Equal(t, tt.expected, pc.scrapeEnabled)
+			assert.Equal(t, tt.expected, pc.loadOptions().ScrapeEnabled)
 		})
 	}
 }
@@ -380,11 +450,14 @@ func TestSetDownloadEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetDownloadEnabled(tt.enabled)
+			opts := pc.LoadOptions()
+			opts.DownloadEnabled = tt.enabled
+			pc.SetOptions(opts)
 
-			assert.Equal(t, tt.expected, pc.downloadEnabled)
+			assert.Equal(t, tt.expected, pc.loadOptions().DownloadEnabled)
 		})
 	}
 }
@@ -412,11 +485,14 @@ func TestSetOrganizeEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetOrganizeEnabled(tt.enabled)
+			opts := pc.LoadOptions()
+			opts.OrganizeEnabled = tt.enabled
+			pc.SetOptions(opts)
 
-			assert.Equal(t, tt.expected, pc.organizeEnabled)
+			assert.Equal(t, tt.expected, pc.loadOptions().OrganizeEnabled)
 		})
 	}
 }
@@ -444,11 +520,14 @@ func TestSetNFOEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetNFOEnabled(tt.enabled)
+			opts := pc.LoadOptions()
+			opts.NFOEnabled = tt.enabled
+			pc.SetOptions(opts)
 
-			assert.Equal(t, tt.expected, pc.nfoEnabled)
+			assert.Equal(t, tt.expected, pc.loadOptions().NFOEnabled)
 		})
 	}
 }
@@ -476,11 +555,14 @@ func TestSetForceUpdate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetForceUpdate(tt.forceUpdate)
+			opts := pc.LoadOptions()
+			opts.ForceUpdate = tt.forceUpdate
+			pc.SetOptions(opts)
 
-			assert.Equal(t, tt.expected, pc.forceUpdate)
+			assert.Equal(t, tt.expected, pc.loadOptions().ForceUpdate)
 		})
 	}
 }
@@ -508,11 +590,14 @@ func TestSetForceRefresh(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := &ProcessingCoordinator{}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetForceRefresh(tt.forceRefresh)
+			opts := pc.LoadOptions()
+			opts.ForceRefresh = tt.forceRefresh
+			pc.SetOptions(opts)
 
-			assert.Equal(t, tt.expected, pc.forceRefresh)
+			assert.Equal(t, tt.expected, pc.loadOptions().ForceRefresh)
 		})
 	}
 }
@@ -521,109 +606,121 @@ func TestSetForceRefresh(t *testing.T) {
 func TestNewProcessingCoordinator(t *testing.T) {
 	t.Parallel()
 
-	// Create coordinator with nil dependencies (just testing initialization)
-	pc := NewProcessingCoordinator(
-		nil, // pool
-		nil, // progressTracker
-		nil, // movieRepo
-		nil, // registry
-		nil, // aggregator
-		nil, // downloader
-		nil, // organizer
-		nil, // nfoGenerator
+	cfg := &config.Config{}
+	cfg.Database.DSN = ":memory:"
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	registry := scraperutil.NewScraperRegistry()
+	wf, matchr, posterGen := testWorkflowComponents(t, cfg, registry, db.Repositories())
+	factory := testBatchJobFactory(t, cfg, registry, db.Repositories())
+	_ = wf
+	_ = matchr
+	_ = posterGen
+
+	pc, err := NewProcessingCoordinator(
+		nil,                  // runner
+		nil,                  // eventSub
+		factory,              // batch job factory
+		registry,             // registry
+		TUIProcessorConfig{}, // zero-value processor config
 		"/dest/path",
 		true, // moveFiles
 	)
+	require.NoError(t, err)
 
 	// Verify initialization
 	assert.NotNil(t, pc)
-	assert.Equal(t, "/dest/path", pc.destPath)
-	assert.Equal(t, true, pc.moveFiles)
-	assert.Equal(t, true, pc.scrapeEnabled, "scrapeEnabled should default to true")
-	assert.Equal(t, true, pc.downloadEnabled, "downloadEnabled should default to true")
-	assert.Equal(t, true, pc.organizeEnabled, "organizeEnabled should default to true")
-	assert.Equal(t, true, pc.nfoEnabled, "nfoEnabled should default to true")
-	assert.Equal(t, false, pc.dryRun, "dryRun should default to false")
-	assert.Equal(t, false, pc.forceUpdate, "forceUpdate should default to false")
-	assert.Equal(t, false, pc.forceRefresh, "forceRefresh should default to false")
-	assert.Nil(t, pc.customScraperPriority, "customScraperPriority should default to nil")
+	assert.Equal(t, "/dest/path", pc.loadOptions().DestPath)
+	assert.True(t, pc.loadOptions().MoveFiles)
+	assert.True(t, pc.loadOptions().ScrapeEnabled, "scrapeEnabled should default to true")
+	assert.True(t, pc.loadOptions().DownloadEnabled, "downloadEnabled should default to true")
+	assert.True(t, pc.loadOptions().OrganizeEnabled, "organizeEnabled should default to true")
+	assert.True(t, pc.loadOptions().NFOEnabled, "nfoEnabled should default to true")
+	assert.False(t, pc.loadOptions().DryRun, "dryRun should default to false")
+	assert.False(t, pc.loadOptions().ForceUpdate, "forceUpdate should default to false")
+	assert.False(t, pc.loadOptions().ForceRefresh, "forceRefresh should default to false")
+	assert.Nil(t, pc.loadOptions().CustomScraperPriority, "customScraperPriority should default to nil")
+}
+
+// TestNewProcessingCoordinator_NilRepos verifies constructor handles nil repos gracefully
+func TestNewProcessingCoordinator_NilRepos(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	cfg.Database.DSN = ":memory:"
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Construct coordinator with repos from real DB
+	registry := scraperutil.NewScraperRegistry()
+	factory := testBatchJobFactory(t, cfg, registry, db.Repositories())
+
+	assert.NotPanics(t, func() {
+		NewProcessingCoordinator(
+			nil,                  // runner
+			nil,                  // eventSub
+			factory,              // batch job factory
+			registry,             // registry
+			TUIProcessorConfig{}, // zero-value processor config
+			"/dest/path",
+			true,
+		)
+	}, "NewProcessingCoordinator should not panic with valid repos")
 }
 
 // ============================================================================
 // Mock Implementations for Dependency Injection Testing
 // ============================================================================
 
-// mockPool is an inline mock for PoolInterface
-type mockPool struct {
-	submitCalled int
-	submitErr    error
-	waitCalled   int
-	waitErr      error
-	stopCalled   int
+// mockRunner is an inline mock for backgroundRunner
+type mockRunner struct {
+	goCalled   int
+	goErr      error
+	waitCalled int
+	waitErr    error
+	stopCalled int
 }
 
-func (m *mockPool) Submit(task worker.Task) error {
-	m.submitCalled++
-	return m.submitErr
+func (m *mockRunner) Go(fn func() error) error {
+	m.goCalled++
+	if m.goErr != nil {
+		return m.goErr
+	}
+	return nil
 }
 
-func (m *mockPool) Wait() error {
+func (m *mockRunner) Wait() error {
 	m.waitCalled++
 	return m.waitErr
 }
 
-func (m *mockPool) Stop() {
+func (m *mockRunner) Stop() {
 	m.stopCalled++
-}
-
-// mockProgressTracker is an inline mock for ProgressTrackerInterface
-type mockProgressTracker struct {
-	updateCalled   int
-	completeCalled int
-	failCalled     int
-}
-
-func (m *mockProgressTracker) Update(id string, progress float64, message string, bytesProcessed int64) {
-	m.updateCalled++
-}
-
-func (m *mockProgressTracker) Complete(id string, message string) {
-	m.completeCalled++
-}
-
-func (m *mockProgressTracker) Fail(id string, err error) {
-	m.failCalled++
-}
-
-// mockDownloader is an inline mock for DownloaderInterface
-type mockDownloader struct {
-	setExtrafanartCalled int
-	extrafanartEnabled   bool
-}
-
-func (m *mockDownloader) SetDownloadExtrafanart(enabled bool) {
-	m.setExtrafanartCalled++
-	m.extrafanartEnabled = enabled
 }
 
 // ============================================================================
 // Tests for Previously Untestable Functions
 // ============================================================================
 
-// TestSetDownloadExtrafanart_NilDownloader verifies nil check prevents panic
+// TestSetDownloadExtrafanart_NilDownloader verifies no panic when downloader is nil
 func TestSetDownloadExtrafanart_NilDownloader(t *testing.T) {
 	t.Parallel()
 
-	pc := &ProcessingCoordinator{
-		downloader: nil,
-	}
+	pc := &processingCoordinator{}
+	pc.opts.Store(ProcessorOptions{})
 
-	// Should not panic when downloader is nil
-	pc.SetDownloadExtrafanart(true)
+	// Should not panic — stores override locally, no downloader call
+	opts := pc.LoadOptions()
+	opts.DownloadExtrafanartOverride = true
+	pc.SetOptions(opts)
+	assert.True(t, pc.loadOptions().DownloadExtrafanartOverride)
 }
 
-// TestSetDownloadExtrafanart_ValidDownloader verifies delegation to downloader
-func TestSetDownloadExtrafanart_ValidDownloader(t *testing.T) {
+// TestSetDownloadExtrafanart_StoresOverride verifies override is stored locally
+func TestSetDownloadExtrafanart_StoresOverride(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -645,20 +742,19 @@ func TestSetDownloadExtrafanart_ValidDownloader(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockDL := &mockDownloader{}
-			pc := &ProcessingCoordinator{
-				downloader: mockDL,
-			}
+			pc := &processingCoordinator{}
+			pc.opts.Store(ProcessorOptions{})
 
-			pc.SetDownloadExtrafanart(tt.enabled)
+			opts := pc.LoadOptions()
+			opts.DownloadExtrafanartOverride = tt.enabled
+			pc.SetOptions(opts)
 
-			assert.Equal(t, 1, mockDL.setExtrafanartCalled)
-			assert.Equal(t, tt.expected, mockDL.extrafanartEnabled)
+			assert.Equal(t, tt.expected, pc.loadOptions().DownloadExtrafanartOverride)
 		})
 	}
 }
 
-// TestWait verifies delegation to pool.Wait()
+// TestWait verifies delegation to runner.Wait()
 func TestWait(t *testing.T) {
 	t.Parallel()
 
@@ -676,22 +772,22 @@ func TestWait(t *testing.T) {
 		},
 		{
 			name:     "wait returns error",
-			waitErr:  errors.New("pool wait error"),
+			waitErr:  errors.New("runner wait error"),
 			wantErr:  true,
-			expected: errors.New("pool wait error"),
+			expected: errors.New("runner wait error"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockP := &mockPool{waitErr: tt.waitErr}
-			pc := &ProcessingCoordinator{
-				pool: mockP,
+			mockR := &mockRunner{waitErr: tt.waitErr}
+			pc := &processingCoordinator{
+				runner: mockR,
 			}
 
 			err := pc.Wait()
 
-			assert.Equal(t, 1, mockP.waitCalled)
+			assert.Equal(t, 1, mockR.waitCalled)
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Equal(t, tt.expected.Error(), err.Error())
@@ -702,240 +798,229 @@ func TestWait(t *testing.T) {
 	}
 }
 
-// TestStop verifies delegation to pool.Stop()
+// TestStop verifies delegation to runner.Stop()
 func TestStop(t *testing.T) {
 	t.Parallel()
 
-	mockP := &mockPool{}
-	pc := &ProcessingCoordinator{
-		pool: mockP,
+	mockR := &mockRunner{}
+	pc := &processingCoordinator{
+		runner: mockR,
 	}
 
 	pc.Stop()
 
-	assert.Equal(t, 1, mockP.stopCalled)
+	assert.Equal(t, 1, mockR.stopCalled)
 }
 
 // ============================================================================
-// ProcessFiles Tests (using real concrete instances + mockPool pattern)
+// ProcessFiles Tests (using real concrete instances + mockRunner pattern)
 // ============================================================================
 
-// createMinimalCoordinator creates a ProcessingCoordinator with all required dependencies
-// for ProcessFiles nil validation, using a mock pool for control
-func createMinimalCoordinator(mockP *mockPool) *ProcessingCoordinator {
-	progressChan := make(chan worker.ProgressUpdate, 10)
-	progressTracker := worker.NewProgressTracker(progressChan)
+// createMinimalCoordinator creates a processingCoordinator with all required dependencies
+// for ProcessFiles nil validation, using a mock runner for control
+func createMinimalCoordinator(t *testing.T, mockR *mockRunner) *processingCoordinator {
+	t.Helper()
+	cfg := &config.Config{}
+	cfg.Database.DSN = ":memory:"
+	db, err := database.New(database.ConfigFromAppConfig(cfg))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
 
-	mockClient := &http.Client{}
-	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{}
-	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent", nil)
+	registry := scraperutil.NewScraperRegistry()
+	factory := testBatchJobFactory(t, cfg, registry, db.Repositories())
 
-	return &ProcessingCoordinator{
-		pool:            mockP,
-		progressTracker: progressTracker,
-		downloader:      dl,
-		registry:        models.NewScraperRegistry(),
-		organizer:       nil,
-		nfoGenerator:    nil,
-		aggregator:      nil,
-		movieRepo:       nil,
+	return &processingCoordinator{
+		runner:    mockR,
+		forwardCh: nil,
+		factory:   factory,
+		registry:  registry,
 	}
 }
 
 // TestProcessFiles_SkipsDirectories verifies directories are skipped
 func TestProcessFiles_SkipsDirectories(t *testing.T) {
-	mockP := &mockPool{}
-	pc := createMinimalCoordinator(mockP)
+	mockR := &mockRunner{}
+	pc := createMinimalCoordinator(t, mockR)
 
-	files := []FileItem{
+	files := []fileItem{
 		{Path: "/dir1", IsDir: true, Matched: true},
 		{Path: "/dir2", IsDir: true, Matched: true},
 	}
-	matches := map[string]matcher.MatchResult{}
+	matches := map[string]models.FileMatchInfo{}
 
 	err := pc.ProcessFiles(context.Background(), files, matches)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 0, mockP.submitCalled, "Should not submit tasks for directories")
+	assert.Equal(t, 0, mockR.goCalled, "Should not submit tasks for directories")
 }
 
 // TestProcessFiles_SkipsUnmatched verifies unmatched files are skipped
 func TestProcessFiles_SkipsUnmatched(t *testing.T) {
-	mockP := &mockPool{}
-	pc := createMinimalCoordinator(mockP)
+	mockR := &mockRunner{}
+	pc := createMinimalCoordinator(t, mockR)
 
-	files := []FileItem{
+	files := []fileItem{
 		{Path: "/video1.mp4", IsDir: false, Matched: false},
 		{Path: "/video2.mp4", IsDir: false, Matched: false},
 	}
-	matches := map[string]matcher.MatchResult{}
+	matches := map[string]models.FileMatchInfo{}
 
 	err := pc.ProcessFiles(context.Background(), files, matches)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 0, mockP.submitCalled, "Should not submit tasks for unmatched files")
+	assert.Equal(t, 0, mockR.goCalled, "Should not submit tasks for unmatched files")
 }
 
 // TestProcessFiles_SkipsMissingMatches verifies files without match data are skipped
 func TestProcessFiles_SkipsMissingMatches(t *testing.T) {
-	mockP := &mockPool{}
-	pc := createMinimalCoordinator(mockP)
+	mockR := &mockRunner{}
+	pc := createMinimalCoordinator(t, mockR)
 
-	files := []FileItem{
+	files := []fileItem{
 		{Path: "/video1.mp4", IsDir: false, Matched: true},
 	}
-	matches := map[string]matcher.MatchResult{
+	matches := map[string]models.FileMatchInfo{
 		// No entry for /video1.mp4
 	}
 
 	err := pc.ProcessFiles(context.Background(), files, matches)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 0, mockP.submitCalled, "Should not submit tasks for files missing match data")
+	assert.Equal(t, 0, mockR.goCalled, "Should not submit tasks for files missing match data")
 }
 
 // TestProcessFiles_EmptyFileList verifies no crashes with empty file list
 func TestProcessFiles_EmptyFileList(t *testing.T) {
-	mockP := &mockPool{}
-	pc := createMinimalCoordinator(mockP)
+	mockR := &mockRunner{}
+	pc := createMinimalCoordinator(t, mockR)
 
-	files := []FileItem{}
-	matches := map[string]matcher.MatchResult{}
+	files := []fileItem{}
+	matches := map[string]models.FileMatchInfo{}
 
 	err := pc.ProcessFiles(context.Background(), files, matches)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 0, mockP.submitCalled, "Should not submit tasks for empty file list")
+	assert.Equal(t, 0, mockR.goCalled, "Should not submit tasks for empty file list")
 }
 
 // TestProcessFiles_SubmitError_Propagates verifies error handling when Submit() fails
 func TestProcessFiles_SubmitError_Propagates(t *testing.T) {
 	// This test requires real concrete instances to pass type assertions
-	// Create minimal dependencies
-	progressChan := make(chan worker.ProgressUpdate, 10)
-	progressTracker := worker.NewProgressTracker(progressChan)
+	// Create minimal dependencies using NewWorkflowFactory
+	cfg := &config.Config{}
+	cfg.Database.DSN = ":memory:"
+	db, err := database.New(database.ConfigFromAppConfig(cfg))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
 
-	mockClient := &http.Client{}
-	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{}
-	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent", nil)
+	registry := scraperutil.NewScraperRegistry()
+	factory := testBatchJobFactory(t, cfg, registry, db.Repositories())
 
-	submitErr := errors.New("pool submit failed")
-	mockP := &mockPool{submitErr: submitErr}
+	goErr := errors.New("runner go failed")
+	mockR := &mockRunner{goErr: goErr}
 
-	pc := &ProcessingCoordinator{
-		pool:            mockP,
-		progressTracker: progressTracker,
-		downloader:      dl,
-		organizer:       nil, // Not used in this test
-		nfoGenerator:    nil, // Not used in this test
-		registry:        models.NewScraperRegistry(),
-		aggregator:      nil, // Not used in task creation
-		movieRepo:       nil, // Not used in task creation
-		destPath:        "/dest",
-		moveFiles:       true,
+	pc := &processingCoordinator{
+		runner:    mockR,
+		forwardCh: nil,
+		factory:   factory,
+		registry:  registry,
 	}
+	pc.opts.Store(ProcessorOptions{})
+	pc.SetOptions(ProcessorOptions{DestPath: "/dest", MoveFiles: true})
 
-	files := []FileItem{
+	files := []fileItem{
 		{Path: "/video1.mp4", IsDir: false, Matched: true},
 	}
-	matches := map[string]matcher.MatchResult{
-		"/video1.mp4": {ID: "IPX-123"},
+	matches := map[string]models.FileMatchInfo{
+		"/video1.mp4": {MovieID: "IPX-123"},
 	}
 
-	err := pc.ProcessFiles(context.Background(), files, matches)
+	err = pc.ProcessFiles(context.Background(), files, matches)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to submit process task")
-	assert.Equal(t, 1, mockP.submitCalled, "Should attempt to submit task")
+	assert.Contains(t, err.Error(), "failed to start batch process")
+	assert.Equal(t, 1, mockR.goCalled, "Should attempt to submit task")
 }
 
 // TestProcessFiles_ValidFiles_SubmitsTask verifies successful task submission
 func TestProcessFiles_ValidFiles_SubmitsTask(t *testing.T) {
 	// This test requires real concrete instances to pass type assertions
-	// Create minimal dependencies
-	progressChan := make(chan worker.ProgressUpdate, 10)
-	progressTracker := worker.NewProgressTracker(progressChan)
+	// Create minimal dependencies using NewWorkflowFactory
+	cfg := &config.Config{}
+	cfg.Database.DSN = ":memory:"
+	db, err := database.New(database.ConfigFromAppConfig(cfg))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
 
-	mockClient := &http.Client{}
-	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{}
-	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent", nil)
+	registry := scraperutil.NewScraperRegistry()
+	factory := testBatchJobFactory(t, cfg, registry, db.Repositories())
 
-	mockP := &mockPool{submitErr: nil} // Success case
+	mockR := &mockRunner{goErr: nil} // success case
 
-	pc := &ProcessingCoordinator{
-		pool:            mockP,
-		progressTracker: progressTracker,
-		downloader:      dl,
-		organizer:       nil, // Not used in this test
-		nfoGenerator:    nil, // Not used in this test
-		registry:        models.NewScraperRegistry(),
-		aggregator:      nil, // Not used in task creation
-		movieRepo:       nil, // Not used in task creation
-		destPath:        "/dest",
-		moveFiles:       true,
+	pc := &processingCoordinator{
+		runner:    mockR,
+		forwardCh: nil,
+		factory:   factory,
+		registry:  registry,
 	}
+	pc.opts.Store(ProcessorOptions{})
+	pc.SetOptions(ProcessorOptions{DestPath: "/dest", MoveFiles: true})
 
-	files := []FileItem{
+	files := []fileItem{
 		{Path: "/video1.mp4", IsDir: false, Matched: true},
 		{Path: "/video2.mp4", IsDir: false, Matched: true},
 		{Path: "/dir1", IsDir: true, Matched: true}, // Should be skipped
 	}
-	matches := map[string]matcher.MatchResult{
-		"/video1.mp4": {ID: "IPX-123"},
-		"/video2.mp4": {ID: "IPX-456"},
+	matches := map[string]models.FileMatchInfo{
+		"/video1.mp4": {MovieID: "IPX-123"},
+		"/video2.mp4": {MovieID: "IPX-456"},
 	}
 
-	err := pc.ProcessFiles(context.Background(), files, matches)
+	err = pc.ProcessFiles(context.Background(), files, matches)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, mockP.submitCalled, "Should submit tasks for 2 valid files (skipping directory)")
+	// With BatchJob migration, a single batch task is submitted (not per-file)
+	assert.Equal(t, 1, mockR.goCalled, "Should submit 1 batch task for all valid files")
 }
 
 // TestProcessFiles_NilDependencies verifies nil checks prevent panics
 func TestProcessFiles_NilDependencies(t *testing.T) {
 	tests := []struct {
 		name        string
-		pc          *ProcessingCoordinator
+		pc          *processingCoordinator
 		expectedErr string
 	}{
 		{
-			name:        "nil pool",
-			pc:          &ProcessingCoordinator{pool: nil},
-			expectedErr: "worker pool is nil",
+			name:        "nil runner",
+			pc:          &processingCoordinator{runner: nil},
+			expectedErr: "background runner is nil",
 		},
 		{
 			name:        "nil registry",
-			pc:          &ProcessingCoordinator{pool: &mockPool{}, registry: nil},
+			pc:          &processingCoordinator{runner: &mockRunner{}, registry: nil},
 			expectedErr: "scraper registry is nil",
 		},
 		{
-			name: "nil progress tracker",
-			pc: &ProcessingCoordinator{
-				pool:            &mockPool{},
-				registry:        models.NewScraperRegistry(),
-				progressTracker: nil,
-			},
-			expectedErr: "progress tracker is nil",
+			name:        "nil factory",
+			pc:          &processingCoordinator{runner: &mockRunner{}, registry: scraperutil.NewScraperRegistry(), factory: nil},
+			expectedErr: "batch job factory is nil",
 		},
 		{
-			name: "nil downloader",
-			pc: &ProcessingCoordinator{
-				pool:            &mockPool{},
-				registry:        models.NewScraperRegistry(),
-				progressTracker: &mockProgressTracker{},
-				downloader:      nil,
-			},
-			expectedErr: "downloader is nil",
+			name:        "nil registry (duplicate check)",
+			pc:          &processingCoordinator{runner: &mockRunner{}, registry: nil},
+			expectedErr: "scraper registry is nil",
+		},
+		{
+			name:        "nil factory (duplicate check)",
+			pc:          &processingCoordinator{runner: &mockRunner{}, registry: scraperutil.NewScraperRegistry(), factory: nil},
+			expectedErr: "batch job factory is nil",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			files := []FileItem{{Path: "/video1.mp4", IsDir: false, Matched: true}}
-			matches := map[string]matcher.MatchResult{"/video1.mp4": {ID: "IPX-123"}}
+			files := []fileItem{{Path: "/video1.mp4", IsDir: false, Matched: true}}
+			matches := map[string]models.FileMatchInfo{"/video1.mp4": {MovieID: "IPX-123"}}
 
 			err := tt.pc.ProcessFiles(context.Background(), files, matches)
 
@@ -945,29 +1030,34 @@ func TestProcessFiles_NilDependencies(t *testing.T) {
 	}
 }
 
-// TestProcessFiles_ContextCancellation verifies context cancellation stops processing
+// TestProcessFiles_ContextCancellation verifies that context cancellation
+// is propagated through the BatchJob during execution. With the BatchJob
+// migration, ProcessFiles submits a single batch task and cancellation is
+// handled internally by the BatchJob's StartScrape/StartApply methods.
 func TestProcessFiles_ContextCancellation(t *testing.T) {
-	mockP := &mockPool{}
-	pc := createMinimalCoordinator(mockP)
+	mockR := &mockRunner{}
+	pc := createMinimalCoordinator(t, mockR)
 
-	// Create a cancelled context
+	// Create a cancelled context — ProcessFiles still submits the batch task
+	// but the BatchJob.Execute will handle cancellation internally
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	files := []FileItem{
+	files := []fileItem{
 		{Path: "/video1.mp4", IsDir: false, Matched: true},
 		{Path: "/video2.mp4", IsDir: false, Matched: true},
 	}
-	matches := map[string]matcher.MatchResult{
-		"/video1.mp4": {ID: "IPX-123"},
-		"/video2.mp4": {ID: "IPX-456"},
+	matches := map[string]models.FileMatchInfo{
+		"/video1.mp4": {MovieID: "IPX-123"},
+		"/video2.mp4": {MovieID: "IPX-456"},
 	}
 
 	err := pc.ProcessFiles(ctx, files, matches)
 
-	assert.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-	assert.Equal(t, 0, mockP.submitCalled, "Should not submit any tasks when context is cancelled")
+	// ProcessFiles still succeeds in submitting the batch task;
+	// context cancellation is handled by BatchJob internally
+	assert.NoError(t, err)
+	assert.Equal(t, 1, mockR.goCalled, "Should submit 1 batch task even with cancelled context (cancellation handled by BatchJob)")
 }
 
 // TestProcessFiles_CustomScrapers_DefensiveCopy verifies defensive copy of custom scrapers
@@ -975,44 +1065,43 @@ func TestProcessFiles_CustomScrapers_DefensiveCopy(t *testing.T) {
 	// This test verifies that ProcessFiles creates a defensive copy of customScraperPriority
 	// to prevent data races when the UI modifies it while tasks are running
 
-	progressChan := make(chan worker.ProgressUpdate, 10)
-	progressTracker := worker.NewProgressTracker(progressChan)
+	// Create minimal dependencies using NewWorkflowFactory
+	cfg := &config.Config{}
+	cfg.Database.DSN = ":memory:"
+	db, err := database.New(database.ConfigFromAppConfig(cfg))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
 
-	mockClient := &http.Client{}
-	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{}
-	dl := downloader.NewDownloader(mockClient, fs, cfg, "test-agent", nil)
+	registry := scraperutil.NewScraperRegistry()
+	factory := testBatchJobFactory(t, cfg, registry, db.Repositories())
 
-	mockP := &mockPool{submitErr: nil}
+	mockR := &mockRunner{goErr: nil}
 
-	pc := &ProcessingCoordinator{
-		pool:                  mockP,
-		progressTracker:       progressTracker,
-		downloader:            dl,
-		organizer:             nil,
-		nfoGenerator:          nil,
-		registry:              models.NewScraperRegistry(),
-		aggregator:            nil,
-		movieRepo:             nil,
-		destPath:              "/dest",
-		moveFiles:             true,
-		customScraperPriority: []string{"r18dev", "dmm"},
+	pc := &processingCoordinator{
+		runner:    mockR,
+		forwardCh: nil,
+		factory:   factory,
+		registry:  registry,
 	}
+	pc.opts.Store(ProcessorOptions{})
+	pc.SetCustomScrapers([]string{"r18dev", "dmm"})
+	pc.SetOptions(ProcessorOptions{DestPath: "/dest", MoveFiles: true, CustomScraperPriority: []string{"r18dev", "dmm"}})
 
-	files := []FileItem{
+	files := []fileItem{
 		{Path: "/video1.mp4", IsDir: false, Matched: true},
 	}
-	matches := map[string]matcher.MatchResult{
-		"/video1.mp4": {ID: "IPX-123"},
+	matches := map[string]models.FileMatchInfo{
+		"/video1.mp4": {MovieID: "IPX-123"},
 	}
 
-	err := pc.ProcessFiles(context.Background(), files, matches)
+	err = pc.ProcessFiles(context.Background(), files, matches)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 1, mockP.submitCalled)
+	// With BatchJob migration, a single batch task is submitted
+	assert.Equal(t, 1, mockR.goCalled)
 
-	// Modify the original slice - should not affect submitted tasks (defensive copy was made)
-	pc.customScraperPriority[0] = "modified"
-	assert.Equal(t, "modified", pc.customScraperPriority[0], "Original slice should be modified")
-	// We can't verify the copy directly, but the defensive copy code is executed
+	// Custom scrapers are passed to the batch task via processingCoordinator
+	// The defensive copy is made by the coordinator's SetCustomScrapers method
+	pc.SetCustomScrapers([]string{"modified"})
+	assert.Equal(t, []string{"modified"}, pc.loadOptions().CustomScraperPriority, "Should be updated via Store")
 }

@@ -11,7 +11,7 @@ import (
 )
 
 func TestTemplateConcurrentRendering(t *testing.T) {
-	engine := NewEngineWithOptions(EngineOptions{
+	engine := newEngineWithOptions(engineOptions{
 		DefaultLanguage:   "en",
 		FallbackLanguages: []string{"ja", "zh"},
 	})
@@ -76,7 +76,7 @@ func TestTemplateConcurrentRendering(t *testing.T) {
 }
 
 func TestTemplateConcurrentRenderingDifferentContexts(t *testing.T) {
-	engine := NewEngineWithOptions(EngineOptions{
+	engine := newEngineWithOptions(engineOptions{
 		DefaultLanguage:   "en",
 		FallbackLanguages: []string{"ja"},
 	})
@@ -193,13 +193,13 @@ func TestConcurrentEngineWithOptions(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			opts := EngineOptions{
+			opts := engineOptions{
 				DefaultLanguage:   "en",
 				FallbackLanguages: []string{"ja", "zh"},
 				MaxTemplateBytes:  1024 * 1024,
 				MaxOutputBytes:    10 * 1024 * 1024,
 			}
-			engines[id] = NewEngineWithOptions(opts)
+			engines[id] = newEngineWithOptions(opts)
 		}(g)
 	}
 
@@ -223,7 +223,7 @@ func TestConcurrentTranslationsMapAccess(t *testing.T) {
 		},
 	}
 
-	engine := NewEngineWithOptions(EngineOptions{
+	engine := newEngineWithOptions(engineOptions{
 		DefaultLanguage:   "en",
 		FallbackLanguages: []string{"ja", "zh"},
 	})
@@ -239,7 +239,7 @@ func TestConcurrentTranslationsMapAccess(t *testing.T) {
 			defer wg.Done()
 			langs := []string{"en", "ja", "zh", "ko", "de", "fr"}
 			langIdx := id % len(langs)
-			results[id] = engine.translationFieldValue("TITLE", langs[langIdx], ctx)
+			results[id] = engine.translationResolver.translationFieldValue("TITLE", langs[langIdx], ctx)
 		}(g)
 	}
 
@@ -272,7 +272,7 @@ func TestConcurrentResolveTranslatedTag(t *testing.T) {
 		},
 	}
 
-	engine := NewEngineWithOptions(EngineOptions{
+	engine := newEngineWithOptions(engineOptions{
 		DefaultLanguage:   "en",
 		FallbackLanguages: []string{"zh", "ko"},
 	})
@@ -288,7 +288,7 @@ func TestConcurrentResolveTranslatedTag(t *testing.T) {
 			defer wg.Done()
 			explicitLangs := []string{"", "en", "ja", "zh", "ko", "de"}
 			langIdx := id % len(explicitLangs)
-			results[id] = engine.resolveTranslatedTag("TITLE", explicitLangs[langIdx], ctx)
+			results[id] = engine.translationResolver.resolveTranslatedTag("TITLE", explicitLangs[langIdx], ctx)
 		}(g)
 	}
 
@@ -312,7 +312,7 @@ func TestConcurrentResolveTranslatedTag(t *testing.T) {
 
 func TestRaceDetectorConcurrentExecution(t *testing.T) {
 	t.Run("Engine Execute concurrent", func(t *testing.T) {
-		engine := NewEngineWithOptions(EngineOptions{
+		engine := newEngineWithOptions(engineOptions{
 			DefaultLanguage:   "en",
 			FallbackLanguages: []string{"ja"},
 		})
@@ -371,7 +371,7 @@ func TestRaceDetectorConcurrentExecution(t *testing.T) {
 	})
 
 	t.Run("languageCandidates concurrent", func(t *testing.T) {
-		engine := NewEngineWithOptions(EngineOptions{
+		engine := newEngineWithOptions(engineOptions{
 			DefaultLanguage:   "en",
 			FallbackLanguages: []string{"ja", "zh"},
 		})
@@ -388,7 +388,7 @@ func TestRaceDetectorConcurrentExecution(t *testing.T) {
 			go func(id int) {
 				defer wg.Done()
 				langs := []string{"", "en", "ja", "zh"}
-				candidates := engine.languageCandidates(langs[id%4], ctx)
+				candidates := engine.translationResolver.languageCandidates(langs[id%4], ctx)
 				assert.NotEmpty(t, candidates)
 			}(i)
 		}
@@ -414,7 +414,7 @@ func TestRaceDetectorConcurrentExecution(t *testing.T) {
 			go func(id int) {
 				defer wg.Done()
 				langs := []string{"en", "ja"}
-				value := engine.translationFieldValue("TITLE", langs[id%2], ctx)
+				value := engine.translationResolver.translationFieldValue("TITLE", langs[id%2], ctx)
 				assert.NotEmpty(t, value)
 			}(i)
 		}
@@ -424,7 +424,7 @@ func TestRaceDetectorConcurrentExecution(t *testing.T) {
 }
 
 func BenchmarkConcurrentTemplateExecution(b *testing.B) {
-	engine := NewEngineWithOptions(EngineOptions{
+	engine := newEngineWithOptions(engineOptions{
 		DefaultLanguage:   "en",
 		FallbackLanguages: []string{"ja"},
 	})

@@ -3,15 +3,15 @@ package scrape
 import (
 	"context"
 	"fmt"
-	"strings"
 
-	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/formatter"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/panicutil"
+	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -40,17 +40,44 @@ func NewCommand() *cobra.Command {
 	return scrapeCmd
 }
 
-// ApplyFlagOverrides applies CLI flag overrides to the config.
-// This is extracted for testability (Story 5.4 - Epic 5).
-// Exported to enable comprehensive testing of flag parsing logic.
+// ApplyFlagOverrides applies CLI flag overrides to the config. Exported for testability.
 func ApplyFlagOverrides(cmd *cobra.Command, cfg *config.Config) {
-	// Ensure Overrides is populated
-	cfg.Scrapers.NormalizeScraperConfigs()
+	cfg.Scrapers.Normalize()
 
-	// Note: DMM-specific CLI flags (scrape-actress, browser, browser-timeout) were
-	// previously stored in ScraperSettings.Extra. Since Extra has been removed as part
-	// of the plugin system migration, these flags are temporarily disabled.
-	// They will be restored via the concrete DMMConfig type in a future update.
+	// DMM-specific CLI flags
+	if cmd.Flags().Changed("scrape-actress") || cmd.Flags().Changed("no-scrape-actress") || cmd.Flags().Changed("browser") || cmd.Flags().Changed("no-browser") {
+		if cfg.Scrapers.Overrides == nil {
+			cfg.Scrapers.Overrides = make(map[string]*models.ScraperSettings)
+		}
+		if cfg.Scrapers.Overrides["dmm"] == nil {
+			cfg.Scrapers.Overrides["dmm"] = &models.ScraperSettings{}
+		}
+	}
+	if cmd.Flags().Changed("scrape-actress") {
+		if val, _ := cmd.Flags().GetBool("scrape-actress"); val {
+			cfg.Scrapers.Overrides["dmm"].ScrapeActress = scraperutil.BoolPtr(true)
+		}
+	}
+	if cmd.Flags().Changed("no-scrape-actress") {
+		if val, _ := cmd.Flags().GetBool("no-scrape-actress"); val {
+			cfg.Scrapers.Overrides["dmm"].ScrapeActress = scraperutil.BoolPtr(false)
+		}
+	}
+	if cmd.Flags().Changed("browser") {
+		if val, _ := cmd.Flags().GetBool("browser"); val {
+			cfg.Scrapers.Overrides["dmm"].UseBrowser = true
+		}
+	}
+	if cmd.Flags().Changed("no-browser") {
+		if val, _ := cmd.Flags().GetBool("no-browser"); val {
+			cfg.Scrapers.Overrides["dmm"].UseBrowser = false
+		}
+	}
+	if cmd.Flags().Changed("browser-timeout") {
+		if val, _ := cmd.Flags().GetInt("browser-timeout"); val > 0 {
+			cfg.Scrapers.Browser.Timeout = val
+		}
+	}
 
 	// Actress database flags
 	if cmd.Flags().Changed("actress-db") {
@@ -78,469 +105,87 @@ func ApplyFlagOverrides(cmd *cobra.Command, cfg *config.Config) {
 }
 
 // Run executes the scrape command business logic and returns the scraped movie and results.
-// Exported for testing purposes - allows testing business logic without console output.
-// Following Epic 7 pattern from Story 7.1 (API command refactoring).
-//
-// Parameters:
-//   - cmd: Cobra command for flag access
-//   - args: Command arguments (JAV ID at args[0])
-//   - configFile: Path to configuration file
-//   - deps: Optional injected dependencies (for testing, pass nil for production use)
-//
-// Returns:
-//   - *models.Movie: Scraped and aggregated movie metadata
-//   - []*models.ScraperResult: Raw results from each scraper source
-//   - error: Any error encountered during scraping process
-func Run(cmd *cobra.Command, args []string, configFile string, deps *commandutil.Dependencies) (*models.Movie, []*models.ScraperResult, error) {
+// Exported for testing — allows testing business logic without console output.
+func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile string, deps *commandutil.CoreDeps) (movie *models.Movie, results []*models.ScraperResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = panicutil.HandleRecoverWithStack(r)
+		}
+	}()
+
 	id := args[0]
 
-	// Load configuration
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Apply environment overrides before CLI flags so flags keep highest precedence.
 	config.ApplyEnvironmentOverrides(cfg)
-
-	// Apply CLI flag overrides to config
 	ApplyFlagOverrides(cmd, cfg)
 	if _, err := config.Prepare(cfg); err != nil {
 		return nil, nil, fmt.Errorf("invalid configuration after CLI overrides: %w", err)
 	}
 
-	// Initialize or use injected dependencies
 	var ownDeps bool
+	var wf workflow.WorkflowInterface
 	if deps == nil {
-		deps, err = commandutil.NewDependencies(cfg)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize dependencies: %w", err)
+		bs, bootstrapErr := commandutil.BootstrapScrapeOnly(cfg)
+		if bootstrapErr != nil {
+			return nil, nil, fmt.Errorf("failed to bootstrap: %w", bootstrapErr)
 		}
+		deps = bs.CoreDeps
+		wf = bs.Workflow
 		ownDeps = true
+	} else {
+		fc, fcErr := workflow.NewFactoryConfigFromRepos(deps.GetConfig(), deps.ScraperRegistry, deps.DB.Repositories())
+		if fcErr != nil {
+			return nil, nil, fmt.Errorf("failed to create factory config: %w", fcErr)
+		}
+		factory, factoryErr := workflow.NewWorkflowFactory(fc)
+		if factoryErr != nil {
+			return nil, nil, fmt.Errorf("failed to create workflow factory: %w", factoryErr)
+		}
+		wf, err = factory.NewScrapeOnlyWorkflow()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create scraper: %w", err)
+		}
 	}
 	if ownDeps {
 		defer func() { _ = deps.Close() }()
 	}
 
-	// Get force flag and scrapers override
 	forceRefresh, _ := cmd.Flags().GetBool("force")
 	scrapersFlag, _ := cmd.Flags().GetStringSlice("scrapers")
 
-	// Initialize repositories
-	movieRepo := database.NewMovieRepository(deps.DB)
-
-	// Use injected scraper registry
-	registry := deps.ScraperRegistry
-
-	// Initialize aggregator with database support
-	agg := aggregator.NewWithDatabase(deps.Config, deps.DB)
-
-	logging.Infof("Scraping metadata for: %s", id)
-
-	// Determine which scrapers to use: CLI flag overrides config
-	scrapersToUse := deps.Config.Scrapers.Priority
-	usingCustomScrapers := len(scrapersFlag) > 0
-	if usingCustomScrapers {
-		scrapersToUse = scrapersFlag
-		logging.Infof("Using scrapers from CLI flag: %v", scrapersFlag)
-	}
-
-	// Force refresh - clear cache if requested
-	if forceRefresh {
-		if err := movieRepo.Delete(id); err != nil {
-			logging.Debugf("Failed to delete %s from cache (may not exist): %v", id, err)
-		} else {
-			logging.Infof("🔄 Cache cleared for %s", id)
-		}
-	}
-
-	// Check cache first (skip cache if user specified custom scrapers or force refresh)
-	if !usingCustomScrapers && !forceRefresh {
-		if movie, err := movieRepo.FindByID(id); err == nil {
-			logging.Info("✅ Found in cache!")
-
-			// Check if translation needs to be re-applied due to settings change
-			if cfg.Metadata.Translation.Enabled {
-				currentHash := cfg.Metadata.Translation.SettingsHash()
-				targetLang := cfg.Metadata.Translation.TargetLanguage
-
-				// Check if we have a translation matching current settings
-				hasValidTranslation := false
-				for _, trans := range movie.Translations {
-					if trans.Language == targetLang && trans.SettingsHash == currentHash {
-						hasValidTranslation = true
-						break
-					}
-				}
-
-				// If no valid translation found, re-translate
-				if !hasValidTranslation {
-					logging.Infof("🔄 Translation settings changed, re-translating...")
-					agg.ApplyConfiguredTranslation(movie)
-
-					// Save updated movie with new translation
-					if _, err := movieRepo.Upsert(movie); err != nil {
-						logging.Warnf("Failed to save re-translated movie: %v", err)
-					} else {
-						logging.Info("💾 Updated translation in database")
-					}
-				}
-			}
-
-			return movie, nil, nil
-		}
-	}
-
-	priorities := scraperutil.GetPriorities()
-	if len(priorities) == 0 {
-		return nil, nil, fmt.Errorf("no scrapers registered")
-	}
-
-	var resolvedID = id
-	resolverScraperName := priorities[0]
-
-	logging.Infof("🔍 Resolving content-ID using %s...", resolverScraperName)
-	resolverScraper, exists := registry.Get(resolverScraperName)
-	if exists {
-		if resolver, ok := resolverScraper.(models.ContentIDResolver); ok {
-			contentID, err := resolver.ResolveContentID(id)
-			if err != nil {
-				logging.Debugf("%s content-ID resolution failed: %v, will use original ID", resolverScraperName, err)
-			} else {
-				resolvedID = contentID
-				logging.Infof("✅ Resolved content-ID: %s", resolvedID)
-			}
-		} else {
-			logging.Debugf("%s does not implement ContentIDResolver, using original ID", resolverScraperName)
-		}
-	} else {
-		logging.Debugf("%s scraper not available, using original ID", resolverScraperName)
-	}
-
-	// Phase 2: Scrape from sources in priority order
-	results := []*models.ScraperResult{}
-
-	for _, scraper := range registry.GetByPriority(scrapersToUse) {
-		logging.Infof("Scraping %s...", scraper.Name())
-		result, err := scraper.Search(context.Background(), resolvedID)
-		if err != nil {
-			logging.Warnf("❌ %s: %v", scraper.Name(), err)
-			// If scraping with resolved ID fails, try with original ID before giving up
-			if resolvedID != id {
-				logging.Debugf("Retrying %s with original ID: %s", scraper.Name(), id)
-				result, err = scraper.Search(context.Background(), id)
-				if err != nil {
-					logging.Warnf("❌ %s (with original ID): %v", scraper.Name(), err)
-					continue
-				}
-			} else {
-				continue
-			}
-		}
-		result.NormalizeMediaURLs()
-		logging.Info("✅")
-		results = append(results, result)
-	}
-
-	if len(results) == 0 {
-		logging.Error("❌ No results found from any scraper")
-		return nil, nil, fmt.Errorf("no results found from any scraper")
-	}
-
-	logging.Infof("✅ Found %d source(s)", len(results))
-
-	// Aggregate results
-	// When users provide --scrapers, honor that order for all fields so
-	// metadata priorities don't accidentally exclude the selected source(s).
-	var movie *models.Movie
-	if usingCustomScrapers {
-		movie, _, err = agg.AggregateWithPriority(results, scrapersToUse)
-	} else {
-		movie, _, err = agg.Aggregate(results)
-	}
+	result, _, err := wf.Scrape(ctx, scrape.ScrapeCmd{
+		MovieID:          id,
+		ForceRefresh:     forceRefresh,
+		SelectedScrapers: scrapersFlag,
+	}, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to aggregate: %w", err)
+		if result != nil && result.Movie != nil {
+			return result.Movie, result.ScraperResults, err
+		}
+		return nil, nil, err
 	}
 
-	if movie.ContentID == "" && resolvedID != "" && resolvedID != id {
-		movie.ContentID = resolvedID
-		logging.Debugf("Using DMM-resolved ContentID %q as fallback (aggregator produced empty ContentID)", resolvedID)
+	if result.Status == scrape.StatusFailed {
+		errMsg := "scrape failed"
+		if result.Message != "" {
+			errMsg = result.Message
+		}
+		return nil, nil, fmt.Errorf("%s", errMsg)
 	}
 
-	movie.OriginalFileName = id
-
-	// Save to database (upsert: create or update)
-	if _, err := movieRepo.Upsert(movie); err != nil {
-		logging.Warnf("Failed to save to database: %v", err)
-	} else {
-		fmt.Println("💾 Saved to database")
-	}
-
-	return movie, results, nil
+	return result.Movie, result.ScraperResults, nil
 }
 
-// runScrape is the private Cobra handler that calls Run() and handles console output.
-// This isolates the testable business logic (Run) from the non-testable console formatting.
+// runScrape is the Cobra handler that calls Run() and formats output.
 func runScrape(cmd *cobra.Command, args []string, configFile string) error {
-	movie, results, err := Run(cmd, args, configFile, nil)
+	movie, results, err := Run(cmd.Context(), cmd, args, configFile, nil)
 	if err != nil {
 		return err
 	}
-
-	printMovie(movie, results)
+	formatter.WriteMovie(cmd.OutOrStdout(), movie, results)
 	return nil
-}
-
-// printMovie displays movie metadata in a formatted table
-func printMovie(movie *models.Movie, results []*models.ScraperResult) {
-	fmt.Println()
-
-	// Build table rows
-	rows := [][]string{}
-
-	// ID and Content ID
-	rows = append(rows, []string{"ID", movie.ID})
-	if movie.ContentID != "" && movie.ContentID != movie.ID {
-		rows = append(rows, []string{"ContentID", movie.ContentID})
-	}
-
-	// Title
-	if movie.Title != "" {
-		rows = append(rows, []string{"Title", movie.Title})
-	}
-
-	// Release Date
-	if movie.ReleaseDate != nil {
-		rows = append(rows, []string{"ReleaseDate", movie.ReleaseDate.Format("2006-01-02")})
-	}
-
-	// Runtime
-	if movie.Runtime > 0 {
-		rows = append(rows, []string{"Runtime", fmt.Sprintf("%d min", movie.Runtime)})
-	}
-
-	// Director
-	if movie.Director != "" {
-		rows = append(rows, []string{"Director", movie.Director})
-	}
-
-	// Maker
-	if movie.Maker != "" {
-		rows = append(rows, []string{"Maker", movie.Maker})
-	}
-
-	// Label
-	if movie.Label != "" {
-		rows = append(rows, []string{"Label", movie.Label})
-	}
-
-	// Series
-	if movie.Series != "" {
-		rows = append(rows, []string{"Series", movie.Series})
-	}
-
-	// Rating
-	if movie.RatingScore > 0 {
-		rows = append(rows, []string{"Rating", fmt.Sprintf("%.1f/10 (%d votes)", movie.RatingScore, movie.RatingVotes)})
-	}
-
-	// Actresses - show detailed information
-	if len(movie.Actresses) > 0 {
-		actressHeader := fmt.Sprintf("Actresses (%d)", len(movie.Actresses))
-		rows = append(rows, []string{actressHeader, ""})
-
-		for i, actress := range movie.Actresses {
-			// Build actress name with Japanese
-			name := actress.FullName()
-			if actress.JapaneseName != "" {
-				name += fmt.Sprintf(" (%s)", actress.JapaneseName)
-			}
-
-			// Build actress info line with number and DMM ID
-			actressLine := fmt.Sprintf("  [%d] %s", i+1, name)
-			if actress.DMMID > 0 {
-				actressLine += fmt.Sprintf(" - ID: %d", actress.DMMID)
-			}
-			rows = append(rows, []string{"", actressLine})
-
-			// Add thumbnail URL on separate line if available
-			if actress.ThumbURL != "" {
-				rows = append(rows, []string{"", fmt.Sprintf("      Thumb: %s", actress.ThumbURL)})
-			}
-		}
-	}
-
-	// Genres
-	if len(movie.Genres) > 0 {
-		genreNames := make([]string, 0, len(movie.Genres))
-		for i, genre := range movie.Genres {
-			if i < 8 || len(movie.Genres) <= 9 {
-				genreNames = append(genreNames, genre.Name)
-			} else if i == 8 {
-				genreNames = append(genreNames, fmt.Sprintf("... and %d more", len(movie.Genres)-8))
-				break
-			}
-		}
-		rows = append(rows, []string{"Genres", strings.Join(genreNames, ", ")})
-	}
-
-	// Translations
-	if len(movie.Translations) > 1 {
-		langNames := []string{}
-		for _, trans := range movie.Translations {
-			langName := map[string]string{
-				"en": "English",
-				"ja": "Japanese",
-				"zh": "Chinese",
-				"ko": "Korean",
-			}[trans.Language]
-			if langName == "" {
-				langName = trans.Language
-			}
-			langNames = append(langNames, fmt.Sprintf("%s (%s)", langName, trans.SourceName))
-		}
-		rows = append(rows, []string{"Translations", strings.Join(langNames, ", ")})
-	}
-
-	// Sources - collect unique sources from translations
-	sourcesMap := make(map[string]bool)
-	var sources []string
-
-	// Add sources from translations
-	for _, trans := range movie.Translations {
-		if trans.SourceName != "" && !sourcesMap[trans.SourceName] {
-			sourcesMap[trans.SourceName] = true
-			sources = append(sources, trans.SourceName)
-		}
-	}
-
-	// If no translations, fall back to movie.SourceName
-	if len(sources) == 0 && movie.SourceName != "" {
-		sources = append(sources, movie.SourceName)
-	}
-
-	// Display sources (names only in the main table)
-	if len(sources) > 0 {
-		rows = append(rows, []string{"Sources", strings.Join(sources, ", ")})
-	}
-
-	// Calculate column widths
-	maxLabelWidth := 0
-	for _, row := range rows {
-		if len(row[0]) > maxLabelWidth {
-			maxLabelWidth = len(row[0])
-		}
-	}
-
-	// Terminal width for wrapping (default 120, can be adjusted)
-	terminalWidth := 120
-	valueWidth := terminalWidth - maxLabelWidth - 5 // Account for label, " : ", and padding
-
-	// Helper function to wrap text to specified width
-	wrapText := func(text string, width int) []string {
-		if width <= 0 {
-			width = 80
-		}
-		words := strings.Fields(text)
-		if len(words) == 0 {
-			return []string{""}
-		}
-
-		var lines []string
-		currentLine := ""
-
-		for _, word := range words {
-			if currentLine == "" {
-				currentLine = word
-			} else if len(currentLine)+1+len(word) <= width {
-				currentLine += " " + word
-			} else {
-				lines = append(lines, currentLine)
-				currentLine = word
-			}
-		}
-		if currentLine != "" {
-			lines = append(lines, currentLine)
-		}
-		return lines
-	}
-
-	// Print table header
-	fmt.Println(strings.Repeat("-", maxLabelWidth+2) + " " + strings.Repeat("-", 100))
-
-	// Print rows with proper wrapping
-	for _, row := range rows {
-		label := row[0]
-		value := row[1]
-
-		// For multi-line values (description, media URLs), wrap them
-		lines := wrapText(value, valueWidth)
-
-		for i, line := range lines {
-			if i == 0 {
-				// First line: show label
-				paddedLabel := label + strings.Repeat(" ", maxLabelWidth-len(label))
-				fmt.Printf("%-*s : %s\n", maxLabelWidth, paddedLabel, line)
-			} else {
-				// Continuation lines: indent to align with first line's value
-				fmt.Printf("%*s   %s\n", maxLabelWidth, "", line)
-			}
-		}
-	}
-
-	// Print Source URLs section (if we have scraperResults from fresh scrape)
-	if len(results) > 0 {
-		fmt.Println(strings.Repeat("-", maxLabelWidth+2) + " " + strings.Repeat("-", 100))
-		fmt.Println()
-		fmt.Println("Source URLs:")
-		fmt.Println()
-
-		for _, result := range results {
-			fmt.Printf("  %-12s : %s\n", result.Source, result.SourceURL)
-		}
-	}
-
-	// Now print expanded media section
-	if movie.CoverURL != "" || movie.PosterURL != "" || len(movie.Screenshots) > 0 || movie.TrailerURL != "" {
-		fmt.Println(strings.Repeat("-", maxLabelWidth+2) + " " + strings.Repeat("-", 100))
-		fmt.Println()
-		fmt.Println("Media URLs:")
-		fmt.Println()
-
-		if movie.CoverURL != "" {
-			fmt.Printf("  Cover URL    : %s\n", movie.CoverURL)
-		}
-		if movie.PosterURL != "" && movie.PosterURL != movie.CoverURL {
-			fmt.Printf("  Poster URL   : %s\n", movie.PosterURL)
-		}
-		if movie.TrailerURL != "" {
-			fmt.Printf("  Trailer URL  : %s\n", movie.TrailerURL)
-		}
-		if len(movie.Screenshots) > 0 {
-			fmt.Printf("  Screenshots  : %d total\n", len(movie.Screenshots))
-			for i, url := range movie.Screenshots {
-				fmt.Printf("    [%2d] %s\n", i+1, url)
-			}
-		}
-	}
-
-	// Description section (full text, properly wrapped)
-	if movie.Description != "" {
-		fmt.Println()
-		fmt.Println(strings.Repeat("-", maxLabelWidth+2) + " " + strings.Repeat("-", 100))
-		fmt.Println()
-		fmt.Println("Description:")
-		fmt.Println()
-
-		// Wrap description to terminal width with some padding
-		descLines := wrapText(movie.Description, terminalWidth-4)
-		for _, line := range descLines {
-			fmt.Printf("  %s\n", line)
-		}
-	}
-
-	// Print table footer
-	fmt.Println()
-	fmt.Println(strings.Repeat("-", maxLabelWidth+2) + " " + strings.Repeat("-", 100))
-	fmt.Println()
 }

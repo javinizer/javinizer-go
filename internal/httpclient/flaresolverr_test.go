@@ -1,4 +1,4 @@
-package httpclient_test
+package httpclient
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
-	httpclient "github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,7 +56,7 @@ func TestResolveURL_ReusesPersistentSessionAndTTL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.FlareSolverrConfig{
+	cfg := models.FlareSolverrConfig{
 		Enabled:    true,
 		URL:        server.URL,
 		Timeout:    30,
@@ -64,7 +64,7 @@ func TestResolveURL_ReusesPersistentSessionAndTTL(t *testing.T) {
 		SessionTTL: 300,
 	}
 
-	fs, err := httpclient.NewFlareSolverr(&cfg)
+	fs, err := newFlareSolverr(&cfg)
 	require.NoError(t, err)
 	require.NotNil(t, fs)
 
@@ -84,12 +84,12 @@ func TestResolveURL_ReusesPersistentSessionAndTTL(t *testing.T) {
 func TestNewFlareSolverr(t *testing.T) {
 	tests := []struct {
 		name      string
-		cfg       config.FlareSolverrConfig
+		cfg       models.FlareSolverrConfig
 		wantError bool
 	}{
 		{
 			name: "valid configuration",
-			cfg: config.FlareSolverrConfig{
+			cfg: models.FlareSolverrConfig{
 				Enabled:    true,
 				URL:        "http://localhost:8191/v1",
 				Timeout:    30,
@@ -100,7 +100,7 @@ func TestNewFlareSolverr(t *testing.T) {
 		},
 		{
 			name: "empty URL",
-			cfg: config.FlareSolverrConfig{
+			cfg: models.FlareSolverrConfig{
 				Enabled:    true,
 				URL:        "",
 				Timeout:    30,
@@ -111,7 +111,7 @@ func TestNewFlareSolverr(t *testing.T) {
 		},
 		{
 			name: "custom URL",
-			cfg: config.FlareSolverrConfig{
+			cfg: models.FlareSolverrConfig{
 				Enabled:    true,
 				URL:        "http://192.168.1.100:8191/v1",
 				Timeout:    30,
@@ -124,7 +124,7 @@ func TestNewFlareSolverr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fs, err := httpclient.NewFlareSolverr(&tt.cfg)
+			fs, err := newFlareSolverr(&tt.cfg)
 
 			if tt.wantError {
 				assert.Error(t, err)
@@ -138,13 +138,13 @@ func TestNewFlareSolverr(t *testing.T) {
 }
 
 func TestNewRestyClientWithFlareSolverr_Disabled(t *testing.T) {
-	fsCfg := config.FlareSolverrConfig{
+	fsCfg := models.FlareSolverrConfig{
 		Enabled: false,
 		URL:     "http://localhost:8191/v1",
 	}
-	proxyProfile := &config.ProxyProfile{}
+	proxyProfile := &models.ProxyProfile{}
 
-	client, fs, err := httpclient.NewRestyClientWithFlareSolverr(
+	result, err := NewRestyClientWithFlareSolverr(
 		proxyProfile,
 		fsCfg,
 		30*time.Second,
@@ -152,21 +152,21 @@ func TestNewRestyClientWithFlareSolverr_Disabled(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	assert.NotNil(t, client)
-	assert.Nil(t, fs) // FlareSolverr should be nil when disabled
+	assert.NotNil(t, result.Client)
+	assert.Nil(t, result.FlareSolverr) // FlareSolverr should be nil when disabled
 }
 
 func TestNewRestyClientWithFlareSolverr_Enabled(t *testing.T) {
-	fsCfg := config.FlareSolverrConfig{
+	fsCfg := models.FlareSolverrConfig{
 		Enabled:    true,
 		URL:        "http://localhost:8191/v1",
 		Timeout:    30,
 		MaxRetries: 3,
 		SessionTTL: 300,
 	}
-	proxyProfile := &config.ProxyProfile{}
+	proxyProfile := &models.ProxyProfile{}
 
-	client, fs, err := httpclient.NewRestyClientWithFlareSolverr(
+	result, err := NewRestyClientWithFlareSolverr(
 		proxyProfile,
 		fsCfg,
 		30*time.Second,
@@ -174,18 +174,18 @@ func TestNewRestyClientWithFlareSolverr_Enabled(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	assert.NotNil(t, client)
-	assert.NotNil(t, fs) // FlareSolverr should be created when enabled
+	assert.NotNil(t, result.Client)
+	assert.NotNil(t, result.FlareSolverr) // FlareSolverr should be created when enabled
 }
 
 func TestFlareSolverrRequestJSON(t *testing.T) {
-	// Test that FlareSolverrRequest can be marshaled to JSON correctly
-	req := httpclient.FlareSolverrRequest{
+	// Test that flareSolverrRequest can be marshaled to JSON correctly
+	req := flareSolverrRequest{
 		Cmd:        "request.get",
 		URL:        "https://example.com",
 		MaxTimeout: 30,
 		Session:    "test-session",
-		Proxy: &httpclient.FlareSolverrProxy{
+		Proxy: &flareSolverrProxy{
 			URL:      "http://proxy.example.com:8080",
 			Username: "user",
 			Password: "pass",
@@ -214,24 +214,24 @@ func TestNewRestyClientWithFlareSolverr_RequestLevelProxy(t *testing.T) {
 	}))
 	defer server.Close()
 
-	fsCfg := config.FlareSolverrConfig{
+	fsCfg := models.FlareSolverrConfig{
 		Enabled:    true,
 		URL:        server.URL,
 		Timeout:    30,
 		MaxRetries: 1,
 		SessionTTL: 300,
 	}
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL:      "http://proxy.example.com:8080",
 		Username: "proxyuser",
 		Password: "proxypass",
 	}
 
-	_, fs, err := httpclient.NewRestyClientWithFlareSolverr(proxyProfile, fsCfg, 30*time.Second, 1)
+	result, err := NewRestyClientWithFlareSolverr(proxyProfile, fsCfg, 30*time.Second, 1)
 	require.NoError(t, err)
-	require.NotNil(t, fs)
+	require.NotNil(t, result.FlareSolverr)
 
-	_, _, err = fs.ResolveURL("https://example.com")
+	_, _, err = result.FlareSolverr.ResolveURL("https://example.com")
 	require.NoError(t, err)
 
 	require.NotNil(t, captured)
@@ -243,8 +243,8 @@ func TestNewRestyClientWithFlareSolverr_RequestLevelProxy(t *testing.T) {
 }
 
 func TestFlareSolverrResponseJSON(t *testing.T) {
-	// Test that FlareSolverrResponse struct has expected fields
-	resp := httpclient.FlareSolverrResponse{
+	// Test that flareSolverrResponse struct has expected fields
+	resp := flareSolverrResponse{
 		Status:  "ok",
 		Message: "",
 		Session: "test-session",
@@ -277,7 +277,7 @@ func TestConfigValidate_FlareSolverr(t *testing.T) {
 			name: "valid FlareSolverr config",
 			cfg: &config.Config{
 				Scrapers: config.ScrapersConfig{
-					FlareSolverr: config.FlareSolverrConfig{
+					FlareSolverr: models.FlareSolverrConfig{
 						Enabled:    true,
 						URL:        "http://localhost:8191/v1",
 						Timeout:    30,
@@ -292,7 +292,7 @@ func TestConfigValidate_FlareSolverr(t *testing.T) {
 			name: "FlareSolverr enabled but empty URL",
 			cfg: &config.Config{
 				Scrapers: config.ScrapersConfig{
-					FlareSolverr: config.FlareSolverrConfig{
+					FlareSolverr: models.FlareSolverrConfig{
 						Enabled:    true,
 						URL:        "",
 						Timeout:    30,
@@ -307,7 +307,7 @@ func TestConfigValidate_FlareSolverr(t *testing.T) {
 			name: "FlareSolverr timeout too low",
 			cfg: &config.Config{
 				Scrapers: config.ScrapersConfig{
-					FlareSolverr: config.FlareSolverrConfig{
+					FlareSolverr: models.FlareSolverrConfig{
 						Enabled:    true,
 						URL:        "http://localhost:8191/v1",
 						Timeout:    0,
@@ -322,7 +322,7 @@ func TestConfigValidate_FlareSolverr(t *testing.T) {
 			name: "FlareSolverr timeout too high",
 			cfg: &config.Config{
 				Scrapers: config.ScrapersConfig{
-					FlareSolverr: config.FlareSolverrConfig{
+					FlareSolverr: models.FlareSolverrConfig{
 						Enabled:    true,
 						URL:        "http://localhost:8191/v1",
 						Timeout:    500,
@@ -337,7 +337,7 @@ func TestConfigValidate_FlareSolverr(t *testing.T) {
 			name: "FlareSolverr max retries too high",
 			cfg: &config.Config{
 				Scrapers: config.ScrapersConfig{
-					FlareSolverr: config.FlareSolverrConfig{
+					FlareSolverr: models.FlareSolverrConfig{
 						Enabled:    true,
 						URL:        "http://localhost:8191/v1",
 						Timeout:    30,
@@ -352,7 +352,7 @@ func TestConfigValidate_FlareSolverr(t *testing.T) {
 			name: "FlareSolverr session TTL too low",
 			cfg: &config.Config{
 				Scrapers: config.ScrapersConfig{
-					FlareSolverr: config.FlareSolverrConfig{
+					FlareSolverr: models.FlareSolverrConfig{
 						Enabled:    true,
 						URL:        "http://localhost:8191/v1",
 						Timeout:    30,
@@ -367,7 +367,7 @@ func TestConfigValidate_FlareSolverr(t *testing.T) {
 			name: "FlareSolverr session TTL too high",
 			cfg: &config.Config{
 				Scrapers: config.ScrapersConfig{
-					FlareSolverr: config.FlareSolverrConfig{
+					FlareSolverr: models.FlareSolverrConfig{
 						Enabled:    true,
 						URL:        "http://localhost:8191/v1",
 						Timeout:    30,
@@ -382,7 +382,7 @@ func TestConfigValidate_FlareSolverr(t *testing.T) {
 			name: "FlareSolverr disabled should not validate",
 			cfg: &config.Config{
 				Scrapers: config.ScrapersConfig{
-					FlareSolverr: config.FlareSolverrConfig{
+					FlareSolverr: models.FlareSolverrConfig{
 						Enabled:    false,
 						URL:        "",
 						Timeout:    0,
@@ -404,7 +404,7 @@ func TestConfigValidate_FlareSolverr(t *testing.T) {
 			if tt.cfg.Scrapers.RequestTimeoutSeconds == 0 {
 				tt.cfg.Scrapers.RequestTimeoutSeconds = 60
 			}
-			// BrowserTimeout for DMM is stored in Extra map (Phase 2 refactor)
+			// BrowserTimeout is stored in ScraperSettings
 			if tt.cfg.Scrapers.Referer == "" {
 				tt.cfg.Scrapers.Referer = "https://www.dmm.co.jp/"
 			}
@@ -436,7 +436,7 @@ func TestConfigValidate_FlareSolverr(t *testing.T) {
 }
 
 func TestDefaultConfig_FlareSolverr(t *testing.T) {
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 
 	assert.False(t, cfg.Scrapers.FlareSolverr.Enabled)
 	assert.Equal(t, "http://localhost:8191/v1", cfg.Scrapers.FlareSolverr.URL)
@@ -447,7 +447,7 @@ func TestDefaultConfig_FlareSolverr(t *testing.T) {
 
 func TestDefaultConfig_JavLibrary(t *testing.T) {
 	t.Skip("Skipping - depends on scraper registry registration which requires full scraper initialization")
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	jl := cfg.Scrapers.Overrides["javlibrary"]
 
 	assert.NotNil(t, jl, "javlibrary should have defaults from scraper registry")
@@ -460,8 +460,8 @@ func TestDefaultConfig_JavLibrary(t *testing.T) {
 }
 
 func TestCookieConversion(t *testing.T) {
-	// Test that FlareSolverrResponse cookies can be converted to http.Cookie format
-	resp := httpclient.FlareSolverrResponse{}
+	// Test that flareSolverrResponse cookies can be converted to http.Cookie format
+	resp := flareSolverrResponse{}
 	resp.Solution.Cookies = []struct {
 		Name  string `json:"name"`
 		Value string `json:"value"`
@@ -504,7 +504,7 @@ func TestFlareSolverr_DestroySession(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.FlareSolverrConfig{
+	cfg := models.FlareSolverrConfig{
 		Enabled:    true,
 		URL:        server.URL,
 		Timeout:    30,
@@ -512,7 +512,7 @@ func TestFlareSolverr_DestroySession(t *testing.T) {
 		SessionTTL: 300,
 	}
 
-	fs, err := httpclient.NewFlareSolverr(&cfg)
+	fs, err := newFlareSolverr(&cfg)
 	require.NoError(t, err)
 
 	// Create a session first
@@ -564,7 +564,7 @@ func TestFlareSolverr_SessionResetOnFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.FlareSolverrConfig{
+	cfg := models.FlareSolverrConfig{
 		Enabled:    true,
 		URL:        server.URL,
 		Timeout:    30,
@@ -572,7 +572,7 @@ func TestFlareSolverr_SessionResetOnFailure(t *testing.T) {
 		SessionTTL: 300,
 	}
 
-	fs, err := httpclient.NewFlareSolverr(&cfg)
+	fs, err := newFlareSolverr(&cfg)
 	require.NoError(t, err)
 
 	// First call will fail and trigger session reset
@@ -584,15 +584,6 @@ func TestFlareSolverr_SessionResetOnFailure(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Greater(t, destroyCalls, 0, "session should be destroyed on failure")
-}
-
-func TestGetFlareSolverrFromClient(t *testing.T) {
-	client := httpclient.NewRestyClientNoProxy(30*time.Second, 3)
-
-	fs, ok := httpclient.GetFlareSolverrFromClient(client)
-
-	assert.Nil(t, fs)
-	assert.False(t, ok)
 }
 
 func TestFlareSolverr_SessionCacheAfterDestroy(t *testing.T) {
@@ -610,7 +601,7 @@ func TestFlareSolverr_SessionCacheAfterDestroy(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.FlareSolverrConfig{
+	cfg := models.FlareSolverrConfig{
 		Enabled:    true,
 		URL:        server.URL,
 		Timeout:    30,
@@ -618,7 +609,7 @@ func TestFlareSolverr_SessionCacheAfterDestroy(t *testing.T) {
 		SessionTTL: 300,
 	}
 
-	fs, err := httpclient.NewFlareSolverr(&cfg)
+	fs, err := newFlareSolverr(&cfg)
 	require.NoError(t, err)
 
 	// Create session
@@ -669,7 +660,7 @@ func TestResolveURL_CachesCookiesInSession(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.FlareSolverrConfig{
+	cfg := models.FlareSolverrConfig{
 		Enabled:    true,
 		URL:        server.URL,
 		Timeout:    30,
@@ -677,7 +668,7 @@ func TestResolveURL_CachesCookiesInSession(t *testing.T) {
 		SessionTTL: 300,
 	}
 
-	fs, err := httpclient.NewFlareSolverr(&cfg)
+	fs, err := newFlareSolverr(&cfg)
 	require.NoError(t, err)
 
 	// First request: should return cookies from response

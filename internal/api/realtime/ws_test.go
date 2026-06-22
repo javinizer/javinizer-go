@@ -12,10 +12,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
 // runHubWithCleanup starts a hub and returns a cleanup function that waits for shutdown
@@ -100,7 +103,7 @@ func TestWebSocketHandler(t *testing.T) {
 			// Setup router with WebSocket handler
 			router := gin.New()
 			router.Use(gin.Recovery()) // Add recovery middleware to catch panics
-			router.GET("/ws", handleWebSocket(wsHub))
+			router.GET("/ws", handleWebSocket(testkit.GetTestRuntime(testRuntimeDeps)))
 
 			// Create request with headers
 			req := httptest.NewRequest("GET", "/ws", nil)
@@ -132,7 +135,7 @@ func TestWebSocketHub(t *testing.T) {
 	msg := &ws.ProgressMessage{
 		JobID:    "test-job-123",
 		FilePath: "/test/file.mp4",
-		Status:   "completed",
+		Status:   ws.ProgressStatus("completed"),
 		Progress: 100,
 		Message:  "Test message",
 	}
@@ -148,7 +151,7 @@ func TestWebSocketUpgrader(t *testing.T) {
 	router.Use(gin.Recovery())
 
 	initTestWebSocket(t)
-	router.GET("/ws", handleWebSocket(wsHub))
+	router.GET("/ws", handleWebSocket(testkit.GetTestRuntime(testRuntimeDeps)))
 
 	// Request without WebSocket headers should fail
 	req := httptest.NewRequest("GET", "/ws", nil)
@@ -178,7 +181,7 @@ func TestWebSocketBroadcastMessage(t *testing.T) {
 			name: "job started message",
 			message: &ws.ProgressMessage{
 				JobID:    "job-001",
-				Status:   "started",
+				Status:   ws.ProgressStatus("started"),
 				Progress: 0,
 				Message:  "Job started",
 			},
@@ -188,7 +191,7 @@ func TestWebSocketBroadcastMessage(t *testing.T) {
 			message: &ws.ProgressMessage{
 				JobID:    "job-001",
 				FilePath: "/video/IPX-535.mp4",
-				Status:   "processing",
+				Status:   ws.ProgressStatus("processing"),
 				Progress: 50,
 				Message:  "Processing file",
 			},
@@ -197,7 +200,7 @@ func TestWebSocketBroadcastMessage(t *testing.T) {
 			name: "completion message",
 			message: &ws.ProgressMessage{
 				JobID:    "job-001",
-				Status:   "completed",
+				Status:   ws.ProgressStatus("completed"),
 				Progress: 100,
 				Message:  "Job completed",
 			},
@@ -207,7 +210,7 @@ func TestWebSocketBroadcastMessage(t *testing.T) {
 			message: &ws.ProgressMessage{
 				JobID:    "job-002",
 				FilePath: "/video/ERROR.mp4",
-				Status:   "failed",
+				Status:   ws.ProgressStatus("failed"),
 				Progress: 0,
 				Message:  "Scraping failed",
 				Error:    "Movie not found",
@@ -242,7 +245,7 @@ func TestWebSocketConnectionHandling(t *testing.T) {
 	// Verify hub is running by broadcasting a message
 	msg := &ws.ProgressMessage{
 		JobID:   "test-connection",
-		Status:  "testing",
+		Status:  ws.ProgressStatus("testing"),
 		Message: "Connection handling test",
 	}
 
@@ -293,7 +296,7 @@ func TestWebSocketErrorCases(t *testing.T) {
 			router.Use(gin.Recovery())
 
 			initTestWebSocket(t)
-			router.GET("/ws", handleWebSocket(wsHub))
+			router.GET("/ws", handleWebSocket(testkit.GetTestRuntime(testRuntimeDeps)))
 
 			req := httptest.NewRequest(tt.method, "/ws", nil)
 			for key, value := range tt.headers {
@@ -325,7 +328,7 @@ func TestWebSocketHubInitialization(t *testing.T) {
 	assert.NotPanics(t, func() {
 		_ = hub.BroadcastProgress(&ws.ProgressMessage{
 			JobID:   "init-test",
-			Status:  "testing",
+			Status:  ws.ProgressStatus("testing"),
 			Message: "Hub initialization test",
 		})
 	})
@@ -343,7 +346,7 @@ func TestWebSocketMessageFormat(t *testing.T) {
 			message: &ws.ProgressMessage{
 				JobID:    "job-123",
 				FilePath: "/path/to/file.mp4",
-				Status:   "completed",
+				Status:   ws.ProgressStatus("completed"),
 				Progress: 100.0,
 				Message:  "Processing complete",
 				Error:    "",
@@ -355,7 +358,7 @@ func TestWebSocketMessageFormat(t *testing.T) {
 			message: &ws.ProgressMessage{
 				JobID:    "job-456",
 				FilePath: "/path/to/error.mp4",
-				Status:   "failed",
+				Status:   ws.ProgressStatus("failed"),
 				Progress: 0.0,
 				Message:  "Processing failed",
 				Error:    "File not found",
@@ -367,7 +370,7 @@ func TestWebSocketMessageFormat(t *testing.T) {
 			message: &ws.ProgressMessage{
 				JobID:    "job-789",
 				FilePath: "/path/to/processing.mp4",
-				Status:   "processing",
+				Status:   ws.ProgressStatus("processing"),
 				Progress: 50.5,
 				Message:  "Halfway through",
 			},
@@ -377,7 +380,7 @@ func TestWebSocketMessageFormat(t *testing.T) {
 			name: "minimal valid message",
 			message: &ws.ProgressMessage{
 				JobID:  "job-minimal",
-				Status: "started",
+				Status: ws.ProgressStatus("started"),
 			},
 			valid: true,
 		},
@@ -436,7 +439,7 @@ func BenchmarkWebSocketBroadcast(b *testing.B) {
 	msg := &ws.ProgressMessage{
 		JobID:    "benchmark-job",
 		FilePath: "/benchmark/file.mp4",
-		Status:   "processing",
+		Status:   ws.ProgressStatus("processing"),
 		Progress: 50.0,
 		Message:  "Benchmark test",
 	}
@@ -456,7 +459,7 @@ func BenchmarkWebSocketHandler(b *testing.B) {
 	go hub.Run(ctx)
 	defer func() { time.Sleep(10 * time.Millisecond) }()
 
-	router.GET("/ws", handleWebSocket(hub))
+	router.GET("/ws", handleWebSocket(testkit.GetTestRuntime(newTestRuntimeDeps(hub))))
 
 	req := httptest.NewRequest("GET", "/ws", nil)
 	// Don't include WebSocket headers so we get a quick 400 response
@@ -478,7 +481,7 @@ func TestWebSocketIntegration(t *testing.T) {
 	// Create router with handler
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.GET("/ws", handleWebSocket(hub))
+	router.GET("/ws", handleWebSocket(testkit.GetTestRuntime(newTestRuntimeDeps(hub))))
 
 	// Test that handler is properly connected to hub
 	req := httptest.NewRequest("GET", "/ws", nil)
@@ -492,7 +495,7 @@ func TestWebSocketIntegration(t *testing.T) {
 	// Test broadcast still works
 	_ = hub.BroadcastProgress(&ws.ProgressMessage{
 		JobID:   "integration-test",
-		Status:  "testing",
+		Status:  ws.ProgressStatus("testing"),
 		Message: "Integration test message",
 	})
 
@@ -514,7 +517,7 @@ func TestWebSocketConcurrentBroadcasts(t *testing.T) {
 			for j := 0; j < 10; j++ {
 				_ = hub.BroadcastProgress(&ws.ProgressMessage{
 					JobID:    string(rune('a' + id)),
-					Status:   "processing",
+					Status:   ws.ProgressStatus("processing"),
 					Progress: float64(j * 10),
 					Message:  "Concurrent broadcast test",
 				})
@@ -538,7 +541,7 @@ func TestWebSocketOriginChecking(t *testing.T) {
 	cleanup := runHubWithCleanup(t, hub)
 	defer cleanup()
 
-	router.GET("/ws", handleWebSocket(hub))
+	router.GET("/ws", handleWebSocket(testkit.GetTestRuntime(newTestRuntimeDeps(hub))))
 
 	tests := []struct {
 		name   string
@@ -583,11 +586,25 @@ func TestWebSocketOriginChecking(t *testing.T) {
 // Real WebSocket Connection Tests (AC-3.2.1, AC-3.2.2, AC-3.2.3)
 // =============================================================================
 
+// newTestRuntimeDeps creates *APIDeps wrapping a local hub for tests.
+func newTestRuntimeDeps(hub *ws.Hub) *core.APIDeps {
+	rs := core.NewRuntimeState()
+	rs.SetWebSocketHubForTesting(hub)
+	rs.SetWebSocketUpgraderForTesting(websocket.Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	})
+	deps := &core.APIDeps{}
+	rt := core.NewAPIRuntime(deps)
+	rt.Runtime = rs
+	testkit.SetTestRuntime(deps, rt)
+	return deps
+}
+
 // createTestServer creates an HTTP test server with WebSocket handler
 func createTestServer(t *testing.T, hub *ws.Hub) *httptest.Server {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.GET("/ws", handleWebSocket(hub))
+	router.GET("/ws", handleWebSocket(testkit.GetTestRuntime(newTestRuntimeDeps(hub))))
 	return httptest.NewServer(router)
 }
 
@@ -645,7 +662,7 @@ func TestWebSocketRealClientConnection(t *testing.T) {
 	testMsg := &ws.ProgressMessage{
 		JobID:    "test-job-001",
 		FilePath: "/test/video.mp4",
-		Status:   "processing",
+		Status:   ws.ProgressStatus("processing"),
 		Progress: 50.0,
 		Message:  "Test broadcast",
 	}
@@ -716,7 +733,7 @@ func TestWebSocketMultipleClients(t *testing.T) {
 	// AC-3.2.1: Server broadcasts to all connected clients
 	testMsg := &ws.ProgressMessage{
 		JobID:    "multi-client-test",
-		Status:   "started",
+		Status:   ws.ProgressStatus("started"),
 		Progress: 0,
 		Message:  "Broadcasting to all clients",
 	}
@@ -769,7 +786,7 @@ func TestWebSocketMessageOrdering(t *testing.T) {
 		msg := &ws.ProgressMessage{
 			JobID:     "ordering-test",
 			FileIndex: i,
-			Status:    "processing",
+			Status:    ws.ProgressStatus("processing"),
 			Progress:  float64(i * 10),
 			Message:   "Message sequence test",
 		}
@@ -815,7 +832,7 @@ func TestWebSocketAbruptDisconnect(t *testing.T) {
 	// Hub should still broadcast without errors
 	err = hub.BroadcastProgress(&ws.ProgressMessage{
 		JobID:   "post-disconnect",
-		Status:  "testing",
+		Status:  ws.ProgressStatus("testing"),
 		Message: "Broadcast after client disconnect",
 	})
 	assert.NoError(t, err)
@@ -872,7 +889,7 @@ func TestWebSocketConcurrentConnections(t *testing.T) {
 			msg := &ws.ProgressMessage{
 				JobID:     "concurrent-test",
 				FileIndex: idx,
-				Status:    "processing",
+				Status:    ws.ProgressStatus("processing"),
 				Progress:  float64(idx),
 				Message:   "Concurrent broadcast",
 			}
@@ -964,7 +981,7 @@ func TestWebSocketMessageSchemaValidation(t *testing.T) {
 		JobID:     "schema-test-001",
 		FileIndex: 5,
 		FilePath:  "/path/to/video.mp4",
-		Status:    "completed",
+		Status:    ws.ProgressStatus("completed"),
 		Progress:  100.0,
 		Message:   "All fields present",
 		Error:     "",
@@ -980,7 +997,7 @@ func TestWebSocketMessageSchemaValidation(t *testing.T) {
 	assert.Equal(t, "schema-test-001", received.JobID)
 	assert.Equal(t, 5, received.FileIndex)
 	assert.Equal(t, "/path/to/video.mp4", received.FilePath)
-	assert.Equal(t, "completed", received.Status)
+	assert.Equal(t, ws.ProgressStatus("completed"), received.Status)
 	assert.Equal(t, 100.0, received.Progress)
 	assert.Equal(t, "All fields present", received.Message)
 	assert.Equal(t, "", received.Error)
@@ -988,7 +1005,7 @@ func TestWebSocketMessageSchemaValidation(t *testing.T) {
 	// Test message with error field
 	errorMsg := &ws.ProgressMessage{
 		JobID:    "schema-test-002",
-		Status:   "failed",
+		Status:   ws.ProgressStatus("failed"),
 		Progress: 0,
 		Message:  "Processing failed",
 		Error:    "File not found",

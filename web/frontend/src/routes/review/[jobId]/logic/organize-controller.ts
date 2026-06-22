@@ -1,4 +1,10 @@
-import type { BatchJobResponse, Movie, OperationMode, ProgressMessage, UpdateRequest } from '$lib/api/types';
+import type {
+	BatchJobResponse,
+	Movie,
+	OperationMode,
+	ProgressMessage,
+	UpdateRequest,
+} from '$lib/api/types';
 
 export type OrganizeOperation = 'move' | 'copy' | 'hardlink' | 'softlink';
 export type OrganizeStatus = 'idle' | 'organizing' | 'completed' | 'failed';
@@ -34,7 +40,14 @@ interface OrganizeControllerDeps {
 		getBatchJob: (jobId: string, includeData?: boolean) => Promise<BatchJobResponse>;
 		organizeBatchJob: (
 			jobId: string,
-			request: { destination: string; copy_only: boolean; link_mode?: 'hard' | 'soft'; operation_mode?: OperationMode; skip_nfo?: boolean; skip_download?: boolean }
+			request: {
+				destination: string;
+				copy_only: boolean;
+				link_mode?: 'hard' | 'soft';
+				operation_mode?: OperationMode;
+				skip_nfo?: boolean;
+				skip_download?: boolean;
+			},
 		) => Promise<unknown>;
 		updateBatchJob: (jobId: string, request?: UpdateRequest) => Promise<unknown>;
 	};
@@ -50,12 +63,7 @@ function getOrganizeRequestOptions(operation: OrganizeOperation): {
 } {
 	return {
 		copyOnly: operation !== 'move',
-		linkMode:
-			operation === 'hardlink'
-				? 'hard'
-				: operation === 'softlink'
-					? 'soft'
-					: undefined
+		linkMode: operation === 'hardlink' ? 'hard' : operation === 'softlink' ? 'soft' : undefined,
 	};
 }
 
@@ -63,7 +71,10 @@ function getOrganizeEligibleFilePaths(batchJob: BatchJobResponse | null): string
 	if (!batchJob) return [];
 	const excluded = batchJob.excluded || {};
 	return Object.entries(batchJob.results || {})
-		.filter(([filePath, result]) => !excluded[filePath] && result.status === 'completed' && !!result.data)
+		.filter(
+			([filePath, result]) =>
+				!excluded[filePath] && result.status === 'completed' && !!result.movie,
+		)
 		.map(([filePath]) => filePath);
 }
 
@@ -121,10 +132,15 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				}
 			}
 
-			const failures = Array.from(deps.getFileStatuses().values()).filter((s) => s.status === 'failed').length;
+			const failures = Array.from(deps.getFileStatuses().values()).filter(
+				(s) => s.status === 'failed',
+			).length;
 			if (failures === 0) {
 				const action = deps.getIsUpdateMode() ? 'updated' : 'organized';
-				deps.toastSuccess(message || `All files ${action} successfully! Redirecting in 5 seconds...`, 8000);
+				deps.toastSuccess(
+					message || `All files ${action} successfully! Redirecting in 5 seconds...`,
+					8000,
+				);
 				organizeRedirectTimer = setTimeout(() => deps.navigateBrowse(), redirectDelayMs);
 			}
 		}, completionDelayMs);
@@ -156,7 +172,19 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				deps.setJob(latestJob);
 				lastPollError = null;
 
-				if (latestJob.status === 'completed') {
+				if (
+					latestJob.status === 'completed' ||
+					latestJob.status === 'organized' ||
+					latestJob.status === 'reverted'
+				) {
+					// 'organized' and 'reverted' are terminal-success statuses set by the
+					// backend on successful organize/revert (see BatchJob.MarkOrganized /
+					// MarkReverted). The backend's real-time WebSocket broadcast of
+					// {status:'organization_completed'} is the primary completion
+					// signal — this poll branch is a fallback that must also recognize
+					// these statuses, or the UI polls forever after a successful
+					// organize (job never reaches 'completed' because MarkCompleted is
+					// guarded against transitioning FROM 'organized'/'reverted').
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
 					finalizeOrganizeSuccess(`${action} completed successfully! Redirecting in 5 seconds...`);
 					return;
@@ -232,7 +260,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				link_mode: linkMode,
 				operation_mode: deps.getOperationMode() as OperationMode,
 				skip_nfo: skipNfo || false,
-				skip_download: skipDownload || false
+				skip_download: skipDownload || false,
 			});
 
 			startOrganizeCompletionPolling();
@@ -269,7 +297,9 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	}
 
 	async function retryFailed() {
-		const failedCount = Array.from(deps.getFileStatuses().values()).filter((s) => s.status === 'failed').length;
+		const failedCount = Array.from(deps.getFileStatuses().values()).filter(
+			(s) => s.status === 'failed',
+		).length;
 		if (failedCount === 0) return;
 
 		deps.toastInfo(`Retrying ${failedCount} failed file${failedCount > 1 ? 's' : ''}...`);
@@ -327,6 +357,6 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		updateAll,
 		retryFailed,
 		handleWebSocketMessage,
-		cleanup
+		cleanup,
 	};
 }

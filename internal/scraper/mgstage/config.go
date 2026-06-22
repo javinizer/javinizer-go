@@ -1,13 +1,11 @@
 package mgstage
 
 import (
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-type MGStageConfig struct {
-	config.BaseScraperConfig `yaml:",inline"`
-}
-
-func (c *MGStageConfig) ValidateConfig(sc *config.ScraperSettings) error {
-	return config.ValidateCommonSettings("mgstage", sc)
+// validateScraperSettings performs scraper-specific validation for mgstage.
+// mgstage has no scraper-specific constraints beyond the base checks.
+func validateScraperSettings(ss *models.ScraperSettings) error {
+	return nil
 }

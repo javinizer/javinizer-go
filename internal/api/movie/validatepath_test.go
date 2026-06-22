@@ -86,7 +86,7 @@ func TestValidateNFOPath(t *testing.T) {
 			name:        "relative path should be resolved",
 			path:        "valid.nfo",
 			allowedDirs: []string{allowedDir},
-			wantErr:     ErrNFONotFound, // Relative path doesn't exist in cwd
+			wantErr:     ErrNFOAccessDenied, // Relative path resolves to CWD, which is outside allowed dirs
 		},
 	}
 
@@ -208,19 +208,19 @@ func TestValidateNFOPath_EdgeCases(t *testing.T) {
 			name:        "empty path",
 			path:        "",
 			allowedDirs: []string{tempDir},
-			wantErr:     ErrNFOIsDirectory, // Empty path resolves to current directory
+			wantErr:     ErrNFOAccessDenied, // Empty path resolves to CWD, which is outside allowed dirs
 		},
 		{
 			name:        "dot path (.)",
 			path:        ".",
 			allowedDirs: []string{tempDir},
-			wantErr:     ErrNFOIsDirectory,
+			wantErr:     ErrNFOAccessDenied, // CWD is outside allowed dirs; access check before type check
 		},
 		{
 			name:        "double dot path (..)",
 			path:        "..",
 			allowedDirs: []string{tempDir},
-			wantErr:     ErrNFOIsDirectory,
+			wantErr:     ErrNFOAccessDenied, // Parent of CWD is outside allowed dirs; access check before type check
 		},
 		{
 			name:        "path with trailing slash",

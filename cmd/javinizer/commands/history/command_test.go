@@ -2,6 +2,7 @@ package history_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,13 +13,11 @@ import (
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/history"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
-	historyinternal "github.com/javinizer/javinizer-go/internal/history"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// Test helpers
 
 func captureOutput(t *testing.T, fn func()) (string, string) {
 	t.Helper()
@@ -63,28 +62,36 @@ func setupHistoryTestDB(t *testing.T) (configPath string, dbPath string) {
 	tmpDir := t.TempDir()
 	dbPath = filepath.Join(tmpDir, "data", "test.db")
 
-	// Ensure database directory exists
 	err := os.MkdirAll(filepath.Dir(dbPath), 0755)
 	require.NoError(t, err)
 
-	// Create test config
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	configPath = filepath.Join(tmpDir, "config.yaml")
 	err = config.Save(testCfg, configPath)
 	require.NoError(t, err)
 
-	// Initialize database with migrations to ensure it exists
-	db, err := database.New(testCfg)
+	db, err := database.New(&database.Config{Type: testCfg.Database.Type, DSN: testCfg.Database.DSN, LogLevel: testCfg.Database.LogLevel})
 	require.NoError(t, err)
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 	_ = db.Close()
 
 	return configPath, dbPath
 }
 
-// Tests
+func createHistory(movieID string, op models.HistoryOperation, origPath, newPath string, status models.HistoryStatus, errMsg string, dryRun bool) *models.History {
+	return &models.History{
+		MovieID:      movieID,
+		Operation:    op,
+		OriginalPath: origPath,
+		NewPath:      newPath,
+		Status:       status,
+		ErrorMessage: errMsg,
+		DryRun:       dryRun,
+		CreatedAt:    time.Now().UTC(),
+	}
+}
 
 func TestRunHistoryList_Empty(t *testing.T) {
 	configPath, _ := setupHistoryTestDB(t)
@@ -108,21 +115,21 @@ func TestRunHistoryList_Empty(t *testing.T) {
 func TestRunHistoryList_MultipleOperations(t *testing.T) {
 	configPath, _ := setupHistoryTestDB(t)
 
-	// Load config and create DB connection to add test data
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
-	require.NoError(t, logger.LogOrganize("IPX-001", "/src/file.mp4", "/dest/file.mp4", false, nil))
-	require.NoError(t, logger.LogDownload("IPX-001", "http://example.com/cover.jpg", "/dest/cover.jpg", "cover", nil))
-	require.NoError(t, logger.LogNFO("IPX-001", "/dest/IPX-001.nfo", nil))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpOrganize, "/src/file.mp4", "/dest/file.mp4", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpDownload, "http://example.com/cover.jpg", "/dest/cover.jpg", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpNFO, "", "/dest/IPX-001.nfo", models.HistoryStatusSuccess, "", false)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -151,16 +158,17 @@ func TestRunHistoryList_WithLimit(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
 	for i := 1; i <= 5; i++ {
 		movieID := fmt.Sprintf("IPX-%03d", i)
-		require.NoError(t, logger.LogScrape(movieID, "http://example.com", nil, nil))
+		require.NoError(t, repo.Create(ctx, createHistory(movieID, models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
 	}
 
 	rootCmd := &cobra.Command{Use: "root"}
@@ -185,16 +193,17 @@ func TestRunHistoryList_FilterByOperation(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
-	require.NoError(t, logger.LogOrganize("IPX-002", "/src", "/dest", false, nil))
-	require.NoError(t, logger.LogDownload("IPX-003", "http://example.com/cover.jpg", "/path", "cover", nil))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-002", models.HistoryOpOrganize, "/src", "/dest", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-003", models.HistoryOpDownload, "http://example.com/cover.jpg", "/path", models.HistoryStatusSuccess, "", false)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -221,15 +230,16 @@ func TestRunHistoryList_FilterByStatus(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
-	require.NoError(t, logger.LogScrape("IPX-002", "http://example.com", nil, fmt.Errorf("scrape failed")))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-002", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusFailed, "scrape failed", false)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -254,14 +264,15 @@ func TestRunHistoryList_DryRunFlag(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	require.NoError(t, logger.LogOrganize("IPX-001", "/src", "/dest", true, nil))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpOrganize, "/src", "/dest", models.HistoryStatusSuccess, "", true)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -308,19 +319,20 @@ func TestRunHistoryStats_MultipleOperations(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
-	require.NoError(t, logger.LogScrape("IPX-002", "http://example.com", nil, nil))
-	require.NoError(t, logger.LogScrape("IPX-003", "http://example.com", nil, fmt.Errorf("failed")))
-	require.NoError(t, logger.LogOrganize("IPX-001", "/src", "/dest", false, nil))
-	require.NoError(t, logger.LogDownload("IPX-001", "http://example.com/cover.jpg", "/path", "cover", nil))
-	require.NoError(t, logger.LogNFO("IPX-001", "/path", nil))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-002", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-003", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusFailed, "failed", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpOrganize, "/src", "/dest", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpDownload, "http://example.com/cover.jpg", "/path", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpNFO, "", "/path", models.HistoryStatusSuccess, "", false)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -350,18 +362,19 @@ func TestRunHistoryStats_Percentages(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
 	for i := 0; i < 8; i++ {
-		_ = logger.LogScrape(fmt.Sprintf("IPX-%03d", i), "http://example.com", nil, nil)
+		require.NoError(t, repo.Create(ctx, createHistory(fmt.Sprintf("IPX-%03d", i), models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
 	}
 	for i := 0; i < 2; i++ {
-		_ = logger.LogScrape(fmt.Sprintf("IPX-%03d", i+10), "http://example.com", nil, fmt.Errorf("failed"))
+		require.NoError(t, repo.Create(ctx, createHistory(fmt.Sprintf("IPX-%03d", i+10), models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusFailed, "failed", false)))
 	}
 
 	rootCmd := &cobra.Command{Use: "root"}
@@ -387,17 +400,18 @@ func TestRunHistoryMovie_Success(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
-	require.NoError(t, logger.LogOrganize("IPX-001", "/src", "/dest", false, nil))
-	require.NoError(t, logger.LogDownload("IPX-001", "http://example.com/cover.jpg", "/path", "cover", nil))
-	require.NoError(t, logger.LogScrape("IPX-002", "http://example.com", nil, nil))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpOrganize, "/src", "/dest", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpDownload, "http://example.com/cover.jpg", "/path", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-002", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -426,14 +440,15 @@ func TestRunHistoryMovie_NotFound(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -457,14 +472,15 @@ func TestRunHistoryMovie_WithPaths(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	require.NoError(t, logger.LogOrganize("IPX-001", "/source/file.mp4", "/destination/file.mp4", false, nil))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpOrganize, "/source/file.mp4", "/destination/file.mp4", models.HistoryStatusSuccess, "", false)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -489,14 +505,15 @@ func TestRunHistoryMovie_WithError(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	_ = logger.LogScrape("IPX-001", "http://example.com", nil, fmt.Errorf("network timeout"))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusFailed, "network timeout", false)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -540,15 +557,16 @@ func TestRunHistoryClean_WithRecords(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
-	require.NoError(t, logger.LogScrape("IPX-002", "http://example.com", nil, nil))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-002", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -570,14 +588,15 @@ func TestRunHistoryClean_CustomDays(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	require.NoError(t, logger.LogScrape("IPX-001", "http://example.com", nil, nil))
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, createHistory("IPX-001", models.HistoryOpScrape, "http://example.com", "", models.HistoryStatusSuccess, "", false)))
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -601,14 +620,15 @@ func TestRunHistoryMovie_AllFields(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	err = logger.LogOrganize("IPX-123", "/old/path/file.mp4", "/new/path/file.mp4", true, nil)
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	err = repo.Create(ctx, createHistory("IPX-123", models.HistoryOpOrganize, "/old/path/file.mp4", "/new/path/file.mp4", models.HistoryStatusSuccess, "", true))
 	require.NoError(t, err)
 
 	rootCmd := &cobra.Command{Use: "root"}
@@ -637,15 +657,15 @@ func TestRunHistoryMovie_FailedStatus(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	testError := fmt.Errorf("Test error")
-	err = logger.LogOrganize("IPX-123", "/old/path", "/new/path", false, testError)
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	err = repo.Create(ctx, createHistory("IPX-123", models.HistoryOpOrganize, "/old/path", "/new/path", models.HistoryStatusFailed, "Test error", false))
 	require.NoError(t, err)
 
 	rootCmd := &cobra.Command{Use: "root"}
@@ -671,14 +691,23 @@ func TestRunHistoryMovie_RevertedStatus(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	err = logger.LogRevert("IPX-123", "/old/path", "/reverted/from", nil)
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	err = repo.Create(ctx, &models.History{
+		MovieID:      "IPX-123",
+		Operation:    models.HistoryOpOrganize,
+		OriginalPath: "/reverted/from",
+		NewPath:      "/old/path",
+		Status:       models.HistoryStatusReverted,
+		DryRun:       false,
+		CreatedAt:    time.Now().UTC(),
+	})
 	require.NoError(t, err)
 
 	rootCmd := &cobra.Command{Use: "root"}
@@ -704,14 +733,15 @@ func TestRunHistoryMovie_EmptyMetadata(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
-	err = logger.LogOrganize("IPX-123", "/old", "/new", false, nil)
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
+	err = repo.Create(ctx, createHistory("IPX-123", models.HistoryOpOrganize, "/old", "/new", models.HistoryStatusSuccess, "", false))
 	require.NoError(t, err)
 
 	rootCmd := &cobra.Command{Use: "root"}
@@ -755,38 +785,37 @@ func TestRunHistoryStats_MultipleOperationTypes(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
 
-	err = logger.LogScrape("IPX-123", "http://test.com", nil, nil)
+	err = repo.Create(ctx, createHistory("IPX-123", models.HistoryOpScrape, "http://test.com", "", models.HistoryStatusSuccess, "", false))
 	require.NoError(t, err)
 
-	err = logger.LogOrganize("IPX-123", "/old", "/new", false, nil)
+	err = repo.Create(ctx, createHistory("IPX-123", models.HistoryOpOrganize, "/old", "/new", models.HistoryStatusSuccess, "", false))
 	require.NoError(t, err)
 
-	err = logger.LogDownload("IPX-123", "http://test.com/image.jpg", "/local/image.jpg", "cover", nil)
+	err = repo.Create(ctx, createHistory("IPX-123", models.HistoryOpDownload, "http://test.com/image.jpg", "/local/image.jpg", models.HistoryStatusSuccess, "", false))
 	require.NoError(t, err)
 
-	err = logger.LogNFO("IPX-123", "/path/to/nfo.nfo", nil)
+	err = repo.Create(ctx, createHistory("IPX-123", models.HistoryOpNFO, "", "/path/to/nfo.nfo", models.HistoryStatusSuccess, "", false))
 	require.NoError(t, err)
 
-	testErr := fmt.Errorf("test error")
-
-	err = logger.LogScrape("IPX-456", "http://test.com", nil, testErr)
+	err = repo.Create(ctx, createHistory("IPX-456", models.HistoryOpScrape, "http://test.com", "", models.HistoryStatusFailed, "test error", false))
 	require.NoError(t, err)
 
-	err = logger.LogOrganize("IPX-456", "/old", "/new", false, testErr)
+	err = repo.Create(ctx, createHistory("IPX-456", models.HistoryOpOrganize, "/old", "/new", models.HistoryStatusFailed, "test error", false))
 	require.NoError(t, err)
 
-	err = logger.LogDownload("IPX-456", "http://test.com/image.jpg", "/local/image.jpg", "cover", testErr)
+	err = repo.Create(ctx, createHistory("IPX-456", models.HistoryOpDownload, "http://test.com/image.jpg", "/local/image.jpg", models.HistoryStatusFailed, "test error", false))
 	require.NoError(t, err)
 
-	err = logger.LogNFO("IPX-456", "/path/to/nfo.nfo", testErr)
+	err = repo.Create(ctx, createHistory("IPX-456", models.HistoryOpNFO, "", "/path/to/nfo.nfo", models.HistoryStatusFailed, "test error", false))
 	require.NoError(t, err)
 
 	rootCmd := &cobra.Command{Use: "root"}
@@ -815,22 +844,23 @@ func TestRunHistoryStats_TimeRanges(t *testing.T) {
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	logger := historyinternal.NewLogger(db)
+	repo := database.NewHistoryRepository(db)
+	ctx := context.Background()
 
 	now := time.Now()
 
-	err = logger.LogScrape("OLD-123", "http://test.com", nil, nil)
+	err = repo.Create(ctx, createHistory("OLD-123", models.HistoryOpScrape, "http://test.com", "", models.HistoryStatusSuccess, "", false))
 	require.NoError(t, err)
 
 	db.Exec("UPDATE histories SET created_at = ? WHERE movie_id = ?", now.Add(-48*time.Hour), "OLD-123")
 
-	err = logger.LogOrganize("NEW-456", "/old", "/new", false, nil)
+	err = repo.Create(ctx, createHistory("NEW-456", models.HistoryOpOrganize, "/old", "/new", models.HistoryStatusSuccess, "", false))
 	require.NoError(t, err)
 
 	rootCmd := &cobra.Command{Use: "root"}

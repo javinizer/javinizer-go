@@ -113,41 +113,11 @@ func classifyScraperStatus(statusCode int) (ScraperErrorKind, bool, bool) {
 		return ScraperErrorKindNotFound, false, false
 	case statusCode == 429:
 		return ScraperErrorKindRateLimited, true, true
-	case statusCode == 403 || statusCode == 451:
+	case statusCode == 401 || statusCode == 403 || statusCode == 451:
 		return ScraperErrorKindBlocked, false, false
 	case statusCode >= 500 && statusCode <= 599:
 		return ScraperErrorKindUnavailable, true, true
 	default:
 		return ScraperErrorKindUnknown, false, false
-	}
-}
-
-type ScraperHTTPError struct {
-	Scraper    string
-	StatusCode int
-	Message    string
-}
-
-func (e *ScraperHTTPError) Error() string {
-	if e == nil {
-		return ""
-	}
-	if strings.TrimSpace(e.Message) != "" {
-		return e.Message
-	}
-	if e.StatusCode > 0 {
-		if e.Scraper != "" {
-			return fmt.Sprintf("%s returned HTTP %d", e.Scraper, e.StatusCode)
-		}
-		return fmt.Sprintf("HTTP %d", e.StatusCode)
-	}
-	return "scraper HTTP error"
-}
-
-func NewScraperHTTPError(scraper string, statusCode int, message string) *ScraperHTTPError {
-	return &ScraperHTTPError{
-		Scraper:    scraper,
-		StatusCode: statusCode,
-		Message:    strings.TrimSpace(message),
 	}
 }

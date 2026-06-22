@@ -18,12 +18,12 @@ import (
 func TestProcessOrganizeJob_HandlesExcludedInvalidAndUnmatchedFiles(t *testing.T) {
 	initTestWebSocket(t)
 
-	cfg := config.DefaultConfig()
-	cfg.Output.DownloadCover = false
-	cfg.Output.DownloadPoster = false
-	cfg.Output.DownloadExtrafanart = false
-	cfg.Output.DownloadTrailer = false
-	cfg.Output.DownloadActress = false
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Download.DownloadCover = false
+	cfg.Output.Download.DownloadPoster = false
+	cfg.Output.Download.DownloadExtrafanart = false
+	cfg.Output.Download.DownloadTrailer = false
+	cfg.Output.Download.DownloadActress = false
 
 	deps := createTestDeps(t, cfg, "")
 	sourceDir := t.TempDir()
@@ -36,47 +36,47 @@ func TestProcessOrganizeJob_HandlesExcludedInvalidAndUnmatchedFiles(t *testing.T
 	requireWriteFile(t, invalidTypePath)
 	requireWriteFile(t, unmatchedPath)
 
-	job := deps.JobQueue.CreateJob([]string{excludedPath, invalidTypePath, unmatchedPath})
-	job.UpdateFileResult(excludedPath, &worker.FileResult{
-		FilePath: excludedPath,
-		MovieID:  "IPX-111",
-		Status:   worker.JobStatusCompleted,
-		Data:     &models.Movie{ID: "IPX-111", Title: "Excluded"},
+	job := deps.JobStore.CreateJobBatch([]string{excludedPath, invalidTypePath, unmatchedPath})
+	setJobResult(job, excludedPath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: excludedPath, MovieID: "IPX-111"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-111", Title: "Excluded"},
 	})
-	job.UpdateFileResult(invalidTypePath, &worker.FileResult{
-		FilePath: invalidTypePath,
-		MovieID:  "IPX-222",
-		Status:   worker.JobStatusCompleted,
-		Data:     struct{}{},
+	// Movie: nil means "no movie data available" — skipped gracefully by organize (not failed)
+	setJobResult(job, invalidTypePath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: invalidTypePath, MovieID: "IPX-222"},
+		Status:        models.JobStatusCompleted,
+		Movie:         nil,
 	})
-	job.UpdateFileResult(unmatchedPath, &worker.FileResult{
-		FilePath: unmatchedPath,
-		MovieID:  "UNKNOWN",
-		Status:   worker.JobStatusCompleted,
-		Data:     &models.Movie{ID: "UNKNOWN", Title: "No Match"},
+	// A Movie with UNKNOWN ID still has a valid Movie struct, so organize will attempt it.
+	// With copyOnly=true, the file is copied successfully → organized.
+	setJobResult(job, unmatchedPath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: unmatchedPath, MovieID: "UNKNOWN"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "UNKNOWN", Title: "No Match"},
 	})
-	job.ExcludeFile(excludedPath)
+	excludeFile(job, excludedPath)
 
-	processOrganizeJob(context.Background(), job, deps.JobQueue, destDir, true, "", false, false, deps.DB, cfg, deps.Registry, nil)
+	testStartOrganizeApply(context.Background(), job, deps.JobStore, destDir, true, "", false, false, deps.CoreDeps.DB, cfg, deps.CoreDeps.ScraperRegistry, nil)
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusCompleted {
-		t.Fatalf("job status = %q, want completed (failed=1, so should stay completed for retry)", status.Status)
-	}
-	if status.Completed != 3 {
-		t.Fatalf("completed count = %d, want 3", status.Completed)
+	// With typed Movie field: nil Movie is skipped (not failed), valid Movie structs get organized.
+	// unmatchedPath organizes successfully (copyOnly=true), excludedPath is skipped, invalidTypePath is skipped.
+	// Result: organized=1, failed=0 → MarkOrganized()
+	if status.Status != models.JobStatusOrganized {
+		t.Fatalf("job status = %q, want organized (1 file organized, 0 failed)", status.Status)
 	}
 }
 
 func TestProcessUpdateMode_SkipsExcludedAndInvalidResults(t *testing.T) {
 	initTestWebSocket(t)
 
-	cfg := config.DefaultConfig()
-	cfg.Output.DownloadCover = false
-	cfg.Output.DownloadPoster = false
-	cfg.Output.DownloadExtrafanart = false
-	cfg.Output.DownloadTrailer = false
-	cfg.Output.DownloadActress = false
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Download.DownloadCover = false
+	cfg.Output.Download.DownloadPoster = false
+	cfg.Output.Download.DownloadExtrafanart = false
+	cfg.Output.Download.DownloadTrailer = false
+	cfg.Output.Download.DownloadActress = false
 
 	deps := createTestDeps(t, cfg, "")
 	sourceDir := t.TempDir()
@@ -87,31 +87,28 @@ func TestProcessUpdateMode_SkipsExcludedAndInvalidResults(t *testing.T) {
 	requireWriteFile(t, excludedPath)
 	requireWriteFile(t, invalidTypePath)
 
-	job := deps.JobQueue.CreateJob([]string{validPath, excludedPath, invalidTypePath})
-	job.UpdateFileResult(validPath, &worker.FileResult{
-		FilePath: validPath,
-		MovieID:  "IPX-333",
-		Status:   worker.JobStatusCompleted,
-		Data:     &models.Movie{ID: "IPX-333", Title: "Valid Update"},
+	job := deps.JobStore.CreateJobBatch([]string{validPath, excludedPath, invalidTypePath})
+	setJobResult(job, validPath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: validPath, MovieID: "IPX-333"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-333", Title: "Valid Update"},
 	})
-	job.UpdateFileResult(excludedPath, &worker.FileResult{
-		FilePath: excludedPath,
-		MovieID:  "IPX-444",
-		Status:   worker.JobStatusCompleted,
-		Data:     &models.Movie{ID: "IPX-444", Title: "Excluded Update"},
+	setJobResult(job, excludedPath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: excludedPath, MovieID: "IPX-444"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-444", Title: "Excluded Update"},
 	})
-	job.UpdateFileResult(invalidTypePath, &worker.FileResult{
-		FilePath: invalidTypePath,
-		MovieID:  "IPX-555",
-		Status:   worker.JobStatusCompleted,
-		Data:     123,
+	setJobResult(job, invalidTypePath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: invalidTypePath, MovieID: "IPX-555"},
+		Status:        models.JobStatusCompleted,
+		Movie:         nil,
 	})
-	job.ExcludeFile(excludedPath)
+	excludeFile(job, excludedPath)
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
+	testStartUpdateApply(context.Background(), job, cfg, deps.CoreDeps.DB, deps.CoreDeps.ScraperRegistry, nil, &updateOptions{})
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusCompleted {
+	if status.Status != models.JobStatusCompleted {
 		t.Fatalf("job status = %q, want completed", status.Status)
 	}
 	if _, err := os.Stat(filepath.Join(sourceDir, "IPX-333.nfo")); err != nil {
@@ -126,51 +123,50 @@ func TestProcessUpdateMode_RespectsNFOEnabledConfig(t *testing.T) {
 	initTestWebSocket(t)
 
 	// Test with NFO disabled
-	cfg := config.DefaultConfig()
-	cfg.Output.DownloadCover = false
-	cfg.Output.DownloadPoster = false
-	cfg.Output.DownloadExtrafanart = false
-	cfg.Output.DownloadTrailer = false
-	cfg.Output.DownloadActress = false
-	cfg.Metadata.NFO.Enabled = false // Explicitly disable NFO generation
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Download.DownloadCover = false
+	cfg.Output.Download.DownloadPoster = false
+	cfg.Output.Download.DownloadExtrafanart = false
+	cfg.Output.Download.DownloadTrailer = false
+	cfg.Output.Download.DownloadActress = false
+	cfg.Metadata.NFO.Feature.Enabled = false // Explicitly disable NFO generation
 
 	deps := createTestDeps(t, cfg, "")
 	sourceDir := t.TempDir()
 	validPath := filepath.Join(sourceDir, "IPX-666.mp4")
 	requireWriteFile(t, validPath)
 
-	job := deps.JobQueue.CreateJob([]string{validPath})
-	job.UpdateFileResult(validPath, &worker.FileResult{
-		FilePath: validPath,
-		MovieID:  "IPX-666",
-		Status:   worker.JobStatusCompleted,
-		Data:     &models.Movie{ID: "IPX-666", Title: "NFO Disabled Test"},
+	job := deps.JobStore.CreateJobBatch([]string{validPath})
+	setJobResult(job, validPath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: validPath, MovieID: "IPX-666"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-666", Title: "NFO Disabled Test"},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
+	testStartUpdateApply(context.Background(), job, cfg, deps.CoreDeps.DB, deps.CoreDeps.ScraperRegistry, nil, &updateOptions{})
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusCompleted {
+	if status.Status != models.JobStatusCompleted {
 		t.Fatalf("job status = %q, want completed", status.Status)
 	}
 
 	// Verify NFO was NOT generated because NFO is disabled
 	nfoPath := filepath.Join(sourceDir, "IPX-666.nfo")
 	if _, err := os.Stat(nfoPath); err == nil {
-		t.Fatalf("NFO should NOT be generated when cfg.Metadata.NFO.Enabled = false")
+		t.Fatalf("NFO should NOT be generated when cfg.Metadata.NFO.Feature.Enabled = false")
 	}
 }
 
 func TestProcessOrganizeJob_SkipsNFOWhenDisabled(t *testing.T) {
 	initTestWebSocket(t)
 
-	cfg := config.DefaultConfig()
-	cfg.Output.DownloadCover = false
-	cfg.Output.DownloadPoster = false
-	cfg.Output.DownloadExtrafanart = false
-	cfg.Output.DownloadTrailer = false
-	cfg.Output.DownloadActress = false
-	cfg.Metadata.NFO.Enabled = false // Explicitly disable NFO generation
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Download.DownloadCover = false
+	cfg.Output.Download.DownloadPoster = false
+	cfg.Output.Download.DownloadExtrafanart = false
+	cfg.Output.Download.DownloadTrailer = false
+	cfg.Output.Download.DownloadActress = false
+	cfg.Metadata.NFO.Feature.Enabled = false // Explicitly disable NFO generation
 
 	deps := createTestDeps(t, cfg, "")
 	sourceDir := t.TempDir()
@@ -178,20 +174,19 @@ func TestProcessOrganizeJob_SkipsNFOWhenDisabled(t *testing.T) {
 	videoPath := filepath.Join(sourceDir, "IPX-777.mp4")
 	requireWriteFile(t, videoPath)
 
-	job := deps.JobQueue.CreateJob([]string{videoPath})
-	job.UpdateFileResult(videoPath, &worker.FileResult{
-		FilePath: videoPath,
-		MovieID:  "IPX-777",
-		Status:   worker.JobStatusCompleted,
-		Data:     &models.Movie{ID: "IPX-777", Title: "Organize NFO Disabled"},
+	job := deps.JobStore.CreateJobBatch([]string{videoPath})
+	setJobResult(job, videoPath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: videoPath, MovieID: "IPX-777"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-777", Title: "Organize NFO Disabled"},
 	})
 
 	// copyOnly=true copies files to destDir without moving original
-	// NFO generation should be skipped since cfg.Metadata.NFO.Enabled = false
-	processOrganizeJob(context.Background(), job, deps.JobQueue, destDir, true, "", false, false, deps.DB, cfg, deps.Registry, nil)
+	// NFO generation should be skipped since cfg.Metadata.NFO.Feature.Enabled = false
+	testStartOrganizeApply(context.Background(), job, deps.JobStore, destDir, true, "", false, false, deps.CoreDeps.DB, cfg, deps.CoreDeps.ScraperRegistry, nil)
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusOrganized {
+	if status.Status != models.JobStatusOrganized {
 		t.Fatalf("job status = %q, want organized", status.Status)
 	}
 

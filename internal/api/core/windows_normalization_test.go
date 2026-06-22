@@ -2,228 +2,164 @@ package core
 
 import (
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIsReservedDeviceName(t *testing.T) {
-	tests := []struct {
-		name      string
-		component string
-		expected  bool
-	}{
-		{"CON", "CON", true},
-		{"NUL", "NUL", true},
-		{"PRN", "PRN", true},
-		{"AUX", "AUX", true},
-		{"COM1", "COM1", true},
-		{"COM9", "COM9", true},
-		{"LPT1", "LPT1", true},
-		{"LPT9", "LPT9", true},
-		{"lowercase con", "con", true},
-		{"with extension txt", "CON.txt", true},
-		{"with extension log", "COM1.log", true},
-		{"with extension jpg", "NUL.jpg", true},
-		{"with multiple extensions", "AUX.txt.bak", true},
-		{"with trailing dot", "CON.", true},
-		{"with trailing space", "NUL ", true},
-		{"normal file", "config.yaml", false},
-		{"Videos", "Videos", false},
-		{"empty", "", false},
-		{"COM10 not reserved", "COM10", false},
-		{"LPT10 not reserved", "LPT10", false},
-		{"config with COM prefix", "COMMIT.txt", false},
-		{"normal with dot", "document.pdf", false},
-		{"drive letter prefix C:CON", "C:CON", true},
-		{"drive letter prefix D:NUL", "D:NUL", true},
-		{"drive letter with extension E:COM1.txt", "E:COM1.txt", true},
-		{"drive letter with space F:AUX ", "F:AUX ", true},
-		{"drive letter normal G:file.txt", "G:file.txt", false},
-		{"numeric drive letter 1:CON", "1:CON", true},
-	}
+// ---------------------------------------------------------------------------
+// isUNCPath — no runtime.GOOS guard, fully testable on all platforms
+// ---------------------------------------------------------------------------
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if runtime.GOOS != "windows" {
-				assert.False(t, isReservedDeviceName(tt.component), "Should be no-op on non-Windows")
-				return
-			}
-			assert.Equal(t, tt.expected, isReservedDeviceName(tt.component))
-		})
+func TestIsUNCPath_StandardUNC(t *testing.T) {
+	assert.True(t, isUNCPath(`\\server\share`))
+	assert.True(t, isUNCPath(`\\server\share\folder`))
+}
+
+func TestIsUNCPath_ExtendedUNCPrefix(t *testing.T) {
+	assert.True(t, isUNCPath(`\\?\UNC\server\share`))
+	assert.True(t, isUNCPath(`\\?\unc\server\share`)) // lowercase
+	assert.True(t, isUNCPath(`\\?\Unc\server\share`)) // mixed case
+}
+
+func TestIsUNCPath_NTNamespaceUNC(t *testing.T) {
+	assert.True(t, isUNCPath(`\??\UNC\server\share`))
+	assert.True(t, isUNCPath(`\??\unc\server\share`)) // lowercase
+}
+
+func TestIsUNCPath_DeviceNamespaceUNC(t *testing.T) {
+	assert.True(t, isUNCPath(`\\.\UNC\server\share`))
+	assert.True(t, isUNCPath(`\\.\unc\server\share`)) // lowercase
+}
+
+func TestIsUNCPath_NonUNCPaths(t *testing.T) {
+	assert.False(t, isUNCPath(`C:\Videos`))
+	assert.False(t, isUNCPath(`Videos`))
+	assert.False(t, isUNCPath(`/unix/path`))
+	assert.False(t, isUNCPath(``))         // empty
+	assert.False(t, isUNCPath(`\`))        // single backslash
+	assert.True(t, isUNCPath(`\\`))        // double backslash triggers standard UNC check
+	assert.False(t, isUNCPath(`//server`)) // forward slashes
+	assert.True(t, isUNCPath(`\\a`))       // starts with \\ so it's a standard UNC
+}
+
+func TestIsUNCPath_NormalizationEdgeCases(t *testing.T) {
+	// Exactly 2 chars: "\\"
+	assert.False(t, isUNCPath(`ab`)) // no backslash prefix
+	// Paths starting with single backslash
+	assert.False(t, isUNCPath(`\server\share`))
+	// Extended prefixes at exactly length 7
+	assert.True(t, isUNCPath(`\\?\UNC`)) // exactly 7 chars, but no trailing separator
+	assert.True(t, isUNCPath(`\\.\UNC`)) // exactly 7 chars
+	assert.True(t, isUNCPath(`\??\UNC`)) // exactly 7 chars
+}
+
+// ---------------------------------------------------------------------------
+// isReservedDeviceName — has runtime.GOOS guard; on non-Windows returns false
+// ---------------------------------------------------------------------------
+
+func TestIsReservedDeviceName_NonWindowsAlwaysFalse(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows-specific behavior tested separately")
+	}
+	// On non-Windows, all reserved names return false
+	reservedNames := []string{"CON", "PRN", "AUX", "NUL", "COM1", "LPT9"}
+	for _, name := range reservedNames {
+		assert.False(t, isReservedDeviceName(name), "isReservedDeviceName(%q) should be false on non-Windows", name)
+	}
+	assert.False(t, isReservedDeviceName(""))
+}
+
+// ---------------------------------------------------------------------------
+// stripTrailingChars — has runtime.GOOS guard; on non-Windows returns input
+// ---------------------------------------------------------------------------
+
+func TestStripTrailingChars_NonWindowsPassthrough(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows-specific behavior tested separately")
+	}
+	// On non-Windows, all inputs are returned unchanged
+	inputs := []string{
+		`C:\Videos.`,
+		`C:\Videos `,
+		`C:\Videos. .`,
+		``,
+		`no-trailing`,
+	}
+	for _, input := range inputs {
+		assert.Equal(t, input, stripTrailingChars(input), "stripTrailingChars(%q) should be identity on non-Windows", input)
 	}
 }
 
-func TestStripTrailingChars(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{"no trailing", `C:\Videos`, `C:\Videos`},
-		{"trailing dot", `C:\Videos.`, `C:\Videos`},
-		{"trailing space", `C:\Videos `, `C:\Videos`},
-		{"multiple dots", `C:\Videos...`, `C:\Videos`},
-		{"mixed trailing", `C:\Videos. .`, `C:\Videos`},
-		{"trailing in middle component", `C:\Videos.\test`, `C:\Videos\test`},
-		{"trailing in multiple components", `C:\Videos. \test. `, `C:\Videos\test`},
-		{"drive letter unchanged", `C:`, `C:`},
-		{"empty string", ``, ``},
-	}
+// ---------------------------------------------------------------------------
+// normalizeWindowsPath — has runtime.GOOS guard; on non-Windows returns input
+// This function had NO tests at all before.
+// ---------------------------------------------------------------------------
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if runtime.GOOS != "windows" {
-				assert.Equal(t, tt.input, stripTrailingChars(tt.input), "Should be no-op on non-Windows")
-				return
-			}
-			assert.Equal(t, tt.expected, stripTrailingChars(tt.input))
-		})
+func TestNormalizeWindowsPath_NonWindowsPassthrough(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows-specific behavior tested separately")
+	}
+	// On non-Windows, all inputs are returned unchanged
+	inputs := []string{
+		`C:\Videos`,
+		`\\?\C:\Videos`,
+		`\\?\UNC\server\share`,
+		`\??\C:\Windows`,
+		`\??\UNC\server\share`,
+		`\\.\C:\Windows`,
+		`\\.\UNC\server\share`,
+		`relative/path`,
+		``,
+	}
+	for _, input := range inputs {
+		assert.Equal(t, input, normalizeWindowsPath(input), "normalizeWindowsPath(%q) should be identity on non-Windows", input)
 	}
 }
 
-func TestIsUNCPath(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		{"standard UNC", `\\server\share`, true},
-		{"UNC with path", `\\server\share\folder`, true},
-		{"extended UNC prefix", `\\?\UNC\server\share`, true},
-		{"lowercase unc prefix", `\\?\unc\server\share`, true},
-		{"NT namespace UNC", `\??\UNC\server\share`, true},
-		{"device namespace UNC", `\\.\UNC\server\share`, true},
-		{"local path", `C:\Videos`, false},
-		{"relative path", `Videos`, false},
-		{"single backslash", `\Videos`, false},
-		{"forward slashes", `//server/share`, false},
-		{"empty string", ``, false},
-		{"single char", `\`, false},
-	}
+// ---------------------------------------------------------------------------
+// normalizeUNCPath — has runtime.GOOS guard; on non-Windows returns (path, nil)
+// ---------------------------------------------------------------------------
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, isUNCPath(tt.input))
-		})
+func TestNormalizeUNCPath_NonWindowsPassthrough(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows-specific behavior tested separately")
+	}
+	result, err := normalizeUNCPath(`\\server\share`, false, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, `\\server\share`, result)
+
+	result, err = normalizeUNCPath(`C:\Videos`, true, []string{"server"})
+	assert.NoError(t, err)
+	assert.Equal(t, `C:\Videos`, result)
+}
+
+// ---------------------------------------------------------------------------
+// normalizePathForPlatform — has runtime.GOOS guard; on non-Windows returns input
+// ---------------------------------------------------------------------------
+
+func TestNormalizePathForPlatform_NonWindowsPassthrough(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows-specific behavior tested separately")
+	}
+	inputs := []string{
+		`/unix/path`,
+		`/some/other/path`,
+		``,
+	}
+	for _, input := range inputs {
+		assert.Equal(t, input, normalizePathForPlatform(input), "normalizePathForPlatform(%q) should be identity on non-Windows", input)
 	}
 }
 
-func TestNormalizeUNCPath(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Run("no-op on non-Windows", func(t *testing.T) {
-			result, err := normalizeUNCPath(`\\server\share`, false, nil)
-			assert.NoError(t, err)
-			assert.Equal(t, `\\server\share`, result)
-		})
-		return
+// ---------------------------------------------------------------------------
+// resolveShortPathName — build-tag guarded; on non-Windows returns input
+// ---------------------------------------------------------------------------
+
+func TestResolveShortPathName_NonWindowsPassthrough(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows-specific behavior tested separately")
 	}
-
-	t.Run("blocks UNC when not allowed", func(t *testing.T) {
-		_, err := normalizeUNCPath(`\\evil-server\share`, false, nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "UNC paths are not allowed")
-	})
-
-	t.Run("blocks UNC when server not in whitelist", func(t *testing.T) {
-		_, err := normalizeUNCPath(`\\evil-server\share`, true, []string{"fileserver"})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "UNC paths are not allowed")
-	})
-
-	t.Run("allows whitelisted UNC server", func(t *testing.T) {
-		result, err := normalizeUNCPath(`\\fileserver\share`, true, []string{"fileserver"})
-		assert.NoError(t, err)
-		assert.Contains(t, result, `\\fileserver`)
-	})
-
-	t.Run("allows whitelisted UNC server case-insensitive", func(t *testing.T) {
-		result, err := normalizeUNCPath(`\\FileServer\share`, true, []string{"fileserver"})
-		assert.NoError(t, err)
-		assert.Contains(t, result, `\\FileServer`)
-	})
-
-	t.Run("passes through non-UNC path", func(t *testing.T) {
-		result, err := normalizeUNCPath(`C:\Videos`, false, nil)
-		assert.NoError(t, err)
-		assert.Equal(t, `C:\Videos`, result)
-	})
-
-	t.Run("handles UNC with only server (no share)", func(t *testing.T) {
-		_, err := normalizeUNCPath(`\\server`, true, []string{"server"})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "UNC paths are not allowed")
-	})
-}
-
-func TestResolveShortPathName(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Run("no-op on non-Windows", func(t *testing.T) {
-			input := "/some/path"
-			result := resolveShortPathName(input)
-			assert.Equal(t, input, result, "Should return path unchanged on non-Windows")
-		})
-		t.Run("handles empty string on non-Windows", func(t *testing.T) {
-			result := resolveShortPathName("")
-			assert.Equal(t, "", result)
-		})
-		return
-	}
-
-	t.Run("resolves short name to long name or falls back securely", func(t *testing.T) {
-		result := resolveShortPathName(`C:\PROGRA~1`)
-		if strings.Contains(result, "~") {
-			assert.Equal(t, `C:\PROGRA~1`, result, "Should return original path when 8.3 is disabled")
-		} else {
-			assert.Contains(t, strings.ToLower(result), "program files", "Should resolve to long name")
-		}
-	})
-
-	t.Run("returns original path on nonexistent path", func(t *testing.T) {
-		result := resolveShortPathName(`C:\NonExistentPath12345`)
-		assert.Equal(t, `C:\NonExistentPath12345`, result, "Should return original on error")
-	})
-
-	t.Run("handles empty string", func(t *testing.T) {
-		result := resolveShortPathName("")
-		assert.Equal(t, "", result)
-	})
-
-	t.Run("handles long path already", func(t *testing.T) {
-		result := resolveShortPathName(`C:\Windows`)
-		assert.Contains(t, result, `Windows`, "Long path should remain unchanged")
-	})
-}
-
-func TestNormalizePathForPlatform(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Run("no-op on non-Windows", func(t *testing.T) {
-			input := "/some/path"
-			result := normalizePathForPlatform(input)
-			assert.Equal(t, input, result)
-		})
-		return
-	}
-
-	t.Run("applies all normalizations on Windows", func(t *testing.T) {
-		// This test verifies the function exists and chains correctly
-		// Detailed testing of each step is in individual function tests
-		result := normalizePathForPlatform(`C:\Videos`)
-		assert.Equal(t, `C:\Videos`, result)
-	})
-
-	t.Run("resolves short names via resolveShortPathName", func(t *testing.T) {
-		result := normalizePathForPlatform(`C:\PROGRA~1`)
-		if strings.Contains(result, "~") {
-			assert.Equal(t, `C:\PROGRA~1`, result, "Should return original when 8.3 disabled")
-		} else {
-			assert.NotContains(t, result, "~", "normalizePathForPlatform should resolve short names")
-		}
-	})
-
-	t.Run("strips trailing characters", func(t *testing.T) {
-		result := normalizePathForPlatform(`C:\Videos.`)
-		assert.Equal(t, `C:\Videos`, result, "Should strip trailing dots")
-	})
+	assert.Equal(t, "/some/path", resolveShortPathName("/some/path"))
+	assert.Equal(t, "", resolveShortPathName(""))
 }

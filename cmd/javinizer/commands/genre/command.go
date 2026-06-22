@@ -1,6 +1,7 @@
 package genre
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -99,8 +100,8 @@ func runAdd(cmd *cobra.Command, args []string, configFile string) error {
 		Replacement: replacement,
 	}
 
-	if err := repo.Upsert(genreReplacement); err != nil {
-		return fmt.Errorf("failed to add genre replacement: %v", err)
+	if err := repo.Upsert(context.Background(), genreReplacement); err != nil {
+		return fmt.Errorf("failed to add genre replacement: %w", err)
 	}
 
 	fmt.Printf("✅ Genre replacement added: '%s' → '%s'\n", original, replacement)
@@ -124,9 +125,9 @@ func runList(cmd *cobra.Command, args []string, configFile string) error {
 
 	repo := database.NewGenreReplacementRepository(deps.DB)
 
-	replacements, err := repo.List()
+	replacements, err := repo.List(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to list genre replacements: %v", err)
+		return fmt.Errorf("failed to list genre replacements: %w", err)
 	}
 
 	if len(replacements) == 0 {
@@ -165,8 +166,8 @@ func runRemove(cmd *cobra.Command, args []string, configFile string) error {
 
 	repo := database.NewGenreReplacementRepository(deps.DB)
 
-	if err := repo.Delete(original); err != nil {
-		return fmt.Errorf("failed to remove genre replacement: %v", err)
+	if err := repo.Delete(context.Background(), original); err != nil {
+		return fmt.Errorf("failed to remove genre replacement: %w", err)
 	}
 
 	fmt.Printf("✅ Genre replacement removed: '%s'\n", original)
@@ -188,9 +189,9 @@ func runGenreExport(cmd *cobra.Command, args []string, configFile string) error 
 
 	repo := database.NewGenreReplacementRepository(deps.DB)
 
-	replacements, err := repo.List()
+	replacements, err := repo.List(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to list genre replacements: %v", err)
+		return fmt.Errorf("failed to list genre replacements: %w", err)
 	}
 
 	sort.Slice(replacements, func(i, j int) bool {
@@ -199,7 +200,7 @@ func runGenreExport(cmd *cobra.Command, args []string, configFile string) error 
 
 	data, err := json.MarshalIndent(replacements, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %v", err)
+		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
 	if len(args) == 0 {
@@ -208,7 +209,7 @@ func runGenreExport(cmd *cobra.Command, args []string, configFile string) error 
 		fmt.Printf("Exported %d genre replacement(s) to stdout\n", len(replacements))
 	} else {
 		if err := os.WriteFile(args[0], data, 0644); err != nil {
-			return fmt.Errorf("failed to write file: %v", err)
+			return fmt.Errorf("failed to write file: %w", err)
 		}
 		fmt.Printf("Exported %d genre replacement(s) to %s\n", len(replacements), args[0])
 	}
@@ -219,12 +220,12 @@ func runGenreExport(cmd *cobra.Command, args []string, configFile string) error 
 func runGenreImport(cmd *cobra.Command, args []string, configFile string) error {
 	fileData, err := os.ReadFile(args[0])
 	if err != nil {
-		return fmt.Errorf("failed to read file: %v", err)
+		return fmt.Errorf("failed to read file: %w", err)
 	}
 
 	var replacements []models.GenreReplacement
 	if err := json.Unmarshal(fileData, &replacements); err != nil {
-		return fmt.Errorf("failed to parse JSON: %v", err)
+		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
 	if len(replacements) == 0 {
@@ -250,7 +251,7 @@ func runGenreImport(cmd *cobra.Command, args []string, configFile string) error 
 
 	for i := range replacements {
 		r := &replacements[i]
-		existing, err := repo.FindByOriginal(r.Original)
+		existing, err := repo.FindByOriginal(context.Background(), r.Original)
 		if err == nil {
 			if existing.Replacement == r.Replacement {
 				skipped++
@@ -258,7 +259,7 @@ func runGenreImport(cmd *cobra.Command, args []string, configFile string) error 
 			}
 		}
 
-		if err := repo.Upsert(r); err != nil {
+		if err := repo.Upsert(context.Background(), r); err != nil {
 			errorsCount++
 			continue
 		}

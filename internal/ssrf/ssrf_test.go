@@ -35,8 +35,8 @@ func TestIsPrivateIP(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.ip == "" {
-				if IsPrivateIP(nil) != tc.wantPriv {
-					t.Errorf("IsPrivateIP(nil) = %v, want %v", !tc.wantPriv, tc.wantPriv)
+				if isPrivateIP(nil) != tc.wantPriv {
+					t.Errorf("isPrivateIP(nil) = %v, want %v", !tc.wantPriv, tc.wantPriv)
 				}
 				return
 			}
@@ -44,9 +44,9 @@ func TestIsPrivateIP(t *testing.T) {
 			if ip == nil {
 				t.Fatalf("failed to parse IP %q", tc.ip)
 			}
-			got := IsPrivateIP(ip)
+			got := isPrivateIP(ip)
 			if got != tc.wantPriv {
-				t.Errorf("IsPrivateIP(%s) = %v, want %v", tc.ip, got, tc.wantPriv)
+				t.Errorf("isPrivateIP(%s) = %v, want %v", tc.ip, got, tc.wantPriv)
 			}
 		})
 	}
@@ -91,7 +91,7 @@ func TestNewSSRFSafeClient_BlocksPrivateIPRedirect(t *testing.T) {
 
 	client := NewSSRFSafeClient(5 * time.Second)
 
-	cleanup := SetLookupIPForTest(func(host string) ([]net.IP, error) {
+	cleanup := setLookupIPForTest(func(host string) ([]net.IP, error) {
 		switch host {
 		case "public.example.com":
 			return []net.IP{net.ParseIP("93.184.216.34")}, nil
@@ -120,7 +120,7 @@ func TestNewSSRFSafeClient_BlocksRedirectToPrivateIP(t *testing.T) {
 
 	client := NewSSRFSafeClient(5 * time.Second)
 
-	cleanup := SetLookupIPForTest(func(host string) ([]net.IP, error) {
+	cleanup := setLookupIPForTest(func(host string) ([]net.IP, error) {
 		switch host {
 		case "public.example.com":
 			return []net.IP{net.ParseIP("93.184.216.34")}, nil
@@ -147,14 +147,14 @@ func TestCheckRedirect_BlocksPrivateIP(t *testing.T) {
 	req.URL, _ = url.Parse("http://192.168.1.1/secret")
 	via := []*http.Request{{}}
 
-	err := CheckRedirect(req, via)
+	err := checkRedirect(req, via)
 	if err == nil {
 		t.Error("expected error for redirect to private IP, got nil")
 	}
 }
 
 func TestCheckRedirect_TooManyRedirects(t *testing.T) {
-	cleanup := SetLookupIPForTest(func(host string) ([]net.IP, error) {
+	cleanup := setLookupIPForTest(func(host string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("93.184.216.34")}, nil
 	})
 	defer cleanup()
@@ -163,14 +163,14 @@ func TestCheckRedirect_TooManyRedirects(t *testing.T) {
 	req.URL, _ = url.Parse("http://example.com/redirect")
 	via := make([]*http.Request, 10)
 
-	err := CheckRedirect(req, via)
+	err := checkRedirect(req, via)
 	if err == nil {
 		t.Error("expected error for too many redirects, got nil")
 	}
 }
 
 func TestCheckRedirect_AllowsPublicIP(t *testing.T) {
-	cleanup := SetLookupIPForTest(func(host string) ([]net.IP, error) {
+	cleanup := setLookupIPForTest(func(host string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("93.184.216.34")}, nil
 	})
 	defer cleanup()
@@ -179,14 +179,14 @@ func TestCheckRedirect_AllowsPublicIP(t *testing.T) {
 	req.URL, _ = url.Parse("http://example.com/page")
 	via := []*http.Request{{}}
 
-	err := CheckRedirect(req, via)
+	err := checkRedirect(req, via)
 	if err != nil {
 		t.Errorf("expected no error for public IP redirect, got: %v", err)
 	}
 }
 
 func TestWrapTransportWithSSRFCheck(t *testing.T) {
-	cleanup := SetLookupIPForTest(func(host string) ([]net.IP, error) {
+	cleanup := setLookupIPForTest(func(host string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("10.0.0.1")}, nil
 	})
 	defer cleanup()
@@ -201,7 +201,7 @@ func TestWrapTransportWithSSRFCheck(t *testing.T) {
 }
 
 func TestWrapTransportWithSSRFCheck_PublicIP(t *testing.T) {
-	cleanup := SetLookupIPForTest(func(host string) ([]net.IP, error) {
+	cleanup := setLookupIPForTest(func(host string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("93.184.216.34")}, nil
 	})
 	defer cleanup()
@@ -235,7 +235,7 @@ func TestCheckURL_EmptyHostname(t *testing.T) {
 }
 
 func TestCheckURL_FailedResolve(t *testing.T) {
-	cleanup := SetLookupIPForTest(func(host string) ([]net.IP, error) {
+	cleanup := setLookupIPForTest(func(host string) ([]net.IP, error) {
 		return nil, fmt.Errorf("DNS failure")
 	})
 	defer cleanup()

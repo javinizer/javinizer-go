@@ -5,7 +5,7 @@ import type { Movie } from '$lib/api/types';
 interface MovieGroup {
 	movieId: string;
 	results: { file_path: string }[];
-	primaryResult: { data: Movie | null };
+	primaryResult: { movie: Movie | null };
 }
 
 function createTestState(movieGroups: MovieGroup[]) {
@@ -16,8 +16,8 @@ function createTestState(movieGroups: MovieGroup[]) {
 
 	function getFilteredMovieGroups(): MovieGroup[] {
 		if (completenessFilter.size === 3) return movieGroups;
-		return movieGroups.filter(group => {
-			const movie = group.primaryResult.data;
+		return movieGroups.filter((group) => {
+			const movie = group.primaryResult.movie;
 			if (!movie) return false;
 			const { tier } = calculateCompleteness(movie);
 			return completenessFilter.has(tier);
@@ -28,8 +28,8 @@ function createTestState(movieGroups: MovieGroup[]) {
 		if (!selectionMode) return;
 		const filtered = getFilteredMovieGroups();
 		if (shiftKey && lastSelectedMovieId !== null) {
-			const fromIndex = filtered.findIndex(g => g.movieId === lastSelectedMovieId);
-			const toIndex = filtered.findIndex(g => g.movieId === movieId);
+			const fromIndex = filtered.findIndex((g) => g.movieId === lastSelectedMovieId);
+			const toIndex = filtered.findIndex((g) => g.movieId === movieId);
 			if (fromIndex !== -1 && toIndex !== -1) {
 				selectMovieRange(fromIndex, toIndex);
 			}
@@ -85,7 +85,7 @@ function createTestState(movieGroups: MovieGroup[]) {
 	function getTierCounts(): Record<CompletenessTier, number> {
 		const counts: Record<CompletenessTier, number> = { incomplete: 0, partial: 0, complete: 0 };
 		for (const group of movieGroups) {
-			const movie = group.primaryResult.data;
+			const movie = group.primaryResult.movie;
 			if (movie) {
 				const { tier } = calculateCompleteness(movie);
 				counts[tier]++;
@@ -100,7 +100,7 @@ function createTestState(movieGroups: MovieGroup[]) {
 
 	function isAllSelected(): boolean {
 		const filtered = getFilteredMovieGroups();
-		return filtered.length > 0 && filtered.every(g => selectedMovieIds.has(g.movieId));
+		return filtered.length > 0 && filtered.every((g) => selectedMovieIds.has(g.movieId));
 	}
 
 	return {
@@ -128,7 +128,7 @@ function makeMovieGroup(movieId: string, movie: Movie): MovieGroup {
 	return {
 		movieId,
 		results: [{ file_path: `/path/to/${movieId}.mp4` }],
-		primaryResult: { data: movie }
+		primaryResult: { movie: movie },
 	};
 }
 
@@ -337,27 +337,33 @@ describe('selection state management', () => {
 describe('completeness filter', () => {
 	const groups = [
 		makeMovieGroup('INCOMPLETE-1', makeMovie('INCOMPLETE-1')),
-		makeMovieGroup('PARTIAL-1', makeMovie('PARTIAL-1', {
-			poster_url: 'https://example.com/poster.jpg',
-			cover_url: 'https://example.com/cover.jpg',
-			actresses: [{ id: 1, first_name: 'A' }],
-			genres: [{ id: 1, name: 'Drama' }],
-		})),
-		makeMovieGroup('COMPLETE-1', makeMovie('COMPLETE-1', {
-			poster_url: 'https://example.com/poster.jpg',
-			cover_url: 'https://example.com/cover.jpg',
-			actresses: [{ id: 1, first_name: 'A' }],
-			genres: [{ id: 1, name: 'Drama' }],
-			description: 'A description',
-			maker: 'Studio',
-			release_date: '2024-01-01',
-			director: 'Director',
-			runtime: 120,
-			trailer_url: 'https://example.com/trailer.mp4',
-			screenshot_urls: ['url1', 'url2', 'url3'],
-			label: 'Label',
-			series: 'Series',
-		})),
+		makeMovieGroup(
+			'PARTIAL-1',
+			makeMovie('PARTIAL-1', {
+				poster_url: 'https://example.com/poster.jpg',
+				cover_url: 'https://example.com/cover.jpg',
+				actresses: [{ id: 1, first_name: 'A' }],
+				genres: [{ id: 1, name: 'Drama' }],
+			}),
+		),
+		makeMovieGroup(
+			'COMPLETE-1',
+			makeMovie('COMPLETE-1', {
+				poster_url: 'https://example.com/poster.jpg',
+				cover_url: 'https://example.com/cover.jpg',
+				actresses: [{ id: 1, first_name: 'A' }],
+				genres: [{ id: 1, name: 'Drama' }],
+				description: 'A description',
+				maker: 'Studio',
+				release_date: '2024-01-01',
+				director: 'Director',
+				runtime: 120,
+				trailer_url: 'https://example.com/trailer.mp4',
+				screenshot_urls: ['url1', 'url2', 'url3'],
+				label: 'Label',
+				series: 'Series',
+			}),
+		),
 	];
 
 	describe('toggleCompletenessTier', () => {

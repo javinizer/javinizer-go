@@ -39,7 +39,7 @@ function createToastStore() {
 		},
 		clear: () => {
 			update(() => []);
-		}
+		},
 	};
 }
 

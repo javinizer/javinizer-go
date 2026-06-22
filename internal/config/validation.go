@@ -3,10 +3,9 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 // validateHTTPBaseURL validates that a URL has an http or https scheme and a host.
@@ -21,6 +20,7 @@ func validateHTTPBaseURL(path, raw string) error {
 	return nil
 }
 
+// validateProxyProfileConfig is the internal implementation for ValidateProxyProfiles.
 func validateProxyProfileConfig(c *Config) error {
 	if c == nil {
 		return nil
@@ -30,7 +30,7 @@ func validateProxyProfileConfig(c *Config) error {
 	// This must be called here (not just in Validate()) so that direct calls
 	// to validateProxyProfileConfig pick up any flat config modifications.
 	if c.Scrapers.Overrides == nil {
-		c.Scrapers.NormalizeScraperConfigs()
+		c.Scrapers.Normalize()
 	}
 
 	profiles := c.Scrapers.Proxy.Profiles
@@ -52,20 +52,18 @@ func validateProxyProfileConfig(c *Config) error {
 	}
 
 	// Validate output.download_proxy (not a scraper, special case)
-	if err := validateProxyProfileRef("output.download_proxy", &c.Output.DownloadProxy, profiles); err != nil {
+	if err := validateProxyProfileRef("output.download_proxy", &c.Output.Download.DownloadProxy, profiles); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// validateScraperProxyProfiles validates proxy profiles for all scrapers generically.
+// validateScraperProxyProfiles validates per-scraper proxy configuration.
 // Uses c.Scrapers.Overrides map — NO hardcoded scraper-name branches.
-// CONF-04: Adding a new scraper only requires adding it to flats map in normalizeScraperConfigs().
 func (c *Config) validateScraperProxyProfiles() error {
-	// Always re-normalize to pick up any modifications made to flat configs
-	// after the previous NormalizeScraperConfigs() call (e.g., in tests).
-	c.Scrapers.NormalizeScraperConfigs()
+	// Always re-normalize to pick up any modifications.
+	c.Scrapers.Normalize()
 
 	for name, sc := range c.Scrapers.Overrides {
 		path := "scrapers." + name
@@ -85,7 +83,7 @@ func (c *Config) validateScraperProxyProfiles() error {
 	return nil
 }
 
-func validateProxyProfileRef(path string, proxyCfg *ProxyConfig, profiles map[string]ProxyProfile) error {
+func validateProxyProfileRef(path string, proxyCfg *models.ProxyConfig, profiles map[string]models.ProxyProfile) error {
 	if proxyCfg == nil {
 		return nil
 	}
@@ -100,32 +98,43 @@ func validateProxyProfileRef(path string, proxyCfg *ProxyConfig, profiles map[st
 	return nil
 }
 
-// rejectUnknownProxyFields checks if the raw YAML node contains legacy proxy fields
-// that are no longer supported. Returns an error if any are found.
-func rejectUnknownProxyFields(node *yaml.Node, context string) error {
-	if node == nil {
+// ValidateProxyProfiles validates proxy profile configuration including global and
+// per-scraper proxy settings. It checks that enabled proxies reference existing profiles,
+// and that per-scraper proxy and download_proxy references are valid.
+func ValidateProxyProfiles(c *Config) error {
+	return validateProxyProfileConfig(c)
+}
+
+// ValidateScraperOverrides validates per-scraper configuration overrides.
+// It checks each scraper's base settings and runs scraper-specific validation
+// via getValidateFn for enabled scrapers. Disabled scrapers skip specific checks.
+func ValidateScraperOverrides(c *Config) error {
+	if c == nil {
 		return nil
 	}
 
-	if node.Kind != yaml.MappingNode {
-		return nil
+	// Ensure Overrides is populated before validation.
+	if c.Scrapers.Overrides == nil {
+		c.Scrapers.Normalize()
 	}
 
-	legacyFields := []string{"url", "username", "password", "use_main_proxy"}
+	// CONF-04: Generic scraper config validation — uses getValidateFn for dispatch.
+	// NO hardcoded scraper-name branches.
+	for name, sc := range c.Scrapers.Overrides {
+		// Base check: ScraperSettings.Validate handles nil, enabled, rate_limit, retry_count, timeout.
+		if err := sc.Validate(name); err != nil {
+			return err
+		}
+		// Skip scraper-specific validation for disabled scrapers (DRY: one guard here
+		// vs adding enabled checks to all 13 individual ValidateFn closures).
+		if !sc.Enabled {
+			continue
+		}
 
-	for i := 0; i < len(node.Content); i += 2 {
-		if i < len(node.Content) {
-			keyNode := node.Content[i]
-			key := strings.ToLower(keyNode.Value)
-
-			for _, legacy := range legacyFields {
-				if key == legacy {
-					return fmt.Errorf(
-						"%s: field '%s' is no longer supported. "+
-							"Use 'profile: <name>' to reference a proxy profile from scrapers.proxy.profiles instead",
-						context, keyNode.Value,
-					)
-				}
+		// Scraper-specific check via ValidateFn (no switch on scraper name)
+		if validateFn := c.Scrapers.getValidateFn(name); validateFn != nil {
+			if err := validateFn(sc); err != nil {
+				return err
 			}
 		}
 	}
@@ -133,56 +142,125 @@ func rejectUnknownProxyFields(node *yaml.Node, context string) error {
 	return nil
 }
 
-// validateFlareSolverrConfig validates FlareSolverr configuration
-func validateFlareSolverrConfig(path string, cfg FlareSolverrConfig) error {
-	if !cfg.Enabled {
+// ValidateTranslationProvider validates cross-field translation provider configuration.
+// It checks provider-specific requirements (base URLs, API keys, modes) based on the
+// selected provider. When translation is disabled, all checks are skipped.
+func ValidateTranslationProvider(c *Config) error {
+	if c == nil {
 		return nil
 	}
-	if cfg.URL == "" {
-		return fmt.Errorf("%s.url is required when flaresolverr is enabled", path)
-	}
-	if cfg.Timeout < 1 || cfg.Timeout > 300 {
-		return fmt.Errorf("%s.timeout must be between 1 and 300", path)
-	}
-	if cfg.MaxRetries < 0 || cfg.MaxRetries > 10 {
-		return fmt.Errorf("%s.max_retries must be between 0 and 10", path)
-	}
-	if cfg.SessionTTL < 60 || cfg.SessionTTL > 3600 {
-		return fmt.Errorf("%s.session_ttl must be between 60 and 3600", path)
-	}
-	return nil
+	return validateTranslationProviderInternal(c)
 }
 
-// validateBrowserConfig validates Browser configuration
-func validateBrowserConfig(path string, cfg BrowserConfig) error {
-	if !cfg.Enabled {
-		return nil // Disabled is valid
+// validateTranslationProviderInternal contains the translation provider validation logic.
+func validateTranslationProviderInternal(c *Config) error {
+	t := c.Metadata.Translation
+
+	provider := strings.ToLower(strings.TrimSpace(t.Provider))
+	if provider == "" {
+		provider = "openai"
 	}
 
-	if cfg.Timeout < 1 || cfg.Timeout > 300 {
-		return fmt.Errorf("%s.timeout must be between 1 and 300 seconds", path)
+	timeoutSeconds := t.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 60
 	}
 
-	if cfg.MaxRetries < 0 || cfg.MaxRetries > 10 {
-		return fmt.Errorf("%s.max_retries must be between 0 and 10", path)
+	openAIBaseURL := strings.TrimSpace(t.OpenAI.BaseURL)
+	if openAIBaseURL == "" {
+		openAIBaseURL = "https://api.openai.com/v1"
 	}
 
-	if cfg.WindowWidth < 640 || cfg.WindowWidth > 3840 {
-		return fmt.Errorf("%s.window_width must be between 640 and 3840", path)
+	deepLMode := models.DeepLMode(strings.ToLower(strings.TrimSpace(string(t.DeepL.Mode))))
+	if deepLMode == "" {
+		deepLMode = models.DeepLModeFree
 	}
 
-	if cfg.WindowHeight < 480 || cfg.WindowHeight > 2160 {
-		return fmt.Errorf("%s.window_height must be between 480 and 2160", path)
+	googleMode := models.GoogleMode(strings.ToLower(strings.TrimSpace(string(t.Google.Mode))))
+	if googleMode == "" {
+		googleMode = models.GoogleModeFree
 	}
 
-	if cfg.SlowMo < 0 || cfg.SlowMo > 5000 {
-		return fmt.Errorf("%s.slow_mo must be between 0 and 5000", path)
+	if !t.Enabled {
+		return nil
 	}
 
-	// If binary_path is set, validate it exists
-	if cfg.BinaryPath != "" {
-		if _, err := os.Stat(cfg.BinaryPath); err != nil {
-			return fmt.Errorf("%s.binary_path does not exist: %s", path, cfg.BinaryPath)
+	if timeoutSeconds < 5 || timeoutSeconds > 300 {
+		return fmt.Errorf("metadata.translation.timeout_seconds must be between 5 and 300")
+	}
+
+	switch provider {
+	case "openai":
+		if err := validateHTTPBaseURL("metadata.translation.openai.base_url", openAIBaseURL); err != nil {
+			return err
+		}
+	case "deepl":
+		if deepLMode != models.DeepLModeFree && deepLMode != models.DeepLModePro {
+			return fmt.Errorf("metadata.translation.deepl.mode must be either 'free' or 'pro'")
+		}
+		if strings.TrimSpace(t.DeepL.BaseURL) != "" {
+			if err := validateHTTPBaseURL("metadata.translation.deepl.base_url", t.DeepL.BaseURL); err != nil {
+				return err
+			}
+		}
+	case "google":
+		if googleMode != models.GoogleModeFree && googleMode != models.GoogleModePaid {
+			return fmt.Errorf("metadata.translation.google.mode must be either 'free' or 'paid'")
+		}
+		if strings.TrimSpace(t.Google.BaseURL) != "" {
+			if err := validateHTTPBaseURL("metadata.translation.google.base_url", t.Google.BaseURL); err != nil {
+				return err
+			}
+		}
+	case "openai-compatible":
+		if strings.TrimSpace(t.OpenAICompatible.BaseURL) == "" {
+			return fmt.Errorf("metadata.translation.openai_compatible.base_url is required when provider=openai-compatible")
+		}
+		if err := validateHTTPBaseURL("metadata.translation.openai_compatible.base_url", t.OpenAICompatible.BaseURL); err != nil {
+			return err
+		}
+		if strings.TrimSpace(t.OpenAICompatible.Model) == "" {
+			return fmt.Errorf("metadata.translation.openai_compatible.model is required when provider=openai-compatible")
+		}
+		switch t.OpenAICompatible.NormalizedBackendType() {
+		case "", "vllm", "ollama", "llama.cpp", "other":
+		default:
+			return fmt.Errorf("metadata.translation.openai_compatible.backend_type must be one of: auto, vllm, ollama, llama.cpp, other")
+		}
+	case "anthropic":
+		if strings.TrimSpace(t.Anthropic.BaseURL) == "" {
+			return fmt.Errorf("metadata.translation.anthropic.base_url is required when provider=anthropic")
+		}
+		if err := validateHTTPBaseURL("metadata.translation.anthropic.base_url", t.Anthropic.BaseURL); err != nil {
+			return err
+		}
+		if strings.TrimSpace(t.Anthropic.Model) == "" {
+			return fmt.Errorf("metadata.translation.anthropic.model is required when provider=anthropic")
+		}
+	default:
+		return fmt.Errorf("metadata.translation.provider must be one of: openai, openai-compatible, anthropic, deepl, google")
+	}
+
+	// REGV-04: Validate API key presence at config time
+	switch provider {
+	case "openai":
+		if strings.TrimSpace(t.OpenAI.APIKey) == "" {
+			return fmt.Errorf("metadata.translation.openai.api_key is required when provider=openai")
+		}
+	case "deepl":
+		if strings.TrimSpace(t.DeepL.APIKey) == "" {
+			return fmt.Errorf("metadata.translation.deepl.api_key is required when provider=deepl")
+		}
+	case "google":
+		// Google free mode doesn't require API key; paid mode does
+		if googleMode == models.GoogleModePaid && strings.TrimSpace(t.Google.APIKey) == "" {
+			return fmt.Errorf("metadata.translation.google.api_key is required when provider=google and mode=paid")
+		}
+	case "openai-compatible":
+		// API key is optional for self-hosted endpoints
+	case "anthropic":
+		if strings.TrimSpace(t.Anthropic.APIKey) == "" {
+			return fmt.Errorf("metadata.translation.anthropic.api_key is required when provider=anthropic")
 		}
 	}
 

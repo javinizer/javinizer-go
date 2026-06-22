@@ -67,8 +67,22 @@ const FIELD_DISPLAY_NAMES: Record<string, string> = {
 
 const DEFAULT_TIERS = {
 	essential: { weight: 50, fields: ['title', 'poster_url', 'cover_url', 'actresses', 'genres'] },
-	important: { weight: 35, fields: ['description', 'maker', 'release_date', 'director', 'runtime', 'trailer_url', 'screenshot_urls'] },
-	nice_to_have: { weight: 15, fields: ['label', 'series', 'rating_score', 'original_title', 'translations'] }
+	important: {
+		weight: 35,
+		fields: [
+			'description',
+			'maker',
+			'release_date',
+			'director',
+			'runtime',
+			'trailer_url',
+			'screenshot_urls',
+		],
+	},
+	nice_to_have: {
+		weight: 15,
+		fields: ['label', 'series', 'rating_score', 'original_title', 'translations'],
+	},
 };
 
 function getScreenshotFill(movie: Movie): number {
@@ -84,16 +98,19 @@ const TIER_NAME_MAP: Record<string, 'essential' | 'important' | 'nice-to-have'> 
 	nice_to_have: 'nice-to-have',
 };
 
-export function calculateCompleteness(movie: Movie, config?: CompletenessConfig): CompletenessResult {
+export function calculateCompleteness(
+	movie: Movie,
+	config?: CompletenessConfig,
+): CompletenessResult {
 	const tiers = (config?.enabled ? config.tiers : DEFAULT_TIERS) as typeof DEFAULT_TIERS;
 
 	const breakdown: FieldCategory[] = [];
 
 	for (const [tierName, tierDef] of Object.entries(tiers)) {
-		const mappedTier = TIER_NAME_MAP[tierName] ?? (tierName as 'essential' | 'important' | 'nice-to-have');
-		const fieldWeight = tierDef.fields.length > 0
-			? (tierDef.weight / 100) / tierDef.fields.length
-			: 0;
+		const mappedTier =
+			TIER_NAME_MAP[tierName] ?? (tierName as 'essential' | 'important' | 'nice-to-have');
+		const fieldWeight =
+			tierDef.fields.length > 0 ? tierDef.weight / 100 / tierDef.fields.length : 0;
 		for (const fieldName of tierDef.fields) {
 			const checker = FIELD_CHECKERS[fieldName];
 			breakdown.push({

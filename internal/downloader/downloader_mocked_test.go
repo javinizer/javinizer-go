@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -93,10 +92,11 @@ func TestDownload_Success(t *testing.T) {
 					Once()
 			}
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				DownloadTimeout: 60,
+				UserAgent:       "test-agent",
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 			// Execute
 			result, err := downloader.download(context.Background(), tt.url, tt.destPath, MediaTypePoster)
@@ -146,7 +146,7 @@ func TestDownload_ErrorHandling(t *testing.T) {
 			mockError:      nil,
 			wantError:      true,
 			wantFileExists: false,
-			expectedErrMsg: "bad status code: 404",
+			expectedErrMsg: "HTTP 404",
 		},
 		{
 			name:           "error - 500 server error",
@@ -156,7 +156,7 @@ func TestDownload_ErrorHandling(t *testing.T) {
 			mockError:      nil,
 			wantError:      true,
 			wantFileExists: false,
-			expectedErrMsg: "bad status code: 500",
+			expectedErrMsg: "HTTP 500",
 		},
 		{
 			name:           "error - 503 service unavailable",
@@ -166,7 +166,7 @@ func TestDownload_ErrorHandling(t *testing.T) {
 			mockError:      nil,
 			wantError:      true,
 			wantFileExists: false,
-			expectedErrMsg: "bad status code: 503",
+			expectedErrMsg: "HTTP 503",
 		},
 		{
 			name:           "error - network timeout",
@@ -208,10 +208,11 @@ func TestDownload_ErrorHandling(t *testing.T) {
 					Once()
 			}
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				DownloadTimeout: 60,
+				UserAgent:       "test-agent",
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 			// Execute
 			result, err := downloader.download(context.Background(), tt.url, tt.destPath, MediaTypePoster)
@@ -259,10 +260,10 @@ func TestDownload_DirectoryCreation(t *testing.T) {
 		}, nil).
 		Once()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadTimeout: 60,
 	}
-	downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+	downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 	// Execute
 	result, err := downloader.download(context.Background(), url, destPath, MediaTypePoster)
@@ -306,10 +307,11 @@ func TestDownload_UserAgent(t *testing.T) {
 		}, nil).
 		Once()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadTimeout: 60,
+		UserAgent:       "TestAgent/1.0",
 	}
-	downloader := NewDownloader(mockHTTP, memFS, cfg, expectedUserAgent, nil)
+	downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 	// Execute
 	result, err := downloader.download(context.Background(), url, destPath, MediaTypePoster)
@@ -370,8 +372,8 @@ func TestDownload_RefererHeader(t *testing.T) {
 				}, nil).
 				Once()
 
-			cfg := &config.OutputConfig{DownloadTimeout: 60}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+			cfg := &Config{DownloadTimeout: 60}
+			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 			result, err := downloader.download(context.Background(), tt.url, destPath, MediaTypePoster)
 			assert.NoError(t, err)
@@ -408,10 +410,10 @@ func TestDownload_ContextUsage(t *testing.T) {
 		}, nil).
 		Once()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadTimeout: 60,
 	}
-	downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+	downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 	// Execute
 	result, err := downloader.download(context.Background(), url, destPath, MediaTypePoster)

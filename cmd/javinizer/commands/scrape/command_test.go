@@ -2,6 +2,7 @@ package scrape_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,13 +14,20 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraper"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	// Register scraper defaults for NormalizeScraperConfigs
+	// Register scraper defaults for Finalize
 	_ "github.com/javinizer/javinizer-go/internal/scraper/dmm"
 	_ "github.com/javinizer/javinizer-go/internal/scraper/r18dev"
 )
+
+func init() {
+	reg := scraperutil.NewScraperRegistry()
+	scraper.RegisterAll(reg)
+}
 
 // Tests
 
@@ -250,10 +258,6 @@ database:
   dsn: ":memory:"
 scrapers:
   priority: ["mock"]
-  dmm:
-    enabled: true
-  r18dev:
-    enabled: true
 metadata:
   translation:
     enabled: true
@@ -281,10 +285,10 @@ matching:
 	// Load config and create database
 	cfg, err := config.Load(tmpFile)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer db.Close()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	// Create cached movie with OLD translation (different hash - gpt-3.5-turbo)
 	oldConfig := config.TranslationConfig{
@@ -308,11 +312,11 @@ matching:
 		},
 	}
 	movieRepo := database.NewMovieRepository(db)
-	require.NoError(t, movieRepo.Create(cachedMovie))
+	require.NoError(t, movieRepo.Create(context.TODO(), cachedMovie))
 
 	// Setup command and dependencies
 	cmd := scrape.NewCommand()
-	registry := models.NewScraperRegistry()
+	registry := scraperutil.NewScraperRegistry()
 	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{
 		DB:              db,
 		ScraperRegistry: registry,
@@ -321,7 +325,7 @@ matching:
 	defer func() { _ = deps.Close() }()
 
 	// Run scrape - should hit cache, detect hash mismatch, re-translate
-	movie, results, err := scrape.Run(cmd, []string{"TEST-001"}, tmpFile, deps)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-001"}, tmpFile, deps)
 
 	require.NoError(t, err)
 	assert.NotNil(t, movie)
@@ -349,10 +353,6 @@ database:
   dsn: ":memory:"
 scrapers:
   priority: ["mock"]
-  dmm:
-    enabled: true
-  r18dev:
-    enabled: true
 metadata:
   translation:
     enabled: true
@@ -379,10 +379,10 @@ matching:
 	// Load config and create database
 	cfg, err := config.Load(tmpFile)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer db.Close()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	// Create cached movie with MATCHING hash
 	matchingHash := cfg.Metadata.Translation.SettingsHash()
@@ -401,11 +401,11 @@ matching:
 		},
 	}
 	movieRepo := database.NewMovieRepository(db)
-	require.NoError(t, movieRepo.Create(cachedMovie))
+	require.NoError(t, movieRepo.Create(context.TODO(), cachedMovie))
 
 	// Setup command and dependencies
 	cmd := scrape.NewCommand()
-	registry := models.NewScraperRegistry()
+	registry := scraperutil.NewScraperRegistry()
 	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{
 		DB:              db,
 		ScraperRegistry: registry,
@@ -414,7 +414,7 @@ matching:
 	defer func() { _ = deps.Close() }()
 
 	// Run scrape - should hit cache, hash matches, NO re-translation
-	movie, results, err := scrape.Run(cmd, []string{"TEST-002"}, tmpFile, deps)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-002"}, tmpFile, deps)
 
 	require.NoError(t, err)
 	assert.NotNil(t, movie)

@@ -5,9 +5,11 @@ This directory contains components for managing granular metadata field prioriti
 ## Components
 
 ### DraggableList.svelte
+
 Reusable drag-and-drop list component with keyboard accessibility.
 
 **Features:**
+
 - Native HTML5 drag and drop
 - Keyboard controls (up/down arrow buttons)
 - Touch-friendly for mobile devices
@@ -15,21 +17,25 @@ Reusable drag-and-drop list component with keyboard accessibility.
 - Custom render via snippets
 
 **Props:**
+
 - `items` - Array of strings to display
 - `onReorder` - Callback fired when order changes
 - `disabled` - Disable drag/reordering
 - `children` - Optional snippet for custom item rendering
 
 ### FieldRow.svelte
+
 Displays a single metadata field with its priority configuration.
 
 **Features:**
+
 - Visual status indicators (green = inherited, orange = custom)
 - Compact priority preview
 - Edit and reset buttons
 - Responsive layout
 
 **Props:**
+
 - `fieldName` - Internal field key (e.g., 'Title')
 - `fieldLabel` - Display label
 - `priority` - Current priority array for this field
@@ -39,9 +45,11 @@ Displays a single metadata field with its priority configuration.
 - `onReset` - Callback to reset to global
 
 ### MetadataPriority.svelte
+
 Main orchestrator component for the entire priority management system.
 
 **Features:**
+
 - Simple/Advanced mode toggle
 - Global priority management
 - Per-field override system
@@ -51,6 +59,7 @@ Main orchestrator component for the entire priority management system.
 - "Show only overridden" filter
 
 **Props:**
+
 - `config` - Full application config object
 - `onUpdate` - Callback when config changes
 
@@ -94,12 +103,15 @@ Main orchestrator component for the entire priority management system.
 The component manages priority for these metadata fields:
 
 ### Primary
+
 - ID, Title, OriginalTitle, Description, ReleaseDate, Runtime, ContentID
 
 ### Metadata
+
 - Actress, Genre, Director, Maker, Label, Series, Rating
 
 ### Media
+
 - CoverURL, PosterURL, ScreenshotURL, TrailerURL
 
 ## Backend Integration
@@ -108,7 +120,7 @@ The config structure matches the Go backend:
 
 ```yaml
 scrapers:
-  priority: [r18dev, dmm]  # Global priority
+  priority: [r18dev, dmm] # Global priority
 
 metadata:
   priority:

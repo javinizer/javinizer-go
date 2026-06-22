@@ -14,7 +14,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		engineOpts EngineOptions
+		engineOpts engineOptions
 		template   string
 		ctx        *Context
 		want       string
@@ -22,7 +22,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 	}{
 		{
 			name:       "Explicit language tag en",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<TITLE:en>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -36,7 +36,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Explicit language tag ja",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<TITLE:ja>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -50,7 +50,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Explicit language tag zh",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<TITLE:zh>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -64,7 +64,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Explicit language not found - fallback to base",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<TITLE:ko>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -77,7 +77,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Multiple language tags in same template",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<TITLE:en> / <TITLE:ja>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -91,7 +91,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Language tag with truncation - combined not supported",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE:en>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -104,7 +104,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Language tag for DIRECTOR",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<DIRECTOR:en>",
 			ctx: &Context{
 				Director: "Base Director",
@@ -118,7 +118,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Language tag for MAKER",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<MAKER:ja>",
 			ctx: &Context{
 				Maker: "Base Maker",
@@ -131,7 +131,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Language tag for STUDIO synonym",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<STUDIO:en>",
 			ctx: &Context{
 				Maker: "Base Maker",
@@ -144,7 +144,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Language tag for LABEL",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<LABEL:zh>",
 			ctx: &Context{
 				Label: "Base Label",
@@ -157,7 +157,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Language tag for SERIES",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<SERIES:en>",
 			ctx: &Context{
 				Series: "Base Series",
@@ -170,7 +170,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Language tag for DESCRIPTION",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<DESCRIPTION:ja>",
 			ctx: &Context{
 				Description: "Base Description",
@@ -183,7 +183,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Language tag for ORIGINALTITLE",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ORIGINALTITLE:ja>",
 			ctx: &Context{
 				OriginalTitle: "Base OriginalTitle",
@@ -196,7 +196,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Mixed language tags and regular tags",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<ID> - <TITLE:ja> (<TITLE:en>) [<STUDIO>]",
 			ctx: &Context{
 				ID:    "IPX-123",
@@ -212,7 +212,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Language tag in conditional content",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<IF:TITLE><TITLE:en><ELSE>No Title</IF>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -225,7 +225,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Language tag conditional - no translation returns base",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<IF:TITLE><TITLE:ja><ELSE>No Japanese Title</IF>",
 			ctx: &Context{
 				Title:        "Base Title",
@@ -236,7 +236,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Invalid uppercase EN treated as legacy modifier",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE:EN>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -249,7 +249,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Case insensitive tag parsing",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<title:en>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -262,7 +262,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Mixed case tag and modifier - modifier is case sensitive",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<Title:En>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -275,7 +275,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 		},
 		{
 			name:       "Full template with multiple translated fields",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<ID> [<TITLE:ja>] - <TITLE:en> by <DIRECTOR:en> (<YEAR>)",
 			ctx: &Context{
 				ID:          "IPX-535",
@@ -294,7 +294,7 @@ func TestTemplateWithLanguageTags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewEngineWithOptions(tt.engineOpts)
+			engine := newEngineWithOptions(tt.engineOpts)
 			got, err := engine.Execute(tt.template, tt.ctx)
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -311,7 +311,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		engineOpts EngineOptions
+		engineOpts engineOptions
 		template   string
 		ctx        *Context
 		want       string
@@ -319,7 +319,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 	}{
 		{
 			name:       "No default language - TITLE uses base field",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ID> - <TITLE>",
 			ctx: &Context{
 				ID:    "IPX-123",
@@ -333,7 +333,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Default language en - TITLE uses translation",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<ID> - <TITLE>",
 			ctx: &Context{
 				ID:    "IPX-123",
@@ -347,7 +347,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Default language ja - TITLE uses Japanese",
-			engineOpts: EngineOptions{DefaultLanguage: "ja"},
+			engineOpts: engineOptions{DefaultLanguage: "ja"},
 			template:   "<ID> - <TITLE>",
 			ctx: &Context{
 				ID:    "IPX-123",
@@ -362,7 +362,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Default language not found - fallback to base",
-			engineOpts: EngineOptions{DefaultLanguage: "ko"},
+			engineOpts: engineOptions{DefaultLanguage: "ko"},
 			template:   "<ID> - <TITLE>",
 			ctx: &Context{
 				ID:    "IPX-123",
@@ -376,7 +376,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Fallback languages work when default not found",
-			engineOpts: EngineOptions{DefaultLanguage: "ko", FallbackLanguages: []string{"ja", "en"}},
+			engineOpts: engineOptions{DefaultLanguage: "ko", FallbackLanguages: []string{"ja", "en"}},
 			template:   "<ID> - <TITLE>",
 			ctx: &Context{
 				ID:    "IPX-123",
@@ -391,7 +391,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Context default overrides engine default",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<ID> - <TITLE>",
 			ctx: &Context{
 				ID:              "IPX-123",
@@ -407,7 +407,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Explicit tag overrides defaults",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<ID> - <TITLE:zh>",
 			ctx: &Context{
 				ID:              "IPX-123",
@@ -424,7 +424,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Default language with truncation modifier",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE:30>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -437,7 +437,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Default language affects multiple translatable tags",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE> by <DIRECTOR> [<MAKER>]",
 			ctx: &Context{
 				Title:    "Base Title",
@@ -452,7 +452,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Mixed default and explicit language tags",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE> (<TITLE:ja>)",
 			ctx: &Context{
 				Title: "Base Title",
@@ -466,7 +466,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Non-translatable tag unaffected by default language",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<ID> - <RUNTIME>min",
 			ctx: &Context{
 				ID:      "IPX-123",
@@ -480,7 +480,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Full template with default language",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<ID> [<MAKER>] - <TITLE> (<YEAR>)",
 			ctx: &Context{
 				ID:          "IPX-535",
@@ -496,7 +496,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "Empty translation field - fallback to next candidate",
-			engineOpts: EngineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja"}},
+			engineOpts: engineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja"}},
 			template:   "<TITLE>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -510,7 +510,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 		},
 		{
 			name:       "All candidates empty - fallback to base",
-			engineOpts: EngineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja"}},
+			engineOpts: engineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja"}},
 			template:   "<TITLE>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -526,7 +526,7 @@ func TestTemplateWithDefaultLanguage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewEngineWithOptions(tt.engineOpts)
+			engine := newEngineWithOptions(tt.engineOpts)
 			got, err := engine.Execute(tt.template, tt.ctx)
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -543,7 +543,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		engineOpts EngineOptions
+		engineOpts engineOptions
 		template   string
 		ctx        *Context
 		want       string
@@ -551,7 +551,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 	}{
 		{
 			name:       "Numeric truncation modifier works without default language",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<TITLE:30>",
 			ctx: &Context{
 				Title: "Very Long Title That Should Be Truncated To Fit",
@@ -561,7 +561,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Numeric truncation modifier works with default language",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE:30>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -574,7 +574,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Date format modifier still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<RELEASEDATE:YYYY-MM>",
 			ctx: &Context{
 				ReleaseDate: &releaseDate,
@@ -584,9 +584,8 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Actor delimiter modifier still works",
-			engineOpts: EngineOptions{},
-			template:   "<ACTORS:DELIM= | >",
-			ctx: &Context{
+			engineOpts: engineOptions{},
+			template:   "<ACTORS:DELIM= | >", ctx: &Context{
 				Actresses: []string{"Actor1", "Actor2", "Actor3"},
 			},
 			want:    "Actor1 | Actor2 | Actor3",
@@ -594,7 +593,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Genres delimiter modifier still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<GENRES:;>",
 			ctx: &Context{
 				Genres: []string{"Genre1", "Genre2"},
@@ -604,7 +603,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Index padding modifier still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "screenshot<INDEX:3>.jpg",
 			ctx: &Context{
 				Index: 5,
@@ -614,7 +613,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Part padding modifier still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "movie-pt<PART:2>.mp4",
 			ctx: &Context{
 				PartNumber: 3,
@@ -624,7 +623,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Case modifier UPPERCASE still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ID:UPPERCASE>",
 			ctx: &Context{
 				ID: "ipx-123",
@@ -634,7 +633,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Case modifier LOWERCASE still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ID:LOWERCASE>",
 			ctx: &Context{
 				ID: "IPX-123",
@@ -644,7 +643,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Legacy template without translations works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ID> [<STUDIO>] - <TITLE> (<YEAR>)",
 			ctx: &Context{
 				ID:          "IPX-535",
@@ -657,7 +656,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Legacy template with translations but no default language",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ID> - <TITLE>",
 			ctx: &Context{
 				ID:    "IPX-535",
@@ -671,7 +670,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Conditional blocks still work",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ID><IF:SERIES> - <SERIES></IF>",
 			ctx: &Context{
 				ID:     "IPX-535",
@@ -682,7 +681,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Conditional with ELSE still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ID><IF:DIRECTOR> by <DIRECTOR><ELSE> (Unknown Director)</IF>",
 			ctx: &Context{
 				ID:       "IPX-535",
@@ -693,7 +692,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "STUDIO synonym for MAKER still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ID> [<STUDIO>]",
 			ctx: &Context{
 				ID:    "IPX-535",
@@ -704,7 +703,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "ACTRESSES synonym for ACTORS still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ACTRESSES>",
 			ctx: &Context{
 				Actresses: []string{"Actress1", "Actress2"},
@@ -714,7 +713,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "DISC synonym for PART still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "movie-cd<DISC:2>.mp4",
 			ctx: &Context{
 				PartNumber: 1,
@@ -724,7 +723,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "GroupActress feature still works",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ID> - <ACTORS>",
 			ctx: &Context{
 				ID:           "IPX-535",
@@ -736,7 +735,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "All original tags still work without translations",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			template:   "<ID> - <CONTENTID> - <TITLE> - <ORIGINALTITLE> - <YEAR> - <RELEASEDATE> - <RUNTIME> - <DIRECTOR> - <MAKER> - <LABEL> - <SERIES> - <ACTORS> - <GENRES>",
 			ctx: &Context{
 				ID:            "IPX-535",
@@ -757,7 +756,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "TITLE with numeric preserves truncation over language",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE:30>",
 			ctx: &Context{
 				Title: "Base Title That Is Very Long",
@@ -770,7 +769,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Explicit language tag with numeric truncation - combined not supported",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE:ja>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -784,7 +783,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Invalid 3-letter language spec uses base field not default",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE:eng>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -797,7 +796,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Invalid fallback chain uses base field not default",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE:foo|bar>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -810,7 +809,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Invalid 3-letter with region eng-US uses base field",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<TITLE:eng-US>",
 			ctx: &Context{
 				Title: "Base Title",
@@ -823,7 +822,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 		},
 		{
 			name:       "Invalid 3-letter with underscore jpn_JP uses base field",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			template:   "<DIRECTOR:jpn_JP>",
 			ctx: &Context{
 				Director: "Base Director",
@@ -838,7 +837,7 @@ func TestTemplateBackwardCompatibility(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewEngineWithOptions(tt.engineOpts)
+			engine := newEngineWithOptions(tt.engineOpts)
 			got, err := engine.Execute(tt.template, tt.ctx)
 			if tt.wantErr {
 				assert.Error(t, err)

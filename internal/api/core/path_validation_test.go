@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/api/apperrors"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,52 +22,44 @@ func TestValidateScanPath(t *testing.T) {
 	tests := []struct {
 		name          string
 		inputPath     string
-		securityCfg   *config.SecurityConfig
+		securityCfg   *SecurityNarrowConfig
 		expectedError bool
 		errorContains string
 	}{
 		{
 			name:      "valid path within allowed directory",
 			inputPath: allowedDir,
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
-				MaxFilesPerScan:    10000,
-				ScanTimeoutSeconds: 30,
 			},
 			expectedError: false,
 		},
 		{
 			name:      "valid path - with allowlist",
 			inputPath: tempDir,
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
-				MaxFilesPerScan:    10000,
-				ScanTimeoutSeconds: 30,
 			},
 			expectedError: false,
 		},
 		{
 			name:      "path traversal attempt with ../",
 			inputPath: filepath.Join(allowedDir, "../etc/passwd"),
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{allowedDir},
 				DeniedDirectories:  []string{},
-				MaxFilesPerScan:    10000,
-				ScanTimeoutSeconds: 30,
 			},
 			expectedError: true,
-			errorContains: "does not exist", // Path validation happens before allowlist check
+			errorContains: "outside allowed directories", // Canonicalized path falls outside allowlist
 		},
 		{
 			name:      "absolute path outside allowed directory",
 			inputPath: tempDir,
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{allowedDir},
 				DeniedDirectories:  []string{},
-				MaxFilesPerScan:    10000,
-				ScanTimeoutSeconds: 30,
 			},
 			expectedError: true,
 			errorContains: "outside allowed directories",
@@ -76,23 +67,19 @@ func TestValidateScanPath(t *testing.T) {
 		{
 			name:      "path with multiple ../ sequences",
 			inputPath: filepath.Join(tempDir, "../../etc"),
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
-				MaxFilesPerScan:    10000,
-				ScanTimeoutSeconds: 30,
 			},
 			expectedError: true,
-			errorContains: "does not exist", // Path validation happens before allowlist check
+			errorContains: "outside allowed directories", // Canonicalized path falls outside allowlist
 		},
 		{
 			name:      "nonexistent path",
 			inputPath: "/nonexistent/path/12345",
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{"/"},
 				DeniedDirectories:  []string{},
-				MaxFilesPerScan:    10000,
-				ScanTimeoutSeconds: 30,
 			},
 			expectedError: true,
 			errorContains: "does not exist",
@@ -129,11 +116,9 @@ func TestValidateScanPath_SystemDirectories(t *testing.T) {
 		t.Skip("Unix-specific test")
 	}
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{"/"},
 		DeniedDirectories:  []string{},
-		MaxFilesPerScan:    10000,
-		ScanTimeoutSeconds: 30,
 	}
 
 	for _, dir := range systemDirs {
@@ -154,11 +139,9 @@ func TestValidateScanPath_FileVsDirectory(t *testing.T) {
 	tempFile := filepath.Join(tempDir, "testfile.txt")
 	require.NoError(t, os.WriteFile(tempFile, []byte("test"), 0644))
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{tempDir},
 		DeniedDirectories:  []string{},
-		MaxFilesPerScan:    10000,
-		ScanTimeoutSeconds: 30,
 	}
 
 	t.Run("rejects file path", func(t *testing.T) {
@@ -190,11 +173,9 @@ func TestGetDeniedDirectories(t *testing.T) {
 func BenchmarkValidateScanPath(b *testing.B) {
 	tempDir := b.TempDir()
 	testPath := tempDir
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{tempDir},
 		DeniedDirectories:  []string{},
-		MaxFilesPerScan:    10000,
-		ScanTimeoutSeconds: 30,
 	}
 
 	b.ResetTimer()
@@ -209,51 +190,43 @@ func TestValidateScanPath_EdgeCases(t *testing.T) {
 	tests := []struct {
 		name          string
 		inputPath     string
-		securityCfg   *config.SecurityConfig
+		securityCfg   *SecurityNarrowConfig
 		expectedError bool
 		errorContains string
 	}{
 		{
 			name:      "empty path defaults to current directory",
 			inputPath: "",
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{"/"},
 				DeniedDirectories:  []string{},
-				MaxFilesPerScan:    10000,
-				ScanTimeoutSeconds: 30,
 			},
 			expectedError: false,
 		},
 		{
 			name:      "path with trailing slash",
 			inputPath: tempDir + "/",
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
-				MaxFilesPerScan:    10000,
-				ScanTimeoutSeconds: 30,
 			},
 			expectedError: false,
 		},
 		{
 			name:      "path with ./ prefix",
 			inputPath: "./",
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{"/"},
 				DeniedDirectories:  []string{},
-				MaxFilesPerScan:    10000,
-				ScanTimeoutSeconds: 30,
 			},
 			expectedError: false,
 		},
 		{
 			name:      "relative path cleaned to absolute",
 			inputPath: tempDir,
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{tempDir},
 				DeniedDirectories:  []string{},
-				MaxFilesPerScan:    10000,
-				ScanTimeoutSeconds: 30,
 			},
 			expectedError: false,
 		},
@@ -682,11 +655,9 @@ func TestValidateScanPath_PathTraversal(t *testing.T) {
 	allowedDir := filepath.Join(tempDir, "allowed")
 	require.NoError(t, os.Mkdir(allowedDir, 0755))
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{allowedDir},
 		DeniedDirectories:  []string{},
-		MaxFilesPerScan:    10000,
-		ScanTimeoutSeconds: 30,
 	}
 
 	tests := []struct {
@@ -699,19 +670,19 @@ func TestValidateScanPath_PathTraversal(t *testing.T) {
 			name:          "path traversal with ../ to escape allowed dir",
 			inputPath:     filepath.Join(allowedDir, "..", "forbidden"),
 			expectedError: true,
-			errorContains: "does not exist", // Path won't exist, caught before allowlist check
+			errorContains: "outside allowed directories", // Canonicalized path falls outside allowlist
 		},
 		{
 			name:          "path traversal with multiple ../",
 			inputPath:     filepath.Join(allowedDir, "..", "..", "etc"),
 			expectedError: true,
-			errorContains: "does not exist",
+			errorContains: "outside allowed directories", // Canonicalized path falls outside allowlist
 		},
 		{
 			name:          "path traversal attempt with mixed slashes",
 			inputPath:     filepath.Join(allowedDir, ".."+string(filepath.Separator)+"forbidden"),
 			expectedError: true,
-			errorContains: "does not exist",
+			errorContains: "outside allowed directories", // Canonicalized path falls outside allowlist
 		},
 		{
 			name:          "clean path within allowed directory",
@@ -755,127 +726,15 @@ func TestValidateScanPath_SymlinkResolution(t *testing.T) {
 	symlinkPath := filepath.Join(allowedDir, "link_to_forbidden")
 	require.NoError(t, os.Symlink(forbiddenDir, symlinkPath))
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{allowedDir},
 		DeniedDirectories:  []string{},
-		MaxFilesPerScan:    10000,
-		ScanTimeoutSeconds: 30,
 	}
 
 	// Attempt to access via symlink should be blocked (symlink resolves to forbidden path)
 	_, err := validateScanPath(symlinkPath, securityCfg)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "outside allowed directories")
-}
-
-func TestPathHasPrefix_CaseSensitivity(t *testing.T) {
-	tests := []struct {
-		name     string
-		path     string
-		prefix   string
-		expected bool
-		skipOS   string // Skip test on specific OS
-	}{
-		{
-			name:     "Windows case-insensitive match - lowercase path",
-			path:     `c:\windows\system32`,
-			prefix:   `C:\Windows`,
-			expected: true,
-			skipOS:   "!windows", // Only run on Windows
-		},
-		{
-			name:     "Windows case-insensitive match - uppercase path",
-			path:     `C:\WINDOWS\SYSTEM32`,
-			prefix:   `c:\windows`,
-			expected: true,
-			skipOS:   "!windows",
-		},
-		{
-			name:     "Windows case-insensitive match - mixed case",
-			path:     `C:\WiNdOwS\SyStEm32`,
-			prefix:   `c:\windows`,
-			expected: true,
-			skipOS:   "!windows",
-		},
-		{
-			name:     "Unix case-sensitive - exact match",
-			path:     `/etc/passwd`,
-			prefix:   `/etc`,
-			expected: true,
-		},
-		{
-			name:     "Unix case-sensitive - different case should not match",
-			path:     `/ETC/passwd`,
-			prefix:   `/etc`,
-			expected: false,
-			skipOS:   "windows", // Skip on Windows (case-insensitive FS)
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.skipOS == "!windows" && runtime.GOOS != "windows" {
-				t.Skip("Test requires Windows")
-			}
-			if tt.skipOS == "windows" && runtime.GOOS == "windows" {
-				t.Skip("Test not applicable on Windows")
-			}
-
-			result := pathHasPrefix(tt.path, tt.prefix)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestPathHasPrefix_WindowsExtendedPaths(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows-specific test")
-	}
-
-	tests := []struct {
-		name     string
-		path     string
-		prefix   string
-		expected bool
-	}{
-		{
-			name:     "Extended path prefix with normal prefix",
-			path:     `\\?\C:\Windows\System32`,
-			prefix:   `C:\Windows`,
-			expected: true,
-		},
-		{
-			name:     "Normal path with extended prefix",
-			path:     `C:\Windows\System32`,
-			prefix:   `\\?\C:\Windows`,
-			expected: true,
-		},
-		{
-			name:     "Both extended paths",
-			path:     `\\?\C:\Windows\System32`,
-			prefix:   `\\?\C:\Windows`,
-			expected: true,
-		},
-		{
-			name:     "NT namespace path",
-			path:     `\??\C:\Windows\System32`,
-			prefix:   `C:\Windows`,
-			expected: true,
-		},
-		{
-			name:     "Device namespace path",
-			path:     `\\.\C:\Windows\System32`,
-			prefix:   `C:\Windows`,
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := pathHasPrefix(tt.path, tt.prefix)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
 }
 
 func TestIsDirAllowed_Allowlist(t *testing.T) {
@@ -1056,12 +915,10 @@ func TestWrapperFunctions(t *testing.T) {
 
 	allow := []string{tempDir}
 	deny := []string{}
-	assert.True(t, IsDirAllowed(tempDir, allow, deny))
+	assert.True(t, isDirAllowed(tempDir, allow, deny))
 
 	assert.Equal(t, ExpandHomeDir("~/test"), expandHomeDir("~/test"))
-	assert.Equal(t, Contains("abcdef", "bcd"), contains("abcdef", "bcd"))
 	assert.Equal(t, GetDeniedDirectories(), getDeniedDirectories())
-	assert.Equal(t, PathHasPrefix(tempDir, tempDir), pathHasPrefix(tempDir, tempDir))
 }
 
 func TestCanonicalizePath_NonExistentChildUnderExistingParent(t *testing.T) {
@@ -1083,31 +940,31 @@ func TestValidateScanPath_TypedErrors(t *testing.T) {
 	tests := []struct {
 		name        string
 		inputPath   string
-		securityCfg *config.SecurityConfig
+		securityCfg *SecurityNarrowConfig
 		expectedErr error
 		skipIf      string
 	}{
 		{
 			name:      "path outside allowed directory returns ErrPathOutsideAllowed",
 			inputPath: tempDir,
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{allowedDir},
 				DeniedDirectories:  []string{},
 			},
 			expectedErr: apperrors.ErrPathOutsideAllowed,
 		},
 		{
-			name:      "nonexistent path returns ErrPathNotExist",
+			name:      "nonexistent path outside allowed dirs returns ErrPathOutsideAllowed",
 			inputPath: "/nonexistent/path/12345",
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{"/tmp"},
 			},
-			expectedErr: apperrors.ErrPathNotExist,
+			expectedErr: apperrors.ErrPathOutsideAllowed, // Allowlist check before existence check (doesn't leak path existence)
 		},
 		{
 			name:      "empty allowlist returns ErrAllowedDirsEmpty",
 			inputPath: tempDir,
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{},
 			},
 			expectedErr: apperrors.ErrAllowedDirsEmpty,
@@ -1115,7 +972,7 @@ func TestValidateScanPath_TypedErrors(t *testing.T) {
 		{
 			name:      "pseudo-filesystem (/proc) returns ErrPathInDenylist even with allowlist",
 			inputPath: "/proc",
-			securityCfg: &config.SecurityConfig{
+			securityCfg: &SecurityNarrowConfig{
 				AllowedDirectories: []string{"/"},
 			},
 			expectedErr: apperrors.ErrPathInDenylist,
@@ -1140,7 +997,7 @@ func TestValidateScanPath_TypedErrors(t *testing.T) {
 func TestValidateScanPath_EmptyAllowlistDeniesByDefault(t *testing.T) {
 	tempDir := t.TempDir()
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{},
 		DeniedDirectories:  []string{},
 	}
@@ -1154,7 +1011,7 @@ func TestValidateScanPath_EmptyAllowlistDeniesByDefault(t *testing.T) {
 func TestValidateScanPath_BlankEntriesIgnored(t *testing.T) {
 	tempDir := t.TempDir()
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{"", "  ", tempDir},
 		DeniedDirectories:  []string{},
 	}
@@ -1166,7 +1023,7 @@ func TestValidateScanPath_BlankEntriesIgnored(t *testing.T) {
 func TestValidateScanPath_OnlyBlankEntriesDeniesByDefault(t *testing.T) {
 	tempDir := t.TempDir()
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{"", "  ", "\t"},
 		DeniedDirectories:  []string{},
 	}
@@ -1182,7 +1039,7 @@ func TestValidateScanPath_FileNotDirectory(t *testing.T) {
 	tempFile := filepath.Join(tempDir, "testfile.txt")
 	require.NoError(t, os.WriteFile(tempFile, []byte("test"), 0644))
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{tempDir},
 		DeniedDirectories:  []string{},
 	}
@@ -1230,7 +1087,7 @@ func TestValidateScanPath_MinimalDenylistOnly(t *testing.T) {
 		{name: "/dev is blocked", path: "/dev", shouldExist: true},
 	}
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{"/"},
 	}
 
@@ -1257,7 +1114,7 @@ func TestValidateScanPath_ReservedDeviceName(t *testing.T) {
 
 	tempDir := t.TempDir()
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{tempDir},
 	}
 
@@ -1289,7 +1146,7 @@ func TestValidateScanPath_UNCPath(t *testing.T) {
 		t.Skip("Windows-specific test")
 	}
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{`C:\Videos`},
 		AllowUNC:           false,
 	}
@@ -1301,7 +1158,7 @@ func TestValidateScanPath_UNCPath(t *testing.T) {
 	})
 
 	t.Run("UNC path blocked when server not in whitelist", func(t *testing.T) {
-		cfg := &config.SecurityConfig{
+		cfg := &SecurityNarrowConfig{
 			AllowedDirectories: []string{`C:\Videos`},
 			AllowUNC:           true,
 			AllowedUNCServers:  []string{"trusted-server"},
@@ -1358,11 +1215,9 @@ func TestValidateScanPath_DenylistPrefix(t *testing.T) {
 
 	tempDir := t.TempDir()
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{tempDir},
 		DeniedDirectories:  []string{},
-		MaxFilesPerScan:    10000,
-		ScanTimeoutSeconds: 30,
 	}
 
 	t.Run("/devmedia is NOT blocked (prefix collision with /dev)", func(t *testing.T) {
@@ -1374,11 +1229,9 @@ func TestValidateScanPath_DenylistPrefix(t *testing.T) {
 	})
 
 	t.Run("/dev/null IS blocked (within /dev)", func(t *testing.T) {
-		securityCfgAll := &config.SecurityConfig{
+		securityCfgAll := &SecurityNarrowConfig{
 			AllowedDirectories: []string{"/"},
 			DeniedDirectories:  []string{},
-			MaxFilesPerScan:    10000,
-			ScanTimeoutSeconds: 30,
 		}
 		if _, err := os.Stat("/dev/null"); os.IsNotExist(err) {
 			t.Skip("/dev/null doesn't exist on this system")
@@ -1390,11 +1243,9 @@ func TestValidateScanPath_DenylistPrefix(t *testing.T) {
 	})
 
 	t.Run("/sys/kernel IS blocked (within /sys)", func(t *testing.T) {
-		securityCfgAll := &config.SecurityConfig{
+		securityCfgAll := &SecurityNarrowConfig{
 			AllowedDirectories: []string{"/"},
 			DeniedDirectories:  []string{},
-			MaxFilesPerScan:    10000,
-			ScanTimeoutSeconds: 30,
 		}
 		if _, err := os.Stat("/sys/kernel"); os.IsNotExist(err) {
 			t.Skip("/sys/kernel doesn't exist on this system")
@@ -1412,11 +1263,9 @@ func TestValidateScanPath_DenylistPrefix(t *testing.T) {
 		customDeniedPath := filepath.Join(tempDir, "custombackup")
 		require.NoError(t, os.Mkdir(customDeniedPath, 0755))
 
-		cfg := &config.SecurityConfig{
+		cfg := &SecurityNarrowConfig{
 			AllowedDirectories: []string{tempDir},
 			DeniedDirectories:  []string{customDeniedDir},
-			MaxFilesPerScan:    10000,
-			ScanTimeoutSeconds: 30,
 		}
 
 		_, err := validateScanPath(customDeniedPath, cfg)
@@ -1447,8 +1296,8 @@ func TestIsPathWithin_ComponentAware(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isPathWithin(tt.path, tt.parent)
-			assert.Equal(t, tt.expected, result, "isPathWithin(%q, %q) = %v, expected %v", tt.path, tt.parent, result, tt.expected)
+			result := isPathWithinCanonical(tt.path, tt.parent)
+			assert.Equal(t, tt.expected, result, "isPathWithinCanonical(%q, %q) = %v, expected %v", tt.path, tt.parent, result, tt.expected)
 		})
 	}
 }
@@ -1481,11 +1330,9 @@ func TestValidateScanPath_Symlink(t *testing.T) {
 	symlinkToFile := filepath.Join(tempDir, "symlink_to_file")
 	require.NoError(t, os.Symlink(targetFile, symlinkToFile))
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{allowedDir},
 		DeniedDirectories:  []string{},
-		MaxFilesPerScan:    10000,
-		ScanTimeoutSeconds: 30,
 	}
 
 	t.Run("symlink to allowed directory passes validation", func(t *testing.T) {
@@ -1569,8 +1416,8 @@ func TestCanonicalizePath_SymlinkAncestor(t *testing.T) {
 		// created pointing to a sensitive location.
 		require.Error(t, err) // Expected: error for broken symlink
 		assert.Empty(t, got)
-		// The error indicates the symlink target doesn't exist
-		assert.Contains(t, err.Error(), "no such file or directory")
+		// The PathValidator wraps the raw error in a PathError with a generic message
+		assert.Contains(t, err.Error(), "cannot resolve path")
 	})
 
 	t.Run("multiple missing components under symlink", func(t *testing.T) {
@@ -1704,9 +1551,10 @@ func TestCanonicalizePath_NonResolvableParent(t *testing.T) {
 		// SECURITY: canonicalizePath correctly returns an error for symlink loops.
 		// filepath.EvalSymlinks detects the loop and returns "too many links" error.
 		// This prevents infinite loops and symlink-based filesystem attacks.
+		// The PathValidator wraps the raw error in a PathError.
 		require.Error(t, err) // Expected: error for symlink loop
 		assert.Empty(t, got)
-		assert.Contains(t, err.Error(), "too many links")
+		assert.Contains(t, err.Error(), "cannot resolve path")
 	})
 
 	t.Run("permission denied on parent is propagated", func(t *testing.T) {
@@ -1728,11 +1576,9 @@ func TestCanonicalizePath_NonResolvableParent(t *testing.T) {
 func TestValidateScanPath_Wrapper(t *testing.T) {
 	tempDir := t.TempDir()
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{tempDir},
 		DeniedDirectories:  []string{},
-		MaxFilesPerScan:    10000,
-		ScanTimeoutSeconds: 30,
 	}
 
 	t.Run("valid path returns canonical path", func(t *testing.T) {
@@ -1747,7 +1593,7 @@ func TestValidateScanPath_Wrapper(t *testing.T) {
 	})
 
 	t.Run("empty allowlist returns error", func(t *testing.T) {
-		cfg := &config.SecurityConfig{
+		cfg := &SecurityNarrowConfig{
 			AllowedDirectories: []string{},
 		}
 		_, err := ValidateScanPath(tempDir, cfg)
@@ -1759,11 +1605,9 @@ func TestValidateScanPath_Wrapper(t *testing.T) {
 func TestValidateAndOpenPath(t *testing.T) {
 	tempDir := t.TempDir()
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{tempDir},
 		DeniedDirectories:  []string{},
-		MaxFilesPerScan:    10000,
-		ScanTimeoutSeconds: 30,
 	}
 
 	t.Run("valid path returns open file and canonical path", func(t *testing.T) {
@@ -1798,7 +1642,7 @@ func TestValidateAndOpenPath(t *testing.T) {
 	})
 
 	t.Run("empty allowlist returns error", func(t *testing.T) {
-		cfg := &config.SecurityConfig{
+		cfg := &SecurityNarrowConfig{
 			AllowedDirectories: []string{},
 		}
 		f, path, err := ValidateAndOpenPath(tempDir, cfg)
@@ -1848,7 +1692,7 @@ func TestValidateAndOpenPath_SymlinkTOCTOU(t *testing.T) {
 	linkDir := filepath.Join(tempDir, "link")
 	require.NoError(t, os.Symlink(realDir, linkDir))
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{realDir},
 		DeniedDirectories:  []string{},
 	}
@@ -1873,7 +1717,7 @@ func TestValidateAndOpenPath_SystemDirectory(t *testing.T) {
 		t.Skip("/proc doesn't exist on this system")
 	}
 
-	securityCfg := &config.SecurityConfig{
+	securityCfg := &SecurityNarrowConfig{
 		AllowedDirectories: []string{"/"},
 		DeniedDirectories:  []string{},
 	}
@@ -1885,65 +1729,6 @@ func TestValidateAndOpenPath_SystemDirectory(t *testing.T) {
 		assert.Nil(t, f)
 		assert.Empty(t, path)
 	})
-}
-
-func TestPathHasPrefix_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		path     string
-		prefix   string
-		expected bool
-	}{
-		{
-			name:     "empty path with empty prefix",
-			path:     "",
-			prefix:   "",
-			expected: true,
-		},
-		{
-			name:     "empty path with non-empty prefix",
-			path:     "",
-			prefix:   "/path",
-			expected: false,
-		},
-		{
-			name:     "non-empty path with empty prefix",
-			path:     "/path",
-			prefix:   "",
-			expected: true,
-		},
-		{
-			name:     "path shorter than prefix",
-			path:     "/a",
-			prefix:   "/abc",
-			expected: false,
-		},
-		{
-			name:     "exact match",
-			path:     "/path",
-			prefix:   "/path",
-			expected: true,
-		},
-		{
-			name:     "subdirectory match",
-			path:     "/path/to/file",
-			prefix:   "/path",
-			expected: true,
-		},
-		{
-			name:     "no match different paths",
-			path:     "/path1",
-			prefix:   "/path2",
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := PathHasPrefix(tt.path, tt.prefix)
-			assert.Equal(t, tt.expected, result, "PathHasPrefix(%q, %q) = %v, expected %v", tt.path, tt.prefix, result, tt.expected)
-		})
-	}
 }
 
 func TestExpandHomeDir_EdgeCases(t *testing.T) {
@@ -1967,28 +1752,6 @@ func TestExpandHomeDir_EdgeCases(t *testing.T) {
 		result := ExpandHomeDir("")
 		assert.Equal(t, "", result)
 	})
-}
-
-func TestContains_EdgeCases(t *testing.T) {
-	tests := []struct {
-		s        string
-		substr   string
-		expected bool
-	}{
-		{"hello world", "world", true},
-		{"hello world", "World", false},
-		{"hello world", "", true},
-		{"", "test", false},
-		{"", "", true},
-		{"short", "longer substring", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.s+"_"+tt.substr, func(t *testing.T) {
-			result := Contains(tt.s, tt.substr)
-			assert.Equal(t, tt.expected, result, "Contains(%q, %q) = %v, expected %v", tt.s, tt.substr, result, tt.expected)
-		})
-	}
 }
 
 func TestGetDeniedDirectories_ReturnsExpected(t *testing.T) {

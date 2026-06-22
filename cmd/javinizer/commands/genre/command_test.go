@@ -2,6 +2,7 @@ package genre_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -66,16 +67,16 @@ func setupGenreTestDB(t *testing.T) (configPath string, dbPath string) {
 	require.NoError(t, err)
 
 	// Create test config
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	configPath = filepath.Join(tmpDir, "config.yaml")
 	err = config.Save(testCfg, configPath)
 	require.NoError(t, err)
 
 	// Initialize database with migrations to ensure it exists
-	db, err := database.New(testCfg)
+	db, err := database.New(&database.Config{Type: testCfg.Database.Type, DSN: testCfg.Database.DSN, LogLevel: testCfg.Database.LogLevel})
 	require.NoError(t, err)
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 
@@ -111,7 +112,7 @@ func TestRunGenreAdd_Success(t *testing.T) {
 	// Verify in database
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
@@ -173,14 +174,14 @@ func TestRunGenreAdd_MultipleReplacements(t *testing.T) {
 	// Verify all in database
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() {
 		_ = db.Close()
 	}()
 
 	repo := database.NewGenreReplacementRepository(db)
-	replacements, err := repo.List()
+	replacements, err := repo.List(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, 3, len(replacements))
 
@@ -231,7 +232,7 @@ func TestRunGenreAdd_Duplicate(t *testing.T) {
 	// Verify updated in database
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
@@ -242,7 +243,7 @@ func TestRunGenreAdd_Duplicate(t *testing.T) {
 
 	// Verify only one entry exists (not duplicated)
 	repo := database.NewGenreReplacementRepository(db)
-	replacements, err := repo.List()
+	replacements, err := repo.List(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(replacements), "should have exactly one entry")
 }
@@ -341,7 +342,7 @@ func TestRunGenreRemove_Success(t *testing.T) {
 	// Verify it exists
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
@@ -495,12 +496,12 @@ func TestRunGenreImport_Valid(t *testing.T) {
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	repo := database.NewGenreReplacementRepository(db)
-	replacements, err := repo.List()
+	replacements, err := repo.List(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(replacements))
 }
@@ -585,11 +586,11 @@ func TestRunGenreImport_UpsertsExisting(t *testing.T) {
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	updated, err := database.NewGenreReplacementRepository(db).FindByOriginal("Drama")
+	updated, err := database.NewGenreReplacementRepository(db).FindByOriginal(context.TODO(), "Drama")
 	require.NoError(t, err)
 	assert.Equal(t, "Drama Updated", updated.Replacement)
 }

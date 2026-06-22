@@ -47,6 +47,9 @@ func ParseDate(s string) *time.Time {
 
 func IntPtr(i int) *int { return &i }
 
+// BoolPtr returns a pointer to the given bool value.
+func BoolPtr(b bool) *bool { return &b }
+
 var nonAlphaNumRegex = regexp.MustCompile(`[^a-z0-9]+`)
 
 func NormalizeID(v string) string {

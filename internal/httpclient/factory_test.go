@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 func TestNewTransport_NoProxy(t *testing.T) {
@@ -25,7 +25,7 @@ func TestNewTransport_NoProxy(t *testing.T) {
 }
 
 func TestNewTransport_EmptyProxyProfile(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{}
+	proxyProfile := &models.ProxyProfile{}
 
 	transport, err := NewTransport(proxyProfile)
 	if err != nil {
@@ -42,7 +42,7 @@ func TestNewTransport_EmptyProxyProfile(t *testing.T) {
 }
 
 func TestNewTransport_HTTPProxy(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL: "http://proxy.example.com:8080",
 	}
 
@@ -57,7 +57,7 @@ func TestNewTransport_HTTPProxy(t *testing.T) {
 }
 
 func TestNewTransport_HTTPProxyWithoutScheme(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL: "proxy.example.com:8080",
 	}
 
@@ -89,7 +89,7 @@ func TestNewTransport_HTTPProxyWithoutScheme(t *testing.T) {
 }
 
 func TestNewTransport_HTTPSProxy(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL: "https://proxy.example.com:8080",
 	}
 
@@ -104,7 +104,7 @@ func TestNewTransport_HTTPSProxy(t *testing.T) {
 }
 
 func TestNewTransport_SOCKS5Proxy(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL: "socks5://localhost:1080",
 	}
 
@@ -120,7 +120,7 @@ func TestNewTransport_SOCKS5Proxy(t *testing.T) {
 }
 
 func TestNewTransport_ProxyWithAuth(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL:      "http://proxy.example.com:8080",
 		Username: "testuser",
 		Password: "testpass",
@@ -137,7 +137,7 @@ func TestNewTransport_ProxyWithAuth(t *testing.T) {
 }
 
 func TestNewTransport_SOCKS5ProxyWithAuth(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL:      "socks5://localhost:1080",
 		Username: "testuser",
 		Password: "testpass",
@@ -155,7 +155,7 @@ func TestNewTransport_SOCKS5ProxyWithAuth(t *testing.T) {
 }
 
 func TestNewTransport_InvalidURL(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL: "://invalid",
 	}
 
@@ -177,7 +177,7 @@ func TestNewHTTPClient_NoProxy(t *testing.T) {
 }
 
 func TestNewHTTPClient_WithProxy(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL: "http://proxy.example.com:8080",
 	}
 
@@ -192,7 +192,7 @@ func TestNewHTTPClient_WithProxy(t *testing.T) {
 }
 
 func TestNewHTTPClient_InvalidProxy(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL: "://invalid",
 	}
 
@@ -214,7 +214,7 @@ func TestNewRestyClient_NoProxy(t *testing.T) {
 }
 
 func TestNewRestyClient_WithProxy(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL: "http://proxy.example.com:8080",
 	}
 
@@ -229,7 +229,7 @@ func TestNewRestyClient_WithProxy(t *testing.T) {
 }
 
 func TestNewRestyClient_InvalidProxy(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL: "://invalid",
 	}
 
@@ -298,7 +298,7 @@ func TestSanitizeProxyURL_WithCredentials(t *testing.T) {
 }
 
 func TestNewTransport_SOCKS5ClearsHTTPProxy(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL: "socks5://localhost:1080",
 	}
 

@@ -1,33 +1,33 @@
 package fc2
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 )
 
-func testSettings() config.ScraperSettings {
-	return config.ScraperSettings{
+func testSettings() *models.ScraperSettings {
+	return &models.ScraperSettings{
 		Enabled:   true,
 		RateLimit: 0,
 	}
 }
 
 func TestScraperInterfaceCompliance(t *testing.T) {
-	s := New(testSettings(), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings(), nil, models.FlareSolverrConfig{})
 	var _ models.Scraper = s
 	var _ models.ScraperQueryResolver = s
 }
 
 func TestCanHandleURL(t *testing.T) {
-	s := New(testSettings(), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings(), nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -50,7 +50,7 @@ func TestCanHandleURL(t *testing.T) {
 }
 
 func TestExtractIDFromURL_FC2(t *testing.T) {
-	s := New(testSettings(), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings(), nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -77,26 +77,25 @@ func TestExtractIDFromURL_FC2(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance_FC2(t *testing.T) {
-	s := New(testSettings(), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings(), nil, models.FlareSolverrConfig{})
 	var _ models.Scraper = s
-	var _ models.URLHandler = s
-	var _ models.DirectURLScraper = s
+	var _ models.Scraper = s
 }
 
 func TestNameAndEnabled(t *testing.T) {
 	settings := testSettings()
-	s := New(settings, nil, config.FlareSolverrConfig{})
+	s := newScraper(settings, nil, models.FlareSolverrConfig{})
 
 	assert.Equal(t, "fc2", s.Name())
 	assert.True(t, s.IsEnabled())
 
-	disabledSettings := config.ScraperSettings{Enabled: false, RateLimit: 0}
-	s = New(disabledSettings, nil, config.FlareSolverrConfig{})
+	disabledSettings := models.ScraperSettings{Enabled: false, RateLimit: 0}
+	s = newScraper(&disabledSettings, nil, models.FlareSolverrConfig{})
 	assert.False(t, s.IsEnabled())
 }
 
 func TestResolveSearchQuery(t *testing.T) {
-	s := New(testSettings(), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings(), nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name  string
@@ -122,17 +121,17 @@ func TestResolveSearchQuery(t *testing.T) {
 }
 
 func TestGetURL(t *testing.T) {
-	s := New(testSettings(), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings(), nil, models.FlareSolverrConfig{})
 
-	u, err := s.GetURL("PPV-4847718")
+	u, err := s.GetURL(context.Background(), "PPV-4847718")
 	assert.NoError(t, err)
 	assert.Equal(t, "https://adult.contents.fc2.com/article/4847718/", u)
 
-	u, err = s.GetURL("https://adult.contents.fc2.com/article/4847718/?lang=en")
+	u, err = s.GetURL(context.Background(), "https://adult.contents.fc2.com/article/4847718/?lang=en")
 	assert.NoError(t, err)
 	assert.Equal(t, "https://adult.contents.fc2.com/article/4847718/", u)
 
-	_, err = s.GetURL("ABP-123")
+	_, err = s.GetURL(context.Background(), "ABP-123")
 	assert.Error(t, err)
 }
 

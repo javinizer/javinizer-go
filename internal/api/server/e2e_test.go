@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,14 +11,15 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/javinizer/javinizer-go/internal/aggregator"
+	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/matcher"
-	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
 type genreReplacement struct {
@@ -52,28 +54,35 @@ func setupDBAndServer(t *testing.T) (*gin.Engine, *ServerDependencies) {
 		},
 	}
 
-	registry := models.NewScraperRegistry()
-	agg := aggregator.New(cfg)
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:           "/tmp/config.yaml",
-		Registry:             registry,
-		DB:                   db,
-		Aggregator:           agg,
-		MovieRepo:            database.NewMovieRepository(db),
-		ActressRepo:          database.NewActressRepository(db),
-		GenreReplacementRepo: database.NewGenreReplacementRepository(db),
-		WordReplacementRepo:  database.NewWordReplacementRepository(db),
-		HistoryRepo:          database.NewHistoryRepository(db),
-		JobRepo:              database.NewJobRepository(db),
-		BatchFileOpRepo:      database.NewBatchFileOperationRepository(db),
-		EventRepo:            database.NewEventRepository(db),
-		Matcher:              mat,
-		JobQueue:             worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+			DB:              db,
+		},
+		ConfigFile: "/tmp/config.yaml",
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   database.NewMovieRepository(db),
+				ActressRepo: database.NewActressRepository(db),
+			},
+			HistoryRepos: database.HistoryRepos{
+				HistoryRepo:     database.NewHistoryRepository(db),
+				JobRepo:         database.NewJobRepository(db),
+				BatchFileOpRepo: database.NewBatchFileOperationRepository(db),
+			},
+			SystemRepos: database.SystemRepos{
+				EventRepo: database.NewEventRepository(db),
+			},
+			ReplacementRepos: database.ReplacementRepos{
+				GenreReplacementRepo: database.NewGenreReplacementRepository(db),
+				WordReplacementRepo:  database.NewWordReplacementRepository(db),
+			},
+		},
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 	}
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 	router := NewServer(deps)
 	t.Cleanup(func() { cleanupServerHub(t, deps) })
 	return router, deps
@@ -312,7 +321,7 @@ func TestE2E_ActressImport(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "\"japanese_name\":\"テストA\"")
 	assert.Contains(t, w.Body.String(), "\"japanese_name\":\"テストB\"")
 
-	deps.ActressRepo.List(10, 0)
+	deps.Repos.ActressRepo.List(context.TODO(), 10, 0)
 }
 
 func TestE2E_ActressImportInvalidJSON(t *testing.T) {

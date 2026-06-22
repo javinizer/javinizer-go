@@ -6,10 +6,10 @@
 		<link rel="icon" type="image/x-icon" href="/favicon.ico" />
 		<link rel="icon" type="image/png" sizes="256x256" href="/favicon.ico" />
 		<script>
-			(function(){
-				var t=localStorage.getItem('javinizer-theme');
-				var d=t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches);
-				if(d)document.documentElement.classList.add('dark');
+			(function () {
+				var t = localStorage.getItem('javinizer-theme');
+				var d = t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme:dark)').matches);
+				if (d) document.documentElement.classList.add('dark');
 			})();
 		</script>
 		%sveltekit.head%

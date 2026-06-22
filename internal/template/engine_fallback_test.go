@@ -10,7 +10,7 @@ import (
 func TestResolveTranslatedTagFallback(t *testing.T) {
 	tests := []struct {
 		name         string
-		engineOpts   EngineOptions
+		engineOpts   engineOptions
 		ctx          *Context
 		tagName      string
 		explicitLang string
@@ -18,7 +18,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 	}{
 		{
 			name:       "No translations - fallback to base field",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			ctx: &Context{
 				Title:        "Base Title",
 				Translations: map[string]models.MovieTranslation{},
@@ -29,7 +29,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Explicit language takes priority",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			ctx: &Context{
 				Title: "Base Title",
 				Translations: map[string]models.MovieTranslation{
@@ -44,7 +44,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Context default language takes priority over engine",
-			engineOpts: EngineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"zh"}},
+			engineOpts: engineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"zh"}},
 			ctx: &Context{
 				Title:           "Base Title",
 				DefaultLanguage: "ja",
@@ -60,7 +60,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Engine default language used when context default empty",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			ctx: &Context{
 				Title:           "Base Title",
 				DefaultLanguage: "",
@@ -75,7 +75,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Fallback languages used when default not found",
-			engineOpts: EngineOptions{DefaultLanguage: "ko", FallbackLanguages: []string{"ja", "en"}},
+			engineOpts: engineOptions{DefaultLanguage: "ko", FallbackLanguages: []string{"ja", "en"}},
 			ctx: &Context{
 				Title: "Base Title",
 				Translations: map[string]models.MovieTranslation{
@@ -89,7 +89,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Multiple fallback languages - first match wins",
-			engineOpts: EngineOptions{DefaultLanguage: "ko", FallbackLanguages: []string{"zh", "ja", "en"}},
+			engineOpts: engineOptions{DefaultLanguage: "ko", FallbackLanguages: []string{"zh", "ja", "en"}},
 			ctx: &Context{
 				Title: "Base Title",
 				Translations: map[string]models.MovieTranslation{
@@ -103,7 +103,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Fallback to base field when no translation matches",
-			engineOpts: EngineOptions{DefaultLanguage: "ko", FallbackLanguages: []string{"fr", "de"}},
+			engineOpts: engineOptions{DefaultLanguage: "ko", FallbackLanguages: []string{"fr", "de"}},
 			ctx: &Context{
 				Title: "Base Title",
 				Translations: map[string]models.MovieTranslation{
@@ -117,7 +117,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Explicit language overrides all defaults",
-			engineOpts: EngineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja"}},
+			engineOpts: engineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja"}},
 			ctx: &Context{
 				Title:           "Base Title",
 				DefaultLanguage: "zh",
@@ -134,7 +134,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Empty translation value - continue to next candidate",
-			engineOpts: EngineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja"}},
+			engineOpts: engineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja"}},
 			ctx: &Context{
 				Title: "Base Title",
 				Translations: map[string]models.MovieTranslation{
@@ -148,7 +148,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "All translations empty - fallback to base",
-			engineOpts: EngineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja"}},
+			engineOpts: engineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja"}},
 			ctx: &Context{
 				Title: "Base Title",
 				Translations: map[string]models.MovieTranslation{
@@ -162,7 +162,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Nil translations map - fallback to base",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			ctx: &Context{
 				Title:        "Base Title",
 				Translations: nil,
@@ -173,7 +173,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "DIRECTOR tag with translation",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			ctx: &Context{
 				Director: "Base Director",
 				Translations: map[string]models.MovieTranslation{
@@ -187,7 +187,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "MAKER tag with translation",
-			engineOpts: EngineOptions{DefaultLanguage: "ja"},
+			engineOpts: engineOptions{DefaultLanguage: "ja"},
 			ctx: &Context{
 				Maker: "Base Maker",
 				Translations: map[string]models.MovieTranslation{
@@ -201,7 +201,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "STUDIO tag synonym uses same translation",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			ctx: &Context{
 				Maker: "Base Maker",
 				Translations: map[string]models.MovieTranslation{
@@ -214,7 +214,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "LABEL tag with translation",
-			engineOpts: EngineOptions{DefaultLanguage: "ja"},
+			engineOpts: engineOptions{DefaultLanguage: "ja"},
 			ctx: &Context{
 				Label: "Base Label",
 				Translations: map[string]models.MovieTranslation{
@@ -228,7 +228,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "SERIES tag with translation",
-			engineOpts: EngineOptions{DefaultLanguage: "zh"},
+			engineOpts: engineOptions{DefaultLanguage: "zh"},
 			ctx: &Context{
 				Series: "Base Series",
 				Translations: map[string]models.MovieTranslation{
@@ -242,7 +242,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "DESCRIPTION tag with translation",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			ctx: &Context{
 				Description: "Base Description",
 				Translations: map[string]models.MovieTranslation{
@@ -255,7 +255,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "ORIGINALTITLE tag with translation",
-			engineOpts: EngineOptions{DefaultLanguage: "ja"},
+			engineOpts: engineOptions{DefaultLanguage: "ja"},
 			ctx: &Context{
 				OriginalTitle: "Base OriginalTitle",
 				Translations: map[string]models.MovieTranslation{
@@ -268,7 +268,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "No engine default language - skips to fallbacks",
-			engineOpts: EngineOptions{FallbackLanguages: []string{"ja", "en"}},
+			engineOpts: engineOptions{FallbackLanguages: []string{"ja", "en"}},
 			ctx: &Context{
 				Title: "Base Title",
 				Translations: map[string]models.MovieTranslation{
@@ -282,7 +282,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "No engine settings at all - fallback to base",
-			engineOpts: EngineOptions{},
+			engineOpts: engineOptions{},
 			ctx: &Context{
 				Title:        "Base Title",
 				Translations: map[string]models.MovieTranslation{},
@@ -293,7 +293,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Context default overrides engine fallbacks order",
-			engineOpts: EngineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"zh"}},
+			engineOpts: engineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"zh"}},
 			ctx: &Context{
 				Title:           "Base Title",
 				DefaultLanguage: "ja",
@@ -309,7 +309,7 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 		},
 		{
 			name:       "Partial translation - only some fields translated",
-			engineOpts: EngineOptions{DefaultLanguage: "en"},
+			engineOpts: engineOptions{DefaultLanguage: "en"},
 			ctx: &Context{
 				Title:    "Base Title",
 				Director: "Base Director",
@@ -325,8 +325,8 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewEngineWithOptions(tt.engineOpts)
-			got := engine.resolveTranslatedTag(tt.tagName, tt.explicitLang, tt.ctx)
+			engine := newEngineWithOptions(tt.engineOpts)
+			got := engine.translationResolver.resolveTranslatedTag(tt.tagName, tt.explicitLang, tt.ctx)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -335,182 +335,182 @@ func TestResolveTranslatedTagFallback(t *testing.T) {
 func TestLanguageCandidatesPrecedence(t *testing.T) {
 	tests := []struct {
 		name           string
-		engineOpts     EngineOptions
+		engineOpts     engineOptions
 		ctx            *Context
 		explicitLang   string
 		wantCandidates []string
 	}{
 		{
 			name:           "Empty explicit, empty context, empty engine",
-			engineOpts:     EngineOptions{},
+			engineOpts:     engineOptions{},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: nil,
 		},
 		{
 			name:           "Explicit language only",
-			engineOpts:     EngineOptions{},
+			engineOpts:     engineOptions{},
 			ctx:            &Context{},
 			explicitLang:   "en",
 			wantCandidates: []string{"en"},
 		},
 		{
 			name:           "Context default only",
-			engineOpts:     EngineOptions{},
+			engineOpts:     engineOptions{},
 			ctx:            &Context{DefaultLanguage: "ja"},
 			explicitLang:   "",
 			wantCandidates: []string{"ja"},
 		},
 		{
 			name:           "Engine default only",
-			engineOpts:     EngineOptions{DefaultLanguage: "zh"},
+			engineOpts:     engineOptions{DefaultLanguage: "zh"},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: []string{"zh"},
 		},
 		{
 			name:           "Engine fallbacks only",
-			engineOpts:     EngineOptions{FallbackLanguages: []string{"en", "ja"}},
+			engineOpts:     engineOptions{FallbackLanguages: []string{"en", "ja"}},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: []string{"en", "ja"},
 		},
 		{
 			name:           "All sources - explicit takes priority",
-			engineOpts:     EngineOptions{DefaultLanguage: "zh", FallbackLanguages: []string{"ko", "en"}},
+			engineOpts:     engineOptions{DefaultLanguage: "zh", FallbackLanguages: []string{"ko", "en"}},
 			ctx:            &Context{DefaultLanguage: "ja"},
 			explicitLang:   "fr",
 			wantCandidates: []string{"fr", "ja", "zh", "ko", "en"},
 		},
 		{
 			name:           "Context default takes priority over engine",
-			engineOpts:     EngineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"zh"}},
+			engineOpts:     engineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"zh"}},
 			ctx:            &Context{DefaultLanguage: "ja"},
 			explicitLang:   "",
 			wantCandidates: []string{"ja", "en", "zh"},
 		},
 		{
 			name:           "Engine default after context",
-			engineOpts:     EngineOptions{DefaultLanguage: "en"},
+			engineOpts:     engineOptions{DefaultLanguage: "en"},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: []string{"en"},
 		},
 		{
 			name:           "Fallbacks after engine default",
-			engineOpts:     EngineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja", "zh"}},
+			engineOpts:     engineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"ja", "zh"}},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: []string{"en", "ja", "zh"},
 		},
 		{
 			name:           "Duplicate handling - explicit same as context (deduped)",
-			engineOpts:     EngineOptions{DefaultLanguage: "en"},
+			engineOpts:     engineOptions{DefaultLanguage: "en"},
 			ctx:            &Context{DefaultLanguage: "ja"},
 			explicitLang:   "ja",
 			wantCandidates: []string{"ja", "en"},
 		},
 		{
 			name:           "Duplicate handling - explicit same as engine default (deduped)",
-			engineOpts:     EngineOptions{DefaultLanguage: "en"},
+			engineOpts:     engineOptions{DefaultLanguage: "en"},
 			ctx:            &Context{DefaultLanguage: "ja"},
 			explicitLang:   "en",
 			wantCandidates: []string{"en", "ja"},
 		},
 		{
 			name:           "Duplicate handling - context same as engine default (deduped)",
-			engineOpts:     EngineOptions{DefaultLanguage: "en"},
+			engineOpts:     engineOptions{DefaultLanguage: "en"},
 			ctx:            &Context{DefaultLanguage: "en"},
 			explicitLang:   "",
 			wantCandidates: []string{"en"},
 		},
 		{
 			name:           "Fallback duplicates - all deduped including DefaultLanguage",
-			engineOpts:     EngineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"en", "ja", "en"}},
+			engineOpts:     engineOptions{DefaultLanguage: "en", FallbackLanguages: []string{"en", "ja", "en"}},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: []string{"en", "ja"},
 		},
 		{
 			name:           "Multiple fallbacks with ordering preserved",
-			engineOpts:     EngineOptions{FallbackLanguages: []string{"zh", "ko", "ja", "en"}},
+			engineOpts:     engineOptions{FallbackLanguages: []string{"zh", "ko", "ja", "en"}},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: []string{"zh", "ko", "ja", "en"},
 		},
 		{
 			name:           "Explicit language normalized at runtime",
-			engineOpts:     EngineOptions{},
+			engineOpts:     engineOptions{},
 			ctx:            &Context{},
 			explicitLang:   "EN",
 			wantCandidates: []string{"en"},
 		},
 		{
 			name:           "Context default normalized at runtime",
-			engineOpts:     EngineOptions{},
+			engineOpts:     engineOptions{},
 			ctx:            &Context{DefaultLanguage: "JA"},
 			explicitLang:   "",
 			wantCandidates: []string{"ja"},
 		},
 		{
 			name:           "Engine default normalized at creation",
-			engineOpts:     EngineOptions{DefaultLanguage: "ZH"},
+			engineOpts:     engineOptions{DefaultLanguage: "ZH"},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: []string{"zh"},
 		},
 		{
 			name:           "Engine fallbacks normalized at creation",
-			engineOpts:     EngineOptions{FallbackLanguages: []string{"EN", "JA"}},
+			engineOpts:     engineOptions{FallbackLanguages: []string{"EN", "JA"}},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: []string{"en", "ja"},
 		},
 		{
 			name:           "Invalid explicit language filtered at runtime",
-			engineOpts:     EngineOptions{DefaultLanguage: "en"},
+			engineOpts:     engineOptions{DefaultLanguage: "en"},
 			ctx:            &Context{},
 			explicitLang:   "eng",
 			wantCandidates: []string{"en"},
 		},
 		{
 			name:           "Invalid context default filtered at runtime",
-			engineOpts:     EngineOptions{DefaultLanguage: "en"},
+			engineOpts:     engineOptions{DefaultLanguage: "en"},
 			ctx:            &Context{DefaultLanguage: "jpn"},
 			explicitLang:   "",
 			wantCandidates: []string{"en"},
 		},
 		{
 			name:           "Invalid engine default filtered at creation",
-			engineOpts:     EngineOptions{DefaultLanguage: "eng"},
+			engineOpts:     engineOptions{DefaultLanguage: "eng"},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: nil,
 		},
 		{
 			name:           "Invalid fallbacks filtered at creation",
-			engineOpts:     EngineOptions{FallbackLanguages: []string{"eng", "jpn", "en"}},
+			engineOpts:     engineOptions{FallbackLanguages: []string{"eng", "jpn", "en"}},
 			ctx:            &Context{},
 			explicitLang:   "",
 			wantCandidates: []string{"en"},
 		},
 		{
 			name:           "Empty strings filtered from fallbacks at creation",
-			engineOpts:     EngineOptions{DefaultLanguage: "", FallbackLanguages: []string{"", "en"}},
+			engineOpts:     engineOptions{DefaultLanguage: "", FallbackLanguages: []string{"", "en"}},
 			ctx:            &Context{DefaultLanguage: ""},
 			explicitLang:   "",
 			wantCandidates: []string{"en"},
 		},
 		{
 			name:           "Region suffixes normalized in all sources",
-			engineOpts:     EngineOptions{DefaultLanguage: "en-US", FallbackLanguages: []string{"ja_JP"}},
+			engineOpts:     engineOptions{DefaultLanguage: "en-US", FallbackLanguages: []string{"ja_JP"}},
 			ctx:            &Context{DefaultLanguage: "zh-Hant"},
 			explicitLang:   "ko-KR",
 			wantCandidates: []string{"ko", "zh", "en", "ja"},
 		},
 		{
 			name:           "Complex scenario with all sources",
-			engineOpts:     EngineOptions{DefaultLanguage: "en-US", FallbackLanguages: []string{"ja_JP", "zh-Hant", "ko"}},
+			engineOpts:     engineOptions{DefaultLanguage: "en-US", FallbackLanguages: []string{"ja_JP", "zh-Hant", "ko"}},
 			ctx:            &Context{DefaultLanguage: "fr"},
 			explicitLang:   "de",
 			wantCandidates: []string{"de", "fr", "en", "ja", "zh", "ko"},
@@ -519,8 +519,8 @@ func TestLanguageCandidatesPrecedence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := NewEngineWithOptions(tt.engineOpts)
-			got := engine.languageCandidates(tt.explicitLang, tt.ctx)
+			engine := newEngineWithOptions(tt.engineOpts)
+			got := engine.translationResolver.languageCandidates(tt.explicitLang, tt.ctx)
 			assert.Equal(t, tt.wantCandidates, got)
 		})
 	}
@@ -551,7 +551,7 @@ func TestResolveBaseTag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := engine.resolveBaseTag(tt.tagName, tt.ctx)
+			got := engine.translationResolver.resolveBaseTag(tt.tagName, tt.ctx)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -719,7 +719,7 @@ func TestTranslationFieldValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := engine.translationFieldValue(tt.tagName, tt.lang, tt.ctx)
+			got := engine.translationResolver.translationFieldValue(tt.tagName, tt.lang, tt.ctx)
 			assert.Equal(t, tt.want, got)
 		})
 	}

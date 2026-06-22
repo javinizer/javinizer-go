@@ -40,17 +40,17 @@ func TestMergeMovieMetadata_FloatMergeArrays(t *testing.T) {
 // TestMergeMovieMetadata_BoolMergeArrays tests mergeBoolField with MergeArrays strategy
 func TestMergeMovieMetadata_BoolMergeArrays(t *testing.T) {
 	scraped := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "Scraped",
-		ShouldCropPoster: true,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "Scraped",
+		Poster:    models.PosterState{ShouldCropPoster: true},
 	}
 
 	nfo := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "NFO",
-		ShouldCropPoster: false,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "NFO",
+		Poster:    models.PosterState{ShouldCropPoster: false},
 	}
 
 	// With MergeArrays strategy, bool fields like ShouldCropPoster fall back to PreferScraper
@@ -60,7 +60,7 @@ func TestMergeMovieMetadata_BoolMergeArrays(t *testing.T) {
 
 	// ShouldCropPoster should prefer scraper with MergeArrays (falls back to PreferScraper for scalars)
 	// Note: false is treated as empty for bool fields, so scraper (true) is used
-	assert.True(t, result.Merged.ShouldCropPoster)
+	assert.True(t, result.Merged.Poster.ShouldCropPoster)
 	assert.Equal(t, "scraper", result.Provenance["ShouldCropPoster"].Source)
 }
 
@@ -92,17 +92,17 @@ func TestMergeFloatField_PreserveExisting(t *testing.T) {
 // TestMergeBoolField_PreserveExisting tests mergeBoolField with PreserveExisting strategy
 func TestMergeBoolField_PreserveExisting(t *testing.T) {
 	scraped := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "Scraped",
-		ShouldCropPoster: true,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "Scraped",
+		Poster:    models.PosterState{ShouldCropPoster: true},
 	}
 
 	nfo := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "NFO",
-		ShouldCropPoster: true, // Both true to test conflict resolution (false = empty)
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "NFO",
+		Poster:    models.PosterState{ShouldCropPoster: true}, // Both true to test conflict resolution (false = empty)
 	}
 
 	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreserveExisting, false)
@@ -110,7 +110,7 @@ func TestMergeBoolField_PreserveExisting(t *testing.T) {
 	require.NotNil(t, result)
 
 	// PreserveExisting should prefer NFO value when both have data
-	assert.True(t, result.Merged.ShouldCropPoster)
+	assert.True(t, result.Merged.Poster.ShouldCropPoster)
 	assert.Equal(t, "nfo", result.Provenance["ShouldCropPoster"].Source)
 }
 
@@ -142,17 +142,17 @@ func TestMergeFloatField_FillMissingOnly(t *testing.T) {
 // TestMergeBoolField_FillMissingOnly tests mergeBoolField with FillMissingOnly strategy
 func TestMergeBoolField_FillMissingOnly(t *testing.T) {
 	scraped := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "Scraped",
-		ShouldCropPoster: true,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "Scraped",
+		Poster:    models.PosterState{ShouldCropPoster: true},
 	}
 
 	nfo := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "NFO",
-		ShouldCropPoster: true, // Both true to test conflict resolution
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "NFO",
+		Poster:    models.PosterState{ShouldCropPoster: true}, // Both true to test conflict resolution
 	}
 
 	result, err := MergeMovieMetadataWithOptions(scraped, nfo, FillMissingOnly, false)
@@ -160,7 +160,7 @@ func TestMergeBoolField_FillMissingOnly(t *testing.T) {
 	require.NotNil(t, result)
 
 	// FillMissingOnly should prefer NFO value when both have data
-	assert.True(t, result.Merged.ShouldCropPoster)
+	assert.True(t, result.Merged.Poster.ShouldCropPoster)
 	assert.Equal(t, "nfo", result.Provenance["ShouldCropPoster"].Source)
 }
 
@@ -191,10 +191,10 @@ func TestMergeFloatField_ScraperOnly(t *testing.T) {
 // TestMergeBoolField_ScraperOnly tests mergeBoolField when NFO is empty
 func TestMergeBoolField_ScraperOnly(t *testing.T) {
 	scraped := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "Scraped",
-		ShouldCropPoster: true,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "Scraped",
+		Poster:    models.PosterState{ShouldCropPoster: true},
 	}
 
 	nfo := &models.Movie{
@@ -208,7 +208,7 @@ func TestMergeBoolField_ScraperOnly(t *testing.T) {
 	require.NotNil(t, result)
 
 	// Should use scraper value when NFO is zero (false = empty)
-	assert.True(t, result.Merged.ShouldCropPoster)
+	assert.True(t, result.Merged.Poster.ShouldCropPoster)
 	assert.Equal(t, "scraper", result.Provenance["ShouldCropPoster"].Source)
 }
 
@@ -245,10 +245,10 @@ func TestMergeBoolField_NFOOnly(t *testing.T) {
 	}
 
 	nfo := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "NFO",
-		ShouldCropPoster: true,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "NFO",
+		Poster:    models.PosterState{ShouldCropPoster: true},
 	}
 
 	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferNFO, false)
@@ -256,7 +256,7 @@ func TestMergeBoolField_NFOOnly(t *testing.T) {
 	require.NotNil(t, result)
 
 	// Should use NFO value when scraper is empty
-	assert.True(t, result.Merged.ShouldCropPoster)
+	assert.True(t, result.Merged.Poster.ShouldCropPoster)
 	assert.Equal(t, "nfo", result.Provenance["ShouldCropPoster"].Source)
 }
 
@@ -285,6 +285,8 @@ func TestMergeFloatField_BothEmpty(t *testing.T) {
 }
 
 // TestMergeBoolField_BothEmpty tests mergeBoolField when both are false
+// (false is a meaningful value for ShouldCropPoster, so both-sides-false
+// is a conflict resolved by strategy, not an "empty" field).
 func TestMergeBoolField_BothEmpty(t *testing.T) {
 	scraped := &models.Movie{
 		ContentID: "IPX-123",
@@ -302,10 +304,10 @@ func TestMergeBoolField_BothEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	// Both false values (empty), should be empty
-	assert.Equal(t, false, result.Merged.ShouldCropPoster)
-	assert.Equal(t, "empty", result.Provenance["ShouldCropPoster"].Source)
-	assert.Greater(t, result.Stats.EmptyFields, 0)
+	// Both false values are meaningful (not empty), so conflict resolution applies
+	assert.Equal(t, false, result.Merged.Poster.ShouldCropPoster)
+	assert.Equal(t, "scraper", result.Provenance["ShouldCropPoster"].Source)
+	assert.Greater(t, result.Stats.ConflictsResolved, 0)
 }
 
 // TestMergeFloatField_PreferScraper_EmptyNFO tests prefer-scraper with empty NFO
@@ -336,17 +338,17 @@ func TestMergeFloatField_PreferScraper_EmptyNFO(t *testing.T) {
 // TestMergeBoolField_PreferScraper_EmptyNFO tests prefer-scraper with empty NFO
 func TestMergeBoolField_PreferScraper_EmptyNFO(t *testing.T) {
 	scraped := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "Scraped",
-		ShouldCropPoster: true,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "Scraped",
+		Poster:    models.PosterState{ShouldCropPoster: true},
 	}
 
 	nfo := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "NFO",
-		ShouldCropPoster: false, // Empty (false = empty for bool)
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "NFO",
+		Poster:    models.PosterState{ShouldCropPoster: false}, // Empty (false = empty for bool)
 	}
 
 	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
@@ -354,7 +356,7 @@ func TestMergeBoolField_PreferScraper_EmptyNFO(t *testing.T) {
 	require.NotNil(t, result)
 
 	// PreferScraper uses scraper when NFO is empty
-	assert.True(t, result.Merged.ShouldCropPoster)
+	assert.True(t, result.Merged.Poster.ShouldCropPoster)
 	assert.Equal(t, "scraper", result.Provenance["ShouldCropPoster"].Source)
 }
 
@@ -386,17 +388,17 @@ func TestMergeFloatField_PreferNFO_EmptyScraper(t *testing.T) {
 // TestMergeBoolField_PreferNFO_EmptyScraper tests prefer-nfo with empty scraper
 func TestMergeBoolField_PreferNFO_EmptyScraper(t *testing.T) {
 	scraped := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "Scraped",
-		ShouldCropPoster: false, // Empty
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "Scraped",
+		Poster:    models.PosterState{ShouldCropPoster: false}, // Empty
 	}
 
 	nfo := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "NFO",
-		ShouldCropPoster: true,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "NFO",
+		Poster:    models.PosterState{ShouldCropPoster: true},
 	}
 
 	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferNFO, false)
@@ -404,7 +406,7 @@ func TestMergeBoolField_PreferNFO_EmptyScraper(t *testing.T) {
 	require.NotNil(t, result)
 
 	// PreferNFO uses NFO when scraper is empty
-	assert.True(t, result.Merged.ShouldCropPoster)
+	assert.True(t, result.Merged.Poster.ShouldCropPoster)
 	assert.Equal(t, "nfo", result.Provenance["ShouldCropPoster"].Source)
 }
 
@@ -437,17 +439,17 @@ func TestMergeFloatField_StrictPreferScraper_BothHaveData(t *testing.T) {
 // TestMergeBoolField_StrictPreferScraper_BothHaveData tests strict prefer-scraper with conflicts
 func TestMergeBoolField_StrictPreferScraper_BothHaveData(t *testing.T) {
 	scraped := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "Scraped",
-		ShouldCropPoster: true,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "Scraped",
+		Poster:    models.PosterState{ShouldCropPoster: true},
 	}
 
 	nfo := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "NFO",
-		ShouldCropPoster: true, // Both true to test conflict resolution (false = empty)
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "NFO",
+		Poster:    models.PosterState{ShouldCropPoster: true}, // Both true to test conflict resolution (false = empty)
 	}
 
 	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferScraper, false)
@@ -455,7 +457,7 @@ func TestMergeBoolField_StrictPreferScraper_BothHaveData(t *testing.T) {
 	require.NotNil(t, result)
 
 	// Strict PreferScraper always uses scraper value
-	assert.True(t, result.Merged.ShouldCropPoster)
+	assert.True(t, result.Merged.Poster.ShouldCropPoster)
 	assert.Equal(t, "scraper", result.Provenance["ShouldCropPoster"].Source)
 	assert.Greater(t, result.Stats.ConflictsResolved, 0)
 }
@@ -489,17 +491,17 @@ func TestMergeFloatField_StrictPreferNFO_BothHaveData(t *testing.T) {
 // TestMergeBoolField_StrictPreferNFO_BothHaveData tests strict prefer-nfo with conflicts
 func TestMergeBoolField_StrictPreferNFO_BothHaveData(t *testing.T) {
 	scraped := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "Scraped",
-		ShouldCropPoster: true,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "Scraped",
+		Poster:    models.PosterState{ShouldCropPoster: true},
 	}
 
 	nfo := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "NFO",
-		ShouldCropPoster: true, // Both true to test conflict resolution (false = empty)
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "NFO",
+		Poster:    models.PosterState{ShouldCropPoster: true}, // Both true to test conflict resolution (false = empty)
 	}
 
 	result, err := MergeMovieMetadataWithOptions(scraped, nfo, PreferNFO, false)
@@ -507,7 +509,7 @@ func TestMergeBoolField_StrictPreferNFO_BothHaveData(t *testing.T) {
 	require.NotNil(t, result)
 
 	// Strict PreferNFO always uses NFO value
-	assert.True(t, result.Merged.ShouldCropPoster)
+	assert.True(t, result.Merged.Poster.ShouldCropPoster)
 	assert.Equal(t, "nfo", result.Provenance["ShouldCropPoster"].Source)
 	assert.Greater(t, result.Stats.ConflictsResolved, 0)
 }
@@ -547,11 +549,11 @@ func TestMergeBoolField_Timestamps(t *testing.T) {
 	scrapedTS := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
 
 	scraped := &models.Movie{
-		ContentID:        "IPX-123",
-		ID:               "IPX-123",
-		Title:            "Scraped",
-		ShouldCropPoster: true,
-		UpdatedAt:        scrapedTS,
+		ContentID: "IPX-123",
+		ID:        "IPX-123",
+		Title:     "Scraped",
+		Poster:    models.PosterState{ShouldCropPoster: true},
+		UpdatedAt: scrapedTS,
 	}
 
 	result, err := MergeMovieMetadataWithOptions(scraped, nil, PreferScraper, false)

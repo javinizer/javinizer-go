@@ -1,9 +1,9 @@
 package database
 
 import (
+	"context"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,20 +13,12 @@ import (
 func newDatabaseTestDB(t *testing.T) *DB {
 	t.Helper()
 
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	return db
 }
 
@@ -138,7 +130,7 @@ func TestNormalizeActressSortAndOrderClauses(t *testing.T) {
 	}
 }
 
-func TestCanonicalActressName(t *testing.T) {
+func TestCanonicalActressNameFromHelpers(t *testing.T) {
 	tests := []struct {
 		name    string
 		actress *models.Actress
@@ -217,7 +209,7 @@ func TestMovieRepositoryEnsureGenresExistTx(t *testing.T) {
 	}
 
 	err := db.Transaction(func(tx *gorm.DB) error {
-		return repo.ensureGenresExistTx(tx, genres)
+		return repo.upserter.ensureGenresExistTx(tx, genres)
 	})
 	require.NoError(t, err)
 	assert.Equal(t, existing.ID, genres[0].ID)
@@ -254,7 +246,7 @@ func TestMovieRepositoryEnsureActressesExistTx(t *testing.T) {
 	}
 
 	err := db.Transaction(func(tx *gorm.DB) error {
-		return repo.ensureActressesExistTx(tx, actresses)
+		return repo.upserter.ensureActressesExistTx(tx, actresses)
 	})
 	require.NoError(t, err)
 
@@ -302,37 +294,37 @@ func TestMoveMovieAssociations(t *testing.T) {
 	target := &models.Actress{DMMID: 5001, JapaneseName: "Target"}
 	source := &models.Actress{DMMID: 5002, JapaneseName: "Source"}
 	other := &models.Actress{DMMID: 5003, JapaneseName: "Other"}
-	require.NoError(t, actressRepo.Create(target))
-	require.NoError(t, actressRepo.Create(source))
-	require.NoError(t, actressRepo.Create(other))
+	require.NoError(t, actressRepo.Create(context.TODO(), target))
+	require.NoError(t, actressRepo.Create(context.TODO(), source))
+	require.NoError(t, actressRepo.Create(context.TODO(), other))
 
 	movie1 := createTestMovie("MV-ASSOC-001")
 	movie1.Actresses = []models.Actress{*source}
-	_, err := movieRepo.Upsert(movie1)
+	_, err := movieRepo.Upsert(context.TODO(), movie1)
 
 	movie2 := createTestMovie("MV-ASSOC-002")
 	movie2.Actresses = []models.Actress{*source, *target}
-	_, err = movieRepo.Upsert(movie2)
+	_, err = movieRepo.Upsert(context.TODO(), movie2)
 
 	movie3 := createTestMovie("MV-ASSOC-003")
 	movie3.Actresses = []models.Actress{*other}
-	_, err = movieRepo.Upsert(movie3)
+	_, err = movieRepo.Upsert(context.TODO(), movie3)
 
 	updated, err := moveMovieAssociations(db.DB, source.ID, target.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 2, updated)
 
-	found1, err := movieRepo.FindByID("MV-ASSOC-001")
+	found1, err := movieRepo.FindByID(context.TODO(), "MV-ASSOC-001")
 	require.NoError(t, err)
 	require.Len(t, found1.Actresses, 1)
 	assert.Equal(t, target.ID, found1.Actresses[0].ID)
 
-	found2, err := movieRepo.FindByID("MV-ASSOC-002")
+	found2, err := movieRepo.FindByID(context.TODO(), "MV-ASSOC-002")
 	require.NoError(t, err)
 	require.Len(t, found2.Actresses, 1)
 	assert.Equal(t, target.ID, found2.Actresses[0].ID)
 
-	found3, err := movieRepo.FindByID("MV-ASSOC-003")
+	found3, err := movieRepo.FindByID(context.TODO(), "MV-ASSOC-003")
 	require.NoError(t, err)
 	require.Len(t, found3.Actresses, 1)
 	assert.Equal(t, other.ID, found3.Actresses[0].ID)
@@ -342,22 +334,22 @@ func TestActressRepositoryLoadPair(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewActressRepository(db)
 
-	_, _, err := repo.loadPair(0, 1)
+	_, _, err := repo.merger.loadPair(context.TODO(), 0, 1)
 	assert.ErrorIs(t, err, ErrActressMergeInvalidID)
 
-	_, _, err = repo.loadPair(1, 1)
+	_, _, err = repo.merger.loadPair(context.TODO(), 1, 1)
 	assert.ErrorIs(t, err, ErrActressMergeSameID)
 
 	target := &models.Actress{DMMID: 7001, JapaneseName: "Target"}
-	require.NoError(t, repo.Create(target))
+	require.NoError(t, repo.Create(context.TODO(), target))
 
-	_, _, err = repo.loadPair(target.ID, 99999)
+	_, _, err = repo.merger.loadPair(context.TODO(), target.ID, 99999)
 	require.Error(t, err)
 
 	source := &models.Actress{DMMID: 7002, JapaneseName: "Source"}
-	require.NoError(t, repo.Create(source))
+	require.NoError(t, repo.Create(context.TODO(), source))
 
-	gotTarget, gotSource, err := repo.loadPair(target.ID, source.ID)
+	gotTarget, gotSource, err := repo.merger.loadPair(context.TODO(), target.ID, source.ID)
 	require.NoError(t, err)
 	assert.Equal(t, target.ID, gotTarget.ID)
 	assert.Equal(t, source.ID, gotSource.ID)

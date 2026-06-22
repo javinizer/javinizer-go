@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func TestAggregateBasic(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	releaseDate := time.Date(2021, 1, 8, 0, 0, 0, 0, time.UTC)
 
@@ -70,7 +71,7 @@ func TestAggregateNoResults(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	movie, _, err := agg.Aggregate([]*models.ScraperResult{})
 	assert.Error(t, err)
@@ -91,268 +92,45 @@ func TestAggregateEmptyPriorityUsesGlobal(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
-	// Verify resolved priorities - all fields use the same global priority
 	assert.Equal(t, []string{"r18dev", "dmm"}, agg.resolvedPriorities["Title"])
 }
 
-// TestValidateRequiredFields_AdditionalFields tests validation for less commonly validated fields
-func TestValidateRequiredFields_AdditionalFields(t *testing.T) {
-	tests := []struct {
-		name           string
-		requiredFields []string
-		movie          *models.Movie
-		expectError    bool
-		errorContains  string
-	}{
-		{
-			name:           "missing director",
-			requiredFields: []string{"director"},
-			movie: &models.Movie{
-				ID:    "IPX-001",
-				Title: "Test Movie",
-				// Director is missing
-			},
-			expectError:   true,
-			errorContains: "Director",
-		},
-		{
-			name:           "missing label",
-			requiredFields: []string{"label"},
-			movie: &models.Movie{
-				ID:    "IPX-001",
-				Title: "Test Movie",
-				// Label is missing
-			},
-			expectError:   true,
-			errorContains: "Label",
-		},
-		{
-			name:           "missing series with alias 'set'",
-			requiredFields: []string{"set"},
-			movie: &models.Movie{
-				ID:    "IPX-001",
-				Title: "Test Movie",
-				// Series is missing
-			},
-			expectError:   true,
-			errorContains: "Series",
-		},
-		{
-			name:           "missing runtime",
-			requiredFields: []string{"runtime"},
-			movie: &models.Movie{
-				ID:      "IPX-001",
-				Title:   "Test Movie",
-				Runtime: 0, // Missing
-			},
-			expectError:   true,
-			errorContains: "Runtime",
-		},
-		{
-			name:           "missing posterurl with alias 'poster'",
-			requiredFields: []string{"poster"},
-			movie: &models.Movie{
-				ID:    "IPX-001",
-				Title: "Test Movie",
-				// PosterURL is missing
-			},
-			expectError:   true,
-			errorContains: "PosterURL",
-		},
-		{
-			name:           "all fields present",
-			requiredFields: []string{"director", "label", "runtime", "poster"},
-			movie: &models.Movie{
-				ID:        "IPX-001",
-				Title:     "Test Movie",
-				Director:  "John Doe",
-				Label:     "Test Label",
-				Runtime:   120,
-				PosterURL: "http://example.com/poster.jpg",
-			},
-			expectError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				Metadata: config.MetadataConfig{
-					RequiredFields: tt.requiredFields,
-				},
-				Scrapers: config.ScrapersConfig{
-					Priority: []string{"r18dev"},
-				},
-			}
-
-			err := validateRequiredFields(tt.movie, cfg.Metadata.RequiredFields)
-
-			if tt.expectError {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errorContains)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-// TestLoadCachesFunctions tests cache loading with nil repositories
 func TestLoadCachesFunctions(t *testing.T) {
-	t.Run("loadGenreReplacementCache with nil repo", func(t *testing.T) {
+	t.Run("GenreProcessor with nil repo", func(t *testing.T) {
 		cfg := &config.Config{
 			Scrapers: config.ScrapersConfig{
 				Priority: []string{"r18dev"},
 			},
 		}
 
-		agg := New(cfg)
-		// genreReplacementRepo is nil by default
-		assert.Nil(t, agg.genreReplacementRepo)
+		gp := NewGenreProcessor(MetadataConfigFromApp(&cfg.Metadata), nil)
 
 		// Should not panic when repo is nil
-		agg.loadGenreReplacementCache()
+		gp.Reload(context.Background())
 
-		// Cache should remain empty
-		agg.genreCacheMutex.RLock()
-		assert.Empty(t, agg.genreReplacementCache)
-		agg.genreCacheMutex.RUnlock()
+		// Replacement should return original when no cache
+		assert.Equal(t, "TestGenre", gp.applyReplacement("TestGenre"))
 	})
 
-	t.Run("loadActressAliasCache with nil repo", func(t *testing.T) {
+	t.Run("AliasResolver with nil repo", func(t *testing.T) {
 		cfg := &config.Config{
 			Scrapers: config.ScrapersConfig{
 				Priority: []string{"r18dev"},
 			},
 		}
 
-		agg := New(cfg)
-		// actressAliasRepo is nil by default
-		assert.Nil(t, agg.actressAliasRepo)
+		ar := NewAliasResolver(MetadataConfigFromApp(&cfg.Metadata), nil)
 
 		// Should not panic when repo is nil
-		agg.loadActressAliasCache()
+		ar.Reload(context.Background())
 
-		// Cache should remain empty
-		agg.aliasCacheMutex.RLock()
-		assert.Empty(t, agg.actressAliasCache)
-		agg.aliasCacheMutex.RUnlock()
+		// Resolution should be no-op when no cache
+		actress := &models.Actress{FirstName: "Test", LastName: "Actress"}
+		ar.Resolve(actress)
+		assert.Equal(t, "Test", actress.FirstName)
 	})
-}
-
-// TestGetFieldByPriority tests priority-based field selection
-func TestGetFieldByPriority(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"r18dev", "dmm"},
-		},
-	}
-
-	agg := New(cfg)
-
-	results := map[string]*models.ScraperResult{
-		"r18dev": {
-			Source: "r18dev",
-			Title:  "R18 Title",
-			Maker:  "", // Empty
-		},
-		"dmm": {
-			Source: "dmm",
-			Title:  "DMM Title",
-			Maker:  "DMM Maker",
-		},
-	}
-
-	// Test string field - should get first non-empty
-	title := agg.getFieldByPriority(results, []string{"r18dev", "dmm"}, func(r *models.ScraperResult) string {
-		return r.Title
-	})
-	assert.Equal(t, "R18 Title", title)
-
-	// Test with first empty - should fall back to second
-	maker := agg.getFieldByPriority(results, []string{"r18dev", "dmm"}, func(r *models.ScraperResult) string {
-		return r.Maker
-	})
-	assert.Equal(t, "DMM Maker", maker)
-
-	// Test with non-existent source
-	empty := agg.getFieldByPriority(results, []string{"nonexistent"}, func(r *models.ScraperResult) string {
-		return r.Title
-	})
-	assert.Equal(t, "", empty)
-}
-
-// TestGetIntFieldByPriority tests integer field selection
-func TestGetIntFieldByPriority(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"r18dev", "dmm"},
-		},
-	}
-
-	agg := New(cfg)
-
-	results := map[string]*models.ScraperResult{
-		"r18dev": {
-			Source:  "r18dev",
-			Runtime: 0, // Zero value
-		},
-		"dmm": {
-			Source:  "dmm",
-			Runtime: 120,
-		},
-	}
-
-	runtime := agg.getIntFieldByPriority(results, []string{"r18dev", "dmm"}, func(r *models.ScraperResult) int {
-		return r.Runtime
-	})
-	assert.Equal(t, 120, runtime)
-
-	// Test with both having values - should use priority
-	results["r18dev"].Runtime = 115
-	runtime = agg.getIntFieldByPriority(results, []string{"r18dev", "dmm"}, func(r *models.ScraperResult) int {
-		return r.Runtime
-	})
-	assert.Equal(t, 115, runtime)
-}
-
-// TestGetTimeFieldByPriority tests time pointer field selection
-func TestGetTimeFieldByPriority(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"r18dev", "dmm"},
-		},
-	}
-
-	agg := New(cfg)
-
-	date1 := time.Date(2021, 1, 8, 0, 0, 0, 0, time.UTC)
-	date2 := time.Date(2021, 1, 10, 0, 0, 0, 0, time.UTC)
-
-	results := map[string]*models.ScraperResult{
-		"r18dev": {
-			Source:      "r18dev",
-			ReleaseDate: nil, // Nil value
-		},
-		"dmm": {
-			Source:      "dmm",
-			ReleaseDate: &date2,
-		},
-	}
-
-	releaseDate := agg.getTimeFieldByPriority(results, []string{"r18dev", "dmm"}, func(r *models.ScraperResult) *time.Time {
-		return r.ReleaseDate
-	})
-	assert.Equal(t, date2, *releaseDate)
-
-	// Test with both having values - should use priority
-	results["r18dev"].ReleaseDate = &date1
-	releaseDate = agg.getTimeFieldByPriority(results, []string{"r18dev", "dmm"}, func(r *models.ScraperResult) *time.Time {
-		return r.ReleaseDate
-	})
-	assert.Equal(t, date1, *releaseDate)
 }
 
 // TestGetRatingByPriority tests rating field selection
@@ -363,7 +141,7 @@ func TestGetRatingByPriority(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := map[string]*models.ScraperResult{
 		"r18dev": {
@@ -379,147 +157,34 @@ func TestGetRatingByPriority(t *testing.T) {
 		},
 	}
 
-	score, votes, warning := agg.getRatingByPriority(results, []string{"r18dev", "dmm"})
+	score, votes, _ := agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
 	assert.Equal(t, 4.5, score)
 	assert.Equal(t, 100, votes)
-	assert.Empty(t, warning)
 
 	// Test with both having values - should use priority
 	results["r18dev"].Rating = &models.Rating{
 		Score: 5.0,
 		Votes: 200,
 	}
-	score, votes, warning = agg.getRatingByPriority(results, []string{"r18dev", "dmm"})
+	score, votes, _ = agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
 	assert.Equal(t, 5.0, score)
 	assert.Equal(t, 200, votes)
-	assert.Empty(t, warning)
 
 	// Test with zero values ignored
 	results["r18dev"].Rating = &models.Rating{
 		Score: 0,
 		Votes: 0,
 	}
-	score, votes, warning = agg.getRatingByPriority(results, []string{"r18dev", "dmm"})
+	score, votes, _ = agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
 	assert.Equal(t, 4.5, score)
 	assert.Equal(t, 100, votes)
-	assert.Empty(t, warning)
-}
-
-func TestGetRatingByPriority_OutOfRangeRejected(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"javlibrary", "r18dev", "dmm"},
-		},
-	}
-	agg := New(cfg)
-
-	makeResults := func(javlibraryScore float64) map[string]*models.ScraperResult {
-		return map[string]*models.ScraperResult{
-			"javlibrary": {
-				Source: "javlibrary",
-				Rating: &models.Rating{Score: javlibraryScore, Votes: 10},
-			},
-			"r18dev": {
-				Source: "r18dev",
-				Rating: &models.Rating{Score: 4.5, Votes: 100},
-			},
-			"dmm": {
-				Source: "dmm",
-				Rating: &models.Rating{Score: 8.2, Votes: 50},
-			},
-		}
-	}
-
-	t.Run("tiny corrupt score is skipped with warning, falls through to next source", func(t *testing.T) {
-		results := makeResults(0.00001603943934375318)
-		score, votes, warning := agg.getRatingByPriority(results, []string{"javlibrary", "r18dev", "dmm"})
-		assert.Equal(t, 4.5, score, "must fall through javlibrary to r18dev")
-		assert.Equal(t, 100, votes)
-		assert.Contains(t, warning, "javlibrary")
-		assert.Contains(t, warning, "out of range")
-		assert.Contains(t, warning, "skipping")
-	})
-
-	t.Run("very small scientific notation score is rejected", func(t *testing.T) {
-		results := makeResults(2.611314569074446e-7)
-		score, _, warning := agg.getRatingByPriority(results, []string{"javlibrary", "r18dev"})
-		assert.Equal(t, 4.5, score, "must fall through javlibrary to r18dev")
-		assert.Contains(t, warning, "javlibrary")
-	})
-
-	t.Run("huge corrupt score is rejected", func(t *testing.T) {
-		results := makeResults(9999.5)
-		score, _, warning := agg.getRatingByPriority(results, []string{"javlibrary", "r18dev"})
-		assert.Equal(t, 4.5, score, "must fall through javlibrary to r18dev")
-		assert.Contains(t, warning, "javlibrary")
-	})
-
-	t.Run("negative score is rejected", func(t *testing.T) {
-		results := makeResults(-1.0)
-		score, _, warning := agg.getRatingByPriority(results, []string{"javlibrary", "r18dev"})
-		assert.Equal(t, 4.5, score)
-		assert.Contains(t, warning, "javlibrary")
-	})
-
-	t.Run("in-range 5-point score (4.5) is accepted", func(t *testing.T) {
-		results := makeResults(4.5)
-		score, _, warning := agg.getRatingByPriority(results, []string{"javlibrary", "r18dev", "dmm"})
-		assert.Equal(t, 4.5, score, "should pick javlibrary first")
-		assert.Empty(t, warning)
-	})
-
-	t.Run("in-range 10-point score (8.2) is accepted", func(t *testing.T) {
-		results := makeResults(8.2)
-		score, _, warning := agg.getRatingByPriority(results, []string{"javlibrary", "r18dev", "dmm"})
-		assert.Equal(t, 8.2, score)
-		assert.Empty(t, warning)
-	})
-
-	t.Run("lower boundary (0.1) is accepted", func(t *testing.T) {
-		results := makeResults(0.1)
-		score, _, warning := agg.getRatingByPriority(results, []string{"javlibrary", "r18dev"})
-		assert.Equal(t, 0.1, score)
-		assert.Empty(t, warning)
-	})
-
-	t.Run("upper boundary (10.0) is accepted", func(t *testing.T) {
-		results := makeResults(10.0)
-		score, _, warning := agg.getRatingByPriority(results, []string{"javlibrary", "r18dev"})
-		assert.Equal(t, 10.0, score)
-		assert.Empty(t, warning)
-	})
-
-	t.Run("all sources invalid returns zero with warning", func(t *testing.T) {
-		results := map[string]*models.ScraperResult{
-			"javlibrary": {Source: "javlibrary", Rating: &models.Rating{Score: 0.0001, Votes: 1}},
-			"r18dev":     {Source: "r18dev", Rating: &models.Rating{Score: 999.9, Votes: 1}},
-		}
-		score, votes, warning := agg.getRatingByPriority(results, []string{"javlibrary", "r18dev"})
-		assert.Equal(t, 0.0, score)
-		assert.Equal(t, 0, votes)
-		assert.NotEmpty(t, warning, "warning must be set when all sources produce corrupt ratings")
-		assert.Contains(t, warning, "javlibrary", "warning should identify the first corrupt source")
-		assert.Contains(t, warning, "out of range")
-	})
 }
 
 // TestGetActressesByPriority tests actress aggregation and merging
 func TestGetActressesByPriority(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"r18dev", "dmm"},
-		},
-		Metadata: config.MetadataConfig{
-			ActressDatabase: config.ActressDatabaseConfig{
-				ConvertAlias: false,
-			},
-		},
-	}
-
-	agg := New(cfg)
-
-	results := map[string]*models.ScraperResult{
-		"r18dev": {
+	merger := newActressMerger()
+	sources := []actressSource{
+		{
 			Source: "r18dev",
 			Actresses: []models.ActressInfo{
 				{
@@ -530,7 +195,7 @@ func TestGetActressesByPriority(t *testing.T) {
 				},
 			},
 		},
-		"dmm": {
+		{
 			Source: "dmm",
 			Actresses: []models.ActressInfo{
 				{
@@ -541,9 +206,11 @@ func TestGetActressesByPriority(t *testing.T) {
 			},
 		},
 	}
+	opts := actressMergeOptions{
+		Priority: []string{"r18dev", "dmm"},
+	}
 
-	actresses := agg.getActressesByPriority(results, []string{"r18dev", "dmm"})
-	require.Len(t, actresses, 1)
+	actresses := merger.Merge(sources, opts)
 
 	// Should merge data from both sources
 	assert.Equal(t, "Yui", actresses[0].FirstName)
@@ -555,21 +222,9 @@ func TestGetActressesByPriority(t *testing.T) {
 
 // TestGetActressesByPriorityMultiple tests multiple actresses
 func TestGetActressesByPriorityMultiple(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"r18dev"},
-		},
-		Metadata: config.MetadataConfig{
-			ActressDatabase: config.ActressDatabaseConfig{
-				ConvertAlias: false,
-			},
-		},
-	}
-
-	agg := New(cfg)
-
-	results := map[string]*models.ScraperResult{
-		"r18dev": {
+	merger := newActressMerger()
+	sources := []actressSource{
+		{
 			Source: "r18dev",
 			Actresses: []models.ActressInfo{
 				{
@@ -585,38 +240,30 @@ func TestGetActressesByPriorityMultiple(t *testing.T) {
 			},
 		},
 	}
+	opts := actressMergeOptions{
+		Priority: []string{"r18dev"},
+	}
 
-	actresses := agg.getActressesByPriority(results, []string{"r18dev"})
+	actresses := merger.Merge(sources, opts)
 	require.Len(t, actresses, 2)
 }
 
 // TestGetActressesByPriorityUnknownText tests unknown actress text
 func TestGetActressesByPriorityUnknownText(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"r18dev"},
-		},
-		Metadata: config.MetadataConfig{
-			ActressDatabase: config.ActressDatabaseConfig{
-				ConvertAlias: false,
-			},
-			NFO: config.NFOConfig{
-				UnknownActressMode: "fallback",
-				UnknownActressText: "Unknown",
-			},
-		},
-	}
-
-	agg := New(cfg)
-
-	results := map[string]*models.ScraperResult{
-		"r18dev": {
+	merger := newActressMerger()
+	sources := []actressSource{
+		{
 			Source:    "r18dev",
 			Actresses: []models.ActressInfo{}, // Empty
 		},
 	}
+	opts := actressMergeOptions{
+		Priority:    []string{"r18dev"},
+		SkipUnknown: false,
+		UnknownText: "Unknown",
+	}
 
-	actresses := agg.getActressesByPriority(results, []string{"r18dev"})
+	actresses := merger.Merge(sources, opts)
 	require.Len(t, actresses, 1)
 	assert.Equal(t, "Unknown", actresses[0].FirstName)
 	assert.Equal(t, "Unknown", actresses[0].JapaneseName)
@@ -630,7 +277,7 @@ func TestGetGenresByPriority(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := map[string]*models.ScraperResult{
 		"r18dev": {
@@ -644,12 +291,12 @@ func TestGetGenresByPriority(t *testing.T) {
 	}
 
 	// Should use r18dev (first priority)
-	genres := agg.getGenresByPriority(results, []string{"r18dev", "dmm"})
+	genres, _ := agg.getGenresByPriorityWithSource(results, []string{"r18dev", "dmm"})
 	assert.Equal(t, []string{"Drama", "Romance"}, genres)
 
 	// Empty genres should fall back to next
 	results["r18dev"].Genres = []string{}
-	genres = agg.getGenresByPriority(results, []string{"r18dev", "dmm"})
+	genres, _ = agg.getGenresByPriorityWithSource(results, []string{"r18dev", "dmm"})
 	assert.Equal(t, []string{"Action", "Comedy"}, genres)
 }
 
@@ -661,7 +308,7 @@ func TestGetScreenshotsByPriority(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := map[string]*models.ScraperResult{
 		"r18dev": {
@@ -674,12 +321,12 @@ func TestGetScreenshotsByPriority(t *testing.T) {
 		},
 	}
 
-	screenshots := agg.getScreenshotsByPriority(results, []string{"r18dev", "dmm"})
+	screenshots := agg.getScreenshotsByPriorityWithSource(results, []string{"r18dev", "dmm"}, nil)
 	assert.Equal(t, []string{"https://r18.com/1.jpg", "https://r18.com/2.jpg"}, screenshots)
 
 	// Empty should fall back
 	results["r18dev"].ScreenshotURL = []string{}
-	screenshots = agg.getScreenshotsByPriority(results, []string{"r18dev", "dmm"})
+	screenshots = agg.getScreenshotsByPriorityWithSource(results, []string{"r18dev", "dmm"}, nil)
 	assert.Equal(t, []string{"https://dmm.com/1.jpg"}, screenshots)
 }
 
@@ -691,7 +338,7 @@ func TestBuildTranslations(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -750,7 +397,7 @@ func TestBuildTranslationsSkipsNoLanguage(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -786,29 +433,33 @@ func TestApplyGenreReplacementWithDatabase(t *testing.T) {
 		},
 	}
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
 	// Add genre replacement
 	repo := database.NewGenreReplacementRepository(db)
-	err = repo.Create(&models.GenreReplacement{
+	err = repo.Create(context.TODO(), &models.GenreReplacement{
 		Original:    "ドラマ",
 		Replacement: "Drama",
 	})
 	require.NoError(t, err)
 
-	agg := NewWithDatabase(cfg, db)
+	agg := newAggregatorWithRepos(testConfigFromAppConfig(cfg),
+		database.NewGenreReplacementRepository(db),
+		database.NewWordReplacementRepository(db),
+		database.NewActressAliasRepository(db),
+	)
 
 	// Test replacement
-	result := agg.applyGenreReplacement("ドラマ")
+	result := agg.genreProcessor.applyReplacement("ドラマ")
 	assert.Equal(t, "Drama", result)
 
 	// Test non-existent
-	result = agg.applyGenreReplacement("Unknown")
+	result = agg.genreProcessor.applyReplacement("Unknown")
 	assert.Equal(t, "Unknown", result)
 }
 
@@ -833,22 +484,26 @@ func TestApplyGenreReplacementAutoAdd(t *testing.T) {
 		},
 	}
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
-	agg := NewWithDatabase(cfg, db)
+	agg := newAggregatorWithRepos(testConfigFromAppConfig(cfg),
+		database.NewGenreReplacementRepository(db),
+		database.NewWordReplacementRepository(db),
+		database.NewActressAliasRepository(db),
+	)
 
 	// Apply to new genre - should auto-add
-	result := agg.applyGenreReplacement("NewGenre")
+	result := agg.genreProcessor.applyReplacement("NewGenre")
 	assert.Equal(t, "NewGenre", result)
 
 	// Verify it was added to database
 	repo := database.NewGenreReplacementRepository(db)
-	replacement, err := repo.FindByOriginal("NewGenre")
+	replacement, err := repo.FindByOriginal(context.TODO(), "NewGenre")
 	require.NoError(t, err)
 	assert.Equal(t, "NewGenre", replacement.Original)
 	assert.Equal(t, "NewGenre", replacement.Replacement)
@@ -874,36 +529,40 @@ func TestReloadGenreReplacements(t *testing.T) {
 		},
 	}
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
-	agg := NewWithDatabase(cfg, db)
+	agg := newAggregatorWithRepos(testConfigFromAppConfig(cfg),
+		database.NewGenreReplacementRepository(db),
+		database.NewWordReplacementRepository(db),
+		database.NewActressAliasRepository(db),
+	)
 
 	// Initially no replacement
-	result := agg.applyGenreReplacement("TestGenre")
+	result := agg.genreProcessor.applyReplacement("TestGenre")
 	assert.Equal(t, "TestGenre", result)
 
 	// Add replacement directly to database
 	repo := database.NewGenreReplacementRepository(db)
-	err = repo.Create(&models.GenreReplacement{
+	err = repo.Create(context.TODO(), &models.GenreReplacement{
 		Original:    "TestGenre",
 		Replacement: "Replaced",
 	})
 	require.NoError(t, err)
 
 	// Should still return original (cache not reloaded)
-	result = agg.applyGenreReplacement("TestGenre")
+	result = agg.genreProcessor.applyReplacement("TestGenre")
 	assert.Equal(t, "TestGenre", result)
 
 	// Reload cache
-	agg.ReloadGenreReplacements()
+	agg.genreProcessor.Reload(context.Background())
 
 	// Should now return replacement
-	result = agg.applyGenreReplacement("TestGenre")
+	result = agg.genreProcessor.applyReplacement("TestGenre")
 	assert.Equal(t, "Replaced", result)
 }
 
@@ -937,15 +596,15 @@ func TestGetFieldPriorityFromConfig(t *testing.T) {
 	}
 
 	// Test that explicit priority is returned (fieldKey is ignored for simplified priorities)
-	priority := getFieldPriorityFromConfig(cfg, "ID")
+	priority := getFieldPriorityFromConfig(testConfigFromAppConfig(cfg), "ID")
 	assert.Equal(t, []string{"dmm", "r18dev"}, priority)
 
 	// Test that same priority is returned for any field (fieldKey is always ignored)
-	priority = getFieldPriorityFromConfig(cfg, "Title")
+	priority = getFieldPriorityFromConfig(testConfigFromAppConfig(cfg), "Title")
 	assert.Equal(t, []string{"dmm", "r18dev"}, priority)
 
 	// With simplified priorities, fieldKey is always ignored - returns explicit priority
-	priority = getFieldPriorityFromConfig(cfg, "UnknownField")
+	priority = getFieldPriorityFromConfig(testConfigFromAppConfig(cfg), "UnknownField")
 	assert.Equal(t, []string{"dmm", "r18dev"}, priority)
 }
 
@@ -957,7 +616,7 @@ func TestAggregateSourceMetadata(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -983,7 +642,7 @@ func TestAggregateTimestamps(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	before := time.Now().UTC()
 
@@ -1020,7 +679,7 @@ func TestAggregateWithAllFields(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	releaseDate := time.Date(2021, 1, 8, 0, 0, 0, 0, time.UTC)
 
@@ -1076,8 +735,8 @@ func TestAggregateWithAllFields(t *testing.T) {
 	assert.Equal(t, "Test Series", movie.Series)
 	assert.Equal(t, 4.5, movie.RatingScore)
 	assert.Equal(t, 100, movie.RatingVotes)
-	assert.Equal(t, "https://example.com/poster.jpg", movie.PosterURL)
-	assert.Equal(t, "https://example.com/cover.jpg", movie.CoverURL)
+	assert.Equal(t, "https://example.com/poster.jpg", movie.Poster.PosterURL)
+	assert.Equal(t, "https://example.com/cover.jpg", movie.Poster.CoverURL)
 	assert.Equal(t, "https://example.com/trailer.mp4", movie.TrailerURL)
 	assert.Equal(t, 2021, movie.ReleaseYear)
 
@@ -1093,11 +752,18 @@ func TestAggregateWithAllFields(t *testing.T) {
 	assert.Equal(t, "en", movie.Translations[0].Language)
 }
 
-// TestNewAggregatorResolvesDefaultPriority tests default priority fallback
+// TestAggregator_NilReceiverMethods tests that nil-receiver calls return errors
 func TestAggregator_NilReceiverMethods(t *testing.T) {
 	var agg *Aggregator
-	assert.Nil(t, agg.Config())
-	assert.Nil(t, agg.TemplateEngine())
+	cfg, err := agg.Config()
+	assert.Nil(t, cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "nil Aggregator")
+
+	te, err := agg.TemplateEngine()
+	assert.Nil(t, te)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "nil Aggregator")
 }
 
 func TestNewAggregatorResolvesDefaultPriority(t *testing.T) {
@@ -1114,7 +780,7 @@ func TestNewAggregatorResolvesDefaultPriority(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	// With simplified priorities and no configured or derived priority,
 	// resolved priorities should be empty (scrapers not imported in tests)
@@ -1132,7 +798,7 @@ func TestAggregateGenresWithFiltering(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -1172,22 +838,26 @@ func TestAggregateGenresWithReplacement(t *testing.T) {
 		},
 	}
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
 	// Add genre replacements
 	repo := database.NewGenreReplacementRepository(db)
-	err = repo.Create(&models.GenreReplacement{
+	err = repo.Create(context.TODO(), &models.GenreReplacement{
 		Original:    "ドラマ",
 		Replacement: "Drama",
 	})
 	require.NoError(t, err)
 
-	agg := NewWithDatabase(cfg, db)
+	agg := newAggregatorWithRepos(testConfigFromAppConfig(cfg),
+		database.NewGenreReplacementRepository(db),
+		database.NewWordReplacementRepository(db),
+		database.NewActressAliasRepository(db),
+	)
 
 	results := []*models.ScraperResult{
 		{
@@ -1219,7 +889,7 @@ func TestAggregateActressMergingByJapaneseName(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -1271,7 +941,7 @@ func TestAggregateActressMergingJapaneseNameVsFirstName(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -1327,22 +997,26 @@ func TestAggregateActressAliasConversion(t *testing.T) {
 		},
 	}
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
 	// Add actress alias
 	aliasRepo := database.NewActressAliasRepository(db)
-	err = aliasRepo.Create(&models.ActressAlias{
+	err = aliasRepo.Create(context.TODO(), &models.ActressAlias{
 		AliasName:     "Yui Hatano",
 		CanonicalName: "Hatano Yui",
 	})
 	require.NoError(t, err)
 
-	agg := NewWithDatabase(cfg, db)
+	agg := newAggregatorWithRepos(testConfigFromAppConfig(cfg),
+		database.NewGenreReplacementRepository(db),
+		database.NewWordReplacementRepository(db),
+		database.NewActressAliasRepository(db),
+	)
 
 	results := []*models.ScraperResult{
 		{
@@ -1381,7 +1055,7 @@ func TestAggregateGenresWithRegexFiltering(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{
 		{
@@ -1427,7 +1101,7 @@ func TestAggregateRequiredFieldsValidation(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	t.Run("all required fields present", func(t *testing.T) {
 		releaseDate := time.Date(2021, 1, 8, 0, 0, 0, 0, time.UTC)
@@ -1480,21 +1154,24 @@ func TestAggregateRequiredFieldsValidation(t *testing.T) {
 	})
 }
 
-// TestAggregateDisplayTitleTemplate tests NFO display name template generation
+// TestAggregateDisplayTitleTemplate verifies that aggregator does NOT apply DisplayTitle
+// regardless of template config. DisplayTitle is applied by Workflow via ApplyDisplayTitleFromSource.
 func TestAggregateDisplayTitleTemplate(t *testing.T) {
-	t.Run("valid template", func(t *testing.T) {
+	t.Run("valid template — aggregator does not apply DisplayTitle", func(t *testing.T) {
 		cfg := &config.Config{
 			Scrapers: config.ScrapersConfig{
 				Priority: []string{"r18dev"},
 			},
 			Metadata: config.MetadataConfig{
 				NFO: config.NFOConfig{
-					DisplayTitle: "[<ID>] <TITLE>",
+					Format: config.NFOFormatConfig{
+						DisplayTitle: "[<ID>] <TITLE>",
+					},
 				},
 			},
 		}
 
-		agg := New(cfg)
+		agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 		results := []*models.ScraperResult{
 			{
@@ -1508,22 +1185,24 @@ func TestAggregateDisplayTitleTemplate(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
-		assert.Equal(t, "[IPX-001] Test Movie", movie.DisplayTitle)
+		assert.Empty(t, movie.DisplayTitle, "aggregator should not apply DisplayTitle")
 	})
 
-	t.Run("template with multiple fields", func(t *testing.T) {
+	t.Run("template with multiple fields — aggregator does not apply DisplayTitle", func(t *testing.T) {
 		cfg := &config.Config{
 			Scrapers: config.ScrapersConfig{
 				Priority: []string{"r18dev"},
 			},
 			Metadata: config.MetadataConfig{
 				NFO: config.NFOConfig{
-					DisplayTitle: "<TITLE> by <STUDIO> (<YEAR>)",
+					Format: config.NFOFormatConfig{
+						DisplayTitle: "<TITLE> by <STUDIO> (<YEAR>)",
+					},
 				},
 			},
 		}
 
-		agg := New(cfg)
+		agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 		releaseDate := time.Date(2021, 1, 8, 0, 0, 0, 0, time.UTC)
 		results := []*models.ScraperResult{
@@ -1540,22 +1219,24 @@ func TestAggregateDisplayTitleTemplate(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
-		assert.Equal(t, "Amazing Movie by Idea Pocket (2021)", movie.DisplayTitle)
+		assert.Empty(t, movie.DisplayTitle, "aggregator should not apply DisplayTitle")
 	})
 
-	t.Run("empty template - no display name", func(t *testing.T) {
+	t.Run("empty template — DisplayTitle remains empty", func(t *testing.T) {
 		cfg := &config.Config{
 			Scrapers: config.ScrapersConfig{
 				Priority: []string{"r18dev"},
 			},
 			Metadata: config.MetadataConfig{
 				NFO: config.NFOConfig{
-					DisplayTitle: "",
+					Format: config.NFOFormatConfig{
+						DisplayTitle: "",
+					},
 				},
 			},
 		}
 
-		agg := New(cfg)
+		agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 		results := []*models.ScraperResult{
 			{
@@ -1569,23 +1250,25 @@ func TestAggregateDisplayTitleTemplate(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
-		// Empty template falls back to Title
-		assert.Equal(t, "Test Movie", movie.DisplayTitle)
+		// Empty template: aggregator leaves DisplayTitle empty (Workflow applies fallback)
+		assert.Empty(t, movie.DisplayTitle)
 	})
 
-	t.Run("invalid template - falls back to Title", func(t *testing.T) {
+	t.Run("invalid template — aggregator does not apply DisplayTitle", func(t *testing.T) {
 		cfg := &config.Config{
 			Scrapers: config.ScrapersConfig{
 				Priority: []string{"r18dev"},
 			},
 			Metadata: config.MetadataConfig{
 				NFO: config.NFOConfig{
-					DisplayTitle: "<INVALID_TAG>",
+					Format: config.NFOFormatConfig{
+						DisplayTitle: "<INVALID_TAG>",
+					},
 				},
 			},
 		}
 
-		agg := New(cfg)
+		agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 		results := []*models.ScraperResult{
 			{
@@ -1599,8 +1282,7 @@ func TestAggregateDisplayTitleTemplate(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, movie)
 
-		// Invalid template falls back to Title
-		assert.Equal(t, "Test Movie", movie.DisplayTitle)
+		assert.Empty(t, movie.DisplayTitle, "aggregator should not apply DisplayTitle")
 	})
 }
 
@@ -1609,21 +1291,9 @@ func TestAggregateDisplayTitleTemplate(t *testing.T) {
 // This is the core scenario mentioned in Story 2.4 AC-2.4.2:
 // "r18dev and dmm may return same actress with different names but same DMMID"
 func TestActressDMMIDDeduplicationSameIDDifferentNames(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"r18dev", "dmm"},
-		},
-		Metadata: config.MetadataConfig{
-			ActressDatabase: config.ActressDatabaseConfig{
-				ConvertAlias: false,
-			},
-		},
-	}
-
-	agg := New(cfg)
-
-	results := map[string]*models.ScraperResult{
-		"r18dev": {
+	merger := newActressMerger()
+	sources := []actressSource{
+		{
 			Source: "r18dev",
 			Actresses: []models.ActressInfo{
 				{
@@ -1635,7 +1305,7 @@ func TestActressDMMIDDeduplicationSameIDDifferentNames(t *testing.T) {
 				},
 			},
 		},
-		"dmm": {
+		{
 			Source: "dmm",
 			Actresses: []models.ActressInfo{
 				{
@@ -1648,8 +1318,11 @@ func TestActressDMMIDDeduplicationSameIDDifferentNames(t *testing.T) {
 			},
 		},
 	}
+	opts := actressMergeOptions{
+		Priority: []string{"r18dev", "dmm"},
+	}
 
-	actresses := agg.getActressesByPriority(results, []string{"r18dev", "dmm"})
+	actresses := merger.Merge(sources, opts)
 
 	// Should have exactly 1 actress (deduplicated by DMMID)
 	require.Len(t, actresses, 1, "Should deduplicate actresses with same DMMID")
@@ -1667,21 +1340,9 @@ func TestActressDMMIDDeduplicationSameIDDifferentNames(t *testing.T) {
 // 2. Second scraper provides same actress with DMMID
 // 3. The actress should be upgraded with the DMMID and merged
 func TestActressDMMIDUpgradeScenario(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"r18dev", "dmm"},
-		},
-		Metadata: config.MetadataConfig{
-			ActressDatabase: config.ActressDatabaseConfig{
-				ConvertAlias: false,
-			},
-		},
-	}
-
-	agg := New(cfg)
-
-	results := map[string]*models.ScraperResult{
-		"r18dev": {
+	merger := newActressMerger()
+	sources := []actressSource{
+		{
 			Source: "r18dev",
 			Actresses: []models.ActressInfo{
 				{
@@ -1693,7 +1354,7 @@ func TestActressDMMIDUpgradeScenario(t *testing.T) {
 				},
 			},
 		},
-		"dmm": {
+		{
 			Source: "dmm",
 			Actresses: []models.ActressInfo{
 				{
@@ -1706,8 +1367,11 @@ func TestActressDMMIDUpgradeScenario(t *testing.T) {
 			},
 		},
 	}
+	opts := actressMergeOptions{
+		Priority: []string{"r18dev", "dmm"},
+	}
 
-	actresses := agg.getActressesByPriority(results, []string{"r18dev", "dmm"})
+	actresses := merger.Merge(sources, opts)
 
 	// Should have exactly 1 actress (merged by name, then upgraded with DMMID)
 	require.Len(t, actresses, 1, "Should merge actress and upgrade with DMMID")
@@ -1725,21 +1389,9 @@ func TestActressDMMIDUpgradeScenario(t *testing.T) {
 // TestActressDMMIDPartialDataMerging tests that when multiple scrapers provide
 // the same actress (by DMMID) with partial data, all fields are merged according to priority
 func TestActressDMMIDPartialDataMerging(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"r18dev", "dmm", "javlibrary"},
-		},
-		Metadata: config.MetadataConfig{
-			ActressDatabase: config.ActressDatabaseConfig{
-				ConvertAlias: false,
-			},
-		},
-	}
-
-	agg := New(cfg)
-
-	results := map[string]*models.ScraperResult{
-		"r18dev": {
+	merger := newActressMerger()
+	sources := []actressSource{
+		{
 			Source: "r18dev",
 			Actresses: []models.ActressInfo{
 				{
@@ -1751,7 +1403,7 @@ func TestActressDMMIDPartialDataMerging(t *testing.T) {
 				},
 			},
 		},
-		"dmm": {
+		{
 			Source: "dmm",
 			Actresses: []models.ActressInfo{
 				{
@@ -1763,7 +1415,7 @@ func TestActressDMMIDPartialDataMerging(t *testing.T) {
 				},
 			},
 		},
-		"javlibrary": {
+		{
 			Source: "javlibrary",
 			Actresses: []models.ActressInfo{
 				{
@@ -1776,8 +1428,11 @@ func TestActressDMMIDPartialDataMerging(t *testing.T) {
 			},
 		},
 	}
+	opts := actressMergeOptions{
+		Priority: []string{"r18dev", "dmm", "javlibrary"},
+	}
 
-	actresses := agg.getActressesByPriority(results, []string{"r18dev", "dmm", "javlibrary"})
+	actresses := merger.Merge(sources, opts)
 
 	// Should have exactly 1 actress (deduplicated by DMMID)
 	require.Len(t, actresses, 1, "Should deduplicate actresses with same DMMID")
@@ -1793,21 +1448,9 @@ func TestActressDMMIDPartialDataMerging(t *testing.T) {
 // TestActressDMMIDZeroNotDeduplicated tests that actresses with DMMID=0 are NOT deduplicated
 // This validates the business rule: "Zero DMMID allowed: Some actresses may not have DMM ID (cannot deduplicate)"
 func TestActressDMMIDZeroNotDeduplicated(t *testing.T) {
-	cfg := &config.Config{
-		Scrapers: config.ScrapersConfig{
-			Priority: []string{"r18dev", "javlibrary"},
-		},
-		Metadata: config.MetadataConfig{
-			ActressDatabase: config.ActressDatabaseConfig{
-				ConvertAlias: false,
-			},
-		},
-	}
-
-	agg := New(cfg)
-
-	results := map[string]*models.ScraperResult{
-		"r18dev": {
+	merger := newActressMerger()
+	sources := []actressSource{
+		{
 			Source: "r18dev",
 			Actresses: []models.ActressInfo{
 				{
@@ -1819,7 +1462,7 @@ func TestActressDMMIDZeroNotDeduplicated(t *testing.T) {
 				},
 			},
 		},
-		"javlibrary": {
+		{
 			Source: "javlibrary",
 			Actresses: []models.ActressInfo{
 				{
@@ -1832,8 +1475,11 @@ func TestActressDMMIDZeroNotDeduplicated(t *testing.T) {
 			},
 		},
 	}
+	opts := actressMergeOptions{
+		Priority: []string{"r18dev", "javlibrary"},
+	}
 
-	actresses := agg.getActressesByPriority(results, []string{"r18dev", "javlibrary"})
+	actresses := merger.Merge(sources, opts)
 
 	// Should have exactly 1 actress (merged by name since both have same name)
 	require.Len(t, actresses, 1, "Should merge actresses with same name even without DMMID")

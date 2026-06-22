@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -103,8 +104,8 @@ func TestMP4Prober_Probe(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMP4Prober()
-	info, err := prober.Probe(f)
+	prober := newMP4Prober()
+	info, err := prober.Probe(context.Background(), f)
 
 	// For minimal MP4, we expect either an error or partial info
 	if err != nil {
@@ -128,8 +129,8 @@ func TestMP4Prober_Probe_InvalidFile(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMP4Prober()
-	_, err = prober.Probe(f)
+	prober := newMP4Prober()
+	_, err = prober.Probe(context.Background(), f)
 
 	// Should fail to parse MP4 structure
 	assert.Error(t, err)
@@ -148,8 +149,8 @@ func TestMP4Prober_Probe_SmallFile(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMP4Prober()
-	_, err = prober.Probe(f)
+	prober := newMP4Prober()
+	_, err = prober.Probe(context.Background(), f)
 
 	// Should fail to decode MP4 file
 	assert.Error(t, err)
@@ -225,13 +226,13 @@ func TestMOVProber_Probe_InvalidBrand(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMOVProber()
-	result := prober.CanProbe([]byte("isom"))
+	prober := newMOVProber()
+	result := prober.canProbe([]byte("isom"))
 	assert.False(t, result, "MOV prober should not handle isom brand")
 }
 
 func TestMP4Prober_Name(t *testing.T) {
-	prober := NewMP4Prober()
+	prober := newMP4Prober()
 	assert.Equal(t, "mp4", prober.Name())
 }
 
@@ -529,7 +530,7 @@ func TestAnalyzeMP4_WithFtypOnly(t *testing.T) {
 }
 
 func TestMOVProber_Name(t *testing.T) {
-	prober := NewMOVProber()
+	prober := newMOVProber()
 	assert.Equal(t, "mov", prober.Name())
 }
 

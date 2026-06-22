@@ -3,8 +3,6 @@ package models
 import (
 	"errors"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestNewScraperStatusErrorClassifiesKinds(t *testing.T) {
@@ -14,7 +12,9 @@ func TestNewScraperStatusErrorClassifiesKinds(t *testing.T) {
 	}{
 		{status: 404, want: ScraperErrorKindNotFound},
 		{status: 429, want: ScraperErrorKindRateLimited},
+		{status: 401, want: ScraperErrorKindBlocked},
 		{status: 403, want: ScraperErrorKindBlocked},
+		{status: 451, want: ScraperErrorKindBlocked},
 		{status: 502, want: ScraperErrorKindUnavailable},
 		{status: 418, want: ScraperErrorKindUnknown},
 	}
@@ -135,37 +135,4 @@ func TestScraperError_ConstructorsTrimAndDefaults(t *testing.T) {
 	if !challengeDefault.Temporary || !challengeDefault.Retryable {
 		t.Fatal("expected challenge error to be temporary and retryable")
 	}
-}
-
-func TestScraperHTTPError_Error(t *testing.T) {
-	tests := []struct {
-		name         string
-		err          *ScraperHTTPError
-		wantContains string
-	}{
-		{"nil returns empty", nil, ""},
-		{"message present", &ScraperHTTPError{Scraper: "S", StatusCode: 429, Message: "rate limited"}, "rate limited"},
-		{"no message with scraper", &ScraperHTTPError{Scraper: "JavDB", StatusCode: 403, Message: ""}, "JavDB returned HTTP 403"},
-		{"no message no scraper", &ScraperHTTPError{Scraper: "", StatusCode: 500, Message: ""}, "HTTP 500"},
-		{"no message no status", &ScraperHTTPError{Scraper: "", StatusCode: 0, Message: ""}, "scraper HTTP error"},
-		{"whitespace message", &ScraperHTTPError{Scraper: "", StatusCode: 502, Message: "   "}, "HTTP 502"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := tc.err.Error()
-			if tc.wantContains == "" {
-				assert.Equal(t, "", got)
-			} else {
-				assert.Equal(t, tc.wantContains, got)
-			}
-		})
-	}
-}
-
-func TestNewScraperHTTPError(t *testing.T) {
-	err := NewScraperHTTPError("TestScraper", 404, "not found")
-	assert.Equal(t, "TestScraper", err.Scraper)
-	assert.Equal(t, 404, err.StatusCode)
-	assert.Equal(t, "not found", err.Message)
 }

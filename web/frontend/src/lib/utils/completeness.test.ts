@@ -1,12 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { calculateCompleteness, type CompletenessResult, type FieldCategory, type CompletenessTier } from './completeness';
+import {
+	calculateCompleteness,
+	type CompletenessResult,
+	type FieldCategory,
+	type CompletenessTier,
+} from './completeness';
 import type { Movie, CompletenessConfig } from '$lib/api/types';
 
 function makeMovie(overrides: Partial<Movie> = {}): Movie {
 	return {
 		id: 'TEST-001',
 		title: 'Test Movie',
-		...overrides
+		...overrides,
 	};
 }
 
@@ -34,12 +39,16 @@ describe('calculateCompleteness', () => {
 				director: 'Director A',
 				runtime: 120,
 				trailer_url: 'https://example.com/trailer.mp4',
-				screenshot_urls: ['https://example.com/ss1.jpg', 'https://example.com/ss2.jpg', 'https://example.com/ss3.jpg'],
+				screenshot_urls: [
+					'https://example.com/ss1.jpg',
+					'https://example.com/ss2.jpg',
+					'https://example.com/ss3.jpg',
+				],
 				label: 'Label A',
 				series: 'Series A',
 				rating_score: 8.5,
 				original_title: 'Original Title',
-				translations: [{ id: 1, language: 'en', title: 'English Title' }]
+				translations: [{ id: 1, language: 'en', title: 'English Title' }],
 			};
 			const result = calculateCompleteness(movie);
 			expect(result.score).toBe(100);
@@ -53,7 +62,7 @@ describe('calculateCompleteness', () => {
 				poster_url: 'https://example.com/poster.jpg',
 				cover_url: 'https://example.com/cover.jpg',
 				actresses: [{ id: 1, first_name: 'Jane' }],
-				genres: [{ id: 1, name: 'Drama' }]
+				genres: [{ id: 1, name: 'Drama' }],
 			};
 			const result = calculateCompleteness(movie);
 			expect(result.score).toBe(50);
@@ -64,32 +73,32 @@ describe('calculateCompleteness', () => {
 	describe('zero values treated as missing', () => {
 		it('treats runtime=0 as unfilled', () => {
 			const movie = makeMovie({ runtime: 0 });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Runtime');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Runtime');
 			expect(cat?.filled).toBe(false);
 		});
 
 		it('treats rating_score=0 as unfilled', () => {
 			const movie = makeMovie({ rating_score: 0 });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Rating');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Rating');
 			expect(cat?.filled).toBe(false);
 		});
 
 		it('treats release_year=0 as unfilled', () => {
 			const movie = makeMovie({ release_year: 0 });
 			const result = calculateCompleteness(movie);
-			const cat = result.breakdown.find(c => c.name === 'Release Date');
+			const cat = result.breakdown.find((c) => c.name === 'Release Date');
 			expect(cat?.filled).toBe(false);
 		});
 
 		it('treats empty release_date string as unfilled', () => {
 			const movie = makeMovie({ release_date: '' });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Release Date');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Release Date');
 			expect(cat?.filled).toBe(false);
 		});
 
 		it('treats non-zero runtime as filled', () => {
 			const movie = makeMovie({ runtime: 90 });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Runtime');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Runtime');
 			expect(cat?.filled).toBe(true);
 		});
 	});
@@ -97,45 +106,45 @@ describe('calculateCompleteness', () => {
 	describe('array scoring', () => {
 		it('empty actresses array scores 0%', () => {
 			const movie = makeMovie({ actresses: [] });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Actresses');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Actresses');
 			expect(cat?.filled).toBe(false);
 		});
 
 		it('non-empty actresses array scores 100%', () => {
 			const movie = makeMovie({ actresses: [{ id: 1, first_name: 'Jane' }] });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Actresses');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Actresses');
 			expect(cat?.filled).toBe(true);
 		});
 
 		it('empty genres array scores 0%', () => {
 			const movie = makeMovie({ genres: [] });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Genres');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Genres');
 			expect(cat?.filled).toBe(false);
 		});
 
 		it('non-empty genres array scores 100%', () => {
 			const movie = makeMovie({ genres: [{ id: 1, name: 'Drama' }] });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Genres');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Genres');
 			expect(cat?.filled).toBe(true);
 		});
 
 		it('0 screenshots scores 0% (graduated)', () => {
 			const movie = makeMovie({ screenshot_urls: [] });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Screenshots');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Screenshots');
 			expect(cat?.filled).toBe(false);
 		});
 
 		it('1-2 screenshots scores 50% (graduated, partial fill)', () => {
 			const movie = makeMovie({ screenshot_urls: ['url1', 'url2'] });
 			const result = calculateCompleteness(movie);
-			const cat = result.breakdown.find(c => c.name === 'Screenshots');
+			const cat = result.breakdown.find((c) => c.name === 'Screenshots');
 			expect(cat?.filled).toBe(true);
 			expect(result.score).toBeGreaterThan(0);
 		});
 
 		it('3+ screenshots scores 100% (graduated)', () => {
 			const movie = makeMovie({ screenshot_urls: ['url1', 'url2', 'url3'] });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Screenshots');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Screenshots');
 			expect(cat?.filled).toBe(true);
 		});
 	});
@@ -157,7 +166,7 @@ describe('calculateCompleteness', () => {
 				cover_url: 'https://example.com/cover.jpg',
 				actresses: [{ id: 1, first_name: 'Jane' }],
 				genres: [{ id: 1, name: 'Drama' }],
-				description: 'A description'
+				description: 'A description',
 			};
 			const result = calculateCompleteness(movie);
 			if (result.score >= 40 && result.score <= 79) {
@@ -181,7 +190,7 @@ describe('calculateCompleteness', () => {
 				trailer_url: 'https://example.com/trailer.mp4',
 				screenshot_urls: ['url1', 'url2', 'url3'],
 				label: 'Label',
-				series: 'Series'
+				series: 'Series',
 			};
 			const result = calculateCompleteness(movie);
 			expect(result.score).toBeGreaterThanOrEqual(80);
@@ -206,17 +215,17 @@ describe('calculateCompleteness', () => {
 		it('essential tier has 5 categories with 0.10 weight each', () => {
 			const movie = makeMovie();
 			const result = calculateCompleteness(movie);
-			const essential = result.breakdown.filter(c => c.tier === 'essential');
+			const essential = result.breakdown.filter((c) => c.tier === 'essential');
 			expect(essential.length).toBe(5);
 			for (const cat of essential) {
-				expect(cat.weight).toBe(0.10);
+				expect(cat.weight).toBe(0.1);
 			}
 		});
 
 		it('important tier has 7 categories with 0.05 weight each', () => {
 			const movie = makeMovie();
 			const result = calculateCompleteness(movie);
-			const important = result.breakdown.filter(c => c.tier === 'important');
+			const important = result.breakdown.filter((c) => c.tier === 'important');
 			expect(important.length).toBe(7);
 			for (const cat of important) {
 				expect(cat.weight).toBeCloseTo(0.05, 10);
@@ -226,7 +235,7 @@ describe('calculateCompleteness', () => {
 		it('nice-to-have tier has 5 categories with 0.03 weight each', () => {
 			const movie = makeMovie();
 			const result = calculateCompleteness(movie);
-			const niceToHave = result.breakdown.filter(c => c.tier === 'nice-to-have');
+			const niceToHave = result.breakdown.filter((c) => c.tier === 'nice-to-have');
 			expect(niceToHave.length).toBe(5);
 			for (const cat of niceToHave) {
 				expect(cat.weight).toBeCloseTo(0.03, 10);
@@ -238,7 +247,7 @@ describe('calculateCompleteness', () => {
 		it('score is rounded to nearest integer', () => {
 			const movie = makeMovie({
 				poster_url: 'https://example.com/poster.jpg',
-				description: 'A description'
+				description: 'A description',
 			});
 			const result = calculateCompleteness(movie);
 			expect(Number.isInteger(result.score)).toBe(true);
@@ -271,7 +280,7 @@ describe('calculateCompleteness', () => {
 				poster_url: 'https://example.com/poster.jpg',
 				cover_url: 'https://example.com/cover.jpg',
 				actresses: [{ id: 1, first_name: 'A' }],
-				genres: []
+				genres: [],
 			};
 			const result = calculateCompleteness(movie);
 			expect(result.score).toBe(40);
@@ -285,7 +294,7 @@ describe('calculateCompleteness', () => {
 				poster_url: 'https://example.com/poster.jpg',
 				cover_url: 'https://example.com/cover.jpg',
 				actresses: [],
-				genres: []
+				genres: [],
 			};
 			const result = calculateCompleteness(movie);
 			expect(result.score).toBe(30);
@@ -299,7 +308,7 @@ describe('calculateCompleteness', () => {
 				poster_url: 'https://example.com/poster.jpg',
 				cover_url: 'https://example.com/cover.jpg',
 				actresses: [{ id: 1, first_name: 'A' }],
-				genres: [{ id: 1, name: 'Drama' }]
+				genres: [{ id: 1, name: 'Drama' }],
 			};
 			const result = calculateCompleteness(movie);
 			expect(result.score).toBe(50);
@@ -320,7 +329,7 @@ describe('calculateCompleteness', () => {
 				director: 'Director',
 				runtime: 120,
 				trailer_url: 'https://example.com/trailer.mp4',
-				screenshot_urls: ['url1', 'url2', 'url3']
+				screenshot_urls: ['url1', 'url2', 'url3'],
 			};
 			const result = calculateCompleteness(movie);
 			expect(result.score).toBe(85);
@@ -341,7 +350,7 @@ describe('calculateCompleteness', () => {
 				director: 'Director',
 				runtime: 120,
 				trailer_url: 'https://example.com/trailer.mp4',
-				screenshot_urls: ['url1']
+				screenshot_urls: ['url1'],
 			};
 			const result = calculateCompleteness(movie);
 			expect(result.score).toBe(83);
@@ -364,10 +373,13 @@ describe('calculateCompleteness', () => {
 				director: 'Director',
 				runtime: 120,
 				trailer_url: 'https://example.com/trailer.mp4',
-				screenshot_urls: ['url1']
+				screenshot_urls: ['url1'],
 			};
 			const withOne = calculateCompleteness(base);
-			const withThree = calculateCompleteness({ ...base, screenshot_urls: ['url1', 'url2', 'url3'] });
+			const withThree = calculateCompleteness({
+				...base,
+				screenshot_urls: ['url1', 'url2', 'url3'],
+			});
 			expect(withThree.score).toBeGreaterThan(withOne.score);
 		});
 
@@ -385,7 +397,7 @@ describe('calculateCompleteness', () => {
 				director: 'Director',
 				runtime: 120,
 				trailer_url: 'https://example.com/trailer.mp4',
-				screenshot_urls: ['url1', 'url2']
+				screenshot_urls: ['url1', 'url2'],
 			};
 			const withTwo = calculateCompleteness(base);
 			const withZero = calculateCompleteness({ ...base, screenshot_urls: [] });
@@ -397,11 +409,25 @@ describe('calculateCompleteness', () => {
 		it('breakdown contains all 17 expected field names', () => {
 			const movie = makeMovie();
 			const result = calculateCompleteness(movie);
-			const names = result.breakdown.map(c => c.name);
+			const names = result.breakdown.map((c) => c.name);
 			const expected = [
-				'Title', 'Poster', 'Cover', 'Actresses', 'Genres',
-				'Description', 'Maker', 'Release Date', 'Director', 'Runtime', 'Trailer', 'Screenshots',
-				'Label', 'Series', 'Rating', 'Original Title', 'Translations'
+				'Title',
+				'Poster',
+				'Cover',
+				'Actresses',
+				'Genres',
+				'Description',
+				'Maker',
+				'Release Date',
+				'Director',
+				'Runtime',
+				'Trailer',
+				'Screenshots',
+				'Label',
+				'Series',
+				'Rating',
+				'Original Title',
+				'Translations',
 			];
 			expect(names).toEqual(expected);
 		});
@@ -436,25 +462,25 @@ describe('calculateCompleteness', () => {
 
 		it('treats NaN runtime as unfilled', () => {
 			const movie = makeMovie({ runtime: NaN });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Runtime');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Runtime');
 			expect(cat?.filled).toBe(false);
 		});
 
 		it('treats NaN rating_score as unfilled', () => {
 			const movie = makeMovie({ rating_score: NaN });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Rating');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Rating');
 			expect(cat?.filled).toBe(false);
 		});
 
 		it('treats negative runtime as unfilled', () => {
 			const movie = makeMovie({ runtime: -1 });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Runtime');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Runtime');
 			expect(cat?.filled).toBe(false);
 		});
 
 		it('treats whitespace-only string as unfilled', () => {
 			const movie = makeMovie({ description: '   ' });
-			const cat = calculateCompleteness(movie).breakdown.find(c => c.name === 'Description');
+			const cat = calculateCompleteness(movie).breakdown.find((c) => c.name === 'Description');
 			expect(cat?.filled).toBe(false);
 		});
 	});
@@ -473,7 +499,7 @@ describe('calculateCompleteness', () => {
 			const movie = makeMovie();
 			const result = calculateCompleteness(movie, customConfig);
 			expect(result.breakdown.length).toBe(5);
-			const essential = result.breakdown.filter(c => c.tier === 'essential');
+			const essential = result.breakdown.filter((c) => c.tier === 'essential');
 			expect(essential.length).toBe(2);
 			expect(essential[0].name).toBe('Title');
 			expect(essential[1].name).toBe('Poster');
@@ -501,9 +527,9 @@ describe('calculateCompleteness', () => {
 			};
 			const movie = makeMovie();
 			const result = calculateCompleteness(movie, configMovingLabel);
-			const labelCat = result.breakdown.find(c => c.name === 'Label');
+			const labelCat = result.breakdown.find((c) => c.name === 'Label');
 			expect(labelCat?.tier).toBe('essential');
-			const posterCat = result.breakdown.find(c => c.name === 'Poster');
+			const posterCat = result.breakdown.find((c) => c.name === 'Poster');
 			expect(posterCat?.tier).toBe('nice-to-have');
 		});
 

@@ -5,12 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 )
 
-// VerificationToken represents a successful proxy test that can be used for save authorization
-type VerificationToken struct {
+// verificationToken represents a successful proxy test that can be used for save authorization
+type verificationToken struct {
 	Token      string    `json:"token"`
 	Scope      string    `json:"scope"`       // "global", "flaresolverr", or "profile:{name}"
 	ConfigHash string    `json:"config_hash"` // Hash of config at test time
@@ -18,18 +19,25 @@ type VerificationToken struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-const TokenValidityDuration = 5 * time.Minute
+const tokenValidityDuration = 5 * time.Minute
 
-// TokenStore manages verification tokens in-memory
-type TokenStore struct {
+// TokenStoreInterface exposes the methods external packages need from the token store.
+type TokenStoreInterface interface {
+	Create(scope string, configHash string) (string, time.Time, error)
+	Validate(token string, scope string, configHash string) bool
+	CleanupExpired()
+}
+
+// tokenStore manages verification tokens in-memory
+type tokenStore struct {
 	mu     sync.RWMutex
-	tokens map[string]VerificationToken
+	tokens map[string]verificationToken
 }
 
 // NewTokenStore creates a new token store with background cleanup
-func NewTokenStore() *TokenStore {
-	ts := &TokenStore{
-		tokens: make(map[string]VerificationToken),
+func NewTokenStore() TokenStoreInterface {
+	ts := &tokenStore{
+		tokens: make(map[string]verificationToken),
 	}
 
 	// Start background cleanup every 10 minutes
@@ -37,7 +45,7 @@ func NewTokenStore() *TokenStore {
 	return ts
 }
 
-func (s *TokenStore) backgroundCleanup() {
+func (s *tokenStore) backgroundCleanup() {
 	ticker := time.NewTicker(10 * time.Minute)
 	defer ticker.Stop()
 
@@ -47,24 +55,27 @@ func (s *TokenStore) backgroundCleanup() {
 }
 
 // Create generates a new verification token for the given scope and config hash
-func (s *TokenStore) Create(scope string, configHash string) VerificationToken {
-	token := generateToken()
-	vt := VerificationToken{
+func (s *tokenStore) Create(scope string, configHash string) (string, time.Time, error) {
+	token, err := generateToken()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	vt := verificationToken{
 		Token:      token,
 		Scope:      scope,
 		ConfigHash: configHash,
-		ExpiresAt:  time.Now().Add(TokenValidityDuration),
+		ExpiresAt:  time.Now().Add(tokenValidityDuration),
 		CreatedAt:  time.Now(),
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tokens[token] = vt
-	return vt
+	return token, vt.ExpiresAt, nil
 }
 
 // Validate checks if a token is valid for the given scope and config hash
-func (s *TokenStore) Validate(token string, scope string, configHash string) bool {
+func (s *tokenStore) Validate(token string, scope string, configHash string) bool {
 	s.mu.RLock()
 	vt, ok := s.tokens[token]
 	if !ok {
@@ -95,7 +106,7 @@ func (s *TokenStore) Validate(token string, scope string, configHash string) boo
 }
 
 // CleanupExpired removes expired tokens from the store
-func (s *TokenStore) CleanupExpired() {
+func (s *tokenStore) CleanupExpired() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -107,16 +118,21 @@ func (s *TokenStore) CleanupExpired() {
 	}
 }
 
-func generateToken() string {
+func generateToken() (string, error) {
 	bytes := make([]byte, 16)
-	_, _ = rand.Read(bytes)
-	return hex.EncodeToString(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("generate token: %w", err)
+	}
+	return hex.EncodeToString(bytes), nil
 }
 
 // HashProxyConfig creates a hash of proxy config for comparison using SHA-256
-func HashProxyConfig(proxyConfig interface{}) string {
+func HashProxyConfig(proxyConfig any) (string, error) {
 	// Use canonical JSON for consistent hashing
-	data, _ := json.Marshal(proxyConfig)
+	data, err := json.Marshal(proxyConfig)
+	if err != nil {
+		return "", fmt.Errorf("hash proxy config: %w", err)
+	}
 	hash := sha256.Sum256(data)
-	return hex.EncodeToString(hash[:8]) // First 8 bytes (16 hex chars) is sufficient
+	return hex.EncodeToString(hash[:8]), nil // First 8 bytes (16 hex chars) is sufficient
 }

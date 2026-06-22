@@ -2,28 +2,22 @@ package tokyohot
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/configutil"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-type TokyoHotConfig struct {
-	config.BaseScraperConfig `yaml:",inline"`
-	Language                 string `yaml:"language" json:"language"`
-	BaseURL                  string `yaml:"base_url" json:"base_url"`
-}
-
-func (c *TokyoHotConfig) ValidateConfig(sc *config.ScraperSettings) error {
-	if err := config.ValidateCommonSettings("tokyohot", sc); err != nil {
-		return err
-	}
-	switch strings.ToLower(strings.TrimSpace(sc.Language)) {
+// validateScraperSettings performs scraper-specific validation for tokyohot.
+// The framework calls ScraperSettings.Validate(name) as a base check first
+// (which trims and lowercases Language), so this function only checks
+// scraper-specific constraints.
+func validateScraperSettings(ss *models.ScraperSettings) error {
+	switch ss.Language {
 	case "", "en", "ja", "zh":
 	default:
-		return fmt.Errorf("tokyohot: language must be 'en', 'ja', or 'zh', got %q", sc.Language)
+		return fmt.Errorf("tokyohot: language must be 'en', 'ja', or 'zh', got %q", ss.Language)
 	}
-	if err := configutil.ValidateHTTPBaseURL("tokyohot.base_url", sc.BaseURL); err != nil {
+	if err := config.ValidateHTTPBaseURL("tokyohot.base_url", ss.BaseURL); err != nil {
 		return err
 	}
 	return nil

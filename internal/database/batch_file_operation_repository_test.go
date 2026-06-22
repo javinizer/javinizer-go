@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func TestBatchFileOperationRepository_Create(t *testing.T) {
 		GeneratedFiles: `["/path/poster.jpg"]`,
 	}
 
-	err := repo.Create(op)
+	err := repo.Create(context.TODO(), op)
 	require.NoError(t, err)
 	assert.NotZero(t, op.ID)
 }
@@ -53,13 +54,13 @@ func TestBatchFileOperationRepository_CreateBatch(t *testing.T) {
 		},
 	}
 
-	err := repo.CreateBatch(ops)
+	err := repo.CreateBatch(context.TODO(), ops)
 	require.NoError(t, err)
 	assert.NotZero(t, ops[0].ID)
 	assert.NotZero(t, ops[1].ID)
 
 	// Verify both records exist
-	results, err := repo.FindByBatchJobID("batch-createbatch-001")
+	results, err := repo.FindByBatchJobID(context.TODO(), "batch-createbatch-001")
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
@@ -76,9 +77,9 @@ func TestBatchFileOperationRepository_FindByID(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
-	require.NoError(t, repo.Create(op))
+	require.NoError(t, repo.Create(context.TODO(), op))
 
-	found, err := repo.FindByID(op.ID)
+	found, err := repo.FindByID(context.TODO(), op.ID)
 	require.NoError(t, err)
 	assert.Equal(t, op.BatchJobID, found.BatchJobID)
 	assert.Equal(t, "/original/find.mp4", found.OriginalPath)
@@ -89,7 +90,7 @@ func TestBatchFileOperationRepository_FindByID_NotFound(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewBatchFileOperationRepository(db)
 
-	_, err := repo.FindByID(99999)
+	_, err := repo.FindByID(context.TODO(), 99999)
 	assert.Error(t, err)
 }
 
@@ -107,7 +108,7 @@ func TestBatchFileOperationRepository_FindByBatchJobID(t *testing.T) {
 			OperationType: models.OperationTypeMove,
 			RevertStatus:  models.RevertStatusApplied,
 		}
-		require.NoError(t, repo.Create(op))
+		require.NoError(t, repo.Create(context.TODO(), op))
 	}
 
 	// Create operations for batch B
@@ -119,16 +120,16 @@ func TestBatchFileOperationRepository_FindByBatchJobID(t *testing.T) {
 			OperationType: models.OperationTypeMove,
 			RevertStatus:  models.RevertStatusApplied,
 		}
-		require.NoError(t, repo.Create(op))
+		require.NoError(t, repo.Create(context.TODO(), op))
 	}
 
 	// Find for batch A only
-	resultsA, err := repo.FindByBatchJobID("batch-filter-A")
+	resultsA, err := repo.FindByBatchJobID(context.TODO(), "batch-filter-A")
 	require.NoError(t, err)
 	assert.Len(t, resultsA, 3)
 
 	// Find for batch B only
-	resultsB, err := repo.FindByBatchJobID("batch-filter-B")
+	resultsB, err := repo.FindByBatchJobID(context.TODO(), "batch-filter-B")
 	require.NoError(t, err)
 	assert.Len(t, resultsB, 2)
 
@@ -168,21 +169,21 @@ func TestBatchFileOperationRepository_FindByBatchJobIDAndRevertStatus(t *testing
 		},
 	}
 	for _, op := range ops {
-		require.NoError(t, repo.Create(op))
+		require.NoError(t, repo.Create(context.TODO(), op))
 	}
 
 	// Find only pending operations
-	pending, err := repo.FindByBatchJobIDAndRevertStatus("batch-revert-001", models.RevertStatusApplied)
+	pending, err := repo.FindByBatchJobIDAndRevertStatus(context.TODO(), "batch-revert-001", models.RevertStatusApplied)
 	require.NoError(t, err)
 	assert.Len(t, pending, 2)
 
 	// Find only reverted operations
-	reverted, err := repo.FindByBatchJobIDAndRevertStatus("batch-revert-001", models.RevertStatusReverted)
+	reverted, err := repo.FindByBatchJobIDAndRevertStatus(context.TODO(), "batch-revert-001", models.RevertStatusReverted)
 	require.NoError(t, err)
 	assert.Len(t, reverted, 1)
 
 	// Find failed (none exist)
-	failed, err := repo.FindByBatchJobIDAndRevertStatus("batch-revert-001", models.RevertStatusFailed)
+	failed, err := repo.FindByBatchJobIDAndRevertStatus(context.TODO(), "batch-revert-001", models.RevertStatusFailed)
 	require.NoError(t, err)
 	assert.Len(t, failed, 0)
 }
@@ -199,26 +200,26 @@ func TestBatchFileOperationRepository_UpdateRevertStatus(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
-	require.NoError(t, repo.Create(op))
+	require.NoError(t, repo.Create(context.TODO(), op))
 
 	beforeUpdate := time.Now().UTC()
 
 	// Update to reverted
-	err := repo.UpdateRevertStatus(op.ID, models.RevertStatusReverted)
+	err := repo.UpdateRevertStatus(context.TODO(), op.ID, models.RevertStatusReverted)
 	require.NoError(t, err)
 
 	// Verify status and reverted_at timestamp
-	found, err := repo.FindByID(op.ID)
+	found, err := repo.FindByID(context.TODO(), op.ID)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertStatusReverted, found.RevertStatus)
 	require.NotNil(t, found.RevertedAt)
 	assert.True(t, found.RevertedAt.After(beforeUpdate) || found.RevertedAt.Equal(beforeUpdate))
 
 	// Update to failed (should not change reverted_at)
-	err = repo.UpdateRevertStatus(op.ID, models.RevertStatusFailed)
+	err = repo.UpdateRevertStatus(context.TODO(), op.ID, models.RevertStatusFailed)
 	require.NoError(t, err)
 
-	found, err = repo.FindByID(op.ID)
+	found, err = repo.FindByID(context.TODO(), op.ID)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertStatusFailed, found.RevertStatus)
 }
@@ -236,15 +237,15 @@ func TestBatchFileOperationRepository_CountByBatchJobID(t *testing.T) {
 			OperationType: models.OperationTypeMove,
 			RevertStatus:  models.RevertStatusApplied,
 		}
-		require.NoError(t, repo.Create(op))
+		require.NoError(t, repo.Create(context.TODO(), op))
 	}
 
-	count, err := repo.CountByBatchJobID("batch-count-001")
+	count, err := repo.CountByBatchJobID(context.TODO(), "batch-count-001")
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), count)
 
 	// Non-existent batch
-	count, err = repo.CountByBatchJobID("nonexistent-batch")
+	count, err = repo.CountByBatchJobID(context.TODO(), "nonexistent-batch")
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count)
 }
@@ -278,14 +279,14 @@ func TestBatchFileOperationRepository_CountByBatchJobIDAndRevertStatus(t *testin
 		},
 	}
 	for _, op := range ops {
-		require.NoError(t, repo.Create(op))
+		require.NoError(t, repo.Create(context.TODO(), op))
 	}
 
-	pendingCount, err := repo.CountByBatchJobIDAndRevertStatus("batch-count-status-001", models.RevertStatusApplied)
+	pendingCount, err := repo.CountByBatchJobIDAndRevertStatus(context.TODO(), "batch-count-status-001", models.RevertStatusApplied)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), pendingCount)
 
-	revertedCount, err := repo.CountByBatchJobIDAndRevertStatus("batch-count-status-001", models.RevertStatusReverted)
+	revertedCount, err := repo.CountByBatchJobIDAndRevertStatus(context.TODO(), "batch-count-status-001", models.RevertStatusReverted)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), revertedCount)
 }
@@ -301,12 +302,12 @@ func TestHistoryRepository_FindByBatchJobID(t *testing.T) {
 		history := &models.History{
 			MovieID:      "ABC-HIST-BATCH",
 			BatchJobID:   &batchJobID1,
-			Operation:    "organize",
-			Status:       "success",
+			Operation:    models.HistoryOpOrganize,
+			Status:       models.HistoryStatusSuccess,
 			OriginalPath: "/original/file.mp4",
 			NewPath:      "/new/file.mp4",
 		}
-		require.NoError(t, repo.Create(history))
+		require.NoError(t, repo.Create(context.TODO(), history))
 	}
 
 	// Create a record for a different batch
@@ -314,15 +315,15 @@ func TestHistoryRepository_FindByBatchJobID(t *testing.T) {
 	history := &models.History{
 		MovieID:      "ABC-HIST-OTHER",
 		BatchJobID:   &batchJobID2,
-		Operation:    "organize",
-		Status:       "success",
+		Operation:    models.HistoryOpOrganize,
+		Status:       models.HistoryStatusSuccess,
 		OriginalPath: "/original/other.mp4",
 		NewPath:      "/new/other.mp4",
 	}
-	require.NoError(t, repo.Create(history))
+	require.NoError(t, repo.Create(context.TODO(), history))
 
 	// Find by batch job ID
-	results, err := repo.FindByBatchJobID("history-batch-001")
+	results, err := repo.FindByBatchJobID(context.TODO(), "history-batch-001")
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 
@@ -341,13 +342,13 @@ func TestHistoryRepository_FindByBatchJobID_NonExistent(t *testing.T) {
 	// Create a record without batch job ID
 	history := &models.History{
 		MovieID:   "NO-BATCH",
-		Operation: "scrape",
-		Status:    "success",
+		Operation: models.HistoryOpScrape,
+		Status:    models.HistoryStatusSuccess,
 	}
-	require.NoError(t, repo.Create(history))
+	require.NoError(t, repo.Create(context.TODO(), history))
 
 	// Query for non-existent batch job ID
-	results, err := repo.FindByBatchJobID("nonexistent-batch-999")
+	results, err := repo.FindByBatchJobID(context.TODO(), "nonexistent-batch-999")
 	require.NoError(t, err)
 	assert.Len(t, results, 0)
 }
@@ -361,13 +362,13 @@ func TestHistoryRepository_FindByBatchJobID_NullBatchJobID(t *testing.T) {
 	history := &models.History{
 		MovieID:    "NULL-BATCH",
 		BatchJobID: nil,
-		Operation:  "scrape",
-		Status:     "success",
+		Operation:  models.HistoryOpScrape,
+		Status:     models.HistoryStatusSuccess,
 	}
-	require.NoError(t, repo.Create(history))
+	require.NoError(t, repo.Create(context.TODO(), history))
 
 	// SQL `= NULL` never matches, so NULL batch_job_id records are excluded
-	results, err := repo.FindByBatchJobID("some-batch")
+	results, err := repo.FindByBatchJobID(context.TODO(), "some-batch")
 	require.NoError(t, err)
 	assert.Len(t, results, 0)
 }
@@ -389,9 +390,9 @@ func TestBatchFileOperationRepository_AllFields(t *testing.T) {
 		InPlaceRenamed:  true,
 		OriginalDirPath: "/original/dir",
 	}
-	require.NoError(t, repo.Create(op))
+	require.NoError(t, repo.Create(context.TODO(), op))
 
-	found, err := repo.FindByID(op.ID)
+	found, err := repo.FindByID(context.TODO(), op.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "batch-all-fields-001", found.BatchJobID)
 	assert.Equal(t, "XYZ-999", found.MovieID)

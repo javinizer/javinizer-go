@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/spf13/cobra"
 )
 
 // TestApplyEnvironmentOverrides_LogLevel tests LOG_LEVEL environment variable
@@ -26,7 +24,7 @@ func TestApplyEnvironmentOverrides_LogLevel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("LOG_LEVEL", tt.envValue)
 
-			cfg := DefaultConfig()
+			cfg := DefaultConfig(nil, nil)
 			ApplyEnvironmentOverrides(cfg)
 
 			if cfg.Logging.Level != tt.expected {
@@ -53,7 +51,7 @@ func TestApplyEnvironmentOverrides_Umask(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("UMASK", tt.envValue)
 
-			cfg := DefaultConfig()
+			cfg := DefaultConfig(nil, nil)
 			ApplyEnvironmentOverrides(cfg)
 
 			if cfg.System.Umask != tt.expected {
@@ -79,7 +77,7 @@ func TestApplyEnvironmentOverrides_DatabaseDSN(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("JAVINIZER_DB", tt.envValue)
 
-			cfg := DefaultConfig()
+			cfg := DefaultConfig(nil, nil)
 			ApplyEnvironmentOverrides(cfg)
 
 			if cfg.Database.DSN != tt.expected {
@@ -132,7 +130,7 @@ func TestApplyEnvironmentOverrides_LogDir(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("JAVINIZER_LOG_DIR", tt.envValue)
 
-			cfg := DefaultConfig()
+			cfg := DefaultConfig(nil, nil)
 			cfg.Logging.Output = tt.originalOutput
 			ApplyEnvironmentOverrides(cfg)
 
@@ -150,7 +148,7 @@ func TestApplyEnvironmentOverrides_Multiple(t *testing.T) {
 	t.Setenv("JAVINIZER_DB", "/custom/db.sqlite")
 	t.Setenv("JAVINIZER_LOG_DIR", "/var/log/javinizer")
 
-	cfg := DefaultConfig()
+	cfg := DefaultConfig(nil, nil)
 	cfg.Logging.Output = "data/logs/app.log"
 	ApplyEnvironmentOverrides(cfg)
 
@@ -182,7 +180,7 @@ func TestDockerAutoDetection(t *testing.T) {
 	// Since we can't easily mock os.Stat, we'll test the actual behavior
 	// when /media doesn't exist (normal case)
 	t.Run("no media directory", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := DefaultConfig(nil, nil)
 		cfg.API.Security.AllowedDirectories = []string{} // Empty initially
 		ApplyEnvironmentOverrides(cfg)
 
@@ -195,7 +193,7 @@ func TestDockerAutoDetection(t *testing.T) {
 	})
 
 	t.Run("pre-configured allowed directories", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := DefaultConfig(nil, nil)
 		cfg.API.Security.AllowedDirectories = []string{"/home/user/videos"}
 		ApplyEnvironmentOverrides(cfg)
 
@@ -206,269 +204,5 @@ func TestDockerAutoDetection(t *testing.T) {
 		if cfg.API.Security.AllowedDirectories[0] != "/home/user/videos" {
 			t.Errorf("Expected '/home/user/videos', got %q", cfg.API.Security.AllowedDirectories[0])
 		}
-	})
-}
-
-// TestApplyScrapeFlagOverrides_ScrapeActress tests scrape-actress flags
-func TestApplyScrapeFlagOverrides_ScrapeActress(t *testing.T) {
-	RegisterTestScraperConfigs()
-	tests := []struct {
-		name     string
-		flag     string
-		value    string
-		expected bool
-	}{
-		{"enable scrape-actress", "scrape-actress", "true", true},
-		{"disable scrape-actress", "scrape-actress", "false", false},
-		{"no-scrape-actress", "no-scrape-actress", "true", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := &cobra.Command{}
-			cmd.Flags().Bool("scrape-actress", false, "")
-			cmd.Flags().Bool("no-scrape-actress", false, "")
-
-			switch tt.flag {
-			case "scrape-actress":
-				_ = cmd.Flags().Set("scrape-actress", tt.value)
-			case "no-scrape-actress":
-				_ = cmd.Flags().Set("no-scrape-actress", tt.value)
-			}
-
-			cfg := DefaultConfig()
-			cfg.Scrapers.NormalizeScraperConfigs()
-			ApplyScrapeFlagOverrides(cmd, cfg)
-
-			// Note: DMM-specific flag tests disabled during migration from Extra to DMMConfig
-			// t.Skip("DMM Extra field migration in progress")
-		})
-	}
-}
-
-// TestApplyScrapeFlagOverrides_Browser tests browser mode flags
-func TestApplyScrapeFlagOverrides_Browser(t *testing.T) {
-	RegisterTestScraperConfigs()
-	tests := []struct {
-		name     string
-		flag     string
-		value    bool
-		expected bool
-	}{
-		{"enable browser", "browser", true, true},
-		{"disable browser", "browser", false, false},
-		{"no-browser", "no-browser", true, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := &cobra.Command{}
-			cmd.Flags().Bool("browser", false, "")
-			cmd.Flags().Bool("no-browser", false, "")
-
-			switch tt.flag {
-			case "browser":
-				if tt.value {
-					_ = cmd.Flags().Set("browser", "true")
-				} else {
-					_ = cmd.Flags().Set("browser", "false")
-				}
-			case "no-browser":
-				_ = cmd.Flags().Set("no-browser", "true")
-			}
-
-			cfg := DefaultConfig()
-			cfg.Scrapers.NormalizeScraperConfigs()
-			ApplyScrapeFlagOverrides(cmd, cfg)
-
-			// Note: DMM-specific flag tests disabled during migration from Extra to DMMConfig
-		})
-	}
-}
-
-// TestApplyScrapeFlagOverrides_BrowserTimeout tests browser-timeout flag
-func TestApplyScrapeFlagOverrides_BrowserTimeout(t *testing.T) {
-	tests := []struct {
-		name     string
-		timeout  int
-		expected int
-	}{
-		{"30 seconds", 30, 30},
-		{"60 seconds", 60, 60},
-		{"120 seconds", 120, 120},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			RegisterTestScraperConfigs()
-			cmd := &cobra.Command{}
-			cmd.Flags().Int("browser-timeout", 0, "")
-			_ = cmd.Flags().Set("browser-timeout", string(rune(tt.timeout)+'0'))
-
-			cfg := DefaultConfig()
-			cfg.Scrapers.NormalizeScraperConfigs()
-			// Note: browser_timeout was previously in Extra, now in DMMConfig
-			ApplyScrapeFlagOverrides(cmd, cfg)
-
-			// Note: DMM Extra field migration in progress
-		})
-	}
-}
-
-// TestApplyScrapeFlagOverrides_ActressDB tests actress-db flags
-func TestApplyScrapeFlagOverrides_ActressDB(t *testing.T) {
-	tests := []struct {
-		name     string
-		flag     string
-		expected bool
-	}{
-		{"enable actress-db", "actress-db", true},
-		{"disable with no-actress-db", "no-actress-db", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := &cobra.Command{}
-			cmd.Flags().Bool("actress-db", false, "")
-			cmd.Flags().Bool("no-actress-db", false, "")
-
-			switch tt.flag {
-			case "actress-db":
-				_ = cmd.Flags().Set("actress-db", "true")
-			case "no-actress-db":
-				_ = cmd.Flags().Set("no-actress-db", "true")
-			}
-
-			cfg := DefaultConfig()
-			ApplyScrapeFlagOverrides(cmd, cfg)
-
-			if cfg.Metadata.ActressDatabase.Enabled != tt.expected {
-				t.Errorf("Expected ActressDatabase.Enabled %v, got %v", tt.expected, cfg.Metadata.ActressDatabase.Enabled)
-			}
-		})
-	}
-}
-
-// TestApplyScrapeFlagOverrides_GenreReplacement tests genre-replacement flags
-func TestApplyScrapeFlagOverrides_GenreReplacement(t *testing.T) {
-	tests := []struct {
-		name     string
-		flag     string
-		expected bool
-	}{
-		{"enable genre-replacement", "genre-replacement", true},
-		{"disable with no-genre-replacement", "no-genre-replacement", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := &cobra.Command{}
-			cmd.Flags().Bool("genre-replacement", false, "")
-			cmd.Flags().Bool("no-genre-replacement", false, "")
-
-			switch tt.flag {
-			case "genre-replacement":
-				_ = cmd.Flags().Set("genre-replacement", "true")
-			case "no-genre-replacement":
-				_ = cmd.Flags().Set("no-genre-replacement", "true")
-			}
-
-			cfg := DefaultConfig()
-			ApplyScrapeFlagOverrides(cmd, cfg)
-
-			if cfg.Metadata.GenreReplacement.Enabled != tt.expected {
-				t.Errorf("Expected GenreReplacement.Enabled %v, got %v", tt.expected, cfg.Metadata.GenreReplacement.Enabled)
-			}
-		})
-	}
-}
-
-// TestBackwardCompatibilityFlags tests deprecated --headless flags
-func TestBackwardCompatibilityFlags(t *testing.T) {
-	RegisterTestScraperConfigs()
-	t.Run("deprecated headless flag", func(t *testing.T) {
-		cmd := &cobra.Command{}
-		cmd.Flags().Bool("headless", false, "")
-		_ = cmd.Flags().Set("headless", "true")
-
-		cfg := DefaultConfig()
-		cfg.Scrapers.NormalizeScraperConfigs()
-		ApplyScrapeFlagOverrides(cmd, cfg)
-
-		// Note: DMM Extra field migration in progress
-	})
-
-	t.Run("deprecated no-headless flag", func(t *testing.T) {
-		cmd := &cobra.Command{}
-		cmd.Flags().Bool("no-headless", false, "")
-		_ = cmd.Flags().Set("no-headless", "true")
-
-		cfg := DefaultConfig()
-		cfg.Scrapers.NormalizeScraperConfigs()
-		ApplyScrapeFlagOverrides(cmd, cfg)
-
-		// Note: DMM Extra field migration in progress
-	})
-
-	t.Run("deprecated headless-timeout flag", func(t *testing.T) {
-		cmd := &cobra.Command{}
-		cmd.Flags().Int("headless-timeout", 0, "")
-		_ = cmd.Flags().Set("headless-timeout", "90")
-
-		cfg := DefaultConfig()
-		cfg.Scrapers.NormalizeScraperConfigs()
-		ApplyScrapeFlagOverrides(cmd, cfg)
-
-		// Note: DMM Extra field migration in progress
-	})
-}
-
-// TestFlagPrecedence tests that new flags override deprecated ones
-func TestFlagPrecedence(t *testing.T) {
-	RegisterTestScraperConfigs()
-	t.Run("browser overrides headless", func(t *testing.T) {
-		cmd := &cobra.Command{}
-		cmd.Flags().Bool("browser", false, "")
-		cmd.Flags().Bool("headless", false, "")
-
-		// Set both flags
-		_ = cmd.Flags().Set("headless", "false")
-		_ = cmd.Flags().Set("browser", "true")
-
-		cfg := DefaultConfig()
-		cfg.Scrapers.NormalizeScraperConfigs()
-		ApplyScrapeFlagOverrides(cmd, cfg)
-
-		// Note: DMM Extra field migration in progress
-	})
-
-	t.Run("no-browser overrides no-headless", func(t *testing.T) {
-		cmd := &cobra.Command{}
-		cmd.Flags().Bool("no-browser", false, "")
-		cmd.Flags().Bool("no-headless", false, "")
-
-		_ = cmd.Flags().Set("no-headless", "false") // This would keep it enabled
-		_ = cmd.Flags().Set("no-browser", "true")   // This should disable
-
-		cfg := DefaultConfig()
-		cfg.Scrapers.NormalizeScraperConfigs()
-		ApplyScrapeFlagOverrides(cmd, cfg)
-
-		// Note: DMM Extra field migration in progress
-	})
-
-	t.Run("browser-timeout overrides headless-timeout", func(t *testing.T) {
-		cmd := &cobra.Command{}
-		cmd.Flags().Int("browser-timeout", 0, "")
-		cmd.Flags().Int("headless-timeout", 0, "")
-
-		_ = cmd.Flags().Set("headless-timeout", "60")
-		_ = cmd.Flags().Set("browser-timeout", "90")
-
-		cfg := DefaultConfig()
-		cfg.Scrapers.NormalizeScraperConfigs()
-		ApplyScrapeFlagOverrides(cmd, cfg)
-
-		// Note: DMM Extra field migration in progress
 	})
 }

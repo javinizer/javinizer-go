@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -9,6 +10,9 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/spf13/afero"
 )
 
 const (
@@ -97,11 +101,64 @@ type AuthManager struct {
 	sessionTTL     time.Duration
 	nowFn          func() time.Time
 	randReader     io.Reader
+	apiTokenRepo   database.ApiTokenRepositoryInterface
+	fs             afero.Fs
+	envLookup      func(key string) (string, bool)
 
 	failedLoginCount       int
 	failedLoginWindowStart time.Time
 	loginBlockedUntil      time.Time
 	disableRateLimit       bool
+}
+
+func (m *AuthManager) SetApiTokenRepo(repo database.ApiTokenRepositoryInterface) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.apiTokenRepo = repo
+}
+
+func (m *AuthManager) ValidateToken(ctx context.Context, tokenHash string) (string, error) {
+	m.mu.RLock()
+	repo := m.apiTokenRepo
+	m.mu.RUnlock()
+
+	if repo == nil {
+		return "", fmt.Errorf("api token repository not configured")
+	}
+
+	apiToken, err := repo.FindByTokenHash(ctx, tokenHash)
+	if err != nil {
+		return "", err
+	}
+
+	if apiToken.RevokedAt != nil {
+		return "", fmt.Errorf("token revoked")
+	}
+
+	return apiToken.ID, nil
+}
+
+func (m *AuthManager) UpdateTokenLastUsed(ctx context.Context, tokenID string) error {
+	m.mu.RLock()
+	repo := m.apiTokenRepo
+	m.mu.RUnlock()
+
+	if repo == nil {
+		return fmt.Errorf("api token repository not configured")
+	}
+
+	return repo.UpdateLastUsed(ctx, tokenID)
+}
+
+// GetEnv returns the value of the environment variable identified by key,
+// using the injectable envLookup function. Falls back to os.Getenv when
+// no custom lookup was provided at construction time.
+func (m *AuthManager) GetEnv(key string) string {
+	if m.envLookup != nil {
+		v, _ := m.envLookup(key)
+		return v
+	}
+	return os.Getenv(key)
 }
 
 // SetDisableRateLimit enables or disables rate limiting on login attempts.
@@ -112,28 +169,36 @@ func (m *AuthManager) SetDisableRateLimit(disabled bool) {
 	m.disableRateLimit = disabled
 }
 
-// CredentialPathForConfig returns the auth credential file path next to config.
-func CredentialPathForConfig(configFile string) string {
+// credentialPathForConfig returns the auth credential file path next to config.
+func credentialPathForConfig(configFile string) string {
 	return filepath.Join(filepath.Dir(configFile), credentialFilename)
 }
 
-func SessionPathForConfig(configFile string) string {
+func sessionPathForConfig(configFile string) string {
 	return filepath.Join(filepath.Dir(configFile), sessionFilename)
 }
 
 // NewAuthManager creates an auth manager and loads credentials from disk if present.
-func NewAuthManager(configFile string, sessionTTL time.Duration) (*AuthManager, error) {
+// envLookup defaults to os.LookupEnv when nil, enabling test injection.
+func NewAuthManager(configFile string, sessionTTL time.Duration, envLookup ...func(key string) (string, bool)) (*AuthManager, error) {
+	lookup := os.LookupEnv
+	if len(envLookup) > 0 && envLookup[0] != nil {
+		lookup = envLookup[0]
+	}
+
 	if sessionTTL <= 0 {
 		sessionTTL = DefaultSessionTTL
 	}
 
 	manager := &AuthManager{
-		credentialPath: CredentialPathForConfig(configFile),
-		sessionPath:    SessionPathForConfig(configFile),
+		credentialPath: credentialPathForConfig(configFile),
+		sessionPath:    sessionPathForConfig(configFile),
 		sessions:       make(map[string]sessionRecord),
 		sessionTTL:     sessionTTL,
 		nowFn:          time.Now,
 		randReader:     rand.Reader,
+		fs:             afero.NewOsFs(),
+		envLookup:      lookup,
 	}
 
 	if err := manager.loadCredentialsFromDisk(); err != nil {
@@ -142,13 +207,13 @@ func NewAuthManager(configFile string, sessionTTL time.Duration) (*AuthManager, 
 
 	manager.loadSessionsFromDisk()
 
-	e2eAuth, e2eEnabled := os.LookupEnv("JAVINIZER_E2E_AUTH")
+	e2eAuth, e2eEnabled := lookup("JAVINIZER_E2E_AUTH")
 	if e2eEnabled && e2eAuth == "true" && manager.credentials == nil {
-		username := os.Getenv("JAVINIZER_E2E_USERNAME")
+		username, _ := lookup("JAVINIZER_E2E_USERNAME")
 		if username == "" {
 			username = "admin"
 		}
-		password := os.Getenv("JAVINIZER_E2E_PASSWORD")
+		password, _ := lookup("JAVINIZER_E2E_PASSWORD")
 		if password == "" {
 			password = "adminpassword123"
 		}

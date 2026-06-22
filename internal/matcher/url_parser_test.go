@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// mockURLHandlerScraper is a test scraper that implements URLHandler
-type mockURLHandlerScraper struct {
+// mockScraper is a test scraper that implements Scraper
+type mockScraper struct {
 	name       string
 	enabled    bool
 	canHandle  bool
@@ -20,25 +20,29 @@ type mockURLHandlerScraper struct {
 	extractErr error
 }
 
-func (m *mockURLHandlerScraper) Name() string { return m.name }
-func (m *mockURLHandlerScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
+func (m *mockScraper) Name() string { return m.name }
+func (m *mockScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
 	return nil, nil
 }
-func (m *mockURLHandlerScraper) GetURL(_ string) (string, error) { return "", nil }
-func (m *mockURLHandlerScraper) IsEnabled() bool                 { return m.enabled }
-func (m *mockURLHandlerScraper) Config() *config.ScraperSettings { return nil }
-func (m *mockURLHandlerScraper) Close() error                    { return nil }
+func (m *mockScraper) GetURL(_ context.Context, _ string) (string, error) { return "", nil }
+func (m *mockScraper) IsEnabled() bool                                    { return m.enabled }
+func (m *mockScraper) Config() *models.ScraperSettings                    { return nil }
+func (m *mockScraper) Close() error                                       { return nil }
 
-// URLHandler implementation
-func (m *mockURLHandlerScraper) CanHandleURL(_ string) bool {
+// Scraper URL-handling methods
+func (m *mockScraper) CanHandleURL(_ string) bool {
 	return m.canHandle
 }
 
-func (m *mockURLHandlerScraper) ExtractIDFromURL(_ string) (string, error) {
+func (m *mockScraper) ExtractIDFromURL(_ string) (string, error) {
 	if m.extractErr != nil {
 		return "", m.extractErr
 	}
 	return m.extractID, nil
+}
+
+func (m *mockScraper) ScrapeURL(_ context.Context, _ string) (*models.ScraperResult, error) {
+	return nil, nil
 }
 
 func TestParseInput(t *testing.T) {
@@ -112,7 +116,7 @@ func TestParseInputWithRegistry(t *testing.T) {
 	tests := []struct {
 		name          string
 		input         string
-		setupRegistry func() *models.ScraperRegistry
+		setupRegistry func() *scraperutil.ScraperRegistry
 		expectedID    string
 		expectedHint  string
 		expectedIsURL bool
@@ -121,9 +125,9 @@ func TestParseInputWithRegistry(t *testing.T) {
 		{
 			name:  "DMM scraper handles URL",
 			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:      "dmm",
 					enabled:   true,
 					canHandle: true,
@@ -138,9 +142,9 @@ func TestParseInputWithRegistry(t *testing.T) {
 		{
 			name:  "R18dev scraper handles URL",
 			input: "https://r18.dev/videos/vod/movies/detail/-/id=ipx00535/",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:      "r18dev",
 					enabled:   true,
 					canHandle: true,
@@ -155,9 +159,9 @@ func TestParseInputWithRegistry(t *testing.T) {
 		{
 			name:  "LibreDMM scraper handles URL",
 			input: "https://www.libredmm.com/movies/IPX-535",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:      "libredmm",
 					enabled:   true,
 					canHandle: true,
@@ -172,9 +176,9 @@ func TestParseInputWithRegistry(t *testing.T) {
 		{
 			name:  "Registry scraper not enabled - falls through to plain ID",
 			input: "https://javbus.com/IPX-535",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:      "javbus",
 					enabled:   false,
 					canHandle: true,
@@ -189,9 +193,9 @@ func TestParseInputWithRegistry(t *testing.T) {
 		{
 			name:  "Registry scraper cannot handle URL - treats as plain ID",
 			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:      "javbus",
 					enabled:   true,
 					canHandle: false,
@@ -205,15 +209,15 @@ func TestParseInputWithRegistry(t *testing.T) {
 		{
 			name:  "Multiple scrapers - first match wins",
 			input: "https://javbus.com/IPX-535",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:      "javbus",
 					enabled:   true,
 					canHandle: true,
 					extractID: "IPX-535",
 				})
-				reg.Register(&mockURLHandlerScraper{
+				reg.RegisterInstance(&mockScraper{
 					name:      "javdb",
 					enabled:   true,
 					canHandle: true,
@@ -228,8 +232,8 @@ func TestParseInputWithRegistry(t *testing.T) {
 		{
 			name:  "Empty registry treats all input as plain ID",
 			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
-			setupRegistry: func() *models.ScraperRegistry {
-				return models.NewScraperRegistry()
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				return scraperutil.NewScraperRegistry()
 			},
 			expectedID:    "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
 			expectedHint:  "",
@@ -238,7 +242,7 @@ func TestParseInputWithRegistry(t *testing.T) {
 		{
 			name:  "Nil registry treats all input as plain ID",
 			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
-			setupRegistry: func() *models.ScraperRegistry {
+			setupRegistry: func() *scraperutil.ScraperRegistry {
 				return nil
 			},
 			expectedID:    "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
@@ -318,7 +322,7 @@ func TestReorderWithPriority(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ReorderWithPriority(tt.scrapers, tt.priority)
+			result := reorderWithPriority(tt.scrapers, tt.priority)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -329,14 +333,14 @@ func TestCalculateOptimalScrapers(t *testing.T) {
 		name            string
 		requestScrapers []string
 		configPriority  []string
-		parsed          *ParsedInput
+		parsed          *parsedInput
 		expected        []string
 	}{
 		{
 			name:            "no URL - uses config priority",
 			requestScrapers: []string{},
 			configPriority:  []string{"dmm", "r18dev", "javlibrary"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "IPX-123",
 				IsURL:              false,
 				CompatibleScrapers: nil,
@@ -348,7 +352,7 @@ func TestCalculateOptimalScrapers(t *testing.T) {
 			name:            "no URL - user override",
 			requestScrapers: []string{"javdb", "javbus"},
 			configPriority:  []string{"dmm", "r18dev"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "IPX-123",
 				IsURL:              false,
 				CompatibleScrapers: nil,
@@ -360,7 +364,7 @@ func TestCalculateOptimalScrapers(t *testing.T) {
 			name:            "URL - filters to compatible and prioritizes hint",
 			requestScrapers: []string{},
 			configPriority:  []string{"dmm", "r18dev", "javlibrary", "javdb"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "kitaike429",
 				IsURL:              true,
 				CompatibleScrapers: []string{"dmm", "javdb"},
@@ -372,7 +376,7 @@ func TestCalculateOptimalScrapers(t *testing.T) {
 			name:            "URL - user selection filtered to compatible",
 			requestScrapers: []string{"dmm", "r18dev", "javlibrary"},
 			configPriority:  []string{"dmm", "javdb"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "kitaike429",
 				IsURL:              true,
 				CompatibleScrapers: []string{"dmm"},
@@ -384,7 +388,7 @@ func TestCalculateOptimalScrapers(t *testing.T) {
 			name:            "URL - no compatible scrapers falls back to original",
 			requestScrapers: []string{"javlibrary"},
 			configPriority:  []string{"dmm", "r18dev"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "unknown123",
 				IsURL:              true,
 				CompatibleScrapers: []string{}, // Empty - no compatible scrapers
@@ -396,7 +400,7 @@ func TestCalculateOptimalScrapers(t *testing.T) {
 			name:            "URL - compatible scrapers empty and no user selection uses config",
 			requestScrapers: []string{},
 			configPriority:  []string{"dmm", "r18dev", "javlibrary"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "unknown123",
 				IsURL:              true,
 				CompatibleScrapers: []string{}, // Empty - no compatible scrapers
@@ -437,7 +441,7 @@ func TestCalculateOptimalScrapers_Priority(t *testing.T) {
 		name            string
 		requestScrapers []string
 		configPriority  []string
-		parsed          *ParsedInput
+		parsed          *parsedInput
 		expected        []string
 		description     string
 	}{
@@ -445,7 +449,7 @@ func TestCalculateOptimalScrapers_Priority(t *testing.T) {
 			name:            "multi-compatible URL uses config priority for hint",
 			requestScrapers: []string{},
 			configPriority:  []string{"bbb", "aaa", "ccc"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "test123",
 				IsURL:              true,
 				CompatibleScrapers: []string{"aaa", "bbb", "ccc"},
@@ -458,7 +462,7 @@ func TestCalculateOptimalScrapers_Priority(t *testing.T) {
 			name:            "priority hint selection ignores non-compatible scrapers",
 			requestScrapers: []string{},
 			configPriority:  []string{"xxx", "bbb", "aaa"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "test123",
 				IsURL:              true,
 				CompatibleScrapers: []string{"aaa", "bbb"},
@@ -471,7 +475,7 @@ func TestCalculateOptimalScrapers_Priority(t *testing.T) {
 			name:            "all compatible scrapers in priority order",
 			requestScrapers: []string{},
 			configPriority:  []string{"ccc", "bbb", "aaa", "ddd"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "test123",
 				IsURL:              true,
 				CompatibleScrapers: []string{"aaa", "bbb", "ccc"},
@@ -484,7 +488,7 @@ func TestCalculateOptimalScrapers_Priority(t *testing.T) {
 			name:            "user selection overrides priority-based hint",
 			requestScrapers: []string{"aaa", "bbb"},
 			configPriority:  []string{"bbb", "aaa", "ccc"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "test123",
 				IsURL:              true,
 				CompatibleScrapers: []string{"aaa", "bbb", "ccc"},
@@ -497,7 +501,7 @@ func TestCalculateOptimalScrapers_Priority(t *testing.T) {
 			name:            "no compatible scrapers returns empty",
 			requestScrapers: []string{},
 			configPriority:  []string{"bbb", "aaa"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				ID:                 "test123",
 				IsURL:              true,
 				CompatibleScrapers: []string{},
@@ -520,7 +524,7 @@ func TestParseInput_MalformedURL(t *testing.T) {
 	tests := []struct {
 		name          string
 		input         string
-		setupRegistry func() *models.ScraperRegistry
+		setupRegistry func() *scraperutil.ScraperRegistry
 		expectError   bool
 		errorContains string
 		description   string
@@ -528,9 +532,9 @@ func TestParseInput_MalformedURL(t *testing.T) {
 		{
 			name:  "malformed supported URL returns error",
 			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=INVALID/",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:       "dmm",
 					enabled:    true,
 					canHandle:  true,
@@ -546,9 +550,9 @@ func TestParseInput_MalformedURL(t *testing.T) {
 		{
 			name:  "unknown URL returns IsURL=false without error",
 			input: "https://unknown-site.com/video/123",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:       "dmm",
 					enabled:    true,
 					canHandle:  false,
@@ -563,9 +567,9 @@ func TestParseInput_MalformedURL(t *testing.T) {
 		{
 			name:  "valid URL extracts successfully",
 			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:       "dmm",
 					enabled:    true,
 					canHandle:  true,
@@ -580,16 +584,16 @@ func TestParseInput_MalformedURL(t *testing.T) {
 		{
 			name:  "first scraper fails but second succeeds",
 			input: "https://javbus.com/IPX-535",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:       "dmm",
 					enabled:    true,
 					canHandle:  true,
 					extractID:  "",
 					extractErr: fmt.Errorf("dmm cannot extract from this URL"),
 				})
-				reg.Register(&mockURLHandlerScraper{
+				reg.RegisterInstance(&mockScraper{
 					name:       "javbus",
 					enabled:    true,
 					canHandle:  true,
@@ -604,16 +608,16 @@ func TestParseInput_MalformedURL(t *testing.T) {
 		{
 			name:  "all compatible scrapers fail extraction",
 			input: "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=INVALID/",
-			setupRegistry: func() *models.ScraperRegistry {
-				reg := models.NewScraperRegistry()
-				reg.Register(&mockURLHandlerScraper{
+			setupRegistry: func() *scraperutil.ScraperRegistry {
+				reg := scraperutil.NewScraperRegistry()
+				reg.RegisterInstance(&mockScraper{
 					name:       "dmm",
 					enabled:    true,
 					canHandle:  true,
 					extractID:  "",
 					extractErr: fmt.Errorf("dmm extraction failed"),
 				})
-				reg.Register(&mockURLHandlerScraper{
+				reg.RegisterInstance(&mockScraper{
 					name:       "r18dev",
 					enabled:    true,
 					canHandle:  true,
@@ -654,13 +658,13 @@ func TestFilterScrapersForURL_AllCases(t *testing.T) {
 	tests := []struct {
 		name         string
 		userScrapers []string
-		parsed       *ParsedInput
+		parsed       *parsedInput
 		expected     []string
 	}{
 		{
 			name:         "not a URL returns user scrapers unchanged",
 			userScrapers: []string{"dmm", "r18dev"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				IsURL:              false,
 				CompatibleScrapers: nil,
 			},
@@ -669,7 +673,7 @@ func TestFilterScrapersForURL_AllCases(t *testing.T) {
 		{
 			name:         "URL with no compatible scrapers returns user scrapers",
 			userScrapers: []string{"dmm", "r18dev"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				IsURL:              true,
 				CompatibleScrapers: []string{},
 			},
@@ -678,7 +682,7 @@ func TestFilterScrapersForURL_AllCases(t *testing.T) {
 		{
 			name:         "URL with empty user scrapers uses all compatible",
 			userScrapers: []string{},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				IsURL:              true,
 				CompatibleScrapers: []string{"dmm", "javdb"},
 			},
@@ -687,7 +691,7 @@ func TestFilterScrapersForURL_AllCases(t *testing.T) {
 		{
 			name:         "URL filters user scrapers to compatible only",
 			userScrapers: []string{"dmm", "r18dev", "javlibrary"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				IsURL:              true,
 				CompatibleScrapers: []string{"dmm", "javdb"},
 			},
@@ -696,7 +700,7 @@ func TestFilterScrapersForURL_AllCases(t *testing.T) {
 		{
 			name:         "URL with no matching user scrapers falls back to compatible",
 			userScrapers: []string{"javlibrary", "javbus"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				IsURL:              true,
 				CompatibleScrapers: []string{"dmm", "javdb"},
 			},
@@ -705,7 +709,7 @@ func TestFilterScrapersForURL_AllCases(t *testing.T) {
 		{
 			name:         "URL with partial overlap returns filtered list",
 			userScrapers: []string{"dmm", "r18dev", "javdb"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				IsURL:              true,
 				CompatibleScrapers: []string{"dmm", "javdb", "libredmm"},
 			},
@@ -714,7 +718,7 @@ func TestFilterScrapersForURL_AllCases(t *testing.T) {
 		{
 			name:         "nil compatible scrapers returns user scrapers",
 			userScrapers: []string{"dmm", "r18dev"},
-			parsed: &ParsedInput{
+			parsed: &parsedInput{
 				IsURL:              true,
 				CompatibleScrapers: nil,
 			},
@@ -724,13 +728,13 @@ func TestFilterScrapersForURL_AllCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FilterScrapersForURL(tt.userScrapers, tt.parsed)
+			result := filterScrapersForURL(tt.userScrapers, tt.parsed)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
 func TestFilterScrapersForURL_NilParsed(t *testing.T) {
-	result := FilterScrapersForURL([]string{"dmm", "r18dev"}, nil)
+	result := filterScrapersForURL([]string{"dmm", "r18dev"}, nil)
 	assert.Equal(t, []string{"dmm", "r18dev"}, result)
 }

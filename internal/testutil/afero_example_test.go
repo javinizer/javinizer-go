@@ -166,7 +166,7 @@ func TestAferoWithComponentIntegration(t *testing.T) {
 	//    err := organizer.Organize(fileInfo, movie, "/output")
 	//
 	//    downloader := downloader.NewDownloader(fs, cfg, userAgent)
-	//    err := downloader.DownloadCover(movie, "/output/covers")
+	//    err := downloader.downloadCover(movie, "/output/covers")
 	//
 	//    nfoGen := nfo.NewGenerator(fs, nfoConfig)
 	//    err := nfoGen.Generate(movie, "/output/movie.nfo", "", "")

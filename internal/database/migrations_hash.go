@@ -9,7 +9,7 @@ import (
 
 const hashTableName = "schema_migrations_hash"
 
-func EnsureMigrationHashTable(db *sql.DB) error {
+func ensureMigrationHashTable(db *sql.DB) error {
 	_, err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			migration_name TEXT PRIMARY KEY,
@@ -23,7 +23,7 @@ func EnsureMigrationHashTable(db *sql.DB) error {
 	return nil
 }
 
-func ComputeMigrationHash(content []byte) string {
+func computeMigrationHash(content []byte) string {
 	hash := sha256.Sum256(content)
 	return hex.EncodeToString(hash[:])
 }
@@ -51,16 +51,4 @@ func GetStoredHash(db *sql.DB, name string) (string, error) {
 		return "", fmt.Errorf("get stored hash: %w", err)
 	}
 	return hash, nil
-}
-
-func HashMatches(db *sql.DB, name string, content []byte) (bool, string, error) {
-	stored, err := GetStoredHash(db, name)
-	if err != nil {
-		return false, "", err
-	}
-	if stored == "" {
-		return false, "", nil
-	}
-	computed := ComputeMigrationHash(content)
-	return stored == computed, stored, nil
 }

@@ -5,22 +5,23 @@ import (
 	"net/http"
 )
 
-type ErrorCode string
+type errorCode string
 
 const (
-	CodeAllowedDirsEmpty   ErrorCode = "ALLOWED_DIRS_EMPTY"
-	CodePathOutsideAllowed ErrorCode = "PATH_OUTSIDE_ALLOWED_DIRS"
-	CodePathInDenylist     ErrorCode = "PATH_IN_DENYLIST"
-	CodePathNotExist       ErrorCode = "PATH_NOT_EXIST"
-	CodePathNotDir         ErrorCode = "PATH_NOT_DIR"
-	CodePathInvalid        ErrorCode = "PATH_INVALID"
-	CodePathUnresolvable   ErrorCode = "PATH_UNRESOLVABLE"
-	CodeUNCPathBlocked     ErrorCode = "UNC_PATH_BLOCKED"
-	CodeReservedDeviceName ErrorCode = "RESERVED_DEVICE_NAME"
+	CodeAllowedDirsEmpty   errorCode = "ALLOWED_DIRS_EMPTY"
+	CodePathOutsideAllowed errorCode = "PATH_OUTSIDE_ALLOWED_DIRS"
+	CodePathInDenylist     errorCode = "PATH_IN_DENYLIST"
+	CodePathNotExist       errorCode = "PATH_NOT_EXIST"
+	CodePathNotDir         errorCode = "PATH_NOT_DIR"
+	CodePathNotFile        errorCode = "PATH_NOT_FILE"
+	CodePathInvalid        errorCode = "PATH_INVALID"
+	CodePathUnresolvable   errorCode = "PATH_UNRESOLVABLE"
+	CodeUNCPathBlocked     errorCode = "UNC_PATH_BLOCKED"
+	CodeReservedDeviceName errorCode = "RESERVED_DEVICE_NAME"
 )
 
 type PathError struct {
-	Code            ErrorCode
+	Code            errorCode
 	Message         string
 	OperatorMessage string
 	HTTPStatus      int
@@ -44,7 +45,7 @@ var (
 
 	// ErrInodeMismatch is returned when inode verification fails (possible symlink swap)
 	ErrInodeMismatch = &PathError{
-		Code:            ErrorCode("INODE_MISMATCH"),
+		Code:            errorCode("INODE_MISMATCH"),
 		Message:         "security violation: file identity changed",
 		OperatorMessage: "File was replaced or swapped after validation (possible symlink attack)",
 		HTTPStatus:      http.StatusInternalServerError,
@@ -87,6 +88,14 @@ var (
 		Code:            CodePathNotDir,
 		Message:         "path is not a directory",
 		OperatorMessage: "Provide a directory path, not a file path",
+		HTTPStatus:      http.StatusBadRequest,
+		DocsURL:         "",
+	}
+
+	ErrPathNotFile = &PathError{
+		Code:            CodePathNotFile,
+		Message:         "path is not a regular file",
+		OperatorMessage: "Provide a file path, not a directory path",
 		HTTPStatus:      http.StatusBadRequest,
 		DocsURL:         "",
 	}
@@ -135,7 +144,16 @@ func NewPathError(base *PathError, path string) *PathError {
 	}
 }
 
-func IsPathError(err error) bool {
-	var pathErr *PathError
-	return errors.As(err, &pathErr)
+// IsPathError checks whether err is a PathError with the given code.
+// This enables callers to match specific path error types without
+// depending on the internal PathError pointer identity.
+func IsPathError(err error, target *PathError) bool {
+	if err == nil || target == nil {
+		return false
+	}
+	var pe *PathError
+	if !errors.As(err, &pe) {
+		return false
+	}
+	return pe.Code == target.Code
 }

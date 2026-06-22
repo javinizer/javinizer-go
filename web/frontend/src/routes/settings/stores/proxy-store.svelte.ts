@@ -27,7 +27,11 @@ export interface ProxyStore {
 	addProxyProfile: () => void;
 	removeProxyProfile: (name: string) => void;
 	renameProxyProfile: (oldName: string, rawNewName: string) => void;
-	setProxyProfileField: (name: string, field: 'url' | 'username' | 'password', value: string) => void;
+	setProxyProfileField: (
+		name: string,
+		field: 'url' | 'username' | 'password',
+		value: string,
+	) => void;
 	saveProxyProfile: (profileName: string) => Promise<void>;
 	runNamedProxyProfileTest: (profileName: string) => Promise<void>;
 	runProxyTest: (mode: 'direct' | 'flaresolverr') => Promise<void>;
@@ -83,7 +87,11 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 		const globalProxyEnabled = config?.scrapers?.proxy?.enabled ?? false;
 		const flaresolverrEnabled = config?.scrapers?.flaresolverr?.enabled ?? false;
 
-		if (!globalProxyEnabled && !flaresolverrEnabled && Object.keys(profileTestResults).length === 0) {
+		if (
+			!globalProxyEnabled &&
+			!flaresolverrEnabled &&
+			Object.keys(profileTestResults).length === 0
+		) {
 			return false;
 		}
 
@@ -126,7 +134,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 	function proxyProfileChoices() {
 		return [
 			{ value: '', label: 'Inherit Default' },
-			...getProxyProfileNames().map((name) => ({ value: name, label: name }))
+			...getProxyProfileNames().map((name) => ({ value: name, label: name })),
 		];
 	}
 
@@ -139,7 +147,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 					return { ...option, choices };
 				}
 				return option;
-			})
+			}),
 		}));
 	}
 
@@ -178,7 +186,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 			const nextResults = { ...profileTestResults };
 			nextResults[newName] = {
 				...nextResults[oldName],
-				configSnapshot: JSON.stringify(profileData)
+				configSnapshot: JSON.stringify(profileData),
 			};
 			delete nextResults[oldName];
 			profileTestResults = nextResults;
@@ -203,7 +211,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 		sc.proxy!.profiles![name] = {
 			url: '',
 			username: '',
-			password: ''
+			password: '',
 		};
 
 		if (!sc.proxy!.default_profile) {
@@ -239,7 +247,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 	function setProxyProfileField(
 		name: string,
 		field: 'url' | 'username' | 'password',
-		value: string
+		value: string,
 	): void {
 		const config = deps.getConfig();
 		if (!config?.scrapers?.proxy?.profiles?.[name]) return;
@@ -260,7 +268,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 		try {
 			await apiClient.request('/api/v1/config', {
 				method: 'PUT',
-				body: JSON.stringify(config)
+				body: JSON.stringify(config),
 			});
 			toastStore.success(`Profile "${profileName}" saved successfully.`, 4000);
 		} catch (e) {
@@ -296,7 +304,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 					? {
 							enabled: true,
 							profile: defaultProfileName,
-							profiles: config?.scrapers?.proxy?.profiles ?? {}
+							profiles: config?.scrapers?.proxy?.profiles ?? {},
 						}
 					: {
 							enabled: true,
@@ -305,17 +313,17 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 								[profileName]: {
 									url: profile.url,
 									username: profile.username ?? '',
-									password: profile.password ?? ''
-								}
-							}
-						}
+									password: profile.password ?? '',
+								},
+							},
+						},
 			});
 
 			profileTestResults[profileName] = {
 				success: result.success,
 				timestamp: Date.now(),
 				message: result.message,
-				configSnapshot: JSON.stringify(profile)
+				configSnapshot: JSON.stringify(profile),
 			};
 
 			if (shouldAlsoValidateGlobalProxy) {
@@ -325,7 +333,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 					message: result.message,
 					configSnapshot: JSON.stringify(config?.scrapers?.proxy),
 					verificationToken: result.verification_token,
-					tokenExpiresAt: result.token_expires_at
+					tokenExpiresAt: result.token_expires_at,
 				};
 				if (result.verification_token) {
 					verificationTokens['global'] = result.verification_token;
@@ -345,12 +353,12 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 			if (result.success) {
 				toastStore.success(
 					`Profile "${profileName}" test passed (${result.duration_ms}ms): ${result.message}`,
-					7000
+					7000,
 				);
 			} else {
 				toastStore.error(
 					`Profile "${profileName}" test failed (${result.duration_ms}ms): ${result.message}`,
-					7000
+					7000,
 				);
 			}
 		} catch (e) {
@@ -378,9 +386,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 			}
 
 			const defaultProfileName = proxyConfig.default_profile;
-			const defaultProfile = defaultProfileName
-				? proxyConfig.profiles?.[defaultProfileName]
-				: null;
+			const defaultProfile = defaultProfileName ? proxyConfig.profiles?.[defaultProfileName] : null;
 
 			if (!defaultProfile?.url?.trim()) {
 				toastStore.error('Set default proxy profile URL before testing', 5000);
@@ -394,8 +400,8 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 					proxy: {
 						enabled: true,
 						profile: defaultProfileName,
-						profiles: proxyConfig.profiles
-					}
+						profiles: proxyConfig.profiles,
+					},
 				});
 
 				globalProxyTestResult = {
@@ -404,7 +410,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 					message: result.message,
 					configSnapshot: JSON.stringify(proxyConfig),
 					verificationToken: result.verification_token,
-					tokenExpiresAt: result.token_expires_at
+					tokenExpiresAt: result.token_expires_at,
 				};
 
 				if (result.verification_token) {
@@ -414,13 +420,10 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 				if (result.success) {
 					toastStore.success(
 						`Proxy test passed (${result.duration_ms}ms): ${result.message}`,
-						7000
+						7000,
 					);
 				} else {
-					toastStore.error(
-						`Proxy test failed (${result.duration_ms}ms): ${result.message}`,
-						7000
-					);
+					toastStore.error(`Proxy test failed (${result.duration_ms}ms): ${result.message}`, 7000);
 				}
 			} catch (e) {
 				globalProxyTestResult = { success: false, timestamp: Date.now() };
@@ -443,7 +446,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 				? {
 						enabled: true,
 						profile: config.scrapers.proxy.default_profile || '',
-						profiles: config.scrapers.proxy.profiles || {}
+						profiles: config.scrapers.proxy.profiles || {},
 					}
 				: { enabled: false };
 
@@ -458,8 +461,8 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 						url: config.scrapers.flaresolverr.url,
 						timeout: config.scrapers.flaresolverr.timeout ?? 30,
 						max_retries: config.scrapers.flaresolverr.max_retries ?? 3,
-						session_ttl: config.scrapers.flaresolverr.session_ttl ?? 300
-					}
+						session_ttl: config.scrapers.flaresolverr.session_ttl ?? 300,
+					},
 				});
 
 				globalFlareSolverrTestResult = {
@@ -468,7 +471,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 					message: result.message,
 					configSnapshot: JSON.stringify(config.scrapers.flaresolverr),
 					verificationToken: result.verification_token,
-					tokenExpiresAt: result.token_expires_at
+					tokenExpiresAt: result.token_expires_at,
 				};
 
 				if (result.verification_token) {
@@ -478,12 +481,12 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 				if (result.success) {
 					toastStore.success(
 						`FlareSolverr test passed (${result.duration_ms}ms): ${result.message}`,
-						7000
+						7000,
 					);
 				} else {
 					toastStore.error(
 						`FlareSolverr test failed (${result.duration_ms}ms): ${result.message}`,
-						7000
+						7000,
 					);
 				}
 			} catch (e) {
@@ -504,14 +507,30 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 	}
 
 	return {
-		get testingProxy() { return testingProxy; },
-		get testingFlareSolverr() { return testingFlareSolverr; },
-		get testingProfile() { return testingProfile; },
-		get savingProfile() { return savingProfile; },
-		get profileTestResults() { return profileTestResults; },
-		get globalProxyTestResult() { return globalProxyTestResult; },
-		get globalFlareSolverrTestResult() { return globalFlareSolverrTestResult; },
-		get verificationTokens() { return verificationTokens; },
+		get testingProxy() {
+			return testingProxy;
+		},
+		get testingFlareSolverr() {
+			return testingFlareSolverr;
+		},
+		get testingProfile() {
+			return testingProfile;
+		},
+		get savingProfile() {
+			return savingProfile;
+		},
+		get profileTestResults() {
+			return profileTestResults;
+		},
+		get globalProxyTestResult() {
+			return globalProxyTestResult;
+		},
+		get globalFlareSolverrTestResult() {
+			return globalFlareSolverrTestResult;
+		},
+		get verificationTokens() {
+			return verificationTokens;
+		},
 		canSaveProfile,
 		canSaveGlobalProxy,
 		canSaveGlobalFlareSolverr,
@@ -531,6 +550,6 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 		runNamedProxyProfileTest,
 		runProxyTest,
 		updateScraperProfileRefs,
-		clearTestResults
+		clearTestResults,
 	};
 }

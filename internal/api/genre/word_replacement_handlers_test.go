@@ -2,6 +2,7 @@ package genre
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -17,33 +17,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestWordDeps(t *testing.T) *core.ServerDependencies {
+func newTestWordDeps(t *testing.T) (GenreDeps, *database.WordReplacementRepository) {
 	t.Helper()
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{Type: "sqlite", DSN: ":memory:"},
 		Logging:  config.LoggingConfig{Level: "error"},
 	}
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	t.Cleanup(func() { _ = db.Close() })
-	return &core.ServerDependencies{
-		GenreReplacementRepo: database.NewGenreReplacementRepository(db),
-		WordReplacementRepo:  database.NewWordReplacementRepository(db),
-	}
+	genreRepo := database.NewGenreReplacementRepository(db)
+	wordRepo := database.NewWordReplacementRepository(db)
+	deps := NewGenreDeps(database.ReplacementRepos{GenreReplacementRepo: genreRepo, WordReplacementRepo: wordRepo}, database.TranslationRepos{})
+	return deps, wordRepo
 }
 
 func TestWordReplacementList(t *testing.T) {
-	deps := newTestWordDeps(t)
-	repo := deps.WordReplacementRepo
+	deps, repo := newTestWordDeps(t)
 
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "F***", Replacement: "Fuck"}))
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "R**e", Replacement: "Rape"}))
+	require.NoError(t, repo.Create(context.Background(), &models.WordReplacement{Original: "F***", Replacement: "Fuck"}))
+	require.NoError(t, repo.Create(context.Background(), &models.WordReplacement{Original: "R**e", Replacement: "Rape"}))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	req := httptest.NewRequest("GET", "/words/replacements", nil)
 	w := httptest.NewRecorder()
@@ -58,11 +57,10 @@ func TestWordReplacementList(t *testing.T) {
 }
 
 func TestWordReplacementListPagination(t *testing.T) {
-	deps := newTestWordDeps(t)
-	repo := deps.WordReplacementRepo
+	deps, repo := newTestWordDeps(t)
 
 	for i := 0; i < 5; i++ {
-		require.NoError(t, repo.Create(&models.WordReplacement{
+		require.NoError(t, repo.Create(context.Background(), &models.WordReplacement{
 			Original:    fmt.Sprintf("word%d", i),
 			Replacement: fmt.Sprintf("Word%d", i),
 		}))
@@ -71,7 +69,7 @@ func TestWordReplacementListPagination(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	req := httptest.NewRequest("GET", "/words/replacements?limit=2&offset=0", nil)
 	w := httptest.NewRecorder()
@@ -86,12 +84,12 @@ func TestWordReplacementListPagination(t *testing.T) {
 }
 
 func TestWordReplacementCreate(t *testing.T) {
-	deps := newTestWordDeps(t)
+	deps, _ := newTestWordDeps(t)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	payload := map[string]string{"original": "F***", "replacement": "Fuck"}
 	body, err := json.Marshal(payload)
@@ -111,12 +109,12 @@ func TestWordReplacementCreate(t *testing.T) {
 }
 
 func TestWordReplacementCreateEmptyOriginal(t *testing.T) {
-	deps := newTestWordDeps(t)
+	deps, _ := newTestWordDeps(t)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	payload := map[string]string{"original": "", "replacement": "Test"}
 	body, err := json.Marshal(payload)
@@ -131,12 +129,12 @@ func TestWordReplacementCreateEmptyOriginal(t *testing.T) {
 }
 
 func TestWordReplacementCreateIdempotent(t *testing.T) {
-	deps := newTestWordDeps(t)
+	deps, _ := newTestWordDeps(t)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	payload := map[string]string{"original": "R**e", "replacement": "Rape"}
 	body, _ := json.Marshal(payload)
@@ -156,14 +154,13 @@ func TestWordReplacementCreateIdempotent(t *testing.T) {
 }
 
 func TestWordReplacementUpdate(t *testing.T) {
-	deps := newTestWordDeps(t)
-	repo := deps.WordReplacementRepo
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "F***", Replacement: "Fuck"}))
+	deps, repo := newTestWordDeps(t)
+	require.NoError(t, repo.Create(context.Background(), &models.WordReplacement{Original: "F***", Replacement: "Fuck"}))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	payload := map[string]string{"original": "F***", "replacement": "Forcing"}
 	body, _ := json.Marshal(payload)
@@ -181,12 +178,12 @@ func TestWordReplacementUpdate(t *testing.T) {
 }
 
 func TestWordReplacementUpdateNotFound(t *testing.T) {
-	deps := newTestWordDeps(t)
+	deps, _ := newTestWordDeps(t)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	payload := map[string]string{"original": "nonexistent", "replacement": "test"}
 	body, _ := json.Marshal(payload)
@@ -200,15 +197,14 @@ func TestWordReplacementUpdateNotFound(t *testing.T) {
 }
 
 func TestWordReplacementDeleteByID(t *testing.T) {
-	deps := newTestWordDeps(t)
-	repo := deps.WordReplacementRepo
+	deps, repo := newTestWordDeps(t)
 	wr := &models.WordReplacement{Original: "K**l", Replacement: "Kill"}
-	require.NoError(t, repo.Create(wr))
+	require.NoError(t, repo.Create(context.Background(), wr))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	req := httptest.NewRequest("DELETE", fmt.Sprintf("/words/replacements?id=%d", wr.ID), nil)
 	w := httptest.NewRecorder()
@@ -218,14 +214,13 @@ func TestWordReplacementDeleteByID(t *testing.T) {
 }
 
 func TestWordReplacementDeleteByOriginal(t *testing.T) {
-	deps := newTestWordDeps(t)
-	repo := deps.WordReplacementRepo
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "B***d", Replacement: "Blood"}))
+	deps, repo := newTestWordDeps(t)
+	require.NoError(t, repo.Create(context.Background(), &models.WordReplacement{Original: "B***d", Replacement: "Blood"}))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	req := httptest.NewRequest("DELETE", "/words/replacements?original=B***d", nil)
 	w := httptest.NewRecorder()
@@ -235,12 +230,12 @@ func TestWordReplacementDeleteByOriginal(t *testing.T) {
 }
 
 func TestWordReplacementDeleteMissingParam(t *testing.T) {
-	deps := newTestWordDeps(t)
+	deps, _ := newTestWordDeps(t)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	req := httptest.NewRequest("DELETE", "/words/replacements", nil)
 	w := httptest.NewRecorder()
@@ -250,12 +245,12 @@ func TestWordReplacementDeleteMissingParam(t *testing.T) {
 }
 
 func TestWordReplacementDeleteNotFound(t *testing.T) {
-	deps := newTestWordDeps(t)
+	deps, _ := newTestWordDeps(t)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	req := httptest.NewRequest("DELETE", "/words/replacements?id=9999", nil)
 	w := httptest.NewRecorder()
@@ -265,12 +260,12 @@ func TestWordReplacementDeleteNotFound(t *testing.T) {
 }
 
 func TestWordReplacementDeleteByOriginalNotFound(t *testing.T) {
-	deps := newTestWordDeps(t)
+	deps, _ := newTestWordDeps(t)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	req := httptest.NewRequest("DELETE", "/words/replacements?original=nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -280,14 +275,13 @@ func TestWordReplacementDeleteByOriginalNotFound(t *testing.T) {
 }
 
 func TestWordReplacementExport(t *testing.T) {
-	deps := newTestWordDeps(t)
-	repo := deps.WordReplacementRepo
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "R**e", Replacement: "Rape"}))
+	deps, repo := newTestWordDeps(t)
+	require.NoError(t, repo.Create(context.Background(), &models.WordReplacement{Original: "R**e", Replacement: "Rape"}))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	req := httptest.NewRequest("GET", "/words/replacements/export", nil)
 	w := httptest.NewRecorder()
@@ -302,12 +296,12 @@ func TestWordReplacementExport(t *testing.T) {
 }
 
 func TestWordReplacementImport(t *testing.T) {
-	deps := newTestWordDeps(t)
+	deps, _ := newTestWordDeps(t)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	importPayload := map[string]interface{}{
 		"replacements": []map[string]string{
@@ -333,12 +327,12 @@ func TestWordReplacementImport(t *testing.T) {
 }
 
 func TestWordReplacementImport_SkipsDefaults(t *testing.T) {
-	deps := newTestWordDeps(t)
+	deps, _ := newTestWordDeps(t)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	importPayload := map[string]interface{}{
 		"replacements": []map[string]string{
@@ -363,14 +357,13 @@ func TestWordReplacementImport_SkipsDefaults(t *testing.T) {
 }
 
 func TestWordReplacementImport_ExistingUnchanged(t *testing.T) {
-	deps := newTestWordDeps(t)
-	repo := deps.WordReplacementRepo
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "CENSORED_X", Replacement: "UncensoredX"}))
+	deps, repo := newTestWordDeps(t)
+	require.NoError(t, repo.Create(context.Background(), &models.WordReplacement{Original: "CENSORED_X", Replacement: "UncensoredX"}))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	importPayload := map[string]interface{}{
 		"replacements": []map[string]string{
@@ -394,14 +387,13 @@ func TestWordReplacementImport_ExistingUnchanged(t *testing.T) {
 }
 
 func TestWordReplacementImport_ExistingUpdated(t *testing.T) {
-	deps := newTestWordDeps(t)
-	repo := deps.WordReplacementRepo
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "CENSORED_Y", Replacement: "OldValue"}))
+	deps, repo := newTestWordDeps(t)
+	require.NoError(t, repo.Create(context.Background(), &models.WordReplacement{Original: "CENSORED_Y", Replacement: "OldValue"}))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 
 	importPayload := map[string]interface{}{
 		"replacements": []map[string]string{

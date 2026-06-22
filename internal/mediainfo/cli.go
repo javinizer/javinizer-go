@@ -4,59 +4,89 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// CLIProber implements the Prober interface using MediaInfo CLI
-type CLIProber struct {
-	enabled bool
-	path    string
-	timeout int
+// execRunner abstracts exec.CommandContext for testability.
+type execRunner interface {
+	output(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
-// NewCLIProber creates a new CLI prober
-func NewCLIProber(cfg *MediaInfoConfig) *CLIProber {
+// realExecRunner delegates to exec.CommandContext in production.
+type realExecRunner struct{}
+
+func (realExecRunner) output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+// mockExecRunner is a test double for execRunner.
+//
+//nolint:unused // used by same-package tests
+type mockExecRunner struct {
+	outputFn func(ctx context.Context, name string, args ...string) ([]byte, error)
+}
+
+//nolint:unused // used by same-package tests
+func (m *mockExecRunner) output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return m.outputFn(ctx, name, args...)
+}
+
+// cliProber implements the prober interface using MediaInfo CLI
+type cliProber struct {
+	enabled    bool
+	path       string
+	timeout    int
+	execRunner execRunner
+}
+
+// newCLIProber creates a new CLI prober
+func newCLIProber(cfg *mediaInfoConfig) *cliProber {
 	if cfg == nil {
-		cfg = DefaultMediaInfoConfig()
+		cfg = defaultMediaInfoConfig()
 	}
-	return &CLIProber{
-		enabled: cfg.CLIEnabled,
-		path:    cfg.CLIPath,
-		timeout: cfg.CLITimeout,
+	return &cliProber{
+		enabled:    cfg.CLIEnabled,
+		path:       cfg.CLIPath,
+		timeout:    cfg.CLITimeout,
+		execRunner: realExecRunner{},
 	}
 }
 
 // Name returns the prober identifier
-func (p *CLIProber) Name() string {
+func (p *cliProber) Name() string {
 	return "mediainfo-cli"
 }
 
-// CanProbe checks if this prober can handle the file based on header
-func (p *CLIProber) CanProbe(header []byte) bool {
+// canProbe checks if this prober can handle the file based on header
+func (p *cliProber) canProbe(header []byte) bool {
 	// CLI can probe anything if enabled
 	return p.enabled
 }
 
 // Probe extracts metadata from the file using MediaInfo CLI
-func (p *CLIProber) Probe(f *os.File) (*VideoInfo, error) {
+func (p *cliProber) Probe(ctx context.Context, f FileReader) (*VideoInfo, error) {
 	if !p.enabled {
 		return nil, fmt.Errorf("MediaInfo CLI is disabled")
 	}
 
-	// Get file path
-	filePath := f.Name()
+	// Get file path from fileReaderStat if available
+	var filePath string
+	if stat, ok := f.(fileReaderStat); ok {
+		filePath = stat.Name()
+	}
+	if filePath == "" {
+		return nil, fmt.Errorf("MediaInfo CLI requires a file path but FileReader does not expose Name")
+	}
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.timeout)*time.Second)
+	// Create context with timeout using caller-provided context
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(p.timeout)*time.Second)
 	defer cancel()
 
 	// Execute mediainfo with JSON output
-	cmd := exec.CommandContext(ctx, p.path, "--Output=JSON", filePath)
-	output, err := cmd.Output()
+	output, err := p.execRunner.output(ctx, p.path, "--Output=JSON", filePath)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("mediainfo command timed out after %d seconds", p.timeout)

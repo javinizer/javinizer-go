@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -20,20 +21,22 @@ import (
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
+// testDownloadProxyResolver implements models.DownloadProxyResolver for testing.
+// It does NOT implement the full models.Scraper interface — only the
+// resolver method needed by []models.DownloadProxyResolver fields.
 type testDownloadProxyResolver struct {
 	match            func(host string) bool
-	downloadOverride *config.ProxyConfig
-	scraperProxy     *config.ProxyConfig
+	downloadOverride *models.ProxyConfig
+	scraperProxy     *models.ProxyConfig
 }
 
-func (r testDownloadProxyResolver) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (r testDownloadProxyResolver) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	if r.match == nil {
 		return nil, nil, false
 	}
@@ -44,12 +47,12 @@ func (r testDownloadProxyResolver) ResolveDownloadProxyForHost(host string) (*co
 }
 
 // helper to get or create scraper settings in Overrides map
-func getOrCreateScraper(cfg *config.Config, name string) *config.ScraperSettings {
+func getOrCreateScraper(cfg *config.Config, name string) *models.ScraperSettings {
 	if cfg.Scrapers.Overrides == nil {
-		cfg.Scrapers.Overrides = make(map[string]*config.ScraperSettings)
+		cfg.Scrapers.Overrides = make(map[string]*models.ScraperSettings)
 	}
 	if cfg.Scrapers.Overrides[name] == nil {
-		cfg.Scrapers.Overrides[name] = &config.ScraperSettings{}
+		cfg.Scrapers.Overrides[name] = &models.ScraperSettings{}
 	}
 	return cfg.Scrapers.Overrides[name]
 }
@@ -61,7 +64,7 @@ func createTestMovie() *models.Movie {
 		ContentID:   "ipx00535",
 		Title:       "Test Movie",
 		ReleaseDate: &releaseDate,
-		CoverURL:    "http://example.com/cover.jpg",
+		Poster:      models.PosterState{CoverURL: "http://example.com/cover.jpg"},
 		TrailerURL:  "http://example.com/trailer.mp4",
 		Screenshots: []string{
 			"http://example.com/screenshot1.jpg",
@@ -93,18 +96,20 @@ func TestDownloader_DownloadCover(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
-	movie.CoverURL = server.URL + "/cover.jpg"
+	movie.Poster.CoverURL = server.URL + "/cover.jpg"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover: true,
-		FanartFormat:  "<ID>-fanart.jpg",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			FanartFormat: "<ID>-fanart.jpg",
+		},
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadCover(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadCover(context.Background(), movie, tmpDir, nil)
 	if err != nil {
-		t.Fatalf("DownloadCover failed: %v", err)
+		t.Fatalf("downloadCover failed: %v", err)
 	}
 
 	if !result.Downloaded {
@@ -139,15 +144,15 @@ func TestDownloader_DownloadCover_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover: false,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadCover(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadCover(context.Background(), movie, tmpDir, nil)
 	if err != nil {
-		t.Fatalf("DownloadCover failed: %v", err)
+		t.Fatalf("downloadCover failed: %v", err)
 	}
 
 	if result.Downloaded {
@@ -159,12 +164,14 @@ func TestDownloader_DownloadCover_AlreadyExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover: true,
-		FanartFormat:  "<ID>-fanart.jpg",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			FanartFormat: "<ID>-fanart.jpg",
+		},
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
 	// Create existing file
 	existingPath := filepath.Join(tmpDir, "IPX-535-fanart.jpg")
@@ -172,9 +179,9 @@ func TestDownloader_DownloadCover_AlreadyExists(t *testing.T) {
 		t.Fatalf("Failed to create existing file: %v", err)
 	}
 
-	result, err := downloader.DownloadCover(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadCover(context.Background(), movie, tmpDir, nil)
 	if err != nil {
-		t.Fatalf("DownloadCover failed: %v", err)
+		t.Fatalf("downloadCover failed: %v", err)
 	}
 
 	// Should not download again
@@ -204,18 +211,20 @@ func TestDownloader_DownloadExtrafanart(t *testing.T) {
 		server.URL + "/screenshot3.jpg",
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadExtrafanart: true,
-		ScreenshotFolder:    "extrafanart",
-		ScreenshotFormat:    "fanart<INDEX:2>.jpg",
-		ScreenshotPadding:   2,
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			ScreenshotFolder:  "extrafanart",
+			ScreenshotFormat:  "fanart<INDEX:2>.jpg",
+			ScreenshotPadding: 2,
+		},
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.DownloadExtrafanart(context.Background(), movie, tmpDir, nil)
+	results, err := downloader.downloadExtrafanart(context.Background(), movie, tmpDir, nil, true)
 	if err != nil {
-		t.Fatalf("DownloadExtrafanart failed: %v", err)
+		t.Fatalf("downloadExtrafanart failed: %v", err)
 	}
 
 	if len(results) != 3 {
@@ -250,15 +259,15 @@ func TestDownloader_DownloadTrailer(t *testing.T) {
 	movie := createTestMovie()
 	movie.TrailerURL = server.URL + "/trailer.mp4"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadTrailer: true,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadTrailer(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadTrailer(context.Background(), movie, tmpDir, nil)
 	if err != nil {
-		t.Fatalf("DownloadTrailer failed: %v", err)
+		t.Fatalf("downloadTrailer failed: %v", err)
 	}
 
 	if !result.Downloaded {
@@ -296,15 +305,15 @@ func TestDownloader_DownloadActressImages(t *testing.T) {
 	movie.Actresses[0].ThumbURL = server.URL + "/actress1.jpg"
 	movie.Actresses[1].ThumbURL = server.URL + "/actress2.jpg"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadActress: true,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.DownloadActressImages(context.Background(), movie, tmpDir)
+	results, err := downloader.downloadActressImages(context.Background(), movie, tmpDir)
 	if err != nil {
-		t.Fatalf("DownloadActressImages failed: %v", err)
+		t.Fatalf("downloadActressImages failed: %v", err)
 	}
 
 	if len(results) != 2 {
@@ -336,15 +345,15 @@ func TestDownloader_Download_BadStatusCode(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
-	movie.CoverURL = server.URL + "/notfound.jpg"
+	movie.Poster.CoverURL = server.URL + "/notfound.jpg"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover: true,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadCover(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadCover(context.Background(), movie, tmpDir, nil)
 	if err == nil {
 		t.Error("Expected error for 404 status")
 	}
@@ -367,28 +376,30 @@ func TestDownloader_DownloadAll_MultiPartFilenames(t *testing.T) {
 	defer server.Close()
 
 	// Use multipart conditional templates
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover:       true,
 		DownloadPoster:      false, // Skip poster to simplify test
 		DownloadExtrafanart: false,
 		DownloadTrailer:     false,
 		DownloadActress:     false,
-		FanartFormat:        "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			FanartFormat: "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
+		},
 	}
 
 	movie := &models.Movie{
-		ID:       "IPX-535",
-		Title:    "Test Movie",
-		CoverURL: server.URL + "/cover.jpg",
+		ID:     "IPX-535",
+		Title:  "Test Movie",
+		Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg"},
 	}
 
-	dl := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	dl := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
 	// Test single file (no multipart)
 	tmpDir1 := t.TempDir()
-	results1, err := dl.DownloadAll(context.Background(), movie, tmpDir1, nil)
+	results1, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir1, nil, true)
 	if err != nil {
-		t.Fatalf("DownloadAll (single) failed: %v", err)
+		t.Fatalf("downloadAll (single) failed: %v", err)
 	}
 	if len(results1) == 0 {
 		t.Fatal("Expected at least one download")
@@ -402,9 +413,9 @@ func TestDownloader_DownloadAll_MultiPartFilenames(t *testing.T) {
 	// Test multipart file
 	tmpDir2 := t.TempDir()
 	multipart := &MultipartInfo{IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"}
-	results2, err := dl.DownloadAll(context.Background(), movie, tmpDir2, multipart)
+	results2, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir2, multipart, true)
 	if err != nil {
-		t.Fatalf("DownloadAll (multipart) failed: %v", err)
+		t.Fatalf("downloadAll (multipart) failed: %v", err)
 	}
 	if len(results2) == 0 {
 		t.Fatal("Expected at least one download")
@@ -428,22 +439,23 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 
 	// Test with templates WITHOUT multipart placeholders (shared filenames)
 	// This tests that file-exists deduplication works correctly
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover:       true,
 		DownloadPoster:      true,
 		DownloadExtrafanart: true,
 		DownloadTrailer:     true,
 		DownloadActress:     true,
-		PosterFormat:        "<ID>-poster",
-		FanartFormat:        "<ID>-fanart",
-		TrailerFormat:       "<ID>-trailer",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			PosterFormat:  "<ID>-poster",
+			FanartFormat:  "<ID>-fanart",
+			TrailerFormat: "<ID>-trailer",
+		},
 	}
 
 	movie := &models.Movie{
-		ID:        "IPX-535",
-		Title:     "Test Movie",
-		CoverURL:  server.URL + "/cover.jpg",
-		PosterURL: server.URL + "/poster.jpg",
+		ID:     "IPX-535",
+		Title:  "Test Movie",
+		Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg", PosterURL: server.URL + "/poster.jpg"},
 		Screenshots: []string{
 			server.URL + "/screen1.jpg",
 			server.URL + "/screen2.jpg",
@@ -454,13 +466,13 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 		},
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
 	// Part 1 should download everything
 	multipartPart1 := &MultipartInfo{IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"}
-	resultsPart1, err := downloader.DownloadAll(context.Background(), movie, tmpDir, multipartPart1)
+	resultsPart1, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, multipartPart1, true)
 	if err != nil {
-		t.Fatalf("DownloadAll part 1 failed: %v", err)
+		t.Fatalf("downloadAll part 1 failed: %v", err)
 	}
 
 	if len(resultsPart1) == 0 {
@@ -478,9 +490,9 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 	// Part 2 returns results but with Downloaded=false (files already exist with same names)
 	// Note: Actress images are not included for part 2+ (only first part downloads them)
 	multipartPart2 := &MultipartInfo{IsMultiPart: true, PartNumber: 2, PartSuffix: "-pt2"}
-	resultsPart2, err := downloader.DownloadAll(context.Background(), movie, tmpDir, multipartPart2)
+	resultsPart2, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, multipartPart2, true)
 	if err != nil {
-		t.Fatalf("DownloadAll part 2 failed: %v", err)
+		t.Fatalf("downloadAll part 2 failed: %v", err)
 	}
 
 	// Part 2 should return results (cover, poster, screenshots, trailer - no actresses)
@@ -498,9 +510,9 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 
 	// nil (single file) should download everything
 	tmpDir2 := t.TempDir()
-	resultsSingle, err := downloader.DownloadAll(context.Background(), movie, tmpDir2, nil)
+	resultsSingle, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir2, nil, true)
 	if err != nil {
-		t.Fatalf("DownloadAll single file failed: %v", err)
+		t.Fatalf("downloadAll single file failed: %v", err)
 	}
 
 	if len(resultsSingle) == 0 {
@@ -517,7 +529,7 @@ func TestDownloader_DownloadAll(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
-	movie.CoverURL = server.URL + "/cover.jpg"
+	movie.Poster.CoverURL = server.URL + "/cover.jpg"
 	movie.TrailerURL = server.URL + "/trailer.mp4"
 	movie.Screenshots = []string{
 		server.URL + "/screenshot1.jpg",
@@ -525,7 +537,7 @@ func TestDownloader_DownloadAll(t *testing.T) {
 	}
 	movie.Actresses[0].ThumbURL = server.URL + "/actress1.jpg"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover:       true,
 		DownloadPoster:      true,
 		DownloadExtrafanart: true,
@@ -533,11 +545,11 @@ func TestDownloader_DownloadAll(t *testing.T) {
 		DownloadActress:     true,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.DownloadAll(context.Background(), movie, tmpDir, nil) // nil = single file
+	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true) // nil = single file
 	if err != nil {
-		t.Fatalf("DownloadAll failed: %v", err)
+		t.Fatalf("downloadAll failed: %v", err)
 	}
 
 	// Should have: cover, poster, 2 screenshots, trailer, 1 actress = 7 total
@@ -569,9 +581,9 @@ func TestDownloader_DownloadAll_IncludesFailedResults(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
-	movie.CoverURL = server.URL + "/cover.jpg"
+	movie.Poster.CoverURL = server.URL + "/cover.jpg"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover:       true,
 		DownloadPoster:      false,
 		DownloadExtrafanart: false,
@@ -579,9 +591,14 @@ func TestDownloader_DownloadAll_IncludesFailedResults(t *testing.T) {
 		DownloadActress:     false,
 	}
 
-	dl := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
-	results, err := dl.DownloadAll(context.Background(), movie, tmpDir, nil)
-	require.NoError(t, err)
+	dl := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
+	results, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true)
+
+	// Cover is the only critical media and it failed — expect DownloadPartialError
+	var partial *DownloadPartialError
+	require.True(t, errors.As(err, &partial), "expected DownloadPartialError when all critical media fails")
+	assert.Equal(t, 1, partial.Attempted)
+	assert.Equal(t, 0, partial.Succeeded)
 
 	foundCover := false
 	for _, result := range results {
@@ -590,35 +607,11 @@ func TestDownloader_DownloadAll_IncludesFailedResults(t *testing.T) {
 		}
 		foundCover = true
 		require.Error(t, result.Error)
-		assert.Contains(t, result.Error.Error(), "bad status code")
+		assert.Contains(t, result.Error.Error(), "HTTP 500")
 		assert.False(t, result.Downloaded)
 	}
 
 	assert.True(t, foundCover, "expected cover result to be present even when download fails")
-}
-
-func TestGetImageExtension(t *testing.T) {
-	testCases := []struct {
-		url      string
-		expected string
-	}{
-		{"http://example.com/image.jpg", ".jpg"},
-		{"http://example.com/image.jpeg", ".jpeg"},
-		{"http://example.com/image.png", ".png"},
-		{"http://example.com/image.gif", ".gif"},
-		{"http://example.com/image.webp", ".webp"},
-		{"http://example.com/image", ".jpg"},     // Default
-		{"http://example.com/image.JPG", ".jpg"}, // Case insensitive
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.url, func(t *testing.T) {
-			result := GetImageExtension(tc.url)
-			if result != tc.expected {
-				t.Errorf("Expected %s, got %s", tc.expected, result)
-			}
-		})
-	}
 }
 
 func TestResolveDownloadReferer(t *testing.T) {
@@ -669,261 +662,6 @@ func TestResolveDownloadReferer(t *testing.T) {
 	}
 }
 
-func TestDownloader_generateFilename(t *testing.T) {
-	cfg := &config.OutputConfig{
-		PosterFormat:     "<ID>-poster.jpg",
-		FanartFormat:     "<ID>-fanart.jpg",
-		TrailerFormat:    "<ID>-trailer.mp4",
-		ScreenshotFormat: "fanart",
-		ActressFolder:    ".actors",
-	}
-
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
-
-	movie := createTestMovie()
-
-	tests := []struct {
-		name        string
-		template    string
-		index       int
-		multipart   *MultipartInfo
-		expected    string
-		description string
-	}{
-		{
-			name:        "Poster template",
-			template:    "<ID>-poster.jpg",
-			index:       0,
-			multipart:   nil,
-			expected:    "IPX-535-poster.jpg",
-			description: "Simple poster template with ID",
-		},
-		{
-			name:        "Fanart template with title",
-			template:    "<ID>-<TITLE>-fanart.jpg",
-			index:       0,
-			multipart:   nil,
-			expected:    "IPX-535-Test Movie-fanart.jpg",
-			description: "Template with title",
-		},
-		{
-			name:        "Screenshot with index",
-			template:    "fanart<INDEX:2>.jpg",
-			index:       5,
-			multipart:   nil,
-			expected:    "fanart05.jpg",
-			description: "Screenshot template with padded index",
-		},
-		{
-			name:        "Complex template",
-			template:    "<ID>-<TITLE:10>-<YEAR>.jpg",
-			index:       0,
-			multipart:   nil,
-			expected:    "IPX-535-Test Movie-2020.jpg",
-			description: "Complex template with title truncation",
-		},
-		{
-			name:        "Empty template",
-			template:    "",
-			index:       0,
-			multipart:   nil,
-			expected:    "",
-			description: "Empty template returns empty string",
-		},
-		// Multipart conditional templating tests
-		{
-			name:        "Multipart conditional - single file (nil multipart)",
-			template:    "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
-			index:       0,
-			multipart:   nil,
-			expected:    "IPX-535-poster.jpg",
-			description: "Single file should not include multipart section",
-		},
-		{
-			name:        "Multipart conditional - multi-part file part 1",
-			template:    "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
-			index:       0,
-			multipart:   &MultipartInfo{IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"},
-			expected:    "IPX-535-pt1-poster.jpg",
-			description: "Multi-part file part 1 should include part number",
-		},
-		{
-			name:        "Multipart conditional - multi-part file part 2",
-			template:    "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
-			index:       0,
-			multipart:   &MultipartInfo{IsMultiPart: true, PartNumber: 2, PartSuffix: "-pt2"},
-			expected:    "IPX-535-pt2-poster.jpg",
-			description: "Multi-part file part 2 should include part number",
-		},
-		{
-			name:        "Multipart PARTSUFFIX placeholder",
-			template:    "<ID><PARTSUFFIX>-fanart.jpg",
-			index:       0,
-			multipart:   &MultipartInfo{IsMultiPart: true, PartNumber: 1, PartSuffix: "-A"},
-			expected:    "IPX-535-A-fanart.jpg",
-			description: "PARTSUFFIX should use original suffix from filename",
-		},
-		{
-			name:        "Multipart PARTSUFFIX - single file (empty)",
-			template:    "<ID><PARTSUFFIX>-fanart.jpg",
-			index:       0,
-			multipart:   nil,
-			expected:    "IPX-535-fanart.jpg",
-			description: "PARTSUFFIX should be empty for single files",
-		},
-		{
-			name:        "Multipart PART:2 zero-padded",
-			template:    "<ID>-pt<PART:2>-poster.jpg",
-			index:       0,
-			multipart:   &MultipartInfo{IsMultiPart: true, PartNumber: 3, PartSuffix: "-pt3"},
-			expected:    "IPX-535-pt03-poster.jpg",
-			description: "PART:2 should zero-pad to 2 digits",
-		},
-		{
-			name:        "Multipart conditional with fanart",
-			template:    "<ID><IF:MULTIPART><PARTSUFFIX></IF>-fanart.jpg",
-			index:       0,
-			multipart:   &MultipartInfo{IsMultiPart: true, PartNumber: 2, PartSuffix: "-cd2"},
-			expected:    "IPX-535-cd2-fanart.jpg",
-			description: "Fanart template with multipart conditional and PARTSUFFIX",
-		},
-		{
-			name:        "Multipart conditional with trailer",
-			template:    "<ID><IF:MULTIPART>-part<PART></IF>-trailer.mp4",
-			index:       0,
-			multipart:   &MultipartInfo{IsMultiPart: true, PartNumber: 1, PartSuffix: "-pt1"},
-			expected:    "IPX-535-part1-trailer.mp4",
-			description: "Trailer template with multipart conditional",
-		},
-		{
-			name:        "Multipart IsMultiPart false should not render conditional",
-			template:    "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
-			index:       0,
-			multipart:   &MultipartInfo{IsMultiPart: false, PartNumber: 0, PartSuffix: ""},
-			expected:    "IPX-535-poster.jpg",
-			description: "IsMultiPart=false should not render conditional content",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := downloader.generateFilename(movie, tt.template, tt.index, tt.multipart)
-			if result != tt.expected {
-				t.Errorf("generateFilename() = %q, want %q (%s)", result, tt.expected, tt.description)
-			}
-		})
-	}
-}
-
-func TestDownloader_generateFilenameActress(t *testing.T) {
-	cfg := &config.OutputConfig{
-		PosterFormat:     "<ID>-poster.jpg",
-		FanartFormat:     "<ID>-fanart.jpg",
-		TrailerFormat:    "<ID>-trailer.mp4",
-		ScreenshotFormat: "fanart",
-		ActressFolder:    ".actors",
-	}
-
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
-
-	actressMovie := &models.Movie{
-		ID: "IPX-535",
-	}
-
-	tests := []struct {
-		name     string
-		template string
-		expected string
-	}{
-		{
-			name:     "Actress template",
-			template: "actress-<ACTORNAME>.jpg",
-			expected: "actress-Momo Sakura.jpg",
-		},
-		{
-			name:     "Actress with ID",
-			template: "<ID>-<ACTORNAME>.jpg",
-			expected: "IPX-535-Momo Sakura.jpg",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := downloader.generateActressFilename(actressMovie, "Momo Sakura", tt.template)
-			if result != tt.expected {
-				t.Errorf("generateActressFilename() = %q, want %q", result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestCleanupPartialDownloads(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create some .tmp files
-	tmpFiles := []string{
-		"file1.jpg.tmp",
-		"file2.jpg.tmp",
-		"file3.jpg.tmp",
-	}
-
-	for _, name := range tmpFiles {
-		path := filepath.Join(tmpDir, name)
-		if err := os.WriteFile(path, []byte("temp"), 0644); err != nil {
-			t.Fatalf("Failed to create temp file: %v", err)
-		}
-	}
-
-	// Create a normal file
-	normalFile := filepath.Join(tmpDir, "normal.jpg")
-	if err := os.WriteFile(normalFile, []byte("normal"), 0644); err != nil {
-		t.Fatalf("Failed to create normal file: %v", err)
-	}
-
-	// Cleanup
-	if err := CleanupPartialDownloads(afero.NewOsFs(), tmpDir); err != nil {
-		t.Fatalf("CleanupPartialDownloads failed: %v", err)
-	}
-
-	// Verify .tmp files are gone
-	for _, name := range tmpFiles {
-		path := filepath.Join(tmpDir, name)
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Errorf("Temp file %s was not removed", name)
-		}
-	}
-
-	// Verify normal file still exists
-	if _, err := os.Stat(normalFile); os.IsNotExist(err) {
-		t.Error("Normal file was removed")
-	}
-}
-
-func TestDownloader_SetDownloadExtrafanart(t *testing.T) {
-	cfg := &config.OutputConfig{
-		DownloadExtrafanart: false,
-	}
-
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
-
-	// Verify initial state
-	if downloader.config.DownloadExtrafanart {
-		t.Error("Expected DownloadExtrafanart to be false initially")
-	}
-
-	// Enable it
-	downloader.SetDownloadExtrafanart(true)
-	if !downloader.config.DownloadExtrafanart {
-		t.Error("Expected DownloadExtrafanart to be true after SetDownloadExtrafanart(true)")
-	}
-
-	// Disable it
-	downloader.SetDownloadExtrafanart(false)
-	if downloader.config.DownloadExtrafanart {
-		t.Error("Expected DownloadExtrafanart to be false after SetDownloadExtrafanart(false)")
-	}
-}
-
 func TestDownloader_DownloadPoster_WithPosterURL(t *testing.T) {
 	// Create a real JPEG image for testing
 	img := image.NewRGBA(image.Rect(0, 0, 800, 538))
@@ -944,18 +682,20 @@ func TestDownloader_DownloadPoster_WithPosterURL(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
-	movie.PosterURL = server.URL + "/poster.jpg"
+	movie.Poster.PosterURL = server.URL + "/poster.jpg"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadPoster: true,
-		PosterFormat:   "<ID>-poster.jpg",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			PosterFormat: "<ID>-poster.jpg",
+		},
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, tmpDir, nil)
 	if err != nil {
-		t.Fatalf("DownloadPoster failed: %v", err)
+		t.Fatalf("downloadPoster failed: %v", err)
 	}
 
 	if result.Type != MediaTypePoster {
@@ -986,15 +726,15 @@ func TestDownloader_DownloadPoster_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadPoster: false,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, tmpDir, nil)
 	if err != nil {
-		t.Fatalf("DownloadPoster failed: %v", err)
+		t.Fatalf("downloadPoster failed: %v", err)
 	}
 
 	if result.Downloaded {
@@ -1010,15 +750,15 @@ func TestDownloader_DownloadExtrafanart_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadExtrafanart: false,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.DownloadExtrafanart(context.Background(), movie, tmpDir, nil)
+	results, err := downloader.downloadExtrafanart(context.Background(), movie, tmpDir, nil, false)
 	if err != nil {
-		t.Fatalf("DownloadExtrafanart failed: %v", err)
+		t.Fatalf("downloadExtrafanart failed: %v", err)
 	}
 
 	if len(results) != 0 {
@@ -1031,16 +771,18 @@ func TestDownloader_DownloadExtrafanart_EmptyScreenshots(t *testing.T) {
 	movie := createTestMovie()
 	movie.Screenshots = []string{}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadExtrafanart: true,
-		ScreenshotFolder:    "extrafanart",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			ScreenshotFolder: "extrafanart",
+		},
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.DownloadExtrafanart(context.Background(), movie, tmpDir, nil)
+	results, err := downloader.downloadExtrafanart(context.Background(), movie, tmpDir, nil, true)
 	if err != nil {
-		t.Fatalf("DownloadExtrafanart failed: %v", err)
+		t.Fatalf("downloadExtrafanart failed: %v", err)
 	}
 
 	if len(results) != 0 {
@@ -1070,16 +812,18 @@ func TestDownloader_DownloadExtrafanart_PartialFailure(t *testing.T) {
 		server.URL + "/screenshot3.jpg",
 	}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadExtrafanart: true,
-		ScreenshotFolder:    "extrafanart",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			ScreenshotFolder: "extrafanart",
+		},
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.DownloadExtrafanart(context.Background(), movie, tmpDir, nil)
+	results, err := downloader.downloadExtrafanart(context.Background(), movie, tmpDir, nil, true)
 	if err != nil {
-		t.Fatalf("DownloadExtrafanart failed: %v", err)
+		t.Fatalf("downloadExtrafanart failed: %v", err)
 	}
 
 	if len(results) != 3 {
@@ -1110,15 +854,15 @@ func TestDownloader_DownloadTrailer_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadTrailer: false,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadTrailer(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadTrailer(context.Background(), movie, tmpDir, nil)
 	if err != nil {
-		t.Fatalf("DownloadTrailer failed: %v", err)
+		t.Fatalf("downloadTrailer failed: %v", err)
 	}
 
 	if result.Downloaded {
@@ -1131,15 +875,15 @@ func TestDownloader_DownloadTrailer_EmptyURL(t *testing.T) {
 	movie := createTestMovie()
 	movie.TrailerURL = ""
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadTrailer: true,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadTrailer(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadTrailer(context.Background(), movie, tmpDir, nil)
 	if err != nil {
-		t.Fatalf("DownloadTrailer failed: %v", err)
+		t.Fatalf("downloadTrailer failed: %v", err)
 	}
 
 	if result.Downloaded {
@@ -1151,15 +895,15 @@ func TestDownloader_DownloadActressImages_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadActress: false,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.DownloadActressImages(context.Background(), movie, tmpDir)
+	results, err := downloader.downloadActressImages(context.Background(), movie, tmpDir)
 	if err != nil {
-		t.Fatalf("DownloadActressImages failed: %v", err)
+		t.Fatalf("downloadActressImages failed: %v", err)
 	}
 
 	if len(results) != 0 {
@@ -1172,16 +916,18 @@ func TestDownloader_DownloadActressImages_EmptyActresses(t *testing.T) {
 	movie := createTestMovie()
 	movie.Actresses = []models.Actress{}
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadActress: true,
-		ActressFolder:   ".actors",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			ActressFolder: ".actors",
+		},
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.DownloadActressImages(context.Background(), movie, tmpDir)
+	results, err := downloader.downloadActressImages(context.Background(), movie, tmpDir)
 	if err != nil {
-		t.Fatalf("DownloadActressImages failed: %v", err)
+		t.Fatalf("downloadActressImages failed: %v", err)
 	}
 
 	if len(results) != 0 {
@@ -1196,8 +942,8 @@ func TestDownload_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	cfg := &config.OutputConfig{DownloadTimeout: 60}
-	downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+	cfg := &Config{DownloadTimeout: 60}
+	downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 	result, err := downloader.download(ctx, "https://example.com/test.jpg", "/tmp/test.jpg", MediaTypePoster)
 
@@ -1215,23 +961,25 @@ func TestDownloadAll_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover:       true,
 		DownloadPoster:      false,
 		DownloadExtrafanart: false,
 		DownloadTrailer:     false,
 		DownloadActress:     false,
-		FanartFormat:        "<ID>-fanart.jpg",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			FanartFormat: "<ID>-fanart.jpg",
+		},
 	}
-	dl := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+	dl := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 	movie := &models.Movie{
-		ID:       "IPX-535",
-		Title:    "Test Movie",
-		CoverURL: "https://example.com/cover.jpg",
+		ID:     "IPX-535",
+		Title:  "Test Movie",
+		Poster: models.PosterState{CoverURL: "https://example.com/cover.jpg"},
 	}
 
-	results, _ := dl.DownloadAll(ctx, movie, "/tmp", nil)
+	results, _ := dl.downloadAllWithExtrafanart(ctx, movie, "/tmp", nil, true)
 
 	mockHTTP.AssertNotCalled(t, "Do", mock.Anything)
 	assert.NotEmpty(t, results)
@@ -1261,8 +1009,8 @@ func TestDownload_WithValidContext_Succeeds(t *testing.T) {
 		Once()
 
 	ctx := context.Background()
-	cfg := &config.OutputConfig{DownloadTimeout: 60}
-	downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+	cfg := &Config{DownloadTimeout: 60}
+	downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 	result, err := downloader.download(ctx, "https://example.com/test.jpg", "/tmp/test.jpg", MediaTypePoster)
 
@@ -1283,16 +1031,18 @@ func TestDownloader_DownloadActressImages_SkipEmptyThumbURL(t *testing.T) {
 	movie.Actresses[0].ThumbURL = server.URL + "/actress1.jpg"
 	movie.Actresses[1].ThumbURL = ""
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadActress: true,
-		ActressFolder:   ".actors",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			ActressFolder: ".actors",
+		},
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.DownloadActressImages(context.Background(), movie, tmpDir)
+	results, err := downloader.downloadActressImages(context.Background(), movie, tmpDir)
 	if err != nil {
-		t.Fatalf("DownloadActressImages failed: %v", err)
+		t.Fatalf("downloadActressImages failed: %v", err)
 	}
 
 	// Should only download 1 (skip the actress with empty URL)
@@ -1308,15 +1058,15 @@ func TestDownloader_DownloadActressImages_SkipEmptyThumbURL(t *testing.T) {
 func TestDownloader_Download_InvalidURL(t *testing.T) {
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
-	movie.CoverURL = "not-a-valid-url://invalid"
+	movie.Poster.CoverURL = "not-a-valid-url://invalid"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover: true,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadCover(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadCover(context.Background(), movie, tmpDir, nil)
 	if err == nil {
 		t.Error("Expected error for invalid URL")
 	}
@@ -1338,15 +1088,15 @@ func TestDownloader_Download_ServerError(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
-	movie.CoverURL = server.URL + "/error.jpg"
+	movie.Poster.CoverURL = server.URL + "/error.jpg"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover: true,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadCover(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadCover(context.Background(), movie, tmpDir, nil)
 	if err == nil {
 		t.Error("Expected error for 500 status")
 	}
@@ -1371,24 +1121,24 @@ func TestDownloader_Download_Timeout(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
-	movie.CoverURL = server.URL + "/slow.jpg"
+	movie.Poster.CoverURL = server.URL + "/slow.jpg"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover:   true,
 		DownloadTimeout: 1, // 1 second timeout
 	}
 
 	// Create HTTP client with timeout for this test
-	httpClient, err := NewHTTPClientForDownloader(&config.Config{
-		Output: *cfg,
+	httpClient, err := NewHTTPClient(HTTPClientConfig{
+		Timeout: time.Duration(cfg.DownloadTimeout) * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("Failed to create HTTP client: %v", err)
 	}
 
-	downloader := NewDownloader(httpClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(httpClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadCover(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadCover(context.Background(), movie, tmpDir, nil)
 	if err == nil {
 		t.Error("Expected timeout error")
 	}
@@ -1409,19 +1159,22 @@ func TestDownloader_Download_WithUserAgent(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
-	movie.CoverURL = server.URL + "/cover.jpg"
+	movie.Poster.CoverURL = server.URL + "/cover.jpg"
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover: true,
-		FanartFormat:  "<ID>-fanart.jpg",
+		UserAgent:     "test-custom-agent/1.0",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			FanartFormat: "<ID>-fanart.jpg",
+		},
 	}
 
 	expectedUserAgent := "test-custom-agent/1.0"
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, expectedUserAgent, nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	_, err := downloader.DownloadCover(context.Background(), movie, tmpDir, nil)
+	_, err := downloader.downloadCover(context.Background(), movie, tmpDir, nil)
 	if err != nil {
-		t.Fatalf("DownloadCover failed: %v", err)
+		t.Fatalf("downloadCover failed: %v", err)
 	}
 
 	if userAgent != expectedUserAgent {
@@ -1429,16 +1182,10 @@ func TestDownloader_Download_WithUserAgent(t *testing.T) {
 	}
 }
 
-func TestDownloader_NewHTTPClientForDownloader_DefaultTimeout(t *testing.T) {
-	cfg := &config.Config{
-		Output: config.OutputConfig{
-			DownloadTimeout: 0, // Should default to 60
-		},
-	}
-
-	client, err := NewHTTPClientForDownloader(cfg)
+func TestDownloader_NewHTTPClient_DefaultTimeout(t *testing.T) {
+	client, err := NewHTTPClient(HTTPClientConfig{Timeout: 60 * time.Second})
 	if err != nil {
-		t.Fatalf("NewHTTPClientForDownloader failed: %v", err)
+		t.Fatalf("NewHTTPClient failed: %v", err)
 	}
 
 	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
@@ -1451,16 +1198,10 @@ func TestDownloader_NewHTTPClientForDownloader_DefaultTimeout(t *testing.T) {
 	}
 }
 
-func TestDownloader_NewHTTPClientForDownloader_CustomTimeout(t *testing.T) {
-	cfg := &config.Config{
-		Output: config.OutputConfig{
-			DownloadTimeout: 30,
-		},
-	}
-
-	client, err := NewHTTPClientForDownloader(cfg)
+func TestDownloader_NewHTTPClient_CustomTimeout(t *testing.T) {
+	client, err := NewHTTPClient(HTTPClientConfig{Timeout: 30 * time.Second})
 	if err != nil {
-		t.Fatalf("NewHTTPClientForDownloader failed: %v", err)
+		t.Fatalf("NewHTTPClient failed: %v", err)
 	}
 
 	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
@@ -1473,24 +1214,16 @@ func TestDownloader_NewHTTPClientForDownloader_CustomTimeout(t *testing.T) {
 	}
 }
 
-func TestDownloader_NewHTTPClientForDownloader_UseMainProxyForAllDownloads(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy = config.ProxyConfig{
-		Enabled:        true,
-		DefaultProfile: "main",
-		Profiles: map[string]config.ProxyProfile{
-			"main": {URL: "http://global-proxy.example.com:8080"},
-		},
-	}
-	// When UseMainProxy is removed, use default profile from scrapers.proxy
-	cfg.Output.DownloadProxy = config.ProxyConfig{
-		Enabled: true,
-		Profile: "main",
-	}
+func TestDownloader_NewHTTPClient_WithDownloadProxy(t *testing.T) {
+	// Simulate a pre-resolved download proxy (bridge function resolves this)
+	downloadProxy := &models.ProxyProfile{URL: "http://global-proxy.example.com:8080"}
 
-	client, err := NewHTTPClientForDownloader(cfg)
+	client, err := NewHTTPClient(HTTPClientConfig{
+		Timeout:       60 * time.Second,
+		DownloadProxy: downloadProxy,
+	})
 	if err != nil {
-		t.Fatalf("NewHTTPClientForDownloader failed: %v", err)
+		t.Fatalf("NewHTTPClient failed: %v", err)
 	}
 
 	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
@@ -1498,23 +1231,14 @@ func TestDownloader_NewHTTPClientForDownloader_UseMainProxyForAllDownloads(t *te
 		t.Fatalf("Expected *adaptiveDownloaderHTTPClient, got %T", client)
 	}
 	if adaptiveClient.forceClient == nil {
-		t.Fatal("Expected forceClient to be configured when using main proxy for downloads")
+		t.Fatal("Expected forceClient to be configured when download proxy is provided")
 	}
 }
 
-func TestDownloader_NewHTTPClientForDownloader_UseMainProxyWithoutGlobalProxyFallsBack(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy = config.ProxyConfig{
-		Enabled: false,
-	}
-	cfg.Output.DownloadProxy = config.ProxyConfig{
-		Enabled: true,
-		Profile: "main",
-	}
-
-	client, err := NewHTTPClientForDownloader(cfg)
+func TestDownloader_NewHTTPClient_WithoutDownloadProxy(t *testing.T) {
+	client, err := NewHTTPClient(HTTPClientConfig{Timeout: 60 * time.Second})
 	if err != nil {
-		t.Fatalf("NewHTTPClientForDownloader failed: %v", err)
+		t.Fatalf("NewHTTPClient failed: %v", err)
 	}
 
 	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
@@ -1522,23 +1246,20 @@ func TestDownloader_NewHTTPClientForDownloader_UseMainProxyWithoutGlobalProxyFal
 		t.Fatalf("Expected *adaptiveDownloaderHTTPClient, got %T", client)
 	}
 	if adaptiveClient.forceClient != nil {
-		t.Fatal("Expected forceClient to be nil when main proxy reuse is enabled but scrapers.proxy is not configured")
+		t.Fatal("Expected forceClient to be nil when no download proxy is configured")
 	}
 }
 
-func TestDownloader_NewHTTPClientForDownloader_GlobalProxyDoesNotForceAllDownloads(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy = config.ProxyConfig{
-		Enabled:        true,
-		DefaultProfile: "main",
-		Profiles: map[string]config.ProxyProfile{
-			"main": {URL: "http://global-proxy.example.com:8080"},
-		},
-	}
+func TestDownloader_NewHTTPClient_GlobalProxyDoesNotForceAllDownloads(t *testing.T) {
+	// Global proxy is pre-resolved but should not force all downloads
+	globalProxy := &models.ProxyProfile{URL: "http://global-proxy.example.com:8080"}
 
-	client, err := NewHTTPClientForDownloader(cfg)
+	client, err := NewHTTPClient(HTTPClientConfig{
+		Timeout:     60 * time.Second,
+		GlobalProxy: globalProxy,
+	})
 	if err != nil {
-		t.Fatalf("NewHTTPClientForDownloader failed: %v", err)
+		t.Fatalf("NewHTTPClient failed: %v", err)
 	}
 
 	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
@@ -1551,21 +1272,21 @@ func TestDownloader_NewHTTPClientForDownloader_GlobalProxyDoesNotForceAllDownloa
 }
 
 func TestAdaptiveDownloader_SelectProxyForRequest_UsesScraperDownloadOverride(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy = config.ProxyConfig{
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy = models.ProxyConfig{
 		Enabled:        true,
 		DefaultProfile: "main",
-		Profiles: map[string]config.ProxyProfile{
+		Profiles: map[string]models.ProxyProfile{
 			"main":           {URL: "http://global-proxy.example.com:8080"},
 			"javdb":          {URL: "http://javdb-main-proxy.example.com:8080"},
 			"javdb-download": {URL: "http://javdb-download-proxy.example.com:8080"},
 		},
 	}
-	getOrCreateScraper(cfg, "javdb").Proxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "javdb").Proxy = &models.ProxyConfig{
 		Enabled: true,
 		Profile: "javdb",
 	}
-	getOrCreateScraper(cfg, "javdb").DownloadProxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "javdb").DownloadProxy = &models.ProxyConfig{
 		Enabled: true,
 		Profile: "javdb-download",
 	}
@@ -1574,9 +1295,10 @@ func TestAdaptiveDownloader_SelectProxyForRequest_UsesScraperDownloadOverride(t 
 	javdbDownloadProxy := getOrCreateScraper(cfg, "javdb").DownloadProxy
 	javdbProxy := getOrCreateScraper(cfg, "javdb").Proxy
 
+	globalProxyCfg := cfg.Scrapers.Proxy
 	client := &adaptiveDownloaderHTTPClient{
-		cfg: cfg,
-		proxyResolvers: []models.ScraperDownloadProxyResolver{
+		httpCfg: HTTPClientConfig{GlobalProxyConfig: &globalProxyCfg},
+		proxyResolvers: []models.DownloadProxyResolver{
 			testDownloadProxyResolver{
 				match: func(host string) bool {
 					return strings.HasSuffix(host, "jdbstatic.com") || strings.HasSuffix(host, "javdb.com")
@@ -1598,13 +1320,13 @@ func TestAdaptiveDownloader_SelectProxyForRequest_UsesScraperDownloadOverride(t 
 }
 
 func TestAdaptiveDownloader_SelectProxyForRequest_AVEntertainmentNoScraperProxyUsesDirect(t *testing.T) {
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	// Disable global proxy - with new ResolveScraperProxy behavior,
 	// disabled scraper proxy + disabled global = direct (empty config)
-	cfg.Scrapers.Proxy = config.ProxyConfig{
+	cfg.Scrapers.Proxy = models.ProxyConfig{
 		Enabled: false,
 	}
-	getOrCreateScraper(cfg, "aventertainment").Proxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "aventertainment").Proxy = &models.ProxyConfig{
 		Enabled: false,
 	}
 
@@ -1612,9 +1334,10 @@ func TestAdaptiveDownloader_SelectProxyForRequest_AVEntertainmentNoScraperProxyU
 	aventDownloadProxy := getOrCreateScraper(cfg, "aventertainment").DownloadProxy
 	aventProxy := getOrCreateScraper(cfg, "aventertainment").Proxy
 
+	globalProxyCfg := cfg.Scrapers.Proxy
 	client := &adaptiveDownloaderHTTPClient{
-		cfg: cfg,
-		proxyResolvers: []models.ScraperDownloadProxyResolver{
+		httpCfg: HTTPClientConfig{GlobalProxyConfig: &globalProxyCfg},
+		proxyResolvers: []models.DownloadProxyResolver{
 			testDownloadProxyResolver{
 				match:            func(host string) bool { return strings.HasSuffix(host, "aventertainments.com") },
 				downloadOverride: aventDownloadProxy,
@@ -1631,16 +1354,16 @@ func TestAdaptiveDownloader_SelectProxyForRequest_AVEntertainmentNoScraperProxyU
 }
 
 func TestAdaptiveDownloader_SelectProxyForRequest_CaribbeancomUsesScraperProxy(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy = config.ProxyConfig{
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy = models.ProxyConfig{
 		Enabled:        true,
 		DefaultProfile: "main",
-		Profiles: map[string]config.ProxyProfile{
+		Profiles: map[string]models.ProxyProfile{
 			"main":         {URL: "http://global-proxy.example.com:8080"},
 			"caribbeancom": {URL: "http://caribbeancom-proxy.example.com:8080"},
 		},
 	}
-	getOrCreateScraper(cfg, "caribbeancom").Proxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "caribbeancom").Proxy = &models.ProxyConfig{
 		Enabled: true,
 		Profile: "caribbeancom",
 	}
@@ -1649,9 +1372,10 @@ func TestAdaptiveDownloader_SelectProxyForRequest_CaribbeancomUsesScraperProxy(t
 	caribbeancomDownloadProxy := getOrCreateScraper(cfg, "caribbeancom").DownloadProxy
 	caribbeancomProxy := getOrCreateScraper(cfg, "caribbeancom").Proxy
 
+	globalProxyCfg := cfg.Scrapers.Proxy
 	client := &adaptiveDownloaderHTTPClient{
-		cfg: cfg,
-		proxyResolvers: []models.ScraperDownloadProxyResolver{
+		httpCfg: HTTPClientConfig{GlobalProxyConfig: &globalProxyCfg},
+		proxyResolvers: []models.DownloadProxyResolver{
 			testDownloadProxyResolver{
 				match:            func(host string) bool { return strings.HasSuffix(host, "caribbeancom.com") },
 				downloadOverride: caribbeancomDownloadProxy,
@@ -1671,13 +1395,13 @@ func TestAdaptiveDownloader_SelectProxyForRequest_CaribbeancomUsesScraperProxy(t
 }
 
 func TestAdaptiveDownloader_SelectProxyForRequest_FC2NoScraperProxyUsesDirect(t *testing.T) {
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	// Disable global proxy - with new ResolveScraperProxy behavior,
 	// disabled scraper proxy + disabled global = direct (empty config)
-	cfg.Scrapers.Proxy = config.ProxyConfig{
+	cfg.Scrapers.Proxy = models.ProxyConfig{
 		Enabled: false,
 	}
-	getOrCreateScraper(cfg, "fc2").Proxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "fc2").Proxy = &models.ProxyConfig{
 		Enabled: false,
 	}
 
@@ -1685,9 +1409,10 @@ func TestAdaptiveDownloader_SelectProxyForRequest_FC2NoScraperProxyUsesDirect(t 
 	fc2DownloadProxy := getOrCreateScraper(cfg, "fc2").DownloadProxy
 	fc2Proxy := getOrCreateScraper(cfg, "fc2").Proxy
 
+	globalProxyCfg := cfg.Scrapers.Proxy
 	client := &adaptiveDownloaderHTTPClient{
-		cfg: cfg,
-		proxyResolvers: []models.ScraperDownloadProxyResolver{
+		httpCfg: HTTPClientConfig{GlobalProxyConfig: &globalProxyCfg},
+		proxyResolvers: []models.DownloadProxyResolver{
 			testDownloadProxyResolver{
 				match:            func(host string) bool { return strings.HasSuffix(host, "fc2.com") },
 				downloadOverride: fc2DownloadProxy,
@@ -1704,21 +1429,21 @@ func TestAdaptiveDownloader_SelectProxyForRequest_FC2NoScraperProxyUsesDirect(t 
 }
 
 func TestAdaptiveDownloader_SelectProxyForRequest_FC2DownloadOverrideWins(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy = config.ProxyConfig{
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy = models.ProxyConfig{
 		Enabled:        true,
 		DefaultProfile: "main",
-		Profiles: map[string]config.ProxyProfile{
+		Profiles: map[string]models.ProxyProfile{
 			"main":         {URL: "http://global-proxy.example.com:8080"},
 			"fc2":          {URL: "http://fc2-main-proxy.example.com:8080"},
 			"fc2-download": {URL: "http://fc2-download-proxy.example.com:8080"},
 		},
 	}
-	getOrCreateScraper(cfg, "fc2").Proxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "fc2").Proxy = &models.ProxyConfig{
 		Enabled: true,
 		Profile: "fc2",
 	}
-	getOrCreateScraper(cfg, "fc2").DownloadProxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "fc2").DownloadProxy = &models.ProxyConfig{
 		Enabled: true,
 		Profile: "fc2-download",
 	}
@@ -1727,9 +1452,10 @@ func TestAdaptiveDownloader_SelectProxyForRequest_FC2DownloadOverrideWins(t *tes
 	fc2DownloadProxy := getOrCreateScraper(cfg, "fc2").DownloadProxy
 	fc2Proxy := getOrCreateScraper(cfg, "fc2").Proxy
 
+	globalProxyCfg := cfg.Scrapers.Proxy
 	client := &adaptiveDownloaderHTTPClient{
-		cfg: cfg,
-		proxyResolvers: []models.ScraperDownloadProxyResolver{
+		httpCfg: HTTPClientConfig{GlobalProxyConfig: &globalProxyCfg},
+		proxyResolvers: []models.DownloadProxyResolver{
 			testDownloadProxyResolver{
 				match:            func(host string) bool { return strings.HasSuffix(host, "fc2.com") },
 				downloadOverride: fc2DownloadProxy,
@@ -1749,11 +1475,11 @@ func TestAdaptiveDownloader_SelectProxyForRequest_FC2DownloadOverrideWins(t *tes
 }
 
 func TestAdaptiveDownloader_SelectProxyForRequest_UnknownHostFallsBackToGlobal(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy = config.ProxyConfig{
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy = models.ProxyConfig{
 		Enabled:        true,
 		DefaultProfile: "main",
-		Profiles: map[string]config.ProxyProfile{
+		Profiles: map[string]models.ProxyProfile{
 			"main": {URL: "http://global-proxy.example.com:8080"},
 		},
 	}
@@ -1762,9 +1488,11 @@ func TestAdaptiveDownloader_SelectProxyForRequest_UnknownHostFallsBackToGlobal(t
 	javdbDownloadProxy := getOrCreateScraper(cfg, "javdb").DownloadProxy
 	javdbProxy := getOrCreateScraper(cfg, "javdb").Proxy
 
+	globalProxyCfg := cfg.Scrapers.Proxy
+	globalProxyProfile := globalProxyCfg.Profiles["main"]
 	client := &adaptiveDownloaderHTTPClient{
-		cfg: cfg,
-		proxyResolvers: []models.ScraperDownloadProxyResolver{
+		httpCfg: HTTPClientConfig{GlobalProxyConfig: &globalProxyCfg, GlobalProxy: &globalProxyProfile},
+		proxyResolvers: []models.DownloadProxyResolver{
 			testDownloadProxyResolver{
 				match: func(host string) bool {
 					return strings.HasSuffix(host, "jdbstatic.com") || strings.HasSuffix(host, "javdb.com")
@@ -1786,11 +1514,11 @@ func TestAdaptiveDownloader_SelectProxyForRequest_UnknownHostFallsBackToGlobal(t
 }
 
 func TestAdaptiveDownloader_SelectProxyForRequest_UsesDownloadProxyProfileWithoutEnabledToggle(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy = config.ProxyConfig{
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy = models.ProxyConfig{
 		Enabled:        true,
 		DefaultProfile: "main",
-		Profiles: map[string]config.ProxyProfile{
+		Profiles: map[string]models.ProxyProfile{
 			"main": {
 				URL: "http://global-proxy.example.com:8080",
 			},
@@ -1799,11 +1527,11 @@ func TestAdaptiveDownloader_SelectProxyForRequest_UsesDownloadProxyProfileWithou
 			},
 		},
 	}
-	getOrCreateScraper(cfg, "javdb").Proxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "javdb").Proxy = &models.ProxyConfig{
 		Enabled: true,
 		Profile: "main",
 	}
-	getOrCreateScraper(cfg, "javdb").DownloadProxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "javdb").DownloadProxy = &models.ProxyConfig{
 		Enabled: true,
 		Profile: "download",
 	}
@@ -1812,9 +1540,10 @@ func TestAdaptiveDownloader_SelectProxyForRequest_UsesDownloadProxyProfileWithou
 	javdbDownloadProxy := getOrCreateScraper(cfg, "javdb").DownloadProxy
 	javdbProxy := getOrCreateScraper(cfg, "javdb").Proxy
 
+	globalProxyCfg := cfg.Scrapers.Proxy
 	client := &adaptiveDownloaderHTTPClient{
-		cfg: cfg,
-		proxyResolvers: []models.ScraperDownloadProxyResolver{
+		httpCfg: HTTPClientConfig{GlobalProxyConfig: &globalProxyCfg},
+		proxyResolvers: []models.DownloadProxyResolver{
 			testDownloadProxyResolver{
 				match: func(host string) bool {
 					return strings.HasSuffix(host, "jdbstatic.com") || strings.HasSuffix(host, "javdb.com")
@@ -1836,21 +1565,21 @@ func TestAdaptiveDownloader_SelectProxyForRequest_UsesDownloadProxyProfileWithou
 }
 
 func TestAdaptiveDownloader_SelectProxyForRequest_ReusesMainProxyWhenRequested(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy = config.ProxyConfig{
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy = models.ProxyConfig{
 		Enabled:        true,
 		DefaultProfile: "main",
-		Profiles: map[string]config.ProxyProfile{
+		Profiles: map[string]models.ProxyProfile{
 			"main":  {URL: "http://global-proxy.example.com:8080"},
 			"javdb": {URL: "http://javdb-main-proxy.example.com:8080"},
 		},
 	}
-	getOrCreateScraper(cfg, "javdb").Proxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "javdb").Proxy = &models.ProxyConfig{
 		Enabled: true,
 		Profile: "javdb",
 	}
 	// When UseMainProxy is removed, DownloadProxy with Profile="main" reuses global proxy
-	getOrCreateScraper(cfg, "javdb").DownloadProxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "javdb").DownloadProxy = &models.ProxyConfig{
 		Enabled: true,
 		Profile: "main",
 	}
@@ -1859,9 +1588,10 @@ func TestAdaptiveDownloader_SelectProxyForRequest_ReusesMainProxyWhenRequested(t
 	javdbDownloadProxy := getOrCreateScraper(cfg, "javdb").DownloadProxy
 	javdbProxy := getOrCreateScraper(cfg, "javdb").Proxy
 
+	globalProxyCfg := cfg.Scrapers.Proxy
 	client := &adaptiveDownloaderHTTPClient{
-		cfg: cfg,
-		proxyResolvers: []models.ScraperDownloadProxyResolver{
+		httpCfg: HTTPClientConfig{GlobalProxyConfig: &globalProxyCfg},
+		proxyResolvers: []models.DownloadProxyResolver{
 			testDownloadProxyResolver{
 				match: func(host string) bool {
 					return strings.HasSuffix(host, "jdbstatic.com") || strings.HasSuffix(host, "javdb.com")
@@ -1882,36 +1612,33 @@ func TestAdaptiveDownloader_SelectProxyForRequest_ReusesMainProxyWhenRequested(t
 	}
 }
 
-func TestAdaptiveDownloader_SelectProxyForRequest_EmptyDownloadOverrideInheritsScraperProxy(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Scrapers.Proxy = config.ProxyConfig{
+func TestAdaptiveDownloader_SelectProxyForRequest_NilDownloadOverrideInheritsScraperProxy(t *testing.T) {
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy = models.ProxyConfig{
 		Enabled:        true,
 		DefaultProfile: "main",
-		Profiles: map[string]config.ProxyProfile{
+		Profiles: map[string]models.ProxyProfile{
 			"main":  {URL: "http://global-proxy.example.com:8080"},
 			"javdb": {URL: "http://javdb-main-proxy.example.com:8080"},
 		},
 	}
-	getOrCreateScraper(cfg, "javdb").Proxy = &config.ProxyConfig{
+	getOrCreateScraper(cfg, "javdb").Proxy = &models.ProxyConfig{
 		Enabled: true,
 		Profile: "javdb",
 	}
-	getOrCreateScraper(cfg, "javdb").DownloadProxy = &config.ProxyConfig{
-		// Empty override should be treated as inherit scraper/global proxy.
-	}
+	// No download override set (nil) → should inherit scraper proxy behavior
 
-	// Extract proxy configs for use in struct literal
-	javdbDownloadProxy := getOrCreateScraper(cfg, "javdb").DownloadProxy
 	javdbProxy := getOrCreateScraper(cfg, "javdb").Proxy
 
+	globalProxyCfg := cfg.Scrapers.Proxy
 	client := &adaptiveDownloaderHTTPClient{
-		cfg: cfg,
-		proxyResolvers: []models.ScraperDownloadProxyResolver{
+		httpCfg: HTTPClientConfig{GlobalProxyConfig: &globalProxyCfg},
+		proxyResolvers: []models.DownloadProxyResolver{
 			testDownloadProxyResolver{
 				match: func(host string) bool {
 					return strings.HasSuffix(host, "jdbstatic.com") || strings.HasSuffix(host, "javdb.com")
 				},
-				downloadOverride: javdbDownloadProxy,
+				downloadOverride: nil,
 				scraperProxy:     javdbProxy,
 			},
 		},
@@ -1927,8 +1654,58 @@ func TestAdaptiveDownloader_SelectProxyForRequest_EmptyDownloadOverrideInheritsS
 	}
 }
 
+// TestAdaptiveDownloader_SelectProxyForRequest_EnabledNoProfileDownloadOverrideUsesGlobalProxy
+// verifies the CR-01 fix: when downloadOverride is enabled with no profile (Inherit mode),
+// it should use the global proxy, NOT the scraper-level proxy.
+func TestAdaptiveDownloader_SelectProxyForRequest_EnabledNoProfileDownloadOverrideUsesGlobalProxy(t *testing.T) {
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Scrapers.Proxy = models.ProxyConfig{
+		Enabled:        true,
+		DefaultProfile: "main",
+		Profiles: map[string]models.ProxyProfile{
+			"main":  {URL: "http://global-proxy.example.com:8080"},
+			"javdb": {URL: "http://javdb-main-proxy.example.com:8080"},
+		},
+	}
+	getOrCreateScraper(cfg, "javdb").Proxy = &models.ProxyConfig{
+		Enabled: true,
+		Profile: "javdb",
+	}
+	// Enabled with no profile = Inherit mode: should use global proxy, NOT scraper proxy
+	getOrCreateScraper(cfg, "javdb").DownloadProxy = &models.ProxyConfig{
+		Enabled: true,
+		// No Profile → Inherit mode
+	}
+
+	javdbDownloadProxy := getOrCreateScraper(cfg, "javdb").DownloadProxy
+	javdbProxy := getOrCreateScraper(cfg, "javdb").Proxy
+	globalProxyCfg := cfg.Scrapers.Proxy
+
+	client := &adaptiveDownloaderHTTPClient{
+		httpCfg: HTTPClientConfig{GlobalProxyConfig: &globalProxyCfg, GlobalProxy: &models.ProxyProfile{URL: "http://global-proxy.example.com:8080"}},
+		proxyResolvers: []models.DownloadProxyResolver{
+			testDownloadProxyResolver{
+				match: func(host string) bool {
+					return strings.HasSuffix(host, "jdbstatic.com") || strings.HasSuffix(host, "javdb.com")
+				},
+				downloadOverride: javdbDownloadProxy,
+				scraperProxy:     javdbProxy,
+			},
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "https://c0.jdbstatic.com/samples/x.jpg", nil)
+
+	resolved := client.selectProxyForRequest(req)
+	if resolved == nil {
+		t.Fatal("Expected global proxy (inherit mode)")
+	}
+	if resolved.URL != "http://global-proxy.example.com:8080" {
+		t.Fatalf("Expected global proxy URL in inherit mode, got %q", resolved.URL)
+	}
+}
+
 func TestAdaptiveDownloader_GetOrCreateProxyClient_CachesByProxyKey(t *testing.T) {
-	proxyProfile := &config.ProxyProfile{
+	proxyProfile := &models.ProxyProfile{
 		URL:      "http://proxy.example.com:8080",
 		Username: "user",
 		Password: "pass",
@@ -1955,7 +1732,7 @@ func TestAdaptiveDownloader_GetOrCreateProxyClient_ReturnsClientCreationError(t 
 		timeout: 10 * time.Second,
 		clients: make(map[string]httpclient.HTTPClient),
 	}
-	badProxy := &config.ProxyProfile{
+	badProxy := &models.ProxyProfile{
 		URL: "http://[::1",
 	}
 
@@ -1969,7 +1746,7 @@ func TestDownloader_DownloadAll_AllDisabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover:       false,
 		DownloadPoster:      false,
 		DownloadExtrafanart: false,
@@ -1977,11 +1754,11 @@ func TestDownloader_DownloadAll_AllDisabled(t *testing.T) {
 		DownloadActress:     false,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.DownloadAll(context.Background(), movie, tmpDir, nil)
+	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true)
 	if err != nil {
-		t.Fatalf("DownloadAll failed: %v", err)
+		t.Fatalf("downloadAll failed: %v", err)
 	}
 
 	// Even when disabled, the methods return DownloadResult with Downloaded=false
@@ -1990,44 +1767,6 @@ func TestDownloader_DownloadAll_AllDisabled(t *testing.T) {
 		if result.Downloaded {
 			t.Errorf("Expected no downloads when all disabled, but %s was downloaded", result.Type)
 		}
-	}
-}
-
-func TestCleanupPartialDownloads_NonExistentDir(t *testing.T) {
-	err := CleanupPartialDownloads(afero.NewOsFs(), "/nonexistent/directory")
-	if err == nil {
-		t.Error("Expected error for non-existent directory")
-	}
-}
-
-func TestCleanupPartialDownloads_WithSubdirectory(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create a subdirectory with a .tmp file
-	subDir := filepath.Join(tmpDir, "subdir")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
-		t.Fatalf("Failed to create subdirectory: %v", err)
-	}
-
-	// Create .tmp file in root
-	tmpFile := filepath.Join(tmpDir, "file.tmp")
-	if err := os.WriteFile(tmpFile, []byte("temp"), 0644); err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-
-	// Cleanup should ignore subdirectories
-	if err := CleanupPartialDownloads(afero.NewOsFs(), tmpDir); err != nil {
-		t.Fatalf("CleanupPartialDownloads failed: %v", err)
-	}
-
-	// Verify .tmp file is gone
-	if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
-		t.Error("Temp file was not removed")
-	}
-
-	// Verify subdirectory still exists
-	if _, err := os.Stat(subDir); os.IsNotExist(err) {
-		t.Error("Subdirectory was removed")
 	}
 }
 
@@ -2071,26 +1810,22 @@ func TestNewDownloaderWithNFOConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.OutputConfig{
-				DownloadTimeout: 30,
-			}
-
-			downloader := NewDownloaderWithNFOConfig(http.DefaultClient, afero.NewMemMapFs(), cfg, "test-agent", tt.actorJapaneseNames, tt.actorFirstNameOrder, nil)
+			downloader := NewDownloader(http.DefaultClient, afero.NewMemMapFs(), &Config{ActorJapaneseNames: tt.actorJapaneseNames, ActorFirstNameOrder: tt.actorFirstNameOrder, UserAgent: "test-agent"}, nil)
 
 			if downloader == nil {
-				t.Fatal("NewDownloaderWithNFOConfig returned nil")
+				t.Fatal("NewDownloader returned nil")
 			}
 
-			if downloader.actorJapaneseNames != tt.expectedJapanese {
-				t.Errorf("Expected actorJapaneseNames=%v, got %v", tt.expectedJapanese, downloader.actorJapaneseNames)
+			if downloader.config.ActorJapaneseNames != tt.expectedJapanese {
+				t.Errorf("Expected ActorJapaneseNames=%v, got %v", tt.expectedJapanese, downloader.config.ActorJapaneseNames)
 			}
 
-			if downloader.actorFirstNameOrder != tt.expectedFirstNameOrder {
-				t.Errorf("Expected actorFirstNameOrder=%v, got %v", tt.expectedFirstNameOrder, downloader.actorFirstNameOrder)
+			if downloader.config.ActorFirstNameOrder != tt.expectedFirstNameOrder {
+				t.Errorf("Expected ActorFirstNameOrder=%v, got %v", tt.expectedFirstNameOrder, downloader.config.ActorFirstNameOrder)
 			}
 
-			if downloader.userAgent != "test-agent" {
-				t.Errorf("Expected userAgent=%q, got %q", "test-agent", downloader.userAgent)
+			if downloader.config.UserAgent != "test-agent" {
+				t.Errorf("Expected userAgent=%q, got %q", "test-agent", downloader.config.UserAgent)
 			}
 
 			// HTTP client timeout checking moved to TestDownloader_NewHTTPClientForDownloader_CustomTimeout
@@ -2204,7 +1939,10 @@ func TestFormatActressName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := nfo.FormatActressName(tt.actress, tt.useJapanese, tt.firstNameOrder, "")
+			result := models.FormatActressName(tt.actress, models.FormatActressNameOptions{
+				JapaneseNames:  tt.useJapanese,
+				FirstNameOrder: tt.firstNameOrder,
+			})
 
 			if result != tt.expectedName {
 				t.Errorf("%s: Expected %q, got %q", tt.description, tt.expectedName, result)
@@ -2232,19 +1970,21 @@ func TestDownloader_DownloadPoster_WithCropping(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
-	movie.PosterURL = server.URL + "/cover.jpg"
-	movie.ShouldCropPoster = true // Enable cropping
+	movie.Poster.PosterURL = server.URL + "/cover.jpg"
+	movie.Poster.ShouldCropPoster = true // Enable cropping
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadPoster: true,
-		PosterFormat:   "<ID>-poster.jpg",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			PosterFormat: "<ID>-poster.jpg",
+		},
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, "test-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.DownloadPoster(context.Background(), movie, tmpDir, nil)
+	result, err := downloader.downloadPoster(context.Background(), movie, tmpDir, nil)
 	if err != nil {
-		t.Fatalf("DownloadPoster with cropping failed: %v", err)
+		t.Fatalf("downloadPoster with cropping failed: %v", err)
 	}
 
 	if !result.Downloaded {
@@ -2324,16 +2064,11 @@ func TestDownloader_DownloadActressImages_WithNFOConfig(t *testing.T) {
 				},
 			}
 
-			cfg := &config.OutputConfig{
-				DownloadActress: true,
-				ActressFolder:   ".actors",
-			}
+			downloader := NewDownloader(http.DefaultClient, afero.NewMemMapFs(), &Config{ActorJapaneseNames: tt.useJapanese, ActorFirstNameOrder: tt.firstNameOrder, UserAgent: "test", DownloadActress: true, MediaFormatConfig: organizer.MediaFormatConfig{ActressFolder: ".actors"}}, nil)
 
-			downloader := NewDownloaderWithNFOConfig(http.DefaultClient, afero.NewMemMapFs(), cfg, "test", tt.useJapanese, tt.firstNameOrder, nil)
-
-			results, err := downloader.DownloadActressImages(context.Background(), movie, testDir)
+			results, err := downloader.downloadActressImages(context.Background(), movie, testDir)
 			if err != nil {
-				t.Fatalf("DownloadActressImages failed: %v", err)
+				t.Fatalf("downloadActressImages failed: %v", err)
 			}
 
 			if len(results) != 1 {
@@ -2368,15 +2103,17 @@ func BenchmarkDownload(b *testing.B) {
 
 	// Setup: Configure downloader with in-memory filesystem
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		DownloadCover: true,
-		FanartFormat:  "<ID>-fanart.jpg",
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			FanartFormat: "<ID>-fanart.jpg",
+		},
 	}
-	downloader := NewDownloader(http.DefaultClient, fs, cfg, "benchmark-agent", nil)
+	downloader := NewDownloader(http.DefaultClient, fs, cfg, nil)
 
 	// Setup: Create test movie
 	movie := createTestMovie()
-	movie.CoverURL = server.URL + "/cover.jpg"
+	movie.Poster.CoverURL = server.URL + "/cover.jpg"
 	destDir := "/tmp/benchmark"
 
 	// Reset timer to exclude setup time
@@ -2384,102 +2121,10 @@ func BenchmarkDownload(b *testing.B) {
 
 	// Benchmark loop
 	for i := 0; i < b.N; i++ {
-		_, err := downloader.DownloadCover(context.Background(), movie, destDir, nil)
+		_, err := downloader.downloadCover(context.Background(), movie, destDir, nil)
 		if err != nil {
-			b.Fatalf("DownloadCover failed: %v", err)
+			b.Fatalf("downloadCover failed: %v", err)
 		}
-	}
-}
-
-// TestCollectDownloadProxyResolvers tests proxy resolver collection
-func TestCollectDownloadProxyResolvers(t *testing.T) {
-	tests := []struct {
-		name         string
-		cfg          *config.Config
-		registry     *models.ScraperRegistry
-		wantProxyLen int
-	}{
-		{
-			name:         "nil config",
-			cfg:          nil,
-			registry:     models.NewScraperRegistry(),
-			wantProxyLen: 0,
-		},
-		{
-			name: "nil registry",
-			cfg: &config.Config{
-				Scrapers: config.ScrapersConfig{
-					Proxy: config.ProxyConfig{
-						Enabled:        true,
-						DefaultProfile: "main",
-						Profiles: map[string]config.ProxyProfile{
-							"main": {URL: "http://proxy.example.com:8080"},
-						},
-					},
-				},
-			},
-			registry:     nil,
-			wantProxyLen: 0,
-		},
-		{
-			name: "no proxies configured",
-			cfg: &config.Config{
-				Scrapers: config.ScrapersConfig{
-					Proxy: config.ProxyConfig{
-						Enabled: false,
-					},
-				},
-			},
-			registry:     models.NewScraperRegistry(),
-			wantProxyLen: 0,
-		},
-		{
-			name: "scraper proxy enabled - no registered scrapers returns nil",
-			cfg: &config.Config{
-				Scrapers: config.ScrapersConfig{
-					Proxy: config.ProxyConfig{
-						Enabled:        true,
-						DefaultProfile: "main",
-						Profiles: map[string]config.ProxyProfile{
-							"main": {URL: "http://proxy.example.com:8080"},
-						},
-					},
-				},
-			},
-			registry:     models.NewScraperRegistry(),
-			wantProxyLen: 0,
-		},
-		{
-			name: "download proxy only - no registered scrapers returns nil",
-			cfg: &config.Config{
-				Scrapers: config.ScrapersConfig{
-					Proxy: config.ProxyConfig{
-						Enabled: false,
-					},
-				},
-				Output: config.OutputConfig{
-					DownloadProxy: config.ProxyConfig{
-						Enabled: true,
-						Profile: "download",
-						Profiles: map[string]config.ProxyProfile{
-							"download": {URL: "http://download-proxy:8080"},
-						},
-					},
-				},
-			},
-			registry:     models.NewScraperRegistry(),
-			wantProxyLen: 0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			proxyResolvers := collectDownloadProxyResolvers(tt.cfg, tt.registry)
-
-			if len(proxyResolvers) != tt.wantProxyLen {
-				t.Errorf("Expected %d proxy resolvers, got %d", tt.wantProxyLen, len(proxyResolvers))
-			}
-		})
 	}
 }
 
@@ -2534,12 +2179,7 @@ func TestDownloader_Do_ErrorPaths(t *testing.T) {
 			destPath := filepath.Join(tmpDir, "test_download")
 
 			// Create downloader with test client
-			cfg := &config.Config{
-				Output: config.OutputConfig{
-					DownloadCover: true,
-				},
-			}
-			downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), &cfg.Output, "test-agent", nil)
+			downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), &Config{DownloadCover: true, UserAgent: "test-agent"}, nil)
 
 			// Perform download - should fail for error status codes
 			err := downloader.DownloadWithRetry(context.Background(), server.URL, destPath, 0)

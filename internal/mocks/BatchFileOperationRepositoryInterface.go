@@ -5,6 +5,8 @@
 package mocks
 
 import (
+	"context"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -37,8 +39,8 @@ func (_m *MockBatchFileOperationRepositoryInterface) EXPECT() *MockBatchFileOper
 }
 
 // CountByBatchJobID provides a mock function for the type MockBatchFileOperationRepositoryInterface
-func (_mock *MockBatchFileOperationRepositoryInterface) CountByBatchJobID(batchJobID string) (int64, error) {
-	ret := _mock.Called(batchJobID)
+func (_mock *MockBatchFileOperationRepositoryInterface) CountByBatchJobID(ctx context.Context, batchJobID string) (int64, error) {
+	ret := _mock.Called(ctx, batchJobID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CountByBatchJobID")
@@ -46,16 +48,16 @@ func (_mock *MockBatchFileOperationRepositoryInterface) CountByBatchJobID(batchJ
 
 	var r0 int64
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (int64, error)); ok {
-		return returnFunc(batchJobID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (int64, error)); ok {
+		return returnFunc(ctx, batchJobID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) int64); ok {
-		r0 = returnFunc(batchJobID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) int64); ok {
+		r0 = returnFunc(ctx, batchJobID)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(batchJobID)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, batchJobID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -68,19 +70,25 @@ type MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call struct {
 }
 
 // CountByBatchJobID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - batchJobID string
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobID(batchJobID interface{}) *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call {
-	return &MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call{Call: _e.mock.On("CountByBatchJobID", batchJobID)}
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobID(ctx interface{}, batchJobID interface{}) *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call {
+	return &MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call{Call: _e.mock.On("CountByBatchJobID", ctx, batchJobID)}
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call) Run(run func(batchJobID string)) *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call) Run(run func(ctx context.Context, batchJobID string)) *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -91,14 +99,14 @@ func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call) Retu
 	return _c
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call) RunAndReturn(run func(batchJobID string) (int64, error)) *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call) RunAndReturn(run func(ctx context.Context, batchJobID string) (int64, error)) *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // CountByBatchJobIDAndRevertStatus provides a mock function for the type MockBatchFileOperationRepositoryInterface
-func (_mock *MockBatchFileOperationRepositoryInterface) CountByBatchJobIDAndRevertStatus(batchJobID string, status string) (int64, error) {
-	ret := _mock.Called(batchJobID, status)
+func (_mock *MockBatchFileOperationRepositoryInterface) CountByBatchJobIDAndRevertStatus(ctx context.Context, batchJobID string, status models.RevertStatusEnum) (int64, error) {
+	ret := _mock.Called(ctx, batchJobID, status)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CountByBatchJobIDAndRevertStatus")
@@ -106,16 +114,16 @@ func (_mock *MockBatchFileOperationRepositoryInterface) CountByBatchJobIDAndReve
 
 	var r0 int64
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string, string) (int64, error)); ok {
-		return returnFunc(batchJobID, status)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, models.RevertStatusEnum) (int64, error)); ok {
+		return returnFunc(ctx, batchJobID, status)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string, string) int64); ok {
-		r0 = returnFunc(batchJobID, status)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, models.RevertStatusEnum) int64); ok {
+		r0 = returnFunc(ctx, batchJobID, status)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
-	if returnFunc, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = returnFunc(batchJobID, status)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, models.RevertStatusEnum) error); ok {
+		r1 = returnFunc(ctx, batchJobID, status)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -128,25 +136,31 @@ type MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_
 }
 
 // CountByBatchJobIDAndRevertStatus is a helper method to define mock.On call
+//   - ctx context.Context
 //   - batchJobID string
-//   - status string
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobIDAndRevertStatus(batchJobID interface{}, status interface{}) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call {
-	return &MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call{Call: _e.mock.On("CountByBatchJobIDAndRevertStatus", batchJobID, status)}
+//   - status models.RevertStatusEnum
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobIDAndRevertStatus(ctx interface{}, batchJobID interface{}, status interface{}) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call {
+	return &MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call{Call: _e.mock.On("CountByBatchJobIDAndRevertStatus", ctx, batchJobID, status)}
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call) Run(run func(batchJobID string, status string)) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call) Run(run func(ctx context.Context, batchJobID string, status models.RevertStatusEnum)) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 string
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 models.RevertStatusEnum
+		if args[2] != nil {
+			arg2 = args[2].(models.RevertStatusEnum)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -157,22 +171,158 @@ func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertSt
 	return _c
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call) RunAndReturn(run func(batchJobID string, status string) (int64, error)) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call) RunAndReturn(run func(ctx context.Context, batchJobID string, status models.RevertStatusEnum) (int64, error)) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CountByBatchJobIDs provides a mock function for the type MockBatchFileOperationRepositoryInterface
+func (_mock *MockBatchFileOperationRepositoryInterface) CountByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error) {
+	ret := _mock.Called(ctx, jobIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountByBatchJobIDs")
+	}
+
+	var r0 map[string]int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) (map[string]int64, error)); ok {
+		return returnFunc(ctx, jobIDs)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) map[string]int64); ok {
+		r0 = returnFunc(ctx, jobIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]int64)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, []string) error); ok {
+		r1 = returnFunc(ctx, jobIDs)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountByBatchJobIDs'
+type MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call struct {
+	*mock.Call
+}
+
+// CountByBatchJobIDs is a helper method to define mock.On call
+//   - ctx context.Context
+//   - jobIDs []string
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobIDs(ctx interface{}, jobIDs interface{}) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call {
+	return &MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call{Call: _e.mock.On("CountByBatchJobIDs", ctx, jobIDs)}
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call) Run(run func(ctx context.Context, jobIDs []string)) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []string
+		if args[1] != nil {
+			arg1 = args[1].([]string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call) Return(stringToInt64 map[string]int64, err error) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call {
+	_c.Call.Return(stringToInt64, err)
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call) RunAndReturn(run func(ctx context.Context, jobIDs []string) (map[string]int64, error)) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CountRevertedByBatchJobIDs provides a mock function for the type MockBatchFileOperationRepositoryInterface
+func (_mock *MockBatchFileOperationRepositoryInterface) CountRevertedByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error) {
+	ret := _mock.Called(ctx, jobIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountRevertedByBatchJobIDs")
+	}
+
+	var r0 map[string]int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) (map[string]int64, error)); ok {
+		return returnFunc(ctx, jobIDs)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) map[string]int64); ok {
+		r0 = returnFunc(ctx, jobIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]int64)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, []string) error); ok {
+		r1 = returnFunc(ctx, jobIDs)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountRevertedByBatchJobIDs'
+type MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call struct {
+	*mock.Call
+}
+
+// CountRevertedByBatchJobIDs is a helper method to define mock.On call
+//   - ctx context.Context
+//   - jobIDs []string
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountRevertedByBatchJobIDs(ctx interface{}, jobIDs interface{}) *MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call {
+	return &MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call{Call: _e.mock.On("CountRevertedByBatchJobIDs", ctx, jobIDs)}
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call) Run(run func(ctx context.Context, jobIDs []string)) *MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []string
+		if args[1] != nil {
+			arg1 = args[1].([]string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call) Return(stringToInt64 map[string]int64, err error) *MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call {
+	_c.Call.Return(stringToInt64, err)
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call) RunAndReturn(run func(ctx context.Context, jobIDs []string) (map[string]int64, error)) *MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Create provides a mock function for the type MockBatchFileOperationRepositoryInterface
-func (_mock *MockBatchFileOperationRepositoryInterface) Create(op *models.BatchFileOperation) error {
-	ret := _mock.Called(op)
+func (_mock *MockBatchFileOperationRepositoryInterface) Create(ctx context.Context, op *models.BatchFileOperation) error {
+	ret := _mock.Called(ctx, op)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.BatchFileOperation) error); ok {
-		r0 = returnFunc(op)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.BatchFileOperation) error); ok {
+		r0 = returnFunc(ctx, op)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -185,19 +335,25 @@ type MockBatchFileOperationRepositoryInterface_Create_Call struct {
 }
 
 // Create is a helper method to define mock.On call
+//   - ctx context.Context
 //   - op *models.BatchFileOperation
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) Create(op interface{}) *MockBatchFileOperationRepositoryInterface_Create_Call {
-	return &MockBatchFileOperationRepositoryInterface_Create_Call{Call: _e.mock.On("Create", op)}
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) Create(ctx interface{}, op interface{}) *MockBatchFileOperationRepositoryInterface_Create_Call {
+	return &MockBatchFileOperationRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, op)}
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_Create_Call) Run(run func(op *models.BatchFileOperation)) *MockBatchFileOperationRepositoryInterface_Create_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_Create_Call) Run(run func(ctx context.Context, op *models.BatchFileOperation)) *MockBatchFileOperationRepositoryInterface_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.BatchFileOperation
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.BatchFileOperation)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.BatchFileOperation
+		if args[1] != nil {
+			arg1 = args[1].(*models.BatchFileOperation)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -208,22 +364,22 @@ func (_c *MockBatchFileOperationRepositoryInterface_Create_Call) Return(err erro
 	return _c
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_Create_Call) RunAndReturn(run func(op *models.BatchFileOperation) error) *MockBatchFileOperationRepositoryInterface_Create_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_Create_Call) RunAndReturn(run func(ctx context.Context, op *models.BatchFileOperation) error) *MockBatchFileOperationRepositoryInterface_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // CreateBatch provides a mock function for the type MockBatchFileOperationRepositoryInterface
-func (_mock *MockBatchFileOperationRepositoryInterface) CreateBatch(ops []*models.BatchFileOperation) error {
-	ret := _mock.Called(ops)
+func (_mock *MockBatchFileOperationRepositoryInterface) CreateBatch(ctx context.Context, ops []*models.BatchFileOperation) error {
+	ret := _mock.Called(ctx, ops)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateBatch")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func([]*models.BatchFileOperation) error); ok {
-		r0 = returnFunc(ops)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []*models.BatchFileOperation) error); ok {
+		r0 = returnFunc(ctx, ops)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -236,19 +392,25 @@ type MockBatchFileOperationRepositoryInterface_CreateBatch_Call struct {
 }
 
 // CreateBatch is a helper method to define mock.On call
+//   - ctx context.Context
 //   - ops []*models.BatchFileOperation
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CreateBatch(ops interface{}) *MockBatchFileOperationRepositoryInterface_CreateBatch_Call {
-	return &MockBatchFileOperationRepositoryInterface_CreateBatch_Call{Call: _e.mock.On("CreateBatch", ops)}
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CreateBatch(ctx interface{}, ops interface{}) *MockBatchFileOperationRepositoryInterface_CreateBatch_Call {
+	return &MockBatchFileOperationRepositoryInterface_CreateBatch_Call{Call: _e.mock.On("CreateBatch", ctx, ops)}
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_CreateBatch_Call) Run(run func(ops []*models.BatchFileOperation)) *MockBatchFileOperationRepositoryInterface_CreateBatch_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_CreateBatch_Call) Run(run func(ctx context.Context, ops []*models.BatchFileOperation)) *MockBatchFileOperationRepositoryInterface_CreateBatch_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 []*models.BatchFileOperation
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].([]*models.BatchFileOperation)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []*models.BatchFileOperation
+		if args[1] != nil {
+			arg1 = args[1].([]*models.BatchFileOperation)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -259,14 +421,14 @@ func (_c *MockBatchFileOperationRepositoryInterface_CreateBatch_Call) Return(err
 	return _c
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_CreateBatch_Call) RunAndReturn(run func(ops []*models.BatchFileOperation) error) *MockBatchFileOperationRepositoryInterface_CreateBatch_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_CreateBatch_Call) RunAndReturn(run func(ctx context.Context, ops []*models.BatchFileOperation) error) *MockBatchFileOperationRepositoryInterface_CreateBatch_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByBatchJobID provides a mock function for the type MockBatchFileOperationRepositoryInterface
-func (_mock *MockBatchFileOperationRepositoryInterface) FindByBatchJobID(batchJobID string) ([]models.BatchFileOperation, error) {
-	ret := _mock.Called(batchJobID)
+func (_mock *MockBatchFileOperationRepositoryInterface) FindByBatchJobID(ctx context.Context, batchJobID string) ([]models.BatchFileOperation, error) {
+	ret := _mock.Called(ctx, batchJobID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByBatchJobID")
@@ -274,18 +436,18 @@ func (_mock *MockBatchFileOperationRepositoryInterface) FindByBatchJobID(batchJo
 
 	var r0 []models.BatchFileOperation
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) ([]models.BatchFileOperation, error)); ok {
-		return returnFunc(batchJobID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]models.BatchFileOperation, error)); ok {
+		return returnFunc(ctx, batchJobID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) []models.BatchFileOperation); ok {
-		r0 = returnFunc(batchJobID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []models.BatchFileOperation); ok {
+		r0 = returnFunc(ctx, batchJobID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.BatchFileOperation)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(batchJobID)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, batchJobID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -298,19 +460,25 @@ type MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call struct {
 }
 
 // FindByBatchJobID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - batchJobID string
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByBatchJobID(batchJobID interface{}) *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call {
-	return &MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call{Call: _e.mock.On("FindByBatchJobID", batchJobID)}
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByBatchJobID(ctx interface{}, batchJobID interface{}) *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call {
+	return &MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call{Call: _e.mock.On("FindByBatchJobID", ctx, batchJobID)}
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call) Run(run func(batchJobID string)) *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call) Run(run func(ctx context.Context, batchJobID string)) *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -321,14 +489,14 @@ func (_c *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call) Retur
 	return _c
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call) RunAndReturn(run func(batchJobID string) ([]models.BatchFileOperation, error)) *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call) RunAndReturn(run func(ctx context.Context, batchJobID string) ([]models.BatchFileOperation, error)) *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByBatchJobIDAndRevertStatus provides a mock function for the type MockBatchFileOperationRepositoryInterface
-func (_mock *MockBatchFileOperationRepositoryInterface) FindByBatchJobIDAndRevertStatus(batchJobID string, revertStatus string) ([]models.BatchFileOperation, error) {
-	ret := _mock.Called(batchJobID, revertStatus)
+func (_mock *MockBatchFileOperationRepositoryInterface) FindByBatchJobIDAndRevertStatus(ctx context.Context, batchJobID string, revertStatus models.RevertStatusEnum) ([]models.BatchFileOperation, error) {
+	ret := _mock.Called(ctx, batchJobID, revertStatus)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByBatchJobIDAndRevertStatus")
@@ -336,18 +504,18 @@ func (_mock *MockBatchFileOperationRepositoryInterface) FindByBatchJobIDAndRever
 
 	var r0 []models.BatchFileOperation
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string, string) ([]models.BatchFileOperation, error)); ok {
-		return returnFunc(batchJobID, revertStatus)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, models.RevertStatusEnum) ([]models.BatchFileOperation, error)); ok {
+		return returnFunc(ctx, batchJobID, revertStatus)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string, string) []models.BatchFileOperation); ok {
-		r0 = returnFunc(batchJobID, revertStatus)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, models.RevertStatusEnum) []models.BatchFileOperation); ok {
+		r0 = returnFunc(ctx, batchJobID, revertStatus)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.BatchFileOperation)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = returnFunc(batchJobID, revertStatus)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, models.RevertStatusEnum) error); ok {
+		r1 = returnFunc(ctx, batchJobID, revertStatus)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -360,25 +528,31 @@ type MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_C
 }
 
 // FindByBatchJobIDAndRevertStatus is a helper method to define mock.On call
+//   - ctx context.Context
 //   - batchJobID string
-//   - revertStatus string
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByBatchJobIDAndRevertStatus(batchJobID interface{}, revertStatus interface{}) *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call {
-	return &MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call{Call: _e.mock.On("FindByBatchJobIDAndRevertStatus", batchJobID, revertStatus)}
+//   - revertStatus models.RevertStatusEnum
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByBatchJobIDAndRevertStatus(ctx interface{}, batchJobID interface{}, revertStatus interface{}) *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call {
+	return &MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call{Call: _e.mock.On("FindByBatchJobIDAndRevertStatus", ctx, batchJobID, revertStatus)}
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call) Run(run func(batchJobID string, revertStatus string)) *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call) Run(run func(ctx context.Context, batchJobID string, revertStatus models.RevertStatusEnum)) *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 string
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 models.RevertStatusEnum
+		if args[2] != nil {
+			arg2 = args[2].(models.RevertStatusEnum)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -389,14 +563,14 @@ func (_c *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertSta
 	return _c
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call) RunAndReturn(run func(batchJobID string, revertStatus string) ([]models.BatchFileOperation, error)) *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call) RunAndReturn(run func(ctx context.Context, batchJobID string, revertStatus models.RevertStatusEnum) ([]models.BatchFileOperation, error)) *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByID provides a mock function for the type MockBatchFileOperationRepositoryInterface
-func (_mock *MockBatchFileOperationRepositoryInterface) FindByID(id uint) (*models.BatchFileOperation, error) {
-	ret := _mock.Called(id)
+func (_mock *MockBatchFileOperationRepositoryInterface) FindByID(ctx context.Context, id uint) (*models.BatchFileOperation, error) {
+	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByID")
@@ -404,18 +578,18 @@ func (_mock *MockBatchFileOperationRepositoryInterface) FindByID(id uint) (*mode
 
 	var r0 *models.BatchFileOperation
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(uint) (*models.BatchFileOperation, error)); ok {
-		return returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) (*models.BatchFileOperation, error)); ok {
+		return returnFunc(ctx, id)
 	}
-	if returnFunc, ok := ret.Get(0).(func(uint) *models.BatchFileOperation); ok {
-		r0 = returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) *models.BatchFileOperation); ok {
+		r0 = returnFunc(ctx, id)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.BatchFileOperation)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(uint) error); ok {
-		r1 = returnFunc(id)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uint) error); ok {
+		r1 = returnFunc(ctx, id)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -428,19 +602,25 @@ type MockBatchFileOperationRepositoryInterface_FindByID_Call struct {
 }
 
 // FindByID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id uint
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByID(id interface{}) *MockBatchFileOperationRepositoryInterface_FindByID_Call {
-	return &MockBatchFileOperationRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", id)}
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockBatchFileOperationRepositoryInterface_FindByID_Call {
+	return &MockBatchFileOperationRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_FindByID_Call) Run(run func(id uint)) *MockBatchFileOperationRepositoryInterface_FindByID_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_FindByID_Call) Run(run func(ctx context.Context, id uint)) *MockBatchFileOperationRepositoryInterface_FindByID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 uint
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(uint)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -451,22 +631,22 @@ func (_c *MockBatchFileOperationRepositoryInterface_FindByID_Call) Return(batchF
 	return _c
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_FindByID_Call) RunAndReturn(run func(id uint) (*models.BatchFileOperation, error)) *MockBatchFileOperationRepositoryInterface_FindByID_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_FindByID_Call) RunAndReturn(run func(ctx context.Context, id uint) (*models.BatchFileOperation, error)) *MockBatchFileOperationRepositoryInterface_FindByID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Update provides a mock function for the type MockBatchFileOperationRepositoryInterface
-func (_mock *MockBatchFileOperationRepositoryInterface) Update(op *models.BatchFileOperation) error {
-	ret := _mock.Called(op)
+func (_mock *MockBatchFileOperationRepositoryInterface) Update(ctx context.Context, op *models.BatchFileOperation) error {
+	ret := _mock.Called(ctx, op)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Update")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.BatchFileOperation) error); ok {
-		r0 = returnFunc(op)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.BatchFileOperation) error); ok {
+		r0 = returnFunc(ctx, op)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -479,19 +659,25 @@ type MockBatchFileOperationRepositoryInterface_Update_Call struct {
 }
 
 // Update is a helper method to define mock.On call
+//   - ctx context.Context
 //   - op *models.BatchFileOperation
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) Update(op interface{}) *MockBatchFileOperationRepositoryInterface_Update_Call {
-	return &MockBatchFileOperationRepositoryInterface_Update_Call{Call: _e.mock.On("Update", op)}
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) Update(ctx interface{}, op interface{}) *MockBatchFileOperationRepositoryInterface_Update_Call {
+	return &MockBatchFileOperationRepositoryInterface_Update_Call{Call: _e.mock.On("Update", ctx, op)}
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_Update_Call) Run(run func(op *models.BatchFileOperation)) *MockBatchFileOperationRepositoryInterface_Update_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_Update_Call) Run(run func(ctx context.Context, op *models.BatchFileOperation)) *MockBatchFileOperationRepositoryInterface_Update_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.BatchFileOperation
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.BatchFileOperation)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.BatchFileOperation
+		if args[1] != nil {
+			arg1 = args[1].(*models.BatchFileOperation)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -502,22 +688,22 @@ func (_c *MockBatchFileOperationRepositoryInterface_Update_Call) Return(err erro
 	return _c
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_Update_Call) RunAndReturn(run func(op *models.BatchFileOperation) error) *MockBatchFileOperationRepositoryInterface_Update_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_Update_Call) RunAndReturn(run func(ctx context.Context, op *models.BatchFileOperation) error) *MockBatchFileOperationRepositoryInterface_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // UpdateRevertStatus provides a mock function for the type MockBatchFileOperationRepositoryInterface
-func (_mock *MockBatchFileOperationRepositoryInterface) UpdateRevertStatus(id uint, status string) error {
-	ret := _mock.Called(id, status)
+func (_mock *MockBatchFileOperationRepositoryInterface) UpdateRevertStatus(ctx context.Context, id uint, status models.RevertStatusEnum) error {
+	ret := _mock.Called(ctx, id, status)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateRevertStatus")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(uint, string) error); ok {
-		r0 = returnFunc(id, status)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, models.RevertStatusEnum) error); ok {
+		r0 = returnFunc(ctx, id, status)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -530,25 +716,31 @@ type MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call struct {
 }
 
 // UpdateRevertStatus is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id uint
-//   - status string
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) UpdateRevertStatus(id interface{}, status interface{}) *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call {
-	return &MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call{Call: _e.mock.On("UpdateRevertStatus", id, status)}
+//   - status models.RevertStatusEnum
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) UpdateRevertStatus(ctx interface{}, id interface{}, status interface{}) *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call {
+	return &MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call{Call: _e.mock.On("UpdateRevertStatus", ctx, id, status)}
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call) Run(run func(id uint, status string)) *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call) Run(run func(ctx context.Context, id uint, status models.RevertStatusEnum)) *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 uint
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(uint)
+			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 uint
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(uint)
+		}
+		var arg2 models.RevertStatusEnum
+		if args[2] != nil {
+			arg2 = args[2].(models.RevertStatusEnum)
 		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -559,7 +751,7 @@ func (_c *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call) Ret
 	return _c
 }
 
-func (_c *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call) RunAndReturn(run func(id uint, status string) error) *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call {
+func (_c *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call) RunAndReturn(run func(ctx context.Context, id uint, status models.RevertStatusEnum) error) *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }

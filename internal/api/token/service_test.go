@@ -1,6 +1,7 @@
 package token
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func newMockRepo() *mockApiTokenRepo {
 	}
 }
 
-func (m *mockApiTokenRepo) Create(token *models.ApiToken) error {
+func (m *mockApiTokenRepo) Create(ctx context.Context, token *models.ApiToken) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -42,7 +43,7 @@ func (m *mockApiTokenRepo) Create(token *models.ApiToken) error {
 	return nil
 }
 
-func (m *mockApiTokenRepo) FindByID(id string) (*models.ApiToken, error) {
+func (m *mockApiTokenRepo) FindByID(ctx context.Context, id string) (*models.ApiToken, error) {
 	t, ok := m.tokens[id]
 	if !ok {
 		return nil, database.ErrNotFound
@@ -51,7 +52,7 @@ func (m *mockApiTokenRepo) FindByID(id string) (*models.ApiToken, error) {
 	return &cp, nil
 }
 
-func (m *mockApiTokenRepo) FindByTokenHash(hash string) (*models.ApiToken, error) {
+func (m *mockApiTokenRepo) FindByTokenHash(ctx context.Context, hash string) (*models.ApiToken, error) {
 	id, ok := m.hashIdx[hash]
 	if !ok {
 		return nil, database.ErrNotFound
@@ -64,7 +65,7 @@ func (m *mockApiTokenRepo) FindByTokenHash(hash string) (*models.ApiToken, error
 	return &cp, nil
 }
 
-func (m *mockApiTokenRepo) FindByPrefix(prefix string) (*models.ApiToken, error) {
+func (m *mockApiTokenRepo) FindByPrefix(ctx context.Context, prefix string) (*models.ApiToken, error) {
 	id, ok := m.prefixIdx[prefix]
 	if !ok {
 		return nil, database.ErrNotFound
@@ -77,7 +78,7 @@ func (m *mockApiTokenRepo) FindByPrefix(prefix string) (*models.ApiToken, error)
 	return &cp, nil
 }
 
-func (m *mockApiTokenRepo) ListActive() ([]models.ApiToken, error) {
+func (m *mockApiTokenRepo) ListActive(ctx context.Context) ([]models.ApiToken, error) {
 	var result []models.ApiToken
 	for _, t := range m.tokens {
 		if t.RevokedAt == nil {
@@ -87,7 +88,7 @@ func (m *mockApiTokenRepo) ListActive() ([]models.ApiToken, error) {
 	return result, nil
 }
 
-func (m *mockApiTokenRepo) Revoke(id string) error {
+func (m *mockApiTokenRepo) Revoke(ctx context.Context, id string) error {
 	t, ok := m.tokens[id]
 	if !ok {
 		return database.ErrNotFound
@@ -97,7 +98,7 @@ func (m *mockApiTokenRepo) Revoke(id string) error {
 	return nil
 }
 
-func (m *mockApiTokenRepo) UpdateLastUsed(id string) error {
+func (m *mockApiTokenRepo) UpdateLastUsed(ctx context.Context, id string) error {
 	t, ok := m.tokens[id]
 	if !ok {
 		return database.ErrNotFound
@@ -107,7 +108,7 @@ func (m *mockApiTokenRepo) UpdateLastUsed(id string) error {
 	return nil
 }
 
-func (m *mockApiTokenRepo) Regenerate(id string, newHash string, newPrefix string) (*models.ApiToken, error) {
+func (m *mockApiTokenRepo) Regenerate(ctx context.Context, id string, newHash string, newPrefix string) (*models.ApiToken, error) {
 	t, ok := m.tokens[id]
 	if !ok {
 		return nil, database.ErrNotFound
@@ -130,7 +131,7 @@ func TestTokenService_Create(t *testing.T) {
 	svc := NewTokenService(repo)
 
 	t.Run("returns full token and metadata", func(t *testing.T) {
-		apiToken, fullToken, err := svc.Create("my-token")
+		apiToken, fullToken, err := svc.Create(context.Background(), "my-token")
 		require.NoError(t, err)
 		assert.NotEmpty(t, apiToken.ID)
 		assert.Equal(t, "my-token", apiToken.Name)
@@ -139,11 +140,11 @@ func TestTokenService_Create(t *testing.T) {
 	})
 
 	t.Run("hash stored correctly", func(t *testing.T) {
-		apiToken, fullToken, err := svc.Create("hash-check")
+		apiToken, fullToken, err := svc.Create(context.Background(), "hash-check")
 		require.NoError(t, err)
 		expectedHash := HashToken(fullToken)
 		assert.Equal(t, expectedHash, apiToken.TokenHash)
-		found, err := repo.FindByTokenHash(expectedHash)
+		found, err := repo.FindByTokenHash(context.Background(), expectedHash)
 		require.NoError(t, err)
 		assert.Equal(t, apiToken.ID, found.ID)
 	})
@@ -152,14 +153,14 @@ func TestTokenService_Create(t *testing.T) {
 		errRepo := newMockRepo()
 		errRepo.createErr = errors.New("db error")
 		errSvc := NewTokenService(errRepo)
-		_, _, err := errSvc.Create("fail-token")
+		_, _, err := errSvc.Create(context.Background(), "fail-token")
 		assert.Error(t, err)
 	})
 
 	t.Run("regenerate error from repo", func(t *testing.T) {
 		repo := newMockRepo()
 		svc := NewTokenService(repo)
-		_, _, err := svc.Regenerate("nonexistent-id")
+		_, _, err := svc.Regenerate(context.Background(), "nonexistent-id")
 		assert.Error(t, err)
 	})
 }
@@ -168,25 +169,15 @@ func TestTokenService_Revoke(t *testing.T) {
 	repo := newMockRepo()
 	svc := NewTokenService(repo)
 
-	apiToken, _, err := svc.Create("to-revoke")
+	apiToken, _, err := svc.Create(context.Background(), "to-revoke")
 	require.NoError(t, err)
 
 	t.Run("marks revoked", func(t *testing.T) {
-		err := svc.Revoke(apiToken.ID)
+		err := svc.Revoke(context.Background(), apiToken.ID)
 		require.NoError(t, err)
-		found, err := repo.FindByID(apiToken.ID)
+		found, err := repo.FindByID(context.Background(), apiToken.ID)
 		require.NoError(t, err)
 		assert.NotNil(t, found.RevokedAt)
-	})
-
-	t.Run("subsequent validate fails", func(t *testing.T) {
-		newToken, fullToken, err := svc.Create("validate-after-revoke")
-		require.NoError(t, err)
-
-		require.NoError(t, svc.Revoke(newToken.ID))
-
-		_, err = svc.Validate(fullToken)
-		assert.Error(t, err)
 	})
 }
 
@@ -194,16 +185,16 @@ func TestTokenService_List(t *testing.T) {
 	repo := newMockRepo()
 	svc := NewTokenService(repo)
 
-	_, _, err := svc.Create("token-a")
+	_, _, err := svc.Create(context.Background(), "token-a")
 	require.NoError(t, err)
-	_, _, err = svc.Create("token-b")
+	_, _, err = svc.Create(context.Background(), "token-b")
 	require.NoError(t, err)
-	tokenC, _, err := svc.Create("token-c")
+	tokenC, _, err := svc.Create(context.Background(), "token-c")
 	require.NoError(t, err)
-	require.NoError(t, svc.Revoke(tokenC.ID))
+	require.NoError(t, svc.Revoke(context.Background(), tokenC.ID))
 
 	t.Run("returns active tokens excluding revoked", func(t *testing.T) {
-		tokens, err := svc.List()
+		tokens, err := svc.List(context.Background())
 		require.NoError(t, err)
 		assert.Len(t, tokens, 2)
 		names := make(map[string]bool)
@@ -221,63 +212,23 @@ func TestTokenService_Regenerate(t *testing.T) {
 	svc := NewTokenService(repo)
 
 	t.Run("new token value and old token invalid", func(t *testing.T) {
-		apiToken, oldFullToken, err := svc.Create("regen-test")
+		apiToken, oldFullToken, err := svc.Create(context.Background(), "regen-test")
 		require.NoError(t, err)
 
-		regenToken, newFullToken, err := svc.Regenerate(apiToken.ID)
+		regenToken, newFullToken, err := svc.Regenerate(context.Background(), apiToken.ID)
 		require.NoError(t, err)
 		assert.Equal(t, apiToken.ID, regenToken.ID)
 		assert.NotEqual(t, oldFullToken, newFullToken)
 		assert.True(t, strings.HasPrefix(newFullToken, TokenPrefix))
 
-		_, err = svc.Validate(oldFullToken)
+		// Old token hash should no longer match
+		_, err = repo.FindByTokenHash(context.Background(), HashToken(oldFullToken))
 		assert.Error(t, err, "old token should be invalid after regenerate")
 
-		validated, err := svc.Validate(newFullToken)
+		// New token hash should match
+		found, err := repo.FindByTokenHash(context.Background(), HashToken(newFullToken))
 		require.NoError(t, err)
-		assert.Equal(t, apiToken.ID, validated.ID)
-	})
-}
-
-func TestTokenService_Validate(t *testing.T) {
-	repo := newMockRepo()
-	svc := NewTokenService(repo)
-
-	t.Run("valid token works", func(t *testing.T) {
-		_, fullToken, err := svc.Create("valid-token")
-		require.NoError(t, err)
-		validated, err := svc.Validate(fullToken)
-		require.NoError(t, err)
-		assert.Equal(t, "valid-token", validated.Name)
-	})
-
-	t.Run("invalid hash fails", func(t *testing.T) {
-		_, err := svc.Validate("jv_nonexistent0000000000000000000000")
-		assert.Error(t, err)
-	})
-
-	t.Run("revoked token fails", func(t *testing.T) {
-		apiToken, fullToken, err := svc.Create("revoke-validate")
-		require.NoError(t, err)
-		require.NoError(t, svc.Revoke(apiToken.ID))
-		_, err = svc.Validate(fullToken)
-		assert.Error(t, err)
-	})
-
-	t.Run("validate updates last used", func(t *testing.T) {
-		apiToken, fullToken, err := svc.Create("last-used-check")
-		require.NoError(t, err)
-
-		found, err := repo.FindByID(apiToken.ID)
-		require.NoError(t, err)
-		assert.Nil(t, found.LastUsedAt)
-
-		_, err = svc.Validate(fullToken)
-		require.NoError(t, err)
-
-		found, err = repo.FindByID(apiToken.ID)
-		require.NoError(t, err)
-		assert.NotNil(t, found.LastUsedAt)
+		assert.Equal(t, apiToken.ID, found.ID)
 	})
 }
 
@@ -285,7 +236,7 @@ func TestTokenService_Create_EmptyName(t *testing.T) {
 	repo := newMockRepo()
 	svc := NewTokenService(repo)
 
-	apiToken, fullToken, err := svc.Create("")
+	apiToken, fullToken, err := svc.Create(context.Background(), "")
 	require.NoError(t, err)
 	assert.Equal(t, "", apiToken.Name)
 	assert.True(t, strings.HasPrefix(fullToken, TokenPrefix))
@@ -295,10 +246,10 @@ func TestTokenService_Regenerate_RevokedToken(t *testing.T) {
 	repo := newMockRepo()
 	svc := NewTokenService(repo)
 
-	apiToken, _, err := svc.Create("regen-revoked")
+	apiToken, _, err := svc.Create(context.Background(), "regen-revoked")
 	require.NoError(t, err)
-	require.NoError(t, svc.Revoke(apiToken.ID))
+	require.NoError(t, svc.Revoke(context.Background(), apiToken.ID))
 
-	_, _, err = svc.Regenerate(apiToken.ID)
+	_, _, err = svc.Regenerate(context.Background(), apiToken.ID)
 	assert.Error(t, err)
 }

@@ -1,3 +1,8 @@
 [
-  {"dmm_id": 99801, "first_name": "E2E", "last_name": "TestActress", "japanese_name": "E2Eテスト女優"}
+	{
+		"dmm_id": 99801,
+		"first_name": "E2E",
+		"last_name": "TestActress",
+		"japanese_name": "E2Eテスト女優"
+	}
 ]

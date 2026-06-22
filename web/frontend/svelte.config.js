@@ -13,11 +13,11 @@ const config = {
 		adapter: adapter({
 			pages: 'build',
 			assets: 'build',
-			fallback: 'index.html',  // SPA fallback for client-side routing
+			fallback: 'index.html', // SPA fallback for client-side routing
 			precompress: false,
-			strict: true
-		})
-	}
+			strict: true,
+		}),
+	},
 };
 
 export default config;

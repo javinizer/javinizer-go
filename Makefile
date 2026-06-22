@@ -1,5 +1,5 @@
 .PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder web-test
-.PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci ci-full config-drift simulate-ci
+.PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci ci-full config-drift check-import-guard simulate-ci
 .PHONY: fmt lint vet vuln swagger docs mocks
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
@@ -46,6 +46,7 @@ help:
 	@echo "  make ci                 - Run full CI suite (vet + lint + coverage + race + drift)"
 	@echo "  make ci-full            - Run full CI suite including frontend tests"
 	@echo "  make config-drift       - Validate config synchronization (no hardcoded values)"
+	@echo "  make check-import-guard - Enforce models→config dependency direction (ADR-0020)"
 	@echo "  make simulate-ci        - Simulate GitHub Actions CI locally"
 	@echo ""
 	@echo "Web Frontend:"
@@ -170,12 +171,20 @@ coverage-pkg: coverage
 coverage-check: coverage
 	@./scripts/check_coverage.sh 75 coverage.out
 
+# Test coverage goal - enforces 90% line coverage
+test-coverage: coverage
+	@./scripts/check_coverage.sh 90 coverage.out
+
 # Validate config synchronization (defaults.go matches config.yaml.example, no hardcoded scraper values)
 config-drift:
 	@./scripts/validate-config-sync.sh
 
+# Check that internal/models does not import internal/config (enforces dependency direction per ADR-0020)
+check-import-guard:
+	@./scripts/check_import_guard.sh
+
 # Run full CI test suite
-ci: vet lint vuln coverage-check test-race config-drift
+ci: vet lint vuln coverage-check test-race config-drift check-import-guard
 	@echo "All CI checks passed!"
 
 # Run full CI suite including frontend tests
@@ -286,6 +295,22 @@ web-install:
 
 web-test:
 	cd web/frontend && npm run test
+
+# Full-stack E2E test suite — real browser → real SvelteKit frontend → real HTTP
+# transport → real Go API server (cmd/javinizer-e2e with the `e2emock`
+# scraper substituted at the scraper seam) → real worker pipeline → real
+# :memory: SQLite → real e2emock scraper. NO page.route / API mocks.
+#
+# Playwright's webServer config spawns both the Go backend (on port
+# 18080) and the Vite dev server (on port 5175) automatically + kills
+# both on teardown. Spec layout lives under web/frontend/tests/fullstack/
+# — see playwright.fullstack.config.ts header for the directory map.
+test-e2e-fullstack:
+	cd web/frontend && npx playwright test --config=playwright.fullstack.config.ts
+
+# Backward-compat alias — the field-drop regression suite runs as part
+# of the general fullstack suite now. Redirects to the new target.
+test-e2e-field-drop: test-e2e-fullstack
 
 web-clean:
 	rm -rf web/frontend/node_modules web/frontend/.svelte-kit web/frontend/build

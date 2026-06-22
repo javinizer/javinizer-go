@@ -3,14 +3,13 @@ package aventertainment
 import (
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestCanHandleURL(t *testing.T) {
-	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+	s := newScraper(&models.ScraperSettings{Enabled: true}, nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -32,7 +31,7 @@ func TestCanHandleURL(t *testing.T) {
 }
 
 func TestExtractIDFromURL_AVEntertainment(t *testing.T) {
-	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+	s := newScraper(&models.ScraperSettings{Enabled: true}, nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -60,10 +59,9 @@ func TestExtractIDFromURL_AVEntertainment(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance_AVEntertainment(t *testing.T) {
-	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+	s := newScraper(&models.ScraperSettings{Enabled: true}, nil, models.FlareSolverrConfig{})
 	var _ models.Scraper = s
-	var _ models.URLHandler = s
-	var _ models.DirectURLScraper = s
+	var _ models.Scraper = s
 }
 
 func TestParseRuntime(t *testing.T) {

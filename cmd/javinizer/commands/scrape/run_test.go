@@ -11,10 +11,11 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	// Register scraper defaults for NormalizeScraperConfigs
+	// Register scraper defaults for Finalize
 	_ "github.com/javinizer/javinizer-go/internal/scraper/dmm"
 )
 
@@ -58,7 +59,7 @@ func (m *MockScraper) Search(_ context.Context, id string) (*models.ScraperResul
 	}, nil
 }
 
-func (m *MockScraper) GetURL(id string) (string, error) {
+func (m *MockScraper) GetURL(_ context.Context, id string) (string, error) {
 	return "http://test.com/" + id, nil
 }
 
@@ -70,8 +71,8 @@ func (m *MockScraper) Close() error {
 	return nil
 }
 
-func (m *MockScraper) Config() *config.ScraperSettings {
-	return &config.ScraperSettings{Enabled: true}
+func (m *MockScraper) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: true}
 }
 
 // setupTestDB creates a temporary database and config for testing
@@ -85,10 +86,6 @@ database:
   dsn: ":memory:"
 scrapers:
   priority: ["mock1", "mock2"]
-  dmm:
-    enabled: true
-  r18dev:
-    enabled: true
 metadata:
   priority:
     id: ["mock1", "mock2"]
@@ -107,9 +104,9 @@ matching:
 	require.NoError(t, err)
 
 	// Create and migrate database
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
 	return tmpFile, db
@@ -134,7 +131,7 @@ func TestRun_ConfigNotFound(t *testing.T) {
 
 	cmd := scrape.NewCommand()
 
-	movie, results, err := scrape.Run(cmd, []string{"TEST-001"}, "/nonexistent/config.yaml", nil)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-001"}, "/nonexistent/config.yaml", nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, movie)
@@ -154,7 +151,7 @@ func TestRun_CacheHit(t *testing.T) {
 	// Pre-populate database with test movie
 	movieRepo := database.NewMovieRepository(db)
 	cachedMovie := createTestMovie("IPX-123", "Cached Movie")
-	_, err := movieRepo.Upsert(cachedMovie)
+	_, err := movieRepo.Upsert(context.TODO(), cachedMovie)
 	require.NoError(t, err)
 
 	// Create command
@@ -166,7 +163,7 @@ func TestRun_CacheHit(t *testing.T) {
 
 	// Create dependencies using Epic 6/8 dependency injection pattern
 	// Use NewDependenciesWithOptions() to inject test database and empty registry
-	registry := models.NewScraperRegistry() // Empty registry - no scrapers should be called
+	registry := scraperutil.NewScraperRegistry() // Empty registry - no scrapers should be called
 	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{
 		DB:              db,
 		ScraperRegistry: registry,
@@ -175,7 +172,7 @@ func TestRun_CacheHit(t *testing.T) {
 	defer func() { _ = deps.Close() }()
 
 	// Run without force refresh - should hit cache
-	movie, results, err := scrape.Run(cmd, []string{"IPX-123"}, configPath, deps)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"IPX-123"}, configPath, deps)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, movie)
@@ -196,7 +193,7 @@ func TestRun_ForceRefresh(t *testing.T) {
 	// Pre-populate database with test movie
 	movieRepo := database.NewMovieRepository(db)
 	cachedMovie := createTestMovie("IPX-123", "Old Cached Movie")
-	_, err := movieRepo.Upsert(cachedMovie)
+	_, err := movieRepo.Upsert(context.TODO(), cachedMovie)
 	require.NoError(t, err)
 
 	// Create command with force flag
@@ -208,9 +205,9 @@ func TestRun_ForceRefresh(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create mock dependencies with mock scraper using Epic 6/8 pattern
-	registry := models.NewScraperRegistry()
+	registry := scraperutil.NewScraperRegistry()
 	mockScraper := NewMockScraper("mock1")
-	registry.Register(mockScraper)
+	registry.RegisterInstance(mockScraper)
 
 	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{
 		DB:              db,
@@ -220,7 +217,7 @@ func TestRun_ForceRefresh(t *testing.T) {
 	defer func() { _ = deps.Close() }()
 
 	// Run with force refresh - should ignore cache
-	movie, results, err := scrape.Run(cmd, []string{"IPX-123"}, configPath, deps)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"IPX-123"}, configPath, deps)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, movie)
@@ -249,11 +246,11 @@ func TestRun_CustomScrapers(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create mock dependencies with multiple scrapers using Epic 6/8 pattern
-	registry := models.NewScraperRegistry()
+	registry := scraperutil.NewScraperRegistry()
 	mock1 := NewMockScraper("mock1")
 	mock2 := NewMockScraper("mock2")
-	registry.Register(mock1)
-	registry.Register(mock2)
+	registry.RegisterInstance(mock1)
+	registry.RegisterInstance(mock2)
 
 	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{
 		DB:              db,
@@ -263,7 +260,7 @@ func TestRun_CustomScrapers(t *testing.T) {
 	defer func() { _ = deps.Close() }()
 
 	// Run with custom scrapers - should only use mock2
-	movie, results, err := scrape.Run(cmd, []string{"TEST-001"}, configPath, deps)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-001"}, configPath, deps)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, movie)
@@ -286,10 +283,6 @@ database:
   dsn: ":memory:"
 scrapers:
   priority: ["mock1"]
-  dmm:
-    enabled: false
-  r18dev:
-    enabled: false
 metadata:
   priority:
     id: ["mock1"]
@@ -305,17 +298,17 @@ matching:
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	cmd := scrape.NewCommand()
 	require.NoError(t, cmd.Flags().Set("scrapers", "mock2"))
 
-	registry := models.NewScraperRegistry()
-	registry.Register(NewMockScraper("mock1"))
-	registry.Register(NewMockScraper("mock2"))
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(NewMockScraper("mock1"))
+	registry.RegisterInstance(NewMockScraper("mock2"))
 
 	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{
 		DB:              db,
@@ -324,7 +317,7 @@ matching:
 	require.NoError(t, err)
 	defer func() { _ = deps.Close() }()
 
-	movie, results, err := scrape.Run(cmd, []string{"TEST-002"}, configPath, deps)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-002"}, configPath, deps)
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 	require.Len(t, results, 1)
@@ -351,9 +344,9 @@ func TestRun_EmptyResults(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create mock dependencies with failing scraper using Epic 6/8 pattern
-	registry := models.NewScraperRegistry()
+	registry := scraperutil.NewScraperRegistry()
 	failingScraper := &MockScraper{name: "failing", fail: true}
-	registry.Register(failingScraper)
+	registry.RegisterInstance(failingScraper)
 
 	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{
 		DB:              db,
@@ -363,10 +356,10 @@ func TestRun_EmptyResults(t *testing.T) {
 	defer func() { _ = deps.Close() }()
 
 	// Run with failing scraper - should get error
-	movie, results, err := scrape.Run(cmd, []string{"TEST-001"}, configPath, deps)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-001"}, configPath, deps)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no results found from any scraper")
+	assert.Contains(t, err.Error(), "No results from any scraper")
 	assert.Nil(t, movie)
 	assert.Nil(t, results)
 }
@@ -388,11 +381,11 @@ func TestRun_Aggregation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create mock dependencies with multiple scrapers using Epic 6/8 pattern
-	registry := models.NewScraperRegistry()
+	registry := scraperutil.NewScraperRegistry()
 	mock1 := NewMockScraper("mock1")
 	mock2 := NewMockScraper("mock2")
-	registry.Register(mock1)
-	registry.Register(mock2)
+	registry.RegisterInstance(mock1)
+	registry.RegisterInstance(mock2)
 
 	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{
 		DB:              db,
@@ -402,7 +395,7 @@ func TestRun_Aggregation(t *testing.T) {
 	defer func() { _ = deps.Close() }()
 
 	// Run with multiple scrapers - should aggregate results
-	movie, results, err := scrape.Run(cmd, []string{"TEST-001"}, configPath, deps)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-001"}, configPath, deps)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, movie)
@@ -430,9 +423,9 @@ func TestRun_DatabaseSave(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create mock dependencies using Epic 6/8 pattern
-	registry := models.NewScraperRegistry()
+	registry := scraperutil.NewScraperRegistry()
 	mockScraper := NewMockScraper("mock1")
-	registry.Register(mockScraper)
+	registry.RegisterInstance(mockScraper)
 
 	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{
 		DB:              db,
@@ -442,7 +435,7 @@ func TestRun_DatabaseSave(t *testing.T) {
 	defer func() { _ = deps.Close() }()
 
 	// Run scrape - should save to database
-	movie, results, err := scrape.Run(cmd, []string{"TEST-SAVE"}, configPath, deps)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-SAVE"}, configPath, deps)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, movie)
@@ -450,7 +443,7 @@ func TestRun_DatabaseSave(t *testing.T) {
 
 	// Verify movie was saved to database
 	movieRepo := database.NewMovieRepository(db)
-	savedMovie, err := movieRepo.FindByID("TEST-SAVE")
+	savedMovie, err := movieRepo.FindByID(context.TODO(), "TEST-SAVE")
 	assert.NoError(t, err)
 	assert.NotNil(t, savedMovie)
 	assert.Equal(t, "TEST-SAVE", savedMovie.ID)
@@ -475,13 +468,13 @@ func TestRun_FlagOverrides(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify initial state
-	cfg.Scrapers.NormalizeScraperConfigs()
-	// Note: scrape_actress was previously accessed via GetBoolExtra, now in DMMConfig
+	cfg.Scrapers.Normalize()
+	// Note: scrape_actress was previously accessed via GetBoolExtra, now in ScraperSettings
 
 	// Create mock dependencies using Epic 6/8 pattern
-	registry := models.NewScraperRegistry()
+	registry := scraperutil.NewScraperRegistry()
 	mockScraper := NewMockScraper("mock1")
-	registry.Register(mockScraper)
+	registry.RegisterInstance(mockScraper)
 
 	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{
 		DB:              db,
@@ -491,7 +484,7 @@ func TestRun_FlagOverrides(t *testing.T) {
 	defer func() { _ = deps.Close() }()
 
 	// Run scrape - ApplyFlagOverrides should be called
-	movie, results, err := scrape.Run(cmd, []string{"TEST-001"}, configPath, deps)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-001"}, configPath, deps)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, movie)
@@ -505,14 +498,14 @@ func TestRun_EnvironmentOverridesValidated(t *testing.T) {
 	}
 
 	tmpFile := t.TempDir() + "/config.yaml"
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.Metadata.Translation.Enabled = true
 	require.NoError(t, config.Save(cfg, tmpFile))
 
 	cmd := scrape.NewCommand()
 	t.Setenv("TRANSLATION_PROVIDER", "definitely-not-valid")
 
-	movie, results, err := scrape.Run(cmd, []string{"TEST-ENV"}, tmpFile, nil)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-ENV"}, tmpFile, nil)
 
 	require.Error(t, err)
 	// Validation now happens earlier (during config load/env override application)

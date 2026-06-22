@@ -1,130 +1,211 @@
 package nfo
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"path/filepath"
 	"strings"
 
-	"github.com/javinizer/javinizer-go/internal/configutil"
-	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/mediainfo"
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
 )
 
+const defaultNFOFileName = "metadata"
+
 // Generator creates NFO files from movie metadata
 type Generator struct {
 	fs             afero.Fs
-	templateEngine *template.Engine
+	templateEngine template.EngineInterface
 	config         *Config
+	mediaAnalyzer  mediaAnalyzer
 }
 
-// Config holds NFO generation settings
-type Config struct {
-	// Actress name formatting
-	ActorFirstNameOrder bool   // true = FirstName LastName, false = LastName FirstName
-	ActorJapaneseNames  bool   // Use Japanese names if available
-	UnknownActress      string // Placeholder for unknown actresses (default: "Unknown")
-	UnknownActressMode  string // skip (default) or fallback
-
-	// File naming
-	NFOFilenameTemplate string // Template for NFO filename (default: "<ID>.nfo")
-	PerFile             bool   // Create separate NFO for each multi-part file (default: false)
-
-	// Optional fields
-	ActressAsTag         bool // Copy actress names to <tag> elements
-	IncludeOriginalPath  bool // Include source filename in NFO
-	IncludeStreamDetails bool // Include video/audio stream information
-	IncludeFanart        bool // Include fanart section
-	IncludeTrailer       bool // Include trailer URLs
-
-	// Actress role options
-	AddGenericRole bool // Add generic "Actress" role to all actresses (default: false)
-	AltNameRole    bool // Use alternate name (Japanese) in role field instead of name (default: false)
-
-	// Rating source
-	DefaultRatingSource string // Which rating to mark as default (default: "themoviedb")
-
-	// Static NFO fields
-	StaticTags    []string // Static tags to add to all NFOs
-	StaticTagline string   // Static tagline for all NFOs
-	StaticCredits []string // Static credits for all NFOs
-
-	// Database integration
-	TagDatabase *database.MovieTagRepository // Optional tag database for per-movie tags
-
-	// Output configuration
-	GroupActress            bool   // Replace multiple actresses with group name (default: false)
-	GroupActressName        string // Folder name when GroupActress is enabled and multiple actresses (default: "@Group")
-	GroupUnknownActressName string // Replacement when group_actress is enabled and the actress list is empty or unknown (default: "@Unknown")
-	ActressDelimiter        string // Delimiter between <ACTORS>/<ACTRESSES> names when no DELIM= modifier is present (default: ", ")
-}
-
-// NewGenerator creates a new NFO generator
 func NewGenerator(fs afero.Fs, cfg *Config) *Generator {
+	return newGeneratorWithAnalyzer(fs, cfg, nil)
+}
+
+// newGeneratorWithAnalyzer creates a new NFO generator with an optional media analyzer override.
+func newGeneratorWithAnalyzer(fs afero.Fs, cfg *Config, ma mediaAnalyzer) *Generator {
 	if cfg == nil {
-		cfg = DefaultConfig()
+		cfg = defaultConfig()
 	}
+
+	// Copy config to prevent caller mutation
+	cfgCopy := *cfg
 
 	// Ensure defaults
-	if cfg.UnknownActress == "" {
-		cfg.UnknownActress = "Unknown"
+	if cfgCopy.UnknownActressText == "" {
+		cfgCopy.UnknownActressText = "Unknown"
 	}
-	if cfg.UnknownActressMode == "" {
-		cfg.UnknownActressMode = "skip"
+	if cfgCopy.UnknownActressMode == "" {
+		cfgCopy.UnknownActressMode = models.UnknownActressModeSkip
 	}
-	if cfg.NFOFilenameTemplate == "" {
-		cfg.NFOFilenameTemplate = "<ID>.nfo"
+	if cfgCopy.FilenameTemplate == "" {
+		cfgCopy.FilenameTemplate = "<ID>.nfo"
+	}
+
+	// Use injected template engine with nil-guard fallback
+	engine := cfgCopy.TemplateEngine
+	if engine == nil {
+		engine = template.NewEngine()
+	}
+
+	if ma == nil {
+		ma = defaultMediaAnalyzer{}
 	}
 
 	return &Generator{
 		fs:             fs,
-		templateEngine: template.NewEngine(),
-		config:         cfg,
+		templateEngine: engine,
+		config:         &cfgCopy,
+		mediaAnalyzer:  ma,
 	}
 }
 
-// DefaultConfig returns default NFO generation settings
-func DefaultConfig() *Config {
+// defaultConfig returns default NFO generation settings
+func defaultConfig() *Config {
 	return &Config{
-		ActorFirstNameOrder:  true,
-		ActorJapaneseNames:   false,
-		UnknownActress:       "Unknown",
-		UnknownActressMode:   "skip",
-		NFOFilenameTemplate:  "<ID>.nfo",
-		IncludeStreamDetails: false,
-		IncludeFanart:        true,
-		IncludeTrailer:       true,
-		DefaultRatingSource:  "themoviedb",
+		FirstNameOrder:     true,
+		UnknownActressText: "Unknown",
+		UnknownActressMode: models.UnknownActressModeSkip,
+		FilenameTemplate:   "<ID>.nfo",
+		IncludeFanart:      true,
+		IncludeTrailer:     true,
+		RatingSource:       "themoviedb",
 	}
 }
+
+// NFOFieldMerger is the focused interface for NFO filename and path resolution.
+// Compare orchestrator and revert log use this to resolve NFO paths through
+// the seam instead of reaching into the nfo package directly.
+// Per the nfoImplementor refactoring: ParseNFO and MergeMovieMetadataWithOptions
+// are now package-level pure functions — no longer on any interface.
+type NFOFieldMerger interface {
+	ResolveNFOFilename(movie *models.Movie, cfg NFONameConfig) string
+
+	// ResolveNFOPath builds the expected NFO file path and a list of legacy
+	// paths to check for backward compatibility. Per ADR-0045: this method
+	// exists on NFOFieldMerger so that revert callers resolve NFO paths
+	// through the seam instead of reaching into the nfo package directly.
+	ResolveNFOPath(baseDir string, movie *models.Movie, cfg NFONameConfig, videoFilePath string) (nfoPath string, legacyPaths []string)
+}
+
+// NFOFileMerger is the focused interface for filesystem-aware NFO merge.
+// Apply orchestrator uses this to merge with an existing NFO file on disk.
+type NFOFileMerger interface {
+	MergeWithExistingNFO(movie *models.Movie, opts MergeWithExistingOptions) MergeWithExistingResult
+}
+
+// NFOInterface combines NFO filename/path resolution and filesystem-aware
+// merge into a single seam. Per the nfoImplementor refactoring: ParseNFO and
+// MergeMovieMetadataWithOptions are now package-level pure functions — callers
+// invoke them directly instead of through an interface.
+// New callers should depend on the narrowest sub-interface they need
+// (NFOFieldMerger or NFOFileMerger).
+type NFOInterface interface {
+	NFOFieldMerger
+	NFOFileMerger
+}
+
+// nfoImplementor is an unexported struct that satisfies NFOInterface.
+// Per the nfoImplementor refactoring: ParseNFO and MergeMovieMetadataWithOptions
+// are now package-level pure functions — callers invoke them directly.
+// nfoImplementor carries infrastructure dependencies (fs, nfoConfig,
+// templateEngine) so MergeWithExistingNFO callers pass domain data only.
+type nfoImplementor struct {
+	fs             afero.Fs
+	nfoConfig      *Config
+	templateEngine template.EngineInterface
+}
+
+var _ NFOInterface = (*nfoImplementor)(nil)
+
+// ResolveNFOFilename resolves the NFO filename for a movie using the implementor's
+// template engine. Per ADR-0045: this method exists on NFOFieldMerger so that
+// preview and revert callers resolve NFO paths through the seam instead of
+// reaching into the nfo package directly.
+func (n nfoImplementor) ResolveNFOFilename(movie *models.Movie, cfg NFONameConfig) string {
+	return ResolveNFOFilename(n.templateEngine, movie, cfg)
+}
+
+// ResolveNFOPath builds the expected NFO file path and legacy paths using the
+// implementor's template engine. Per ADR-0045: this method exists on
+// NFOFieldMerger so that revert callers resolve NFO paths through the seam
+// instead of reaching into the nfo package directly.
+func (n nfoImplementor) ResolveNFOPath(baseDir string, movie *models.Movie, cfg NFONameConfig, videoFilePath string) (string, []string) {
+	return resolveNFOPath(baseDir, movie, cfg, videoFilePath, n.templateEngine)
+}
+
+// NewNFOImplementor creates the canonical NFOInterface implementation with
+// infrastructure dependencies. Per ADR-0033: fs, nfoConfig, and templateEngine
+// are owned by the implementor, not threaded through per-call.
+func NewNFOImplementor(fs afero.Fs, nfoConfig *Config, templateEngine template.EngineInterface) NFOInterface {
+	return nfoImplementor{fs: fs, nfoConfig: nfoConfig, templateEngine: templateEngine}
+}
+
+type GeneratorInterface interface {
+	Generate(ctx context.Context, movie *models.Movie, outputPath string, partSuffix string, videoFilePath string, tags []string) error
+	GenerateAtPath(ctx context.Context, movie *models.Movie, nfoPath string, videoFilePath string, tags []string) error
+
+	// ResolveAndGenerate resolves the NFO filename from the template, validates the
+	// template, builds the full path, and generates the NFO file in the destination
+	// directory. Returns the NFO path on success, or ("", nil) if NFO generation was
+	// skipped (e.g. broken template). Returns ("", error) on generation failure.
+	// Per architecture deepening: this encapsulates the full NFO write path so that
+	// callers (the apply orchestrator) don't need to reach into NFO internals for
+	// template validation, filename resolution, and path construction.
+	ResolveAndGenerate(ctx context.Context, movie *models.Movie, destDir string, nameCfg NFONameConfig, videoFilePath string, tags []string) (nfoPath string, err error)
+}
+
+var _ GeneratorInterface = (*Generator)(nil)
 
 // Generate creates an NFO file from a Movie model
 // partSuffix: optional suffix for multi-part files (e.g., "-pt1", "-A")
 // videoFilePath: optional path to video file for extracting stream details (empty string to skip)
-func (g *Generator) Generate(movie *models.Movie, outputPath string, partSuffix string, videoFilePath string) error {
-	nfo := g.MovieToNFO(movie, videoFilePath)
-
-	// Generate filename using template
-	ctx := template.NewContextFromMovie(movie)
-	ctx.GroupActress = g.config.GroupActress
-	ctx.GroupActressName = g.config.GroupActressName
-	ctx.GroupUnknownActressName = g.config.GroupUnknownActressName
-	ctx.FirstNameOrder = g.config.ActorFirstNameOrder
-	ctx.ActressLanguageJa = g.config.ActorJapaneseNames
-	ctx.ActressDelimiter = g.config.ActressDelimiter
-	filename, err := g.templateEngine.Execute(g.config.NFOFilenameTemplate, ctx)
+// tags: pre-resolved tags from caller (e.g., tag database) — replaces internal DB call
+func (g *Generator) Generate(ctx context.Context, movie *models.Movie, outputPath string, partSuffix string, videoFilePath string, tags []string) error {
+	// Compute the NFO filename using the same logic as ResolveNFOFilename,
+	// but fail on template errors (Generate is the write path — broken templates
+	// should be reported, not silently fallen back).
+	tmplCtx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
+		FirstNameOrder: g.config.FirstNameOrder,
+	})
+	tmplCtx.GroupActress = g.config.GroupActress
+	tmplCtx.GroupActressName = g.config.GroupActressName
+	tmplCtx.GroupUnknownActressName = g.config.GroupUnknownActressName
+	tmplCtx.ActressLanguageJa = g.config.ActressLanguageJA
+	tmplCtx.ActressDelimiter = g.config.ActressDelimiter
+	filename, err := g.templateEngine.Execute(g.config.FilenameTemplate, tmplCtx)
 	if err != nil {
 		return fmt.Errorf("failed to generate NFO filename: %w", err)
 	}
 
 	// Sanitize filename
 	filename = template.SanitizeFilename(filename)
+	if filename == "" {
+		filename = template.SanitizeFilename(movie.ID)
+		if filename == "" {
+			filename = defaultNFOFileName
+		}
+	}
 
 	// Remove .nfo extension if present (we'll add it back at the end)
-	filename = strings.TrimSuffix(filename, ".nfo")
+	if strings.HasSuffix(strings.ToLower(filename), ".nfo") {
+		filename = filename[:len(filename)-4]
+	} else if strings.EqualFold(filename, "nfo") {
+		filename = ""
+	}
+
+	// After stripping .nfo, filename may be empty (e.g., template produced only ".nfo")
+	if filename == "" {
+		filename = template.SanitizeFilename(movie.ID)
+		if filename == "" {
+			filename = defaultNFOFileName
+		}
+	}
 
 	// Append part suffix before extension (if provided and per_file is enabled)
 	if partSuffix != "" && g.config.PerFile {
@@ -135,306 +216,56 @@ func (g *Generator) Generate(movie *models.Movie, outputPath string, partSuffix 
 	filename += ".nfo"
 
 	fullPath := filepath.Join(outputPath, filename)
-
-	return g.WriteNFO(nfo, fullPath)
+	return g.GenerateAtPath(ctx, movie, fullPath, videoFilePath, tags)
 }
 
-// MovieToNFO converts a Movie model to NFO format
+// GenerateAtPath creates an NFO file at the specified path without computing
+// the filename. Callers that have already resolved the NFO path (e.g., via
+// ResolveNFOFilename) should use this method to avoid dual path computation
+// and ensure the revert log and generator agree on the target path.
+func (g *Generator) GenerateAtPath(ctx context.Context, movie *models.Movie, nfoPath string, videoFilePath string, tags []string) error {
+	nfo := g.movieToNFO(ctx, movie, videoFilePath, tags)
+	return g.WriteNFO(nfo, nfoPath)
+}
+
+// ResolveAndGenerate encapsulates the full NFO write path: template validation,
+// filename resolution, path construction, and generation. Per architecture deepening:
+// callers don't need to reach into NFO internals for template validation, filename
+// resolution, or path construction. Returns the NFO path on success, or ("", nil)
+// if NFO generation was skipped (e.g. broken template).
+func (g *Generator) ResolveAndGenerate(ctx context.Context, movie *models.Movie, destDir string, nameCfg NFONameConfig, videoFilePath string, tags []string) (string, error) {
+	// Validate the template before resolving the filename — broken templates
+	// must skip NFO generation rather than silently falling back to movie.ID.nfo.
+	tmplCtx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
+		FirstNameOrder: nameCfg.FirstNameOrder,
+	})
+	tmplCtx.GroupActress = nameCfg.GroupActress
+	tmplCtx.GroupActressName = nameCfg.GroupActressName
+	if _, tmplErr := g.templateEngine.Execute(nameCfg.FilenameTemplate, tmplCtx); tmplErr != nil {
+		return "", nil //nolint:nilerr // intentional: broken templates skip NFO generation, not an error
+	}
+
+	nfoFilename := ResolveNFOFilename(g.templateEngine, movie, nameCfg)
+	nfoPath := filepath.ToSlash(filepath.Join(destDir, nfoFilename))
+
+	if genErr := g.GenerateAtPath(ctx, movie, nfoPath, videoFilePath, tags); genErr != nil {
+		return "", genErr
+	}
+	return nfoPath, nil
+}
+
+// movieToNFO converts a Movie model to NFO format.
 // videoFilePath: optional path to video file for extracting stream details (empty string to skip)
-func (g *Generator) MovieToNFO(movie *models.Movie, videoFilePath string) *Movie {
-	// Use DisplayTitle (canonical title), fallback to Title if not set
-	title := movie.DisplayTitle
-	if title == "" {
-		title = movie.Title
-	}
-
-	nfo := &Movie{
-		ID:            movie.ID,
-		Title:         title,
-		OriginalTitle: movie.OriginalTitle,
-		SortTitle:     movie.ID, // Use ID for sorting
-		Plot:          movie.Description,
-		Director:      movie.Director,
-		Studio:        movie.Maker,
-		Maker:         movie.Maker, // Custom JAV field
-		Label:         movie.Label, // Custom JAV field
-		Set:           movie.Series,
-	}
-
-	// Add unique IDs
-	if movie.ContentID != "" {
-		nfo.UniqueID = append(nfo.UniqueID, UniqueID{
-			Type:    "contentid",
-			Default: true,
-			Value:   movie.ContentID,
-		})
-	}
-
-	// Add release date
-	if movie.ReleaseDate != nil {
-		nfo.ReleaseDate = movie.ReleaseDate.Format("2006-01-02")
-		nfo.Premiered = movie.ReleaseDate.Format("2006-01-02")
-		nfo.Year = movie.ReleaseDate.Year()
-	} else if movie.ReleaseYear > 0 {
-		nfo.Year = movie.ReleaseYear
-	}
-
-	// Add runtime
-	if movie.Runtime > 0 {
-		nfo.Runtime = movie.Runtime
-	}
-
-	// Add rating
-	if movie.RatingScore > 0 {
-		nfo.Ratings = Ratings{
-			Rating: []Rating{
-				{
-					Name:    g.config.DefaultRatingSource,
-					Max:     10,
-					Default: true,
-					Value:   movie.RatingScore,
-					Votes:   movie.RatingVotes,
-				},
-			},
-		}
-	}
-
-	// Add actresses
-	if len(movie.Actresses) > 0 {
-		nfo.Actors = make([]Actor, 0, len(movie.Actresses))
-		seenDMMID := make(map[int]struct{})
-		seenNames := make(map[string]struct{})
-		for _, actress := range movie.Actresses {
-			actorName := g.formatActressName(actress)
-
-			// Deduplicate actresses:
-			// 1) Prefer positive DMMID as stable identity.
-			// 2) Fall back to normalized formatted name when DMMID is unavailable.
-			if actress.DMMID > 0 {
-				if _, exists := seenDMMID[actress.DMMID]; exists {
-					continue
-				}
-				seenDMMID[actress.DMMID] = struct{}{}
-			} else {
-				nameKey := normalizeActressNameForDedup(actorName)
-				if _, exists := seenNames[nameKey]; exists {
-					continue
-				}
-				seenNames[nameKey] = struct{}{}
-			}
-
-			actor := Actor{
-				Name:  actorName,
-				Order: len(nfo.Actors),
-			}
-
-			// Add generic role if configured
-			if g.config.AddGenericRole {
-				actor.Role = "Actress"
-			}
-
-			// Use alternate name (Japanese) in role field if configured
-			if g.config.AltNameRole && actress.JapaneseName != "" {
-				actor.Role = actress.JapaneseName
-			}
-
-			// Add actress image if available
-			if actress.ThumbURL != "" {
-				actor.Thumb = actress.ThumbURL
-			}
-
-			nfo.Actors = append(nfo.Actors, actor)
-		}
-	}
-
-	// Add genres
-	if len(movie.Genres) > 0 {
-		nfo.Genres = make([]string, 0, len(movie.Genres))
-		for _, genre := range movie.Genres {
-			nfo.Genres = append(nfo.Genres, genre.Name)
-		}
-	}
-
-	// Add cover image
-	if movie.CoverURL != "" {
-		nfo.Thumb = []Thumb{
-			{
-				Aspect: "poster",
-				Value:  movie.CoverURL,
-			},
-		}
-	}
-
-	// Add fanart (background images)
-	if g.config.IncludeFanart && len(movie.Screenshots) > 0 {
-		fanart := &Fanart{
-			Thumbs: make([]Thumb, 0, len(movie.Screenshots)),
-		}
-		for _, url := range movie.Screenshots {
-			fanart.Thumbs = append(fanart.Thumbs, Thumb{
-				Value: url,
-			})
-		}
-		nfo.Fanart = fanart
-	}
-
-	// Add trailer
-	if g.config.IncludeTrailer && movie.TrailerURL != "" {
-		nfo.Trailer = movie.TrailerURL
-	}
-
-	// Add stream details if enabled and video file path provided
-	if g.config.IncludeStreamDetails && videoFilePath != "" {
-		if streamDetails := g.extractStreamDetails(videoFilePath); streamDetails != nil {
-			nfo.FileInfo = &FileInfo{
-				StreamDetails: streamDetails,
-			}
-		}
-	}
-
-	// Add original filename if enabled
-	if g.config.IncludeOriginalPath && movie.OriginalFileName != "" {
-		nfo.OriginalPath = movie.OriginalFileName
-	}
-
-	// Add actress names as tags if enabled
-	if g.config.ActressAsTag && len(movie.Actresses) > 0 {
-		// Create set of existing tags for deduplication
-		tagSet := make(map[string]bool)
-		for _, tag := range nfo.Tags {
-			tagSet[tag] = true
-		}
-
-		// Add actress names as tags
-		for _, actress := range movie.Actresses {
-			actressName := g.formatActressName(actress)
-			skipUnknownTag := g.config.UnknownActressMode != "fallback" && actressName == g.config.UnknownActress
-			if actressName != "" && !skipUnknownTag && !tagSet[actressName] {
-				nfo.Tags = append(nfo.Tags, actressName)
-				tagSet[actressName] = true
-			}
-		}
-	}
-
-	// Add movie-specific tags from database
-	if g.config.TagDatabase != nil {
-		movieTags, err := g.config.TagDatabase.GetTagsForMovie(movie.ID)
-		if err == nil && len(movieTags) > 0 {
-			// Create or reuse tagSet for deduplication
-			tagSet := make(map[string]bool)
-			for _, tag := range nfo.Tags {
-				tagSet[tag] = true
-			}
-
-			// Add database tags
-			for _, tag := range movieTags {
-				if tag != "" && !tagSet[tag] {
-					nfo.Tags = append(nfo.Tags, tag)
-					tagSet[tag] = true
-				}
-			}
-		}
-	}
-
-	// Add static tags from config
-	if len(g.config.StaticTags) > 0 {
-		// Create set for deduplication if not already created
-		tagSet := make(map[string]bool)
-		for _, tag := range nfo.Tags {
-			tagSet[tag] = true
-		}
-
-		// Add static tags
-		for _, tag := range g.config.StaticTags {
-			if tag != "" && !tagSet[tag] {
-				nfo.Tags = append(nfo.Tags, tag)
-				tagSet[tag] = true
-			}
-		}
-	}
-
-	// Add static tagline from config
-	if g.config.StaticTagline != "" {
-		nfo.Tagline = g.config.StaticTagline
-	}
-
-	// Add static credits from config
-	if len(g.config.StaticCredits) > 0 {
-		// Join credits with comma separator for NFO XML
-		nfo.Credits = strings.Join(g.config.StaticCredits, ", ")
-	}
-
-	return nfo
+// tags: pre-resolved tags from caller (e.g., tag database) — replaces internal DB call
+func (g *Generator) movieToNFO(ctx context.Context, movie *models.Movie, videoFilePath string, tags []string) *Movie {
+	input := g.transformMovieForNFO(ctx, movie, videoFilePath, tags)
+	return g.buildNFO(input)
 }
 
-func normalizeActressNameForDedup(name string) string {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" {
-		return ""
-	}
-	return strings.ToLower(strings.Join(strings.Fields(trimmed), " "))
-}
-
-// formatActressName formats an actress name according to config
-func (g *Generator) formatActressName(actress models.Actress) string {
-	return FormatActressName(actress, g.config.ActorJapaneseNames, g.config.ActorFirstNameOrder, g.config.UnknownActress, g.config.UnknownActressMode)
-}
-
-func (g *Generator) formatActressNameFromActressInfo(actress models.ActressInfo) string {
-	return FormatActressName(models.Actress{
-		FirstName:    actress.FirstName,
-		LastName:     actress.LastName,
-		JapaneseName: actress.JapaneseName,
-	}, g.config.ActorJapaneseNames, g.config.ActorFirstNameOrder, g.config.UnknownActress, g.config.UnknownActressMode)
-}
-
-func FormatActressName(actress models.Actress, japaneseNames bool, firstNameOrder bool, unknownActress string, unknownActressMode ...string) string {
-	mode := ""
-	if len(unknownActressMode) > 0 {
-		mode = unknownActressMode[0]
-	}
-	if unknownActress == "" {
-		unknownActress = "Unknown"
-	}
-
-	if japaneseNames && actress.JapaneseName != "" {
-		return actress.JapaneseName
-	}
-
-	if actress.FirstName == "" && actress.LastName == "" {
-		if actress.JapaneseName != "" {
-			return actress.JapaneseName
-		}
-		if mode == "skip" {
-			return ""
-		}
-		return unknownActress
-	}
-
-	if firstNameOrder {
-		if actress.FirstName != "" && actress.LastName != "" {
-			return actress.FirstName + " " + actress.LastName
-		}
-		if actress.FirstName != "" {
-			return actress.FirstName
-		}
-		return actress.LastName
-	}
-
-	if actress.FirstName != "" && actress.LastName != "" {
-		return actress.LastName + " " + actress.FirstName
-	}
-	if actress.LastName != "" {
-		return actress.LastName
-	}
-	return actress.FirstName
-}
-
-// WriteNFO writes an NFO structure to a file
 func (g *Generator) WriteNFO(nfo *Movie, path string) error {
 	// Ensure output directory exists
 	dir := filepath.Dir(path)
-	if err := g.fs.MkdirAll(dir, configutil.DirPerm); err != nil {
+	if err := g.fs.MkdirAll(dir, config.DirPerm); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -467,225 +298,74 @@ func (g *Generator) WriteNFO(nfo *Movie, path string) error {
 	return nil
 }
 
-// GenerateFromScraperResult creates an NFO from a ScraperResult
-func (g *Generator) GenerateFromScraperResult(result *models.ScraperResult, outputPath string) error {
-	// Convert ScraperResult to NFO
-	nfo := g.ScraperResultToNFO(result)
-
-	// Generate filename using template
-	ctx := template.NewContextFromScraperResult(result)
-	filename, err := g.templateEngine.Execute(g.config.NFOFilenameTemplate, ctx)
-	if err != nil {
-		return fmt.Errorf("failed to generate NFO filename: %w", err)
-	}
-
-	// Sanitize filename
-	filename = template.SanitizeFilename(filename)
-
-	// Ensure .nfo extension
-	if !strings.HasSuffix(filename, ".nfo") {
-		filename += ".nfo"
-	}
-
-	fullPath := filepath.Join(outputPath, filename)
-
-	return g.WriteNFO(nfo, fullPath)
-}
-
-// ScraperResultToNFO converts a ScraperResult to NFO format
-func (g *Generator) ScraperResultToNFO(result *models.ScraperResult) *Movie {
-	nfo := &Movie{
-		ID:            result.ID,
-		Title:         result.Title,
-		OriginalTitle: result.OriginalTitle,
-		SortTitle:     result.ID,
-		Plot:          result.Description,
-		Director:      result.Director,
-		Studio:        result.Maker,
-		Maker:         result.Maker,
-		Label:         result.Label,
-		Set:           result.Series,
-	}
-
-	// Add unique IDs
-	if result.ContentID != "" {
-		nfo.UniqueID = append(nfo.UniqueID, UniqueID{
-			Type:    "contentid",
-			Default: true,
-			Value:   result.ContentID,
-		})
-	}
-
-	// Add release date
-	if result.ReleaseDate != nil {
-		nfo.ReleaseDate = result.ReleaseDate.Format("2006-01-02")
-		nfo.Premiered = result.ReleaseDate.Format("2006-01-02")
-		nfo.Year = result.ReleaseDate.Year()
-	}
-
-	// Add runtime
-	if result.Runtime > 0 {
-		nfo.Runtime = result.Runtime
-	}
-
-	// Add rating
-	if result.Rating != nil {
-		nfo.Ratings = Ratings{
-			Rating: []Rating{
-				{
-					Name:    g.config.DefaultRatingSource,
-					Max:     10,
-					Default: true,
-					Value:   result.Rating.Score,
-					Votes:   result.Rating.Votes,
-				},
-			},
-		}
-	}
-
-	// Add actresses
-	if len(result.Actresses) > 0 {
-		nfo.Actors = make([]Actor, 0, len(result.Actresses))
-		for i, actress := range result.Actresses {
-			actorName := g.formatActressNameFromActressInfo(actress)
-			actor := Actor{
-				Name:  actorName,
-				Order: i,
-			}
-
-			// Add generic role if configured
-			if g.config.AddGenericRole {
-				actor.Role = "Actress"
-			}
-
-			// Use alternate name (Japanese) in role field if configured
-			if g.config.AltNameRole && actress.JapaneseName != "" {
-				actor.Role = actress.JapaneseName
-			}
-
-			if actress.ThumbURL != "" {
-				actor.Thumb = actress.ThumbURL
-			}
-
-			nfo.Actors = append(nfo.Actors, actor)
-		}
-	}
-
-	// Add genres
-	if len(result.Genres) > 0 {
-		nfo.Genres = result.Genres
-	}
-
-	// Add cover image
-	if result.CoverURL != "" {
-		nfo.Thumb = []Thumb{
-			{
-				Aspect: "poster",
-				Value:  result.CoverURL,
-			},
-		}
-	}
-
-	// Add fanart
-	if g.config.IncludeFanart && len(result.ScreenshotURL) > 0 {
-		fanart := &Fanart{
-			Thumbs: make([]Thumb, 0, len(result.ScreenshotURL)),
-		}
-		for _, url := range result.ScreenshotURL {
-			fanart.Thumbs = append(fanart.Thumbs, Thumb{
-				Value: url,
-			})
-		}
-		nfo.Fanart = fanart
-	}
-
-	// Add trailer
-	if g.config.IncludeTrailer && result.TrailerURL != "" {
-		nfo.Trailer = result.TrailerURL
-	}
-
-	return nfo
-}
-
 // extractStreamDetails extracts video/audio stream information from a video file
-func (g *Generator) extractStreamDetails(videoFilePath string) *StreamDetails {
-	// Extract media information
-	info, err := mediainfo.Analyze(videoFilePath)
+func (g *Generator) extractStreamDetails(ctx context.Context, videoFilePath string) *streamDetails {
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
+
+	details, err := g.mediaAnalyzer.Analyze(ctx, videoFilePath)
 	if err != nil {
-		// Silently fail - stream details are optional
 		return nil
 	}
-
-	streamDetails := &StreamDetails{}
-
-	// Add video stream
-	if info.Width > 0 && info.Height > 0 {
-		videoStream := VideoStream{
-			Codec:  info.VideoCodec,
-			Aspect: info.AspectRatio,
-			Width:  info.Width,
-			Height: info.Height,
-		}
-
-		if info.Duration > 0 {
-			videoStream.DurationInSeconds = int(info.Duration)
-		}
-
-		streamDetails.Video = []VideoStream{videoStream}
-	}
-
-	// Add audio stream
-	if info.AudioCodec != "" {
-		audioStream := AudioStream{
-			Codec:    info.AudioCodec,
-			Channels: info.AudioChannels,
-		}
-
-		streamDetails.Audio = []AudioStream{audioStream}
-	}
-
-	// Return nil if no streams were added
-	if len(streamDetails.Video) == 0 && len(streamDetails.Audio) == 0 {
-		return nil
-	}
-
-	return streamDetails
+	return details
 }
 
 // ResolveNFOFilename computes the NFO filename for a movie using the same logic
-// as Generate, without writing the file. This ensures that history/revert code
-// tracks the exact path the generator will use.
-func ResolveNFOFilename(movie *models.Movie, nfoFilenameTemplate string, groupActress bool, groupActressName string, groupUnknownActressName string, firstNameOrder bool, actressLanguageJa bool, actressDelimiter string, perFile bool, isMultiPart bool, partSuffix string) string {
-	tmplCtx := template.NewContextFromMovie(movie)
-	tmplCtx.GroupActress = groupActress
-	tmplCtx.GroupActressName = groupActressName
-	tmplCtx.GroupUnknownActressName = groupUnknownActressName
-	tmplCtx.FirstNameOrder = firstNameOrder
-	tmplCtx.ActressLanguageJa = actressLanguageJa
-	tmplCtx.ActressDelimiter = actressDelimiter
-	engine := template.NewEngine()
-	filename, err := engine.Execute(nfoFilenameTemplate, tmplCtx)
+// as Generate, without writing the file. On template execution error, falls back
+// to movie.ID.nfo (unlike Generate, which returns the error). This ensures that
+// history/revert code always gets a usable path even if the template is broken.
+// The engine parameter allows injection of a shared template engine with language
+// config; if nil, a default engine is created.
+func ResolveNFOFilename(engine template.EngineInterface, movie *models.Movie, cfg NFONameConfig) string {
+	if engine == nil {
+		engine = template.NewEngine()
+	}
+	tmplCtx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
+		FirstNameOrder: cfg.FirstNameOrder,
+	})
+	tmplCtx.GroupActress = cfg.GroupActress
+	tmplCtx.GroupActressName = cfg.GroupActressName
+	tmplCtx.GroupUnknownActressName = cfg.GroupUnknownActressName
+	tmplCtx.ActressLanguageJa = cfg.ActressLanguageJA
+	tmplCtx.ActressDelimiter = cfg.ActressDelimiter
+	filename, err := engine.Execute(cfg.FilenameTemplate, tmplCtx)
 	if err != nil {
 		sanitized := template.SanitizeFilename(movie.ID)
 		if sanitized == "" {
-			sanitized = "metadata"
+			sanitized = defaultNFOFileName
 		}
 		return sanitized + ".nfo"
 	}
-	basename := filename
-	lower := strings.ToLower(basename)
-	if strings.HasSuffix(lower, ".nfo") {
-		basename = basename[:len(basename)-4]
-	}
-	sanitized := template.SanitizeFilename(basename)
-	if sanitized == "" {
-		sanitized = template.SanitizeFilename(movie.ID)
-		if sanitized == "" {
-			sanitized = "metadata"
+
+	// Sanitize FIRST (matching Generate's order), then strip .nfo
+	filename = template.SanitizeFilename(filename)
+	if filename == "" {
+		filename = template.SanitizeFilename(movie.ID)
+		if filename == "" {
+			filename = defaultNFOFileName
 		}
 	}
-	if partSuffix != "" && perFile {
-		sanitized += partSuffix
+
+	// Remove .nfo extension if present (we'll add it back at the end)
+	if strings.HasSuffix(strings.ToLower(filename), ".nfo") {
+		filename = filename[:len(filename)-4]
+	} else if strings.EqualFold(filename, "nfo") {
+		filename = ""
 	}
-	return sanitized + ".nfo"
+
+	// After stripping .nfo, filename may be empty (e.g., template produced only ".nfo")
+	if filename == "" {
+		filename = template.SanitizeFilename(movie.ID)
+		if filename == "" {
+			filename = defaultNFOFileName
+		}
+	}
+
+	if cfg.PartSuffix != "" && cfg.PerFile {
+		filename += cfg.PartSuffix
+	}
+	return filename + ".nfo"
 }

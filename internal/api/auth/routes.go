@@ -1,18 +1,18 @@
 package auth
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
+)
 
-func RequireAuthenticated(deps *ServerDependencies) gin.HandlerFunc {
-	return requireAuthenticated(deps)
+func RequireTokenOrSession(deps *core.APIDeps) gin.HandlerFunc {
+	rt := core.NewAPIRuntime(deps)
+	return requireTokenOrSession(rt)
 }
 
-func RequireTokenOrSession(deps *ServerDependencies) gin.HandlerFunc {
-	return requireTokenOrSession(deps)
-}
-
-func RegisterPublicRoutes(v1 *gin.RouterGroup, deps *ServerDependencies) {
-	v1.GET("/auth/status", getAuthStatus(deps))
-	v1.POST("/auth/setup", setupAuth(deps))
-	v1.POST("/auth/login", loginAuth(deps))
-	v1.POST("/auth/logout", logoutAuth(deps))
+func RegisterPublicRoutes(v1 *gin.RouterGroup, rt *core.APIRuntime) {
+	v1.GET("/auth/status", getAuthStatus(rt))
+	v1.POST("/auth/setup", setupAuth(rt))
+	v1.POST("/auth/login", loginAuth(rt))
+	v1.POST("/auth/logout", logoutAuth(rt))
 }

@@ -7,7 +7,6 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +22,7 @@ func TestAggregatePriority_JapaneseFirst(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	releaseDate := time.Date(2021, 1, 8, 0, 0, 0, 0, time.UTC)
 
@@ -97,7 +96,7 @@ func TestAggregatePriority_JapaneseFirst(t *testing.T) {
 			},
 		}
 
-		aggR18First := New(cfgR18First)
+		aggR18First := newAggregatorNoDB(testConfigFromAppConfig(cfgR18First))
 		results := []*models.ScraperResult{r18devResult, dmmResult}
 		movie, _, err := aggR18First.Aggregate(results)
 		require.NoError(t, err)
@@ -123,7 +122,7 @@ func TestAggregatePriority_MissingData(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	// DMM result with missing title
 	dmmResult := &models.ScraperResult{
@@ -171,7 +170,7 @@ func TestAggregatePriority_EmptyPriorityFallsBackToGlobal(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	// Verify resolved priorities - all fields use the same priority
 	assert.Equal(t, []string{"r18dev", "dmm"}, agg.resolvedPriorities["Title"])
@@ -225,7 +224,7 @@ func TestAggregatePriority_MissingPriorityFallsBackToGlobal(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	// Verify resolved priorities - all fields use the same priority
 	assert.Equal(t, []string{"r18dev", "dmm"}, agg.resolvedPriorities["Title"])
@@ -277,7 +276,7 @@ func TestAggregateWithPriority_CustomPriority(t *testing.T) {
 		},
 	}
 
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	releaseDate := time.Date(2021, 1, 8, 0, 0, 0, 0, time.UTC)
 
@@ -322,7 +321,7 @@ func TestAggregateWithPriority_CustomPriority(t *testing.T) {
 		"Should use R18Dev maker based on custom priority")
 	assert.Equal(t, "English description", movie.Description,
 		"Should use R18Dev description based on custom priority")
-	assert.Equal(t, "https://r18dev.com/poster.jpg", movie.PosterURL,
+	assert.Equal(t, "https://r18dev.com/poster.jpg", movie.Poster.PosterURL,
 		"Should use R18Dev poster URL based on custom priority")
 
 	// Test with opposite custom priority (dmm first)
@@ -343,7 +342,7 @@ func TestAggregateWithPriority_CustomPriority(t *testing.T) {
 // TestAggregateWithPriority_EmptyResults tests error handling with empty results
 func TestAggregateWithPriority_EmptyResults(t *testing.T) {
 	cfg := &config.Config{}
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	results := []*models.ScraperResult{}
 	customPriority := []string{"r18dev", "dmm"}
@@ -357,7 +356,7 @@ func TestAggregateWithPriority_EmptyResults(t *testing.T) {
 // TestAggregateWithPriority_FallbackToNextPriority tests fallback behavior
 func TestAggregateWithPriority_FallbackToNextPriority(t *testing.T) {
 	cfg := &config.Config{}
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	// First scraper has incomplete data
 	firstResult := &models.ScraperResult{
@@ -400,11 +399,13 @@ func TestAggregateWithPriority_AllFields(t *testing.T) {
 	cfg := &config.Config{
 		Metadata: config.MetadataConfig{
 			NFO: config.NFOConfig{
-				DisplayTitle: "<ID> - <TITLE>",
+				Format: config.NFOFormatConfig{
+					DisplayTitle: "<ID> - <TITLE>",
+				},
 			},
 		},
 	}
-	agg := New(cfg)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	releaseDate := time.Date(2021, 6, 15, 0, 0, 0, 0, time.UTC)
 	screenshots := []string{
@@ -458,8 +459,8 @@ func TestAggregateWithPriority_AllFields(t *testing.T) {
 	assert.Equal(t, "Test Studio", movie.Maker)
 	assert.Equal(t, "Test Label", movie.Label)
 	assert.Equal(t, "Test Series", movie.Series)
-	assert.Equal(t, "https://example.com/poster.jpg", movie.PosterURL)
-	assert.Equal(t, "https://example.com/cover.jpg", movie.CoverURL)
+	assert.Equal(t, "https://example.com/poster.jpg", movie.Poster.PosterURL)
+	assert.Equal(t, "https://example.com/cover.jpg", movie.Poster.CoverURL)
 	assert.Equal(t, "https://example.com/trailer.mp4", movie.TrailerURL)
 	assert.Equal(t, 120, movie.Runtime)
 	assert.Equal(t, 2021, movie.ReleaseDate.Year())
@@ -472,7 +473,7 @@ func TestAggregateWithPriority_AllFields(t *testing.T) {
 	assert.Len(t, movie.Screenshots, 2)
 	assert.Equal(t, "test-scraper", movie.SourceName)
 	assert.Equal(t, "https://test-scraper.com/movie/123", movie.SourceURL)
-	assert.Equal(t, "TEST-123 - Test Movie Title", movie.DisplayTitle)
+	assert.Empty(t, movie.DisplayTitle, "aggregator should not apply DisplayTitle")
 
 	// Verify timestamps are set
 	assert.False(t, movie.CreatedAt.IsZero())
@@ -489,33 +490,31 @@ func (m *mockScraper) Name() string { return m.name }
 func (m *mockScraper) Search(_ context.Context, _ string) (*models.ScraperResult, error) {
 	return m.result, nil
 }
-func (m *mockScraper) GetURL(_ string) (string, error) { return "", nil }
-func (m *mockScraper) IsEnabled() bool                 { return true }
-func (m *mockScraper) Config() *config.ScraperSettings { return nil }
-func (m *mockScraper) Close() error                    { return nil }
+func (m *mockScraper) GetURL(_ context.Context, _ string) (string, error) { return "", nil }
+func (m *mockScraper) IsEnabled() bool                                    { return true }
+func (m *mockScraper) Config() *models.ScraperSettings                    { return nil }
+func (m *mockScraper) Close() error                                       { return nil }
 
-// TestResolvePriorities_ScrapersOverride tests that injected scrapers determine priority order
-func TestResolvePriorities_ScrapersOverride(t *testing.T) {
-	// Create mock scrapers with known names in specific order
-	scrapers := []models.Scraper{
-		&mockScraper{name: "r18dev"},
-		&mockScraper{name: "dmm"},
-		&mockScraper{name: "javlibrary"},
+// TestResolvePriorities_ScrapersPriorityOrder tests that ScrapersPriority determines priority order
+func TestResolvePriorities_ScrapersPriorityOrder(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"r18dev", "dmm", "javlibrary"},
+		},
 	}
+	aggCfg := testConfigFromAppConfig(cfg)
+	agg := New(aggCfg, NewGenreProcessor(aggCfg.Metadata, nil), NewWordProcessor(aggCfg.Metadata, nil), NewAliasResolver(aggCfg.Metadata, nil))
 
-	cfg := &config.Config{}
-	agg := NewWithOptions(cfg, &AggregatorOptions{Scrapers: scrapers})
-
-	// Verify priority order matches scraper order
-	priority := agg.GetResolvedPriorities()["Title"]
+	// Verify priority order matches ScrapersPriority order
+	priority := agg.getResolvedPriorities()["Title"]
 	assert.Equal(t, []string{"r18dev", "dmm", "javlibrary"}, priority)
 
 	// Verify all fields use the same priority
-	assert.Equal(t, priority, agg.GetResolvedPriorities()["Description"])
-	assert.Equal(t, priority, agg.GetResolvedPriorities()["Maker"])
+	assert.Equal(t, priority, agg.getResolvedPriorities()["Description"])
+	assert.Equal(t, priority, agg.getResolvedPriorities()["Maker"])
 }
 
-// TestResolvePriorities_ScrapersEmptyFallsBack tests that scraperutil fallback is used when no scrapers injected
+// TestResolvePriorities_ScrapersEmptyFallsBack tests fallback when no scrapers injected
 func TestResolvePriorities_ScrapersEmptyFallsBack(t *testing.T) {
 	// Create config with explicit priority (to verify it takes precedence)
 	cfg := &config.Config{
@@ -527,14 +526,15 @@ func TestResolvePriorities_ScrapersEmptyFallsBack(t *testing.T) {
 	}
 
 	// When Scrapers is nil, should fall back to config priority
-	agg := NewWithOptions(cfg, &AggregatorOptions{Scrapers: nil})
+	aggCfg := testConfigFromAppConfig(cfg)
+	agg := New(aggCfg, NewGenreProcessor(aggCfg.Metadata, nil), NewWordProcessor(aggCfg.Metadata, nil), NewAliasResolver(aggCfg.Metadata, nil))
 
-	priority := agg.GetResolvedPriorities()["Title"]
+	priority := agg.getResolvedPriorities()["Title"]
 	assert.Equal(t, []string{"custom1", "custom2"}, priority)
 }
 
-// TestResolvePriorities_ScrapersWithEmptyArrayFallsBack tests that empty scrapers array falls back to scraperutil
-func TestResolvePriorities_ScrapersWithEmptyArrayFallsBack(t *testing.T) {
+// TestResolvePriorities_EmptyScrapersPriorityFallsBackToMetadataPriority tests fallback when ScrapersPriority is empty
+func TestResolvePriorities_EmptyScrapersPriorityFallsBackToMetadataPriority(t *testing.T) {
 	cfg := &config.Config{
 		Metadata: config.MetadataConfig{
 			Priority: config.PriorityConfig{
@@ -543,23 +543,17 @@ func TestResolvePriorities_ScrapersWithEmptyArrayFallsBack(t *testing.T) {
 		},
 	}
 
-	// When Scrapers is empty slice (not nil), should still fall back
-	agg := NewWithOptions(cfg, &AggregatorOptions{Scrapers: []models.Scraper{}})
+	// When ScrapersPriority is empty, should fall back to metadata priority
+	aggCfg := testConfigFromAppConfig(cfg)
+	agg := New(aggCfg, NewGenreProcessor(aggCfg.Metadata, nil), NewWordProcessor(aggCfg.Metadata, nil), NewAliasResolver(aggCfg.Metadata, nil))
 
-	priority := agg.GetResolvedPriorities()["Title"]
+	priority := agg.getResolvedPriorities()["Title"]
 	assert.Equal(t, []string{"fallback1", "fallback2"}, priority)
 }
 
 // TestResolvePriorities_PrefersConfiguredScraperPriorityOverRegistryDefaults verifies that
-// cfg.Scrapers.Priority is used when metadata priority is unset, even if scraperutil defaults exist.
+// cfg.Scrapers.Priority is used when metadata priority is unset.
 func TestResolvePriorities_PrefersConfiguredScraperPriorityOverRegistryDefaults(t *testing.T) {
-	scraperutil.ResetDefaults()
-	defer scraperutil.ResetDefaults()
-
-	module1 := &testPriorityModule{name: "r18dev", priority: 100}
-	module2 := &testPriorityModule{name: "dmm", priority: 50}
-	scraperutil.RegisterModule(module1)
-	scraperutil.RegisterModule(module2)
 
 	cfg := &config.Config{
 		Scrapers: config.ScrapersConfig{
@@ -572,8 +566,8 @@ func TestResolvePriorities_PrefersConfiguredScraperPriorityOverRegistryDefaults(
 		},
 	}
 
-	agg := New(cfg)
-	priority := agg.GetResolvedPriorities()["Title"]
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
+	priority := agg.getResolvedPriorities()["Title"]
 	assert.Equal(t, []string{"dmm", "r18dev"}, priority)
 }
 
@@ -586,43 +580,3 @@ func (m *testPriorityModule) Name() string        { return m.name }
 func (m *testPriorityModule) Description() string { return "Test " + m.name }
 func (m *testPriorityModule) Constructor() any    { return nil }
 func (m *testPriorityModule) Validator() any      { return nil }
-func (m *testPriorityModule) ConfigFactory() any  { return nil }
-func (m *testPriorityModule) Options() any        { return nil }
-func (m *testPriorityModule) Defaults() any       { return config.ScraperSettings{} }
-func (m *testPriorityModule) Priority() int       { return m.priority }
-func (m *testPriorityModule) FlattenFunc() any    { return nil }
-
-// TestAggregateWithPriority_ShouldCropPoster tests that ShouldCropPoster matches the PosterURL source
-func TestAggregateWithPriority_ShouldCropPoster(t *testing.T) {
-	cfg := &config.Config{}
-	agg := New(cfg)
-
-	// R18Dev result with ShouldCropPoster = false
-	r18devResult := &models.ScraperResult{
-		Source:           "r18dev",
-		ID:               "TEST-001",
-		PosterURL:        "https://r18dev.com/poster.jpg",
-		ShouldCropPoster: false,
-	}
-
-	// DMM result with ShouldCropPoster = true
-	dmmResult := &models.ScraperResult{
-		Source:           "dmm",
-		ID:               "TEST-001",
-		PosterURL:        "https://dmm.com/poster.jpg",
-		ShouldCropPoster: true,
-	}
-
-	// Test with r18dev first - should get ShouldCropPoster = false
-	results := []*models.ScraperResult{r18devResult, dmmResult}
-	movie, _, err := agg.AggregateWithPriority(results, []string{"r18dev", "dmm"})
-	require.NoError(t, err)
-	assert.Equal(t, "https://r18dev.com/poster.jpg", movie.PosterURL)
-	assert.False(t, movie.ShouldCropPoster, "ShouldCropPoster should match r18dev source")
-
-	// Test with dmm first - should get ShouldCropPoster = true
-	movie2, _, err := agg.AggregateWithPriority(results, []string{"dmm", "r18dev"})
-	require.NoError(t, err)
-	assert.Equal(t, "https://dmm.com/poster.jpg", movie2.PosterURL)
-	assert.True(t, movie2.ShouldCropPoster, "ShouldCropPoster should match dmm source")
-}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,22 +17,22 @@ func TestScrapersConfigMarshalJSON(t *testing.T) {
 		TimeoutSeconds:        30,
 		RequestTimeoutSeconds: 60,
 		Priority:              []string{"dmm", "r18dev"},
-		Proxy: ProxyConfig{
+		Proxy: models.ProxyConfig{
 			Enabled:        true,
 			DefaultProfile: "main",
-			Profiles: map[string]ProxyProfile{
+			Profiles: map[string]models.ProxyProfile{
 				"main": {URL: "http://proxy.example.com:8080"},
 			},
 		},
-		Overrides: map[string]*ScraperSettings{
-			"dmm": &ScraperSettings{
+		Overrides: map[string]*models.ScraperSettings{
+			"dmm": &models.ScraperSettings{
 				Enabled:    true,
 				Language:   "ja",
 				Timeout:    10,
 				RateLimit:  1000,
 				RetryCount: 3,
 			},
-			"r18dev": &ScraperSettings{
+			"r18dev": &models.ScraperSettings{
 				Enabled:   false,
 				Language:  "en",
 				RateLimit: 500,
@@ -86,12 +87,12 @@ func TestScrapersConfigMarshalJSON(t *testing.T) {
 }
 
 func TestScrapersConfigMarshalJSONWithOverrides(t *testing.T) {
-	// Create a ScrapersConfig with Overrides populated (simulating post-NormalizeScraperConfigs state)
+	// Create a ScrapersConfig with Overrides populated (simulating post-Finalize state)
 	scrapersCfg := ScrapersConfig{
 		UserAgent: "test-agent",
 		Priority:  []string{"dmm"},
-		Overrides: map[string]*ScraperSettings{
-			"dmm": &ScraperSettings{
+		Overrides: map[string]*models.ScraperSettings{
+			"dmm": &models.ScraperSettings{
 				Enabled:   true,
 				RateLimit: 2000,
 			},
@@ -121,8 +122,8 @@ func TestScrapersConfigRoundTrip(t *testing.T) {
 		UserAgent:      "round-trip-agent",
 		TimeoutSeconds: 45,
 		Priority:       []string{"dmm", "r18dev"},
-		Overrides: map[string]*ScraperSettings{
-			"dmm": &ScraperSettings{
+		Overrides: map[string]*models.ScraperSettings{
+			"dmm": &models.ScraperSettings{
 				Enabled:    true,
 				RateLimit:  1500,
 				RetryCount: 5,
@@ -159,7 +160,7 @@ func TestScrapersConfigRoundTrip(t *testing.T) {
 	if !ok {
 		t.Errorf("dmm scraper settings missing after round-trip")
 	} else {
-		// Note: RateLimit should round-trip correctly since ScraperSettings uses the same field name
+		// Note: RateLimit should round-trip correctly since models.ScraperSettings uses the same field name
 		if dmmSettings.RateLimit != original.Overrides["dmm"].RateLimit {
 			t.Errorf("RateLimit round-trip mismatch: got %d, want %d", dmmSettings.RateLimit, original.Overrides["dmm"].RateLimit)
 		}
@@ -213,13 +214,13 @@ func TestScrapersConfigMarshalYAML(t *testing.T) {
 		UserAgent:      "test-user-agent",
 		TimeoutSeconds: 30,
 		Priority:       []string{"dmm", "r18dev"},
-		Overrides: map[string]*ScraperSettings{
-			"dmm": &ScraperSettings{
+		Overrides: map[string]*models.ScraperSettings{
+			"dmm": &models.ScraperSettings{
 				Enabled:   true,
 				Language:  "ja",
 				RateLimit: 1000,
 			},
-			"r18dev": &ScraperSettings{
+			"r18dev": &models.ScraperSettings{
 				Enabled:   false,
 				Language:  "en",
 				RateLimit: 500,
@@ -266,19 +267,19 @@ func TestScrapersConfigJSONRoundTripWithFlaresolverr(t *testing.T) {
 		UserAgent:      "test-agent",
 		TimeoutSeconds: 30,
 		Priority:       []string{"dmm", "r18dev"},
-		FlareSolverr: FlareSolverrConfig{
+		FlareSolverr: models.FlareSolverrConfig{
 			Enabled:    true,
 			URL:        "http://localhost:8191/v1",
 			Timeout:    30,
 			MaxRetries: 3,
 			SessionTTL: 300,
 		},
-		Overrides: map[string]*ScraperSettings{
-			"r18dev": &ScraperSettings{
+		Overrides: map[string]*models.ScraperSettings{
+			"r18dev": &models.ScraperSettings{
 				Enabled:         true,
 				UseFlareSolverr: true,
 			},
-			"dmm": &ScraperSettings{
+			"dmm": &models.ScraperSettings{
 				Enabled:         false,
 				UseFlareSolverr: false,
 			},
@@ -352,14 +353,14 @@ func TestScrapersConfigJSONRoundTripScraperSpecific(t *testing.T) {
 		UserAgent:      "test-agent",
 		TimeoutSeconds: 30,
 		Priority:       []string{"dmm", "r18dev"},
-		Overrides: map[string]*ScraperSettings{
-			"r18dev": &ScraperSettings{
+		Overrides: map[string]*models.ScraperSettings{
+			"r18dev": &models.ScraperSettings{
 				Enabled: true,
 			},
-			"dmm": &ScraperSettings{
+			"dmm": &models.ScraperSettings{
 				Enabled: true,
 			},
-			"javlibrary": &ScraperSettings{
+			"javlibrary": &models.ScraperSettings{
 				Enabled: true,
 				BaseURL: "https://javlibrary.com",
 			},
@@ -387,7 +388,7 @@ func TestScrapersConfigJSONRoundTripScraperSpecific(t *testing.T) {
 	}
 
 	// Note: scraper-specific fields (respect_retry_after, browser_timeout)
-	// were previously in Extra but are now in concrete config types
+	// were previously in Extra but are now in ScraperSettings
 	if !strings.Contains(jsonStr, `"base_url"`) {
 		t.Errorf("JSON output missing 'base_url' field. Got: %s", jsonStr)
 	}
@@ -406,7 +407,7 @@ func TestScrapersConfigJSONRoundTripScraperSpecific(t *testing.T) {
 	if !r18Cfg.Enabled {
 		t.Errorf("After round-trip: r18dev.Enabled should be true")
 	}
-	// Note: respect_retry_after was previously in Extra, now in R18DevConfig
+	// Note: respect_retry_after was previously in Extra, now in ScraperSettings
 
 	// Verify dmm fields round-trip
 	dmmCfg, ok := decoded.Overrides["dmm"]
@@ -417,7 +418,7 @@ func TestScrapersConfigJSONRoundTripScraperSpecific(t *testing.T) {
 		t.Errorf("After round-trip: dmm.Enabled should be true")
 	}
 	// Note: DMM-specific fields (enable_browser, browser_timeout, scrape_actress)
-	// were previously in Extra, now in DMMConfig
+	// were previously in Extra, now in ScraperSettings
 
 	// Verify javlibrary base_url at top level
 	javlibCfg, ok := decoded.Overrides["javlibrary"]

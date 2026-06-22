@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -103,10 +102,10 @@ func TestDownloadWithRetry_TransientErrors(t *testing.T) {
 				t.Logf("Configured mock expectation %d: HTTP %d", i+1, status)
 			}
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				DownloadTimeout: 60,
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 			// Execute with timing measurement if backoff validation requested
 			start := time.Now()
@@ -190,10 +189,10 @@ func TestDownloadWithRetry_RetryExhaustion(t *testing.T) {
 					Once()
 			}
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				DownloadTimeout: 60,
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 			// Execute
 			ctx := context.Background()
@@ -259,10 +258,10 @@ func TestDownloadWithRetry_NonRetryableErrors(t *testing.T) {
 				}, nil).
 				Once()
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				DownloadTimeout: 60,
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 			// Execute
 			ctx := context.Background()
@@ -319,10 +318,10 @@ func TestDownloadWithRetry_ContextCancellation(t *testing.T) {
 					Maybe() // Use Maybe() since cancellation might prevent second call
 			}
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				DownloadTimeout: 60,
 			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 			// Create cancellable context
 			ctx, cancel := context.WithCancel(context.Background())
@@ -375,8 +374,8 @@ func TestDownloadWithRetry_ExponentialBackoff(t *testing.T) {
 			Body:       io.NopCloser(bytes.NewReader(goldenData)),
 		}, nil).Once()
 
-		cfg := &config.OutputConfig{DownloadTimeout: 60}
-		downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+		cfg := &Config{DownloadTimeout: 60}
+		downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 		// Execute with timing measurement
 		start := time.Now()
@@ -406,8 +405,8 @@ func TestDownloadWithRetry_ExponentialBackoff(t *testing.T) {
 			mockHTTP.EXPECT().Do(mock.Anything).Return(&http.Response{StatusCode: 503, Body: http.NoBody}, nil).Once()
 		}
 
-		cfg := &config.OutputConfig{DownloadTimeout: 60}
-		downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+		cfg := &Config{DownloadTimeout: 60}
+		downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 		// Execute with timing measurement
 		start := time.Now()
@@ -476,8 +475,8 @@ func TestDownloadWithRetry_RedirectHandling(t *testing.T) {
 				}, nil).
 				Once()
 
-			cfg := &config.OutputConfig{DownloadTimeout: 60}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+			cfg := &Config{DownloadTimeout: 60}
+			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 			// Execute
 			ctx := context.Background()
@@ -528,8 +527,8 @@ func TestDownloadWithRetry_NetworkErrors(t *testing.T) {
 			}, nil).
 			Once()
 
-		cfg := &config.OutputConfig{DownloadTimeout: 60}
-		downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+		cfg := &Config{DownloadTimeout: 60}
+		downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 		// Execute
 		ctx := context.Background()
@@ -607,8 +606,8 @@ func TestDownloadWithRetry_MaxRetriesBoundary(t *testing.T) {
 				}
 			}
 
-			cfg := &config.OutputConfig{DownloadTimeout: 60}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+			cfg := &Config{DownloadTimeout: 60}
+			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 			// Execute
 			ctx := context.Background()
@@ -681,8 +680,8 @@ func TestDownloadWithRetry_InvalidURLScheme(t *testing.T) {
 				require.NoError(t, afero.WriteFile(memFS, "/tmp/output.jpg", []byte("test"), 0644))
 			}
 
-			cfg := &config.OutputConfig{DownloadTimeout: 60}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, "test-agent", nil)
+			cfg := &Config{DownloadTimeout: 60}
+			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
 
 			// Execute
 			ctx := context.Background()

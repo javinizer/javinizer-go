@@ -23,7 +23,7 @@ import (
 )
 
 func TestConfigYAMLLoadAndRoundTrip(t *testing.T) {
-	repoRoot := filepath.Join("..", "..", "configs", "config.yaml")
+	repoRoot := filepath.Join("..", "..", "configs", "config.yaml.example")
 
 	cfg, err := config.Load(repoRoot)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestConfigYAMLLoadAndRoundTrip(t *testing.T) {
 }
 
 func TestConfigYAMLScraperFlareSolverr(t *testing.T) {
-	repoRoot := filepath.Join("..", "..", "configs", "config.yaml")
+	repoRoot := filepath.Join("..", "..", "configs", "config.yaml.example")
 
 	cfg, err := config.Load(repoRoot)
 	if err != nil {
@@ -90,7 +90,7 @@ func TestConfigYAMLScraperFlareSolverr(t *testing.T) {
 }
 
 func TestGeneratedConfigLoadable(t *testing.T) {
-	repoRoot := filepath.Join("..", "..", "configs", "config.yaml")
+	repoRoot := filepath.Join("..", "..", "configs", "config.yaml.example")
 
 	if _, err := os.Stat(repoRoot); os.IsNotExist(err) {
 		t.Skip("configs/config.yaml not found, skipping integration test")

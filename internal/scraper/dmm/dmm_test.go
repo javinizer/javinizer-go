@@ -15,30 +15,26 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // createTestSettings creates ScraperSettings for testing
-func createTestSettings(enabled bool, extra map[string]any) config.ScraperSettings {
-	_ = extra // extra is no longer used; scraper-specific fields moved to DMMConfig
-	settings := config.ScraperSettings{
+func createTestSettings(enabled bool, extra map[string]any) models.ScraperSettings {
+	_ = extra // extra is no longer used; scraper-specific fields moved to ScraperSettings
+	settings := models.ScraperSettings{
 		Enabled: enabled,
 	}
 	return settings
 }
 
-// createTestGlobalConfig creates a ScrapersConfig for testing
-func createTestGlobalConfig(proxy *config.ProxyConfig, flareSolverr config.FlareSolverrConfig, scrapeActress, useBrowser bool) *config.ScrapersConfig {
-	if proxy == nil {
-		proxy = &config.ProxyConfig{}
-	}
-	return &config.ScrapersConfig{
-		Proxy:         *proxy,
-		FlareSolverr:  flareSolverr,
+// createTestDMMOptions creates dmmOptions for testing
+func createTestDMMOptions(scrapeActress, useBrowser bool) dmmOptions {
+	return dmmOptions{
 		ScrapeActress: scrapeActress,
-		Browser: config.BrowserConfig{
+		Browser: models.BrowserConfig{
 			Enabled: useBrowser,
 			Timeout: 30,
 		},
@@ -46,10 +42,10 @@ func createTestGlobalConfig(proxy *config.ProxyConfig, flareSolverr config.Flare
 }
 
 // testGlobalProxy is a non-nil proxy config used to avoid nil pointer dereference in NewHTTPClient
-var testGlobalProxy = &config.ProxyConfig{}
+var testGlobalProxy = &models.ProxyConfig{}
 
 // testGlobalFlareSolverr is a zero-value FlareSolverr config for testing
-var testGlobalFlareSolverr = config.FlareSolverrConfig{}
+var testGlobalFlareSolverr = models.FlareSolverrConfig{}
 
 func ptrBool(b bool) *bool { return &b }
 
@@ -57,7 +53,7 @@ func ptrBool(b bool) *bool { return &b }
 func TestNew(t *testing.T) {
 	tests := []struct {
 		name                string
-		settings            config.ScraperSettings
+		settings            models.ScraperSettings
 		globalScrapeActress bool
 		globalUseBrowser    bool
 		expectEnabled       bool
@@ -67,7 +63,7 @@ func TestNew(t *testing.T) {
 	}{
 		{
 			name: "basic config",
-			settings: func() config.ScraperSettings {
+			settings: func() models.ScraperSettings {
 				s := createTestSettings(true, nil)
 				s.UserAgent = "Test Agent"
 				return s
@@ -81,10 +77,10 @@ func TestNew(t *testing.T) {
 		},
 		{
 			name: "with proxy",
-			settings: func() config.ScraperSettings {
+			settings: func() models.ScraperSettings {
 				s := createTestSettings(true, nil)
 				s.UserAgent = "Test Agent"
-				s.Proxy = &config.ProxyConfig{
+				s.Proxy = &models.ProxyConfig{
 					Enabled: true,
 					Profile: "main",
 				}
@@ -99,7 +95,7 @@ func TestNew(t *testing.T) {
 		},
 		{
 			name: "browser enabled",
-			settings: func() config.ScraperSettings {
+			settings: func() models.ScraperSettings {
 				s := createTestSettings(true, nil)
 				s.UserAgent = "Test Agent"
 				s.UseBrowser = true
@@ -116,7 +112,7 @@ func TestNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scraper := New(tt.settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, tt.globalScrapeActress, tt.globalUseBrowser), nil)
+			scraper := newScraper(&tt.settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(tt.globalScrapeActress, tt.globalUseBrowser))
 
 			require.NotNil(t, scraper)
 			assert.NotNil(t, scraper.client)
@@ -130,7 +126,7 @@ func TestNew(t *testing.T) {
 // TestName verifies the scraper name
 func TestName(t *testing.T) {
 	settings := createTestSettings(true, nil)
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+	scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 	assert.Equal(t, "dmm", scraper.Name())
 }
 
@@ -147,7 +143,7 @@ func TestIsEnabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(tt.enabled, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 			assert.Equal(t, tt.enabled, scraper.IsEnabled())
 		})
 	}
@@ -367,7 +363,7 @@ func TestCleanString(t *testing.T) {
 func TestSearch_NetworkErrors(t *testing.T) {
 	t.Run("no content ID repository", func(t *testing.T) {
 		settings := createTestSettings(true, nil)
-		scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil) // nil repository
+		scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false)) // nil repository
 
 		_, err := scraper.Search(context.Background(), "IPX-535")
 		require.Error(t, err)
@@ -442,7 +438,7 @@ func TestParseHTML_OldSite(t *testing.T) {
 
 	settings := createTestSettings(true, nil)
 	settings.ScrapeActress = ptrBool(true)
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, true, false), nil)
+	scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(true, false))
 	doc, err := parseHTMLString(htmlContent)
 	require.NoError(t, err)
 
@@ -522,7 +518,7 @@ func TestParseHTML_NewSite(t *testing.T) {
 
 	settings := createTestSettings(true, nil)
 	settings.ScrapeActress = ptrBool(true)
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, true, false), nil)
+	scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(true, false))
 
 	doc, err := parseHTMLString(htmlContent)
 	require.NoError(t, err)
@@ -605,7 +601,7 @@ func TestExtractActresses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -630,7 +626,7 @@ func TestExtractActresses(t *testing.T) {
 
 func TestExtractActressesFromStreamingPage_CastSectionPriority(t *testing.T) {
 	settings := createTestSettings(true, nil)
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+	scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 	html := `<html><body>
 		<div class="recommend">
@@ -665,7 +661,7 @@ func TestExtractActressesFromStreamingPage_CastSectionPriority(t *testing.T) {
 
 func TestExtractActressesFromStreamingPage_HeadingFallback(t *testing.T) {
 	settings := createTestSettings(true, nil)
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+	scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 	html := `<html><body>
 		<div class="recommend">
@@ -696,7 +692,7 @@ func TestExtractActressesFromStreamingPage_HeadingFallback(t *testing.T) {
 
 func TestExtractActressesFromStreamingPage_SkipsRecommendationOnlyLinks(t *testing.T) {
 	settings := createTestSettings(true, nil)
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+	scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 	html := `<html><body>
 		<div class="recommend-list">
@@ -744,7 +740,7 @@ func TestExtractGenres(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -783,7 +779,7 @@ func TestExtractReleaseDate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -816,7 +812,7 @@ func TestExtractRuntime(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -860,7 +856,7 @@ func TestExtractRating_OldSite(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -942,7 +938,7 @@ func TestExtractDescription_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -990,7 +986,7 @@ func TestExtractDirector_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -1043,7 +1039,7 @@ func TestExtractMaker_Formats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -1091,7 +1087,7 @@ func TestExtractLabel_Formats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -1130,7 +1126,7 @@ func TestExtractSeries_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -1183,7 +1179,7 @@ func TestExtractCoverURL_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -1235,7 +1231,7 @@ func TestExtractScreenshots_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(tt.html)
 			require.NoError(t, err)
@@ -1293,7 +1289,7 @@ func TestParseHTML_ScrapeActressFlag(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
 			settings.ScrapeActress = ptrBool(tt.scrapeActress)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, tt.scrapeActress, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(tt.scrapeActress, false))
 
 			doc, err := parseHTMLString(htmlContent)
 			require.NoError(t, err)
@@ -1472,7 +1468,7 @@ func TestExtractCandidateURLs_Priorities(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
 			settings.UseBrowser = true
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, true), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, true))
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -1544,7 +1540,7 @@ func TestExtractCandidateURLs_BaseIDMatching(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -1626,7 +1622,7 @@ func TestExtractCandidateURLs_ExcludePatterns(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := createTestSettings(true, nil)
 			settings.UseBrowser = tt.enableBrowser
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, tt.enableBrowser), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, tt.enableBrowser))
 
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
@@ -1655,7 +1651,7 @@ func TestExtractCandidateURLs_PriorityOrder(t *testing.T) {
 
 	settings := createTestSettings(true, nil)
 	settings.UseBrowser = true
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, true), nil)
+	scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, true))
 
 	doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", html))
 	require.NoError(t, err)
@@ -1687,7 +1683,7 @@ func TestResolveContentID_NoRepository(t *testing.T) {
 	settings := createTestSettings(true, nil)
 
 	// Create scraper with nil repository
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+	scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
 	_, err := scraper.ResolveContentID("ipx-535")
 	assert.Error(t, err)
@@ -1705,14 +1701,14 @@ func TestResolveContentID_UsesSearchQueryVariations(t *testing.T) {
 		},
 	}
 
-	db, err := database.New(dbCfg)
+	db, err := database.New(&database.Config{Type: dbCfg.Database.Type, DSN: dbCfg.Database.DSN, LogLevel: dbCfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	repo := database.NewContentIDMappingRepository(db)
 	settings := createTestSettings(true, nil)
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), repo)
+	scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
 	transport := &searchVariationRoundTripper{
 		responseByQuery: map[string]string{
@@ -1729,7 +1725,7 @@ func TestResolveContentID_UsesSearchQueryVariations(t *testing.T) {
 	assert.Equal(t, "clt00069", contentID)
 	assert.Equal(t, []string{"clt069", "clt00069"}, transport.requestedQueries)
 
-	cached, err := repo.FindBySearchID("CLT-069")
+	cached, err := repo.FindBySearchID(context.TODO(), "CLT-069")
 	require.NoError(t, err)
 	assert.Equal(t, "clt00069", cached.ContentID)
 }
@@ -1739,9 +1735,9 @@ func TestGetURL_NoRepository(t *testing.T) {
 	settings := createTestSettings(true, nil)
 
 	// Create scraper with nil repository
-	scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+	scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 
-	_, err := scraper.GetURL("ipx-535")
+	_, err := scraper.GetURL(context.Background(), "ipx-535")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "movie not found on DMM")
 }
@@ -2038,23 +2034,16 @@ func TestFilterPlaceholderScreenshots(t *testing.T) {
 			}
 
 			// Create scraper with test settings
-			settings := config.ScraperSettings{
-				Enabled: true,
-			}
-			if len(tt.hashes) > 0 {
-				settings.Extra = map[string]any{
-					ConfigKeyExtraPlaceholderHashes: tt.hashes,
-				}
+			settings := models.ScraperSettings{
+				Enabled:                true,
+				ExtraPlaceholderHashes: tt.hashes,
 			}
 
-			scraper := New(settings, createTestGlobalConfig(testGlobalProxy, testGlobalFlareSolverr, false, false), nil)
+			scraper := newScraper(&settings, testGlobalProxy, testGlobalFlareSolverr, createTestDMMOptions(false, false))
 			require.NotNil(t, scraper)
 
-			// Set threshold via extra if needed
 			if tt.thresholdBytes != 10*1024 {
-				scraper.settings.Extra = map[string]any{
-					ConfigKeyPlaceholderThreshold: int(tt.thresholdBytes / 1024),
-				}
+				scraper.settings.PlaceholderThresholdKB = int(tt.thresholdBytes / 1024)
 			}
 
 			filtered := scraper.filterPlaceholderScreenshots(ctx, urls)

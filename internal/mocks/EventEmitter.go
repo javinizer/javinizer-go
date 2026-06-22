@@ -5,6 +5,9 @@
 package mocks
 
 import (
+	"context"
+
+	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -36,16 +39,16 @@ func (_m *MockEventEmitter) EXPECT() *MockEventEmitter_Expecter {
 }
 
 // EmitOrganizeEvent provides a mock function for the type MockEventEmitter
-func (_mock *MockEventEmitter) EmitOrganizeEvent(source string, message string, severity string, context map[string]interface{}) error {
-	ret := _mock.Called(source, message, severity, context)
+func (_mock *MockEventEmitter) EmitOrganizeEvent(ctx context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any) error {
+	ret := _mock.Called(ctx, source, message, severity, eventCtx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for EmitOrganizeEvent")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string, string, string, map[string]interface{}) error); ok {
-		r0 = returnFunc(source, message, severity, context)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, models.EventSeverity, map[string]any) error); ok {
+		r0 = returnFunc(ctx, source, message, severity, eventCtx)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -58,19 +61,20 @@ type MockEventEmitter_EmitOrganizeEvent_Call struct {
 }
 
 // EmitOrganizeEvent is a helper method to define mock.On call
+//   - ctx context.Context
 //   - source string
 //   - message string
-//   - severity string
-//   - context map[string]interface{}
-func (_e *MockEventEmitter_Expecter) EmitOrganizeEvent(source interface{}, message interface{}, severity interface{}, context interface{}) *MockEventEmitter_EmitOrganizeEvent_Call {
-	return &MockEventEmitter_EmitOrganizeEvent_Call{Call: _e.mock.On("EmitOrganizeEvent", source, message, severity, context)}
+//   - severity models.EventSeverity
+//   - eventCtx map[string]any
+func (_e *MockEventEmitter_Expecter) EmitOrganizeEvent(ctx interface{}, source interface{}, message interface{}, severity interface{}, eventCtx interface{}) *MockEventEmitter_EmitOrganizeEvent_Call {
+	return &MockEventEmitter_EmitOrganizeEvent_Call{Call: _e.mock.On("EmitOrganizeEvent", ctx, source, message, severity, eventCtx)}
 }
 
-func (_c *MockEventEmitter_EmitOrganizeEvent_Call) Run(run func(source string, message string, severity string, context map[string]interface{})) *MockEventEmitter_EmitOrganizeEvent_Call {
+func (_c *MockEventEmitter_EmitOrganizeEvent_Call) Run(run func(ctx context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any)) *MockEventEmitter_EmitOrganizeEvent_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 string
 		if args[1] != nil {
@@ -80,15 +84,20 @@ func (_c *MockEventEmitter_EmitOrganizeEvent_Call) Run(run func(source string, m
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
-		var arg3 map[string]interface{}
+		var arg3 models.EventSeverity
 		if args[3] != nil {
-			arg3 = args[3].(map[string]interface{})
+			arg3 = args[3].(models.EventSeverity)
+		}
+		var arg4 map[string]any
+		if args[4] != nil {
+			arg4 = args[4].(map[string]any)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
+			arg4,
 		)
 	})
 	return _c
@@ -99,22 +108,22 @@ func (_c *MockEventEmitter_EmitOrganizeEvent_Call) Return(err error) *MockEventE
 	return _c
 }
 
-func (_c *MockEventEmitter_EmitOrganizeEvent_Call) RunAndReturn(run func(source string, message string, severity string, context map[string]interface{}) error) *MockEventEmitter_EmitOrganizeEvent_Call {
+func (_c *MockEventEmitter_EmitOrganizeEvent_Call) RunAndReturn(run func(ctx context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any) error) *MockEventEmitter_EmitOrganizeEvent_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // EmitScraperEvent provides a mock function for the type MockEventEmitter
-func (_mock *MockEventEmitter) EmitScraperEvent(source string, message string, severity string, context map[string]interface{}) error {
-	ret := _mock.Called(source, message, severity, context)
+func (_mock *MockEventEmitter) EmitScraperEvent(ctx context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any) error {
+	ret := _mock.Called(ctx, source, message, severity, eventCtx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for EmitScraperEvent")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string, string, string, map[string]interface{}) error); ok {
-		r0 = returnFunc(source, message, severity, context)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, models.EventSeverity, map[string]any) error); ok {
+		r0 = returnFunc(ctx, source, message, severity, eventCtx)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -127,19 +136,20 @@ type MockEventEmitter_EmitScraperEvent_Call struct {
 }
 
 // EmitScraperEvent is a helper method to define mock.On call
+//   - ctx context.Context
 //   - source string
 //   - message string
-//   - severity string
-//   - context map[string]interface{}
-func (_e *MockEventEmitter_Expecter) EmitScraperEvent(source interface{}, message interface{}, severity interface{}, context interface{}) *MockEventEmitter_EmitScraperEvent_Call {
-	return &MockEventEmitter_EmitScraperEvent_Call{Call: _e.mock.On("EmitScraperEvent", source, message, severity, context)}
+//   - severity models.EventSeverity
+//   - eventCtx map[string]any
+func (_e *MockEventEmitter_Expecter) EmitScraperEvent(ctx interface{}, source interface{}, message interface{}, severity interface{}, eventCtx interface{}) *MockEventEmitter_EmitScraperEvent_Call {
+	return &MockEventEmitter_EmitScraperEvent_Call{Call: _e.mock.On("EmitScraperEvent", ctx, source, message, severity, eventCtx)}
 }
 
-func (_c *MockEventEmitter_EmitScraperEvent_Call) Run(run func(source string, message string, severity string, context map[string]interface{})) *MockEventEmitter_EmitScraperEvent_Call {
+func (_c *MockEventEmitter_EmitScraperEvent_Call) Run(run func(ctx context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any)) *MockEventEmitter_EmitScraperEvent_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 string
 		if args[1] != nil {
@@ -149,15 +159,20 @@ func (_c *MockEventEmitter_EmitScraperEvent_Call) Run(run func(source string, me
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
-		var arg3 map[string]interface{}
+		var arg3 models.EventSeverity
 		if args[3] != nil {
-			arg3 = args[3].(map[string]interface{})
+			arg3 = args[3].(models.EventSeverity)
+		}
+		var arg4 map[string]any
+		if args[4] != nil {
+			arg4 = args[4].(map[string]any)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
+			arg4,
 		)
 	})
 	return _c
@@ -168,22 +183,22 @@ func (_c *MockEventEmitter_EmitScraperEvent_Call) Return(err error) *MockEventEm
 	return _c
 }
 
-func (_c *MockEventEmitter_EmitScraperEvent_Call) RunAndReturn(run func(source string, message string, severity string, context map[string]interface{}) error) *MockEventEmitter_EmitScraperEvent_Call {
+func (_c *MockEventEmitter_EmitScraperEvent_Call) RunAndReturn(run func(ctx context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any) error) *MockEventEmitter_EmitScraperEvent_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // EmitSystemEvent provides a mock function for the type MockEventEmitter
-func (_mock *MockEventEmitter) EmitSystemEvent(source string, message string, severity string, context map[string]interface{}) error {
-	ret := _mock.Called(source, message, severity, context)
+func (_mock *MockEventEmitter) EmitSystemEvent(ctx context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any) error {
+	ret := _mock.Called(ctx, source, message, severity, eventCtx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for EmitSystemEvent")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string, string, string, map[string]interface{}) error); ok {
-		r0 = returnFunc(source, message, severity, context)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, models.EventSeverity, map[string]any) error); ok {
+		r0 = returnFunc(ctx, source, message, severity, eventCtx)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -196,19 +211,20 @@ type MockEventEmitter_EmitSystemEvent_Call struct {
 }
 
 // EmitSystemEvent is a helper method to define mock.On call
+//   - ctx context.Context
 //   - source string
 //   - message string
-//   - severity string
-//   - context map[string]interface{}
-func (_e *MockEventEmitter_Expecter) EmitSystemEvent(source interface{}, message interface{}, severity interface{}, context interface{}) *MockEventEmitter_EmitSystemEvent_Call {
-	return &MockEventEmitter_EmitSystemEvent_Call{Call: _e.mock.On("EmitSystemEvent", source, message, severity, context)}
+//   - severity models.EventSeverity
+//   - eventCtx map[string]any
+func (_e *MockEventEmitter_Expecter) EmitSystemEvent(ctx interface{}, source interface{}, message interface{}, severity interface{}, eventCtx interface{}) *MockEventEmitter_EmitSystemEvent_Call {
+	return &MockEventEmitter_EmitSystemEvent_Call{Call: _e.mock.On("EmitSystemEvent", ctx, source, message, severity, eventCtx)}
 }
 
-func (_c *MockEventEmitter_EmitSystemEvent_Call) Run(run func(source string, message string, severity string, context map[string]interface{})) *MockEventEmitter_EmitSystemEvent_Call {
+func (_c *MockEventEmitter_EmitSystemEvent_Call) Run(run func(ctx context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any)) *MockEventEmitter_EmitSystemEvent_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 string
 		if args[1] != nil {
@@ -218,15 +234,20 @@ func (_c *MockEventEmitter_EmitSystemEvent_Call) Run(run func(source string, mes
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
-		var arg3 map[string]interface{}
+		var arg3 models.EventSeverity
 		if args[3] != nil {
-			arg3 = args[3].(map[string]interface{})
+			arg3 = args[3].(models.EventSeverity)
+		}
+		var arg4 map[string]any
+		if args[4] != nil {
+			arg4 = args[4].(map[string]any)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
+			arg4,
 		)
 	})
 	return _c
@@ -237,7 +258,60 @@ func (_c *MockEventEmitter_EmitSystemEvent_Call) Return(err error) *MockEventEmi
 	return _c
 }
 
-func (_c *MockEventEmitter_EmitSystemEvent_Call) RunAndReturn(run func(source string, message string, severity string, context map[string]interface{}) error) *MockEventEmitter_EmitSystemEvent_Call {
+func (_c *MockEventEmitter_EmitSystemEvent_Call) RunAndReturn(run func(ctx context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any) error) *MockEventEmitter_EmitSystemEvent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Stats provides a mock function for the type MockEventEmitter
+func (_mock *MockEventEmitter) Stats() (int64, int64) {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stats")
+	}
+
+	var r0 int64
+	var r1 int64
+	if returnFunc, ok := ret.Get(0).(func() (int64, int64)); ok {
+		return returnFunc()
+	}
+	if returnFunc, ok := ret.Get(0).(func() int64); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func() int64); ok {
+		r1 = returnFunc()
+	} else {
+		r1 = ret.Get(1).(int64)
+	}
+	return r0, r1
+}
+
+// MockEventEmitter_Stats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stats'
+type MockEventEmitter_Stats_Call struct {
+	*mock.Call
+}
+
+// Stats is a helper method to define mock.On call
+func (_e *MockEventEmitter_Expecter) Stats() *MockEventEmitter_Stats_Call {
+	return &MockEventEmitter_Stats_Call{Call: _e.mock.On("Stats")}
+}
+
+func (_c *MockEventEmitter_Stats_Call) Run(run func()) *MockEventEmitter_Stats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockEventEmitter_Stats_Call) Return(emitted int64, failed int64) *MockEventEmitter_Stats_Call {
+	_c.Call.Return(emitted, failed)
+	return _c
+}
+
+func (_c *MockEventEmitter_Stats_Call) RunAndReturn(run func() (int64, int64)) *MockEventEmitter_Stats_Call {
 	_c.Call.Return(run)
 	return _c
 }

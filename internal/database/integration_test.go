@@ -1,11 +1,11 @@
 package database
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,20 +16,12 @@ import (
 func newIntegrationTestDB(t *testing.T) *DB {
 	t.Helper()
 
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
 
 	db, err := New(cfg)
 	require.NoError(t, err, "Failed to create database")
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, db.AutoMigrate(), "Failed to run migrations")
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()), "Failed to run migrations")
 	return db
 }
 
@@ -120,10 +112,10 @@ func TestIntegration_CrossTableIndependence(t *testing.T) {
 	// Create history record
 	historyRecord := &models.History{
 		MovieID:   "TEST-001",
-		Operation: "scrape",
-		Status:    "success",
+		Operation: models.HistoryOpScrape,
+		Status:    models.HistoryStatusSuccess,
 	}
-	require.NoError(t, historyRepo.Create(historyRecord))
+	require.NoError(t, historyRepo.Create(context.TODO(), historyRecord))
 
 	// Create batch_file_operations record
 	bfoRecord := &models.BatchFileOperation{
@@ -135,7 +127,7 @@ func TestIntegration_CrossTableIndependence(t *testing.T) {
 		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 	}
-	require.NoError(t, bfoRepo.Create(bfoRecord))
+	require.NoError(t, bfoRepo.Create(context.TODO(), bfoRecord))
 
 	// Create event record
 	eventRecord := &models.Event{
@@ -145,24 +137,25 @@ func TestIntegration_CrossTableIndependence(t *testing.T) {
 		Source:    "r18dev",
 		CreatedAt: time.Now().UTC(),
 	}
-	require.NoError(t, eventRepo.Create(eventRecord))
+	require.NoError(t, eventRepo.Create(context.TODO(), eventRecord))
 
 	// Delete all events
 	cutoff := time.Now().UTC().Add(time.Hour) // future cutoff deletes everything
-	require.NoError(t, eventRepo.DeleteOlderThan(cutoff))
+	_, err := eventRepo.DeleteOlderThan(context.TODO(), cutoff)
+	require.NoError(t, err)
 
 	// Verify events are gone
-	eventCount, err := eventRepo.Count()
+	eventCount, err := eventRepo.Count(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), eventCount, "All events should be deleted")
 
 	// Verify history is still accessible
-	historyRecords, err := historyRepo.FindByMovieID("TEST-001")
+	historyRecords, err := historyRepo.FindByMovieID(context.TODO(), "TEST-001")
 	require.NoError(t, err)
 	assert.Len(t, historyRecords, 1, "History record should still exist after events deletion")
 
 	// Verify batch_file_operations is still accessible
-	bfoRecords, err := bfoRepo.FindByBatchJobID("job-001")
+	bfoRecords, err := bfoRepo.FindByBatchJobID(context.TODO(), "job-001")
 	require.NoError(t, err)
 	assert.Len(t, bfoRecords, 1, "BatchFileOperation record should still exist after events deletion")
 }
@@ -179,32 +172,32 @@ func TestIntegration_BatchCentricQuery(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		record := &models.History{
 			MovieID:    "TEST-" + string(rune('A'+i)),
-			Operation:  "organize",
-			Status:     "success",
+			Operation:  models.HistoryOpOrganize,
+			Status:     models.HistoryStatusSuccess,
 			BatchJobID: strPtr(batchJobID),
 		}
-		require.NoError(t, repo.Create(record))
+		require.NoError(t, repo.Create(context.TODO(), record))
 	}
 
 	// Create a history record with a different batch_job_id
 	isolatedRecord := &models.History{
 		MovieID:    "TEST-ISOLATED",
-		Operation:  "scrape",
-		Status:     "success",
+		Operation:  models.HistoryOpScrape,
+		Status:     models.HistoryStatusSuccess,
 		BatchJobID: strPtr("other-batch"),
 	}
-	require.NoError(t, repo.Create(isolatedRecord))
+	require.NoError(t, repo.Create(context.TODO(), isolatedRecord))
 
 	// Create a history record with no batch_job_id (legacy record)
 	legacyRecord := &models.History{
 		MovieID:   "TEST-LEGACY",
-		Operation: "download",
-		Status:    "success",
+		Operation: models.HistoryOpDownload,
+		Status:    models.HistoryStatusSuccess,
 	}
-	require.NoError(t, repo.Create(legacyRecord))
+	require.NoError(t, repo.Create(context.TODO(), legacyRecord))
 
 	// Query by batch_job_id
-	results, err := repo.FindByBatchJobID(batchJobID)
+	results, err := repo.FindByBatchJobID(context.TODO(), batchJobID)
 	require.NoError(t, err)
 	assert.Len(t, results, 3, "Should return exactly 3 records for the batch")
 
@@ -215,7 +208,7 @@ func TestIntegration_BatchCentricQuery(t *testing.T) {
 	}
 
 	// Verify query with non-existent batch returns empty
-	emptyResults, err := repo.FindByBatchJobID("nonexistent")
+	emptyResults, err := repo.FindByBatchJobID(context.TODO(), "nonexistent")
 	require.NoError(t, err)
 	assert.Empty(t, emptyResults, "Non-existent batch should return empty")
 }
@@ -230,12 +223,12 @@ func TestIntegration_EventEmission(t *testing.T) {
 
 	// Simulate what EventEmitter.EmitScraperEvent does: create an Event
 	// with event_type="scraper" and context JSON
-	context := map[string]interface{}{
+	contextMap := map[string]interface{}{
 		"movie_id": "ABC-123",
 		"url":      "https://example.com/abc-123",
 		"duration": 1.5,
 	}
-	contextBytes, err := json.Marshal(context)
+	contextBytes, err := json.Marshal(contextMap)
 	require.NoError(t, err)
 
 	scraperEvent := &models.Event{
@@ -246,10 +239,10 @@ func TestIntegration_EventEmission(t *testing.T) {
 		Source:    "r18dev",
 		CreatedAt: time.Now().UTC(),
 	}
-	require.NoError(t, repo.Create(scraperEvent))
+	require.NoError(t, repo.Create(context.TODO(), scraperEvent))
 
 	// Verify the event was stored with correct fields
-	events, err := repo.FindByType(models.EventCategoryScraper, 10, 0)
+	events, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper}, 10, 0)
 	require.NoError(t, err)
 	require.Len(t, events, 1, "Should have exactly one scraper event")
 
@@ -274,7 +267,7 @@ func TestIntegration_EventEmission(t *testing.T) {
 		Source:    "file_move",
 		CreatedAt: time.Now().UTC(),
 	}
-	require.NoError(t, repo.Create(organizeEvent))
+	require.NoError(t, repo.Create(context.TODO(), organizeEvent))
 
 	systemEvent := &models.Event{
 		EventType: models.EventCategorySystem,
@@ -284,27 +277,27 @@ func TestIntegration_EventEmission(t *testing.T) {
 		Source:    "server",
 		CreatedAt: time.Now().UTC(),
 	}
-	require.NoError(t, repo.Create(systemEvent))
+	require.NoError(t, repo.Create(context.TODO(), systemEvent))
 
 	// Verify all three event types are stored
-	totalCount, err := repo.Count()
+	totalCount, err := repo.Count(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), totalCount, "Should have 3 events total")
 
-	scraperCount, err := repo.CountByType(models.EventCategoryScraper)
+	scraperCount, err := repo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), scraperCount, "Should have 1 scraper event")
 
-	organizeCount, err := repo.CountByType(models.EventCategoryOrganize)
+	organizeCount, err := repo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryOrganize})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), organizeCount, "Should have 1 organize event")
 
-	systemCount, err := repo.CountByType(models.EventCategorySystem)
+	systemCount, err := repo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategorySystem})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), systemCount, "Should have 1 system event")
 
 	// Verify combined type+severity query works
-	infoScraperEvents, err := repo.FindByTypeAndSeverity(models.EventCategoryScraper, models.SeverityInfo, 10, 0)
+	infoScraperEvents, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper, Severity: models.SeverityInfo}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, infoScraperEvents, 1, "Should have 1 info-level scraper event")
 }
@@ -320,7 +313,7 @@ func TestIntegration_ServerDependenciesSmokeTest(t *testing.T) {
 	eventRepo := NewEventRepository(db)
 
 	// Verify they work correctly
-	require.NoError(t, bfoRepo.Create(&models.BatchFileOperation{
+	require.NoError(t, bfoRepo.Create(context.TODO(), &models.BatchFileOperation{
 		BatchJobID:    "smoke-test",
 		OriginalPath:  "/a",
 		NewPath:       "/b",
@@ -330,7 +323,7 @@ func TestIntegration_ServerDependenciesSmokeTest(t *testing.T) {
 		UpdatedAt:     time.Now().UTC(),
 	}))
 
-	require.NoError(t, eventRepo.Create(&models.Event{
+	require.NoError(t, eventRepo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem,
 		Severity:  models.SeverityDebug,
 		Message:   "smoke test",
@@ -339,11 +332,11 @@ func TestIntegration_ServerDependenciesSmokeTest(t *testing.T) {
 	}))
 
 	// Verify both repos return data from the same DB
-	bfoResults, err := bfoRepo.FindByBatchJobID("smoke-test")
+	bfoResults, err := bfoRepo.FindByBatchJobID(context.TODO(), "smoke-test")
 	require.NoError(t, err)
 	assert.Len(t, bfoResults, 1)
 
-	eventCount, err := eventRepo.CountByType(models.EventCategorySystem)
+	eventCount, err := eventRepo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategorySystem})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), eventCount)
 }

@@ -1,8 +1,10 @@
 package movie
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/gin-gonic/gin"
+)
 
-func RegisterRoutes(protected *gin.RouterGroup, deps *ServerDependencies) {
+func RegisterRoutes(protected *gin.RouterGroup, deps MovieDeps) {
 	protected.POST("/scrape", scrapeMovie(deps))
 	protected.GET("/movies/:id", getMovie(deps))
 	protected.GET("/movies", listMovies(deps))

@@ -7,7 +7,6 @@ package mocks
 import (
 	"context"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -84,19 +83,19 @@ func (_c *MockScraper_Close_Call) RunAndReturn(run func() error) *MockScraper_Cl
 }
 
 // Config provides a mock function for the type MockScraper
-func (_mock *MockScraper) Config() *config.ScraperSettings {
+func (_mock *MockScraper) Config() *models.ScraperSettings {
 	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for Config")
 	}
 
-	var r0 *config.ScraperSettings
-	if returnFunc, ok := ret.Get(0).(func() *config.ScraperSettings); ok {
+	var r0 *models.ScraperSettings
+	if returnFunc, ok := ret.Get(0).(func() *models.ScraperSettings); ok {
 		r0 = returnFunc()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*config.ScraperSettings)
+			r0 = ret.Get(0).(*models.ScraperSettings)
 		}
 	}
 	return r0
@@ -119,19 +118,19 @@ func (_c *MockScraper_Config_Call) Run(run func()) *MockScraper_Config_Call {
 	return _c
 }
 
-func (_c *MockScraper_Config_Call) Return(scraperSettings *config.ScraperSettings) *MockScraper_Config_Call {
-	_c.Call.Return(scraperSettings)
+func (_c *MockScraper_Config_Call) Return(v *models.ScraperSettings) *MockScraper_Config_Call {
+	_c.Call.Return(v)
 	return _c
 }
 
-func (_c *MockScraper_Config_Call) RunAndReturn(run func() *config.ScraperSettings) *MockScraper_Config_Call {
+func (_c *MockScraper_Config_Call) RunAndReturn(run func() *models.ScraperSettings) *MockScraper_Config_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetURL provides a mock function for the type MockScraper
-func (_mock *MockScraper) GetURL(id string) (string, error) {
-	ret := _mock.Called(id)
+func (_mock *MockScraper) GetURL(ctx context.Context, id string) (string, error) {
+	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetURL")
@@ -139,16 +138,16 @@ func (_mock *MockScraper) GetURL(id string) (string, error) {
 
 	var r0 string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (string, error)); ok {
-		return returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
+		return returnFunc(ctx, id)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) string); ok {
-		r0 = returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = returnFunc(ctx, id)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(id)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, id)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -161,19 +160,25 @@ type MockScraper_GetURL_Call struct {
 }
 
 // GetURL is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id string
-func (_e *MockScraper_Expecter) GetURL(id interface{}) *MockScraper_GetURL_Call {
-	return &MockScraper_GetURL_Call{Call: _e.mock.On("GetURL", id)}
+func (_e *MockScraper_Expecter) GetURL(ctx interface{}, id interface{}) *MockScraper_GetURL_Call {
+	return &MockScraper_GetURL_Call{Call: _e.mock.On("GetURL", ctx, id)}
 }
 
-func (_c *MockScraper_GetURL_Call) Run(run func(id string)) *MockScraper_GetURL_Call {
+func (_c *MockScraper_GetURL_Call) Run(run func(ctx context.Context, id string)) *MockScraper_GetURL_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -184,7 +189,7 @@ func (_c *MockScraper_GetURL_Call) Return(s string, err error) *MockScraper_GetU
 	return _c
 }
 
-func (_c *MockScraper_GetURL_Call) RunAndReturn(run func(id string) (string, error)) *MockScraper_GetURL_Call {
+func (_c *MockScraper_GetURL_Call) RunAndReturn(run func(ctx context.Context, id string) (string, error)) *MockScraper_GetURL_Call {
 	_c.Call.Return(run)
 	return _c
 }

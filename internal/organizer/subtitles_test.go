@@ -6,17 +6,17 @@ import (
 	"testing"
 
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 func TestSubtitleHandler_FindSubtitles(t *testing.T) {
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		SubtitleExtensions: []string{".srt", ".ass", ".ssa", ".smi", ".vtt"},
 	}
 
-	handler := NewSubtitleHandler(afero.NewOsFs(), cfg)
+	handler := newSubtitleHandler(afero.NewOsFs(), cfg.SubtitleExtensions)
 
 	// Create temporary directory structure
 	tmpDir := t.TempDir()
@@ -27,7 +27,7 @@ func TestSubtitleHandler_FindSubtitles(t *testing.T) {
 		t.Fatalf("Failed to create video file: %v", err)
 	}
 
-	videoFile := scanner.FileInfo{
+	videoFile := models.FileMatchInfo{
 		Name:      "IPX-535.mp4",
 		Path:      videoPath,
 		Extension: ".mp4",
@@ -86,11 +86,11 @@ func TestSubtitleHandler_FindSubtitles(t *testing.T) {
 }
 
 func TestSubtitleHandler_FindSubtitles_CaseInsensitive(t *testing.T) {
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		SubtitleExtensions: []string{".srt", ".ass"},
 	}
 
-	handler := NewSubtitleHandler(afero.NewOsFs(), cfg)
+	handler := newSubtitleHandler(afero.NewOsFs(), cfg.SubtitleExtensions)
 
 	// Create temporary directory structure
 	tmpDir := t.TempDir()
@@ -101,7 +101,7 @@ func TestSubtitleHandler_FindSubtitles_CaseInsensitive(t *testing.T) {
 		t.Fatalf("Failed to create video file: %v", err)
 	}
 
-	videoFile := scanner.FileInfo{
+	videoFile := models.FileMatchInfo{
 		Name:      "IPX-535.mp4",
 		Path:      videoPath,
 		Extension: ".mp4",
@@ -159,11 +159,11 @@ func TestSubtitleHandler_FindSubtitles_CaseInsensitive(t *testing.T) {
 }
 
 func TestSubtitleHandler_MoveSubtitles(t *testing.T) {
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		SubtitleExtensions: []string{".srt", ".ass"},
 	}
 
-	handler := NewSubtitleHandler(afero.NewOsFs(), cfg)
+	handler := newSubtitleHandler(afero.NewOsFs(), cfg.SubtitleExtensions)
 
 	// Create temporary directory structure
 	sourceDir := t.TempDir()
@@ -176,7 +176,7 @@ func TestSubtitleHandler_MoveSubtitles(t *testing.T) {
 	}
 
 	// Create subtitle files
-	subtitles := []SubtitleMatch{
+	subtitles := []subtitleMatch{
 		{
 			OriginalPath: filepath.Join(sourceDir, "IPX-535.srt"),
 			Language:     "",
@@ -243,11 +243,11 @@ func TestSubtitleHandler_MoveSubtitles(t *testing.T) {
 }
 
 func TestSubtitleHandler_extractLanguageCode(t *testing.T) {
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		SubtitleExtensions: []string{".srt"},
 	}
 
-	handler := NewSubtitleHandler(afero.NewOsFs(), cfg)
+	handler := newSubtitleHandler(afero.NewOsFs(), cfg.SubtitleExtensions)
 
 	tests := []struct {
 		name                string
@@ -316,11 +316,11 @@ func TestSubtitleHandler_extractLanguageCode(t *testing.T) {
 }
 
 func TestSubtitleHandler_generateSubtitleFileName(t *testing.T) {
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		SubtitleExtensions: []string{".srt", ".ass"},
 	}
 
-	handler := NewSubtitleHandler(afero.NewOsFs(), cfg)
+	handler := newSubtitleHandler(afero.NewOsFs(), cfg.SubtitleExtensions)
 
 	tests := []struct {
 		name                string
@@ -377,12 +377,12 @@ func TestSubtitleHandler_generateSubtitleFileName(t *testing.T) {
 }
 
 func TestSubtitleHandler_FindSubtitles_NonexistentDirectory(t *testing.T) {
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		SubtitleExtensions: []string{".srt"},
 	}
-	handler := NewSubtitleHandler(afero.NewOsFs(), cfg)
+	handler := newSubtitleHandler(afero.NewOsFs(), cfg.SubtitleExtensions)
 
-	videoFile := scanner.FileInfo{
+	videoFile := models.FileMatchInfo{
 		Path:      "/nonexistent/path/video.mp4",
 		Name:      "video.mp4",
 		Extension: ".mp4",
@@ -395,10 +395,10 @@ func TestSubtitleHandler_FindSubtitles_NonexistentDirectory(t *testing.T) {
 }
 
 func TestSubtitleHandler_FindSubtitles_EmptyExtensions(t *testing.T) {
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		SubtitleExtensions: []string{}, // No extensions configured
 	}
-	handler := NewSubtitleHandler(afero.NewOsFs(), cfg)
+	handler := newSubtitleHandler(afero.NewOsFs(), cfg.SubtitleExtensions)
 
 	tmpDir := t.TempDir()
 	videoPath := filepath.Join(tmpDir, "IPX-535.mp4")
@@ -412,7 +412,7 @@ func TestSubtitleHandler_FindSubtitles_EmptyExtensions(t *testing.T) {
 		t.Fatalf("Failed to create subtitle file: %v", err)
 	}
 
-	videoFile := scanner.FileInfo{
+	videoFile := models.FileMatchInfo{
 		Path:      videoPath,
 		Name:      "IPX-535.mp4",
 		Extension: ".mp4",
@@ -422,4 +422,56 @@ func TestSubtitleHandler_FindSubtitles_EmptyExtensions(t *testing.T) {
 	if len(matches) != 0 {
 		t.Errorf("Expected 0 matches when no extensions configured, got %d", len(matches))
 	}
+}
+
+func TestSubtitleHandler_MoveSubtitles_DryRun(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	handler := newSubtitleHandler(fs, []string{".srt", ".ass"})
+
+	subtitles := []subtitleMatch{
+		{OriginalPath: "/src/IPX-535.eng.srt", Language: "eng", Extension: ".srt"},
+	}
+
+	err := handler.MoveSubtitles(subtitles, "/target", "IPX-535.mp4", true)
+	assert.NoError(t, err, "Dry run should not error")
+}
+
+func TestSubtitleHandler_MoveSubtitles_SkipsExisting(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	handler := newSubtitleHandler(fs, []string{".srt", ".ass"})
+
+	// Create target directory and existing subtitle
+	_ = fs.MkdirAll("/target", 0755)
+	_ = afero.WriteFile(fs, "/target/IPX-535.eng.srt", []byte("existing"), 0644)
+
+	subtitles := []subtitleMatch{
+		{OriginalPath: "/src/IPX-535.eng.srt", Language: "eng", Extension: ".srt"},
+	}
+
+	err := handler.MoveSubtitles(subtitles, "/target", "IPX-535.mp4", false)
+	assert.NoError(t, err, "Should skip existing subtitle without error")
+}
+
+func TestSubtitleHandler_MoveSubtitles_MoveFails(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	handler := newSubtitleHandler(fs, []string{".srt", ".ass"})
+
+	// Target dir exists, but source file does not — MoveFileFs will fail
+	_ = fs.MkdirAll("/target", 0755)
+
+	subtitles := []subtitleMatch{
+		{OriginalPath: "/src/nonexistent.srt", Language: "eng", Extension: ".srt"},
+	}
+
+	err := handler.MoveSubtitles(subtitles, "/target", "IPX-535.mp4", false)
+	assert.Error(t, err, "Should error when source file does not exist")
+	assert.Contains(t, err.Error(), "failed to move subtitle")
+}
+
+func TestSubtitleHandler_MoveSubtitles_EmptyList(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	handler := newSubtitleHandler(fs, []string{".srt"})
+
+	err := handler.MoveSubtitles(nil, "/target", "IPX-535.mp4", false)
+	assert.NoError(t, err, "Empty list should return nil")
 }

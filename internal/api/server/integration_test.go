@@ -29,14 +29,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/javinizer/javinizer-go/internal/aggregator"
+	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
 // setupTestDB creates an in-memory SQLite database for integration testing.
@@ -59,11 +61,11 @@ func setupTestDB(t *testing.T) *database.DB {
 		},
 	}
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err, "Failed to create test database")
 
 	// Run migrations to create schema
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err, "Failed to run database migrations")
 
 	// Cleanup: Close database connection after test
@@ -134,24 +136,26 @@ func setupTestServer(t *testing.T) (*gin.Engine, *ServerDependencies) {
 	}
 
 	// Create dependencies
-	registry := models.NewScraperRegistry()
-	agg := aggregator.New(cfg)
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
 
 	deps := &ServerDependencies{
-		ConfigFile:  "/tmp/config.yaml",
-		Registry:    registry,
-		DB:          db,
-		Aggregator:  agg,
-		MovieRepo:   database.NewMovieRepository(db),
-		ActressRepo: database.NewActressRepository(db),
-		Matcher:     mat,
-		JobQueue:    worker.NewJobQueue(nil, "", nil),
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+			DB:              db,
+		},
+		ConfigFile: "/tmp/config.yaml",
+		Repos: database.Repositories{
+			ContentRepos: database.ContentRepos{
+				MovieRepo:   database.NewMovieRepository(db),
+				ActressRepo: database.NewActressRepository(db),
+			},
+		},
+		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 	}
+	testkit.GetTestRuntime(deps)
 
 	// Initialize atomic config pointer
-	deps.SetConfig(cfg)
+	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	// Create Gin router with all middleware and handlers
 	router := NewServer(deps)
@@ -295,7 +299,7 @@ func TestIntegrationWebSocketCleanup(t *testing.T) {
 
 	// Cleanup will be called by t.Cleanup() via setupTestServer()
 	// Verify runtime is available for cleanup.
-	assert.NotNil(t, deps.Runtime, "runtime should be initialized")
+	assert.NotNil(t, testkit.GetTestRuntime(deps), "runtime should be initialized")
 
 	// cleanupServerHub(t, deps) will be called automatically by t.Cleanup()
 }
@@ -345,7 +349,7 @@ func TestIntegrationMovieCRUDOperations(t *testing.T) {
 		DisplayTitle: "IPX-123 Integration Test Movie",
 		ReleaseYear:  2024,
 	}
-	err := deps.DB.Create(movie).Error
+	err := deps.CoreDeps.DB.Create(movie).Error
 	require.NoError(t, err)
 
 	// Test 1: GET /api/v1/movies (list movies)
@@ -374,7 +378,7 @@ func TestIntegrationMovieCRUDOperations(t *testing.T) {
 		assert.Equal(t, 200, w.Code)
 		assert.Contains(t, w.Body.String(), "IPX-123")
 		assert.Contains(t, w.Body.String(), "Integration Test Movie")
-		assert.Contains(t, w.Body.String(), "content_id")
+		assert.Contains(t, w.Body.String(), "code")
 	})
 
 	// Test 3: GET /api/v1/movies/:id (not found)
@@ -390,7 +394,7 @@ func TestIntegrationMovieCRUDOperations(t *testing.T) {
 	// Test 4: Verify database state matches API response
 	t.Run("Database State Validation", func(t *testing.T) {
 		var retrieved models.Movie
-		err := deps.DB.First(&retrieved, "content_id = ?", "IPX-123").Error
+		err := deps.CoreDeps.DB.First(&retrieved, "content_id = ?", "IPX-123").Error
 		require.NoError(t, err)
 
 		assert.Equal(t, "IPX-123", retrieved.ContentID)
@@ -417,14 +421,14 @@ func TestIntegrationMovieWithRelationships(t *testing.T) {
 		LastName:     "TestLast",
 		JapaneseName: "テスト",
 	}
-	err := deps.DB.Create(actress).Error
+	err := deps.CoreDeps.DB.Create(actress).Error
 	require.NoError(t, err)
 
 	// Create genre
 	genre := &models.Genre{
 		Name: "Test Genre",
 	}
-	err = deps.DB.Create(genre).Error
+	err = deps.CoreDeps.DB.Create(genre).Error
 	require.NoError(t, err)
 
 	// Create movie with relationships
@@ -435,12 +439,12 @@ func TestIntegrationMovieWithRelationships(t *testing.T) {
 		Actresses:    []models.Actress{*actress},
 		Genres:       []models.Genre{*genre},
 	}
-	err = deps.DB.Create(movie).Error
+	err = deps.CoreDeps.DB.Create(movie).Error
 	require.NoError(t, err)
 
 	// Query movie with relationships
 	var retrieved models.Movie
-	err = deps.DB.Preload("Actresses").Preload("Genres").First(&retrieved, "content_id = ?", "RELTEST-001").Error
+	err = deps.CoreDeps.DB.Preload("Actresses").Preload("Genres").First(&retrieved, "content_id = ?", "RELTEST-001").Error
 	require.NoError(t, err)
 
 	// Verify relationships persisted

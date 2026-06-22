@@ -30,7 +30,7 @@ export interface GlobalProxyConfig {
  */
 export function getScraperProxyMode(
 	globalEnabled: boolean,
-	override?: ScraperProxyOverride
+	override?: ScraperProxyOverride,
 ): ScraperProxyMode {
 	// Circuit breaker: global proxy disabled = all scrapers direct
 	if (!globalEnabled) {
@@ -59,10 +59,7 @@ export function getScraperProxyMode(
 /**
  * Check if proxy config is dirty compared to baseline.
  */
-export function isProxyConfigDirty(
-	current: ProxyConfig | undefined,
-	baseline: string
-): boolean {
+export function isProxyConfigDirty(current: ProxyConfig | undefined, baseline: string): boolean {
 	const currentStr = JSON.stringify(current);
 	return currentStr !== baseline;
 }
@@ -82,7 +79,7 @@ export interface TestResult {
 export function isTestValid(
 	result: TestResult | null | undefined,
 	currentConfig: unknown,
-	validityMs: number = 5 * 60 * 1000
+	validityMs: number = 5 * 60 * 1000,
 ): boolean {
 	if (!result) return false;
 	if (!result.success) return false;

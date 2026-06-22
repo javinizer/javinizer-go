@@ -2,6 +2,7 @@ package genre
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -23,38 +23,35 @@ func newTestGenreRepo(t *testing.T) *database.GenreReplacementRepository {
 		Database: config.DatabaseConfig{Type: "sqlite", DSN: ":memory:"},
 		Logging:  config.LoggingConfig{Level: "error"},
 	}
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	t.Cleanup(func() { _ = db.Close() })
 	return database.NewGenreReplacementRepository(db)
 }
 
-func newTestDeps(t *testing.T) *core.ServerDependencies {
+func newTestGenreDeps(t *testing.T) (GenreDeps, *database.GenreReplacementRepository) {
 	t.Helper()
 	repo := newTestGenreRepo(t)
-	deps := &core.ServerDependencies{
-		GenreReplacementRepo: repo,
-	}
-	return deps
+	deps := NewGenreDeps(database.ReplacementRepos{GenreReplacementRepo: repo}, database.TranslationRepos{})
+	return deps, repo
 }
 
-func setupRouter(deps *core.ServerDependencies) *gin.Engine {
+func setupGenreRouter(deps GenreDeps) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("")
-	RegisterRoutes(protected, deps)
+	RegisterRoutes(protected, deps, func() {})
 	return router
 }
 
 func TestGenreReplacementList(t *testing.T) {
-	deps := newTestDeps(t)
-	repo := deps.GenreReplacementRepo
+	deps, repo := newTestGenreDeps(t)
 
-	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
-	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "VR", Replacement: "Virtual Reality"}))
+	require.NoError(t, repo.Create(context.Background(), &models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
+	require.NoError(t, repo.Create(context.Background(), &models.GenreReplacement{Original: "VR", Replacement: "Virtual Reality"}))
 
-	router := setupRouter(deps)
+	router := setupGenreRouter(deps)
 
 	req := httptest.NewRequest("GET", "/genres/replacements", nil)
 	w := httptest.NewRecorder()
@@ -69,8 +66,8 @@ func TestGenreReplacementList(t *testing.T) {
 }
 
 func TestGenreReplacementCreate(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	payload := map[string]string{"original": "HD", "replacement": "High Definition"}
 	body, err := json.Marshal(payload)
@@ -90,8 +87,8 @@ func TestGenreReplacementCreate(t *testing.T) {
 }
 
 func TestGenreReplacementCreateIdempotent(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	payload := map[string]string{"original": "HD", "replacement": "High Definition"}
 	body, err := json.Marshal(payload)
@@ -117,12 +114,11 @@ func TestGenreReplacementCreateIdempotent(t *testing.T) {
 }
 
 func TestGenreReplacementDelete(t *testing.T) {
-	deps := newTestDeps(t)
-	repo := deps.GenreReplacementRepo
+	deps, repo := newTestGenreDeps(t)
 	entity := models.GenreReplacement{Original: "HD", Replacement: "High Definition"}
-	require.NoError(t, repo.Create(&entity))
+	require.NoError(t, repo.Create(context.Background(), &entity))
 
-	router := setupRouter(deps)
+	router := setupGenreRouter(deps)
 
 	req := httptest.NewRequest("DELETE", fmt.Sprintf("/genres/replacements?id=%d", entity.ID), nil)
 	w := httptest.NewRecorder()
@@ -137,8 +133,8 @@ func TestGenreReplacementDelete(t *testing.T) {
 }
 
 func TestGenreReplacementDeleteNotFound(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	req := httptest.NewRequest("DELETE", "/genres/replacements?id=9999", nil)
 	w := httptest.NewRecorder()
@@ -148,12 +144,11 @@ func TestGenreReplacementDeleteNotFound(t *testing.T) {
 }
 
 func TestGenreReplacementDeleteWithSpecialCharacters(t *testing.T) {
-	deps := newTestDeps(t)
-	repo := deps.GenreReplacementRepo
+	deps, repo := newTestGenreDeps(t)
 	entity := models.GenreReplacement{Original: "Threesome / Foursome", Replacement: "Group"}
-	require.NoError(t, repo.Create(&entity))
+	require.NoError(t, repo.Create(context.Background(), &entity))
 
-	router := setupRouter(deps)
+	router := setupGenreRouter(deps)
 
 	req := httptest.NewRequest("DELETE", fmt.Sprintf("/genres/replacements?id=%d", entity.ID), nil)
 	w := httptest.NewRecorder()
@@ -168,8 +163,8 @@ func TestGenreReplacementDeleteWithSpecialCharacters(t *testing.T) {
 }
 
 func TestGenreReplacementDeleteMissingOriginal(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	req := httptest.NewRequest("DELETE", "/genres/replacements", nil)
 	w := httptest.NewRecorder()
@@ -179,11 +174,10 @@ func TestGenreReplacementDeleteMissingOriginal(t *testing.T) {
 }
 
 func TestGenreReplacementDeleteByOriginal(t *testing.T) {
-	deps := newTestDeps(t)
-	repo := deps.GenreReplacementRepo
-	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
+	deps, repo := newTestGenreDeps(t)
+	require.NoError(t, repo.Create(context.Background(), &models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
 
-	router := setupRouter(deps)
+	router := setupGenreRouter(deps)
 
 	req := httptest.NewRequest("DELETE", "/genres/replacements?original=HD", nil)
 	w := httptest.NewRecorder()
@@ -198,8 +192,8 @@ func TestGenreReplacementDeleteByOriginal(t *testing.T) {
 }
 
 func TestGenreReplacementDeleteByOriginalNotFound(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	req := httptest.NewRequest("DELETE", "/genres/replacements?original=nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -209,8 +203,8 @@ func TestGenreReplacementDeleteByOriginalNotFound(t *testing.T) {
 }
 
 func TestGenreReplacementCreateEmptyOriginal(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	payload := map[string]string{"original": "", "replacement": "High Definition"}
 	body, err := json.Marshal(payload)
@@ -225,17 +219,16 @@ func TestGenreReplacementCreateEmptyOriginal(t *testing.T) {
 }
 
 func TestGenreReplacementListPagination(t *testing.T) {
-	deps := newTestDeps(t)
-	repo := deps.GenreReplacementRepo
+	deps, repo := newTestGenreDeps(t)
 
 	for i := 0; i < 5; i++ {
-		require.NoError(t, repo.Create(&models.GenreReplacement{
+		require.NoError(t, repo.Create(context.Background(), &models.GenreReplacement{
 			Original:    "genre" + string(rune('A'+i)),
 			Replacement: "Genre " + string(rune('A'+i)),
 		}))
 	}
 
-	router := setupRouter(deps)
+	router := setupGenreRouter(deps)
 
 	req := httptest.NewRequest("GET", "/genres/replacements?limit=2&offset=0", nil)
 	w := httptest.NewRecorder()
@@ -252,11 +245,10 @@ func TestGenreReplacementListPagination(t *testing.T) {
 }
 
 func TestGenreReplacementUpdate(t *testing.T) {
-	deps := newTestDeps(t)
-	repo := deps.GenreReplacementRepo
-	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
+	deps, repo := newTestGenreDeps(t)
+	require.NoError(t, repo.Create(context.Background(), &models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
 
-	router := setupRouter(deps)
+	router := setupGenreRouter(deps)
 
 	payload := map[string]string{"original": "HD", "replacement": "HD Video"}
 	body, _ := json.Marshal(payload)
@@ -275,8 +267,8 @@ func TestGenreReplacementUpdate(t *testing.T) {
 }
 
 func TestGenreReplacementUpdateNotFound(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	payload := map[string]string{"original": "nonexistent", "replacement": "test"}
 	body, _ := json.Marshal(payload)
@@ -290,8 +282,8 @@ func TestGenreReplacementUpdateNotFound(t *testing.T) {
 }
 
 func TestGenreReplacementUpdateEmptyOriginal(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	payload := map[string]string{"original": "", "replacement": "test"}
 	body, _ := json.Marshal(payload)
@@ -305,12 +297,11 @@ func TestGenreReplacementUpdateEmptyOriginal(t *testing.T) {
 }
 
 func TestGenreReplacementExport(t *testing.T) {
-	deps := newTestDeps(t)
-	repo := deps.GenreReplacementRepo
-	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
-	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "VR", Replacement: "Virtual Reality"}))
+	deps, repo := newTestGenreDeps(t)
+	require.NoError(t, repo.Create(context.Background(), &models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
+	require.NoError(t, repo.Create(context.Background(), &models.GenreReplacement{Original: "VR", Replacement: "Virtual Reality"}))
 
-	router := setupRouter(deps)
+	router := setupGenreRouter(deps)
 
 	req := httptest.NewRequest("GET", "/genres/replacements/export", nil)
 	w := httptest.NewRecorder()
@@ -326,8 +317,8 @@ func TestGenreReplacementExport(t *testing.T) {
 }
 
 func TestGenreReplacementExportEmpty(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	req := httptest.NewRequest("GET", "/genres/replacements/export", nil)
 	w := httptest.NewRecorder()
@@ -341,8 +332,8 @@ func TestGenreReplacementExportEmpty(t *testing.T) {
 }
 
 func TestGenreReplacementImport(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	importPayload := map[string]interface{}{
 		"replacements": []map[string]string{
@@ -367,8 +358,8 @@ func TestGenreReplacementImport(t *testing.T) {
 }
 
 func TestGenreReplacementImport_SkipsDefaults(t *testing.T) {
-	deps := newTestDeps(t)
-	router := setupRouter(deps)
+	deps, _ := newTestGenreDeps(t)
+	router := setupGenreRouter(deps)
 
 	importPayload := map[string]interface{}{
 		"replacements": []map[string]string{
@@ -392,11 +383,10 @@ func TestGenreReplacementImport_SkipsDefaults(t *testing.T) {
 }
 
 func TestGenreReplacementImport_ExistingUnchanged(t *testing.T) {
-	deps := newTestDeps(t)
-	repo := deps.GenreReplacementRepo
-	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
+	deps, repo := newTestGenreDeps(t)
+	require.NoError(t, repo.Create(context.Background(), &models.GenreReplacement{Original: "HD", Replacement: "High Definition"}))
 
-	router := setupRouter(deps)
+	router := setupGenreRouter(deps)
 
 	importPayload := map[string]interface{}{
 		"replacements": []map[string]string{
@@ -419,11 +409,10 @@ func TestGenreReplacementImport_ExistingUnchanged(t *testing.T) {
 }
 
 func TestGenreReplacementImport_ExistingUpdated(t *testing.T) {
-	deps := newTestDeps(t)
-	repo := deps.GenreReplacementRepo
-	require.NoError(t, repo.Create(&models.GenreReplacement{Original: "HD", Replacement: "OldValue"}))
+	deps, repo := newTestGenreDeps(t)
+	require.NoError(t, repo.Create(context.Background(), &models.GenreReplacement{Original: "HD", Replacement: "OldValue"}))
 
-	router := setupRouter(deps)
+	router := setupGenreRouter(deps)
 
 	importPayload := map[string]interface{}{
 		"replacements": []map[string]string{

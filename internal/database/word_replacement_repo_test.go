@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -19,7 +20,7 @@ func TestWordReplacementRepository_Create(t *testing.T) {
 	repo := NewWordReplacementRepository(db)
 
 	wr := &models.WordReplacement{Original: "F***", Replacement: "Fuck"}
-	err := repo.Create(wr)
+	err := repo.Create(context.TODO(), wr)
 	require.NoError(t, err)
 	assert.NotZero(t, wr.ID)
 }
@@ -30,11 +31,11 @@ func TestWordReplacementRepository_Upsert_Create(t *testing.T) {
 	repo := NewWordReplacementRepository(db)
 
 	wr := &models.WordReplacement{Original: "R**e", Replacement: "Rape"}
-	err := repo.Upsert(wr)
+	err := repo.Upsert(context.TODO(), wr)
 	require.NoError(t, err)
 	assert.NotZero(t, wr.ID)
 
-	found, err := repo.FindByOriginal("R**e")
+	found, err := repo.FindByOriginal(context.TODO(), "R**e")
 	require.NoError(t, err)
 	assert.Equal(t, "Rape", found.Replacement)
 }
@@ -45,13 +46,13 @@ func TestWordReplacementRepository_Upsert_Update(t *testing.T) {
 	repo := NewWordReplacementRepository(db)
 
 	wr := &models.WordReplacement{Original: "R**e", Replacement: "Rape"}
-	require.NoError(t, repo.Create(wr))
+	require.NoError(t, repo.Create(context.TODO(), wr))
 
 	updated := &models.WordReplacement{Original: "R**e", Replacement: "Raped"}
-	err := repo.Upsert(updated)
+	err := repo.Upsert(context.TODO(), updated)
 	require.NoError(t, err)
 
-	found, err := repo.FindByOriginal("R**e")
+	found, err := repo.FindByOriginal(context.TODO(), "R**e")
 	require.NoError(t, err)
 	assert.Equal(t, "Raped", found.Replacement)
 	assert.Equal(t, wr.ID, found.ID)
@@ -62,13 +63,13 @@ func TestWordReplacementRepository_FindByOriginal(t *testing.T) {
 	db := newTestWordReplacementDB(t)
 	repo := NewWordReplacementRepository(db)
 
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "D***k", Replacement: "Drunk"}))
+	require.NoError(t, repo.Create(context.TODO(), &models.WordReplacement{Original: "D***k", Replacement: "Drunk"}))
 
-	found, err := repo.FindByOriginal("D***k")
+	found, err := repo.FindByOriginal(context.TODO(), "D***k")
 	require.NoError(t, err)
 	assert.Equal(t, "Drunk", found.Replacement)
 
-	_, err = repo.FindByOriginal("nonexistent")
+	_, err = repo.FindByOriginal(context.TODO(), "nonexistent")
 	assert.Error(t, err)
 }
 
@@ -77,12 +78,12 @@ func TestWordReplacementRepository_Delete(t *testing.T) {
 	db := newTestWordReplacementDB(t)
 	repo := NewWordReplacementRepository(db)
 
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "K**l", Replacement: "Kill"}))
+	require.NoError(t, repo.Create(context.TODO(), &models.WordReplacement{Original: "K**l", Replacement: "Kill"}))
 
-	err := repo.Delete("K**l")
+	err := repo.Delete(context.TODO(), "K**l")
 	require.NoError(t, err)
 
-	_, err = repo.FindByOriginal("K**l")
+	_, err = repo.FindByOriginal(context.TODO(), "K**l")
 	assert.Error(t, err)
 }
 
@@ -92,12 +93,12 @@ func TestWordReplacementRepository_DeleteByID(t *testing.T) {
 	repo := NewWordReplacementRepository(db)
 
 	wr := &models.WordReplacement{Original: "B***d", Replacement: "Blood"}
-	require.NoError(t, repo.Create(wr))
+	require.NoError(t, repo.Create(context.TODO(), wr))
 
-	err := repo.DeleteByID(wr.ID)
+	err := repo.DeleteByID(context.TODO(), wr.ID)
 	require.NoError(t, err)
 
-	_, err = repo.FindByID(wr.ID)
+	_, err = repo.FindByID(context.TODO(), wr.ID)
 	assert.Error(t, err)
 }
 
@@ -106,10 +107,10 @@ func TestWordReplacementRepository_GetReplacementMap(t *testing.T) {
 	db := newTestWordReplacementDB(t)
 	repo := NewWordReplacementRepository(db)
 
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "F***", Replacement: "Fuck"}))
-	require.NoError(t, repo.Create(&models.WordReplacement{Original: "R**e", Replacement: "Rape"}))
+	require.NoError(t, repo.Create(context.TODO(), &models.WordReplacement{Original: "F***", Replacement: "Fuck"}))
+	require.NoError(t, repo.Create(context.TODO(), &models.WordReplacement{Original: "R**e", Replacement: "Rape"}))
 
-	m, err := repo.GetReplacementMap()
+	m, err := repo.GetReplacementMap(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, "Fuck", m["F***"])
 	assert.Equal(t, "Rape", m["R**e"])
@@ -121,23 +122,9 @@ func TestWordReplacementRepository_GetReplacementMap_Empty(t *testing.T) {
 	db := newTestWordReplacementDB(t)
 	repo := NewWordReplacementRepository(db)
 
-	m, err := repo.GetReplacementMap()
+	m, err := repo.GetReplacementMap(context.TODO())
 	require.NoError(t, err)
 	assert.Empty(t, m)
-}
-
-func TestDefaultWordReplacements(t *testing.T) {
-	defaults := DefaultWordReplacements()
-	assert.NotEmpty(t, defaults)
-
-	for _, wr := range defaults {
-		assert.NotEmpty(t, wr.Original, "default word replacement should have non-empty Original")
-	}
-
-	modified := defaults
-	modified[0] = models.WordReplacement{Original: "MODIFIED", Replacement: "modified"}
-	original := DefaultWordReplacements()
-	assert.NotEqual(t, "MODIFIED", original[0].Original, "DefaultWordReplacements should return a copy")
 }
 
 func TestIsDefaultWordReplacement(t *testing.T) {
@@ -151,13 +138,13 @@ func TestSeedDefaultWordReplacements(t *testing.T) {
 	db := newTestWordReplacementDB(t)
 	repo := NewWordReplacementRepository(db)
 
-	SeedDefaultWordReplacements(repo)
+	SeedDefaultWordReplacements(context.TODO(), repo)
 
-	list, err := repo.List()
+	list, err := repo.List(context.TODO())
 	require.NoError(t, err)
 	assert.NotEmpty(t, list)
 
-	m, err := repo.GetReplacementMap()
+	m, err := repo.GetReplacementMap(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, "Rape", m["R**e"])
 	assert.Equal(t, "Fuck", m["F***"])
@@ -167,12 +154,12 @@ func TestSeedDefaultWordReplacements_Idempotent(t *testing.T) {
 	db := newTestWordReplacementDB(t)
 	repo := NewWordReplacementRepository(db)
 
-	SeedDefaultWordReplacements(repo)
-	count1, err := repo.List()
+	SeedDefaultWordReplacements(context.TODO(), repo)
+	count1, err := repo.List(context.TODO())
 	require.NoError(t, err)
 
-	SeedDefaultWordReplacements(repo)
-	count2, err := repo.List()
+	SeedDefaultWordReplacements(context.TODO(), repo)
+	count2, err := repo.List(context.TODO())
 	require.NoError(t, err)
 
 	assert.Equal(t, len(count1), len(count2), "seeding twice should not duplicate entries")

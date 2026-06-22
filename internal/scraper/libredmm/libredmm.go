@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -39,9 +38,6 @@ var (
 	// Pattern to strip other control characters (0x00-0x1F) except tab, newline, carriage return
 	// These can be injected by broken proxies or terminal wrappers
 	controlCharRegex = regexp.MustCompile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
-	// FC2 ID patterns — LibreDMM aggregates FC2 content alongside Fanza/MGStage/SOD
-	fc2IDRegex = regexp.MustCompile(`(?i)fc2[\s_-]*ppv[\s_-]*(\d{5,10})`)
-	ppvIDRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])ppv[\s_-]*(\d{5,10})(?:$|[^a-z0-9])`)
 )
 
 type actressPayload struct {
@@ -69,22 +65,23 @@ type moviePayload struct {
 	SampleImageURLs   []string         `json:"sample_image_urls"`
 }
 
-// Scraper implements the LibreDMM scraper.
-type Scraper struct {
+// scraper implements the LibreDMM scraper.
+type scraper struct {
 	client          *resty.Client
 	enabled         bool
 	baseURL         string
-	proxyOverride   *config.ProxyConfig
-	downloadProxy   *config.ProxyConfig
+	proxyOverride   *models.ProxyConfig
+	downloadProxy   *models.ProxyConfig
 	rateLimiter     *ratelimit.Limiter
 	pollInterval    time.Duration
 	maxPollAttempts int
-	settings        config.ScraperSettings // stores the full settings for Config() method
+	settings        models.ScraperSettings // stores the full settings for Config() method
 }
 
 // New creates a new LibreDMM scraper.
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+// newScraper creates a new LibreDMM scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
 			httpclient.JSONAPIHeaders(),
 			httpclient.UserAgentHeader(settings.UserAgent),
@@ -99,7 +96,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	}
 	base = strings.TrimRight(base, "/")
 
-	s := &Scraper{
+	s := &scraper{
 		client:          client,
 		enabled:         settings.Enabled,
 		baseURL:         base,
@@ -108,7 +105,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		rateLimiter:     ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		pollInterval:    defaultPollInterval,
 		maxPollAttempts: defaultPollAttempts,
-		settings:        settings,
+		settings:        *settings,
 	}
 
 	if result.ProxyEnabled && strings.TrimSpace(result.ProxyProfile.URL) != "" {
@@ -119,23 +116,24 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 }
 
 // Name returns scraper identifier.
-func (s *Scraper) Name() string { return "libredmm" }
+func (s *scraper) Name() string { return "libredmm" }
 
 // IsEnabled returns whether scraper is enabled.
-func (s *Scraper) IsEnabled() bool { return s.enabled }
+func (s *scraper) IsEnabled() bool { return s.enabled }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	return nil
 }
 
 // CanHandleURL returns true if this scraper can handle the given URL
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -145,7 +143,7 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 }
 
 // ExtractIDFromURL extracts the movie ID from a LibreDMM URL
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return "", err
@@ -175,7 +173,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from LibreDMM URL")
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(urlStr) {
 		return nil, models.NewScraperNotFoundError("LibreDMM", "URL not handled by LibreDMM scraper")
 	}
@@ -270,39 +268,31 @@ func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 }
 
 // ResolveDownloadProxyForHost declares LibreDMM-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
 	}
 	if host == "libredmm.com" || strings.HasSuffix(host, ".libredmm.com") {
-		return s.downloadProxy, s.proxyOverride, true
+		return s.settings.DownloadProxy, s.settings.Proxy, true
 	}
 	return nil, nil, false
 }
 
-// ResolveSearchQuery prioritizes this scraper when the input is a LibreDMM URL
-// or an FC2-style identifier (since LibreDMM aggregates FC2 content).
-func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
-	input = strings.TrimSpace(input)
-
-	normalized, ok := normalizeMovieURL(input, s.baseURL)
-	if ok {
-		return normalized, true
+// ResolveSearchQuery prioritizes this scraper when the input is a LibreDMM URL.
+func (s *scraper) ResolveSearchQuery(input string) (string, bool) {
+	normalized, ok := normalizeMovieURL(strings.TrimSpace(input), s.baseURL)
+	if !ok {
+		return "", false
 	}
-
-	if articleID := extractFC2ArticleID(input); articleID != "" {
-		return "FC2-PPV-" + articleID, true
-	}
-
-	return "", false
+	return normalized, true
 }
 
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -322,7 +312,7 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 }
 
 // Search scrapes metadata from LibreDMM JSON endpoints.
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("LibreDMM scraper is disabled")
 	}
@@ -402,7 +392,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
 }
 
-func (s *Scraper) fetchMovieJSONCtx(ctx context.Context, targetURL string) (*moviePayload, string, int, error) {
+func (s *scraper) fetchMovieJSONCtx(ctx context.Context, targetURL string) (*moviePayload, string, int, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return nil, "", 0, err
 	}
@@ -434,6 +424,13 @@ func (s *Scraper) fetchMovieJSONCtx(ctx context.Context, targetURL string) (*mov
 	}
 
 	return payload, finalURL, resp.StatusCode(), nil
+}
+
+// PayloadToResult converts a LibreDMM movie payload to a ScraperResult.
+// This is the documented parsing seam for testing; it delegates to the
+// internal payloadToResult function.
+func PayloadToResult(payload *moviePayload, sourceURL, fallbackID string, client *http.Client) *models.ScraperResult {
+	return payloadToResult(payload, sourceURL, fallbackID, client)
 }
 
 func payloadToResult(payload *moviePayload, sourceURL, fallbackID string, client *http.Client) *models.ScraperResult {
@@ -705,19 +702,6 @@ func toHTTPS(raw string) string {
 	return raw
 }
 
-func extractFC2ArticleID(input string) string {
-	if input == "" {
-		return ""
-	}
-	if m := fc2IDRegex.FindStringSubmatch(input); len(m) > 1 {
-		return m[1]
-	}
-	if m := ppvIDRegex.FindStringSubmatch(input); len(m) > 1 {
-		return m[1]
-	}
-	return ""
-}
-
 // stripANSICodes removes ANSI escape sequences and control characters from a string.
 // These can appear in responses from proxies or terminal wrappers.
 // Handles ANSI sequences, bare ESC characters, and other control characters.
@@ -746,7 +730,7 @@ func stripANSICodes(s string) string {
 	return s
 }
 
-func (s *Scraper) filterPlaceholderScreenshotsCtx(ctx context.Context, result *models.ScraperResult) {
+func (s *scraper) filterPlaceholderScreenshotsCtx(ctx context.Context, result *models.ScraperResult) {
 	if len(result.ScreenshotURL) == 0 {
 		return
 	}

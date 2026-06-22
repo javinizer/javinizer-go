@@ -266,13 +266,13 @@ test.describe('Completeness Filter', () => {
 
 	test('filter toggles are visually distinct when active vs inactive', async ({ page }) => {
 		const incompleteBtn = getCompletenessFilterButton(page, 'Incomplete');
-		const classBefore = await incompleteBtn.getAttribute('class') ?? '';
+		const classBefore = (await incompleteBtn.getAttribute('class')) ?? '';
 		expect(classBefore).toContain('bg-secondary');
 
 		await incompleteBtn.click();
 		await page.waitForTimeout(300);
 
-		const classAfter = await incompleteBtn.getAttribute('class') ?? '';
+		const classAfter = (await incompleteBtn.getAttribute('class')) ?? '';
 		expect(classAfter).not.toContain('bg-secondary');
 	});
 });
@@ -338,7 +338,9 @@ test.describe('Bulk Exclude', () => {
 		const confirmBtn = dialog.getByRole('button', { name: /exclude/i }).first();
 		await confirmBtn.click();
 
-		await expect(page.locator(getGridCardSelector())).toHaveCount(countBefore - 1, { timeout: 10_000 });
+		await expect(page.locator(getGridCardSelector())).toHaveCount(countBefore - 1, {
+			timeout: 10_000,
+		});
 	});
 
 	test('remove button not visible when no movies selected', async ({ page }) => {
@@ -366,7 +368,7 @@ test.describe('Bulk Rescrape', () => {
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await expect(rescrapeBtn).toBeVisible({ timeout: 5_000 });
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await expect(modal).toBeVisible({ timeout: 5_000 });
 	});
@@ -378,8 +380,10 @@ test.describe('Bulk Rescrape', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
-		await expect(page.getByRole('heading', { name: /rescrape 2 movies/i })).toBeVisible({ timeout: 5_000 });
+
+		await expect(page.getByRole('heading', { name: /rescrape 2 movies/i })).toBeVisible({
+			timeout: 5_000,
+		});
 	});
 
 	test('rescrape modal shows scraper selector', async ({ page }) => {
@@ -400,7 +404,7 @@ test.describe('Bulk Rescrape', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await expect(modal).toBeVisible({ timeout: 5_000 });
 		await expect(modal.getByText(/nfo merge strategy/i)).toBeVisible({ timeout: 5_000 });
@@ -412,11 +416,17 @@ test.describe('Bulk Rescrape', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
-		await expect(modal.getByRole('button', { name: /conservative/i })).toBeVisible({ timeout: 5_000 });
-		await expect(modal.getByRole('button', { name: /^📝 gap fill/i })).toBeVisible({ timeout: 5_000 });
-		await expect(modal.getByRole('button', { name: /aggressive/i })).toBeVisible({ timeout: 5_000 });
+		await expect(modal.getByRole('button', { name: /conservative/i })).toBeVisible({
+			timeout: 5_000,
+		});
+		await expect(modal.getByRole('button', { name: /^📝 gap fill/i })).toBeVisible({
+			timeout: 5_000,
+		});
+		await expect(modal.getByRole('button', { name: /aggressive/i })).toBeVisible({
+			timeout: 5_000,
+		});
 	});
 
 	test('rescrape modal shows individual strategies', async ({ page }) => {
@@ -425,13 +435,23 @@ test.describe('Bulk Rescrape', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
-		await expect(modal.getByRole('button', { name: /prefer nfo/i })).toBeVisible({ timeout: 5_000 });
-		await expect(modal.getByRole('button', { name: /prefer scraped/i })).toBeVisible({ timeout: 5_000 });
-		await expect(modal.getByRole('button', { name: /preserve existing/i })).toBeVisible({ timeout: 5_000 });
-		await expect(modal.getByRole('button', { name: /fill missing only/i })).toBeVisible({ timeout: 5_000 });
-		await expect(modal.getByRole('button', { name: /replace all/i })).toBeVisible({ timeout: 5_000 });
+		await expect(modal.getByRole('button', { name: /prefer nfo/i })).toBeVisible({
+			timeout: 5_000,
+		});
+		await expect(modal.getByRole('button', { name: /prefer scraped/i })).toBeVisible({
+			timeout: 5_000,
+		});
+		await expect(modal.getByRole('button', { name: /preserve existing/i })).toBeVisible({
+			timeout: 5_000,
+		});
+		await expect(modal.getByRole('button', { name: /fill missing only/i })).toBeVisible({
+			timeout: 5_000,
+		});
+		await expect(modal.getByRole('button', { name: /replace all/i })).toBeVisible({
+			timeout: 5_000,
+		});
 	});
 
 	test('rescrape modal can be closed via cancel button', async ({ page }) => {
@@ -440,7 +460,7 @@ test.describe('Bulk Rescrape', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await expect(modal).toBeVisible({ timeout: 5_000 });
 
@@ -457,7 +477,7 @@ test.describe('Bulk Rescrape', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await expect(modal).toBeVisible({ timeout: 5_000 });
 
@@ -474,13 +494,16 @@ test.describe('Bulk Rescrape', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
-		const conservativeBtn = modal.locator('button').filter({ hasText: /conservative/i }).first();
+		const conservativeBtn = modal
+			.locator('button')
+			.filter({ hasText: /conservative/i })
+			.first();
 		await conservativeBtn.click();
 		await page.waitForTimeout(300);
 
-		const classAttr = await conservativeBtn.getAttribute('class') ?? '';
+		const classAttr = (await conservativeBtn.getAttribute('class')) ?? '';
 		expect(classAttr).toContain('border-primary');
 	});
 
@@ -537,7 +560,10 @@ test.describe('Grid to Detail Navigation', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const metadataCard = page.locator('.p-6').filter({ hasText: /movie metadata/i }).first();
+		const metadataCard = page
+			.locator('.p-6')
+			.filter({ hasText: /movie metadata/i })
+			.first();
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await expect(rescrapeBtn).toBeVisible({ timeout: 5_000 });
 	});
@@ -571,7 +597,10 @@ test.describe('Grid to Detail Navigation', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const navCard = page.locator('.p-4').filter({ hasText: /movie \d+ of \d+/i }).first();
+		const navCard = page
+			.locator('.p-4')
+			.filter({ hasText: /movie \d+ of \d+/i })
+			.first();
 		const removeBtn = navCard.getByRole('button', { name: /remove/i });
 		await expect(removeBtn).toBeVisible({ timeout: 5_000 });
 	});
@@ -631,25 +660,33 @@ test.describe('Detail View Rescrape', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const metadataCard = page.locator('.p-6').filter({ hasText: /movie metadata/i }).first();
+		const metadataCard = page
+			.locator('.p-6')
+			.filter({ hasText: /movie metadata/i })
+			.first();
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await expect(modal).toBeVisible({ timeout: 5_000 });
 	});
 
-	test('detail rescrape modal shows rescrape from file and manual search tabs', async ({ page }) => {
+	test('detail rescrape modal shows rescrape from file and manual search tabs', async ({
+		page,
+	}) => {
 		const cards = await getGridCards(page);
 		if (cards.length === 0) return;
 
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const metadataCard = page.locator('.p-6').filter({ hasText: /movie metadata/i }).first();
+		const metadataCard = page
+			.locator('.p-6')
+			.filter({ hasText: /movie metadata/i })
+			.first();
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await expect(modal).toBeVisible({ timeout: 5_000 });
 		await expect(modal.getByText(/rescrape from file/i)).toBeVisible({ timeout: 5_000 });
@@ -663,10 +700,13 @@ test.describe('Detail View Rescrape', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const metadataCard = page.locator('.p-6').filter({ hasText: /movie metadata/i }).first();
+		const metadataCard = page
+			.locator('.p-6')
+			.filter({ hasText: /movie metadata/i })
+			.first();
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await modal.getByText(/manual search/i).click();
 		await page.waitForTimeout(300);
@@ -682,10 +722,13 @@ test.describe('Detail View Rescrape', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const metadataCard = page.locator('.p-6').filter({ hasText: /movie metadata/i }).first();
+		const metadataCard = page
+			.locator('.p-6')
+			.filter({ hasText: /movie metadata/i })
+			.first();
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await modal.getByText(/manual search/i).click();
 		await page.waitForTimeout(300);
@@ -702,13 +745,18 @@ test.describe('Detail View Rescrape', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const metadataCard = page.locator('.p-6').filter({ hasText: /movie metadata/i }).first();
+		const metadataCard = page
+			.locator('.p-6')
+			.filter({ hasText: /movie metadata/i })
+			.first();
 		const rescrapeBtn = metadataCard.getByRole('button', { name: /rescrape/i }).first();
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await expect(modal.getByRole('button', { name: /cancel/i })).toBeVisible({ timeout: 5_000 });
-		await expect(modal.getByRole('button', { name: /^rescrape$/i })).toBeVisible({ timeout: 5_000 });
+		await expect(modal.getByRole('button', { name: /^rescrape$/i })).toBeVisible({
+			timeout: 5_000,
+		});
 	});
 });
 
@@ -720,10 +768,13 @@ test.describe('Detail View Remove', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const navCard = page.locator('.p-4').filter({ hasText: /movie \d+ of \d+/i }).first();
+		const navCard = page
+			.locator('.p-4')
+			.filter({ hasText: /movie \d+ of \d+/i })
+			.first();
 		const removeBtn = navCard.getByRole('button', { name: /remove/i });
 		await removeBtn.click();
-		
+
 		const movieNav = page.getByText(/movie \d+ of \d+/i);
 		await expect(movieNav).toBeVisible({ timeout: 5_000 });
 	});
@@ -735,7 +786,10 @@ test.describe('Detail View Remove', () => {
 		await cards[0].click();
 		await page.waitForTimeout(500);
 
-		const navCard = page.locator('.p-4').filter({ hasText: /movie \d+ of \d+/i }).first();
+		const navCard = page
+			.locator('.p-4')
+			.filter({ hasText: /movie \d+ of \d+/i })
+			.first();
 		const removeBtn = navCard.getByRole('button', { name: /remove/i });
 		await expect(removeBtn).toBeVisible({ timeout: 5_000 });
 	});
@@ -775,8 +829,10 @@ test.describe('Selection Mode with Filter Interaction', () => {
 		await page.waitForTimeout(500);
 
 		const allCards = await getGridCards(page);
-		const checkedValues = await Promise.all(allCards.map(card => card.getAttribute('aria-checked')));
-		const selectedCount = checkedValues.filter(v => v === 'true').length;
+		const checkedValues = await Promise.all(
+			allCards.map((card) => card.getAttribute('aria-checked')),
+		);
+		const selectedCount = checkedValues.filter((v) => v === 'true').length;
 		expect(selectedCount).toBeLessThan(allCards.length);
 	});
 
@@ -843,12 +899,16 @@ test.describe('View Mode Toggle', () => {
 		const toggle = page.locator('.inline-flex.rounded-md.border.border-input.p-1');
 		await expect(toggle).toBeVisible({ timeout: 10_000 });
 
-		const detailBtn = toggle.locator('button').filter({ hasText: /detail/i }).first();
-		const posterBtn = toggle.locator('button').filter({ hasText: /poster/i }).first();
-		const coverBtn = toggle.locator('button').filter({ hasText: /cover/i }).first();
+		const detailBtn = toggle
+			.locator('button')
+			.filter({ hasText: /detail/i })
+			.first();
+		const gridBtn = toggle
+			.locator('button')
+			.filter({ hasText: /poster/i })
+			.first();
 		await expect(detailBtn).toBeVisible();
-		await expect(posterBtn).toBeVisible();
-		await expect(coverBtn).toBeVisible();
+		await expect(gridBtn).toBeVisible();
 	});
 });
 
@@ -898,7 +958,7 @@ test.describe('Keyboard Navigation', () => {
 		await page.waitForTimeout(200);
 
 		const focusedElement = page.locator(':focus');
-		const tag = await focusedElement.evaluate(el => el.tagName.toLowerCase());
+		const tag = await focusedElement.evaluate((el) => el.tagName.toLowerCase());
 		expect(['div', 'button', 'a']).toContain(tag);
 	});
 });
@@ -953,7 +1013,7 @@ test.describe('Scraper Selector in Rescrape Modal', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await expect(modal).toBeVisible({ timeout: 5_000 });
 		await expect(modal.getByRole('button', { name: /^all$/i })).toBeVisible({ timeout: 5_000 });
@@ -966,7 +1026,7 @@ test.describe('Scraper Selector in Rescrape Modal', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await expect(modal.getByText(/priority order/i)).toBeVisible({ timeout: 5_000 });
 	});
@@ -977,7 +1037,7 @@ test.describe('Scraper Selector in Rescrape Modal', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		const noneBtn = modal.getByRole('button', { name: /^none$/i });
 		await noneBtn.click();
@@ -993,7 +1053,7 @@ test.describe('Scraper Selector in Rescrape Modal', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		const noneBtn = modal.getByRole('button', { name: /^none$/i });
 		await noneBtn.click();
@@ -1013,7 +1073,7 @@ test.describe('Bulk Rescrape Progress', () => {
 	test('rescrape execute triggers progress indicator', async ({ page }) => {
 		await page.route('**/api/v1/batch/**', async (route) => {
 			if (route.request().url().includes('/batch-rescrape')) {
-				await new Promise(resolve => setTimeout(resolve, 1500));
+				await new Promise((resolve) => setTimeout(resolve, 1500));
 				await route.fulfill({
 					json: {
 						results: [],
@@ -1047,7 +1107,7 @@ test.describe('Bulk Rescrape Progress', () => {
 
 		const rescrapeBtn = getBulkRescrapeButton(page);
 		await rescrapeBtn.click();
-		
+
 		const modal = getRescrapeModal(page);
 		await expect(modal).toBeVisible({ timeout: 5_000 });
 		const executeBtn = modal.getByRole('button', { name: /rescrape/i }).last();
@@ -1140,7 +1200,9 @@ test.describe('Edge Cases', () => {
 
 		const cards = await getGridCards(page);
 		for (let i = 0; i < cards.length; i++) {
-			await expect(getGridCard(page, i)).toHaveAttribute('aria-checked', 'false', { timeout: 5_000 });
+			await expect(getGridCard(page, i)).toHaveAttribute('aria-checked', 'false', {
+				timeout: 5_000,
+			});
 		}
 	});
 

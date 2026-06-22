@@ -3,7 +3,7 @@ import { toastStore } from '$lib/stores/toast';
 import { confirmDialog } from '$lib/stores/dialog.svelte';
 import {
 	getScraperProxyMode as getScraperProxyModePure,
-	type ScraperProxyMode
+	type ScraperProxyMode,
 } from '$lib/proxy/proxy-logic';
 import type { Config, ScraperSettings, ScraperOption, ProxyConfig } from '$lib/api/types';
 
@@ -31,7 +31,11 @@ export interface ScraperStore {
 	isInteractiveRowTarget: (target: EventTarget | null) => boolean;
 	onScraperRowClick: (event: MouseEvent, index: number) => void;
 	getOptionValue: (scraperName: string, optionKey: string) => string | number | boolean | undefined;
-	setOptionValue: (scraperName: string, optionKey: string, value: string | number | boolean) => void;
+	setOptionValue: (
+		scraperName: string,
+		optionKey: string,
+		value: string | number | boolean,
+	) => void;
 	getNestedValue: (obj: Record<string, unknown> | undefined, path: string) => unknown;
 	setNestedValue: (obj: Record<string, unknown>, path: string, value: unknown) => void;
 	parseOptionNumber: (value: string) => number | undefined;
@@ -112,7 +116,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 					enabled: (sc[name] as ScraperSettings)?.enabled ?? false,
 					displayName: scraperDisplayNames[name] || name,
 					expanded: false,
-					options: scraperOptionsMap[name] || []
+					options: scraperOptionsMap[name] || [],
 				};
 			});
 			scrapers = deps.refreshLocalProxyProfileChoices(scrapers);
@@ -142,7 +146,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 				enabled: (sc[name] as ScraperSettings)?.enabled ?? false,
 				displayName: name,
 				expanded: false,
-				options: []
+				options: [],
 			}));
 			scrapers = deps.refreshLocalProxyProfileChoices(scrapers);
 		}
@@ -158,7 +162,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 
 	function getRenderableScraperOptions(scraper: ScraperItem): ScraperOption[] {
 		return (scraper.options || []).filter(
-			(option) => !option.key.startsWith('proxy.') && !option.key.startsWith('download_proxy.')
+			(option) => !option.key.startsWith('proxy.') && !option.key.startsWith('download_proxy.'),
 		);
 	}
 
@@ -167,7 +171,14 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 		if (!config?.scrapers) return [];
 		return Object.keys(config.scrapers).filter(
 			(name: string) =>
-				!['priority', 'proxy', 'user_agent', 'referer', 'timeout_seconds', 'request_timeout_seconds'].includes(name)
+				![
+					'priority',
+					'proxy',
+					'user_agent',
+					'referer',
+					'timeout_seconds',
+					'request_timeout_seconds',
+				].includes(name),
 		);
 	}
 
@@ -270,13 +281,13 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 
 	function getOptionValue(
 		scraperName: string,
-		optionKey: string
+		optionKey: string,
 	): string | number | boolean | undefined {
 		const config = deps.getConfig();
 		if (optionKey === 'download_proxy.enabled') {
 			const downloadProxy = getNestedValue(
 				config?.scrapers?.[scraperName] as Record<string, unknown> | undefined,
-				'download_proxy'
+				'download_proxy',
 			) as Record<string, unknown> | undefined;
 			if (!downloadProxy || typeof downloadProxy !== 'object') return false;
 			if (downloadProxy.enabled !== undefined) return !!downloadProxy.enabled;
@@ -294,7 +305,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 
 		const currentValue = getNestedValue(
 			config?.scrapers?.[scraperName] as Record<string, unknown> | undefined,
-			optionKey
+			optionKey,
 		);
 
 		if (currentValue === undefined || currentValue === null || currentValue === '') {
@@ -314,7 +325,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 	function setOptionValue(
 		scraperName: string,
 		optionKey: string,
-		value: string | number | boolean
+		value: string | number | boolean,
 	) {
 		const config = deps.getConfig();
 		if (!config?.scrapers) return;
@@ -384,11 +395,14 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 		if (wasEnabled && !willBeEnabled) {
 			const usageInfo = getScraperUsage(scraper.name);
 			if (usageInfo.count > 0) {
-				if (!(await confirmDialog(
-					'Disable Scraper',
-					`${scraper.displayName} is currently used in ${usageInfo.count} field(s):\n\n${usageInfo.fields.join(', ')}\n\nDisabling this scraper will remove it from all priority lists. Continue?`,
-					{ variant: 'danger', confirmLabel: 'Disable' }
-				))) return;
+				if (
+					!(await confirmDialog(
+						'Disable Scraper',
+						`${scraper.displayName} is currently used in ${usageInfo.count} field(s):\n\n${usageInfo.fields.join(', ')}\n\nDisabling this scraper will remove it from all priority lists. Continue?`,
+						{ variant: 'danger', confirmLabel: 'Disable' },
+					))
+				)
+					return;
 
 				removeScraperFromPriorities(scraper.name);
 			}
@@ -416,11 +430,14 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 			}
 		}
 		if (totalUsage > 0) {
-			if (!(await confirmDialog(
-				'Disable All Scrapers',
-				`The following scrapers are currently used in priority lists:\n\n${usedScrapers.join(', ')}\n\nDisabling all scrapers will remove them from all priority lists. Continue?`,
-				{ variant: 'danger', confirmLabel: 'Disable All' }
-			))) return;
+			if (
+				!(await confirmDialog(
+					'Disable All Scrapers',
+					`The following scrapers are currently used in priority lists:\n\n${usedScrapers.join(', ')}\n\nDisabling all scrapers will remove them from all priority lists. Continue?`,
+					{ variant: 'danger', confirmLabel: 'Disable All' },
+				))
+			)
+				return;
 
 			for (const scraper of scrapers) {
 				removeScraperFromPriorities(scraper.name);
@@ -441,7 +458,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 			{ key: 'description', label: 'Description' },
 			{ key: 'release_date', label: 'Release Date' },
 			{ key: 'runtime', label: 'Runtime' },
-			{ key: 'content_id', label: 'Content ID' },
+			{ key: 'code', label: 'Content ID' },
 			{ key: 'actress', label: 'Actresses' },
 			{ key: 'genre', label: 'Genres' },
 			{ key: 'director', label: 'Director' },
@@ -452,7 +469,7 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 			{ key: 'cover_url', label: 'Cover Image' },
 			{ key: 'poster_url', label: 'Poster Image' },
 			{ key: 'screenshot_url', label: 'Screenshots' },
-			{ key: 'trailer_url', label: 'Trailer' }
+			{ key: 'trailer_url', label: 'Trailer' },
 		];
 
 		const globalPriority = config?.scrapers?.priority || [];
@@ -530,8 +547,12 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 	}
 
 	return {
-		get scrapers() { return scrapers; },
-		set scrapers(v) { scrapers = v; },
+		get scrapers() {
+			return scrapers;
+		},
+		set scrapers(v) {
+			scrapers = v;
+		},
 		buildScraperList,
 		scraperHasOptions,
 		scraperSupportsProxyOptions,
@@ -561,6 +582,6 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 		clearAllScrapers,
 		getScraperUsage,
 		removeScraperFromPriorities,
-		isOptionDisabled
+		isOptionDisabled,
 	};
 }

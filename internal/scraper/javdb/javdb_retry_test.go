@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,12 +57,12 @@ func TestSearch_RetriesSparseDetailWithDirectSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      resty.New(),
 		enabled:     true,
 		baseURL:     server.URL,
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{Enabled: true},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	result, err := scraper.Search(context.Background(), "IPX-123")
@@ -102,12 +102,12 @@ func TestSearch_FailsWhenDirectRetryStillSparse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      resty.New(),
 		enabled:     true,
 		baseURL:     server.URL,
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{Enabled: true},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	result, err := scraper.Search(context.Background(), "IPX-123")

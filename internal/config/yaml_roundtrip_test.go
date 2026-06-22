@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 func TestScrapersConfigYAMLRoundTrip(t *testing.T) {
@@ -13,13 +15,13 @@ func TestScrapersConfigYAMLRoundTrip(t *testing.T) {
 		UserAgent:      "test-agent",
 		TimeoutSeconds: 30,
 		Priority:       []string{"dmm", "r18dev"},
-		Overrides: map[string]*ScraperSettings{
-			"dmm": &ScraperSettings{
+		Overrides: map[string]*models.ScraperSettings{
+			"dmm": &models.ScraperSettings{
 				Enabled:   true,
 				Language:  "ja",
 				RateLimit: 1000,
 			},
-			"r18dev": &ScraperSettings{
+			"r18dev": &models.ScraperSettings{
 				Enabled:   false,
 				Language:  "en",
 				RateLimit: 500,
@@ -192,7 +194,7 @@ func TestScrapersConfigYAMLRoundTripScraperSpecific(t *testing.T) {
 	if !dmmCfg.Enabled {
 		t.Errorf("dmm.Enabled should be true")
 	}
-	// Note: DMM-specific fields were previously in Extra, now in DMMConfig
+	// Note: DMM-specific fields were previously in Extra, now in ScraperSettings
 
 	// Verify r18dev scraper-specific fields
 	r18Cfg, ok := loaded.Scrapers.Overrides["r18dev"]
@@ -202,7 +204,7 @@ func TestScrapersConfigYAMLRoundTripScraperSpecific(t *testing.T) {
 	if !r18Cfg.Enabled {
 		t.Errorf("r18dev.Enabled should be true")
 	}
-	// Note: respect_retry_after was previously in Extra, now in R18DevConfig
+	// Note: respect_retry_after was previously in Extra, now in ScraperSettings
 
 	// Verify javlibrary scraper-specific fields
 	javlibCfg, ok := loaded.Scrapers.Overrides["javlibrary"]
@@ -236,7 +238,7 @@ func TestScrapersConfigYAMLRoundTripScraperSpecific(t *testing.T) {
 	if !r18Reloaded.Enabled {
 		t.Errorf("After round-trip: r18dev.Enabled should be true")
 	}
-	// Note: respect_retry_after was previously in Extra, now in R18DevConfig
+	// Note: respect_retry_after was previously in Extra, now in ScraperSettings
 
 	// Verify javlibrary base_url preserved after round-trip
 	javlibReloaded, ok := reloaded.Scrapers.Overrides["javlibrary"]

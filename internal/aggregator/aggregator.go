@@ -1,307 +1,120 @@
 package aggregator
 
 import (
-	"regexp"
-	"strings"
-	"sync"
+	"context"
+	"fmt"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
 )
 
-// AggregatorInterface abstracts aggregator operations for dependency injection.
-// Allows CLI commands and API endpoints to accept either real Aggregator or test mocks.
-// Added in Epic 8 Story 8.2 to enable testable aggregation logic.
-type AggregatorInterface interface {
-	Aggregate(results []*models.ScraperResult) (*models.Movie, string, error)
-
-	AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, string, error)
-
-	GetResolvedPriorities() map[string][]string
+// AggregateResult carries the byproducts of an aggregation call.
+// Returned explicitly so callers never need to query hidden mutable state.
+type AggregateResult struct {
+	FieldSources       map[string]string
+	ResolvedPriorities map[string][]string
 }
 
-// AggregatorOptions allows optional dependency injection for testing.
-// Fields left nil will be initialized with real implementations or skipped entirely.
-// Added in Epic 8 Story 8.2 to support testable aggregator initialization.
-type AggregatorOptions struct {
-	// GenreReplacementRepo is an optional genre replacement repository for tests.
-	// If nil, loadGenreReplacementCache() is skipped (empty cache).
-	// If non-nil, genre replacements are loaded from the repository during initialization.
-	GenreReplacementRepo database.GenreReplacementRepositoryInterface
+// AggregatorInterface abstracts aggregator operations for dependency injection.
+// Allows CLI commands and API endpoints to accept either real Aggregator or test mocks.
+type AggregatorInterface interface {
+	Aggregate(results []*models.ScraperResult) (*models.Movie, *AggregateResult, error)
 
-	// ActressAliasRepo is an optional actress alias repository for tests.
-	// If nil, loadActressAliasCache() is skipped (empty cache).
-	// If non-nil, actress aliases are loaded from the repository during initialization.
-	ActressAliasRepo database.ActressAliasRepositoryInterface
+	AggregateWithPriority(results []*models.ScraperResult, customPriority []string) (*models.Movie, *AggregateResult, error)
 
-	// WordReplacementRepo is an optional word replacement repository for tests.
-	// If nil, loadWordReplacementCache() is skipped (empty cache).
-	// If non-nil, word replacements are loaded from the repository during initialization.
-	WordReplacementRepo database.WordReplacementRepositoryInterface
-
-	// TemplateEngine is an optional template engine for tests.
-	// If nil, a real template.NewEngine() is created.
-	// If non-nil, the injected template engine is used.
-	TemplateEngine *template.Engine
-
-	// GenreCache is an optional pre-populated genre replacement cache for tests.
-	// If non-nil, this cache is used directly without loading from database.
-	// Takes precedence over GenreReplacementRepo if both are provided.
-	GenreCache map[string]string
-
-	// WordCache is an optional pre-populated word replacement cache for tests.
-	// If non-nil, this cache is used directly without loading from database.
-	// Takes precedence over WordReplacementRepo if both are provided.
-	WordCache map[string]string
-
-	// ActressCache is an optional pre-populated actress alias cache for tests.
-	// If non-nil, this cache is used directly without loading from database.
-	// Takes precedence over ActressAliasRepo if both are provided.
-	ActressCache map[string]string
-
-	// Scrapers is an optional list of scrapers for dependency injection.
-	// If non-nil, the scrapers are used in order as their priority for aggregation.
-	// If nil, scraperutil.GetPriorities() is used for backward compatibility.
-	Scrapers []models.Scraper
+	// ReloadReplacementCaches refreshes the genre, word, and alias replacement
+	// caches from their backing repositories without reconstructing the
+	// aggregator or any of its peers (scraper, matcher, organizer, etc.).
+	// Use this on the hot path when a genre/word/alias mutation must be visible
+	// to the next aggregation call — avoids the cold-start penalty of a full
+	// factory rebuild.
+	ReloadReplacementCaches(ctx context.Context)
 }
 
 // Compile-time verification that Aggregator implements AggregatorInterface
 var _ AggregatorInterface = (*Aggregator)(nil)
 
-// Aggregator combines metadata from multiple scrapers based on priority
+// Aggregator combines metadata from multiple scrapers based on priority.
+// It delegates genre replacement, word replacement, actress alias
+// resolution, and actress merging to focused sub-modules, keeping the
+// Aggregator itself as a thin composition root.
 type Aggregator struct {
-	config                *config.Config
-	scrapers              []models.Scraper // Injected scrapers for priority (nil = use scraperutil)
-	templateEngine        *template.Engine
-	genreReplacementRepo  database.GenreReplacementRepositoryInterface
-	genreReplacementCache map[string]string
-	genreCacheMutex       sync.RWMutex // Protects genreReplacementCache from concurrent access
-	wordReplacementRepo   database.WordReplacementRepositoryInterface
-	wordReplacementCache  map[string]string
-	wordReplacementSorted []struct{ orig, repl string } // Pre-sorted longest-first
-	wordCacheMutex        sync.RWMutex                  // Protects wordReplacementCache and wordReplacementSorted from concurrent access
-	actressAliasRepo      database.ActressAliasRepositoryInterface
-	actressAliasCache     map[string]string   // Maps alias name to canonical name
-	aliasCacheMutex       sync.RWMutex        // Protects actressAliasCache from concurrent access
-	resolvedPriorities    map[string][]string // Cached resolved priorities for each field
-	ignoreGenreRegexes    []*regexp.Regexp    // Compiled regex patterns for genre filtering
+	cfg                *Config
+	templateEngine     template.EngineInterface
+	genreProcessor     genreProcessorInterface
+	wordProcessor      wordProcessorInterface
+	aliasResolver      aliasResolverInterface
+	actressMerger      actressMergerInterface
+	resolvedPriorities map[string][]string // Cached resolved priorities — set once in New(), read-only thereafter. Do NOT mutate after construction.
 }
 
-func (a *Aggregator) Config() *config.Config {
+// Config returns the aggregator's configuration.
+func (a *Aggregator) Config() (*Config, error) {
 	if a == nil {
-		return nil
+		return nil, fmt.Errorf("Config called on nil Aggregator")
 	}
-	return a.config
+	return a.cfg, nil
 }
 
-func (a *Aggregator) TemplateEngine() *template.Engine {
+// TemplateEngine returns the aggregator's template engine.
+func (a *Aggregator) TemplateEngine() (template.EngineInterface, error) {
 	if a == nil {
-		return nil
+		return nil, fmt.Errorf("TemplateEngine called on nil Aggregator")
 	}
-	return a.templateEngine
+	return a.templateEngine, nil
 }
 
-// New creates a new aggregator
-func New(cfg *config.Config) *Aggregator {
-	agg := &Aggregator{
-		config:                cfg,
-		templateEngine:        template.NewEngine(),
-		genreReplacementCache: make(map[string]string),
-		wordReplacementCache:  make(map[string]string),
-		actressAliasCache:     make(map[string]string),
-	}
-	agg.resolvePriorities()
-	agg.compileGenreRegexes()
-	return agg
-}
-
-// NewWithOptions creates a new aggregator with optional dependency injection.
-// If opts is nil or opts fields are nil, real implementations are created or database loading is skipped.
-// If opts fields are non-nil, injected dependencies are used (for testing).
-// Added in Epic 8 Story 8.2 to enable testable aggregator initialization.
+// ReloadReplacementCaches refreshes the genre, word, and alias replacement
+// caches from their backing repositories. This is the targeted alternative
+// to destroying and rebuilding the entire WorkflowFactory: only the
+// in-memory replacement maps are swapped, so the scraper, matcher,
+// organizer, downloader, and NFO generator remain cached.
 //
-// Production usage: Use NewWithDatabase() instead
-// Test usage: aggregator.NewWithOptions(cfg, &AggregatorOptions{GenreCache: mockCache})
-func NewWithOptions(cfg *config.Config, opts *AggregatorOptions) *Aggregator {
+// The reload is individually safe per sub-processor (each owns its own mutex)
+// and is safe to call concurrently with ongoing aggregation.
+func (a *Aggregator) ReloadReplacementCaches(ctx context.Context) {
+	if a == nil {
+		return
+	}
+	if a.genreProcessor != nil {
+		a.genreProcessor.Reload(ctx)
+	}
+	if a.wordProcessor != nil {
+		a.wordProcessor.Reload(ctx)
+	}
+	if a.aliasResolver != nil {
+		a.aliasResolver.Reload(ctx)
+	}
+}
+
+// New creates a new aggregator with injected sub-modules.
+// This is the single constructor — callers construct sub-modules
+// externally and pass them in:
+//
+//	agg := aggregator.New(cfg,
+//	    aggregator.NewGenreProcessor(cfg.Metadata, genreRepo),
+//	    aggregator.NewWordProcessor(cfg.Metadata, wordRepo),
+//	    aggregator.NewAliasResolver(cfg.Metadata, aliasRepo),
+//	)
+//
+// Pass nil sub-modules when their features are not needed or no database
+// is available.
+func New(cfg *Config, genreProcessor genreProcessorInterface, wordProcessor wordProcessorInterface, aliasResolver aliasResolverInterface) *Aggregator {
 	if cfg == nil {
-		return nil // Defensive: prevent nil config
+		return nil
 	}
-
+	te := cfg.TemplateEngine
+	if te == nil {
+		te = template.NewEngine()
+	}
 	agg := &Aggregator{
-		config:                cfg,
-		scrapers:              nil, // Default empty, populated below if provided
-		genreReplacementCache: make(map[string]string),
-		wordReplacementCache:  make(map[string]string),
-		actressAliasCache:     make(map[string]string),
+		cfg:            cfg,
+		templateEngine: te,
+		genreProcessor: genreProcessor,
+		wordProcessor:  wordProcessor,
+		aliasResolver:  aliasResolver,
+		actressMerger:  newActressMerger(),
 	}
-
-	// Store injected scrapers if provided (for priority ordering)
-	if opts != nil && opts.Scrapers != nil {
-		agg.scrapers = opts.Scrapers
-	}
-
-	// Use injected template engine or create real one
-	if opts != nil && opts.TemplateEngine != nil {
-		agg.templateEngine = opts.TemplateEngine
-	} else {
-		agg.templateEngine = template.NewEngine()
-	}
-
-	// Use injected genre replacement repository or skip
-	if opts != nil && opts.GenreReplacementRepo != nil {
-		agg.genreReplacementRepo = opts.GenreReplacementRepo
-	}
-
-	// Use injected actress alias repository or skip
-	if opts != nil && opts.ActressAliasRepo != nil {
-		agg.actressAliasRepo = opts.ActressAliasRepo
-	}
-
-	// Use injected word replacement repository or skip
-	if opts != nil && opts.WordReplacementRepo != nil {
-		agg.wordReplacementRepo = opts.WordReplacementRepo
-	}
-
-	// Use pre-populated genre cache if provided (for tests)
-	if opts != nil && opts.GenreCache != nil {
-		agg.genreCacheMutex.Lock()
-		agg.genreReplacementCache = opts.GenreCache
-		agg.genreCacheMutex.Unlock()
-	} else if agg.genreReplacementRepo != nil && agg.config.Metadata.GenreReplacement.Enabled {
-		// Load from database if repository is available
-		agg.loadGenreReplacementCache()
-	}
-
-	// Use pre-populated word cache if provided (for tests)
-	if opts != nil && opts.WordCache != nil {
-		agg.wordCacheMutex.Lock()
-		agg.wordReplacementCache = opts.WordCache
-		agg.wordCacheMutex.Unlock()
-	} else if agg.wordReplacementRepo != nil && agg.config.Metadata.WordReplacement.Enabled {
-		// Load from database if repository is available
-		agg.loadWordReplacementCache()
-	}
-
-	// Use pre-populated actress cache if provided (for tests)
-	if opts != nil && opts.ActressCache != nil {
-		agg.aliasCacheMutex.Lock()
-		agg.actressAliasCache = opts.ActressCache
-		agg.aliasCacheMutex.Unlock()
-	} else if agg.actressAliasRepo != nil && agg.config.Metadata.ActressDatabase.Enabled {
-		// Load from database if repository is available
-		agg.loadActressAliasCache()
-	}
-
-	// Resolve field-level priorities (always required)
 	agg.resolvePriorities()
-
-	// Compile genre filter regexes (always required)
-	agg.compileGenreRegexes()
-
 	return agg
-}
-
-// NewWithDatabase creates a new aggregator with database support for genre replacements and actress aliases.
-// This is the production constructor - for testable constructor see NewWithOptions.
-// Refactored in Epic 8 Story 8.2 to wrap NewWithOptions for backward compatibility.
-func NewWithDatabase(cfg *config.Config, db *database.DB) *Aggregator {
-	return NewWithOptions(cfg, &AggregatorOptions{
-		GenreReplacementRepo: database.NewGenreReplacementRepository(db),
-		WordReplacementRepo:  database.NewWordReplacementRepository(db),
-		ActressAliasRepo:     database.NewActressAliasRepository(db),
-		TemplateEngine:       nil,
-	})
-}
-
-// loadGenreReplacementCache loads genre replacements into memory
-func (a *Aggregator) loadGenreReplacementCache() {
-	if a.genreReplacementRepo == nil {
-		return
-	}
-
-	replacementMap, err := a.genreReplacementRepo.GetReplacementMap()
-	if err == nil {
-		a.genreCacheMutex.Lock()
-		a.genreReplacementCache = replacementMap
-		a.genreCacheMutex.Unlock()
-	} else {
-		logging.Warnf("failed to load genre replacement cache: %v", err)
-	}
-}
-
-// loadActressAliasCache loads actress aliases into memory
-func (a *Aggregator) loadActressAliasCache() {
-	if a.actressAliasRepo == nil {
-		return
-	}
-
-	aliasMap, err := a.actressAliasRepo.GetAliasMap()
-	if err == nil {
-		a.aliasCacheMutex.Lock()
-		a.actressAliasCache = aliasMap
-		a.aliasCacheMutex.Unlock()
-	}
-}
-
-// applyActressAlias converts actress names using the alias database
-// It checks Japanese name, FirstName LastName, and LastName FirstName combinations
-func (a *Aggregator) applyActressAlias(actress *models.Actress) {
-	// Check cache first with read lock
-	a.aliasCacheMutex.RLock()
-	defer a.aliasCacheMutex.RUnlock()
-
-	// Try Japanese name first
-	if actress.JapaneseName != "" {
-		if canonical, found := a.actressAliasCache[actress.JapaneseName]; found {
-			actress.JapaneseName = canonical
-			return
-		}
-	}
-
-	// Try FirstName LastName combination
-	if actress.FirstName != "" && actress.LastName != "" {
-		fullName := actress.FirstName + " " + actress.LastName
-		if canonical, found := a.actressAliasCache[fullName]; found {
-			// Parse canonical name back into first/last if it contains space
-			// Otherwise, assume it's a Japanese name
-			if len(canonical) > 0 {
-				parts := splitActressName(canonical)
-				if len(parts) == 2 {
-					// Canonical form is typically "FamilyName GivenName" (Japanese convention)
-					// Assign so FullName() returns LastName + " " + FirstName = canonical
-					actress.LastName = parts[0]  // Family name
-					actress.FirstName = parts[1] // Given name
-				} else {
-					// Canonical is a single name (likely Japanese)
-					actress.JapaneseName = canonical
-				}
-			}
-			return
-		}
-
-		// Try LastName FirstName combination
-		reverseName := actress.LastName + " " + actress.FirstName
-		if canonical, found := a.actressAliasCache[reverseName]; found {
-			if len(canonical) > 0 {
-				parts := splitActressName(canonical)
-				if len(parts) == 2 {
-					// Canonical form is typically "FamilyName GivenName" (Japanese convention)
-					// Assign so FullName() returns LastName + " " + FirstName = canonical
-					actress.LastName = parts[0]  // Family name
-					actress.FirstName = parts[1] // Given name
-				} else {
-					actress.JapaneseName = canonical
-				}
-			}
-			return
-		}
-	}
-}
-
-// splitActressName splits a full name into parts (e.g., "Yui Hatano" -> ["Yui", "Hatano"])
-func splitActressName(fullName string) []string {
-	return strings.Fields(fullName)
 }

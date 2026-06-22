@@ -1,11 +1,14 @@
 package movie
 
 import (
-	"fmt"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scrape"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 // rescrapeMovie godoc
@@ -15,75 +18,63 @@ import (
 // @Accept json
 // @Produce json
 // @Param id path string true "Movie ID" example:"IPX-535"
-// @Param request body RescrapeRequest true "Rescrape options"
-// @Success 200 {object} MovieResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Param request body contracts.RescrapeRequest true "Rescrape options"
+// @Success 200 {object} contracts.MovieResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/movies/{id}/rescrape [post]
-func rescrapeMovie(deps *ServerDependencies) gin.HandlerFunc {
+func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		movieID := c.Param("id")
 
-		var req RescrapeRequest
+		var req contracts.RescrapeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
 		if len(req.SelectedScrapers) == 0 {
-			c.JSON(400, ErrorResponse{Error: "selected_scrapers cannot be empty"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "selected_scrapers cannot be empty"})
 			return
 		}
 
 		logging.Infof("API rescrape request for %s with scrapers: %v", movieID, req.SelectedScrapers)
 
-		// Clear cache if force
-		if req.Force {
-			if err := deps.MovieRepo.Delete(movieID); err != nil {
-				logging.Debugf("Failed to delete %s from cache: %v", movieID, err)
-			}
+		cmd := scrape.ScrapeCmd{
+			MovieID:          movieID,
+			ForceRefresh:     req.Force,
+			SelectedScrapers: req.SelectedScrapers,
 		}
 
-		// Scrape with selected scrapers only
-		results := []*models.ScraperResult{}
-		scrapeErrors := []string{}
-
-		for _, scraper := range deps.GetRegistry().GetByPriority(req.SelectedScrapers) {
-			logging.Infof("Rescraping from %s...", scraper.Name())
-			result, err := scraper.Search(c.Request.Context(), movieID)
-			if err != nil {
-				scrapeErrors = append(scrapeErrors, fmt.Sprintf("%s: %v", scraper.Name(), err))
-				logging.Warnf("%s: %v", scraper.Name(), err)
-				continue
-			}
-			result.NormalizeMediaURLs()
-			results = append(results, result)
-		}
-
-		if len(results) == 0 {
-			c.JSON(404, ErrorResponse{
-				Error:  "No results from selected scrapers",
-				Errors: scrapeErrors,
-			})
+		// Execute rescrape via the canonical Workflow seam (ADR-0001)
+		wf := deps.getWorkflow()
+		if wf == nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "workflow not available"})
 			return
 		}
-
-		// Aggregate using custom priority order
-		logging.Infof("Aggregating results with custom priority: %v", req.SelectedScrapers)
-		movie, _, err := deps.GetAggregator().AggregateWithPriority(results, req.SelectedScrapers)
+		result, _, err := wf.Scrape(c.Request.Context(), cmd, nil)
 		if err != nil {
-			c.JSON(500, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		movie.OriginalFileName = movieID
-
-		// Save to DB
-		if _, err := deps.MovieRepo.Upsert(movie); err != nil {
-			logging.Warnf("Failed to save movie to DB: %v", err)
+		if result.Status == scrape.StatusFailed {
+			errMsg := "No results from selected scrapers"
+			if result.Message != "" {
+				errMsg = result.Message
+			}
+			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: errMsg})
+			return
 		}
 
-		c.JSON(200, MovieResponse{Movie: movie})
+		// Generate temp poster for the rescraped movie.
+		// Poster generation was moved out of the scrape orchestrator;
+		// API endpoints that call wf.Scrape() directly must do it explicitly.
+		if deps.PosterGen != nil && result.Movie != nil {
+			_ = deps.PosterGen.GeneratePoster(c.Request.Context(), models.SentinelJobID().String(), result.Movie)
+		}
+
+		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(result.Movie)})
 	}
 }

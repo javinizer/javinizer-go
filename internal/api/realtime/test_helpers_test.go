@@ -3,13 +3,18 @@ package realtime
 import (
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
-	ws "github.com/javinizer/javinizer-go/internal/websocket"
 )
 
-var wsHub *ws.Hub
+var testRuntimeDeps *core.APIDeps
 
 func initTestWebSocket(t *testing.T) {
-	testkit.InitTestWebSocket(t)
-	wsHub = testkit.CurrentHub()
+	rs := core.NewRuntimeState()
+	testkit.InitTestWebSocket(t, rs)
+	deps := &core.APIDeps{}
+	rt := core.NewAPIRuntime(deps)
+	rt.Runtime = rs
+	testkit.SetTestRuntime(deps, rt)
+	testRuntimeDeps = deps
 }

@@ -5,6 +5,7 @@
 package mocks
 
 import (
+	"context"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -40,8 +41,8 @@ func (_m *MockEventRepositoryInterface) EXPECT() *MockEventRepositoryInterface_E
 }
 
 // Count provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) Count() (int64, error) {
-	ret := _mock.Called()
+func (_mock *MockEventRepositoryInterface) Count(ctx context.Context) (int64, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Count")
@@ -49,16 +50,16 @@ func (_mock *MockEventRepositoryInterface) Count() (int64, error) {
 
 	var r0 int64
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (int64, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (int64, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() int64); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) int64); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -71,13 +72,20 @@ type MockEventRepositoryInterface_Count_Call struct {
 }
 
 // Count is a helper method to define mock.On call
-func (_e *MockEventRepositoryInterface_Expecter) Count() *MockEventRepositoryInterface_Count_Call {
-	return &MockEventRepositoryInterface_Count_Call{Call: _e.mock.On("Count")}
+//   - ctx context.Context
+func (_e *MockEventRepositoryInterface_Expecter) Count(ctx interface{}) *MockEventRepositoryInterface_Count_Call {
+	return &MockEventRepositoryInterface_Count_Call{Call: _e.mock.On("Count", ctx)}
 }
 
-func (_c *MockEventRepositoryInterface_Count_Call) Run(run func()) *MockEventRepositoryInterface_Count_Call {
+func (_c *MockEventRepositoryInterface_Count_Call) Run(run func(ctx context.Context)) *MockEventRepositoryInterface_Count_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -87,326 +95,14 @@ func (_c *MockEventRepositoryInterface_Count_Call) Return(n int64, err error) *M
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_Count_Call) RunAndReturn(run func() (int64, error)) *MockEventRepositoryInterface_Count_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CountByDateRange provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) CountByDateRange(start time.Time, end time.Time) (int64, error) {
-	ret := _mock.Called(start, end)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CountByDateRange")
-	}
-
-	var r0 int64
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(time.Time, time.Time) (int64, error)); ok {
-		return returnFunc(start, end)
-	}
-	if returnFunc, ok := ret.Get(0).(func(time.Time, time.Time) int64); ok {
-		r0 = returnFunc(start, end)
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-	if returnFunc, ok := ret.Get(1).(func(time.Time, time.Time) error); ok {
-		r1 = returnFunc(start, end)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockEventRepositoryInterface_CountByDateRange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountByDateRange'
-type MockEventRepositoryInterface_CountByDateRange_Call struct {
-	*mock.Call
-}
-
-// CountByDateRange is a helper method to define mock.On call
-//   - start time.Time
-//   - end time.Time
-func (_e *MockEventRepositoryInterface_Expecter) CountByDateRange(start interface{}, end interface{}) *MockEventRepositoryInterface_CountByDateRange_Call {
-	return &MockEventRepositoryInterface_CountByDateRange_Call{Call: _e.mock.On("CountByDateRange", start, end)}
-}
-
-func (_c *MockEventRepositoryInterface_CountByDateRange_Call) Run(run func(start time.Time, end time.Time)) *MockEventRepositoryInterface_CountByDateRange_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 time.Time
-		if args[0] != nil {
-			arg0 = args[0].(time.Time)
-		}
-		var arg1 time.Time
-		if args[1] != nil {
-			arg1 = args[1].(time.Time)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_CountByDateRange_Call) Return(n int64, err error) *MockEventRepositoryInterface_CountByDateRange_Call {
-	_c.Call.Return(n, err)
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_CountByDateRange_Call) RunAndReturn(run func(start time.Time, end time.Time) (int64, error)) *MockEventRepositoryInterface_CountByDateRange_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CountBySeverity provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) CountBySeverity(severity string) (int64, error) {
-	ret := _mock.Called(severity)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CountBySeverity")
-	}
-
-	var r0 int64
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (int64, error)); ok {
-		return returnFunc(severity)
-	}
-	if returnFunc, ok := ret.Get(0).(func(string) int64); ok {
-		r0 = returnFunc(severity)
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(severity)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockEventRepositoryInterface_CountBySeverity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountBySeverity'
-type MockEventRepositoryInterface_CountBySeverity_Call struct {
-	*mock.Call
-}
-
-// CountBySeverity is a helper method to define mock.On call
-//   - severity string
-func (_e *MockEventRepositoryInterface_Expecter) CountBySeverity(severity interface{}) *MockEventRepositoryInterface_CountBySeverity_Call {
-	return &MockEventRepositoryInterface_CountBySeverity_Call{Call: _e.mock.On("CountBySeverity", severity)}
-}
-
-func (_c *MockEventRepositoryInterface_CountBySeverity_Call) Run(run func(severity string)) *MockEventRepositoryInterface_CountBySeverity_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_CountBySeverity_Call) Return(n int64, err error) *MockEventRepositoryInterface_CountBySeverity_Call {
-	_c.Call.Return(n, err)
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_CountBySeverity_Call) RunAndReturn(run func(severity string) (int64, error)) *MockEventRepositoryInterface_CountBySeverity_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CountBySource provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) CountBySource(source string) (int64, error) {
-	ret := _mock.Called(source)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CountBySource")
-	}
-
-	var r0 int64
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (int64, error)); ok {
-		return returnFunc(source)
-	}
-	if returnFunc, ok := ret.Get(0).(func(string) int64); ok {
-		r0 = returnFunc(source)
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(source)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockEventRepositoryInterface_CountBySource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountBySource'
-type MockEventRepositoryInterface_CountBySource_Call struct {
-	*mock.Call
-}
-
-// CountBySource is a helper method to define mock.On call
-//   - source string
-func (_e *MockEventRepositoryInterface_Expecter) CountBySource(source interface{}) *MockEventRepositoryInterface_CountBySource_Call {
-	return &MockEventRepositoryInterface_CountBySource_Call{Call: _e.mock.On("CountBySource", source)}
-}
-
-func (_c *MockEventRepositoryInterface_CountBySource_Call) Run(run func(source string)) *MockEventRepositoryInterface_CountBySource_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_CountBySource_Call) Return(n int64, err error) *MockEventRepositoryInterface_CountBySource_Call {
-	_c.Call.Return(n, err)
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_CountBySource_Call) RunAndReturn(run func(source string) (int64, error)) *MockEventRepositoryInterface_CountBySource_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CountByType provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) CountByType(eventType string) (int64, error) {
-	ret := _mock.Called(eventType)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CountByType")
-	}
-
-	var r0 int64
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (int64, error)); ok {
-		return returnFunc(eventType)
-	}
-	if returnFunc, ok := ret.Get(0).(func(string) int64); ok {
-		r0 = returnFunc(eventType)
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(eventType)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockEventRepositoryInterface_CountByType_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountByType'
-type MockEventRepositoryInterface_CountByType_Call struct {
-	*mock.Call
-}
-
-// CountByType is a helper method to define mock.On call
-//   - eventType string
-func (_e *MockEventRepositoryInterface_Expecter) CountByType(eventType interface{}) *MockEventRepositoryInterface_CountByType_Call {
-	return &MockEventRepositoryInterface_CountByType_Call{Call: _e.mock.On("CountByType", eventType)}
-}
-
-func (_c *MockEventRepositoryInterface_CountByType_Call) Run(run func(eventType string)) *MockEventRepositoryInterface_CountByType_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_CountByType_Call) Return(n int64, err error) *MockEventRepositoryInterface_CountByType_Call {
-	_c.Call.Return(n, err)
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_CountByType_Call) RunAndReturn(run func(eventType string) (int64, error)) *MockEventRepositoryInterface_CountByType_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CountByTypeAndSeverity provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) CountByTypeAndSeverity(eventType string, severity string) (int64, error) {
-	ret := _mock.Called(eventType, severity)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CountByTypeAndSeverity")
-	}
-
-	var r0 int64
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string, string) (int64, error)); ok {
-		return returnFunc(eventType, severity)
-	}
-	if returnFunc, ok := ret.Get(0).(func(string, string) int64); ok {
-		r0 = returnFunc(eventType, severity)
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-	if returnFunc, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = returnFunc(eventType, severity)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockEventRepositoryInterface_CountByTypeAndSeverity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountByTypeAndSeverity'
-type MockEventRepositoryInterface_CountByTypeAndSeverity_Call struct {
-	*mock.Call
-}
-
-// CountByTypeAndSeverity is a helper method to define mock.On call
-//   - eventType string
-//   - severity string
-func (_e *MockEventRepositoryInterface_Expecter) CountByTypeAndSeverity(eventType interface{}, severity interface{}) *MockEventRepositoryInterface_CountByTypeAndSeverity_Call {
-	return &MockEventRepositoryInterface_CountByTypeAndSeverity_Call{Call: _e.mock.On("CountByTypeAndSeverity", eventType, severity)}
-}
-
-func (_c *MockEventRepositoryInterface_CountByTypeAndSeverity_Call) Run(run func(eventType string, severity string)) *MockEventRepositoryInterface_CountByTypeAndSeverity_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_CountByTypeAndSeverity_Call) Return(n int64, err error) *MockEventRepositoryInterface_CountByTypeAndSeverity_Call {
-	_c.Call.Return(n, err)
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_CountByTypeAndSeverity_Call) RunAndReturn(run func(eventType string, severity string) (int64, error)) *MockEventRepositoryInterface_CountByTypeAndSeverity_Call {
+func (_c *MockEventRepositoryInterface_Count_Call) RunAndReturn(run func(ctx context.Context) (int64, error)) *MockEventRepositoryInterface_Count_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // CountFiltered provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) CountFiltered(filter database.EventFilter) (int64, error) {
-	ret := _mock.Called(filter)
+func (_mock *MockEventRepositoryInterface) CountFiltered(ctx context.Context, filter database.EventFilter) (int64, error) {
+	ret := _mock.Called(ctx, filter)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CountFiltered")
@@ -414,16 +110,16 @@ func (_mock *MockEventRepositoryInterface) CountFiltered(filter database.EventFi
 
 	var r0 int64
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(database.EventFilter) (int64, error)); ok {
-		return returnFunc(filter)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.EventFilter) (int64, error)); ok {
+		return returnFunc(ctx, filter)
 	}
-	if returnFunc, ok := ret.Get(0).(func(database.EventFilter) int64); ok {
-		r0 = returnFunc(filter)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.EventFilter) int64); ok {
+		r0 = returnFunc(ctx, filter)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
-	if returnFunc, ok := ret.Get(1).(func(database.EventFilter) error); ok {
-		r1 = returnFunc(filter)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, database.EventFilter) error); ok {
+		r1 = returnFunc(ctx, filter)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -436,19 +132,25 @@ type MockEventRepositoryInterface_CountFiltered_Call struct {
 }
 
 // CountFiltered is a helper method to define mock.On call
+//   - ctx context.Context
 //   - filter database.EventFilter
-func (_e *MockEventRepositoryInterface_Expecter) CountFiltered(filter interface{}) *MockEventRepositoryInterface_CountFiltered_Call {
-	return &MockEventRepositoryInterface_CountFiltered_Call{Call: _e.mock.On("CountFiltered", filter)}
+func (_e *MockEventRepositoryInterface_Expecter) CountFiltered(ctx interface{}, filter interface{}) *MockEventRepositoryInterface_CountFiltered_Call {
+	return &MockEventRepositoryInterface_CountFiltered_Call{Call: _e.mock.On("CountFiltered", ctx, filter)}
 }
 
-func (_c *MockEventRepositoryInterface_CountFiltered_Call) Run(run func(filter database.EventFilter)) *MockEventRepositoryInterface_CountFiltered_Call {
+func (_c *MockEventRepositoryInterface_CountFiltered_Call) Run(run func(ctx context.Context, filter database.EventFilter)) *MockEventRepositoryInterface_CountFiltered_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 database.EventFilter
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(database.EventFilter)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 database.EventFilter
+		if args[1] != nil {
+			arg1 = args[1].(database.EventFilter)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -459,14 +161,14 @@ func (_c *MockEventRepositoryInterface_CountFiltered_Call) Return(n int64, err e
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_CountFiltered_Call) RunAndReturn(run func(filter database.EventFilter) (int64, error)) *MockEventRepositoryInterface_CountFiltered_Call {
+func (_c *MockEventRepositoryInterface_CountFiltered_Call) RunAndReturn(run func(ctx context.Context, filter database.EventFilter) (int64, error)) *MockEventRepositoryInterface_CountFiltered_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // CountGroupBySource provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) CountGroupBySource() (map[string]int64, error) {
-	ret := _mock.Called()
+func (_mock *MockEventRepositoryInterface) CountGroupBySource(ctx context.Context) (map[string]int64, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CountGroupBySource")
@@ -474,18 +176,18 @@ func (_mock *MockEventRepositoryInterface) CountGroupBySource() (map[string]int6
 
 	var r0 map[string]int64
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (map[string]int64, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (map[string]int64, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() map[string]int64); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) map[string]int64); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]int64)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -498,13 +200,20 @@ type MockEventRepositoryInterface_CountGroupBySource_Call struct {
 }
 
 // CountGroupBySource is a helper method to define mock.On call
-func (_e *MockEventRepositoryInterface_Expecter) CountGroupBySource() *MockEventRepositoryInterface_CountGroupBySource_Call {
-	return &MockEventRepositoryInterface_CountGroupBySource_Call{Call: _e.mock.On("CountGroupBySource")}
+//   - ctx context.Context
+func (_e *MockEventRepositoryInterface_Expecter) CountGroupBySource(ctx interface{}) *MockEventRepositoryInterface_CountGroupBySource_Call {
+	return &MockEventRepositoryInterface_CountGroupBySource_Call{Call: _e.mock.On("CountGroupBySource", ctx)}
 }
 
-func (_c *MockEventRepositoryInterface_CountGroupBySource_Call) Run(run func()) *MockEventRepositoryInterface_CountGroupBySource_Call {
+func (_c *MockEventRepositoryInterface_CountGroupBySource_Call) Run(run func(ctx context.Context)) *MockEventRepositoryInterface_CountGroupBySource_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -514,22 +223,22 @@ func (_c *MockEventRepositoryInterface_CountGroupBySource_Call) Return(stringToI
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_CountGroupBySource_Call) RunAndReturn(run func() (map[string]int64, error)) *MockEventRepositoryInterface_CountGroupBySource_Call {
+func (_c *MockEventRepositoryInterface_CountGroupBySource_Call) RunAndReturn(run func(ctx context.Context) (map[string]int64, error)) *MockEventRepositoryInterface_CountGroupBySource_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Create provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) Create(event *models.Event) error {
-	ret := _mock.Called(event)
+func (_mock *MockEventRepositoryInterface) Create(ctx context.Context, event *models.Event) error {
+	ret := _mock.Called(ctx, event)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.Event) error); ok {
-		r0 = returnFunc(event)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Event) error); ok {
+		r0 = returnFunc(ctx, event)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -542,19 +251,25 @@ type MockEventRepositoryInterface_Create_Call struct {
 }
 
 // Create is a helper method to define mock.On call
+//   - ctx context.Context
 //   - event *models.Event
-func (_e *MockEventRepositoryInterface_Expecter) Create(event interface{}) *MockEventRepositoryInterface_Create_Call {
-	return &MockEventRepositoryInterface_Create_Call{Call: _e.mock.On("Create", event)}
+func (_e *MockEventRepositoryInterface_Expecter) Create(ctx interface{}, event interface{}) *MockEventRepositoryInterface_Create_Call {
+	return &MockEventRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, event)}
 }
 
-func (_c *MockEventRepositoryInterface_Create_Call) Run(run func(event *models.Event)) *MockEventRepositoryInterface_Create_Call {
+func (_c *MockEventRepositoryInterface_Create_Call) Run(run func(ctx context.Context, event *models.Event)) *MockEventRepositoryInterface_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.Event
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.Event)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.Event
+		if args[1] != nil {
+			arg1 = args[1].(*models.Event)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -565,26 +280,35 @@ func (_c *MockEventRepositoryInterface_Create_Call) Return(err error) *MockEvent
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_Create_Call) RunAndReturn(run func(event *models.Event) error) *MockEventRepositoryInterface_Create_Call {
+func (_c *MockEventRepositoryInterface_Create_Call) RunAndReturn(run func(ctx context.Context, event *models.Event) error) *MockEventRepositoryInterface_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // DeleteOlderThan provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) DeleteOlderThan(date time.Time) error {
-	ret := _mock.Called(date)
+func (_mock *MockEventRepositoryInterface) DeleteOlderThan(ctx context.Context, date time.Time) (int64, error) {
+	ret := _mock.Called(ctx, date)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteOlderThan")
 	}
 
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(time.Time) error); ok {
-		r0 = returnFunc(date)
-	} else {
-		r0 = ret.Error(0)
+	var r0 int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time) (int64, error)); ok {
+		return returnFunc(ctx, date)
 	}
-	return r0
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time) int64); ok {
+		r0 = returnFunc(ctx, date)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, time.Time) error); ok {
+		r1 = returnFunc(ctx, date)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
 }
 
 // MockEventRepositoryInterface_DeleteOlderThan_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteOlderThan'
@@ -593,117 +317,43 @@ type MockEventRepositoryInterface_DeleteOlderThan_Call struct {
 }
 
 // DeleteOlderThan is a helper method to define mock.On call
+//   - ctx context.Context
 //   - date time.Time
-func (_e *MockEventRepositoryInterface_Expecter) DeleteOlderThan(date interface{}) *MockEventRepositoryInterface_DeleteOlderThan_Call {
-	return &MockEventRepositoryInterface_DeleteOlderThan_Call{Call: _e.mock.On("DeleteOlderThan", date)}
+func (_e *MockEventRepositoryInterface_Expecter) DeleteOlderThan(ctx interface{}, date interface{}) *MockEventRepositoryInterface_DeleteOlderThan_Call {
+	return &MockEventRepositoryInterface_DeleteOlderThan_Call{Call: _e.mock.On("DeleteOlderThan", ctx, date)}
 }
 
-func (_c *MockEventRepositoryInterface_DeleteOlderThan_Call) Run(run func(date time.Time)) *MockEventRepositoryInterface_DeleteOlderThan_Call {
+func (_c *MockEventRepositoryInterface_DeleteOlderThan_Call) Run(run func(ctx context.Context, date time.Time)) *MockEventRepositoryInterface_DeleteOlderThan_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 time.Time
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(time.Time)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_DeleteOlderThan_Call) Return(err error) *MockEventRepositoryInterface_DeleteOlderThan_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_DeleteOlderThan_Call) RunAndReturn(run func(date time.Time) error) *MockEventRepositoryInterface_DeleteOlderThan_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FindByDateRange provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) FindByDateRange(start time.Time, end time.Time, limit int, offset int) ([]models.Event, error) {
-	ret := _mock.Called(start, end, limit, offset)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FindByDateRange")
-	}
-
-	var r0 []models.Event
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(time.Time, time.Time, int, int) ([]models.Event, error)); ok {
-		return returnFunc(start, end, limit, offset)
-	}
-	if returnFunc, ok := ret.Get(0).(func(time.Time, time.Time, int, int) []models.Event); ok {
-		r0 = returnFunc(start, end, limit, offset)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]models.Event)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(time.Time, time.Time, int, int) error); ok {
-		r1 = returnFunc(start, end, limit, offset)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockEventRepositoryInterface_FindByDateRange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByDateRange'
-type MockEventRepositoryInterface_FindByDateRange_Call struct {
-	*mock.Call
-}
-
-// FindByDateRange is a helper method to define mock.On call
-//   - start time.Time
-//   - end time.Time
-//   - limit int
-//   - offset int
-func (_e *MockEventRepositoryInterface_Expecter) FindByDateRange(start interface{}, end interface{}, limit interface{}, offset interface{}) *MockEventRepositoryInterface_FindByDateRange_Call {
-	return &MockEventRepositoryInterface_FindByDateRange_Call{Call: _e.mock.On("FindByDateRange", start, end, limit, offset)}
-}
-
-func (_c *MockEventRepositoryInterface_FindByDateRange_Call) Run(run func(start time.Time, end time.Time, limit int, offset int)) *MockEventRepositoryInterface_FindByDateRange_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 time.Time
-		if args[0] != nil {
-			arg0 = args[0].(time.Time)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 time.Time
 		if args[1] != nil {
 			arg1 = args[1].(time.Time)
 		}
-		var arg2 int
-		if args[2] != nil {
-			arg2 = args[2].(int)
-		}
-		var arg3 int
-		if args[3] != nil {
-			arg3 = args[3].(int)
-		}
 		run(
 			arg0,
 			arg1,
-			arg2,
-			arg3,
 		)
 	})
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_FindByDateRange_Call) Return(events []models.Event, err error) *MockEventRepositoryInterface_FindByDateRange_Call {
-	_c.Call.Return(events, err)
+func (_c *MockEventRepositoryInterface_DeleteOlderThan_Call) Return(n int64, err error) *MockEventRepositoryInterface_DeleteOlderThan_Call {
+	_c.Call.Return(n, err)
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_FindByDateRange_Call) RunAndReturn(run func(start time.Time, end time.Time, limit int, offset int) ([]models.Event, error)) *MockEventRepositoryInterface_FindByDateRange_Call {
+func (_c *MockEventRepositoryInterface_DeleteOlderThan_Call) RunAndReturn(run func(ctx context.Context, date time.Time) (int64, error)) *MockEventRepositoryInterface_DeleteOlderThan_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByID provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) FindByID(id uint) (*models.Event, error) {
-	ret := _mock.Called(id)
+func (_mock *MockEventRepositoryInterface) FindByID(ctx context.Context, id uint) (*models.Event, error) {
+	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByID")
@@ -711,18 +361,18 @@ func (_mock *MockEventRepositoryInterface) FindByID(id uint) (*models.Event, err
 
 	var r0 *models.Event
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(uint) (*models.Event, error)); ok {
-		return returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) (*models.Event, error)); ok {
+		return returnFunc(ctx, id)
 	}
-	if returnFunc, ok := ret.Get(0).(func(uint) *models.Event); ok {
-		r0 = returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) *models.Event); ok {
+		r0 = returnFunc(ctx, id)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.Event)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(uint) error); ok {
-		r1 = returnFunc(id)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uint) error); ok {
+		r1 = returnFunc(ctx, id)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -735,19 +385,25 @@ type MockEventRepositoryInterface_FindByID_Call struct {
 }
 
 // FindByID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id uint
-func (_e *MockEventRepositoryInterface_Expecter) FindByID(id interface{}) *MockEventRepositoryInterface_FindByID_Call {
-	return &MockEventRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", id)}
+func (_e *MockEventRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockEventRepositoryInterface_FindByID_Call {
+	return &MockEventRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
-func (_c *MockEventRepositoryInterface_FindByID_Call) Run(run func(id uint)) *MockEventRepositoryInterface_FindByID_Call {
+func (_c *MockEventRepositoryInterface_FindByID_Call) Run(run func(ctx context.Context, id uint)) *MockEventRepositoryInterface_FindByID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 uint
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(uint)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -758,284 +414,62 @@ func (_c *MockEventRepositoryInterface_FindByID_Call) Return(event *models.Event
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_FindByID_Call) RunAndReturn(run func(id uint) (*models.Event, error)) *MockEventRepositoryInterface_FindByID_Call {
+func (_c *MockEventRepositoryInterface_FindByID_Call) RunAndReturn(run func(ctx context.Context, id uint) (*models.Event, error)) *MockEventRepositoryInterface_FindByID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// FindBySeverity provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) FindBySeverity(severity string, limit int, offset int) ([]models.Event, error) {
-	ret := _mock.Called(severity, limit, offset)
+// FindFiltered provides a mock function for the type MockEventRepositoryInterface
+func (_mock *MockEventRepositoryInterface) FindFiltered(ctx context.Context, filter database.EventFilter, limit int, offset int) ([]models.Event, error) {
+	ret := _mock.Called(ctx, filter, limit, offset)
 
 	if len(ret) == 0 {
-		panic("no return value specified for FindBySeverity")
+		panic("no return value specified for FindFiltered")
 	}
 
 	var r0 []models.Event
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string, int, int) ([]models.Event, error)); ok {
-		return returnFunc(severity, limit, offset)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.EventFilter, int, int) ([]models.Event, error)); ok {
+		return returnFunc(ctx, filter, limit, offset)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string, int, int) []models.Event); ok {
-		r0 = returnFunc(severity, limit, offset)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.EventFilter, int, int) []models.Event); ok {
+		r0 = returnFunc(ctx, filter, limit, offset)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.Event)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string, int, int) error); ok {
-		r1 = returnFunc(severity, limit, offset)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, database.EventFilter, int, int) error); ok {
+		r1 = returnFunc(ctx, filter, limit, offset)
 	} else {
 		r1 = ret.Error(1)
 	}
 	return r0, r1
 }
 
-// MockEventRepositoryInterface_FindBySeverity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindBySeverity'
-type MockEventRepositoryInterface_FindBySeverity_Call struct {
+// MockEventRepositoryInterface_FindFiltered_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindFiltered'
+type MockEventRepositoryInterface_FindFiltered_Call struct {
 	*mock.Call
 }
 
-// FindBySeverity is a helper method to define mock.On call
-//   - severity string
+// FindFiltered is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filter database.EventFilter
 //   - limit int
 //   - offset int
-func (_e *MockEventRepositoryInterface_Expecter) FindBySeverity(severity interface{}, limit interface{}, offset interface{}) *MockEventRepositoryInterface_FindBySeverity_Call {
-	return &MockEventRepositoryInterface_FindBySeverity_Call{Call: _e.mock.On("FindBySeverity", severity, limit, offset)}
+func (_e *MockEventRepositoryInterface_Expecter) FindFiltered(ctx interface{}, filter interface{}, limit interface{}, offset interface{}) *MockEventRepositoryInterface_FindFiltered_Call {
+	return &MockEventRepositoryInterface_FindFiltered_Call{Call: _e.mock.On("FindFiltered", ctx, filter, limit, offset)}
 }
 
-func (_c *MockEventRepositoryInterface_FindBySeverity_Call) Run(run func(severity string, limit int, offset int)) *MockEventRepositoryInterface_FindBySeverity_Call {
+func (_c *MockEventRepositoryInterface_FindFiltered_Call) Run(run func(ctx context.Context, filter database.EventFilter, limit int, offset int)) *MockEventRepositoryInterface_FindFiltered_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
 		}
-		var arg1 int
+		var arg1 database.EventFilter
 		if args[1] != nil {
-			arg1 = args[1].(int)
-		}
-		var arg2 int
-		if args[2] != nil {
-			arg2 = args[2].(int)
-		}
-		run(
-			arg0,
-			arg1,
-			arg2,
-		)
-	})
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_FindBySeverity_Call) Return(events []models.Event, err error) *MockEventRepositoryInterface_FindBySeverity_Call {
-	_c.Call.Return(events, err)
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_FindBySeverity_Call) RunAndReturn(run func(severity string, limit int, offset int) ([]models.Event, error)) *MockEventRepositoryInterface_FindBySeverity_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FindBySource provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) FindBySource(source string, limit int, offset int) ([]models.Event, error) {
-	ret := _mock.Called(source, limit, offset)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FindBySource")
-	}
-
-	var r0 []models.Event
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string, int, int) ([]models.Event, error)); ok {
-		return returnFunc(source, limit, offset)
-	}
-	if returnFunc, ok := ret.Get(0).(func(string, int, int) []models.Event); ok {
-		r0 = returnFunc(source, limit, offset)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]models.Event)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(string, int, int) error); ok {
-		r1 = returnFunc(source, limit, offset)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockEventRepositoryInterface_FindBySource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindBySource'
-type MockEventRepositoryInterface_FindBySource_Call struct {
-	*mock.Call
-}
-
-// FindBySource is a helper method to define mock.On call
-//   - source string
-//   - limit int
-//   - offset int
-func (_e *MockEventRepositoryInterface_Expecter) FindBySource(source interface{}, limit interface{}, offset interface{}) *MockEventRepositoryInterface_FindBySource_Call {
-	return &MockEventRepositoryInterface_FindBySource_Call{Call: _e.mock.On("FindBySource", source, limit, offset)}
-}
-
-func (_c *MockEventRepositoryInterface_FindBySource_Call) Run(run func(source string, limit int, offset int)) *MockEventRepositoryInterface_FindBySource_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		var arg1 int
-		if args[1] != nil {
-			arg1 = args[1].(int)
-		}
-		var arg2 int
-		if args[2] != nil {
-			arg2 = args[2].(int)
-		}
-		run(
-			arg0,
-			arg1,
-			arg2,
-		)
-	})
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_FindBySource_Call) Return(events []models.Event, err error) *MockEventRepositoryInterface_FindBySource_Call {
-	_c.Call.Return(events, err)
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_FindBySource_Call) RunAndReturn(run func(source string, limit int, offset int) ([]models.Event, error)) *MockEventRepositoryInterface_FindBySource_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FindByType provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) FindByType(eventType string, limit int, offset int) ([]models.Event, error) {
-	ret := _mock.Called(eventType, limit, offset)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FindByType")
-	}
-
-	var r0 []models.Event
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string, int, int) ([]models.Event, error)); ok {
-		return returnFunc(eventType, limit, offset)
-	}
-	if returnFunc, ok := ret.Get(0).(func(string, int, int) []models.Event); ok {
-		r0 = returnFunc(eventType, limit, offset)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]models.Event)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(string, int, int) error); ok {
-		r1 = returnFunc(eventType, limit, offset)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockEventRepositoryInterface_FindByType_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByType'
-type MockEventRepositoryInterface_FindByType_Call struct {
-	*mock.Call
-}
-
-// FindByType is a helper method to define mock.On call
-//   - eventType string
-//   - limit int
-//   - offset int
-func (_e *MockEventRepositoryInterface_Expecter) FindByType(eventType interface{}, limit interface{}, offset interface{}) *MockEventRepositoryInterface_FindByType_Call {
-	return &MockEventRepositoryInterface_FindByType_Call{Call: _e.mock.On("FindByType", eventType, limit, offset)}
-}
-
-func (_c *MockEventRepositoryInterface_FindByType_Call) Run(run func(eventType string, limit int, offset int)) *MockEventRepositoryInterface_FindByType_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		var arg1 int
-		if args[1] != nil {
-			arg1 = args[1].(int)
-		}
-		var arg2 int
-		if args[2] != nil {
-			arg2 = args[2].(int)
-		}
-		run(
-			arg0,
-			arg1,
-			arg2,
-		)
-	})
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_FindByType_Call) Return(events []models.Event, err error) *MockEventRepositoryInterface_FindByType_Call {
-	_c.Call.Return(events, err)
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_FindByType_Call) RunAndReturn(run func(eventType string, limit int, offset int) ([]models.Event, error)) *MockEventRepositoryInterface_FindByType_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FindByTypeAndSeverity provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) FindByTypeAndSeverity(eventType string, severity string, limit int, offset int) ([]models.Event, error) {
-	ret := _mock.Called(eventType, severity, limit, offset)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FindByTypeAndSeverity")
-	}
-
-	var r0 []models.Event
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string, string, int, int) ([]models.Event, error)); ok {
-		return returnFunc(eventType, severity, limit, offset)
-	}
-	if returnFunc, ok := ret.Get(0).(func(string, string, int, int) []models.Event); ok {
-		r0 = returnFunc(eventType, severity, limit, offset)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]models.Event)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(string, string, int, int) error); ok {
-		r1 = returnFunc(eventType, severity, limit, offset)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockEventRepositoryInterface_FindByTypeAndSeverity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByTypeAndSeverity'
-type MockEventRepositoryInterface_FindByTypeAndSeverity_Call struct {
-	*mock.Call
-}
-
-// FindByTypeAndSeverity is a helper method to define mock.On call
-//   - eventType string
-//   - severity string
-//   - limit int
-//   - offset int
-func (_e *MockEventRepositoryInterface_Expecter) FindByTypeAndSeverity(eventType interface{}, severity interface{}, limit interface{}, offset interface{}) *MockEventRepositoryInterface_FindByTypeAndSeverity_Call {
-	return &MockEventRepositoryInterface_FindByTypeAndSeverity_Call{Call: _e.mock.On("FindByTypeAndSeverity", eventType, severity, limit, offset)}
-}
-
-func (_c *MockEventRepositoryInterface_FindByTypeAndSeverity_Call) Run(run func(eventType string, severity string, limit int, offset int)) *MockEventRepositoryInterface_FindByTypeAndSeverity_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(database.EventFilter)
 		}
 		var arg2 int
 		if args[2] != nil {
@@ -1055,62 +489,62 @@ func (_c *MockEventRepositoryInterface_FindByTypeAndSeverity_Call) Run(run func(
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_FindByTypeAndSeverity_Call) Return(events []models.Event, err error) *MockEventRepositoryInterface_FindByTypeAndSeverity_Call {
+func (_c *MockEventRepositoryInterface_FindFiltered_Call) Return(events []models.Event, err error) *MockEventRepositoryInterface_FindFiltered_Call {
 	_c.Call.Return(events, err)
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_FindByTypeAndSeverity_Call) RunAndReturn(run func(eventType string, severity string, limit int, offset int) ([]models.Event, error)) *MockEventRepositoryInterface_FindByTypeAndSeverity_Call {
+func (_c *MockEventRepositoryInterface_FindFiltered_Call) RunAndReturn(run func(ctx context.Context, filter database.EventFilter, limit int, offset int) ([]models.Event, error)) *MockEventRepositoryInterface_FindFiltered_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// FindFiltered provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) FindFiltered(filter database.EventFilter, limit int, offset int) ([]models.Event, error) {
-	ret := _mock.Called(filter, limit, offset)
+// List provides a mock function for the type MockEventRepositoryInterface
+func (_mock *MockEventRepositoryInterface) List(ctx context.Context, limit int, offset int) ([]models.Event, error) {
+	ret := _mock.Called(ctx, limit, offset)
 
 	if len(ret) == 0 {
-		panic("no return value specified for FindFiltered")
+		panic("no return value specified for List")
 	}
 
 	var r0 []models.Event
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(database.EventFilter, int, int) ([]models.Event, error)); ok {
-		return returnFunc(filter, limit, offset)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) ([]models.Event, error)); ok {
+		return returnFunc(ctx, limit, offset)
 	}
-	if returnFunc, ok := ret.Get(0).(func(database.EventFilter, int, int) []models.Event); ok {
-		r0 = returnFunc(filter, limit, offset)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) []models.Event); ok {
+		r0 = returnFunc(ctx, limit, offset)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.Event)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(database.EventFilter, int, int) error); ok {
-		r1 = returnFunc(filter, limit, offset)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int, int) error); ok {
+		r1 = returnFunc(ctx, limit, offset)
 	} else {
 		r1 = ret.Error(1)
 	}
 	return r0, r1
 }
 
-// MockEventRepositoryInterface_FindFiltered_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindFiltered'
-type MockEventRepositoryInterface_FindFiltered_Call struct {
+// MockEventRepositoryInterface_List_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'List'
+type MockEventRepositoryInterface_List_Call struct {
 	*mock.Call
 }
 
-// FindFiltered is a helper method to define mock.On call
-//   - filter database.EventFilter
+// List is a helper method to define mock.On call
+//   - ctx context.Context
 //   - limit int
 //   - offset int
-func (_e *MockEventRepositoryInterface_Expecter) FindFiltered(filter interface{}, limit interface{}, offset interface{}) *MockEventRepositoryInterface_FindFiltered_Call {
-	return &MockEventRepositoryInterface_FindFiltered_Call{Call: _e.mock.On("FindFiltered", filter, limit, offset)}
+func (_e *MockEventRepositoryInterface_Expecter) List(ctx interface{}, limit interface{}, offset interface{}) *MockEventRepositoryInterface_List_Call {
+	return &MockEventRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx, limit, offset)}
 }
 
-func (_c *MockEventRepositoryInterface_FindFiltered_Call) Run(run func(filter database.EventFilter, limit int, offset int)) *MockEventRepositoryInterface_FindFiltered_Call {
+func (_c *MockEventRepositoryInterface_List_Call) Run(run func(ctx context.Context, limit int, offset int)) *MockEventRepositoryInterface_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 database.EventFilter
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(database.EventFilter)
+			arg0 = args[0].(context.Context)
 		}
 		var arg1 int
 		if args[1] != nil {
@@ -1129,80 +563,12 @@ func (_c *MockEventRepositoryInterface_FindFiltered_Call) Run(run func(filter da
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_FindFiltered_Call) Return(events []models.Event, err error) *MockEventRepositoryInterface_FindFiltered_Call {
-	_c.Call.Return(events, err)
-	return _c
-}
-
-func (_c *MockEventRepositoryInterface_FindFiltered_Call) RunAndReturn(run func(filter database.EventFilter, limit int, offset int) ([]models.Event, error)) *MockEventRepositoryInterface_FindFiltered_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// List provides a mock function for the type MockEventRepositoryInterface
-func (_mock *MockEventRepositoryInterface) List(limit int, offset int) ([]models.Event, error) {
-	ret := _mock.Called(limit, offset)
-
-	if len(ret) == 0 {
-		panic("no return value specified for List")
-	}
-
-	var r0 []models.Event
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(int, int) ([]models.Event, error)); ok {
-		return returnFunc(limit, offset)
-	}
-	if returnFunc, ok := ret.Get(0).(func(int, int) []models.Event); ok {
-		r0 = returnFunc(limit, offset)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]models.Event)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(int, int) error); ok {
-		r1 = returnFunc(limit, offset)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockEventRepositoryInterface_List_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'List'
-type MockEventRepositoryInterface_List_Call struct {
-	*mock.Call
-}
-
-// List is a helper method to define mock.On call
-//   - limit int
-//   - offset int
-func (_e *MockEventRepositoryInterface_Expecter) List(limit interface{}, offset interface{}) *MockEventRepositoryInterface_List_Call {
-	return &MockEventRepositoryInterface_List_Call{Call: _e.mock.On("List", limit, offset)}
-}
-
-func (_c *MockEventRepositoryInterface_List_Call) Run(run func(limit int, offset int)) *MockEventRepositoryInterface_List_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 int
-		if args[0] != nil {
-			arg0 = args[0].(int)
-		}
-		var arg1 int
-		if args[1] != nil {
-			arg1 = args[1].(int)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
 func (_c *MockEventRepositoryInterface_List_Call) Return(events []models.Event, err error) *MockEventRepositoryInterface_List_Call {
 	_c.Call.Return(events, err)
 	return _c
 }
 
-func (_c *MockEventRepositoryInterface_List_Call) RunAndReturn(run func(limit int, offset int) ([]models.Event, error)) *MockEventRepositoryInterface_List_Call {
+func (_c *MockEventRepositoryInterface_List_Call) RunAndReturn(run func(ctx context.Context, limit int, offset int) ([]models.Event, error)) *MockEventRepositoryInterface_List_Call {
 	_c.Call.Return(run)
 	return _c
 }

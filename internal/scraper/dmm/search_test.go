@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -90,11 +90,11 @@ func TestParseHTMLWithGoldenFiles(t *testing.T) {
 			require.NoError(t, err, "Failed to parse HTML")
 
 			// Create scraper instance with proper initialization
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled:       true,
 				ScrapeActress: ptrBool(true),
 			}
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
 			// Call parseHTML
 			result, err := scraper.parseHTML(context.Background(), doc, tt.sourceURL)
@@ -150,11 +150,11 @@ func TestParseHTMLFieldExtraction(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(htmlContent)))
 	require.NoError(t, err)
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:       true,
 		ScrapeActress: ptrBool(true),
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=abc00123/")
 	require.NoError(t, err)
@@ -218,10 +218,10 @@ func TestParseHTMLActressDisabled(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create scraper with actress scraping DISABLED
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled: true,
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=abc00123/")
 	require.NoError(t, err)
@@ -241,11 +241,11 @@ func TestParseHTMLMultipleActresses(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(htmlContent)))
 	require.NoError(t, err)
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:       true,
 		ScrapeActress: ptrBool(true),
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ghi00789/")
 	require.NoError(t, err)
@@ -272,11 +272,11 @@ func TestParseHTMLEmptyActressList(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(htmlContent)))
 	require.NoError(t, err)
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:       true,
 		ScrapeActress: ptrBool(true),
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=def00456/")
 	require.NoError(t, err)
@@ -296,11 +296,11 @@ func TestParseHTMLMalformedHTML(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(htmlContent)))
 	require.NoError(t, err)
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:       true,
 		ScrapeActress: ptrBool(true),
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
 	// parseHTML should not panic or error on malformed HTML
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=jkl00999/")
@@ -322,11 +322,11 @@ func TestParseHTML404Page(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(htmlContent)))
 	require.NoError(t, err)
 
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled:       true,
 		ScrapeActress: ptrBool(true),
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, true, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=notfound/")
 

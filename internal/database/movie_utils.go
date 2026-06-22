@@ -14,7 +14,7 @@ func filterIdentifiableActresses(actresses []models.Actress) []models.Actress {
 		return actresses
 	}
 
-	filtered := actresses[:0]
+	filtered := make([]models.Actress, 0, len(actresses))
 	for _, actress := range actresses {
 		if actress.DMMID != 0 ||
 			strings.TrimSpace(actress.JapaneseName) != "" ||

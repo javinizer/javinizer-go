@@ -3,6 +3,7 @@ package javbus
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path"
 	"regexp"
@@ -12,7 +13,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/challengedetect"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -33,21 +34,22 @@ var (
 	runtimeRegex = regexp.MustCompile(`(\d+)`)
 )
 
-// Scraper implements the JavBus scraper.
-type Scraper struct {
+// scraper implements the JavBus scraper.
+type scraper struct {
 	client        *resty.Client
 	enabled       bool
 	baseURL       string
 	language      string
-	proxyOverride *config.ProxyConfig
-	downloadProxy *config.ProxyConfig
+	proxyOverride *models.ProxyConfig
+	downloadProxy *models.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings // stores the full settings for Config() method
+	settings      models.ScraperSettings // stores the full settings for Config() method
 }
 
 // New creates a new JavBus scraper.
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+// newScraper creates a new JavBus scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
 			httpclient.StandardHTMLHeaders(),
 			httpclient.UserAgentHeader(settings.UserAgent),
@@ -69,7 +71,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 
 	lang := normalizeLanguage(settings.Language)
 
-	s := &Scraper{
+	s := &scraper{
 		client:        client,
 		enabled:       settings.Enabled,
 		baseURL:       base,
@@ -77,7 +79,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
-		settings:      settings,
+		settings:      *settings,
 	}
 
 	if result.ProxyEnabled && result.ProxyProfile.URL != "" {
@@ -88,61 +90,41 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 }
 
 // Name returns the scraper identifier.
-func (s *Scraper) Name() string {
+func (s *scraper) Name() string {
 	return "javbus"
 }
 
 // IsEnabled returns whether the scraper is enabled.
-func (s *Scraper) IsEnabled() bool {
+func (s *scraper) IsEnabled() bool {
 	return s.enabled
 }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper
-func (s *Scraper) Close() error {
-	return nil
-}
-
-// ValidateConfig validates the scraper configuration.
-// Returns error if config is invalid, nil if valid.
-func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
-	if cfg == nil {
-		return fmt.Errorf("javbus: config is nil")
-	}
-	if !cfg.Enabled {
-		return nil // Disabled is valid
-	}
-	if cfg.RateLimit < 0 {
-		return fmt.Errorf("javbus: rate_limit must be non-negative, got %d", cfg.RateLimit)
-	}
-	if cfg.RetryCount < 0 {
-		return fmt.Errorf("javbus: retry_count must be non-negative, got %d", cfg.RetryCount)
-	}
-	if cfg.Timeout < 0 {
-		return fmt.Errorf("javbus: timeout must be non-negative, got %d", cfg.Timeout)
-	}
+func (s *scraper) Close() error {
 	return nil
 }
 
 // ResolveDownloadProxyForHost declares JavBus-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
 	}
 	if host == "javbus.com" || strings.HasSuffix(host, ".javbus.com") ||
 		host == "javbus.org" || strings.HasSuffix(host, ".javbus.org") {
-		return s.downloadProxy, s.proxyOverride, true
+		return s.settings.DownloadProxy, s.settings.Proxy, true
 	}
 	return nil, nil, false
 }
 
 // GetURL attempts to find a detail URL for the given movie ID.
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -152,7 +134,7 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 		host == "javbus.org" || strings.HasSuffix(host, ".javbus.org")
 }
 
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse URL: %w", err)
@@ -180,7 +162,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return strings.ToUpper(candidates[0]), nil
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(url) {
 		return nil, models.NewScraperNotFoundError("JavBus", "URL not handled by JavBus scraper")
 	}
@@ -194,7 +176,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 		return nil, models.NewScraperNotFoundError("JavBus", "page not found")
 	}
 	if status == 429 {
-		return nil, models.NewScraperStatusError("JavBus", 429, "rate limited")
+		return nil, models.NewScraperStatusError("JavBus", http.StatusTooManyRequests, "rate limited")
 	}
 	if status == 403 || status == 451 {
 		return nil, models.NewScraperStatusError("JavBus", status, "access blocked")
@@ -212,11 +194,11 @@ func (s *Scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 	return s.parseDetailPage(doc, detailURL, id)
 }
 
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -261,7 +243,7 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 
 // Search searches JavBus for a movie and extracts metadata.
 // Search searches JavBus for a movie and extracts metadata with context support.
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("JavBus scraper is disabled")
 	}
@@ -287,7 +269,14 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	return s.parseDetailPage(doc, detailURL, id)
 }
 
-func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID string) (*models.ScraperResult, error) {
+// ParseHTML parses a JavBus detail page from a goquery.Document.
+// This is the documented parsing seam for testing; it delegates to the
+// internal parseDetailPage method.
+func (s *scraper) ParseHTML(doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+	return s.parseDetailPage(doc, sourceURL, "")
+}
+
+func (s *scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID string) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
@@ -357,7 +346,7 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 	return result, nil
 }
 
-func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
+func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}
@@ -381,7 +370,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 			"JavBus returned a driver verification challenge page (request blocked; adjust proxy/IP)",
 		)
 	}
-	if resp.StatusCode() == 200 && models.IsCloudflareChallengePage(html) {
+	if resp.StatusCode() == 200 && challengedetect.IsCloudflareChallengePage(html) {
 		return "", resp.StatusCode(), models.NewScraperChallengeError(
 			"JavBus",
 			"JavBus returned a Cloudflare challenge page (request blocked; adjust proxy/IP or cookies)",
@@ -390,7 +379,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 	return html, resp.StatusCode(), nil
 }
 
-func (s *Scraper) findDetailURL(html, base, id string) string {
+func (s *scraper) findDetailURL(html, base, id string) string {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return ""
@@ -694,7 +683,7 @@ func normalizeLanguage(lang string) string {
 	}
 }
 
-func (s *Scraper) applyLanguageToURL(rawURL string) string {
+func (s *scraper) applyLanguageToURL(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return rawURL

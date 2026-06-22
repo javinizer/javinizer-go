@@ -13,7 +13,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/challengedetect"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -36,29 +36,31 @@ var (
 	javdbVideoPathRegex = regexp.MustCompile(`/v/([A-Za-z0-9]+)`)
 )
 
-// Scraper implements the JavDB scraper.
-type Scraper struct {
+// scraper implements the JavDB scraper.
+type scraper struct {
 	client        *resty.Client
 	flaresolverr  *httpclient.FlareSolverr
 	enabled       bool
 	baseURL       string
-	proxyOverride *config.ProxyConfig
-	downloadProxy *config.ProxyConfig
+	proxyOverride *models.ProxyConfig
+	downloadProxy *models.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings // stores the full settings for Config() method
+	settings      models.ScraperSettings // stores the full settings for Config() method
 	cookieMu      sync.Mutex             // protects cookie mutations on shared client
 }
 
 // New creates a new JavDB scraper.
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	configForHTTP := &config.ScraperSettings{
-		Enabled:       settings.Enabled,
-		Timeout:       settings.Timeout,
-		RateLimit:     settings.RateLimit,
-		RetryCount:    settings.RetryCount,
-		UserAgent:     settings.UserAgent,
-		Proxy:         settings.Proxy,
-		DownloadProxy: settings.DownloadProxy,
+// newScraper creates a new JavDB scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	configForHTTP := &models.ScraperSettings{
+		Enabled:         settings.Enabled,
+		Timeout:         settings.Timeout,
+		RateLimit:       settings.RateLimit,
+		RetryCount:      settings.RetryCount,
+		UserAgent:       settings.UserAgent,
+		Proxy:           settings.Proxy,
+		DownloadProxy:   settings.DownloadProxy,
+		UseFlareSolverr: settings.UseFlareSolverr,
 	}
 
 	client, flaresolverr, err := httpclient.FromScraperSettings(configForHTTP, globalProxy, globalFlareSolverr,
@@ -67,10 +69,10 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	).BuildWithFlareSolverr()
 
 	proxyEnabled := false
-	var proxyCfg *config.ProxyProfile
+	var proxyCfg *models.ProxyProfile
 	if globalProxy != nil {
 		proxyEnabled = globalProxy.Enabled
-		proxyCfg = config.ResolveScraperProxy(*globalProxy, settings.Proxy)
+		proxyCfg = models.ResolveScraperProxy(*globalProxy, settings.Proxy)
 	}
 	if settings.Proxy != nil && settings.Proxy.Enabled {
 		proxyEnabled = true
@@ -87,7 +89,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		baseURL = defaultBaseURL
 	}
 
-	s := &Scraper{
+	s := &scraper{
 		client:        client,
 		flaresolverr:  flaresolverr,
 		enabled:       settings.Enabled,
@@ -95,7 +97,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
-		settings:      settings,
+		settings:      *settings,
 	}
 
 	if usingProxy && proxyCfg != nil {
@@ -109,22 +111,23 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 }
 
 // Name returns the scraper identifier.
-func (s *Scraper) Name() string {
+func (s *scraper) Name() string {
 	return "javdb"
 }
 
 // IsEnabled returns whether the scraper is enabled.
-func (s *Scraper) IsEnabled() bool {
+func (s *scraper) IsEnabled() bool {
 	return s.enabled
 }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper (HTTP client, FlareSolverr).
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	if s.flaresolverr != nil {
 		if closeErr := s.flaresolverr.Close(); closeErr != nil {
 			logging.Debugf("JavDB: Error closing FlareSolverr: %v", closeErr)
@@ -134,7 +137,7 @@ func (s *Scraper) Close() error {
 }
 
 // CanHandleURL returns true if this scraper can handle the given URL
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -151,7 +154,7 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 }
 
 // ExtractIDFromURL extracts the movie ID from a JavDB URL
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse JavDB URL: %w", err)
@@ -166,7 +169,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 
 // ScrapeURL directly scrapes metadata from a JavDB URL.
 // This provides more accurate results than ID-based search when the exact URL is known.
-func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(urlStr) {
 		return nil, models.NewScraperNotFoundError("JavDB", "URL not handled by JavDB scraper")
 	}
@@ -207,7 +210,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 	// Verify we got meaningful metadata
 	if !hasDetailMetadata(result, videoID) {
 		// Check if this might be a Cloudflare challenge page or login page
-		if models.IsCloudflareChallengePage(html) {
+		if challengedetect.IsCloudflareChallengePage(html) {
 			return nil, models.NewScraperChallengeError("JavDB",
 				"JavDB returned a Cloudflare challenge page (request blocked; check FlareSolverr/proxy configuration)")
 		}
@@ -236,23 +239,20 @@ func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 }
 
 // ResolveDownloadProxyForHost declares JavDB-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
 	}
 	if host == "jdbstatic.com" || strings.HasSuffix(host, ".jdbstatic.com") ||
 		host == "javdb.com" || strings.HasSuffix(host, ".javdb.com") {
-		return s.downloadProxy, s.proxyOverride, true
+		return s.settings.DownloadProxy, s.settings.Proxy, true
 	}
 	return nil, nil, false
 }
 
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
-}
-
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	_ = ctx // pure URL formatter — no I/O to cancel, ctx accepted for interface compliance
 	if strings.TrimSpace(id) == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
 	}
@@ -276,7 +276,7 @@ func isJavDBVideoCode(id string) bool {
 
 // Search looks up a movie by ID and scrapes metadata.
 // Search looks up a movie by ID and scrapes metadata with context support.
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("JavDB scraper is disabled")
 	}
@@ -347,8 +347,8 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	return retryResult, nil
 }
 
-func (s *Scraper) findDetailURLCtx(ctx context.Context, id string) (string, error) {
-	searchURL, err := s.getURLCtx(ctx, id)
+func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, error) {
+	searchURL, err := s.GetURL(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -413,7 +413,7 @@ func (s *Scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	return "", models.NewScraperNotFoundError("JavDB", fmt.Sprintf("movie %s not found on JavDB", id))
 }
 
-func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, error) {
+func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
@@ -421,7 +421,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, e
 	resp, err := s.client.R().SetContext(ctx).Get(targetURL)
 	if err == nil && resp != nil && resp.StatusCode() == 200 {
 		html := resp.String()
-		if !models.IsCloudflareChallengePage(html) {
+		if !challengedetect.IsCloudflareChallengePage(html) {
 			return html, nil
 		}
 		logging.Warnf("JavDB: Direct request returned Cloudflare challenge, escalating to FlareSolverr: %s", targetURL)
@@ -438,7 +438,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, e
 				s.client.SetCookie(&c)
 			}
 			s.cookieMu.Unlock()
-			if models.IsCloudflareChallengePage(html) {
+			if challengedetect.IsCloudflareChallengePage(html) {
 				return "", models.NewScraperChallengeError(
 					"JavDB",
 					"JavDB returned a Cloudflare challenge page (request blocked; check FlareSolverr/proxy configuration)",
@@ -452,7 +452,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, e
 	return s.fetchPageDirectResponse(resp, err)
 }
 
-func (s *Scraper) fetchPageDirectCtx(ctx context.Context, targetURL string) (string, error) {
+func (s *scraper) fetchPageDirectCtx(ctx context.Context, targetURL string) (string, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
@@ -461,7 +461,7 @@ func (s *Scraper) fetchPageDirectCtx(ctx context.Context, targetURL string) (str
 	return s.fetchPageDirectResponse(resp, err)
 }
 
-func (s *Scraper) fetchPageDirectResponse(resp *resty.Response, err error) (string, error) {
+func (s *scraper) fetchPageDirectResponse(resp *resty.Response, err error) (string, error) {
 	if err != nil {
 		return "", err
 	}
@@ -474,7 +474,7 @@ func (s *Scraper) fetchPageDirectResponse(resp *resty.Response, err error) (stri
 	}
 
 	html := resp.String()
-	if models.IsCloudflareChallengePage(html) {
+	if challengedetect.IsCloudflareChallengePage(html) {
 		return "", models.NewScraperChallengeError(
 			"JavDB",
 			"JavDB returned a Cloudflare challenge page (request blocked; enable FlareSolverr or adjust proxy/IP)",
@@ -503,7 +503,110 @@ func hasDetailMetadata(result *models.ScraperResult, fallbackID string) bool {
 	return strings.TrimSpace(result.Title) != "" && !idsMatch(result.Title, fallbackID)
 }
 
-func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID string) (*models.ScraperResult, error) {
+// ParseHTML parses a JavDB detail page from a goquery.Document.
+// This is the documented parsing seam for testing; it delegates to the
+// internal parseDetailPage method.
+func (s *scraper) ParseHTML(doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+	return s.parseDetailPage(doc, sourceURL, "")
+}
+
+// labelRoute is a single entry in the labelRouter: it matches a normalized DOM label
+// to a setter closure that populates the appropriate field on the result.
+type labelRoute struct {
+	keys   []string // label substrings to match against
+	handle func(label string, valueNode *goquery.Selection, valueText string)
+}
+
+// labelRouter maps normalized DOM labels to field-setter closures.
+// The DOM loop in parseDetailPage becomes: normalize label → lookup in router → call setter.
+type labelRouter struct {
+	routes  []labelRoute
+	result  *models.ScraperResult
+	castCtx *castRouterContext
+}
+
+// castRouterContext tracks actress-parsing state across DOM block iterations.
+type castRouterContext struct {
+	hasFemaleActressRow bool
+}
+
+// newLabelRouter builds a router with all field handlers bound to the given result.
+func newLabelRouter(result *models.ScraperResult) *labelRouter {
+	castCtx := &castRouterContext{}
+	r := &labelRouter{result: result, castCtx: castCtx}
+
+	r.routes = []labelRoute{
+		{keys: []string{"番號", "番号", "識別碼", "识别码", "ID"}, handle: func(_ string, _ *goquery.Selection, valueText string) {
+			if result.ID == "" && valueText != "" {
+				result.ID = valueText
+			}
+		}},
+		{keys: []string{"日期", "發行日期", "发行日期", "release"}, handle: func(_ string, _ *goquery.Selection, valueText string) {
+			if t := scraperutil.ParseDate(valueText); t != nil {
+				result.ReleaseDate = t
+			}
+		}},
+		{keys: []string{"時長", "长度", "長度", "runtime", "length", "duration"}, handle: func(_ string, _ *goquery.Selection, valueText string) {
+			result.Runtime = parseRuntime(valueText)
+		}},
+		{keys: []string{"導演", "导演", "director"}, handle: func(_ string, valueNode *goquery.Selection, _ string) {
+			result.Director = extractFirstText(valueNode)
+		}},
+		{keys: []string{"片商", "maker", "studio"}, handle: func(_ string, valueNode *goquery.Selection, _ string) {
+			result.Maker = extractFirstText(valueNode)
+		}},
+		{keys: []string{"發行", "发行", "label", "publisher"}, handle: func(_ string, valueNode *goquery.Selection, _ string) {
+			result.Label = extractFirstText(valueNode)
+		}},
+		{keys: []string{"系列", "series"}, handle: func(_ string, valueNode *goquery.Selection, _ string) {
+			result.Series = extractFirstText(valueNode)
+		}},
+		{keys: []string{"評分", "评分", "rating", "score"}, handle: func(_ string, _ *goquery.Selection, valueText string) {
+			result.Rating = parseRating(valueText)
+		}},
+		{keys: []string{"類別", "类别", "genre", "tag", "tags"}, handle: func(_ string, valueNode *goquery.Selection, _ string) {
+			result.Genres = extractStringList(valueNode)
+		}},
+	}
+
+	return r
+}
+
+// dispatch looks up the normalized label in the route table. If a route matches,
+// it calls the setter. Returns true if a route handled the label.
+func (lr *labelRouter) dispatch(label string, valueNode *goquery.Selection, valueText string) bool {
+	for _, route := range lr.routes {
+		if labelContains(label, route.keys...) {
+			route.handle(label, valueNode, valueText)
+			return true
+		}
+	}
+	return false
+}
+
+// dispatchCast handles actress/cast label classification when no standard route matches.
+func (lr *labelRouter) dispatchCast(label string, valueNode *goquery.Selection) {
+	switch classifyCastLabel(label) {
+	case castLabelFemale:
+		if actresses := extractActresses(valueNode); len(actresses) > 0 {
+			lr.result.Actresses = actresses
+			lr.castCtx.hasFemaleActressRow = true
+		}
+	case castLabelGeneric:
+		// Generic cast rows may include male actors. Use only as fallback
+		// when no female-specific row was found.
+		if lr.castCtx.hasFemaleActressRow || len(lr.result.Actresses) > 0 {
+			return
+		}
+		if actresses := extractActresses(valueNode); len(actresses) > 0 {
+			lr.result.Actresses = actresses
+		}
+	case castLabelMale:
+		// Explicit male actor rows should not be merged into actresses.
+	}
+}
+
+func (s *scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID string) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
@@ -542,7 +645,7 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 	}
 	result.Description = description
 
-	hasFemaleActressRow := false
+	router := newLabelRouter(result)
 
 	doc.Find(".movie-panel-info .panel-block").Each(func(_ int, block *goquery.Selection) {
 		label := normalizeLabel(block.Find("strong").First().Text())
@@ -552,48 +655,8 @@ func (s *Scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 		}
 		valueText := scraperutil.CleanString(valueNode.Text())
 
-		switch {
-		case labelContains(label, "番號", "番号", "識別碼", "识别码", "ID"):
-			if result.ID == "" && valueText != "" {
-				result.ID = valueText
-			}
-		case labelContains(label, "日期", "發行日期", "发行日期", "release"):
-			if t := scraperutil.ParseDate(valueText); t != nil {
-				result.ReleaseDate = t
-			}
-		case labelContains(label, "時長", "长度", "長度", "runtime", "length", "duration"):
-			result.Runtime = parseRuntime(valueText)
-		case labelContains(label, "導演", "导演", "director"):
-			result.Director = extractFirstText(valueNode)
-		case labelContains(label, "片商", "maker", "studio"):
-			result.Maker = extractFirstText(valueNode)
-		case labelContains(label, "發行", "发行", "label", "publisher"):
-			result.Label = extractFirstText(valueNode)
-		case labelContains(label, "系列", "series"):
-			result.Series = extractFirstText(valueNode)
-		case labelContains(label, "評分", "评分", "rating", "score"):
-			result.Rating = parseRating(valueText)
-		case labelContains(label, "類別", "类别", "genre", "tag", "tags"):
-			result.Genres = extractStringList(valueNode)
-		default:
-			switch classifyCastLabel(label) {
-			case castLabelFemale:
-				if actresses := extractActresses(valueNode); len(actresses) > 0 {
-					result.Actresses = actresses
-					hasFemaleActressRow = true
-				}
-			case castLabelGeneric:
-				// Generic cast rows may include male actors. Use only as fallback
-				// when no female-specific row was found.
-				if hasFemaleActressRow || len(result.Actresses) > 0 {
-					return
-				}
-				if actresses := extractActresses(valueNode); len(actresses) > 0 {
-					result.Actresses = actresses
-				}
-			case castLabelMale:
-				// Explicit male actor rows should not be merged into actresses.
-			}
+		if !router.dispatch(label, valueNode, valueText) {
+			router.dispatchCast(label, valueNode)
 		}
 	})
 

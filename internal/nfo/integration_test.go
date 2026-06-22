@@ -1,6 +1,7 @@
 package nfo
 
 import (
+	"context"
 	"encoding/xml"
 	"os"
 	"path/filepath"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -30,7 +30,7 @@ func TestNFOGenerationEndToEnd(t *testing.T) {
 		Maker:         "IdeaPocket",
 		Label:         "IP Premium",
 		Series:        "Beautiful Days",
-		CoverURL:      "https://example.com/covers/ipx535.jpg",
+		Poster:        models.PosterState{CoverURL: "https://example.com/covers/ipx535.jpg"},
 		TrailerURL:    "https://example.com/trailers/ipx535.mp4",
 		Screenshots: []string{
 			"https://example.com/screenshots/ipx535-1.jpg",
@@ -59,9 +59,9 @@ func TestNFOGenerationEndToEnd(t *testing.T) {
 
 	// Test with default config
 	t.Run("Default Config", func(t *testing.T) {
-		gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
+		gen := NewGenerator(afero.NewOsFs(), defaultConfig())
 
-		err := gen.Generate(movie, tmpDir, "", "")
+		err := gen.Generate(context.Background(), movie, tmpDir, "", "", nil)
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -84,25 +84,24 @@ func TestNFOGenerationEndToEnd(t *testing.T) {
 		}
 
 		// Verify all fields
-		verifyNFOContent(t, &parsed, movie, DefaultConfig())
+		verifyNFOContent(t, &parsed, movie, defaultConfig())
 	})
 
 	// Test with custom config
 	t.Run("Custom Config - Japanese Names", func(t *testing.T) {
 		cfg := &Config{
-			ActorFirstNameOrder:  false,
-			ActorJapaneseNames:   true,
-			UnknownActress:       "不明",
-			NFOFilenameTemplate:  "<ID> - <TITLE>.nfo",
-			IncludeStreamDetails: false,
-			IncludeFanart:        true,
-			IncludeTrailer:       true,
-			DefaultRatingSource:  "javinizer",
+			FirstNameOrder:     false,
+			ActressLanguageJA:  true,
+			UnknownActressText: "不明",
+			FilenameTemplate:   "<ID> - <TITLE>.nfo",
+			IncludeFanart:      true,
+			IncludeTrailer:     true,
+			RatingSource:       "javinizer",
 		}
 		gen := NewGenerator(afero.NewOsFs(), cfg)
 
 		tmpDir2 := t.TempDir()
-		err := gen.Generate(movie, tmpDir2, "", "")
+		err := gen.Generate(context.Background(), movie, tmpDir2, "", "", nil)
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -149,19 +148,19 @@ func TestNFOGenerationEndToEnd(t *testing.T) {
 	// Test with minimal config (no fanart, no trailer)
 	t.Run("Minimal Config", func(t *testing.T) {
 		cfg := &Config{
-			ActorFirstNameOrder:  true,
-			ActorJapaneseNames:   false,
-			UnknownActress:       "Unknown",
-			NFOFilenameTemplate:  "<ID>.nfo",
+			FirstNameOrder:       true,
+			ActressLanguageJA:    false,
+			UnknownActressText:   "Unknown",
+			FilenameTemplate:     "<ID>.nfo",
 			IncludeStreamDetails: false,
 			IncludeFanart:        false,
 			IncludeTrailer:       false,
-			DefaultRatingSource:  "themoviedb",
+			RatingSource:         "themoviedb",
 		}
 		gen := NewGenerator(afero.NewOsFs(), cfg)
 
 		tmpDir3 := t.TempDir()
-		err := gen.Generate(movie, tmpDir3, "", "")
+		err := gen.Generate(context.Background(), movie, tmpDir3, "", "", nil)
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -187,15 +186,13 @@ func TestNFOGenerationEndToEnd(t *testing.T) {
 	})
 }
 
-// TestConfigFromAppConfig tests the config adapter
-func TestConfigFromAppConfig(t *testing.T) {
-	appCfg := &config.NFOConfig{
-		Enabled:              true,
-		DisplayTitle:         "<ID> - <TITLE>",
-		FilenameTemplate:     "<ID> [<STUDIO>].nfo",
+// TestConfigDirectConstruction tests direct Config struct construction
+func TestConfigDirectConstruction(t *testing.T) {
+	nfoCfg := &Config{
 		FirstNameOrder:       false,
 		ActressLanguageJA:    true,
 		UnknownActressText:   "不明",
+		FilenameTemplate:     "<ID> [<STUDIO>].nfo",
 		ActressAsTag:         true,
 		IncludeStreamDetails: true,
 		IncludeFanart:        false,
@@ -203,42 +200,36 @@ func TestConfigFromAppConfig(t *testing.T) {
 		RatingSource:         "custom",
 	}
 
-	nfoCfg := ConfigFromAppConfig(appCfg, nil, nil, nil)
-
-	// Verify all fields are mapped correctly
-	if nfoCfg.ActorFirstNameOrder != false {
-		t.Error("ActorFirstNameOrder not mapped correctly")
+	if nfoCfg.FirstNameOrder != false {
+		t.Error("FirstNameOrder not set correctly")
 	}
-	if nfoCfg.ActorJapaneseNames != true {
-		t.Error("ActorJapaneseNames not mapped correctly")
+	if nfoCfg.ActressLanguageJA != true {
+		t.Error("ActressLanguageJA not set correctly")
 	}
-	if nfoCfg.UnknownActress != "不明" {
-		t.Errorf("UnknownActress not mapped correctly: got %s", nfoCfg.UnknownActress)
+	if nfoCfg.UnknownActressText != "不明" {
+		t.Errorf("UnknownActressText not set correctly: got %s", nfoCfg.UnknownActressText)
 	}
-	if nfoCfg.NFOFilenameTemplate != "<ID> [<STUDIO>].nfo" {
-		t.Errorf("NFOFilenameTemplate not mapped correctly: got %s", nfoCfg.NFOFilenameTemplate)
+	if nfoCfg.FilenameTemplate != "<ID> [<STUDIO>].nfo" {
+		t.Errorf("FilenameTemplate not set correctly: got %s", nfoCfg.FilenameTemplate)
 	}
 	if nfoCfg.IncludeStreamDetails != true {
-		t.Error("IncludeStreamDetails not mapped correctly")
+		t.Error("IncludeStreamDetails not set correctly")
 	}
 	if nfoCfg.IncludeFanart != false {
-		t.Error("IncludeFanart not mapped correctly")
+		t.Error("IncludeFanart not set correctly")
 	}
 	if nfoCfg.IncludeTrailer != false {
-		t.Error("IncludeTrailer not mapped correctly")
+		t.Error("IncludeTrailer not set correctly")
 	}
-	if nfoCfg.DefaultRatingSource != "custom" {
-		t.Errorf("DefaultRatingSource not mapped correctly: got %s", nfoCfg.DefaultRatingSource)
+	if nfoCfg.RatingSource != "custom" {
+		t.Errorf("RatingSource not set correctly: got %s", nfoCfg.RatingSource)
 	}
 }
 
-// TestNFOFromScraperResult tests generating NFO from scraper results
-func TestNFOFromScraperResult(t *testing.T) {
+// TestNFOFromMovie tests generating NFO from a Movie model
+func TestNFOFromMovie(t *testing.T) {
 	releaseDate := time.Date(2021, 3, 15, 0, 0, 0, 0, time.UTC)
-	result := &models.ScraperResult{
-		Source:      "r18dev",
-		SourceURL:   "https://r18.dev/videos/vod/movies/detail/-/id=ipx535/",
-		Language:    "en",
+	movie := &models.Movie{
 		ID:          "IPX-535",
 		ContentID:   "ipx00535",
 		Title:       "Test Movie from Scraper",
@@ -249,11 +240,9 @@ func TestNFOFromScraperResult(t *testing.T) {
 		Maker:       "Test Maker",
 		Label:       "Test Label",
 		Series:      "Test Series",
-		Rating: &models.Rating{
-			Score: 9.2,
-			Votes: 150,
-		},
-		Actresses: []models.ActressInfo{
+		RatingScore: 9.2,
+		RatingVotes: 150,
+		Actresses: []models.Actress{
 			{
 				FirstName:    "Test",
 				LastName:     "Actress",
@@ -261,21 +250,21 @@ func TestNFOFromScraperResult(t *testing.T) {
 				ThumbURL:     "https://example.com/test.jpg",
 			},
 		},
-		Genres:   []string{"Genre1", "Genre2"},
-		CoverURL: "https://example.com/cover.jpg",
-		ScreenshotURL: []string{
+		Genres: []models.Genre{{Name: "Genre1"}, {Name: "Genre2"}},
+		Poster: models.PosterState{CoverURL: "https://example.com/cover.jpg"},
+		Screenshots: []string{
 			"https://example.com/screenshot1.jpg",
 			"https://example.com/screenshot2.jpg",
 		},
 		TrailerURL: "https://example.com/trailer.mp4",
 	}
 
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
+	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
 	tmpDir := t.TempDir()
 
-	err := gen.GenerateFromScraperResult(result, tmpDir)
+	err := gen.Generate(context.Background(), movie, tmpDir, "", "", nil)
 	if err != nil {
-		t.Fatalf("GenerateFromScraperResult failed: %v", err)
+		t.Fatalf("Generate failed: %v", err)
 	}
 
 	// Verify file exists
@@ -319,10 +308,10 @@ func TestXMLFormatting(t *testing.T) {
 		ReleaseDate: &releaseDate,
 	}
 
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
+	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
 	tmpDir := t.TempDir()
 
-	err := gen.Generate(movie, tmpDir, "", "")
+	err := gen.Generate(context.Background(), movie, tmpDir, "", "", nil)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -437,7 +426,7 @@ func verifyNFOContent(t *testing.T, nfo *Movie, movie *models.Movie, cfg *Config
 	}
 
 	// Media
-	if movie.CoverURL != "" {
+	if movie.Poster.CoverURL != "" {
 		if len(nfo.Thumb) == 0 {
 			t.Error("Thumb should be present when CoverURL is set")
 		}
@@ -472,8 +461,8 @@ func TestMultipleActresses(t *testing.T) {
 		},
 	}
 
-	gen := NewGenerator(afero.NewOsFs(), DefaultConfig())
-	nfo := gen.MovieToNFO(movie, "")
+	gen := NewGenerator(afero.NewOsFs(), defaultConfig())
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	if len(nfo.Actors) != 3 {
 		t.Fatalf("Expected 3 actors, got %d", len(nfo.Actors))

@@ -28,7 +28,10 @@ function makeController(opts: {
 		movie_id: 'STARS-136',
 		status: 'completed',
 		started_at: '',
-		data: {
+		is_multi_part: false,
+		part_number: 0,
+		part_suffix: '',
+		movie: {
 			id: 'STARS-136',
 			title: 'Test Movie',
 			poster_url: opts.serverPosterUrl ?? 'https://dmm/digital-poster.jpg'

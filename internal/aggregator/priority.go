@@ -1,29 +1,10 @@
 package aggregator
 
 import (
-	"regexp"
-
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"unicode"
 )
 
-// compileGenreRegexes compiles regex patterns from ignore_genres config
-// Patterns that look like regex (contain special chars) are compiled
-// Plain strings are left for exact matching
-func (a *Aggregator) compileGenreRegexes() {
-	a.ignoreGenreRegexes = make([]*regexp.Regexp, 0)
-
-	for _, pattern := range a.config.Metadata.IgnoreGenres {
-		// Check if pattern looks like a regex (contains regex metacharacters)
-		if isRegexPattern(pattern) {
-			compiled, err := regexp.Compile(pattern)
-			if err == nil {
-				a.ignoreGenreRegexes = append(a.ignoreGenreRegexes, compiled)
-			}
-			// If compilation fails, silently skip (will fall through to exact match)
-		}
-	}
-}
+// compileGenreRegexes moved to GenreProcessor.compileRegexes in genre_processor.go
 
 // isRegexPattern checks if a string contains regex metacharacters
 // Only returns true for patterns with clear regex intent
@@ -64,18 +45,7 @@ func isRegexPattern(s string) bool {
 func (a *Aggregator) resolvePriorities() {
 	a.resolvedPriorities = make(map[string][]string)
 
-	var globalPriority []string
-
-	// If scrapers are injected, use their names in order as priority
-	if len(a.scrapers) > 0 {
-		globalPriority = make([]string, 0, len(a.scrapers))
-		for _, s := range a.scrapers {
-			globalPriority = append(globalPriority, s.Name())
-		}
-	} else {
-		// Fall back to scraperutil for backward compatibility
-		globalPriority = getFieldPriorityFromConfig(a.config, "")
-	}
+	globalPriority := getFieldPriorityFromConfig(a.cfg, "")
 
 	// List of all metadata fields that need priority resolution
 	fields := []string{
@@ -88,8 +58,8 @@ func (a *Aggregator) resolvePriorities() {
 	for _, field := range fields {
 		fieldPriority := copySlice(globalPriority)
 
-		if a.config != nil {
-			if fp := a.config.Metadata.Priority.GetFieldPriority(toSnakeCase(field)); len(fp) > 0 {
+		if a.cfg != nil {
+			if fp := a.cfg.Metadata.Priority.GetFieldPriority(toSnakeCase(field)); len(fp) > 0 {
 				fieldPriority = mergePriorityLists(fp, globalPriority)
 			}
 		}
@@ -99,8 +69,9 @@ func (a *Aggregator) resolvePriorities() {
 }
 
 // GetResolvedPriorities returns the cached field-level priority map (for debugging)
-// Implements AggregatorInterface
-func (a *Aggregator) GetResolvedPriorities() map[string][]string {
+//
+//nolint:unused // used by same-package tests
+func (a *Aggregator) getResolvedPriorities() map[string][]string {
 	return a.resolvedPriorities
 }
 
@@ -126,24 +97,20 @@ func mergePriorityLists(perFieldOverride, globalFallback []string) []string {
 
 // getFieldPriorityFromConfig returns the scraper priority list.
 // Checks per-field override first, then global metadata priority, then scrapers priority.
-func getFieldPriorityFromConfig(cfg *config.Config, fieldKey string) []string {
+// Returns nil when no config is available.
+func getFieldPriorityFromConfig(cfg *Config, fieldKey string) []string {
 	if cfg == nil {
-		if priorities := scraperutil.GetPriorities(); len(priorities) > 0 {
-			return priorities
-		}
 		return nil
 	}
 
-	if fp := cfg.Metadata.Priority.GetFieldPriority(fieldKey); len(fp) > 0 {
-		return fp
+	if cfg.Metadata != nil {
+		if fp := cfg.Metadata.Priority.GetFieldPriority(fieldKey); len(fp) > 0 {
+			return fp
+		}
 	}
 
-	if len(cfg.Scrapers.Priority) > 0 {
-		return cfg.Scrapers.Priority
-	}
-
-	if priorities := scraperutil.GetPriorities(); len(priorities) > 0 {
-		return priorities
+	if len(cfg.ScrapersPriority) > 0 {
+		return cfg.ScrapersPriority
 	}
 
 	return nil
@@ -178,9 +145,9 @@ func toSnakeCase(s string) string {
 					result = append(result, '_')
 				}
 			}
-			result = append(result, byte(r+32))
+			result = append(result, []byte(string(unicode.ToLower(r)))...)
 		} else {
-			result = append(result, byte(r))
+			result = append(result, []byte(string(r))...)
 		}
 	}
 	return string(result)

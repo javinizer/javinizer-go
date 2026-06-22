@@ -103,10 +103,16 @@ linters:
       - path: internal/database/actress_merge\.go
         linters:
           - goconst
+      - path: internal/database/actress_merge_domain\.go
+        linters:
+          - goconst
       - path: internal/database/actress_repo\.go
         linters:
           - goconst
       - path: internal/tui/update\.go
+        linters:
+          - goconst
+      - path: internal/tui/actress_merge\.go
         linters:
           - goconst
       - path: internal/api/server/server\.go
@@ -140,6 +146,9 @@ linters:
       - path: internal/template/engine\.go
         linters:
           - goconst
+      - path: internal/template/translation_resolver\.go
+        linters:
+          - goconst
       - path: internal/translation/service\.go
         linters:
           - goconst
@@ -150,6 +159,9 @@ linters:
         linters:
           - nilerr
       - path: internal/mediainfo/flv\.go
+        linters:
+          - nilerr
+      - path: internal/worker/batch_job\.go
         linters:
           - nilerr
       - path: internal/database/migrations_hash\.go
@@ -182,7 +194,7 @@ linters:
       - path: internal/api/batch/process_media_helpers\.go
         linters:
           - unparam
-      - path: internal/api/batch/process_organize\.go
+      - path: internal/downloader/media\.go
         linters:
           - unparam
       - path: internal/api/batch/process_preview\.go
@@ -201,6 +213,9 @@ linters:
         linters:
           - unparam
       - path: internal/database/actress_merge\.go
+        linters:
+          - unparam
+      - path: internal/database/actress_merge_domain\.go
         linters:
           - unparam
       - path: internal/history/reverter\.go
@@ -239,3 +254,55 @@ linters:
       - path: internal/worker/scrape_query\.go
         linters:
           - unparam
+      - path: internal/scrape/scrape\.go
+        linters:
+          - unparam
+      - path: internal/scrape/query\.go
+        linters:
+          - unparam
+      - path: internal/scraperutil/module\.go
+        linters:
+          - unconvert
+      - path: cmd/javinizer/commands/tui/command\.go
+        linters:
+          - staticcheck
+      - path: internal/api/realtime/progress_adapter\.go
+        linters:
+          - staticcheck
+      - path: internal/tui/components\.go
+        linters:
+          - staticcheck
+      - path: internal/tui/handlers\.go
+        linters:
+          - staticcheck
+      - path: internal/tui/update\.go
+        linters:
+          - staticcheck
+      - path: internal/tui/model\.go
+        linters:
+          - staticcheck
+      - path: internal/commandutil/scan_pipeline\.go
+        linters:
+          - errcheck
+      - path: cmd/javinizer/commands/sort/command\.go
+        linters:
+          - errcheck
+      - path: cmd/javinizer/commands/update/command\.go
+        linters:
+          - errcheck
+      - path: cmd/javinizer/commands/scrape/command\.go
+        linters:
+          - errcheck
+      - path: internal/formatter/movie_formatter\.go
+        linters:
+          - errcheck
+      - path: internal/update/checker\.go
+        linters:
+          - unused
+          - unparam
+      - path: internal/update/service\.go
+        linters:
+          - unused
+      - path: internal/update/state\.go
+        linters:
+          - unused

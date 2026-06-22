@@ -143,11 +143,43 @@ func TestFormatActressName(t *testing.T) {
 			unknownActress: "",
 			want:           "波多野結衣",
 		},
+		{
+			name: "skip mode returns empty string for unknown actress",
+			actress: models.Actress{
+				FirstName: "",
+				LastName:  "",
+			},
+			japaneseNames:  false,
+			firstNameOrder: false,
+			unknownActress: "",
+			want:           "",
+		},
+		{
+			name: "skip mode returns name when actress has name",
+			actress: models.Actress{
+				FirstName: "Yui",
+				LastName:  "Hatano",
+			},
+			japaneseNames:  false,
+			firstNameOrder: true,
+			unknownActress: "",
+			want:           "Yui Hatano",
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := FormatActressName(tc.actress, tc.japaneseNames, tc.firstNameOrder, tc.unknownActress)
+			opts := models.FormatActressNameOptions{
+				JapaneseNames:  tc.japaneseNames,
+				FirstNameOrder: tc.firstNameOrder,
+				UnknownActress: tc.unknownActress,
+			}
+			// The last two test cases use skip mode
+			if tc.name == "skip mode returns empty string for unknown actress" ||
+				tc.name == "skip mode returns name when actress has name" {
+				opts.UnknownActressMode = models.UnknownActressModeSkip
+			}
+			got := models.FormatActressName(tc.actress, opts)
 			assert.Equal(t, tc.want, got)
 		})
 	}

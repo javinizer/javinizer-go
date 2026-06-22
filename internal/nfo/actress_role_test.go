@@ -1,6 +1,7 @@
 package nfo
 
 import (
+	"context"
 	"encoding/xml"
 	"strings"
 	"testing"
@@ -33,8 +34,8 @@ func TestAddGenericRole(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
-				ActorFirstNameOrder: true,
-				AddGenericRole:      tt.addGenericRole,
+				FirstNameOrder: true,
+				AddGenericRole: tt.addGenericRole,
 			}
 			gen := NewGenerator(afero.NewOsFs(), cfg)
 
@@ -47,7 +48,7 @@ func TestAddGenericRole(t *testing.T) {
 				},
 			}
 
-			nfo := gen.MovieToNFO(movie, "")
+			nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 			require.Len(t, nfo.Actors, 2)
 			assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -88,8 +89,8 @@ func TestAltNameRole(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
-				ActorFirstNameOrder: true,
-				AltNameRole:         tt.altNameRole,
+				FirstNameOrder: true,
+				AltNameRole:    tt.altNameRole,
 			}
 			gen := NewGenerator(afero.NewOsFs(), cfg)
 
@@ -105,7 +106,7 @@ func TestAltNameRole(t *testing.T) {
 				},
 			}
 
-			nfo := gen.MovieToNFO(movie, "")
+			nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 			require.Len(t, nfo.Actors, 1)
 			assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -117,9 +118,9 @@ func TestAltNameRole(t *testing.T) {
 func TestBothRoleOptions(t *testing.T) {
 	t.Run("AltNameRole takes precedence over AddGenericRole", func(t *testing.T) {
 		cfg := &Config{
-			ActorFirstNameOrder: true,
-			AddGenericRole:      true, // This should be overridden
-			AltNameRole:         true,
+			FirstNameOrder: true,
+			AddGenericRole: true,
+			AltNameRole:    true,
 		}
 		gen := NewGenerator(afero.NewOsFs(), cfg)
 
@@ -135,7 +136,7 @@ func TestBothRoleOptions(t *testing.T) {
 			},
 		}
 
-		nfo := gen.MovieToNFO(movie, "")
+		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 		require.Len(t, nfo.Actors, 1)
 		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -144,9 +145,9 @@ func TestBothRoleOptions(t *testing.T) {
 
 	t.Run("AddGenericRole used when no Japanese name", func(t *testing.T) {
 		cfg := &Config{
-			ActorFirstNameOrder: true,
-			AddGenericRole:      true,
-			AltNameRole:         true, // Enabled but no Japanese name available
+			FirstNameOrder: true,
+			AddGenericRole: true,
+			AltNameRole:    true,
 		}
 		gen := NewGenerator(afero.NewOsFs(), cfg)
 
@@ -162,7 +163,7 @@ func TestBothRoleOptions(t *testing.T) {
 			},
 		}
 
-		nfo := gen.MovieToNFO(movie, "")
+		nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 		require.Len(t, nfo.Actors, 1)
 		assert.Equal(t, "Yui Hatano", nfo.Actors[0].Name)
@@ -172,8 +173,8 @@ func TestBothRoleOptions(t *testing.T) {
 
 func TestRoleInXML(t *testing.T) {
 	cfg := &Config{
-		ActorFirstNameOrder: true,
-		AddGenericRole:      true,
+		FirstNameOrder: true,
+		AddGenericRole: true,
 	}
 	gen := NewGenerator(afero.NewOsFs(), cfg)
 
@@ -185,7 +186,7 @@ func TestRoleInXML(t *testing.T) {
 		},
 	}
 
-	nfo := gen.MovieToNFO(movie, "")
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	// Marshal to XML
 	xmlData, err := xml.MarshalIndent(nfo, "", "  ")
@@ -200,8 +201,8 @@ func TestRoleInXML(t *testing.T) {
 
 func TestAltNameRoleInXML(t *testing.T) {
 	cfg := &Config{
-		ActorFirstNameOrder: true,
-		AltNameRole:         true,
+		FirstNameOrder: true,
+		AltNameRole:    true,
 	}
 	gen := NewGenerator(afero.NewOsFs(), cfg)
 
@@ -217,7 +218,7 @@ func TestAltNameRoleInXML(t *testing.T) {
 		},
 	}
 
-	nfo := gen.MovieToNFO(movie, "")
+	nfo := gen.movieToNFO(context.Background(), movie, "", nil)
 
 	// Marshal to XML
 	xmlData, err := xml.MarshalIndent(nfo, "", "  ")

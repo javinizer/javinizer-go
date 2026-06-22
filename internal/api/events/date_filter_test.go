@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -41,11 +42,11 @@ func TestListEvents_DateFilter(t *testing.T) {
 	}
 
 	for _, e := range []*models.Event{e1, e2, e3, e4} {
-		require.NoError(t, deps.EventRepo.Create(e))
+		require.NoError(t, deps.Repos.EventRepo.Create(context.Background(), e))
 	}
 
 	router := gin.New()
-	router.GET("/api/v1/events", listEvents(deps))
+	router.GET("/api/v1/events", listEvents(deps.Repos.EventRepo))
 
 	tests := []struct {
 		name          string

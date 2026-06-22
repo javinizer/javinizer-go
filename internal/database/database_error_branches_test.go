@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -13,7 +14,7 @@ func TestMovieRepositoryUpsert_MoviesTableMissingReturnsError(t *testing.T) {
 	repo := NewMovieRepository(db)
 
 	require.NoError(t, db.DB.Exec("DROP TABLE movies").Error)
-	_, err := repo.Upsert(createTestMovie("IPX-ERR-MOVIES"))
+	_, err := repo.Upsert(context.TODO(), createTestMovie("IPX-ERR-MOVIES"))
 	require.Error(t, err)
 }
 
@@ -26,7 +27,7 @@ func TestMovieRepositoryUpsert_CreatePathAssociationErrors(t *testing.T) {
 		movie := createTestMovie("IPX-ERR-GENRE")
 		movie.Genres = []models.Genre{{Name: "Drama"}}
 
-		_, err := repo.Upsert(movie)
+		_, err := repo.Upsert(context.TODO(), movie)
 		require.Error(t, err)
 	})
 
@@ -38,7 +39,7 @@ func TestMovieRepositoryUpsert_CreatePathAssociationErrors(t *testing.T) {
 		movie := createTestMovie("IPX-ERR-ACTRESS")
 		movie.Actresses = []models.Actress{{DMMID: 91001, JapaneseName: "Branch Actress"}}
 
-		_, err := repo.Upsert(movie)
+		_, err := repo.Upsert(context.TODO(), movie)
 		require.Error(t, err)
 	})
 }
@@ -48,7 +49,7 @@ func TestMovieRepositoryUpsert_UpdatePathTranslationError(t *testing.T) {
 	repo := NewMovieRepository(db)
 
 	movie := createTestMovie("IPX-ERR-TRANS-UPD")
-	_, err := repo.Upsert(movie)
+	_, err := repo.Upsert(context.TODO(), movie)
 	require.NoError(t, err)
 
 	require.NoError(t, db.DB.Exec("DROP TABLE movie_translations").Error)
@@ -57,7 +58,7 @@ func TestMovieRepositoryUpsert_UpdatePathTranslationError(t *testing.T) {
 	movie.Translations = []models.MovieTranslation{
 		{Language: "en", Title: "English"},
 	}
-	_, err = repo.Upsert(movie)
+	_, err = repo.Upsert(context.TODO(), movie)
 	require.Error(t, err)
 }
 
@@ -67,11 +68,11 @@ func TestMovieRepositoryDelete_ErrorBranches(t *testing.T) {
 		repo := NewMovieRepository(db)
 
 		movie := createTestMovie("IPX-DEL-ERR-1")
-		_, err := repo.Upsert(movie)
+		_, err := repo.Upsert(context.TODO(), movie)
 		require.NoError(t, err)
 		require.NoError(t, db.DB.Exec("DROP TABLE movie_actresses").Error)
 
-		err = repo.Delete(movie.ID)
+		err = repo.Delete(context.TODO(), movie.ID)
 		require.Error(t, err)
 	})
 
@@ -80,11 +81,11 @@ func TestMovieRepositoryDelete_ErrorBranches(t *testing.T) {
 		repo := NewMovieRepository(db)
 
 		movie := createTestMovie("IPX-DEL-ERR-2")
-		_, err := repo.Upsert(movie)
+		_, err := repo.Upsert(context.TODO(), movie)
 		require.NoError(t, err)
 		require.NoError(t, db.DB.Exec("DROP TABLE movie_translations").Error)
 
-		err = repo.Delete(movie.ID)
+		err = repo.Delete(context.TODO(), movie.ID)
 		require.Error(t, err)
 	})
 
@@ -93,11 +94,11 @@ func TestMovieRepositoryDelete_ErrorBranches(t *testing.T) {
 		repo := NewMovieRepository(db)
 
 		movie := createTestMovie("IPX-DEL-ERR-3")
-		_, err := repo.Upsert(movie)
+		_, err := repo.Upsert(context.TODO(), movie)
 		require.NoError(t, err)
 		require.NoError(t, db.DB.Exec("DROP TABLE movie_tags").Error)
 
-		err = repo.Delete(movie.ID)
+		err = repo.Delete(context.TODO(), movie.ID)
 		require.Error(t, err)
 	})
 
@@ -110,7 +111,7 @@ func TestMovieRepositoryDelete_ErrorBranches(t *testing.T) {
 			"IPX-DEL-EMPTY-CID",
 		).Error)
 
-		err := repo.Delete("IPX-DEL-EMPTY-CID")
+		err := repo.Delete(context.TODO(), "IPX-DEL-EMPTY-CID")
 		require.NoError(t, err)
 
 		var count int64

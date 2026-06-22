@@ -5,6 +5,8 @@
 package mocks
 
 import (
+	"context"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -37,16 +39,16 @@ func (_m *MockActressAliasRepositoryInterface) EXPECT() *MockActressAliasReposit
 }
 
 // Create provides a mock function for the type MockActressAliasRepositoryInterface
-func (_mock *MockActressAliasRepositoryInterface) Create(alias *models.ActressAlias) error {
-	ret := _mock.Called(alias)
+func (_mock *MockActressAliasRepositoryInterface) Create(ctx context.Context, alias *models.ActressAlias) error {
+	ret := _mock.Called(ctx, alias)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.ActressAlias) error); ok {
-		r0 = returnFunc(alias)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.ActressAlias) error); ok {
+		r0 = returnFunc(ctx, alias)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -59,19 +61,25 @@ type MockActressAliasRepositoryInterface_Create_Call struct {
 }
 
 // Create is a helper method to define mock.On call
+//   - ctx context.Context
 //   - alias *models.ActressAlias
-func (_e *MockActressAliasRepositoryInterface_Expecter) Create(alias interface{}) *MockActressAliasRepositoryInterface_Create_Call {
-	return &MockActressAliasRepositoryInterface_Create_Call{Call: _e.mock.On("Create", alias)}
+func (_e *MockActressAliasRepositoryInterface_Expecter) Create(ctx interface{}, alias interface{}) *MockActressAliasRepositoryInterface_Create_Call {
+	return &MockActressAliasRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, alias)}
 }
 
-func (_c *MockActressAliasRepositoryInterface_Create_Call) Run(run func(alias *models.ActressAlias)) *MockActressAliasRepositoryInterface_Create_Call {
+func (_c *MockActressAliasRepositoryInterface_Create_Call) Run(run func(ctx context.Context, alias *models.ActressAlias)) *MockActressAliasRepositoryInterface_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.ActressAlias
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.ActressAlias)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.ActressAlias
+		if args[1] != nil {
+			arg1 = args[1].(*models.ActressAlias)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -82,22 +90,22 @@ func (_c *MockActressAliasRepositoryInterface_Create_Call) Return(err error) *Mo
 	return _c
 }
 
-func (_c *MockActressAliasRepositoryInterface_Create_Call) RunAndReturn(run func(alias *models.ActressAlias) error) *MockActressAliasRepositoryInterface_Create_Call {
+func (_c *MockActressAliasRepositoryInterface_Create_Call) RunAndReturn(run func(ctx context.Context, alias *models.ActressAlias) error) *MockActressAliasRepositoryInterface_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Delete provides a mock function for the type MockActressAliasRepositoryInterface
-func (_mock *MockActressAliasRepositoryInterface) Delete(aliasName string) error {
-	ret := _mock.Called(aliasName)
+func (_mock *MockActressAliasRepositoryInterface) Delete(ctx context.Context, aliasName string) error {
+	ret := _mock.Called(ctx, aliasName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string) error); ok {
-		r0 = returnFunc(aliasName)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, aliasName)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -110,19 +118,25 @@ type MockActressAliasRepositoryInterface_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
+//   - ctx context.Context
 //   - aliasName string
-func (_e *MockActressAliasRepositoryInterface_Expecter) Delete(aliasName interface{}) *MockActressAliasRepositoryInterface_Delete_Call {
-	return &MockActressAliasRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", aliasName)}
+func (_e *MockActressAliasRepositoryInterface_Expecter) Delete(ctx interface{}, aliasName interface{}) *MockActressAliasRepositoryInterface_Delete_Call {
+	return &MockActressAliasRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, aliasName)}
 }
 
-func (_c *MockActressAliasRepositoryInterface_Delete_Call) Run(run func(aliasName string)) *MockActressAliasRepositoryInterface_Delete_Call {
+func (_c *MockActressAliasRepositoryInterface_Delete_Call) Run(run func(ctx context.Context, aliasName string)) *MockActressAliasRepositoryInterface_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -133,14 +147,14 @@ func (_c *MockActressAliasRepositoryInterface_Delete_Call) Return(err error) *Mo
 	return _c
 }
 
-func (_c *MockActressAliasRepositoryInterface_Delete_Call) RunAndReturn(run func(aliasName string) error) *MockActressAliasRepositoryInterface_Delete_Call {
+func (_c *MockActressAliasRepositoryInterface_Delete_Call) RunAndReturn(run func(ctx context.Context, aliasName string) error) *MockActressAliasRepositoryInterface_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByAliasName provides a mock function for the type MockActressAliasRepositoryInterface
-func (_mock *MockActressAliasRepositoryInterface) FindByAliasName(aliasName string) (*models.ActressAlias, error) {
-	ret := _mock.Called(aliasName)
+func (_mock *MockActressAliasRepositoryInterface) FindByAliasName(ctx context.Context, aliasName string) (*models.ActressAlias, error) {
+	ret := _mock.Called(ctx, aliasName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByAliasName")
@@ -148,18 +162,18 @@ func (_mock *MockActressAliasRepositoryInterface) FindByAliasName(aliasName stri
 
 	var r0 *models.ActressAlias
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*models.ActressAlias, error)); ok {
-		return returnFunc(aliasName)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*models.ActressAlias, error)); ok {
+		return returnFunc(ctx, aliasName)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *models.ActressAlias); ok {
-		r0 = returnFunc(aliasName)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *models.ActressAlias); ok {
+		r0 = returnFunc(ctx, aliasName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.ActressAlias)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(aliasName)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, aliasName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -172,19 +186,25 @@ type MockActressAliasRepositoryInterface_FindByAliasName_Call struct {
 }
 
 // FindByAliasName is a helper method to define mock.On call
+//   - ctx context.Context
 //   - aliasName string
-func (_e *MockActressAliasRepositoryInterface_Expecter) FindByAliasName(aliasName interface{}) *MockActressAliasRepositoryInterface_FindByAliasName_Call {
-	return &MockActressAliasRepositoryInterface_FindByAliasName_Call{Call: _e.mock.On("FindByAliasName", aliasName)}
+func (_e *MockActressAliasRepositoryInterface_Expecter) FindByAliasName(ctx interface{}, aliasName interface{}) *MockActressAliasRepositoryInterface_FindByAliasName_Call {
+	return &MockActressAliasRepositoryInterface_FindByAliasName_Call{Call: _e.mock.On("FindByAliasName", ctx, aliasName)}
 }
 
-func (_c *MockActressAliasRepositoryInterface_FindByAliasName_Call) Run(run func(aliasName string)) *MockActressAliasRepositoryInterface_FindByAliasName_Call {
+func (_c *MockActressAliasRepositoryInterface_FindByAliasName_Call) Run(run func(ctx context.Context, aliasName string)) *MockActressAliasRepositoryInterface_FindByAliasName_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -195,14 +215,14 @@ func (_c *MockActressAliasRepositoryInterface_FindByAliasName_Call) Return(actre
 	return _c
 }
 
-func (_c *MockActressAliasRepositoryInterface_FindByAliasName_Call) RunAndReturn(run func(aliasName string) (*models.ActressAlias, error)) *MockActressAliasRepositoryInterface_FindByAliasName_Call {
+func (_c *MockActressAliasRepositoryInterface_FindByAliasName_Call) RunAndReturn(run func(ctx context.Context, aliasName string) (*models.ActressAlias, error)) *MockActressAliasRepositoryInterface_FindByAliasName_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByCanonicalName provides a mock function for the type MockActressAliasRepositoryInterface
-func (_mock *MockActressAliasRepositoryInterface) FindByCanonicalName(canonicalName string) ([]models.ActressAlias, error) {
-	ret := _mock.Called(canonicalName)
+func (_mock *MockActressAliasRepositoryInterface) FindByCanonicalName(ctx context.Context, canonicalName string) ([]models.ActressAlias, error) {
+	ret := _mock.Called(ctx, canonicalName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByCanonicalName")
@@ -210,18 +230,18 @@ func (_mock *MockActressAliasRepositoryInterface) FindByCanonicalName(canonicalN
 
 	var r0 []models.ActressAlias
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) ([]models.ActressAlias, error)); ok {
-		return returnFunc(canonicalName)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]models.ActressAlias, error)); ok {
+		return returnFunc(ctx, canonicalName)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) []models.ActressAlias); ok {
-		r0 = returnFunc(canonicalName)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []models.ActressAlias); ok {
+		r0 = returnFunc(ctx, canonicalName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.ActressAlias)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(canonicalName)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, canonicalName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -234,19 +254,25 @@ type MockActressAliasRepositoryInterface_FindByCanonicalName_Call struct {
 }
 
 // FindByCanonicalName is a helper method to define mock.On call
+//   - ctx context.Context
 //   - canonicalName string
-func (_e *MockActressAliasRepositoryInterface_Expecter) FindByCanonicalName(canonicalName interface{}) *MockActressAliasRepositoryInterface_FindByCanonicalName_Call {
-	return &MockActressAliasRepositoryInterface_FindByCanonicalName_Call{Call: _e.mock.On("FindByCanonicalName", canonicalName)}
+func (_e *MockActressAliasRepositoryInterface_Expecter) FindByCanonicalName(ctx interface{}, canonicalName interface{}) *MockActressAliasRepositoryInterface_FindByCanonicalName_Call {
+	return &MockActressAliasRepositoryInterface_FindByCanonicalName_Call{Call: _e.mock.On("FindByCanonicalName", ctx, canonicalName)}
 }
 
-func (_c *MockActressAliasRepositoryInterface_FindByCanonicalName_Call) Run(run func(canonicalName string)) *MockActressAliasRepositoryInterface_FindByCanonicalName_Call {
+func (_c *MockActressAliasRepositoryInterface_FindByCanonicalName_Call) Run(run func(ctx context.Context, canonicalName string)) *MockActressAliasRepositoryInterface_FindByCanonicalName_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -257,14 +283,14 @@ func (_c *MockActressAliasRepositoryInterface_FindByCanonicalName_Call) Return(a
 	return _c
 }
 
-func (_c *MockActressAliasRepositoryInterface_FindByCanonicalName_Call) RunAndReturn(run func(canonicalName string) ([]models.ActressAlias, error)) *MockActressAliasRepositoryInterface_FindByCanonicalName_Call {
+func (_c *MockActressAliasRepositoryInterface_FindByCanonicalName_Call) RunAndReturn(run func(ctx context.Context, canonicalName string) ([]models.ActressAlias, error)) *MockActressAliasRepositoryInterface_FindByCanonicalName_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetAliasMap provides a mock function for the type MockActressAliasRepositoryInterface
-func (_mock *MockActressAliasRepositoryInterface) GetAliasMap() (map[string]string, error) {
-	ret := _mock.Called()
+func (_mock *MockActressAliasRepositoryInterface) GetAliasMap(ctx context.Context) (map[string]string, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAliasMap")
@@ -272,18 +298,18 @@ func (_mock *MockActressAliasRepositoryInterface) GetAliasMap() (map[string]stri
 
 	var r0 map[string]string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (map[string]string, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (map[string]string, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() map[string]string); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) map[string]string); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]string)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -296,13 +322,20 @@ type MockActressAliasRepositoryInterface_GetAliasMap_Call struct {
 }
 
 // GetAliasMap is a helper method to define mock.On call
-func (_e *MockActressAliasRepositoryInterface_Expecter) GetAliasMap() *MockActressAliasRepositoryInterface_GetAliasMap_Call {
-	return &MockActressAliasRepositoryInterface_GetAliasMap_Call{Call: _e.mock.On("GetAliasMap")}
+//   - ctx context.Context
+func (_e *MockActressAliasRepositoryInterface_Expecter) GetAliasMap(ctx interface{}) *MockActressAliasRepositoryInterface_GetAliasMap_Call {
+	return &MockActressAliasRepositoryInterface_GetAliasMap_Call{Call: _e.mock.On("GetAliasMap", ctx)}
 }
 
-func (_c *MockActressAliasRepositoryInterface_GetAliasMap_Call) Run(run func()) *MockActressAliasRepositoryInterface_GetAliasMap_Call {
+func (_c *MockActressAliasRepositoryInterface_GetAliasMap_Call) Run(run func(ctx context.Context)) *MockActressAliasRepositoryInterface_GetAliasMap_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -312,14 +345,14 @@ func (_c *MockActressAliasRepositoryInterface_GetAliasMap_Call) Return(stringToS
 	return _c
 }
 
-func (_c *MockActressAliasRepositoryInterface_GetAliasMap_Call) RunAndReturn(run func() (map[string]string, error)) *MockActressAliasRepositoryInterface_GetAliasMap_Call {
+func (_c *MockActressAliasRepositoryInterface_GetAliasMap_Call) RunAndReturn(run func(ctx context.Context) (map[string]string, error)) *MockActressAliasRepositoryInterface_GetAliasMap_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // List provides a mock function for the type MockActressAliasRepositoryInterface
-func (_mock *MockActressAliasRepositoryInterface) List() ([]models.ActressAlias, error) {
-	ret := _mock.Called()
+func (_mock *MockActressAliasRepositoryInterface) List(ctx context.Context) ([]models.ActressAlias, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -327,18 +360,18 @@ func (_mock *MockActressAliasRepositoryInterface) List() ([]models.ActressAlias,
 
 	var r0 []models.ActressAlias
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() ([]models.ActressAlias, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]models.ActressAlias, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() []models.ActressAlias); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []models.ActressAlias); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.ActressAlias)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -351,13 +384,20 @@ type MockActressAliasRepositoryInterface_List_Call struct {
 }
 
 // List is a helper method to define mock.On call
-func (_e *MockActressAliasRepositoryInterface_Expecter) List() *MockActressAliasRepositoryInterface_List_Call {
-	return &MockActressAliasRepositoryInterface_List_Call{Call: _e.mock.On("List")}
+//   - ctx context.Context
+func (_e *MockActressAliasRepositoryInterface_Expecter) List(ctx interface{}) *MockActressAliasRepositoryInterface_List_Call {
+	return &MockActressAliasRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx)}
 }
 
-func (_c *MockActressAliasRepositoryInterface_List_Call) Run(run func()) *MockActressAliasRepositoryInterface_List_Call {
+func (_c *MockActressAliasRepositoryInterface_List_Call) Run(run func(ctx context.Context)) *MockActressAliasRepositoryInterface_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -367,22 +407,22 @@ func (_c *MockActressAliasRepositoryInterface_List_Call) Return(actressAliass []
 	return _c
 }
 
-func (_c *MockActressAliasRepositoryInterface_List_Call) RunAndReturn(run func() ([]models.ActressAlias, error)) *MockActressAliasRepositoryInterface_List_Call {
+func (_c *MockActressAliasRepositoryInterface_List_Call) RunAndReturn(run func(ctx context.Context) ([]models.ActressAlias, error)) *MockActressAliasRepositoryInterface_List_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Upsert provides a mock function for the type MockActressAliasRepositoryInterface
-func (_mock *MockActressAliasRepositoryInterface) Upsert(alias *models.ActressAlias) error {
-	ret := _mock.Called(alias)
+func (_mock *MockActressAliasRepositoryInterface) Upsert(ctx context.Context, alias *models.ActressAlias) error {
+	ret := _mock.Called(ctx, alias)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.ActressAlias) error); ok {
-		r0 = returnFunc(alias)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.ActressAlias) error); ok {
+		r0 = returnFunc(ctx, alias)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -395,19 +435,25 @@ type MockActressAliasRepositoryInterface_Upsert_Call struct {
 }
 
 // Upsert is a helper method to define mock.On call
+//   - ctx context.Context
 //   - alias *models.ActressAlias
-func (_e *MockActressAliasRepositoryInterface_Expecter) Upsert(alias interface{}) *MockActressAliasRepositoryInterface_Upsert_Call {
-	return &MockActressAliasRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", alias)}
+func (_e *MockActressAliasRepositoryInterface_Expecter) Upsert(ctx interface{}, alias interface{}) *MockActressAliasRepositoryInterface_Upsert_Call {
+	return &MockActressAliasRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, alias)}
 }
 
-func (_c *MockActressAliasRepositoryInterface_Upsert_Call) Run(run func(alias *models.ActressAlias)) *MockActressAliasRepositoryInterface_Upsert_Call {
+func (_c *MockActressAliasRepositoryInterface_Upsert_Call) Run(run func(ctx context.Context, alias *models.ActressAlias)) *MockActressAliasRepositoryInterface_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.ActressAlias
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.ActressAlias)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.ActressAlias
+		if args[1] != nil {
+			arg1 = args[1].(*models.ActressAlias)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -418,7 +464,7 @@ func (_c *MockActressAliasRepositoryInterface_Upsert_Call) Return(err error) *Mo
 	return _c
 }
 
-func (_c *MockActressAliasRepositoryInterface_Upsert_Call) RunAndReturn(run func(alias *models.ActressAlias) error) *MockActressAliasRepositoryInterface_Upsert_Call {
+func (_c *MockActressAliasRepositoryInterface_Upsert_Call) RunAndReturn(run func(ctx context.Context, alias *models.ActressAlias) error) *MockActressAliasRepositoryInterface_Upsert_Call {
 	_c.Call.Return(run)
 	return _c
 }

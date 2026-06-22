@@ -1,8 +1,11 @@
 package database
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"gorm.io/gorm"
@@ -12,302 +15,80 @@ import (
 const (
 	MergeResolutionTarget = "target"
 	MergeResolutionSource = "source"
+	resolutionTarget      = "target"
 )
 
-// mergeFieldDecision validates and normalizes a merge field decision.
-// Returns "target" or "source" based on the decision string.
-// Empty/whitespace or "target" returns "target", "source" returns "source".
-func mergeFieldDecision(decision string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(decision)) {
-	case "", "target":
-		return "target", nil
-	case "source":
-		return "source", nil
-	default:
-		return "", fmt.Errorf("%w: %s", ErrActressMergeInvalidDecision, decision)
-	}
+var (
+	ErrActressMergeSameID           = errors.New("target_id and source_id must be different")
+	ErrActressMergeInvalidID        = errors.New("target_id and source_id must be greater than 0")
+	ErrActressMergeUniqueConstraint = errors.New("merge would violate unique constraints")
+)
+
+// ActressMergeConflict describes a single field conflict between two actresses being merged.
+type ActressMergeConflict struct {
+	Field             string `json:"field"`
+	TargetValue       any    `json:"target_value,omitempty"`
+	SourceValue       any    `json:"source_value,omitempty"`
+	DefaultResolution string `json:"default_resolution"`
 }
 
-// normalizeMergeResolutions normalizes merge resolution map by validating
-// field names and decision values. Returns normalized map or error.
-func normalizeMergeResolutions(resolutions map[string]string) (map[string]string, error) {
-	normalized := make(map[string]string)
-	allowed := map[string]bool{
-		"dmm_id":        true,
-		"first_name":    true,
-		"last_name":     true,
-		"japanese_name": true,
-		"thumb_url":     true,
-	}
-
-	for field, decision := range resolutions {
-		field = strings.ToLower(strings.TrimSpace(field))
-		if !allowed[field] {
-			return nil, fmt.Errorf("%w: %s", ErrActressMergeInvalidField, field)
-		}
-		normalizedDecision, err := mergeFieldDecision(decision)
-		if err != nil {
-			return nil, err
-		}
-		normalized[field] = normalizedDecision
-	}
-
-	return normalized, nil
+// ActressMergePreview holds the preview of a merge operation before execution.
+type ActressMergePreview struct {
+	Target             models.Actress                  `json:"target"`
+	Source             models.Actress                  `json:"source"`
+	ProposedMerged     models.Actress                  `json:"proposed_merged"`
+	Conflicts          []ActressMergeConflict          `json:"conflicts"`
+	DefaultResolutions map[string]string               `json:"default_resolutions"`
+	ConflictByField    map[string]ActressMergeConflict `json:"-"`
 }
 
-// nonEmptyString returns true if the string has non-whitespace content.
-func nonEmptyString(v string) bool {
-	return strings.TrimSpace(v) != ""
+// ActressMergeResult holds the result of a completed merge operation.
+type ActressMergeResult struct {
+	MergedActress     models.Actress `json:"merged_actress"`
+	MergedFromID      uint           `json:"merged_from_id"`
+	UpdatedMovies     int            `json:"updated_movies"`
+	ConflictsResolved int            `json:"conflicts_resolved"`
+	AliasesAdded      int            `json:"aliases_added"`
 }
 
-// appendConflict adds a conflict to the list with the given field and values.
-func appendConflict(conflicts []ActressMergeConflict, field string, targetValue, sourceValue interface{}) []ActressMergeConflict {
-	conflicts = append(conflicts, ActressMergeConflict{
-		Field:             field,
-		TargetValue:       targetValue,
-		SourceValue:       sourceValue,
-		DefaultResolution: "target",
-	})
-	return conflicts
+// MergePlan captures the computed merge state: merged values, conflict resolutions,
+// and alias candidates. It is produced by PlanMerge and consumed by ExecuteMerge,
+// separating the "what to merge" decision from the "how to execute" side effect.
+type MergePlan struct {
+	TargetID           uint
+	SourceID           uint
+	Merged             models.Actress
+	CanonicalName      string
+	AliasesAdded       int
+	SourceAliasUpserts []string
+	ConflictsResolved  int
 }
 
-// buildActressMergeConflicts compares target and source actresses and returns
-// a list of conflicting fields (where both have values that differ).
-func buildActressMergeConflicts(target, source *models.Actress) []ActressMergeConflict {
-	conflicts := make([]ActressMergeConflict, 0)
-
-	if target.DMMID > 0 && source.DMMID > 0 && target.DMMID != source.DMMID {
-		conflicts = appendConflict(conflicts, "dmm_id", target.DMMID, source.DMMID)
-	}
-	if nonEmptyString(target.FirstName) && nonEmptyString(source.FirstName) && target.FirstName != source.FirstName {
-		conflicts = appendConflict(conflicts, "first_name", target.FirstName, source.FirstName)
-	}
-	if nonEmptyString(target.LastName) && nonEmptyString(source.LastName) && target.LastName != source.LastName {
-		conflicts = appendConflict(conflicts, "last_name", target.LastName, source.LastName)
-	}
-	if nonEmptyString(target.JapaneseName) && nonEmptyString(source.JapaneseName) && target.JapaneseName != source.JapaneseName {
-		conflicts = appendConflict(conflicts, "japanese_name", target.JapaneseName, source.JapaneseName)
-	}
-	if nonEmptyString(target.ThumbURL) && nonEmptyString(source.ThumbURL) && target.ThumbURL != source.ThumbURL {
-		conflicts = appendConflict(conflicts, "thumb_url", target.ThumbURL, source.ThumbURL)
-	}
-
-	return conflicts
-}
-
-// defaultResolutionsFromConflicts creates a resolution map where all conflicts
-// default to "target" (keep target value).
-func defaultResolutionsFromConflicts(conflicts []ActressMergeConflict) map[string]string {
-	resolutions := make(map[string]string, len(conflicts))
-	for _, conflict := range conflicts {
-		resolutions[conflict.Field] = "target"
-	}
-	return resolutions
-}
-
-// canonicalActressName returns the canonical name for an actress.
-// Priority: JapaneseName > FullName() > FirstName > LastName.
-func canonicalActressName(actress *models.Actress) string {
-	if nonEmptyString(actress.JapaneseName) {
-		return strings.TrimSpace(actress.JapaneseName)
-	}
-	fullName := strings.TrimSpace(actress.FullName())
-	if fullName != "" {
-		return fullName
-	}
-	if nonEmptyString(actress.FirstName) {
-		return strings.TrimSpace(actress.FirstName)
-	}
-	return strings.TrimSpace(actress.LastName)
-}
-
-// splitAliasList splits a pipe-separated alias string into individual aliases.
-// Empty strings are filtered out.
-func splitAliasList(raw string) []string {
-	parts := strings.Split(raw, "|")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		out = append(out, part)
-	}
-	return out
-}
-
-// collectActressAliasCandidates collects all possible alias candidates from an actress.
-// Includes explicit aliases, JapaneseName, and name variations.
-func collectActressAliasCandidates(actress *models.Actress) []string {
-	candidates := make([]string, 0, 8)
-	candidates = append(candidates, splitAliasList(actress.Aliases)...)
-
-	if nonEmptyString(actress.JapaneseName) {
-		candidates = append(candidates, strings.TrimSpace(actress.JapaneseName))
-	}
-	if nonEmptyString(actress.FirstName) && nonEmptyString(actress.LastName) {
-		candidates = append(candidates, strings.TrimSpace(actress.LastName+" "+actress.FirstName))
-		candidates = append(candidates, strings.TrimSpace(actress.FirstName+" "+actress.LastName))
-	} else {
-		if nonEmptyString(actress.FirstName) {
-			candidates = append(candidates, strings.TrimSpace(actress.FirstName))
-		}
-		if nonEmptyString(actress.LastName) {
-			candidates = append(candidates, strings.TrimSpace(actress.LastName))
-		}
-	}
-
-	return candidates
-}
-
-// mergeAliasValues merges source alias candidates into target aliases.
-// Returns merged alias string, count of added aliases, and list of added aliases.
-func mergeAliasValues(targetAliases string, sourceCandidates []string, canonicalName string) (string, int, []string) {
-	seen := make(map[string]bool)
-	merged := make([]string, 0)
-	addedFromSource := make([]string, 0)
-
-	for _, alias := range splitAliasList(targetAliases) {
-		key := strings.ToLower(strings.TrimSpace(alias))
-		if key == "" || seen[key] {
-			continue
-		}
-		seen[key] = true
-		merged = append(merged, strings.TrimSpace(alias))
-	}
-
-	addedCount := 0
-	canonicalKey := strings.ToLower(strings.TrimSpace(canonicalName))
-	for _, alias := range sourceCandidates {
-		alias = strings.TrimSpace(alias)
-		key := strings.ToLower(alias)
-		if key == "" || key == canonicalKey || seen[key] {
-			continue
-		}
-		seen[key] = true
-		merged = append(merged, alias)
-		addedFromSource = append(addedFromSource, alias)
-		addedCount++
-	}
-
-	return strings.Join(merged, "|"), addedCount, addedFromSource
-}
-
-// sourceAliasesForUpsert filters source candidates to return only aliases that
-// should be upserted (excluding canonical name and duplicates).
-func sourceAliasesForUpsert(sourceCandidates []string, canonicalName string) []string {
-	canonicalKey := strings.ToLower(strings.TrimSpace(canonicalName))
-	seen := make(map[string]bool)
-	upserts := make([]string, 0, len(sourceCandidates))
-
-	for _, alias := range sourceCandidates {
-		alias = strings.TrimSpace(alias)
-		key := strings.ToLower(alias)
-		if key == "" || key == canonicalKey || seen[key] {
-			continue
-		}
-		seen[key] = true
-		upserts = append(upserts, alias)
-	}
-
-	return upserts
-}
-
-// mergeActressValues merges source actress into target based on resolutions.
-// Returns merged actress or error if resolution is invalid.
-func mergeActressValues(target, source *models.Actress, resolutions map[string]string) (models.Actress, error) {
-	merged := *target
-
-	conflicts := buildActressMergeConflicts(target, source)
-	conflictSet := make(map[string]bool, len(conflicts))
-	for _, conflict := range conflicts {
-		conflictSet[conflict.Field] = true
-	}
-
-	getDecision := func(field string) (string, error) {
-		if !conflictSet[field] {
-			return "target", nil
-		}
-		decision, err := mergeFieldDecision(resolutions[field])
-		if err != nil {
-			return "", err
-		}
-		return decision, nil
-	}
-
-	decision, err := getDecision("dmm_id")
-	if err != nil {
-		return models.Actress{}, err
-	}
-	switch {
-	case target.DMMID == 0 && source.DMMID > 0:
-		merged.DMMID = source.DMMID
-	case target.DMMID > 0 && source.DMMID > 0 && target.DMMID != source.DMMID:
-		if decision == "source" {
-			merged.DMMID = source.DMMID
-		}
-	}
-
-	decision, err = getDecision("first_name")
-	if err != nil {
-		return models.Actress{}, err
-	}
-	switch {
-	case !nonEmptyString(target.FirstName) && nonEmptyString(source.FirstName):
-		merged.FirstName = strings.TrimSpace(source.FirstName)
-	case nonEmptyString(target.FirstName) && nonEmptyString(source.FirstName) && target.FirstName != source.FirstName:
-		if decision == "source" {
-			merged.FirstName = strings.TrimSpace(source.FirstName)
-		}
-	}
-
-	decision, err = getDecision("last_name")
-	if err != nil {
-		return models.Actress{}, err
-	}
-	switch {
-	case !nonEmptyString(target.LastName) && nonEmptyString(source.LastName):
-		merged.LastName = strings.TrimSpace(source.LastName)
-	case nonEmptyString(target.LastName) && nonEmptyString(source.LastName) && target.LastName != source.LastName:
-		if decision == "source" {
-			merged.LastName = strings.TrimSpace(source.LastName)
-		}
-	}
-
-	decision, err = getDecision("japanese_name")
-	if err != nil {
-		return models.Actress{}, err
-	}
-	switch {
-	case !nonEmptyString(target.JapaneseName) && nonEmptyString(source.JapaneseName):
-		merged.JapaneseName = strings.TrimSpace(source.JapaneseName)
-	case nonEmptyString(target.JapaneseName) && nonEmptyString(source.JapaneseName) && target.JapaneseName != source.JapaneseName:
-		if decision == "source" {
-			merged.JapaneseName = strings.TrimSpace(source.JapaneseName)
-		}
-	}
-
-	decision, err = getDecision("thumb_url")
-	if err != nil {
-		return models.Actress{}, err
-	}
-	switch {
-	case !nonEmptyString(target.ThumbURL) && nonEmptyString(source.ThumbURL):
-		merged.ThumbURL = strings.TrimSpace(source.ThumbURL)
-	case nonEmptyString(target.ThumbURL) && nonEmptyString(source.ThumbURL) && target.ThumbURL != source.ThumbURL:
-		if decision == "source" {
-			merged.ThumbURL = strings.TrimSpace(source.ThumbURL)
-		}
-	}
-
-	return merged, nil
+// actressMerger handles actress merge operations, extracted from ActressRepository
+// to keep the repository focused on CRUD and the merge logic independently testable.
+type actressMerger struct {
+	repo ActressRepositoryInterface
 }
 
 // moveMovieAssociations moves movie associations from source actress to target actress.
 // Returns count of updated movies. Uses the provided transaction.
 func moveMovieAssociations(tx *gorm.DB, sourceID, targetID uint) (int, error) {
+	// Use the join table to find only movies that reference the source actress,
+	// avoiding a full-table scan that loads every movie into memory.
+	var movieContentIDs []string
+	if err := tx.Model(&models.Movie{}).
+		Select("movies.content_id").
+		Joins("JOIN movie_actresses ON movie_actresses.movie_content_id = movies.content_id").
+		Where("movie_actresses.actress_id = ?", sourceID).
+		Pluck("content_id", &movieContentIDs).Error; err != nil {
+		return 0, err
+	}
+	if len(movieContentIDs) == 0 {
+		return 0, nil
+	}
+
 	var movies []models.Movie
-	if err := tx.Preload("Actresses").Find(&movies).Error; err != nil {
+	if err := tx.Preload("Actresses").Where("content_id IN ?", movieContentIDs).Find(&movies).Error; err != nil {
 		return 0, err
 	}
 
@@ -383,4 +164,201 @@ func upsertActressAliases(tx *gorm.DB, aliases []string, canonicalName string) e
 	}
 
 	return nil
+}
+
+// loadPair loads and validates a pair of actresses for merge operations.
+func (m *actressMerger) loadPair(ctx context.Context, targetID, sourceID uint) (*models.Actress, *models.Actress, error) {
+	if targetID == 0 || sourceID == 0 {
+		return nil, nil, ErrActressMergeInvalidID
+	}
+	if targetID == sourceID {
+		return nil, nil, ErrActressMergeSameID
+	}
+
+	target, err := m.repo.FindByID(ctx, targetID)
+	if err != nil {
+		return nil, nil, err
+	}
+	source, err := m.repo.FindByID(ctx, sourceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return target, source, nil
+}
+
+// PreviewMerge previews a merge between two actresses without modifying the database.
+func (m *actressMerger) PreviewMerge(ctx context.Context, targetID, sourceID uint) (*ActressMergePreview, error) {
+	target, source, err := m.loadPair(ctx, targetID, sourceID)
+	if err != nil {
+		return nil, err
+	}
+
+	conflicts := buildActressMergeConflicts(target, source)
+	defaultResolutions := defaultResolutionsFromConflicts(conflicts)
+	merged, err := mergeActressValues(target, source, defaultResolutions)
+	if err != nil {
+		return nil, err
+	}
+
+	canonicalName := canonicalActressName(&merged)
+	merged.Aliases, _, _ = mergeAliasValues(target.Aliases, collectActressAliasCandidates(source), canonicalName) // 3rd return (added aliases) not needed at call site
+
+	byField := make(map[string]ActressMergeConflict, len(conflicts))
+	for _, conflict := range conflicts {
+		byField[conflict.Field] = conflict
+	}
+
+	return &ActressMergePreview{
+		Target:             *target,
+		Source:             *source,
+		ProposedMerged:     merged,
+		Conflicts:          conflicts,
+		DefaultResolutions: defaultResolutions,
+		ConflictByField:    byField,
+	}, nil
+}
+
+// PlanMerge computes a MergePlan by resolving field conflicts and alias candidates
+// without touching the database. It returns the plan ready for ExecuteMerge.
+func (m *actressMerger) PlanMerge(ctx context.Context, targetID, sourceID uint, resolutions map[string]string) (*MergePlan, error) {
+	preview, err := m.PreviewMerge(ctx, targetID, sourceID)
+	if err != nil {
+		return nil, err
+	}
+
+	normalizedResolutions, err := normalizeMergeResolutions(resolutions)
+	if err != nil {
+		return nil, err
+	}
+	for _, conflict := range preview.Conflicts {
+		if _, exists := normalizedResolutions[conflict.Field]; !exists {
+			normalizedResolutions[conflict.Field] = resolutionTarget
+		}
+	}
+
+	merged, err := mergeActressValues(&preview.Target, &preview.Source, normalizedResolutions)
+	if err != nil {
+		return nil, err
+	}
+
+	canonicalName := canonicalActressName(&merged)
+	aliasesAdded := 0
+	sourceCandidates := collectActressAliasCandidates(&preview.Source)
+	merged.Aliases, aliasesAdded, _ = mergeAliasValues(
+		preview.Target.Aliases,
+		sourceCandidates,
+		canonicalName,
+	)
+	sourceAliasUpserts := sourceAliasesForUpsert(sourceCandidates, canonicalName)
+
+	return &MergePlan{
+		TargetID:           targetID,
+		SourceID:           sourceID,
+		Merged:             merged,
+		CanonicalName:      canonicalName,
+		AliasesAdded:       aliasesAdded,
+		SourceAliasUpserts: sourceAliasUpserts,
+		ConflictsResolved:  len(preview.Conflicts),
+	}, nil
+}
+
+// ExecuteMerge applies a precomputed MergePlan to the database within a transaction.
+// It performs the actual row updates, association moves, alias upserts, and source deletion.
+// The db parameter provides the database connection for the transaction boundary.
+func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *DB) (*ActressMergeResult, error) {
+	targetID := plan.TargetID
+	sourceID := plan.SourceID
+	merged := plan.Merged
+
+	updatedMovies := 0
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if merged.DMMID > 0 {
+			var existing models.Actress
+			checkErr := tx.Where("dmm_id = ? AND id NOT IN ?", merged.DMMID, []uint{targetID, sourceID}).First(&existing).Error
+			if checkErr == nil {
+				return fmt.Errorf("%w: dmm_id %d is already used by actress #%d", ErrActressMergeUniqueConstraint, merged.DMMID, existing.ID)
+			}
+			if checkErr != nil && !errors.Is(checkErr, gorm.ErrRecordNotFound) {
+				return wrapDBErr("find", fmt.Sprintf("actress by dmm_id %d for merge", merged.DMMID), checkErr)
+			}
+		}
+
+		// Load source to check whether DMMID swap is needed
+		source, err := m.repo.FindByID(ctx, sourceID)
+		if err != nil {
+			return err
+		}
+		if merged.DMMID > 0 && merged.DMMID == source.DMMID {
+			target, err := m.repo.FindByID(ctx, targetID)
+			if err != nil {
+				return err
+			}
+			if target.DMMID != source.DMMID {
+				tempDMMID := -int(sourceID)
+				if tempDMMID == 0 {
+					tempDMMID = -1
+				}
+				if err := tx.Model(&models.Actress{}).Where("id = ?", sourceID).Update("dmm_id", tempDMMID).Error; err != nil {
+					return wrapDBErr("update", fmt.Sprintf("merge actress %d temp dmm_id", sourceID), err)
+				}
+			}
+		}
+
+		if err := tx.Model(&models.Actress{}).Where("id = ?", targetID).Updates(map[string]any{
+			"dmm_id":        merged.DMMID,
+			"first_name":    merged.FirstName,
+			"last_name":     merged.LastName,
+			"japanese_name": merged.JapaneseName,
+			"thumb_url":     merged.ThumbURL,
+			"aliases":       merged.Aliases,
+			"updated_at":    time.Now().UTC(),
+		}).Error; err != nil {
+			if errors.Is(err, gorm.ErrDuplicatedKey) {
+				return ErrActressMergeUniqueConstraint
+			}
+			return wrapDBErr("update", fmt.Sprintf("merge actress %d", targetID), err)
+		}
+
+		var moveErr error
+		updatedMovies, moveErr = moveMovieAssociations(tx, sourceID, targetID)
+		if moveErr != nil {
+			return wrapDBErr("merge", fmt.Sprintf("actress movie associations from %d to %d", sourceID, targetID), moveErr)
+		}
+
+		if err := upsertActressAliases(tx, plan.SourceAliasUpserts, plan.CanonicalName); err != nil {
+			return wrapDBErr("merge", fmt.Sprintf("actress aliases for %s", plan.CanonicalName), err)
+		}
+
+		if err := tx.Delete(&models.Actress{}, sourceID).Error; err != nil {
+			return wrapDBErr("delete", fmt.Sprintf("merge source actress %d", sourceID), err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	mergedRecord, err := m.repo.FindByID(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ActressMergeResult{
+		MergedActress:     *mergedRecord,
+		MergedFromID:      sourceID,
+		UpdatedMovies:     updatedMovies,
+		ConflictsResolved: plan.ConflictsResolved,
+		AliasesAdded:      plan.AliasesAdded,
+	}, nil
+}
+
+// Merge computes a merge plan and executes it in one call.
+// For finer control, use PlanMerge + ExecuteMerge separately.
+func (m *actressMerger) Merge(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, db *DB) (*ActressMergeResult, error) {
+	plan, err := m.PlanMerge(ctx, targetID, sourceID, resolutions)
+	if err != nil {
+		return nil, err
+	}
+	return m.ExecuteMerge(ctx, plan, db)
 }

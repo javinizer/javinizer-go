@@ -124,16 +124,16 @@
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
 				Content ID
-				{#if sourceText('content_id')}
-					<span class="text-xs font-normal text-muted-foreground">{sourceText('content_id')}</span>
+				{#if sourceText('code')}
+					<span class="text-xs font-normal text-muted-foreground">{sourceText('code')}</span>
 				{/if}
-				{#if isModified('content_id')}
+				{#if isModified('code')}
 					<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400" />
 				{/if}
 			</label>
 			<input
 				type="text"
-				bind:value={editedMovie.content_id}
+				bind:value={editedMovie.code}
 				onchange={() => onUpdate(editedMovie)}
 				class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 			/>

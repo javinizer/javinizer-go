@@ -1,6 +1,7 @@
 package nfo_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -40,11 +41,19 @@ func ExampleGenerator_Generate() {
 	}
 
 	// Create generator with default config
-	gen := nfo.NewGenerator(afero.NewOsFs(), nfo.DefaultConfig())
+	gen := nfo.NewGenerator(afero.NewOsFs(), &nfo.Config{
+		FirstNameOrder:     true,
+		UnknownActressText: "Unknown",
+		UnknownActressMode: models.UnknownActressModeSkip,
+		FilenameTemplate:   "<ID>.nfo",
+		IncludeFanart:      true,
+		IncludeTrailer:     true,
+		RatingSource:       "themoviedb",
+	})
 
 	// Generate NFO file (no part suffix for single file)
 	tmpDir := os.TempDir()
-	err := gen.Generate(movie, tmpDir, "", "")
+	err := gen.Generate(context.Background(), movie, tmpDir, "", "", nil)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -54,47 +63,9 @@ func ExampleGenerator_Generate() {
 	// Output: NFO generated successfully
 }
 
-// ExampleGenerator_MovieToNFO demonstrates converting a Movie to NFO structure
-func ExampleGenerator_MovieToNFO() {
-	releaseDate := time.Date(2020, 9, 13, 0, 0, 0, 0, time.UTC)
-	movie := &models.Movie{
-		ID:          "IPX-535",
-		Title:       "Beautiful Day",
-		ReleaseDate: &releaseDate,
-		Runtime:     120,
-		Maker:       "IdeaPocket",
-	}
-
-	gen := nfo.NewGenerator(afero.NewOsFs(), nfo.DefaultConfig())
-	nfoMovie := gen.MovieToNFO(movie, "")
-
-	fmt.Printf("ID: %s\n", nfoMovie.ID)
-	fmt.Printf("Title: %s\n", nfoMovie.Title)
-	fmt.Printf("Year: %d\n", nfoMovie.Year)
-	fmt.Printf("Runtime: %d\n", nfoMovie.Runtime)
-	fmt.Printf("Studio: %s\n", nfoMovie.Studio)
-
-	// Output:
-	// ID: IPX-535
-	// Title: Beautiful Day
-	// Year: 2020
-	// Runtime: 120
-	// Studio: IdeaPocket
-}
-
-// ExampleConfigFromAppConfig demonstrates config conversion
-func ExampleConfigFromAppConfig() {
-	// Application config would typically come from config.yaml
-	appCfg := &struct {
-		FilenameTemplate     string
-		FirstNameOrder       bool
-		ActressLanguageJA    bool
-		UnknownActressText   string
-		IncludeFanart        bool
-		IncludeTrailer       bool
-		RatingSource         string
-		IncludeStreamDetails bool
-	}{
+// ExampleConfig demonstrates constructing an nfo.Config struct
+func ExampleConfig() {
+	cfg := &nfo.Config{
 		FilenameTemplate:     "<ID>.nfo",
 		FirstNameOrder:       true,
 		ActressLanguageJA:    false,
@@ -105,9 +76,9 @@ func ExampleConfigFromAppConfig() {
 		IncludeStreamDetails: false,
 	}
 
-	fmt.Printf("Filename template: %s\n", appCfg.FilenameTemplate)
-	fmt.Printf("Use Japanese names: %v\n", appCfg.ActressLanguageJA)
-	fmt.Printf("Include fanart: %v\n", appCfg.IncludeFanart)
+	fmt.Printf("Filename template: %s\n", cfg.FilenameTemplate)
+	fmt.Printf("Use Japanese names: %v\n", cfg.ActressLanguageJA)
+	fmt.Printf("Include fanart: %v\n", cfg.IncludeFanart)
 
 	// Output:
 	// Filename template: <ID>.nfo

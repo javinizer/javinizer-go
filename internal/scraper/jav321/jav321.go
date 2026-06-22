@@ -3,6 +3,7 @@ package jav321
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -12,7 +13,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/challengedetect"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -28,22 +29,25 @@ var (
 	idRegex          = regexp.MustCompile(`([A-Za-z]+-?\d+[A-Za-z]?)`)
 	runtimeRegex     = regexp.MustCompile(`(\d+)\s*(?:minutes|min|分)?`)
 	releaseDateRegex = regexp.MustCompile(`(\d{4}-\d{2}-\d{2})`)
+	stripTagsRegex   = regexp.MustCompile(`(?s)<[^>]*>`)
+	linkRegex        = regexp.MustCompile(`(?is)<a[^>]*>(.*?)</a>`)
 )
 
-// Scraper implements the Jav321 scraper.
-type Scraper struct {
+// scraper implements the Jav321 scraper.
+type scraper struct {
 	client        *resty.Client
 	enabled       bool
 	baseURL       string
-	proxyOverride *config.ProxyConfig
-	downloadProxy *config.ProxyConfig
+	proxyOverride *models.ProxyConfig
+	downloadProxy *models.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings // stores the full settings for Config() method
+	settings      models.ScraperSettings // stores the full settings for Config() method
 }
 
 // New creates a new Jav321 scraper.
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+// newScraper creates a new Jav321 scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
 			httpclient.StandardHTMLHeaders(),
 			httpclient.UserAgentHeader(settings.UserAgent),
@@ -58,14 +62,14 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	}
 	base = strings.TrimRight(base, "/")
 
-	s := &Scraper{
+	s := &scraper{
 		client:        client,
 		enabled:       settings.Enabled,
 		baseURL:       base,
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
-		settings:      settings,
+		settings:      *settings,
 	}
 
 	if result.ProxyEnabled && strings.TrimSpace(result.ProxyProfile.URL) != "" {
@@ -76,39 +80,40 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 }
 
 // Name returns the scraper identifier.
-func (s *Scraper) Name() string { return "jav321" }
+func (s *scraper) Name() string { return "jav321" }
 
 // IsEnabled returns whether scraper is enabled.
-func (s *Scraper) IsEnabled() bool { return s.enabled }
+func (s *scraper) IsEnabled() bool { return s.enabled }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	return nil
 }
 
 // ResolveDownloadProxyForHost declares Jav321-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
 	}
 	if host == "jav321.com" || strings.HasSuffix(host, ".jav321.com") {
-		return s.downloadProxy, s.proxyOverride, true
+		return s.settings.DownloadProxy, s.settings.Proxy, true
 	}
 	return nil, nil, false
 }
 
 // GetURL returns the detail page URL for an ID.
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -183,7 +188,7 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	return "", models.NewScraperNotFoundError("Jav321", fmt.Sprintf("movie %s not found on Jav321", id))
 }
 
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -192,7 +197,7 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 	return host == "jav321.com" || strings.HasSuffix(host, ".jav321.com")
 }
 
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse URL: %w", err)
@@ -208,7 +213,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from URL")
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("Jav321", "URL not handled by Jav321 scraper")
 	}
@@ -226,7 +231,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, models.NewScraperNotFoundError("Jav321", "page not found")
 	}
 	if status == 429 {
-		return nil, models.NewScraperStatusError("Jav321", 429, "rate limited")
+		return nil, models.NewScraperStatusError("Jav321", http.StatusTooManyRequests, "rate limited")
 	}
 	if status == 403 || status == 451 {
 		return nil, models.NewScraperStatusError("Jav321", status, "access blocked")
@@ -244,7 +249,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 }
 
 // Search searches and extracts metadata with context support.
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("Jav321 scraper is disabled")
 	}
@@ -268,6 +273,12 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	}
 
 	return parseDetailPage(doc, detailURL, id), nil
+}
+
+// ParseHTML parses a JAV321 detail page from a goquery.Document.
+// This is the documented parsing seam for testing.
+func ParseHTML(doc *goquery.Document, sourceURL string) *models.ScraperResult {
+	return parseDetailPage(doc, sourceURL, "")
 }
 
 func parseDetailPage(doc *goquery.Document, sourceURL, fallbackID string) *models.ScraperResult {
@@ -340,7 +351,8 @@ func parseDetailPage(doc *goquery.Document, sourceURL, fallbackID string) *model
 
 func extractLabeledValue(html string, labels []string) string {
 	for _, label := range labels {
-		re := regexp.MustCompile(`(?is)<b>\s*` + regexp.QuoteMeta(label) + `\s*</b>\s*:\s*(.*?)<br`) //nolint:gocritic
+		// Dynamic pattern: label is a runtime parameter, cannot pre-compile
+		re := regexp.MustCompile(`(?is)<b>\s*` + regexp.QuoteMeta(label) + `\s*</b>\s*:\s*(.*?)<br`)
 		if m := re.FindStringSubmatch(html); len(m) > 1 {
 			return scraperutil.CleanString(stripTags(m[1]))
 		}
@@ -350,7 +362,8 @@ func extractLabeledValue(html string, labels []string) string {
 
 func extractLabeledAnchorValue(html string, labels []string) string {
 	for _, label := range labels {
-		re := regexp.MustCompile(`(?is)<b>\s*` + regexp.QuoteMeta(label) + `\s*</b>\s*:\s*.*?<a[^>]*>(.*?)</a>`) //nolint:gocritic
+		// Dynamic pattern: label is a runtime parameter, cannot pre-compile
+		re := regexp.MustCompile(`(?is)<b>\s*` + regexp.QuoteMeta(label) + `\s*</b>\s*:\s*.*?<a[^>]*>(.*?)</a>`)
 		if m := re.FindStringSubmatch(html); len(m) > 1 {
 			return scraperutil.CleanString(stripTags(m[1]))
 		}
@@ -462,15 +475,15 @@ func extractLabeledAnchorValues(html string, labels []string) []string {
 	values := make([]string, 0)
 
 	for _, label := range labels {
-		re := regexp.MustCompile(`(?is)<b>\s*` + regexp.QuoteMeta(label) + `\s*</b>\s*:\s*(.*?)<br`) //nolint:gocritic
+		// Dynamic pattern: label is a runtime parameter, cannot pre-compile
+		re := regexp.MustCompile(`(?is)<b>\s*` + regexp.QuoteMeta(label) + `\s*</b>\s*:\s*(.*?)<br`)
 		m := re.FindStringSubmatch(html)
 		if len(m) <= 1 {
 			continue
 		}
 
 		section := m[1]
-		linkRe := regexp.MustCompile(`(?is)<a[^>]*>(.*?)</a>`) //nolint:gocritic
-		matches := linkRe.FindAllStringSubmatch(section, -1)
+		matches := linkRegex.FindAllStringSubmatch(section, -1)
 		for _, match := range matches {
 			if len(match) <= 1 {
 				continue
@@ -568,7 +581,7 @@ func extractScreenshotURLs(doc *goquery.Document, base string) []string {
 	return urls
 }
 
-func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
+func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}
@@ -578,7 +591,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 		return "", 0, err
 	}
 	html := resp.String()
-	if resp.StatusCode() == 200 && models.IsCloudflareChallengePage(html) {
+	if resp.StatusCode() == 200 && challengedetect.IsCloudflareChallengePage(html) {
 		return "", resp.StatusCode(), models.NewScraperChallengeError(
 			"Jav321",
 			"Jav321 returned a Cloudflare challenge page (request blocked; adjust proxy/IP)",
@@ -610,6 +623,5 @@ func stripTrailingSiteName(v string) string {
 }
 
 func stripTags(v string) string {
-	re := regexp.MustCompile(`(?s)<[^>]*>`) //nolint:gocritic
-	return re.ReplaceAllString(v, "")
+	return stripTagsRegex.ReplaceAllString(v, "")
 }

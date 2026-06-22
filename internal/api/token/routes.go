@@ -2,12 +2,11 @@ package token
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/javinizer/javinizer-go/internal/api/core"
 )
 
-func RegisterRoutes(protected *gin.RouterGroup, writeProtected *gin.RouterGroup, deps *core.ServerDependencies) {
-	protected.GET("/tokens", listTokens(deps))
-	writeProtected.POST("/tokens", createToken(deps))
-	writeProtected.DELETE("/tokens/:id", revokeToken(deps))
-	writeProtected.POST("/tokens/:id/regenerate", regenerateToken(deps))
+func RegisterRoutes(protected *gin.RouterGroup, writeProtected *gin.RouterGroup, svc *TokenService) {
+	protected.GET("/tokens", listTokens(svc))
+	writeProtected.POST("/tokens", createToken(svc))
+	writeProtected.DELETE("/tokens/:id", revokeToken(svc))
+	writeProtected.POST("/tokens/:id/regenerate", regenerateToken(svc))
 }

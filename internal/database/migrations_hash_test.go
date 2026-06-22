@@ -11,19 +11,19 @@ import (
 
 func TestComputeMigrationHash(t *testing.T) {
 	content := []byte("CREATE TABLE test (id INTEGER);")
-	hash := ComputeMigrationHash(content)
+	hash := computeMigrationHash(content)
 
 	// SHA256 produces 64 character hex string
 	assert.Len(t, hash, 64)
 	assert.NotEmpty(t, hash)
 
 	// Same content produces same hash
-	hash2 := ComputeMigrationHash(content)
+	hash2 := computeMigrationHash(content)
 	assert.Equal(t, hash, hash2)
 
 	// Different content produces different hash
 	different := []byte("CREATE TABLE other (id INTEGER);")
-	hash3 := ComputeMigrationHash(different)
+	hash3 := computeMigrationHash(different)
 	assert.NotEqual(t, hash, hash3)
 }
 
@@ -32,7 +32,7 @@ func TestEnsureMigrationHashTable(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	err = EnsureMigrationHashTable(db)
+	err = ensureMigrationHashTable(db)
 	require.NoError(t, err)
 
 	// Verify table exists
@@ -44,7 +44,7 @@ func TestEnsureMigrationHashTable(t *testing.T) {
 	assert.Equal(t, "schema_migrations_hash", name)
 
 	// Calling again should not error (idempotent)
-	err = EnsureMigrationHashTable(db)
+	err = ensureMigrationHashTable(db)
 	require.NoError(t, err)
 }
 
@@ -53,7 +53,7 @@ func TestStoreAndGetHash(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	err = EnsureMigrationHashTable(db)
+	err = ensureMigrationHashTable(db)
 	require.NoError(t, err)
 
 	// Store hash
@@ -69,38 +69,4 @@ func TestStoreAndGetHash(t *testing.T) {
 	hash, err = GetStoredHash(db, "nonexistent")
 	require.NoError(t, err)
 	assert.Empty(t, hash)
-}
-
-func TestHashMatches(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	require.NoError(t, err)
-	defer db.Close()
-
-	err = EnsureMigrationHashTable(db)
-	require.NoError(t, err)
-
-	content := []byte("CREATE TABLE test (id INTEGER);")
-	computed := ComputeMigrationHash(content)
-
-	// No stored hash yet
-	matches, stored, err := HashMatches(db, "test_migration", content)
-	require.NoError(t, err)
-	assert.False(t, matches)
-	assert.Empty(t, stored)
-
-	// Store hash
-	err = StoreMigrationHash(db, "test_migration", computed)
-	require.NoError(t, err)
-
-	// Now should match
-	matches, stored, err = HashMatches(db, "test_migration", content)
-	require.NoError(t, err)
-	assert.True(t, matches)
-	assert.Equal(t, computed, stored)
-
-	// Different content should not match
-	different := []byte("different")
-	matches, _, err = HashMatches(db, "test_migration", different)
-	require.NoError(t, err)
-	assert.False(t, matches)
 }

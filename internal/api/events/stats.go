@@ -4,8 +4,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/javinizer/javinizer-go/internal/logging"
-	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/eventlog"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 // eventStatsResponse is the response shape for GET /events/stats
@@ -22,51 +24,21 @@ type eventStatsResponse struct {
 // @Tags events
 // @Produce json
 // @Success 200 {object} eventStatsResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/events/stats [get]
-func eventStats(deps *ServerDependencies) gin.HandlerFunc {
+func eventStats(eventRepo database.EventRepositoryInterface) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		total, err := deps.EventRepo.Count()
+		stats, err := eventlog.GetStats(c.Request.Context(), eventRepo)
 		if err != nil {
-			logging.Errorf("Failed to count events: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to count events"})
-			return
-		}
-
-		byType := make(map[string]int64)
-		for _, t := range []string{models.EventCategoryScraper, models.EventCategoryOrganize, models.EventCategorySystem} {
-			count, err := deps.EventRepo.CountByType(t)
-			if err != nil {
-				logging.Errorf("Failed to count events by type %s: %v", t, err)
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to count events"})
-				return
-			}
-			byType[t] = count
-		}
-
-		bySeverity := make(map[string]int64)
-		for _, s := range []string{models.SeverityDebug, models.SeverityInfo, models.SeverityWarn, models.SeverityError} {
-			count, err := deps.EventRepo.CountBySeverity(s)
-			if err != nil {
-				logging.Errorf("Failed to count events by severity %s: %v", s, err)
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to count events"})
-				return
-			}
-			bySeverity[s] = count
-		}
-
-		bySource, err := deps.EventRepo.CountGroupBySource()
-		if err != nil {
-			logging.Errorf("Failed to count events by source: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to count events"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to count events"})
 			return
 		}
 
 		c.JSON(http.StatusOK, eventStatsResponse{
-			Total:      total,
-			ByType:     byType,
-			BySeverity: bySeverity,
-			BySource:   bySource,
+			Total:      stats.Total,
+			ByType:     stats.ByType,
+			BySeverity: stats.BySeverity,
+			BySource:   stats.BySource,
 		})
 	}
 }

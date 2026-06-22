@@ -1,9 +1,12 @@
 package temp
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
+)
 
-func RegisterRoutes(protected *gin.RouterGroup, deps *ServerDependencies) {
-	protected.GET("/temp/posters/:jobId/:filename", serveTempPoster(deps))
-	protected.GET("/temp/image", serveTempImage(deps))
+func RegisterRoutes(protected *gin.RouterGroup, rt *core.APIRuntime) {
+	protected.GET("/temp/posters/:jobId/:filename", serveTempPoster(rt))
+	protected.GET("/temp/image", serveTempImage(rt))
 	protected.GET("/posters/:filename", serveCroppedPoster())
 }

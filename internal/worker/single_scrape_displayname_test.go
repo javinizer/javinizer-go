@@ -111,8 +111,10 @@ func TestDisplayTitleRegenerationWithMergeStrategies(t *testing.T) {
 			}
 
 			// Merge using the specified strategy (simulating single_scrape.go logic)
-			scalar := nfo.ParseScalarStrategy(tt.scalarStrategy)
-			mergeArrays := nfo.ParseArrayStrategy(tt.arrayStrategy)
+			scalar, scalarErr := nfo.ParseScalarStrategy(tt.scalarStrategy)
+			require.NoError(t, scalarErr, "ParseScalarStrategy should succeed for test input")
+			mergeArrays, arrayErr := nfo.ParseArrayStrategy(tt.arrayStrategy)
+			require.NoError(t, arrayErr, "ParseArrayStrategy should succeed for test input")
 			mergeResult, err := nfo.MergeMovieMetadataWithOptions(scrapedMovie, parseResult.Movie, scalar, mergeArrays)
 			require.NoError(t, err, "Merge should succeed")
 
@@ -124,7 +126,9 @@ func TestDisplayTitleRegenerationWithMergeStrategies(t *testing.T) {
 			cfg := &config.Config{
 				Metadata: config.MetadataConfig{
 					NFO: config.NFOConfig{
-						DisplayTitle: tt.displayNameTemplate,
+						Format: config.NFOFormatConfig{
+							DisplayTitle: tt.displayNameTemplate,
+						},
 					},
 				},
 			}
@@ -135,11 +139,11 @@ func TestDisplayTitleRegenerationWithMergeStrategies(t *testing.T) {
 				"shouldRegenerateDisplayTitle flag should match expected value")
 
 			var finalDisplayTitle string
-			if shouldRegenerateDisplayTitle && cfg.Metadata.NFO.DisplayTitle != "" {
+			if shouldRegenerateDisplayTitle && cfg.Metadata.NFO.Format.DisplayTitle != "" {
 				// Regenerate DisplayTitle from merged data
 				tmplEngine := template.NewEngine()
 				ctx := template.NewContextFromMovie(mergedMovie)
-				displayName, err := tmplEngine.Execute(cfg.Metadata.NFO.DisplayTitle, ctx)
+				displayName, err := tmplEngine.Execute(cfg.Metadata.NFO.Format.DisplayTitle, ctx)
 				require.NoError(t, err, "Template execution should succeed")
 				finalDisplayTitle = displayName
 				t.Logf("Regenerated DisplayTitle: %q", finalDisplayTitle)
@@ -199,8 +203,10 @@ func TestDisplayTitleWithEmptyNFOTitle(t *testing.T) {
 	}
 
 	// Test with fill-missing-only (Gap-Fill)
-	scalar := nfo.ParseScalarStrategy("fill-missing-only")
-	mergeArrays := nfo.ParseArrayStrategy("merge")
+	scalar, scalarErr := nfo.ParseScalarStrategy("fill-missing-only")
+	require.NoError(t, scalarErr)
+	mergeArrays, arrayErr := nfo.ParseArrayStrategy("merge")
+	require.NoError(t, arrayErr)
 	mergeResult, err := nfo.MergeMovieMetadataWithOptions(scrapedMovie, parseResult.Movie, scalar, mergeArrays)
 	require.NoError(t, err)
 
@@ -249,7 +255,8 @@ func TestDisplayTitleRegenerationPresetMapping(t *testing.T) {
 			assert.Equal(t, tt.expectedScalar, scalarStr, "Scalar strategy should match")
 			assert.Equal(t, tt.expectedArray, arrayStr, "Array strategy should match")
 
-			scalar := nfo.ParseScalarStrategy(scalarStr)
+			scalar, scalarErr := nfo.ParseScalarStrategy(scalarStr)
+			require.NoError(t, scalarErr, "ParseScalarStrategy should succeed for preset output")
 			shouldRegenerate := scalar != nfo.PreserveExisting && scalar != nfo.FillMissingOnly
 			assert.Equal(t, tt.shouldRegenerateDisplayTitle, shouldRegenerate,
 				"DisplayTitle regeneration flag should match for preset: %s", tt.preset)
@@ -326,8 +333,10 @@ func TestDisplayTitleWithCachedMovie(t *testing.T) {
 			}
 
 			// Merge cached movie with NFO (same as lines 286 in single_scrape.go)
-			scalar := nfo.ParseScalarStrategy(tt.scalarStrategy)
-			mergeArrays := nfo.ParseArrayStrategy("merge")
+			scalar, scalarErr := nfo.ParseScalarStrategy(tt.scalarStrategy)
+			require.NoError(t, scalarErr, "ParseScalarStrategy should succeed for test input")
+			mergeArrays, arrayErr := nfo.ParseArrayStrategy("merge")
+			require.NoError(t, arrayErr, "ParseArrayStrategy should succeed for test input")
 			mergeResult, err := nfo.MergeMovieMetadataWithOptions(cachedMovie, parseResult.Movie, scalar, mergeArrays)
 			require.NoError(t, err)
 
@@ -338,7 +347,9 @@ func TestDisplayTitleWithCachedMovie(t *testing.T) {
 			cfg := &config.Config{
 				Metadata: config.MetadataConfig{
 					NFO: config.NFOConfig{
-						DisplayTitle: tt.displayNameTemplate,
+						Format: config.NFOFormatConfig{
+							DisplayTitle: tt.displayNameTemplate,
+						},
 					},
 				},
 			}
@@ -348,10 +359,10 @@ func TestDisplayTitleWithCachedMovie(t *testing.T) {
 				"shouldRegenerateDisplayTitle flag should match expected (cached movie path)")
 
 			var finalDisplayTitle string
-			if shouldRegenerateDisplayTitle && cfg.Metadata.NFO.DisplayTitle != "" {
+			if shouldRegenerateDisplayTitle && cfg.Metadata.NFO.Format.DisplayTitle != "" {
 				tmplEngine := template.NewEngine()
 				ctx := template.NewContextFromMovie(mergedMovie)
-				displayName, err := tmplEngine.Execute(cfg.Metadata.NFO.DisplayTitle, ctx)
+				displayName, err := tmplEngine.Execute(cfg.Metadata.NFO.Format.DisplayTitle, ctx)
 				require.NoError(t, err)
 				finalDisplayTitle = displayName
 				t.Logf("Regenerated DisplayTitle (cached path): %q", finalDisplayTitle)
@@ -406,7 +417,8 @@ func TestBothCodePathsUseIdenticalLogic(t *testing.T) {
 
 	for _, tt := range strategies {
 		t.Run(tt.name, func(t *testing.T) {
-			scalar := nfo.ParseScalarStrategy(tt.scalarStrategy)
+			scalar, scalarErr := nfo.ParseScalarStrategy(tt.scalarStrategy)
+			require.NoError(t, scalarErr, "ParseScalarStrategy should succeed for test input")
 			shouldRegenerate := scalar != nfo.PreserveExisting && scalar != nfo.FillMissingOnly
 
 			assert.Equal(t, tt.shouldRegenerateDisplayTitle, shouldRegenerate,

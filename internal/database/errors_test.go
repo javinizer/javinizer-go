@@ -1,12 +1,12 @@
 package database
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,18 +48,16 @@ func TestIsNotFound(t *testing.T) {
 func TestFindByID_ErrNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{Type: "sqlite", DSN: dbPath},
-	}
+	cfg := &Config{Type: "sqlite", DSN: dbPath}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	repo := NewMovieRepository(db)
 
 	t.Run("returns ErrNotFound for missing movie", func(t *testing.T) {
-		_, err := repo.FindByID("NONEXISTENT-999")
+		_, err := repo.FindByID(context.TODO(), "NONEXISTENT-999")
 		assert.Error(t, err)
 		assert.True(t, IsNotFound(err), "error should be ErrNotFound, got: %v", err)
 		assert.True(t, errors.Is(err, ErrNotFound), "errors.Is should match ErrNotFound")
@@ -69,18 +67,16 @@ func TestFindByID_ErrNotFound(t *testing.T) {
 func TestFindByContentID_ErrNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{Type: "sqlite", DSN: dbPath},
-	}
+	cfg := &Config{Type: "sqlite", DSN: dbPath}
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	repo := NewMovieRepository(db)
 
 	t.Run("returns ErrNotFound for missing movie", func(t *testing.T) {
-		_, err := repo.FindByContentID("nonexistent999")
+		_, err := repo.FindByContentID(context.TODO(), "nonexistent999")
 		assert.Error(t, err)
 		assert.True(t, IsNotFound(err), "error should be ErrNotFound, got: %v", err)
 		assert.True(t, errors.Is(err, ErrNotFound), "errors.Is should match ErrNotFound")
@@ -92,9 +88,9 @@ func TestFindByContentID_ErrNotFound(t *testing.T) {
 			ContentID: "findtest001",
 			Title:     "Test Movie",
 		}
-		require.NoError(t, repo.Create(movie))
+		require.NoError(t, repo.Create(context.TODO(), movie))
 
-		found, err := repo.FindByContentID("findtest001")
+		found, err := repo.FindByContentID(context.TODO(), "findtest001")
 		assert.NoError(t, err)
 		assert.Equal(t, "findtest001", found.ContentID)
 	})

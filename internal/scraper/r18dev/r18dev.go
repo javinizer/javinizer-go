@@ -13,7 +13,6 @@ import (
 	"unicode"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -37,22 +36,23 @@ var (
 	specialCharsRegex     = regexp.MustCompile(`[^a-z0-9_]`)
 )
 
-// Scraper implements the R18.dev scraper
-type Scraper struct {
+// scraper implements the R18.dev scraper.
+type scraper struct {
 	client            *resty.Client
 	enabled           bool
 	language          string
 	maxRetries        int
 	respectRetryAfter bool
-	proxyOverride     *config.ProxyConfig
-	downloadProxy     *config.ProxyConfig
+	proxyOverride     *models.ProxyConfig
+	downloadProxy     *models.ProxyConfig
 	rateLimiter       *ratelimit.Limiter
-	settings          config.ScraperSettings // stores the full settings for Config() method
+	settings          models.ScraperSettings // stores the full settings for Config() method
 }
 
 // New creates a new R18.dev scraper
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+// newScraper creates a new R18.dev scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.R18DevHeaders()),
 		httpclient.WithScraperHeaders(httpclient.RefererHeader("https://r18.dev/")),
 		httpclient.WithScraperHeaders(httpclient.UserAgentHeader(settings.UserAgent)),
@@ -81,12 +81,9 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		maxRetries = 3 // Default to 3 retries
 	}
 
-	respectRetryAfter := true // Default: respect Cloudflare Retry-After header on 429 responses
-	if settings.RespectRetryAfter != nil {
-		respectRetryAfter = *settings.RespectRetryAfter
-	}
+	respectRetryAfter := settings.ShouldRespectRetryAfter(true) // Default: respect Cloudflare Retry-After header on 429 responses
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:            client,
 		enabled:           settings.Enabled,
 		language:          language,
@@ -95,7 +92,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		respectRetryAfter: respectRetryAfter,
 		proxyOverride:     settings.Proxy,
 		downloadProxy:     settings.DownloadProxy,
-		settings:          settings,
+		settings:          *settings,
 	}
 
 	if settings.RateLimit > 0 {
@@ -106,27 +103,28 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 }
 
 // Name returns the scraper identifier
-func (s *Scraper) Name() string {
+func (s *scraper) Name() string {
 	return "r18dev"
 }
 
 // IsEnabled returns whether the scraper is enabled
-func (s *Scraper) IsEnabled() bool {
+func (s *scraper) IsEnabled() bool {
 	return s.enabled
 }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	return nil
 }
 
 // CanHandleURL returns true if this scraper can handle the given URL
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -137,7 +135,7 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 }
 
 // ExtractIDFromURL extracts the movie ID from an R18.dev URL
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	matches := r18IDRegex.FindStringSubmatch(urlStr)
 	if len(matches) > 2 {
 		return matches[2], nil
@@ -146,7 +144,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from R18.dev URL")
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(urlStr) {
 		return nil, models.NewScraperNotFoundError("R18.dev", "URL not handled by R18.dev scraper")
 	}
@@ -180,7 +178,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 		return nil, models.NewScraperNotFoundError("R18.dev", "movie not found on R18.dev (returned HTML)")
 	}
 
-	var data R18Response
+	var data r18Response
 	if err := json.Unmarshal(resp.Body(), &data); err != nil {
 		bodyPreview := string(resp.Body())
 		if len(bodyPreview) > 200 {
@@ -192,42 +190,8 @@ func (s *Scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 	return s.parseResponse(ctx, &data, urlStr)
 }
 
-// ValidateConfig validates the scraper configuration.
-// Returns error if config is invalid, nil if valid.
-// Called by callers before creating the scraper to validate configuration.
-func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
-	if cfg == nil {
-		return fmt.Errorf("r18dev: config is nil")
-	}
-	if !cfg.Enabled {
-		return nil // Disabled is valid
-	}
-	// Validate language if set
-	switch strings.ToLower(strings.TrimSpace(cfg.Language)) {
-	case "", "en":
-		// Valid
-	case "ja":
-		// Valid
-	default:
-		return fmt.Errorf("r18dev: language must be 'en' or 'ja', got %q", cfg.Language)
-	}
-	// Validate rate limit
-	if cfg.RateLimit < 0 {
-		return fmt.Errorf("r18dev: rate_limit must be non-negative, got %d", cfg.RateLimit)
-	}
-	// Validate retry count
-	if cfg.RetryCount < 0 {
-		return fmt.Errorf("r18dev: retry_count must be non-negative, got %d", cfg.RetryCount)
-	}
-	// Validate timeout
-	if cfg.Timeout < 0 {
-		return fmt.Errorf("r18dev: timeout must be non-negative, got %d", cfg.Timeout)
-	}
-	return nil
-}
-
 // ResolveDownloadProxyForHost declares R18.dev-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
@@ -238,183 +202,18 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 	return nil, nil, false
 }
 
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-// resolveByContentIDVariations tries multiple content-id format variations when dvd_id lookup fails.
-// Some titles (digital-only releases) have null dvd_id, so the dvd_id endpoint returns 404.
-// We construct content_id variations (with DMM prefix, zero-padded) and try the combined endpoint.
-// resolveAwsimgsrcPoster tries multiple awsimgsrc poster URL variations when the
-// standard construction fails. The pics.dmm.co.jp URL path and content_id format
-// don't always match awsimgsrc, so we use the prefix lookup to try variations.
-// Returns the first valid awsimgsrc ps.jpg URL that meets quality requirements.
-func (s *Scraper) resolveAwsimgsrcPoster(ctx context.Context, contentID string, client *http.Client) string {
-	series, numStr := splitSeriesAndNumber(contentIDToID(contentID))
-	if series == "" || numStr == "" {
-		return ""
-	}
-
-	series = strings.ToLower(series)
-	num, err := strconv.Atoi(numStr)
-	if err != nil {
-		return ""
-	}
-
-	padded3 := fmt.Sprintf("%03d", num)
-
-	// Look up known prefixes for this series
-	var prefixes []string
-	if lookup, ok := contentIDPrefixLookup[series]; ok {
-		prefixes = lookup
-	} else {
-		prefixes = []string{"", "1"}
-	}
-
-	// Try each prefix + 3-digit padded number on awsimgsrc
-	for _, prefix := range prefixes {
-		id := prefix + series + padded3
-		url := fmt.Sprintf("https://awsimgsrc.dmm.com/dig/mono/movie/%s/%sps.jpg", id, id)
-
-		width, height, err := imageutil.GetImageDimensions(url, client)
-		if err != nil {
-			continue
-		}
-
-		if width >= imageutil.MinPosterWidth && height >= imageutil.MinPosterHeight {
-			logging.Debugf("R18: Resolved awsimgsrc poster for %s: %s (%dx%d)", contentID, url, width, height)
-			return url
-		}
-	}
-
-	return ""
-}
-
-func (s *Scraper) resolveByContentIDVariations(ctx context.Context, id string) (string, error) {
-	variations := generateContentIDVariations(id)
-	if len(variations) == 0 {
-		return "", nil
-	}
-
-	logging.Debugf("R18: dvd_id lookup failed, trying %d content-id variation(s) for %s", len(variations), id)
-
-	for _, variation := range variations {
-		url := fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, variation)
-		logging.Debugf("R18: Trying content-id variation: %s (%s)", variation, url)
-
-		resp, err := s.doRequestWithRetryCtx(ctx, url)
-		if err != nil {
-			logging.Debugf("R18: Failed content-id variation %s: %v", variation, err)
-			continue
-		}
-
-		if resp.StatusCode() == 200 {
-			contentType := resp.Header().Get("Content-Type")
-			if !strings.Contains(contentType, "text/html") {
-				logging.Debugf("R18: ✓ Content-id variation %s resolved for %s", variation, id)
-				return url, nil
-			}
-		}
-		logging.Debugf("R18: Content-id variation %s returned status %d", variation, resp.StatusCode())
-	}
-
-	return "", nil
-}
-
-// generateContentIDVariations constructs possible content_id formats from a dvd_id.
-// For "START-575", generates: ["1start00575", "1start575"]
-// For "ABF-346", generates: ["118abf00346", "118abf346", "436abf00346", "436abf346"]
-// The r18.dev content_id format is: [DMM-prefix][series][zero-padded-number]
-// Uses the contentIDPrefixLookup table built from r18.dev database dumps to find
-// known prefixes per series. Falls back to common prefixes if the series is unknown.
-func generateContentIDVariations(id string) []string {
-	series, numStr := splitSeriesAndNumber(id)
-	if series == "" || numStr == "" {
-		return nil
-	}
-
-	series = strings.ToLower(series)
-	num, err := strconv.Atoi(numStr)
-	if err != nil {
-		return nil
-	}
-
-	padded3 := fmt.Sprintf("%03d", num)
-	padded5 := fmt.Sprintf("%05d", num)
-
-	// Look up known prefixes for this series from the r18.dev database dump
-	var prefixes []string
-	if lookup, ok := contentIDPrefixLookup[series]; ok {
-		prefixes = lookup
-	} else {
-		// Fallback: try common prefixes for unknown series
-		prefixes = []string{"", "1"}
-	}
-
-	var variations []string
-	seen := make(map[string]bool)
-
-	add := func(v string) {
-		if !seen[v] {
-			seen[v] = true
-			variations = append(variations, v)
-		}
-	}
-
-	for _, prefix := range prefixes {
-		// 5-digit padded (standard DMM content_id format)
-		add(prefix + series + padded5)
-		// 3-digit padded (used by many r18.dev content_ids)
-		add(prefix + series + padded3)
-	}
-
-	return variations
-}
-
-// splitSeriesAndNumber splits a dvd_id like "START-575" into ("START", "575")
-func splitSeriesAndNumber(id string) (string, string) {
-	// Try standard format: SERIES-NUMBER
-	if parts := strings.SplitN(id, "-", 2); len(parts) == 2 {
-		if isAlpha(parts[0]) && isDigit(parts[1]) {
-			return parts[0], parts[1]
-		}
-	}
-
-	// Try already-normalized format: series575 (from normalizeID)
-	lowered := strings.ToLower(id)
-	if m := contentIDFullRegex.FindStringSubmatch(lowered); len(m) >= 4 {
-		return m[2], m[3]
-	}
-
-	return "", ""
-}
-
-func isAlpha(s string) bool {
-	for _, r := range s {
-		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
-			return false
-		}
-	}
-	return len(s) > 0
-}
-
-func isDigit(s string) bool {
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return len(s) > 0
-}
-
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	normalized := normalizeID(id)
 	return fmt.Sprintf(apiURL, normalized), nil
 }
 
 // doRequestWithRetry performs an HTTP request with retry logic for rate limiting
 // doRequestWithRetryCtx performs an HTTP request with retry logic for rate limiting and context support
-func (s *Scraper) doRequestWithRetryCtx(ctx context.Context, url string) (*resty.Response, error) {
+func (s *scraper) doRequestWithRetryCtx(ctx context.Context, url string) (*resty.Response, error) {
 	var resp *resty.Response
 	var err error
 
@@ -462,7 +261,7 @@ func (s *Scraper) doRequestWithRetryCtx(ctx context.Context, url string) (*resty
 			}
 
 			// Max retries exceeded
-			return nil, models.NewScraperHTTPError("R18", resp.StatusCode(), fmt.Sprintf("rate limited after %d retries", s.maxRetries))
+			return nil, models.NewScraperStatusError("R18", resp.StatusCode(), fmt.Sprintf("rate limited after %d retries", s.maxRetries))
 		}
 
 		// Request successful or non-rate-limit error
@@ -472,15 +271,22 @@ func (s *Scraper) doRequestWithRetryCtx(ctx context.Context, url string) (*resty
 	return resp, err
 }
 
-// Search searches for and scrapes metadata for a given movie ID with context support
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
-	// Step 1: Try to lookup content_id using dvd_id with multiple ID variations
-	// R18.dev uses dvd_id to find the content_id, then uses content_id for the full data
+// contentIDURLResolver resolves a JAV ID to the R18.dev content-ID URL.
+// This seam separates the "resolve URL" decision from the "fetch → parse" execution,
+// making the search flow testable without HTTP calls.
 
-	// Generate ID variations to try (original first, then with DMM prefix stripped)
+// r18ContentIDResolver implements contentIDURLResolver using the R18.dev API.
+type r18ContentIDResolver struct {
+	scraper *scraper
+}
+
+func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (string, bool) {
+	s := r.scraper
+
+	// Step 1: Try to lookup content_id using dvd_id with multiple ID variations
 	idVariations := []string{
-		normalizeIDWithoutStripping(id), // Try original ID first (e.g., "61mdb087")
-		normalizeID(id),                 // Then try with DMM prefix stripped (e.g., "mdb087")
+		normalizeIDWithoutStripping(id),
+		normalizeID(id),
 	}
 
 	// Remove duplicates
@@ -493,10 +299,6 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 	}
 
-	var contentID string
-	var successfulVariation string
-
-	// Try each variation until we find a match
 	for _, idVariation := range uniqueVariations {
 		dvdIDURL := fmt.Sprintf("%s/videos/vod/movies/detail/-/dvd_id=%s/json", baseURL, idVariation)
 		logging.Debugf("R18: Trying dvd_id lookup: %s (%s)", idVariation, dvdIDURL)
@@ -507,7 +309,6 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 			continue
 		}
 
-		// If dvd_id lookup succeeds, extract and validate content_id
 		if resp.StatusCode() == 200 {
 			contentType := resp.Header().Get("Content-Type")
 			if !strings.Contains(contentType, "text/html") {
@@ -517,15 +318,12 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 				}
 				if err := json.Unmarshal(resp.Body(), &lookupData); err == nil && lookupData.ContentID != "" {
 					returnedDVDID := strings.ToLower(strings.ReplaceAll(lookupData.DVDID, "-", ""))
-
 					if returnedDVDID == idVariation || (returnedDVDID == "" && contentIDCoreMatch(lookupData.ContentID, idVariation)) {
-						contentID = lookupData.ContentID
-						successfulVariation = idVariation
+						contentID := lookupData.ContentID
 						logging.Debugf("R18: ✓ Resolved %s (tried: %s) to content-id: %s", id, idVariation, contentID)
-						break
-					} else {
-						logging.Debugf("R18: dvd_id lookup returned mismatched content-id %s for %s, skipping", lookupData.ContentID, idVariation)
+						return fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, contentID), true
 					}
+					logging.Debugf("R18: dvd_id lookup returned mismatched content-id %s for %s, skipping", lookupData.ContentID, idVariation)
 				}
 			}
 		} else {
@@ -533,29 +331,39 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 	}
 
-	if contentID == "" && successfulVariation == "" {
-		logging.Debugf("R18: No valid content-id found after trying all variations")
+	// Step 2: Try content-ID variations
+	contentIDURL, err := s.resolveByContentIDVariations(ctx, id)
+	if err != nil {
+		return "", false
+	}
+	if contentIDURL != "" {
+		logging.Debugf("R18: Resolved via content-id variations: %s", contentIDURL)
+		return contentIDURL, true
 	}
 
+	return "", false
+}
+
+// Search searches for and scrapes metadata for a given movie ID with context support
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+	if !s.enabled {
+		return nil, fmt.Errorf("R18.dev scraper is disabled")
+	}
+
+	// Use the content-ID resolver seam: resolve URL → fetch → parse
+	resolver := &r18ContentIDResolver{scraper: s}
+
 	var finalURL string
-	var err error
-	if contentID != "" {
-		finalURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, contentID)
-		logging.Debugf("R18: Using resolved content-id URL: %s", finalURL)
+	if resolvedURL, ok := resolver.ResolveURL(ctx, id); ok {
+		finalURL = resolvedURL
 	} else {
-		finalURL, err = s.resolveByContentIDVariations(ctx, id)
+		// Fallback: use normalized ID URL
+		var err error
+		finalURL, err = s.getURLCtx(ctx, id)
 		if err != nil {
 			return nil, err
 		}
-		if finalURL != "" {
-			logging.Debugf("R18: Resolved via content-id variations: %s", finalURL)
-		} else {
-			finalURL, err = s.getURLCtx(ctx, id)
-			if err != nil {
-				return nil, err
-			}
-			logging.Debugf("R18: Using normalized ID URL (no content-id found): %s", finalURL)
-		}
+		logging.Debugf("R18: Using normalized ID URL (no content-id found): %s", finalURL)
 	}
 
 	resp, err := s.doRequestWithRetryCtx(ctx, finalURL)
@@ -579,7 +387,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, models.NewScraperNotFoundError("R18.dev", "movie not found on R18.dev (returned HTML)")
 	}
 
-	var data R18Response
+	var data r18Response
 	if err := json.Unmarshal(resp.Body(), &data); err != nil {
 		bodyPreview := string(resp.Body())
 		if len(bodyPreview) > 200 {
@@ -591,28 +399,25 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	return s.parseResponse(ctx, &data, finalURL)
 }
 
-// parseResponse converts R18 API response to ScraperResult
-func (s *Scraper) parseResponse(ctx context.Context, data *R18Response, sourceURL string) (*models.ScraperResult, error) {
-	// Use DVDID if available, otherwise convert ContentID to ID format
-	movieID := data.DVDID
-	if movieID == "" && data.ContentID != "" {
-		movieID = contentIDToID(data.ContentID)
-	}
+// parseResponse converts R18 API response to ScraperResult.
+// Decomposed: orchestrates resolveIDs → resolveLocalizedStrings → resolveActresses →
+// resolveGenres → resolveMediaURLs so that each concern is independently testable.
+func (s *scraper) parseResponse(ctx context.Context, data *r18Response, sourceURL string) (*models.ScraperResult, error) {
+	movieID := resolveIDs(data)
 
 	result := &models.ScraperResult{
-		Source:        s.Name(),
-		SourceURL:     sourceURL,
-		Language:      s.language,
-		ID:            movieID,
-		ContentID:     data.ContentID,
-		Title:         scraperutil.CleanString(selectLocalizedString(s.language, data.TitleEn, data.TitleJA)),
-		OriginalTitle: scraperutil.CleanString(data.TitleJA), // Japanese title
-		Description:   scraperutil.CleanString(selectLocalizedString(s.language, data.DescriptionEn, data.Description)),
-		Runtime:       data.Runtime,
+		Source:    s.Name(),
+		SourceURL: sourceURL,
+		Language:  s.language,
+		ID:        movieID,
+		ContentID: data.ContentID,
+		Runtime:   data.Runtime,
 	}
 
 	// Build translations for both languages if API provides both English and Japanese data
 	result.Translations = s.buildTranslations(data, movieID)
+
+	resolveLocalizedStrings(s.language, data, result)
 
 	// Parse release date (now in YYYY-MM-DD format)
 	if data.ReleaseDate != "" {
@@ -622,41 +427,65 @@ func (s *Scraper) parseResponse(ctx context.Context, data *R18Response, sourceUR
 		}
 	}
 
+	resolveActresses(data, result)
+	resolveGenres(s.language, data, result)
+	resolveMediaURLs(ctx, s, data, result)
+
+	return result, nil
+}
+
+// resolveIDs determines the movie ID from DVDID or ContentID.
+func resolveIDs(data *r18Response) string {
+	movieID := data.DVDID
+	if movieID == "" && data.ContentID != "" {
+		movieID = contentIDToID(data.ContentID)
+	}
+	return movieID
+}
+
+// resolveLocalizedStrings populates title, description, director, maker, label, and series
+// on the result based on the configured language preference.
+func resolveLocalizedStrings(language string, data *r18Response, result *models.ScraperResult) {
+	result.Title = scraperutil.CleanString(selectLocalizedString(language, data.TitleEn, data.TitleJA))
+	result.OriginalTitle = scraperutil.CleanString(data.TitleJA) // Japanese title
+	result.Description = scraperutil.CleanString(selectLocalizedString(language, data.DescriptionEn, data.Description))
+
 	// Parse director based on configured language preference.
 	// Try directors array first (new API format), then fall back to flat fields
 	if len(data.Directors) > 0 {
-		// Use directors array (new API format)
-		if s.language == "ja" {
+		if language == "ja" {
 			result.Director = scraperutil.CleanString(getPreferredString(data.Directors[0].NameKanji, data.Directors[0].NameRomaji))
 		} else {
 			result.Director = scraperutil.CleanString(getPreferredString(data.Directors[0].NameRomaji, data.Directors[0].NameKanji))
 		}
 	} else {
-		// Use legacy flat fields
-		result.Director = scraperutil.CleanString(selectLocalizedString(s.language, data.DirectorEn, data.Director))
+		// Deprecated: Legacy format fallback.
+		result.Director = scraperutil.CleanString(selectLocalizedString(language, data.DirectorEn, data.Director))
 	}
 
 	// Parse maker/studio based on configured language preference.
-	result.Maker = scraperutil.CleanString(selectLocalizedString(s.language, data.MakerNameEn, data.MakerNameJa))
+	result.Maker = scraperutil.CleanString(selectLocalizedString(language, data.MakerNameEn, data.MakerNameJa))
 	if result.Maker == "" {
-		// Fallback to nested structure (legacy format)
-		result.Maker = scraperutil.CleanString(selectLocalizedString(s.language, "", data.Maker.Name))
+		// Deprecated: Legacy format fallback.
+		result.Maker = scraperutil.CleanString(selectLocalizedString(language, "", data.Maker.Name))
 	}
 
-	result.Label = scraperutil.CleanString(selectLocalizedString(s.language, data.LabelNameEn, data.LabelNameJa))
+	result.Label = scraperutil.CleanString(selectLocalizedString(language, data.LabelNameEn, data.LabelNameJa))
 	if result.Label == "" {
-		// Fallback to nested structure (legacy format)
-		result.Label = scraperutil.CleanString(selectLocalizedString(s.language, "", data.Label.Name))
+		// Deprecated: Legacy format fallback.
+		result.Label = scraperutil.CleanString(selectLocalizedString(language, "", data.Label.Name))
 	}
 
 	// Parse series based on configured language preference.
-	if s.language == "ja" {
+	if language == "ja" {
 		result.Series = scraperutil.CleanString(getPreferredString(data.SeriesNameJa, getPreferredString(data.Series.Name, getPreferredString(data.SeriesName, data.SeriesNameEn))))
 	} else {
 		result.Series = scraperutil.CleanString(getPreferredString(data.SeriesNameEn, getPreferredString(data.SeriesNameJa, getPreferredString(data.Series.Name, data.SeriesName))))
 	}
+}
 
-	// Parse actresses with detailed information
+// resolveActresses parses actress details from the API response into the result.
+func resolveActresses(data *r18Response, result *models.ScraperResult) {
 	result.Actresses = make([]models.ActressInfo, 0, len(data.Actresses))
 	for _, actress := range data.Actresses {
 		// Build thumb URL from image_url field
@@ -675,10 +504,8 @@ func (s *Scraper) parseResponse(ctx context.Context, data *R18Response, sourceUR
 				firstname := strings.ToLower(parts[0])
 				filename = lastname + "_" + firstname
 			} else if len(parts) == 1 {
-				// Single name
 				filename = strings.ToLower(parts[0])
 			}
-			// Remove any special characters that might break the URL
 			filename = specialCharsRegex.ReplaceAllString(filename, "")
 			if filename != "" {
 				thumbURL = "https://pics.dmm.co.jp/mono/actjpgs/" + filename + ".jpg"
@@ -686,9 +513,6 @@ func (s *Scraper) parseResponse(ctx context.Context, data *R18Response, sourceUR
 		}
 
 		// Parse romaji name into first/last names
-		// Note: R18.dev's name_romaji field is inconsistent - sometimes Western order (First Last),
-		// sometimes Japanese order (Last First). We treat it as Western order by default since
-		// that's the more common case in their API responses.
 		firstName := ""
 		lastName := ""
 		if actress.NameRomaji != "" {
@@ -705,35 +529,38 @@ func (s *Scraper) parseResponse(ctx context.Context, data *R18Response, sourceUR
 			DMMID:        actress.ID,
 			FirstName:    firstName,
 			LastName:     lastName,
-			JapaneseName: scraperutil.CleanString(actress.NameKanji), // Use kanji name as Japanese name
+			JapaneseName: scraperutil.CleanString(actress.NameKanji),
 			ThumbURL:     thumbURL,
 		})
 	}
+}
 
-	// Parse genres (categories) - try new name_en/name_ja fields first, then legacy name field
+// resolveGenres parses genre categories from the API response into the result.
+func resolveGenres(language string, data *r18Response, result *models.ScraperResult) {
 	result.Genres = make([]string, 0, len(data.Categories))
 	for _, category := range data.Categories {
 		var genreName string
-		if s.language == "ja" {
-			// Japanese mode: prefer name_ja, fallback to name_en, then legacy name
+		if language == "ja" {
+			// Deprecated: Legacy format fallback.
 			genreName = scraperutil.CleanString(getPreferredString(category.NameJa, getPreferredString(category.NameEn, category.Name)))
 		} else {
-			// English mode: prefer name_en, fallback to name_ja, then legacy name
+			// Deprecated: Legacy format fallback.
 			genreName = scraperutil.CleanString(getPreferredString(category.NameEn, getPreferredString(category.NameJa, category.Name)))
 		}
 		if genreName != "" {
 			result.Genres = append(result.Genres, genreName)
 		}
 	}
+}
 
+// resolveMediaURLs parses cover, poster, screenshots, and trailer URLs from the API response.
+func resolveMediaURLs(ctx context.Context, s *scraper, data *r18Response, result *models.ScraperResult) {
 	// Parse cover image - R18.dev provides the large version (pl.jpg)
 	var coverImageURL string
 
-	// Try top-level jacket URLs first (newer API format)
 	if data.JacketFullURL != "" {
 		coverImageURL = strings.TrimSpace(data.JacketFullURL)
 	} else if data.Images.JacketImage.Large2 != "" {
-		// Fallback to nested structure (older API format)
 		coverImageURL = strings.TrimSpace(data.Images.JacketImage.Large2)
 	} else if data.Images.JacketImage.Large != "" {
 		coverImageURL = strings.TrimSpace(data.Images.JacketImage.Large)
@@ -744,21 +571,14 @@ func (s *Scraper) parseResponse(ctx context.Context, data *R18Response, sourceUR
 		coverImageURL = imageutil.UpgradeCoverResolution(coverImageURL)
 		result.CoverURL = coverImageURL
 
-		// Try to get a high-quality poster from awsimgsrc
-		// If the awsimgsrc poster is too low quality, we'll use the cover for cropping
 		posterURL, shouldCrop := imageutil.GetOptimalPosterURL(coverImageURL, s.client.GetClient())
 		result.ShouldCropPoster = shouldCrop
 		if shouldCrop {
-			// Use cover for both, poster will be cropped during organization/display
 			result.PosterURL = coverImageURL
 		} else {
-			// Use the high-quality awsimgsrc poster directly (no cropping needed)
 			result.PosterURL = posterURL
 		}
 
-		// If the poster ended up being the cover (pl.jpg), try awsimgsrc ps.jpg variations
-		// using the content_id prefix lookup. The pics.dmm.co.jp URL path and content_id
-		// format don't always match the awsimgsrc path, so we try multiple variations.
 		if result.PosterURL == coverImageURL && data.ContentID != "" {
 			if awsURL := s.resolveAwsimgsrcPoster(ctx, data.ContentID, s.client.GetClient()); awsURL != "" {
 				result.PosterURL = awsURL
@@ -769,7 +589,6 @@ func (s *Scraper) parseResponse(ctx context.Context, data *R18Response, sourceUR
 
 	// Parse screenshots - try gallery first (newer API), then Images.SampleImages (older API)
 	if len(data.Gallery) > 0 {
-		// Extract full-size URLs from gallery
 		result.ScreenshotURL = make([]string, 0, len(data.Gallery))
 		for _, item := range data.Gallery {
 			if item.ImageFull != "" {
@@ -814,8 +633,6 @@ func (s *Scraper) parseResponse(ctx context.Context, data *R18Response, sourceUR
 	} else if data.Sample.Low != "" {
 		result.TrailerURL = data.Sample.Low
 	}
-
-	return result, nil
 }
 
 // normalizeIDWithoutStripping normalizes the movie ID without stripping DMM prefix
@@ -906,6 +723,171 @@ func stripDMMPrefix(id string) string {
 	return id
 }
 
+// resolveByContentIDVariations tries multiple content-id format variations when dvd_id lookup fails.
+// Some titles (digital-only releases) have null dvd_id, so the dvd_id endpoint returns 404.
+// We construct content_id variations (with DMM prefix, zero-padded) and try the combined endpoint.
+func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (string, error) {
+	variations := generateContentIDVariations(id)
+	if len(variations) == 0 {
+		return "", nil
+	}
+
+	logging.Debugf("R18: dvd_id lookup failed, trying %d content-id variation(s) for %s", len(variations), id)
+
+	for _, variation := range variations {
+		u := fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, variation)
+		logging.Debugf("R18: Trying content-id variation: %s (%s)", variation, u)
+
+		resp, err := s.doRequestWithRetryCtx(ctx, u)
+		if err != nil {
+			logging.Debugf("R18: Failed content-id variation %s: %v", variation, err)
+			continue
+		}
+
+		if resp.StatusCode() == 200 {
+			contentType := resp.Header().Get("Content-Type")
+			if !strings.Contains(contentType, "text/html") {
+				logging.Debugf("R18: ✓ Content-id variation %s resolved for %s", variation, id)
+				return u, nil
+			}
+		}
+		logging.Debugf("R18: Content-id variation %s returned status %d", variation, resp.StatusCode())
+	}
+
+	return "", nil
+}
+
+// resolveAwsimgsrcPoster tries multiple awsimgsrc poster URL variations when the
+// standard construction fails. The pics.dmm.co.jp URL path and content_id format
+// don't always match awsimgsrc, so we use the prefix lookup to try variations.
+// Returns the first valid awsimgsrc ps.jpg URL that meets quality requirements.
+func (s *scraper) resolveAwsimgsrcPoster(ctx context.Context, contentID string, client *http.Client) string {
+	series, numStr := splitSeriesAndNumber(contentIDToID(contentID))
+	if series == "" || numStr == "" {
+		return ""
+	}
+
+	series = strings.ToLower(series)
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return ""
+	}
+
+	padded3 := fmt.Sprintf("%03d", num)
+
+	// Look up known prefixes for this series
+	var prefixes []string
+	if lookup, ok := contentIDPrefixLookup[series]; ok {
+		prefixes = lookup
+	} else {
+		prefixes = []string{"", "1"}
+	}
+
+	// Try each prefix + 3-digit padded number on awsimgsrc
+	for _, prefix := range prefixes {
+		id := prefix + series + padded3
+		u := fmt.Sprintf("https://awsimgsrc.dmm.com/dig/mono/movie/%s/%sps.jpg", id, id)
+
+		width, height, imgErr := imageutil.GetImageDimensions(u, client)
+		if imgErr != nil {
+			continue
+		}
+
+		if width >= imageutil.MinPosterWidth && height >= imageutil.MinPosterHeight {
+			logging.Debugf("R18: Resolved awsimgsrc poster for %s: %s (%dx%d)", contentID, u, width, height)
+			return u
+		}
+	}
+
+	return ""
+}
+
+// generateContentIDVariations constructs possible content_id formats from a dvd_id.
+// For "START-575", generates: ["1start00575", "1start575"]
+// For "ABF-346", generates: ["118abf00346", "118abf346", "436abf00346", "436abf346"]
+// The r18.dev content_id format is: [DMM-prefix][series][zero-padded-number]
+// Uses the contentIDPrefixLookup table built from r18.dev database dumps to find
+// known prefixes per series. Falls back to common prefixes if the series is unknown.
+func generateContentIDVariations(id string) []string {
+	series, numStr := splitSeriesAndNumber(id)
+	if series == "" || numStr == "" {
+		return nil
+	}
+
+	series = strings.ToLower(series)
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return nil
+	}
+
+	padded3 := fmt.Sprintf("%03d", num)
+	padded5 := fmt.Sprintf("%05d", num)
+
+	// Look up known prefixes for this series from the r18.dev database dump
+	var prefixes []string
+	if lookup, ok := contentIDPrefixLookup[series]; ok {
+		prefixes = lookup
+	} else {
+		// Fallback: try common prefixes for unknown series
+		prefixes = []string{"", "1"}
+	}
+
+	var variations []string
+	seen := make(map[string]bool)
+
+	add := func(v string) {
+		if !seen[v] {
+			seen[v] = true
+			variations = append(variations, v)
+		}
+	}
+
+	for _, prefix := range prefixes {
+		// 5-digit padded (standard DMM content_id format)
+		add(prefix + series + padded5)
+		// 3-digit padded (used by many r18.dev content_ids)
+		add(prefix + series + padded3)
+	}
+
+	return variations
+}
+
+// splitSeriesAndNumber splits a dvd_id like "START-575" into ("START", "575")
+func splitSeriesAndNumber(id string) (string, string) {
+	// Try standard format: SERIES-NUMBER
+	if parts := strings.SplitN(id, "-", 2); len(parts) == 2 {
+		if isAlpha(parts[0]) && isDigit(parts[1]) {
+			return parts[0], parts[1]
+		}
+	}
+
+	// Try already-normalized format: series575 (from normalizeID)
+	lowered := strings.ToLower(id)
+	if m := contentIDFullRegex.FindStringSubmatch(lowered); len(m) >= 4 {
+		return m[2], m[3]
+	}
+
+	return "", ""
+}
+
+func isAlpha(s string) bool {
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+func isDigit(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
 // contentIDToID converts content ID to standard ID format
 // Example: "118abw00001" -> "ABW-001", "ipx00535" -> "IPX-535", "h_086mesu00103" -> "MESU-103"
 func contentIDToID(contentID string) string {
@@ -961,8 +943,8 @@ func selectLocalizedString(language, englishValue, japaneseValue string) string 
 	return getPreferredString(englishValue, japaneseValue)
 }
 
-// R18Response represents the JSON response from R18.dev API (current format)
-type R18Response struct {
+// r18Response represents the JSON response from R18.dev API (current format)
+type r18Response struct {
 	DVDID         string `json:"dvd_id"`
 	ContentID     string `json:"content_id"`
 	TitleJA       string `json:"title_ja"`       // Japanese title
@@ -1053,7 +1035,7 @@ type R18Response struct {
 
 // buildTranslations creates translation records for both English and Japanese
 // if the API provides data in both languages
-func (s *Scraper) buildTranslations(data *R18Response, movieID string) []models.MovieTranslation {
+func (s *scraper) buildTranslations(data *r18Response, movieID string) []models.MovieTranslation {
 	translations := make([]models.MovieTranslation, 0, 2)
 
 	// Add English translation if English data is available

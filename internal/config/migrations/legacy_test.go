@@ -19,7 +19,6 @@ func TestLegacyMigration_Info(t *testing.T) {
 }
 
 func TestLegacyMigration_Migrate_CreatesBackup(t *testing.T) {
-	config.ResetMigrations()
 	config.RegisterMigration(config.NewLegacyMigration())
 
 	tmpDir := t.TempDir()
@@ -48,7 +47,6 @@ func TestLegacyMigration_Migrate_CreatesBackup(t *testing.T) {
 }
 
 func TestLegacyMigration_Migrate_DryRun_NoBackup(t *testing.T) {
-	config.ResetMigrations()
 	config.RegisterMigration(config.NewLegacyMigration())
 
 	tmpDir := t.TempDir()

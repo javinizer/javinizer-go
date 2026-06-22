@@ -14,46 +14,47 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
 func TestGetBatchJob_IncludesCompletedAndEndedAt(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
-	job := deps.JobQueue.CreateJob([]string{"/path/to/IPX-700.mp4"})
+	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-700.mp4"})
 	started := time.Now().UTC().Add(-2 * time.Minute)
 	ended := time.Now().UTC()
-	job.UpdateFileResult("/path/to/IPX-700.mp4", &worker.FileResult{
-		FilePath:  "/path/to/IPX-700.mp4",
-		MovieID:   "IPX-700",
-		Status:    worker.JobStatusCompleted,
-		Data:      &models.Movie{ID: "IPX-700", Title: "Done"},
-		StartedAt: started,
-		EndedAt:   &ended,
+	setJobResult(job, "/path/to/IPX-700.mp4", &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-700.mp4", MovieID: "IPX-700"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-700", Title: "Done"},
+		StartedAt:     started,
+		EndedAt:       &ended,
 	})
-	job.MarkCompleted()
+	setJobStatus(job, models.JobStatusCompleted)
 
 	router := gin.New()
-	router.GET("/batch/:id", getBatchJob(deps))
+	router.GET("/batch/:id", getBatchJob(testkit.GetTestRuntime(deps)))
 
-	req := httptest.NewRequest("GET", "/batch/"+job.ID, nil)
+	req := httptest.NewRequest("GET", "/batch/"+job.GetID(), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, 200, w.Code)
 
-	var response BatchJobResponse
+	var response contracts.BatchJobResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.NotNil(t, response.CompletedAt)
 	require.Contains(t, response.Results, "/path/to/IPX-700.mp4")
 
 	result := response.Results["/path/to/IPX-700.mp4"]
 	assert.NotNil(t, result.EndedAt)
-	assert.Equal(t, "completed", result.Status)
+	assert.Equal(t, models.JobStatusCompleted, result.Status)
 	assert.Equal(t, "IPX-700", result.MovieID)
 }
 
-func TestBatchScrape_InvalidPresetReturnsBadRequest(t *testing.T) {
+func TestBatchScrape_InvalidPresetPassedToSeam(t *testing.T) {
 	initTestWebSocket(t)
 
 	cfg := &config.Config{
@@ -69,7 +70,7 @@ func TestBatchScrape_InvalidPresetReturnsBadRequest(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	router := gin.New()
-	router.POST("/batch/scrape", batchScrape(deps))
+	router.POST("/batch/scrape", batchScrape(testkit.GetTestRuntime(deps)))
 
 	body := `{"files":["/path/to/IPX-535.mp4"],"preset":"not-a-preset"}`
 	req := httptest.NewRequest("POST", "/batch/scrape", bytes.NewBufferString(body))
@@ -77,6 +78,8 @@ func TestBatchScrape_InvalidPresetReturnsBadRequest(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
+	// API layer now validates presets at the boundary — invalid presets
+	// are rejected with HTTP 400 before reaching the pipeline.
 	assert.Equal(t, 400, w.Code)
 }
 
@@ -84,13 +87,13 @@ func TestDeleteBatchJob_Success(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
-	job := deps.JobQueue.CreateJob([]string{"/path/to/IPX-700.mp4"})
-	job.MarkCompleted()
+	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-700.mp4"})
+	setJobStatus(job, models.JobStatusCompleted)
 
 	router := gin.New()
-	router.DELETE("/batch/:id", deleteBatchJob(deps))
+	router.DELETE("/batch/:id", deleteBatchJob(testkit.GetTestRuntime(deps)))
 
-	req := httptest.NewRequest("DELETE", "/batch/"+job.ID, nil)
+	req := httptest.NewRequest("DELETE", "/batch/"+job.GetID(), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -102,7 +105,7 @@ func TestDeleteBatchJob_NotFound(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	router := gin.New()
-	router.DELETE("/batch/:id", deleteBatchJob(deps))
+	router.DELETE("/batch/:id", deleteBatchJob(testkit.GetTestRuntime(deps)))
 
 	req := httptest.NewRequest("DELETE", "/batch/nonexistent-id", nil)
 	w := httptest.NewRecorder()
@@ -115,13 +118,13 @@ func TestDeleteBatchJob_RunningJobRejected(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
-	job := deps.JobQueue.CreateJob([]string{"/path/to/IPX-700.mp4"})
-	job.Status = worker.JobStatusRunning
+	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-700.mp4"})
+	setJobStatus(job, models.JobStatusRunning)
 
 	router := gin.New()
-	router.DELETE("/batch/:id", deleteBatchJob(deps))
+	router.DELETE("/batch/:id", deleteBatchJob(testkit.GetTestRuntime(deps)))
 
-	req := httptest.NewRequest("DELETE", "/batch/"+job.ID, nil)
+	req := httptest.NewRequest("DELETE", "/batch/"+job.GetID(), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -132,11 +135,11 @@ func TestListBatchJobs_Success(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
-	deps.JobQueue.CreateJob([]string{"/path/to/IPX-700.mp4"})
-	deps.JobQueue.CreateJob([]string{"/path/to/IPX-701.mp4"})
+	deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-700.mp4"})
+	deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-701.mp4"})
 
 	router := gin.New()
-	router.GET("/batch", listBatchJobs(deps))
+	router.GET("/batch", listBatchJobs(testkit.GetTestRuntime(deps)))
 
 	req := httptest.NewRequest("GET", "/batch", nil)
 	w := httptest.NewRecorder()
@@ -155,21 +158,20 @@ func TestListBatchJobs_WithCompletedJob(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
-	job := deps.JobQueue.CreateJob([]string{"/path/to/IPX-700.mp4"})
+	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-700.mp4"})
 	started := time.Now().UTC().Add(-2 * time.Minute)
 	ended := time.Now().UTC()
-	job.UpdateFileResult("/path/to/IPX-700.mp4", &worker.FileResult{
-		FilePath:  "/path/to/IPX-700.mp4",
-		MovieID:   "IPX-700",
-		Status:    worker.JobStatusCompleted,
-		Data:      &models.Movie{ID: "IPX-700", Title: "Done"},
-		StartedAt: started,
-		EndedAt:   &ended,
+	setJobResult(job, "/path/to/IPX-700.mp4", &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-700.mp4", MovieID: "IPX-700"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-700", Title: "Done"},
+		StartedAt:     started,
+		EndedAt:       &ended,
 	})
-	job.MarkCompleted()
+	setJobStatus(job, models.JobStatusCompleted)
 
 	router := gin.New()
-	router.GET("/batch", listBatchJobs(deps))
+	router.GET("/batch", listBatchJobs(testkit.GetTestRuntime(deps)))
 
 	req := httptest.NewRequest("GET", "/batch", nil)
 	w := httptest.NewRecorder()
@@ -180,7 +182,7 @@ func TestListBatchJobs_WithCompletedJob(t *testing.T) {
 	var response contracts.BatchJobListResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Len(t, response.Jobs, 1)
-	assert.Equal(t, job.ID, response.Jobs[0].ID)
+	assert.Equal(t, job.GetID(), response.Jobs[0].ID)
 }
 
 func TestListBatchJobs_EmptyList(t *testing.T) {
@@ -188,7 +190,7 @@ func TestListBatchJobs_EmptyList(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	router := gin.New()
-	router.GET("/batch", listBatchJobs(deps))
+	router.GET("/batch", listBatchJobs(testkit.GetTestRuntime(deps)))
 
 	req := httptest.NewRequest("GET", "/batch", nil)
 	w := httptest.NewRecorder()
@@ -205,10 +207,10 @@ func TestListBatchJobs_WithExcludedFiles(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
-	deps.JobQueue.CreateJob([]string{"/path/to/IPX-700.mp4", "/path/to/IPX-701.mp4"})
+	deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-700.mp4", "/path/to/IPX-701.mp4"})
 
 	router := gin.New()
-	router.GET("/batch", listBatchJobs(deps))
+	router.GET("/batch", listBatchJobs(testkit.GetTestRuntime(deps)))
 
 	req := httptest.NewRequest("GET", "/batch", nil)
 	w := httptest.NewRecorder()
@@ -225,25 +227,24 @@ func TestGetBatchJobFull_Success(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
-	job := deps.JobQueue.CreateJob([]string{"/path/to/IPX-800.mp4"})
+	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-800.mp4"})
 	started := time.Now().UTC().Add(-1 * time.Minute)
 	ended := time.Now().UTC()
-	job.UpdateFileResult("/path/to/IPX-800.mp4", &worker.FileResult{
-		FilePath:  "/path/to/IPX-800.mp4",
-		MovieID:   "IPX-800",
-		Status:    worker.JobStatusCompleted,
-		Data:      &models.Movie{ID: "IPX-800", Title: "Full Test"},
-		StartedAt: started,
-		EndedAt:   &ended,
+	setJobResult(job, "/path/to/IPX-800.mp4", &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-800.mp4", MovieID: "IPX-800"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-800", Title: "Full Test"},
+		StartedAt:     started,
+		EndedAt:       &ended,
 	})
-	job.MarkCompleted()
+	setJobStatus(job, models.JobStatusCompleted)
 
 	router := gin.New()
 	router.GET("/batch/:id", func(c *gin.Context) {
-		getBatchJobFull(deps, c, c.Param("id"))
+		getBatchJobFull(lifecycleDepsFromCore(deps), c, c.Param("id"))
 	})
 
-	req := httptest.NewRequest("GET", "/batch/"+job.ID, nil)
+	req := httptest.NewRequest("GET", "/batch/"+job.GetID(), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -251,8 +252,8 @@ func TestGetBatchJobFull_Success(t *testing.T) {
 
 	var response contracts.BatchJobResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	assert.Equal(t, job.ID, response.ID)
-	assert.Equal(t, "completed", response.Status)
+	assert.Equal(t, job.GetID(), response.ID)
+	assert.Equal(t, models.JobStatusCompleted, response.Status)
 	assert.NotNil(t, response.CompletedAt)
 	assert.Len(t, response.Results, 1)
 }
@@ -263,7 +264,7 @@ func TestGetBatchJobFull_NotFound(t *testing.T) {
 
 	router := gin.New()
 	router.GET("/batch/:id", func(c *gin.Context) {
-		getBatchJobFull(deps, c, c.Param("id"))
+		getBatchJobFull(lifecycleDepsFromCore(deps), c, c.Param("id"))
 	})
 
 	req := httptest.NewRequest("GET", "/batch/nonexistent-id", nil)
@@ -277,25 +278,21 @@ func TestGetBatchJobFull_MultiPart(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
-	job := deps.JobQueue.CreateJob([]string{"/path/to/IPX-900-1.mp4", "/path/to/IPX-900-2.mp4"})
+	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-900-1.mp4", "/path/to/IPX-900-2.mp4"})
 	started := time.Now().UTC()
-	job.UpdateFileResult("/path/to/IPX-900-1.mp4", &worker.FileResult{
-		FilePath:    "/path/to/IPX-900-1.mp4",
-		MovieID:     "IPX-900",
-		Status:      worker.JobStatusCompleted,
-		Data:        &models.Movie{ID: "IPX-900", Title: "Multi Part"},
-		StartedAt:   started,
-		IsMultiPart: true,
-		PartNumber:  1,
-		PartSuffix:  "A",
+	setJobResult(job, "/path/to/IPX-900-1.mp4", &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-900-1.mp4", MovieID: "IPX-900", IsMultiPart: true, PartNumber: 1, PartSuffix: "A"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-900", Title: "Multi Part"},
+		StartedAt:     started,
 	})
 
 	router := gin.New()
 	router.GET("/batch/:id", func(c *gin.Context) {
-		getBatchJobFull(deps, c, c.Param("id"))
+		getBatchJobFull(lifecycleDepsFromCore(deps), c, c.Param("id"))
 	})
 
-	req := httptest.NewRequest("GET", "/batch/"+job.ID, nil)
+	req := httptest.NewRequest("GET", "/batch/"+job.GetID(), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -303,7 +300,7 @@ func TestGetBatchJobFull_MultiPart(t *testing.T) {
 
 	var response contracts.BatchJobResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	assert.Equal(t, job.ID, response.ID)
+	assert.Equal(t, job.GetID(), response.ID)
 	result, ok := response.Results["/path/to/IPX-900-1.mp4"]
 	require.True(t, ok)
 	assert.True(t, result.IsMultiPart)
@@ -314,21 +311,20 @@ func TestListBatchJobs_WithResults(t *testing.T) {
 	cfg := &config.Config{}
 	deps := createTestDeps(t, cfg, "")
 
-	job := deps.JobQueue.CreateJob([]string{"/path/to/IPX-950.mp4"})
+	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-950.mp4"})
 	started := time.Now().UTC().Add(-1 * time.Minute)
 	ended := time.Now().UTC()
-	job.UpdateFileResult("/path/to/IPX-950.mp4", &worker.FileResult{
-		FilePath:  "/path/to/IPX-950.mp4",
-		MovieID:   "IPX-950",
-		Status:    worker.JobStatusCompleted,
-		Data:      &models.Movie{ID: "IPX-950", Title: "List Test"},
-		StartedAt: started,
-		EndedAt:   &ended,
+	setJobResult(job, "/path/to/IPX-950.mp4", &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-950.mp4", MovieID: "IPX-950"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-950", Title: "List Test"},
+		StartedAt:     started,
+		EndedAt:       &ended,
 	})
-	job.MarkCompleted()
+	setJobStatus(job, models.JobStatusCompleted)
 
 	router := gin.New()
-	router.GET("/batch", listBatchJobs(deps))
+	router.GET("/batch", listBatchJobs(testkit.GetTestRuntime(deps)))
 
 	req := httptest.NewRequest("GET", "/batch", nil)
 	w := httptest.NewRecorder()
@@ -339,6 +335,63 @@ func TestListBatchJobs_WithResults(t *testing.T) {
 	var response contracts.BatchJobListResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Len(t, response.Jobs, 1)
-	assert.Equal(t, job.ID, response.Jobs[0].ID)
+	assert.Equal(t, job.GetID(), response.Jobs[0].ID)
 	assert.GreaterOrEqual(t, response.Jobs[0].OperationCount, int64(0))
+}
+
+// TestListBatchJobs_IncludesPosterURLForThumbnails is the regression test for
+// the rebase bug where /jobs page thumbnail previews stopped rendering.
+//
+// Root cause: ListJobsUseCase returned Results:nil, deferring to
+// GET /batch/{id}?include_data=true. But the frontend jobs/+page.svelte
+// getFirstPoster reads job.results inline, so thumbnails were nil/empty.
+// main's listBatchJobs inlined results (including movie poster URLs).
+//
+// Fix: ListJobsUseCase now calls parseAndConvertJobResults to inline the
+// persisted results — including r.movie.poster_url / cropped_poster_url —
+// for every job in the list response.
+func TestListBatchJobs_IncludesPosterURLForThumbnails(t *testing.T) {
+	cfg := &config.Config{}
+	deps := createTestDeps(t, cfg, "")
+
+	posterURL := "https://r18.dev/images/IPX-THUMB/poster.jpg"
+	croppedURL := "/api/v1/temp/posters/job-thumb/IPX-THUMB.jpg?v=999"
+
+	job := deps.JobStore.CreateJobBatch([]string{"/path/to/IPX-THUMB.mp4"})
+	setJobResult(job, "/path/to/IPX-THUMB.mp4", &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/path/to/IPX-THUMB.mp4", MovieID: "IPX-THUMB"},
+		Status:        models.JobStatusCompleted,
+		StartedAt:     time.Now(),
+		Movie: &models.Movie{
+			ID:    "IPX-THUMB",
+			Title: "Thumbnail Test",
+			Poster: models.PosterState{
+				PosterURL:        posterURL,
+				CroppedPosterURL: croppedURL,
+			},
+		},
+	})
+	setJobStatus(job, models.JobStatusCompleted)
+	deps.JobStore.PersistJob(job)
+
+	router := gin.New()
+	router.GET("/batch", listBatchJobs(testkit.GetTestRuntime(deps)))
+
+	req := httptest.NewRequest("GET", "/batch", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, 200, w.Code)
+
+	var resp contracts.BatchJobListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Jobs, 1)
+
+	result, ok := resp.Jobs[0].Results["/path/to/IPX-THUMB.mp4"]
+	require.True(t, ok, "Results must be inline in the list response so /jobs thumbnails render")
+	require.NotNil(t, result.Movie, "Movie must be populated from persisted results")
+	assert.Equal(t, posterURL, result.Movie.PosterURL,
+		"poster_url must be present in list response — /jobs page reads r.movie.poster_url")
+	assert.Equal(t, croppedURL, result.Movie.CroppedPosterURL,
+		"cropped_poster_url must be present in list response — /jobs page reads r.movie.cropped_poster_url")
 }

@@ -7,7 +7,8 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
-	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 )
 
@@ -52,22 +53,22 @@ var (
 	}()
 )
 
-// SubtitleHandler manages subtitle file operations
-type SubtitleHandler struct {
+// subtitleHandler manages subtitle file operations
+type subtitleHandler struct {
 	fs         afero.Fs
 	extensions []string
 }
 
-// NewSubtitleHandler creates a new subtitle handler
-func NewSubtitleHandler(fs afero.Fs, cfg *config.OutputConfig) *SubtitleHandler {
-	return &SubtitleHandler{
+// newSubtitleHandler creates a new subtitle handler
+func newSubtitleHandler(fs afero.Fs, subtitleExtensions []string) *subtitleHandler {
+	return &subtitleHandler{
 		fs:         fs,
-		extensions: cfg.SubtitleExtensions,
+		extensions: subtitleExtensions,
 	}
 }
 
-// SubtitleMatch represents a matched subtitle file
-type SubtitleMatch struct {
+// subtitleMatch represents a matched subtitle file
+type subtitleMatch struct {
 	OriginalPath string
 	NewPath      string
 	Language     string // ISO 639 language code if detectable
@@ -75,7 +76,7 @@ type SubtitleMatch struct {
 }
 
 // FindSubtitles searches for subtitle files associated with a video file
-func (sh *SubtitleHandler) FindSubtitles(videoFile scanner.FileInfo) []SubtitleMatch {
+func (sh *subtitleHandler) FindSubtitles(videoFile models.FileMatchInfo) []subtitleMatch {
 	if len(sh.extensions) == 0 {
 		return nil
 	}
@@ -84,7 +85,7 @@ func (sh *SubtitleHandler) FindSubtitles(videoFile scanner.FileInfo) []SubtitleM
 	videoName := filepath.Base(videoFile.Path)
 	videoNameWithoutExt := strings.TrimSuffix(videoName, videoFile.Extension)
 
-	matches := make([]SubtitleMatch, 0)
+	matches := make([]subtitleMatch, 0)
 
 	// Search for subtitle files in the same directory
 	files, err := afero.ReadDir(sh.fs, videoDir)
@@ -125,7 +126,7 @@ func (sh *SubtitleHandler) FindSubtitles(videoFile scanner.FileInfo) []SubtitleM
 		// Extract language code from filename
 		language := sh.extractLanguageCode(subtitleName, videoNameWithoutExt)
 
-		matches = append(matches, SubtitleMatch{
+		matches = append(matches, subtitleMatch{
 			OriginalPath: subtitlePath,
 			Language:     language,
 			Extension:    filepath.Ext(subtitleName),
@@ -136,7 +137,7 @@ func (sh *SubtitleHandler) FindSubtitles(videoFile scanner.FileInfo) []SubtitleM
 }
 
 // MoveSubtitles moves subtitle files to the target directory with the video file
-func (sh *SubtitleHandler) MoveSubtitles(subtitles []SubtitleMatch, targetDir, videoFileName string, dryRun bool) error {
+func (sh *subtitleHandler) MoveSubtitles(subtitles []subtitleMatch, targetDir, videoFileName string, dryRun bool) error {
 	if len(subtitles) == 0 {
 		return nil
 	}
@@ -156,30 +157,27 @@ func (sh *SubtitleHandler) MoveSubtitles(subtitles []SubtitleMatch, targetDir, v
 		newPath := filepath.Join(targetDir, newFileName)
 
 		if dryRun {
-			fmt.Printf("Would move subtitle: %s -> %s\n", subtitle.OriginalPath, newPath)
+			logging.Debugf("Would move subtitle: %s -> %s", subtitle.OriginalPath, newPath)
 			continue
 		}
 
-		// Check if target file already exists
 		if _, err := sh.fs.Stat(newPath); err == nil {
-			// File exists, skip or overwrite? For now, skip
-			fmt.Printf("Subtitle already exists, skipping: %s\n", newPath)
+			logging.Infof("Subtitle already exists, skipping: %s", newPath)
 			continue
 		}
 
-		// Move the subtitle file
 		if err := fsutil.MoveFileFs(sh.fs, subtitle.OriginalPath, newPath); err != nil {
 			return fmt.Errorf("failed to move subtitle %s to %s: %w", subtitle.OriginalPath, newPath, err)
 		}
 
-		fmt.Printf("Moved subtitle: %s -> %s\n", subtitle.OriginalPath, newPath)
+		logging.Infof("Moved subtitle: %s -> %s", subtitle.OriginalPath, newPath)
 	}
 
 	return nil
 }
 
 // isSubtitleFile checks if a filename has a subtitle extension
-func (sh *SubtitleHandler) isSubtitleFile(filename string) bool {
+func (sh *subtitleHandler) isSubtitleFile(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 	for _, allowedExt := range sh.extensions {
 		if ext == strings.ToLower(allowedExt) {
@@ -191,7 +189,7 @@ func (sh *SubtitleHandler) isSubtitleFile(filename string) bool {
 
 // ExtractLanguageCode extracts language code from subtitle filename
 // Examples: "IPX-535.eng.srt" -> "eng", "IPX-535.english.srt" -> "english"
-func (sh *SubtitleHandler) extractLanguageCode(subtitleName, videoNameWithoutExt string) string {
+func (sh *subtitleHandler) extractLanguageCode(subtitleName, videoNameWithoutExt string) string {
 	subtitleNameWithoutExt := strings.TrimSuffix(subtitleName, filepath.Ext(subtitleName))
 
 	// Remove the video name prefix to get the language part (case-insensitive)
@@ -228,7 +226,7 @@ func (sh *SubtitleHandler) extractLanguageCode(subtitleName, videoNameWithoutExt
 
 // GenerateSubtitleFileName generates the new filename for a subtitle file
 // Examples: "IPX-535.eng.srt", "IPX-535.srt", "IPX-535.english.srt"
-func (sh *SubtitleHandler) generateSubtitleFileName(videoNameWithoutExt, language, extension string) string {
+func (sh *subtitleHandler) generateSubtitleFileName(videoNameWithoutExt, language, extension string) string {
 	if language == "" {
 		// No language code detected
 		return videoNameWithoutExt + extension

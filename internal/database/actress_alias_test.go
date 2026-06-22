@@ -1,9 +1,9 @@
 package database
 
 import (
+	"context"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -11,19 +11,14 @@ import (
 
 func TestActressAliasRepository(t *testing.T) {
 	// Create in-memory database
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  "file::memory:?cache=shared",
-		},
-	}
+	cfg := &Config{Type: "sqlite", DSN: "file::memory:?cache=shared"}
 
 	db, err := New(cfg)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	// Run migrations
-	err = db.AutoMigrate()
+	err = db.RunMigrationsOnStartup(context.Background())
 	require.NoError(t, err)
 
 	repo := NewActressAliasRepository(db)
@@ -34,12 +29,12 @@ func TestActressAliasRepository(t *testing.T) {
 			CanonicalName: "Hatano Yui",
 		}
 
-		err := repo.Create(alias)
+		err := repo.Create(context.TODO(), alias)
 		require.NoError(t, err)
 		assert.NotZero(t, alias.ID)
 
 		// Find by alias name
-		found, err := repo.FindByAliasName("Yui Hatano")
+		found, err := repo.FindByAliasName(context.TODO(), "Yui Hatano")
 		require.NoError(t, err)
 		assert.Equal(t, "Hatano Yui", found.CanonicalName)
 	})
@@ -51,18 +46,18 @@ func TestActressAliasRepository(t *testing.T) {
 		}
 
 		// First upsert (create)
-		err := repo.Upsert(alias)
+		err := repo.Upsert(context.TODO(), alias)
 		require.NoError(t, err)
 		originalID := alias.ID
 
 		// Second upsert (update)
 		alias.CanonicalName = "Tsubasa Amami (Updated)"
-		err = repo.Upsert(alias)
+		err = repo.Upsert(context.TODO(), alias)
 		require.NoError(t, err)
 		assert.Equal(t, originalID, alias.ID, "ID should remain the same")
 
 		// Verify update
-		found, err := repo.FindByAliasName("Tsubasa Amami")
+		found, err := repo.FindByAliasName(context.TODO(), "Tsubasa Amami")
 		require.NoError(t, err)
 		assert.Equal(t, "Tsubasa Amami (Updated)", found.CanonicalName)
 	})
@@ -76,18 +71,18 @@ func TestActressAliasRepository(t *testing.T) {
 		}
 
 		for _, alias := range aliases {
-			err := repo.Create(alias)
+			err := repo.Create(context.TODO(), alias)
 			require.NoError(t, err)
 		}
 
 		// Find all aliases for this canonical name
-		found, err := repo.FindByCanonicalName("Amamiya Jun")
+		found, err := repo.FindByCanonicalName(context.TODO(), "Amamiya Jun")
 		require.NoError(t, err)
 		assert.Len(t, found, 3)
 	})
 
 	t.Run("GetAliasMap", func(t *testing.T) {
-		aliasMap, err := repo.GetAliasMap()
+		aliasMap, err := repo.GetAliasMap(context.TODO())
 		require.NoError(t, err)
 
 		// Should contain all aliases created in previous tests
@@ -102,20 +97,20 @@ func TestActressAliasRepository(t *testing.T) {
 			CanonicalName: "Actress Test",
 		}
 
-		err := repo.Create(alias)
+		err := repo.Create(context.TODO(), alias)
 		require.NoError(t, err)
 
 		// Delete
-		err = repo.Delete("Test Actress")
+		err = repo.Delete(context.TODO(), "Test Actress")
 		require.NoError(t, err)
 
 		// Verify deletion
-		_, err = repo.FindByAliasName("Test Actress")
+		_, err = repo.FindByAliasName(context.TODO(), "Test Actress")
 		assert.Error(t, err, "Should not find deleted alias")
 	})
 
 	t.Run("List", func(t *testing.T) {
-		aliases, err := repo.List()
+		aliases, err := repo.List(context.TODO())
 		require.NoError(t, err)
 		assert.Greater(t, len(aliases), 0)
 	})

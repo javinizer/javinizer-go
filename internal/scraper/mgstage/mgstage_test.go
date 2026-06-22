@@ -13,7 +13,6 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
@@ -22,7 +21,7 @@ import (
 )
 
 func TestCanHandleURL(t *testing.T) {
-	s := &Scraper{rateLimiter: ratelimit.NewLimiter(0)}
+	s := &scraper{rateLimiter: ratelimit.NewLimiter(0)}
 
 	tests := []struct {
 		name     string
@@ -63,14 +62,13 @@ func TestExtractIDFromURL_MGStage(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance_MGStage(t *testing.T) {
-	s := &Scraper{rateLimiter: ratelimit.NewLimiter(0)}
+	s := &scraper{rateLimiter: ratelimit.NewLimiter(0)}
 	var _ models.Scraper = s
-	var _ models.URLHandler = s
-	var _ models.DirectURLScraper = s
+	var _ models.Scraper = s
 }
 
-func testSettings(baseURL string) config.ScraperSettings {
-	return config.ScraperSettings{
+func testSettings(baseURL string) models.ScraperSettings {
+	return models.ScraperSettings{
 		Enabled:   true,
 		RateLimit: 0,
 		BaseURL:   baseURL,
@@ -223,7 +221,7 @@ func TestHTTPStatusError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := resty.New()
-			scraper := &Scraper{
+			scraper := &scraper{
 				client:      client,
 				enabled:     true,
 				rateLimiter: ratelimit.NewLimiter(0),
@@ -611,13 +609,13 @@ func TestGetURLErrorPaths(t *testing.T) {
 
 			client.SetTransport(rt)
 
-			scraper := &Scraper{
+			scraper := &scraper{
 				client:      client,
 				enabled:     true,
 				rateLimiter: ratelimit.NewLimiter(0),
 			}
 
-			url, err := scraper.GetURL("MIDE-123")
+			url, err := scraper.GetURL(context.Background(), "MIDE-123")
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -831,7 +829,7 @@ func TestParseHTML_MultipleActresses(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := testSettings("https://www.mgstage.com")
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 	result, err := scraper.parseHTML(doc, "https://www.mgstage.com/product/product_detail/mide-456/")
 	require.NoError(t, err)
@@ -859,7 +857,7 @@ func TestParseHTML_MultipleGenres(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := testSettings("https://www.mgstage.com")
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 	result, err := scraper.parseHTML(doc, "https://www.mgstage.com/product/product_detail/mide-789/")
 	require.NoError(t, err)
@@ -1070,7 +1068,7 @@ func TestParseHTML_Rating(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := testSettings("https://www.mgstage.com")
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 	result, err := scraper.parseHTML(doc, "https://www.mgstage.com/product/product_detail/mide-rating/")
 	require.NoError(t, err)
@@ -1098,7 +1096,7 @@ func TestParseHTML_NoRating(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := testSettings("https://www.mgstage.com")
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 	result, err := scraper.parseHTML(doc, "https://www.mgstage.com/product/product_detail/mide-norating/")
 	require.NoError(t, err)
@@ -1138,7 +1136,7 @@ func TestParseHTML_VolumeAsRuntime(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := testSettings("https://www.mgstage.com")
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 	result, err := scraper.parseHTML(doc, "https://www.mgstage.com/product/product_detail/mide-volume/")
 	require.NoError(t, err)
@@ -1235,7 +1233,7 @@ func TestIsEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scraper := &Scraper{
+			scraper := &scraper{
 				enabled: tt.enabled,
 			}
 
@@ -1250,45 +1248,47 @@ func TestResolveDownloadProxyForHost(t *testing.T) {
 	tests := []struct {
 		name          string
 		host          string
-		downloadProxy *config.ProxyConfig
-		proxyOverride *config.ProxyConfig
+		downloadProxy *models.ProxyConfig
+		proxyOverride *models.ProxyConfig
 		wantMatch     bool
 	}{
 		{
 			name:          "mgstage host with proxy",
 			host:          "www.mgstage.com",
-			downloadProxy: &config.ProxyConfig{Enabled: true, Profile: "main", Profiles: map[string]config.ProxyProfile{"main": {URL: "http://proxy.example.com"}}},
-			proxyOverride: &config.ProxyConfig{Enabled: false},
+			downloadProxy: &models.ProxyConfig{Enabled: true, Profile: "main", Profiles: map[string]models.ProxyProfile{"main": {URL: "http://proxy.example.com"}}},
+			proxyOverride: &models.ProxyConfig{Enabled: false},
 			wantMatch:     true,
 		},
 		{
 			name:          "libredmm host (not mgstage)",
 			host:          "www.libredmm.com",
-			downloadProxy: &config.ProxyConfig{Enabled: true},
-			proxyOverride: &config.ProxyConfig{},
+			downloadProxy: &models.ProxyConfig{Enabled: true},
+			proxyOverride: &models.ProxyConfig{},
 			wantMatch:     false,
 		},
 		{
 			name:          "empty host",
 			host:          "",
-			downloadProxy: &config.ProxyConfig{Enabled: true},
-			proxyOverride: &config.ProxyConfig{},
+			downloadProxy: &models.ProxyConfig{Enabled: true},
+			proxyOverride: &models.ProxyConfig{},
 			wantMatch:     false,
 		},
 		{
 			name:          "MGStage subdomain",
 			host:          "cdn.mgstage.com",
-			downloadProxy: &config.ProxyConfig{Enabled: true},
-			proxyOverride: &config.ProxyConfig{},
+			downloadProxy: &models.ProxyConfig{Enabled: true},
+			proxyOverride: &models.ProxyConfig{},
 			wantMatch:     true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scraper := &Scraper{
-				downloadProxy: tt.downloadProxy,
-				proxyOverride: tt.proxyOverride,
+			scraper := &scraper{
+				settings: models.ScraperSettings{
+					DownloadProxy: tt.downloadProxy,
+					Proxy:         tt.proxyOverride,
+				},
 			}
 
 			download, override, matched := scraper.ResolveDownloadProxyForHost(tt.host)
@@ -1366,7 +1366,7 @@ func TestResolveSearchQuery(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := testSettings("https://www.mgstage.com")
-			scraper := New(settings, nil, config.FlareSolverrConfig{})
+			scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 			result, ok := scraper.ResolveSearchQuery(tt.input)
 			assert.Equal(t, tt.wantOk, ok)
@@ -1404,7 +1404,7 @@ func TestSearchIntegration(t *testing.T) {
 </html>`
 
 	settings := testSettings("https://www.mgstage.com")
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(productHTML))
 	require.NoError(t, err)
@@ -1467,7 +1467,7 @@ func TestSearch_ErrorPaths(t *testing.T) {
 			client.SetHeader("User-Agent", "Mozilla/5.0")
 			client.SetHeader("Cookie", "adc=1")
 
-			scraper := &Scraper{
+			scraper := &scraper{
 				client:      client,
 				enabled:     true,
 				rateLimiter: ratelimit.NewLimiter(0),
@@ -1594,13 +1594,13 @@ func TestGetURL_PrefixExpansion(t *testing.T) {
 
 	client.SetTransport(rt)
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:      client,
 		enabled:     true,
 		rateLimiter: ratelimit.NewLimiter(0),
 	}
 
-	url, err := scraper.GetURL("GANA-2850")
+	url, err := scraper.GetURL(context.Background(), "GANA-2850")
 	assert.NoError(t, err)
 	assert.Equal(t, "https://www.mgstage.com/product/product_detail/200GANA-2850/", url)
 }
@@ -1636,7 +1636,7 @@ func TestResolveSearchQuery_PlainID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := testSettings("https://www.mgstage.com")
-			scraper := New(settings, nil, config.FlareSolverrConfig{})
+			scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 			result, ok := scraper.ResolveSearchQuery(tt.input)
 			assert.Equal(t, tt.wantOk, ok)

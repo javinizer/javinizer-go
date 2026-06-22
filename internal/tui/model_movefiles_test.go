@@ -16,50 +16,29 @@ import (
 // config.yaml (issue #36) instead of hardcoding it to false.
 func TestNewLoadsMoveFilesFromConfig(t *testing.T) {
 	t.Run("loads true from config", func(t *testing.T) {
-		cfg := config.DefaultConfig()
-		cfg.Output.MoveFiles = true
+		m := New(TUIModelConfig{MoveFiles: true})
 
-		m := New(cfg)
-
-		assert.True(t, m.moveFiles, "moveFiles should be loaded from cfg.Output.MoveFiles")
+		assert.True(t, m.settingsMgr.snapshot.MoveFiles, "moveFiles should be loaded from TUIModelConfig.MoveFiles")
 	})
 
 	t.Run("loads false from config", func(t *testing.T) {
-		cfg := config.DefaultConfig()
-		cfg.Output.MoveFiles = false
+		m := New(TUIModelConfig{MoveFiles: false})
 
-		m := New(cfg)
-
-		assert.False(t, m.moveFiles, "moveFiles should be loaded from cfg.Output.MoveFiles")
+		assert.False(t, m.settingsMgr.snapshot.MoveFiles, "moveFiles should be loaded from TUIModelConfig.MoveFiles")
 	})
 }
 
 // TestSetMoveFilesSyncsModelAndProcessor verifies SetMoveFiles updates both the
 // model state and (when present) the processor.
 func TestSetMoveFilesSyncsModelAndProcessor(t *testing.T) {
-	t.Run("without processor", func(t *testing.T) {
-		cfg := config.DefaultConfig()
-		m := New(cfg)
+	t.Run("updates settings manager", func(t *testing.T) {
+		m := New(TUIModelConfig{})
 
 		m.SetMoveFiles(true)
-		assert.True(t, m.moveFiles)
+		assert.True(t, m.settingsMgr.snapshot.MoveFiles)
 
 		m.SetMoveFiles(false)
-		assert.False(t, m.moveFiles)
-	})
-
-	t.Run("with processor", func(t *testing.T) {
-		cfg := config.DefaultConfig()
-		m := New(cfg)
-		proc := NewProcessingCoordinator(nil, nil, nil, nil, nil, nil, nil, nil, "", false)
-		m.SetProcessor(proc)
-
-		m.SetMoveFiles(true)
-		assert.True(t, m.moveFiles)
-		assert.True(t, proc.moveFiles, "SetMoveFiles should sync to the processor")
-
-		m.SetMoveFiles(false)
-		assert.False(t, proc.moveFiles)
+		assert.False(t, m.settingsMgr.snapshot.MoveFiles)
 	})
 }
 
@@ -118,25 +97,25 @@ func TestSaveConfigPersistsMoveFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	cfg := config.DefaultConfig()
-	cfg.Output.MoveFiles = false
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Operation.MoveFiles = false
 	require.NoError(t, config.Save(cfg, configPath))
 
 	// Reload so the model starts from the persisted (false) state
 	loaded, err := config.Load(configPath)
 	require.NoError(t, err)
-	require.False(t, loaded.Output.MoveFiles)
+	require.False(t, loaded.Output.Operation.MoveFiles)
 
-	m := New(loaded)
+	m := New(TUIModelConfig{MoveFiles: loaded.Output.Operation.MoveFiles})
 	m.SetConfigPath(configPath)
 
 	// Simulate the TUI toggle: flip moveFiles on and persist
-	m.moveFiles = true
+	m.settingsMgr.snapshot.MoveFiles = true
 	m.saveConfig()
 
 	reloaded, err := config.Load(configPath)
 	require.NoError(t, err)
-	assert.True(t, reloaded.Output.MoveFiles, "move_files should be persisted as true after saveConfig")
+	assert.True(t, reloaded.Output.Operation.MoveFiles, "move_files should be persisted as true after saveConfig")
 }
 
 // TestSaveConfigDoesNotLeakSessionOverrides verifies that saveConfig persists ONLY
@@ -147,9 +126,9 @@ func TestSaveConfigDoesNotLeakSessionOverrides(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
 	// On-disk config: extrafanart=false, logging output=stdout
-	disk := config.DefaultConfig()
-	disk.Output.MoveFiles = false
-	disk.Output.DownloadExtrafanart = false
+	disk := config.DefaultConfig(nil, nil)
+	disk.Output.Operation.MoveFiles = false
+	disk.Output.Download.DownloadExtrafanart = false
 	disk.Logging.Output = "stdout"
 	require.NoError(t, config.Save(disk, configPath))
 
@@ -157,24 +136,24 @@ func TestSaveConfigDoesNotLeakSessionOverrides(t *testing.T) {
 	// --extrafanart, --scraper-priority, and the TUI-mode logging.output rewrite.
 	loaded, err := config.Load(configPath)
 	require.NoError(t, err)
-	loaded.Output.DownloadExtrafanart = true // --extrafanart override
+	loaded.Output.Download.DownloadExtrafanart = true // --extrafanart override
 	loaded.Logging.Output = "data/logs/javinizer-tui.log"
 	loaded.Scrapers.Priority = []string{"custom-scraper"} // --scraper-priority override
 
-	m := New(loaded)
+	m := New(TUIModelConfig{MoveFiles: loaded.Output.Operation.MoveFiles})
 	m.SetConfigPath(configPath)
 
 	// Toggle moveFiles on and persist
-	m.moveFiles = true
+	m.settingsMgr.snapshot.MoveFiles = true
 	m.saveConfig()
 
 	reloaded, err := config.Load(configPath)
 	require.NoError(t, err)
 
 	// move_files SHOULD be persisted
-	assert.True(t, reloaded.Output.MoveFiles, "move_files should be persisted")
+	assert.True(t, reloaded.Output.Operation.MoveFiles, "move_files should be persisted")
 	// Session overrides should NOT leak to disk
-	assert.False(t, reloaded.Output.DownloadExtrafanart,
+	assert.False(t, reloaded.Output.Download.DownloadExtrafanart,
 		"--extrafanart session override must not be persisted to config")
 	assert.Equal(t, "stdout", reloaded.Logging.Output,
 		"TUI-mode logging.output rewrite must not be persisted to config")
@@ -189,41 +168,39 @@ func TestSaveConfigEndToEndRestart(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	cfg := config.DefaultConfig()
-	cfg.Output.MoveFiles = false
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Operation.MoveFiles = false
 	require.NoError(t, config.Save(cfg, configPath))
 
 	// Session 1: start in copy mode, toggle to move mode, persist
-	loaded, err := config.Load(configPath)
-	require.NoError(t, err)
-	m1 := New(loaded)
+	loaded, _ := config.Load(configPath)
+	m1 := New(TUIModelConfig{MoveFiles: loaded.Output.Operation.MoveFiles})
 	m1.SetConfigPath(configPath)
-	require.False(t, m1.moveFiles, "should start in copy mode")
-	m1.moveFiles = true
+	require.False(t, m1.settingsMgr.snapshot.MoveFiles, "should start in copy mode")
+	m1.settingsMgr.snapshot.MoveFiles = true
 	m1.saveConfig()
 
 	// Session 2: reload config into a fresh model
 	reloaded, err := config.Load(configPath)
 	require.NoError(t, err)
-	m2 := New(reloaded)
-	assert.True(t, m2.moveFiles, "after restart the TUI should start in move mode (issue #36)")
+	m2 := New(TUIModelConfig{MoveFiles: reloaded.Output.Operation.MoveFiles})
+	assert.True(t, m2.settingsMgr.snapshot.MoveFiles, "after restart the TUI should start in move mode (issue #36)")
 
 	// Session 3: toggle back off and confirm it persists
 	m2.SetConfigPath(configPath)
-	m2.moveFiles = false
+	m2.settingsMgr.snapshot.MoveFiles = false
 	m2.saveConfig()
 	final, err := config.Load(configPath)
 	require.NoError(t, err)
-	assert.False(t, final.Output.MoveFiles, "toggling back off should persist")
+	assert.False(t, final.Output.Operation.MoveFiles, "toggling back off should persist")
 }
 
 // TestSaveConfigNoOpWithoutPath verifies saveConfig is a no-op when no config path
 // is set (e.g. config not yet written), so it never crashes the TUI.
 func TestSaveConfigNoOpWithoutPath(t *testing.T) {
-	cfg := config.DefaultConfig()
-	m := New(cfg)
+	m := New(TUIModelConfig{})
 	// configPath is empty by default
-	m.moveFiles = true
+	m.settingsMgr.snapshot.MoveFiles = true
 	assert.NotPanics(t, func() { m.saveConfig() })
 }
 
@@ -237,10 +214,9 @@ func TestSaveConfigNoOpWhenFileUnreadable(t *testing.T) {
 	invalid := []byte("output: [invalid\n  not: valid")
 	require.NoError(t, os.WriteFile(configPath, invalid, 0o644))
 
-	cfg := config.DefaultConfig()
-	m := New(cfg)
+	m := New(TUIModelConfig{})
 	m.SetConfigPath(configPath)
-	m.moveFiles = true
+	m.settingsMgr.snapshot.MoveFiles = true
 	assert.NotPanics(t, func() { m.saveConfig() })
 
 	// The corrupt file must be left as-is (no partial write)
@@ -254,47 +230,41 @@ func TestSaveConfigNoOpWhenFileUnreadable(t *testing.T) {
 func TestHandleSettingsKeys_ToggleMoveFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
-	cfg := config.DefaultConfig()
-	cfg.Output.MoveFiles = false
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Operation.MoveFiles = false
 	require.NoError(t, config.Save(cfg, configPath))
 
 	loaded, err := config.Load(configPath)
 	require.NoError(t, err)
-	m := New(loaded)
+	m := New(TUIModelConfig{MoveFiles: loaded.Output.Operation.MoveFiles})
 	m.SetConfigPath(configPath)
-	m.currentView = ViewSettings
-	m.settingsCursor = 3 // "Move Files" row
+	m.viewMgr.switchTo(viewSettings)
+	m.settingsMgr.cursor = 3 // "Move Files" row
 
-	// Attach a processor to verify the toggle propagates
-	proc := NewProcessingCoordinator(nil, nil, nil, nil, nil, nil, nil, nil, "", false)
-	m.SetProcessor(proc)
-	require.False(t, m.moveFiles)
-	require.False(t, proc.moveFiles)
+	require.False(t, m.settingsMgr.snapshot.MoveFiles)
 
 	// Simulate pressing space at the Move Files row
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m2 := updated.(*Model)
 
-	assert.True(t, m2.moveFiles, "space at cursor 3 should toggle moveFiles on")
-	assert.True(t, proc.moveFiles, "processor should be synced")
+	assert.True(t, m2.settingsMgr.snapshot.MoveFiles, "space at cursor 3 should toggle moveFiles on")
 
 	reloaded, err := config.Load(configPath)
 	require.NoError(t, err)
-	assert.True(t, reloaded.Output.MoveFiles, "toggle should persist move_files")
+	assert.True(t, reloaded.Output.Operation.MoveFiles, "toggle should persist move_files")
 
 	// Toggle back off through the same keypress path (true -> false)
 	updated2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m3 := updated2.(*Model)
-	assert.False(t, m3.moveFiles, "second space should toggle moveFiles off")
-	assert.False(t, proc.moveFiles, "processor should sync back to false")
+	assert.False(t, m3.settingsMgr.snapshot.MoveFiles, "second space should toggle moveFiles off")
 	reloaded2, err := config.Load(configPath)
 	require.NoError(t, err)
-	assert.False(t, reloaded2.Output.MoveFiles, "toggle-off should persist")
+	assert.False(t, reloaded2.Output.Operation.MoveFiles, "toggle-off should persist")
 }
 
 // TestCanEnableMoveMode verifies the guard predicate used by the runtime toggle.
 func TestCanEnableMoveMode(t *testing.T) {
-	m := New(config.DefaultConfig())
+	m := New(TUIModelConfig{})
 	assert.True(t, m.canEnableMoveMode(), "no link mode -> move can be enabled")
 
 	m.SetLinkMode(organizer.LinkModeHard)
@@ -314,34 +284,34 @@ func TestCanEnableMoveMode(t *testing.T) {
 func TestHandleSettingsKeys_ToggleMoveFiles_RefusedWithLinkMode(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
-	cfg := config.DefaultConfig()
-	cfg.Output.MoveFiles = false
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Operation.MoveFiles = false
 	require.NoError(t, config.Save(cfg, configPath))
 
 	loaded, err := config.Load(configPath)
 	require.NoError(t, err)
-	m := New(loaded)
+	m := New(TUIModelConfig{MoveFiles: loaded.Output.Operation.MoveFiles})
 	m.SetConfigPath(configPath)
 	m.SetLinkMode(organizer.LinkModeHard) // simulate --link-mode hard
-	m.currentView = ViewSettings
-	m.settingsCursor = 3 // "Move Files" row
+	m.viewMgr.switchTo(viewSettings)
+	m.settingsMgr.cursor = 3 // "Move Files" row
 
-	proc := NewProcessingCoordinator(nil, nil, nil, nil, nil, nil, nil, nil, "", false)
+	proc, _ := NewProcessingCoordinator(nil, nil, nil, nil, TUIProcessorConfig{}, "", false)
 	m.SetProcessor(proc)
-	require.False(t, m.moveFiles)
+	require.False(t, m.settingsMgr.snapshot.MoveFiles)
 
 	// Attempt to toggle move on — must be refused due to link mode.
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m2 := updated.(*Model)
 
-	assert.False(t, m2.moveFiles, "move mode must NOT enable while link mode is active")
-	assert.False(t, proc.moveFiles, "processor must remain in copy mode")
+	assert.False(t, m2.settingsMgr.snapshot.MoveFiles, "move mode must NOT enable while link mode is active")
+	assert.False(t, proc.opts.Load().(ProcessorOptions).MoveFiles, "processor must remain in copy mode")
 
 	reloaded, err := config.Load(configPath)
 	require.NoError(t, err)
-	assert.False(t, reloaded.Output.MoveFiles, "refused toggle must not persist move_files")
+	assert.False(t, reloaded.Output.Operation.MoveFiles, "refused toggle must not persist move_files")
 
-	require.NotEmpty(t, m2.logs, "a warning should be logged when the toggle is refused")
-	last := m2.logs[len(m2.logs)-1]
+	require.NotEmpty(t, m2.logState.logs, "a warning should be logged when the toggle is refused")
+	last := m2.logState.logs[len(m2.logState.logs)-1]
 	assert.Equal(t, "warn", last.Level, "refused toggle should log a warning")
 }

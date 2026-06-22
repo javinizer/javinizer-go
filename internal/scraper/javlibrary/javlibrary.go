@@ -12,7 +12,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/challengedetect"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -20,27 +20,28 @@ import (
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 )
 
-// SupportedLanguages lists the language codes supported by JavLibrary.
+// supportedLanguages lists the language codes supported by JavLibrary.
 // en = English, ja = Japanese, cn = Chinese (Simplified), tw = Chinese (Traditional)
-var SupportedLanguages = []string{"en", "ja", "cn", "tw"}
+var supportedLanguages = []string{"en", "ja", "cn", "tw"}
 
-// Scraper implements the models.Scraper interface for JavLibrary
-type Scraper struct {
+// scraper implements the JavLibrary scraper.
+type scraper struct {
 	client        *resty.Client
 	flaresolverr  *httpclient.FlareSolverr
 	enabled       bool
 	baseURL       string
 	language      string
-	proxyOverride *config.ProxyConfig
-	downloadProxy *config.ProxyConfig
+	proxyOverride *models.ProxyConfig
+	downloadProxy *models.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings // stores the full settings for Config() method
+	settings      models.ScraperSettings // stores the full settings for Config() method
 	cookieMu      sync.Mutex             // protects cookie mutations on shared client
 }
 
 // New creates a new JavLibrary scraper.
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	configForHTTP := &config.ScraperSettings{
+// newScraper creates a new JavLibrary scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	configForHTTP := &models.ScraperSettings{
 		Enabled:         settings.Enabled,
 		Language:        settings.Language,
 		RateLimit:       settings.RateLimit,
@@ -57,10 +58,10 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		httpclient.WithHeaders(httpclient.UserAgentHeader(settings.UserAgent)),
 	).BuildWithFlareSolverr()
 
-	var resolvedProxy *config.ProxyProfile
+	var resolvedProxy *models.ProxyProfile
 	usingProxy := false
 	if globalProxy != nil {
-		resolvedProxy = config.ResolveScraperProxy(*globalProxy, settings.Proxy)
+		resolvedProxy = models.ResolveScraperProxy(*globalProxy, settings.Proxy)
 		usingProxy = err == nil && globalProxy.Enabled && strings.TrimSpace(resolvedProxy.URL) != ""
 	}
 	if err != nil {
@@ -79,7 +80,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		language = "en"
 	}
 	if !isValidLanguage(language) {
-		logging.Warnf("JavLibrary: unsupported language %q, falling back to 'en' (supported: %v)", language, SupportedLanguages)
+		logging.Warnf("JavLibrary: unsupported language %q, falling back to 'en' (supported: %v)", language, supportedLanguages)
 		language = "en"
 	}
 
@@ -87,7 +88,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		logging.Infof("JavLibrary: Using proxy %s", httpclient.SanitizeProxyURL(resolvedProxy.URL))
 	}
 
-	return &Scraper{
+	return &scraper{
 		client:        client,
 		flaresolverr:  flaresolverr,
 		enabled:       settings.Enabled,
@@ -96,32 +97,35 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
-		settings:      settings,
+		settings:      *settings,
 	}
 }
 
 // Name returns the scraper name
-func (s *Scraper) Name() string {
+func (s *scraper) Name() string {
 	return "javlibrary"
 }
 
-// GetLanguage returns the configured language
-func (s *Scraper) GetLanguage() string {
+// getLanguage returns the configured language
+//
+//nolint:unused // used by same-package tests
+func (s *scraper) getLanguage() string {
 	return s.language
 }
 
 // IsEnabled returns whether the scraper is enabled
-func (s *Scraper) IsEnabled() bool {
+func (s *scraper) IsEnabled() bool {
 	return s.enabled
 }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper (HTTP client, FlareSolverr).
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	if s.flaresolverr != nil {
 		if closeErr := s.flaresolverr.Close(); closeErr != nil {
 			logging.Debugf("JavLibrary: Error closing FlareSolverr: %v", closeErr)
@@ -131,7 +135,7 @@ func (s *Scraper) Close() error {
 }
 
 // ResolveDownloadProxyForHost declares JavLibrary-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
@@ -139,13 +143,13 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 	// JavLibrary uses c.impact.jp for its image CDN alongside javlibrary.com
 	if host == "javlibrary.com" || strings.HasSuffix(host, ".javlibrary.com") ||
 		host == "c.impact.jp" || strings.HasSuffix(host, ".c.impact.jp") {
-		return s.downloadProxy, s.proxyOverride, true
+		return s.settings.DownloadProxy, s.settings.Proxy, true
 	}
 	return nil, nil, false
 }
 
 // GetURL returns the search URL for a given ID
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -154,7 +158,7 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 	return host == "javlibrary.com" || strings.HasSuffix(host, ".javlibrary.com")
 }
 
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse URL: %w", err)
@@ -176,7 +180,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from URL")
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("JavLibrary", "URL not handled by JavLibrary scraper")
 	}
@@ -215,16 +219,16 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
 }
 
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	return fmt.Sprintf("%s/%s/vl_searchbyid.php?keyword=%s", s.baseURL, s.language, url.QueryEscape(id)), nil
 }
 
 // Search searches for a movie by ID with context support.
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("JavLibrary scraper is disabled")
 	}
@@ -273,7 +277,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 }
 
 // fetchPageCtx fetches a page via FlareSolverr (if enabled) or direct HTTP with context support.
-func (s *Scraper) fetchPageCtx(ctx context.Context, url string) (string, error) {
+func (s *scraper) fetchPageCtx(ctx context.Context, url string) (string, error) {
 	// Rate limit before fetching
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", fmt.Errorf("JavLibrary: rate limit wait failed: %w", err)
@@ -283,7 +287,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 	resp, err := s.client.R().SetContext(ctx).Get(url)
 	if err == nil && resp != nil && resp.StatusCode() == 200 {
 		html := string(resp.Body())
-		if !models.IsCloudflareChallengePage(html) {
+		if !challengedetect.IsCloudflareChallengePage(html) {
 			return html, nil
 		}
 		logging.Warnf("JavLibrary: Direct request returned Cloudflare challenge, escalating to FlareSolverr: %s", url)
@@ -298,7 +302,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 		logging.Infof("JavLibrary: Using FlareSolverr for %s", url)
 		html, cookies, fsErr := s.flaresolverr.ResolveURL(url)
 		if fsErr == nil {
-			if models.IsCloudflareChallengePage(html) {
+			if challengedetect.IsCloudflareChallengePage(html) {
 				return "", models.NewScraperChallengeError(
 					"JavLibrary",
 					"JavLibrary returned a Cloudflare challenge page (request blocked; check FlareSolverr/proxy configuration)",
@@ -327,7 +331,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 	}
 
 	html := string(resp.Body())
-	if models.IsCloudflareChallengePage(html) {
+	if challengedetect.IsCloudflareChallengePage(html) {
 		return "", models.NewScraperChallengeError(
 			"JavLibrary",
 			"JavLibrary returned a Cloudflare challenge page (request blocked; enable FlareSolverr or adjust proxy/IP)",
@@ -338,7 +342,40 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 }
 
 // parseDetailPage parses a JavLibrary detail page HTML
-func (s *Scraper) parseDetailPage(html string, id string, sourceURL string, language string) (*models.ScraperResult, error) {
+// ParseHTMLRaw parses a JavLibrary detail page from raw HTML.
+// This is the legacy parsing seam that takes raw HTML, ID, and language directly.
+// Prefer the ParseHTML method (models.HTMLParser interface) for new code.
+func (s *scraper) ParseHTMLRaw(html, id, sourceURL, language string) (*models.ScraperResult, error) {
+	return s.parseDetailPage(html, id, sourceURL, language)
+}
+
+// ParseHTML implements the models.HTMLParser interface. It renders the
+// goquery.Document back to HTML and delegates to ParseHTMLRaw with the
+// scraper's configured language and an ID extracted from the source URL.
+func (s *scraper) ParseHTML(doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+	html, err := doc.Html()
+	if err != nil {
+		return nil, fmt.Errorf("javlibrary: failed to render document to HTML: %w", err)
+	}
+	// Extract ID from URL path if possible
+	id := ""
+	if u, parseErr := url.Parse(sourceURL); parseErr == nil {
+		id = extractIDFromURL(u)
+	}
+	return s.ParseHTMLRaw(html, id, sourceURL, s.language)
+}
+
+func extractIDFromURL(u *url.URL) string {
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] != "" {
+			return parts[i]
+		}
+	}
+	return ""
+}
+
+func (s *scraper) parseDetailPage(html string, id string, sourceURL string, language string) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
@@ -346,13 +383,16 @@ func (s *Scraper) parseDetailPage(html string, id string, sourceURL string, lang
 		ID:        id,
 	}
 
+	// Parse HTML document for goquery-based extraction
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
-		return nil, fmt.Errorf("JavLibrary: failed to parse HTML: %w", err)
+		logging.Warnf("javlibrary: failed to parse HTML document: %v", err)
 	}
 
+	// Title: from <title> tag, strip " - JAVLibrary" suffix and ID prefix
 	result.Title = s.extractTitle(html, id)
 
+	// Structured fields from video_info div
 	result.ReleaseDate = s.extractReleaseDate(html)
 	result.Runtime = s.extractRuntime(html)
 	result.Director = s.extractField(html, "video_director")
@@ -362,8 +402,10 @@ func (s *Scraper) parseDetailPage(html string, id string, sourceURL string, lang
 	result.Genres = s.extractGenres(html)
 	result.Actresses = s.extractActresses(html)
 
+	// Description from video_review div
 	result.Description = s.extractDescription(html)
 
+	// Rating from video_rating div
 	result.Rating = s.extractRating(html, doc)
 
 	// Media URLs
@@ -408,7 +450,7 @@ func (s *Scraper) parseDetailPage(html string, id string, sourceURL string, lang
 }
 
 // extractTitle extracts the movie title from HTML
-func (s *Scraper) extractTitle(html string, id string) string {
+func (s *scraper) extractTitle(html string, id string) string {
 	re := regexp.MustCompile(`<title>([^<]+)</title>`)
 	matches := re.FindStringSubmatch(html)
 	if len(matches) < 2 {
@@ -429,7 +471,7 @@ func (s *Scraper) extractTitle(html string, id string) string {
 }
 
 // extractCoverURL extracts the cover image URL from the video_jacket_img element
-func (s *Scraper) extractCoverURL(html string) string {
+func (s *scraper) extractCoverURL(html string) string {
 	re := regexp.MustCompile(`id="video_jacket_img"[^>]*src="([^"]+)"`)
 	matches := re.FindStringSubmatch(html)
 	if len(matches) > 1 {
@@ -451,7 +493,7 @@ func (s *Scraper) extractCoverURL(html string) string {
 }
 
 // extractReleaseDate extracts release date from video_date div
-func (s *Scraper) extractReleaseDate(html string) *time.Time {
+func (s *scraper) extractReleaseDate(html string) *time.Time {
 	re := regexp.MustCompile(`id="video_date"[^>]*>[\s\S]*?class="text">(\d{4}-\d{2}-\d{2})<`)
 	matches := re.FindStringSubmatch(html)
 	if len(matches) > 1 {
@@ -474,7 +516,7 @@ func (s *Scraper) extractReleaseDate(html string) *time.Time {
 }
 
 // extractRuntime extracts runtime from video_length div
-func (s *Scraper) extractRuntime(html string) int {
+func (s *scraper) extractRuntime(html string) int {
 	// JavLibrary uses "Length:" with <span class="text">120</span> min(s)
 	re := regexp.MustCompile(`id="video_length"[^>]*>[\s\S]*?class="text">(\d+)<`)
 	matches := re.FindStringSubmatch(html)
@@ -499,7 +541,7 @@ func (s *Scraper) extractRuntime(html string) int {
 
 // extractField extracts a field value from a video_info div by its ID
 // Works for video_director, video_maker, video_label
-func (s *Scraper) extractField(html string, divID string) string {
+func (s *scraper) extractField(html string, divID string) string {
 	// Pattern: <div id="video_director" ...> ... <a ...>Value</a> ...
 	pattern := fmt.Sprintf(`id="%s"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>`, divID)
 	re := regexp.MustCompile(pattern)
@@ -511,7 +553,7 @@ func (s *Scraper) extractField(html string, divID string) string {
 }
 
 // extractGenres extracts genres from the video_genres div
-func (s *Scraper) extractGenres(html string) []string {
+func (s *scraper) extractGenres(html string) []string {
 	// Genres are in: <span class="genre"><a href="..." rel="tag">GenreName</a></span>
 	re := regexp.MustCompile(`class="genre"[^>]*><a[^>]*>([^<]+)</a>`)
 	matches := re.FindAllStringSubmatch(html, -1)
@@ -531,7 +573,7 @@ func (s *Scraper) extractGenres(html string) []string {
 }
 
 // extractActresses extracts actress info from the video_cast div
-func (s *Scraper) extractActresses(html string) []models.ActressInfo {
+func (s *scraper) extractActresses(html string) []models.ActressInfo {
 	// Cast is in: <span class="star"><a href="..." rel="tag">ActressName</a></span>
 	re := regexp.MustCompile(`class="star"[^>]*><a[^>]*>([^<]+)</a>`)
 	matches := re.FindAllStringSubmatch(html, -1)
@@ -566,7 +608,7 @@ func (s *Scraper) extractActresses(html string) []models.ActressInfo {
 // extractDescription extracts the movie description from the page.
 // JavLibrary typically doesn't include movie descriptions on detail pages.
 // We check the meta description tag first, then fall back to any review text.
-func (s *Scraper) extractDescription(html string) string {
+func (s *scraper) extractDescription(html string) string {
 	// First check meta description tag
 	re := regexp.MustCompile(`(?i)<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']`)
 	matches := re.FindStringSubmatch(html)
@@ -600,7 +642,7 @@ func (s *Scraper) extractDescription(html string) string {
 }
 
 // extractSeries extracts the series name from the video_series div
-func (s *Scraper) extractSeries(html string) string {
+func (s *scraper) extractSeries(html string) string {
 	// Series is in: <div id="video_series"><a href="...">SeriesName</a></div>
 	re := regexp.MustCompile(`id="video_series"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>`)
 	matches := re.FindStringSubmatch(html)
@@ -617,7 +659,7 @@ func (s *Scraper) extractSeries(html string) string {
 }
 
 // extractRating extracts the movie rating (score) from the JavLibrary page.
-func (s *Scraper) extractRating(html string, doc *goquery.Document) *models.Rating {
+func (s *scraper) extractRating(html string, doc *goquery.Document) *models.Rating {
 	ratingRegex := regexp.MustCompile(`\$rating\s*=\s*"([\d.]+)"`)
 	if m := ratingRegex.FindStringSubmatch(html); len(m) >= 2 {
 		score, err := strconv.ParseFloat(m[1], 64)
@@ -640,7 +682,7 @@ func (s *Scraper) extractRating(html string, doc *goquery.Document) *models.Rati
 }
 
 // extractScreenshotURLs extracts screenshot/image gallery URLs from the page
-func (s *Scraper) extractScreenshotURLs(html string) []string {
+func (s *scraper) extractScreenshotURLs(html string) []string {
 	var screenshotURLs []string
 	seen := make(map[string]bool)
 
@@ -687,7 +729,7 @@ func (s *Scraper) extractScreenshotURLs(html string) []string {
 	}
 
 	// Also look for jp-1.jpg, jp-2.jpg, etc. patterns (JavLibrary/DMM screenshot pattern)
-	// Pattern: ID + jp + number + .jpg (e.g., abp880jp-1.jpg, 118abp00880jp-1.jpg)
+	// Pattern: ID + jp + number + .jpg (e.g., abp880jp-1.jpg, 118abp880jp-1.jpg)
 	re = regexp.MustCompile(`src="([^"]*jp-\d+\.jpg[^"]*)"`)
 	matches = re.FindAllStringSubmatch(html, -1)
 	for _, m := range matches {
@@ -782,7 +824,7 @@ func (s *Scraper) extractScreenshotURLs(html string) []string {
 }
 
 // extractTrailerURL extracts the trailer/sample video URL
-func (s *Scraper) extractTrailerURL(html string) string {
+func (s *scraper) extractTrailerURL(html string) string {
 	// Look for video source tags with sample/trailer context
 	re := regexp.MustCompile(`src="([^"]*sample[^"]*\.mp4[^"]*)"`)
 	matches := re.FindStringSubmatch(html)
@@ -821,7 +863,7 @@ var reLegacyHrefLang = regexp.MustCompile(`href="(/?(?:en|ja|cn|tw)/\?v=[a-zA-Z0
 var reLegacyHrefQuery = regexp.MustCompile(`href="(\?v=[a-zA-Z0-9]+)"`)
 
 // extractMovieURLFromHTML extracts the movie detail link from search results
-func (s *Scraper) extractMovieURLFromHTML(html string, searchID string) string {
+func (s *scraper) extractMovieURLFromHTML(html string, searchID string) string {
 	// Pattern 1: Current JavLibrary format uses relative HTML links
 	// e.g., <div class="video" id="vid_javliat76u"> with <div class="id">ONED-025</div>
 	matches := reVideoThumbDiv.FindAllStringSubmatch(html, -1)
@@ -869,7 +911,7 @@ func (s *Scraper) extractMovieURLFromHTML(html string, searchID string) string {
 
 // isValidLanguage checks if the language code is supported by JavLibrary
 func isValidLanguage(lang string) bool {
-	for _, l := range SupportedLanguages {
+	for _, l := range supportedLanguages {
 		if l == lang {
 			return true
 		}

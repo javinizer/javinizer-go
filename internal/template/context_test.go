@@ -33,7 +33,7 @@ func TestNewContextFromMovie(t *testing.T) {
 				Series:        "Test Series",
 				RatingScore:   4.5,
 				Description:   "Test description",
-				CoverURL:      "https://example.com/cover.jpg",
+				Poster:        models.PosterState{CoverURL: "https://example.com/cover.jpg"},
 				TrailerURL:    "https://example.com/trailer.mp4",
 				Actresses: []models.Actress{
 					{FirstName: "Sakura", LastName: "Momo"},
@@ -61,7 +61,6 @@ func TestNewContextFromMovie(t *testing.T) {
 				CoverURL:         "https://example.com/cover.jpg",
 				TrailerURL:       "https://example.com/trailer.mp4",
 				Actresses:        []string{"Momo Sakura", "Hatano Yui"},
-				ActressDetails:   []ActressDetail{{FirstName: "Sakura", LastName: "Momo"}, {FirstName: "Yui", LastName: "Hatano"}},
 				Genres:           []string{"Drama", "Romance"},
 				FirstName:        "Sakura",
 				LastName:         "Momo",
@@ -104,13 +103,12 @@ func TestNewContextFromMovie(t *testing.T) {
 				},
 			},
 			want: &Context{
-				ID:             "IPX-001",
-				Title:          "Single Actress",
-				Actresses:      []string{"Actress Test"},
-				ActressDetails: []ActressDetail{{FirstName: "Test", LastName: "Actress"}},
-				FirstName:      "Test",
-				LastName:       "Actress",
-				Translations:   map[string]models.MovieTranslation{},
+				ID:           "IPX-001",
+				Title:        "Single Actress",
+				Actresses:    []string{"Actress Test"},
+				FirstName:    "Test",
+				LastName:     "Actress",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -124,13 +122,12 @@ func TestNewContextFromMovie(t *testing.T) {
 				},
 			},
 			want: &Context{
-				ID:             "IPX-001",
-				Title:          "Japanese Names",
-				Actresses:      []string{"波多野結衣", "Uehara Ai"},
-				ActressDetails: []ActressDetail{{JapaneseName: "波多野結衣"}, {FirstName: "Ai", LastName: "Uehara", JapaneseName: "上原亜衣"}},
-				FirstName:      "",
-				LastName:       "",
-				Translations:   map[string]models.MovieTranslation{},
+				ID:           "IPX-001",
+				Title:        "Japanese Names",
+				Actresses:    []string{"波多野結衣", "Uehara Ai"},
+				FirstName:    "",
+				LastName:     "",
+				Translations: map[string]models.MovieTranslation{},
 			},
 		},
 		{
@@ -143,6 +140,19 @@ func TestNewContextFromMovie(t *testing.T) {
 			want: &Context{
 				ID:           "IPX-001",
 				Title:        "No Genres",
+				Translations: map[string]models.MovieTranslation{},
+			},
+		},
+		{
+			name: "Movie with nil genres",
+			movie: &models.Movie{
+				ID:     "IPX-001",
+				Title:  "Nil Genres",
+				Genres: nil,
+			},
+			want: &Context{
+				ID:           "IPX-001",
+				Title:        "Nil Genres",
 				Translations: map[string]models.MovieTranslation{},
 			},
 		},
@@ -276,255 +286,6 @@ func TestNewContextFromMovie(t *testing.T) {
 	}
 }
 
-func TestNewContextFromScraperResult(t *testing.T) {
-	releaseDate := time.Date(2020, 9, 13, 0, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		name   string
-		result *models.ScraperResult
-		want   *Context
-	}{
-		{
-			name: "Complete scraper result with all fields",
-			result: &models.ScraperResult{
-				Source:        "r18dev",
-				ID:            "IPX-535",
-				ContentID:     "ipx00535",
-				Title:         "Test Movie Title",
-				OriginalTitle: "テストムービータイトル",
-				ReleaseDate:   &releaseDate,
-				Runtime:       120,
-				Director:      "Test Director",
-				Maker:         "Test Studio",
-				Label:         "Test Label",
-				Series:        "Test Series",
-				Rating: &models.Rating{
-					Score: 4.5,
-					Votes: 100,
-				},
-				Description: "Test description",
-				CoverURL:    "https://example.com/cover.jpg",
-				TrailerURL:  "https://example.com/trailer.mp4",
-				Actresses: []models.ActressInfo{
-					{FirstName: "Sakura", LastName: "Momo"},
-					{FirstName: "Yui", LastName: "Hatano"},
-				},
-				Genres: []string{"Drama", "Romance"},
-			},
-			want: &Context{
-				ID:             "IPX-535",
-				ContentID:      "ipx00535",
-				Title:          "Test Movie Title",
-				OriginalTitle:  "テストムービータイトル",
-				ReleaseDate:    &releaseDate,
-				ReleaseYear:    2020,
-				Runtime:        120,
-				Director:       "Test Director",
-				Maker:          "Test Studio",
-				Label:          "Test Label",
-				Series:         "Test Series",
-				Rating:         4.5,
-				Description:    "Test description",
-				CoverURL:       "https://example.com/cover.jpg",
-				TrailerURL:     "https://example.com/trailer.mp4",
-				Actresses:      []string{"Momo Sakura", "Hatano Yui"},
-				ActressDetails: []ActressDetail{{FirstName: "Sakura", LastName: "Momo"}, {FirstName: "Yui", LastName: "Hatano"}},
-				Genres:         []string{"Drama", "Romance"},
-				FirstName:      "Sakura",
-				LastName:       "Momo",
-				Translations:   map[string]models.MovieTranslation{},
-			},
-		},
-		{
-			name: "Minimal scraper result",
-			result: &models.ScraperResult{
-				Source: "r18dev",
-				ID:     "ABC-123",
-				Title:  "Minimal Result",
-			},
-			want: &Context{
-				ID:           "ABC-123",
-				Title:        "Minimal Result",
-				Translations: map[string]models.MovieTranslation{},
-			},
-		},
-		{
-			name: "Scraper result with nil rating",
-			result: &models.ScraperResult{
-				Source: "r18dev",
-				ID:     "IPX-001",
-				Title:  "No Rating",
-				Rating: nil,
-			},
-			want: &Context{
-				ID:           "IPX-001",
-				Title:        "No Rating",
-				Rating:       0,
-				Translations: map[string]models.MovieTranslation{},
-			},
-		},
-		{
-			name: "Scraper result with zero rating score",
-			result: &models.ScraperResult{
-				Source: "r18dev",
-				ID:     "IPX-001",
-				Title:  "Zero Rating",
-				Rating: &models.Rating{Score: 0, Votes: 10},
-			},
-			want: &Context{
-				ID:           "IPX-001",
-				Title:        "Zero Rating",
-				Rating:       0,
-				Translations: map[string]models.MovieTranslation{},
-			},
-		},
-		{
-			name: "Scraper result with empty actresses",
-			result: &models.ScraperResult{
-				Source:    "r18dev",
-				ID:        "IPX-001",
-				Title:     "No Actresses",
-				Actresses: []models.ActressInfo{},
-			},
-			want: &Context{
-				ID:           "IPX-001",
-				Title:        "No Actresses",
-				Translations: map[string]models.MovieTranslation{},
-			},
-		},
-		{
-			name: "Scraper result with single actress",
-			result: &models.ScraperResult{
-				Source: "r18dev",
-				ID:     "IPX-001",
-				Title:  "Single Actress",
-				Actresses: []models.ActressInfo{
-					{FirstName: "Test", LastName: "Actress"},
-				},
-			},
-			want: &Context{
-				ID:             "IPX-001",
-				Title:          "Single Actress",
-				Actresses:      []string{"Actress Test"},
-				ActressDetails: []ActressDetail{{FirstName: "Test", LastName: "Actress"}},
-				FirstName:      "Test",
-				LastName:       "Actress",
-				Translations:   map[string]models.MovieTranslation{},
-			},
-		},
-		{
-			name: "Scraper result with Japanese actress name",
-			result: &models.ScraperResult{
-				Source: "r18dev",
-				ID:     "IPX-001",
-				Title:  "Japanese Name",
-				Actresses: []models.ActressInfo{
-					{JapaneseName: "波多野結衣"},
-				},
-			},
-			want: &Context{
-				ID:             "IPX-001",
-				Title:          "Japanese Name",
-				Actresses:      []string{"波多野結衣"},
-				ActressDetails: []ActressDetail{{JapaneseName: "波多野結衣"}},
-				FirstName:      "",
-				LastName:       "",
-				Translations:   map[string]models.MovieTranslation{},
-			},
-		},
-		{
-			name: "Scraper result with empty genres",
-			result: &models.ScraperResult{
-				Source: "r18dev",
-				ID:     "IPX-001",
-				Title:  "No Genres",
-				Genres: []string{},
-			},
-			want: &Context{
-				ID:           "IPX-001",
-				Title:        "No Genres",
-				Genres:       []string{},
-				Translations: map[string]models.MovieTranslation{},
-			},
-		},
-		{
-			name: "Scraper result with nil genres",
-			result: &models.ScraperResult{
-				Source: "r18dev",
-				ID:     "IPX-001",
-				Title:  "Nil Genres",
-				Genres: nil,
-			},
-			want: &Context{
-				ID:           "IPX-001",
-				Title:        "Nil Genres",
-				Genres:       nil,
-				Translations: map[string]models.MovieTranslation{},
-			},
-		},
-		{
-			name: "Scraper result initializes empty Translations map",
-			result: &models.ScraperResult{
-				Source: "r18dev",
-				ID:     "IPX-001",
-				Title:  "Test",
-			},
-			want: &Context{
-				ID:           "IPX-001",
-				Title:        "Test",
-				Translations: map[string]models.MovieTranslation{},
-			},
-		},
-		{
-			name: "Scraper result with translations",
-			result: &models.ScraperResult{
-				Source: "r18dev",
-				ID:     "IPX-001",
-				Title:  "Test",
-				Translations: []models.MovieTranslation{
-					{Language: "en", Title: "English Title"},
-					{Language: "ja", Title: "Japanese Title"},
-				},
-			},
-			want: &Context{
-				ID:    "IPX-001",
-				Title: "Test",
-				Translations: map[string]models.MovieTranslation{
-					"en": {Language: "en", Title: "English Title"},
-					"ja": {Language: "ja", Title: "Japanese Title"},
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := NewContextFromScraperResult(tt.result)
-
-			assert.Equal(t, tt.want.ID, got.ID)
-			assert.Equal(t, tt.want.ContentID, got.ContentID)
-			assert.Equal(t, tt.want.Title, got.Title)
-			assert.Equal(t, tt.want.OriginalTitle, got.OriginalTitle)
-			assert.Equal(t, tt.want.ReleaseDate, got.ReleaseDate)
-			assert.Equal(t, tt.want.ReleaseYear, got.ReleaseYear)
-			assert.Equal(t, tt.want.Runtime, got.Runtime)
-			assert.Equal(t, tt.want.Director, got.Director)
-			assert.Equal(t, tt.want.Maker, got.Maker)
-			assert.Equal(t, tt.want.Label, got.Label)
-			assert.Equal(t, tt.want.Series, got.Series)
-			assert.Equal(t, tt.want.Rating, got.Rating)
-			assert.Equal(t, tt.want.Description, got.Description)
-			assert.Equal(t, tt.want.CoverURL, got.CoverURL)
-			assert.Equal(t, tt.want.TrailerURL, got.TrailerURL)
-			assert.Equal(t, tt.want.FirstName, got.FirstName)
-			assert.Equal(t, tt.want.LastName, got.LastName)
-			assert.Equal(t, tt.want.Actresses, got.Actresses)
-			assert.Equal(t, tt.want.Genres, got.Genres)
-			assert.Equal(t, tt.want.Translations, got.Translations)
-		})
-	}
-}
-
 func TestClone(t *testing.T) {
 	releaseDate := time.Date(2020, 9, 13, 0, 0, 0, 0, time.UTC)
 
@@ -638,11 +399,9 @@ func TestClone(t *testing.T) {
 			assert.Equal(t, tt.ctx.DefaultLanguage, clone.DefaultLanguage)
 			assert.Equal(t, tt.ctx.GroupActress, clone.GroupActress)
 			assert.Equal(t, tt.ctx.GroupActressName, clone.GroupActressName)
-			assert.Equal(t, tt.ctx.FirstNameOrder, clone.FirstNameOrder)
 
 			// Verify slices are equal
 			assert.Equal(t, tt.ctx.Actresses, clone.Actresses)
-			assert.Equal(t, tt.ctx.ActressDetails, clone.ActressDetails)
 			assert.Equal(t, tt.ctx.Genres, clone.Genres)
 
 			// Verify translations map is equal
@@ -951,13 +710,13 @@ func TestGetMediaInfo(t *testing.T) {
 		}
 
 		// First call should return the cached info
-		info1 := ctx.GetMediaInfo()
+		info1 := ctx.getMediaInfo()
 		require.NotNil(t, info1, "Should return cached mediainfo")
 		assert.Equal(t, 1080, info1.Height)
 		assert.Equal(t, 1920, info1.Width)
 
 		// Second call should return the same cached instance (pointer equality)
-		info2 := ctx.GetMediaInfo()
+		info2 := ctx.getMediaInfo()
 		require.NotNil(t, info2, "Should return cached mediainfo")
 		assert.Same(t, info1, info2, "Should return the same cached instance")
 		assert.Equal(t, 1080, info2.Height)
@@ -969,7 +728,7 @@ func TestGetMediaInfo(t *testing.T) {
 			VideoFilePath: "",
 		}
 
-		info := ctx.GetMediaInfo()
+		info := ctx.getMediaInfo()
 		assert.Nil(t, info, "Should return nil when VideoFilePath is empty")
 	})
 
@@ -979,7 +738,7 @@ func TestGetMediaInfo(t *testing.T) {
 			VideoFilePath: "/nonexistent/path/to/video.mp4",
 		}
 
-		info := ctx.GetMediaInfo()
+		info := ctx.getMediaInfo()
 		assert.Nil(t, info, "Should return nil when video file does not exist")
 	})
 }
@@ -1001,7 +760,7 @@ func TestContextFieldPreservation(t *testing.T) {
 		Series:           "Series Name",
 		Description:      "Long description",
 		RatingScore:      3.8,
-		CoverURL:         "https://example.com/cover.jpg",
+		Poster:           models.PosterState{CoverURL: "https://example.com/cover.jpg"},
 		TrailerURL:       "https://example.com/trailer.mp4",
 		OriginalFileName: "test_file.mp4",
 		Actresses: []models.Actress{
@@ -1027,15 +786,13 @@ func TestContextFieldPreservation(t *testing.T) {
 	assert.Equal(t, movie.Series, ctx.Series)
 	assert.Equal(t, movie.Description, ctx.Description)
 	assert.Equal(t, movie.RatingScore, ctx.Rating)
-	assert.Equal(t, movie.CoverURL, ctx.CoverURL)
+	assert.Equal(t, movie.Poster.CoverURL, ctx.CoverURL)
 	assert.Equal(t, movie.TrailerURL, ctx.TrailerURL)
 	assert.Equal(t, movie.OriginalFileName, ctx.OriginalFilename)
 
 	// Verify transformed fields
 	require.Len(t, ctx.Actresses, 1)
 	assert.Equal(t, "Last First", ctx.Actresses[0])
-	require.Len(t, ctx.ActressDetails, 1)
-	assert.Equal(t, ActressDetail{FirstName: "First", LastName: "Last"}, ctx.ActressDetails[0])
 	assert.Equal(t, "First", ctx.FirstName)
 	assert.Equal(t, "Last", ctx.LastName)
 
@@ -1043,58 +800,34 @@ func TestContextFieldPreservation(t *testing.T) {
 	assert.Equal(t, "Genre1", ctx.Genres[0])
 }
 
-func TestContextFieldPreservationFromScraperResult(t *testing.T) {
-	// Test that NewContextFromScraperResult preserves all fields correctly
-	releaseDate := time.Date(2023, 5, 15, 0, 0, 0, 0, time.UTC)
-
-	result := &models.ScraperResult{
-		Source:        "r18dev",
-		ID:            "TEST-123",
-		ContentID:     "test00123",
-		Title:         "Test Title",
-		OriginalTitle: "Original Title",
-		ReleaseDate:   &releaseDate,
-		Runtime:       150,
-		Director:      "Director Name",
-		Maker:         "Studio Name",
-		Label:         "Label Name",
-		Series:        "Series Name",
-		Description:   "Long description",
-		Rating:        &models.Rating{Score: 3.8, Votes: 50},
-		CoverURL:      "https://example.com/cover.jpg",
-		TrailerURL:    "https://example.com/trailer.mp4",
-		Actresses: []models.ActressInfo{
-			{FirstName: "First", LastName: "Last"},
+func TestNewContextFromMovieWithOptions(t *testing.T) {
+	movie := &models.Movie{
+		ID:    "IPX-535",
+		Title: "Test Movie",
+		Actresses: []models.Actress{
+			{FirstName: "Yui", LastName: "Hatano"},
+			{FirstName: "Momo", LastName: "Sakura"},
 		},
-		Genres: []string{"Genre1"},
 	}
 
-	ctx := NewContextFromScraperResult(result)
+	t.Run("default options produces LastName-first names", func(t *testing.T) {
+		ctx := NewContextFromMovieWithOptions(movie, ContextOptions{})
+		assert.Equal(t, []string{"Hatano Yui", "Sakura Momo"}, ctx.Actresses)
+	})
 
-	// Verify all scalar fields
-	assert.Equal(t, result.ID, ctx.ID)
-	assert.Equal(t, result.ContentID, ctx.ContentID)
-	assert.Equal(t, result.Title, ctx.Title)
-	assert.Equal(t, result.OriginalTitle, ctx.OriginalTitle)
-	assert.Equal(t, result.ReleaseDate, ctx.ReleaseDate)
-	assert.Equal(t, result.Runtime, ctx.Runtime)
-	assert.Equal(t, result.Director, ctx.Director)
-	assert.Equal(t, result.Maker, ctx.Maker)
-	assert.Equal(t, result.Label, ctx.Label)
-	assert.Equal(t, result.Series, ctx.Series)
-	assert.Equal(t, result.Description, ctx.Description)
-	assert.Equal(t, result.Rating.Score, ctx.Rating)
-	assert.Equal(t, result.CoverURL, ctx.CoverURL)
-	assert.Equal(t, result.TrailerURL, ctx.TrailerURL)
+	t.Run("FirstNameOrder true produces FirstName-first names", func(t *testing.T) {
+		ctx := NewContextFromMovieWithOptions(movie, ContextOptions{FirstNameOrder: true})
+		assert.Equal(t, []string{"Yui Hatano", "Momo Sakura"}, ctx.Actresses)
+	})
 
-	// Verify transformed fields
-	require.Len(t, ctx.Actresses, 1)
-	assert.Equal(t, "Last First", ctx.Actresses[0])
-	require.Len(t, ctx.ActressDetails, 1)
-	assert.Equal(t, ActressDetail{FirstName: "First", LastName: "Last"}, ctx.ActressDetails[0])
-	assert.Equal(t, "First", ctx.FirstName)
-	assert.Equal(t, "Last", ctx.LastName)
+	t.Run("FirstNameOrder false produces LastName-first names", func(t *testing.T) {
+		ctx := NewContextFromMovieWithOptions(movie, ContextOptions{FirstNameOrder: false})
+		assert.Equal(t, []string{"Hatano Yui", "Sakura Momo"}, ctx.Actresses)
+	})
 
-	require.Len(t, ctx.Genres, 1)
-	assert.Equal(t, "Genre1", ctx.Genres[0])
+	t.Run("NewContextFromMovie matches default options", func(t *testing.T) {
+		ctxDefault := NewContextFromMovie(movie)
+		ctxOpts := NewContextFromMovieWithOptions(movie, ContextOptions{})
+		assert.Equal(t, ctxDefault.Actresses, ctxOpts.Actresses)
+	})
 }

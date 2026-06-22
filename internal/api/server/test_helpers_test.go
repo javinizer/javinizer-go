@@ -16,13 +16,14 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-type ServerDependencies = core.ServerDependencies
+type ServerDependencies = core.APIDeps
 type ErrorResponse = contracts.ErrorResponse
 type ScrapeResponse = contracts.ScrapeResponse
 type BatchScrapeRequest = contracts.BatchScrapeRequest
 
-func createTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.ServerDependencies {
-	return testkit.CreateTestDeps(t, cfg, configFile)
+func createTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.APIDeps {
+	deps := testkit.CreateTestDeps(t, cfg, configFile)
+	return deps
 }
 
 func newMockMovieRepo() *database.MovieRepository { return testkit.NewMockMovieRepo() }
@@ -30,13 +31,13 @@ func newMockActressRepo() *database.ActressRepository {
 	return testkit.NewMockActressRepo()
 }
 
-func cleanupServerHub(t *testing.T, deps *core.ServerDependencies) {
-	testkit.CleanupServerHub(t, deps)
+func cleanupServerHub(t *testing.T, deps *core.APIDeps) {
+	testkit.CleanupServerHub(t, testkit.GetTestRuntime(deps))
 }
 
-func setupAuthenticatedTestServer(t *testing.T) (*gin.Engine, *core.ServerDependencies) {
+func setupAuthenticatedTestServer(t *testing.T) (*gin.Engine, *core.APIDeps) {
 	t.Helper()
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	configFile := filepath.Join(t.TempDir(), "config.yaml")
 	deps := createTestDeps(t, cfg, configFile)
 	manager, err := auth.NewAuthManager(configFile, time.Hour)
@@ -66,11 +67,11 @@ func (m *mockScraperWithResults) Search(_ context.Context, id string) (*models.S
 	return &result, nil
 }
 
-func (m *mockScraperWithResults) GetURL(id string) (string, error) { return "", nil }
-func (m *mockScraperWithResults) IsEnabled() bool                  { return m.enabled }
-func (m *mockScraperWithResults) Close() error                     { return nil }
-func (m *mockScraperWithResults) Config() *config.ScraperSettings {
-	return &config.ScraperSettings{Enabled: m.enabled}
+func (m *mockScraperWithResults) GetURL(_ context.Context, id string) (string, error) { return "", nil }
+func (m *mockScraperWithResults) IsEnabled() bool                                     { return m.enabled }
+func (m *mockScraperWithResults) Close() error                                        { return nil }
+func (m *mockScraperWithResults) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: m.enabled}
 }
 
 type mockScraper struct {
@@ -82,9 +83,9 @@ func (m *mockScraper) Name() string { return m.name }
 func (m *mockScraper) Search(_ context.Context, id string) (*models.ScraperResult, error) {
 	return nil, nil
 }
-func (m *mockScraper) GetURL(id string) (string, error) { return "", nil }
-func (m *mockScraper) IsEnabled() bool                  { return m.enabled }
-func (m *mockScraper) Close() error                     { return nil }
-func (m *mockScraper) Config() *config.ScraperSettings {
-	return &config.ScraperSettings{Enabled: m.enabled}
+func (m *mockScraper) GetURL(_ context.Context, id string) (string, error) { return "", nil }
+func (m *mockScraper) IsEnabled() bool                                     { return m.enabled }
+func (m *mockScraper) Close() error                                        { return nil }
+func (m *mockScraper) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: m.enabled}
 }

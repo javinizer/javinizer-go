@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/update"
 	"github.com/javinizer/javinizer-go/internal/version"
 )
@@ -30,11 +31,14 @@ type VersionStatusResponse struct {
 // @Produce json
 // @Success 200 {object} VersionStatusResponse
 // @Router /api/v1/version [get]
-func versionStatus(deps *ServerDependencies) gin.HandlerFunc {
+func versionStatus(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Create update service
+		// Create update service from narrow config.
 		cfg := deps.GetConfig()
-		service := update.NewService(cfg)
+		service := update.NewService(update.UpdateConfig{
+			Enabled:                   cfg.System.VersionCheckEnabled,
+			VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+		})
 
 		// Get current version info
 		currentVer := version.Short()
@@ -48,7 +52,7 @@ func versionStatus(deps *ServerDependencies) gin.HandlerFunc {
 			Current:   currentVer,
 			Commit:    commit,
 			BuildDate: buildDate,
-			Source:    "cached",
+			Source:    string(update.UpdateSourceCached),
 		}
 
 		if err != nil {
@@ -58,21 +62,21 @@ func versionStatus(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		// Handle disabled state
-		if state.Source == "disabled" {
+		if state.Source == update.UpdateSourceDisabled {
 			response.Latest = ""
 			response.UpdateAvailable = false
 			response.CheckedAt = ""
-			response.Source = "disabled"
+			response.Source = string(update.UpdateSourceDisabled)
 			c.JSON(http.StatusOK, response)
 			return
 		}
 
 		// Handle none/empty state
-		if state.Source == "none" || state.CheckedAt == "" {
+		if state.Source == update.UpdateSourceNone || state.CheckedAt == "" {
 			response.Latest = ""
 			response.UpdateAvailable = false
 			response.CheckedAt = ""
-			response.Source = "none"
+			response.Source = string(update.UpdateSourceNone)
 			c.JSON(http.StatusOK, response)
 			return
 		}
@@ -82,7 +86,7 @@ func versionStatus(deps *ServerDependencies) gin.HandlerFunc {
 		response.UpdateAvailable = state.Available
 		response.Prerelease = state.Prerelease
 		response.CheckedAt = state.CheckedAt
-		response.Source = state.Source
+		response.Source = string(state.Source)
 
 		if state.Error != "" {
 			response.Error = state.Error
@@ -99,11 +103,14 @@ func versionStatus(deps *ServerDependencies) gin.HandlerFunc {
 // @Produce json
 // @Success 200 {object} VersionStatusResponse
 // @Router /api/v1/version/check [post]
-func versionCheck(deps *ServerDependencies) gin.HandlerFunc {
+func versionCheck(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Create update service
+		// Create update service from narrow config.
 		cfg := deps.GetConfig()
-		service := update.NewService(cfg)
+		service := update.NewService(update.UpdateConfig{
+			Enabled:                   cfg.System.VersionCheckEnabled,
+			VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+		})
 
 		// Perform the check (sync)
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
@@ -120,7 +127,7 @@ func versionCheck(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		if err != nil {
-			response.Source = "error"
+			response.Source = string(update.UpdateSourceError)
 			response.Error = err.Error()
 			response.Latest = ""
 			response.UpdateAvailable = false
@@ -129,7 +136,7 @@ func versionCheck(deps *ServerDependencies) gin.HandlerFunc {
 		}
 
 		if state == nil {
-			response.Source = "error"
+			response.Source = string(update.UpdateSourceError)
 			response.Error = "update check returned no state"
 			response.Latest = ""
 			response.UpdateAvailable = false
@@ -137,7 +144,7 @@ func versionCheck(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		response.Source = state.Source
+		response.Source = string(state.Source)
 		response.Error = state.Error
 		response.Latest = state.Version
 		response.Prerelease = state.Prerelease

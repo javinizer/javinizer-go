@@ -15,7 +15,7 @@ type Movie struct {
 
 	// IDs
 	ID       string     `xml:"id,omitempty"`
-	UniqueID []UniqueID `xml:"uniqueid,omitempty"`
+	UniqueID []uniqueID `xml:"uniqueid,omitempty"`
 
 	// Plot/Description
 	Plot    string `xml:"plot,omitempty"`
@@ -29,11 +29,11 @@ type Movie struct {
 	Premiered   string `xml:"premiered,omitempty"`   // YYYY-MM-DD format
 
 	// Rating
-	Ratings Ratings `xml:"ratings,omitempty"`
+	Ratings ratings `xml:"ratings,omitempty"`
 
 	// People
 	Director string  `xml:"director,omitempty"`
-	Actors   []Actor `xml:"actor,omitempty"`
+	Actors   []actor `xml:"actor,omitempty"`
 	Credits  string  `xml:"credits,omitempty"` // Writer/credits
 
 	// Production info
@@ -48,28 +48,28 @@ type Movie struct {
 
 	// Media
 	Thumb   []Thumb `xml:"thumb,omitempty"`
-	Fanart  *Fanart `xml:"fanart,omitempty"`
+	Fanart  *fanart `xml:"fanart,omitempty"`
 	Trailer string  `xml:"trailer,omitempty"`
 
 	// File info (optional)
-	FileInfo     *FileInfo `xml:"fileinfo,omitempty"`
+	FileInfo     *fileInfo `xml:"fileinfo,omitempty"`
 	OriginalPath string    `xml:"originalpath,omitempty"` // Original source filename
 }
 
-// UniqueID represents a unique identifier with a type
-type UniqueID struct {
+// uniqueID represents a unique identifier with a type
+type uniqueID struct {
 	Type    string `xml:"type,attr"`
 	Default bool   `xml:"default,attr,omitempty"`
 	Value   string `xml:",chardata"`
 }
 
-// Ratings contains rating information
-type Ratings struct {
-	Rating []Rating `xml:"rating,omitempty"`
+// ratings contains rating information
+type ratings struct {
+	Rating []rating `xml:"rating,omitempty"`
 }
 
-// Rating represents a single rating source
-type Rating struct {
+// rating represents a single rating source
+type rating struct {
 	Name    string  `xml:"name,attr,omitempty"`
 	Max     int     `xml:"max,attr,omitempty"`
 	Default bool    `xml:"default,attr,omitempty"`
@@ -77,8 +77,8 @@ type Rating struct {
 	Votes   int     `xml:"votes,omitempty"`
 }
 
-// Actor represents an actress/actor in the movie
-type Actor struct {
+// actor represents an actress/actor in the movie
+type actor struct {
 	Name    string `xml:"name"`
 	AltName string `xml:"altname,omitempty"` // Alternative/romanized name
 	Role    string `xml:"role,omitempty"`
@@ -93,25 +93,25 @@ type Thumb struct {
 	Value   string `xml:",chardata"`              // Main URL
 }
 
-// Fanart contains fanart/background images
-type Fanart struct {
+// fanart contains fanart/background images
+type fanart struct {
 	Thumbs []Thumb `xml:"thumb,omitempty"`
 }
 
-// FileInfo contains media file technical information
-type FileInfo struct {
-	StreamDetails *StreamDetails `xml:"streamdetails,omitempty"`
+// fileInfo contains media file technical information
+type fileInfo struct {
+	StreamDetails *streamDetails `xml:"streamdetails,omitempty"`
 }
 
-// StreamDetails contains video/audio/subtitle stream information
-type StreamDetails struct {
-	Video    []VideoStream    `xml:"video,omitempty"`
-	Audio    []AudioStream    `xml:"audio,omitempty"`
-	Subtitle []SubtitleStream `xml:"subtitle,omitempty"`
+// streamDetails contains video/audio/subtitle stream information
+type streamDetails struct {
+	Video    []videoStream    `xml:"video,omitempty"`
+	Audio    []audioStream    `xml:"audio,omitempty"`
+	Subtitle []subtitleStream `xml:"subtitle,omitempty"`
 }
 
-// VideoStream represents video stream information
-type VideoStream struct {
+// videoStream represents video stream information
+type videoStream struct {
 	Codec             string  `xml:"codec,omitempty"`
 	Aspect            float64 `xml:"aspect,omitempty"`
 	Width             int     `xml:"width,omitempty"`
@@ -120,14 +120,14 @@ type VideoStream struct {
 	StereoMode        string  `xml:"stereomode,omitempty"`
 }
 
-// AudioStream represents audio stream information
-type AudioStream struct {
+// audioStream represents audio stream information
+type audioStream struct {
 	Codec    string `xml:"codec,omitempty"`
 	Language string `xml:"language,omitempty"`
 	Channels int    `xml:"channels,omitempty"`
 }
 
-// SubtitleStream represents subtitle stream information
-type SubtitleStream struct {
+// subtitleStream represents subtitle stream information
+type subtitleStream struct {
 	Language string `xml:"language,omitempty"`
 }

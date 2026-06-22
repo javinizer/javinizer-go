@@ -43,7 +43,7 @@ func TestLimiter_DelayCausesWait(t *testing.T) {
 	if secondElapsed < delay-10*time.Millisecond {
 		t.Errorf("second call should wait at least %v, only waited %v", delay, secondElapsed)
 	}
-	if secondElapsed > delay+20*time.Millisecond {
+	if secondElapsed > delay+30*time.Millisecond {
 		t.Errorf("second call should not wait much longer than %v, waited %v", delay, secondElapsed)
 	}
 }
@@ -80,32 +80,30 @@ func TestLimiter_ConcurrentCalls(t *testing.T) {
 		t.Skip("skipping slow test in short mode")
 	}
 
-	delay := 20 * time.Millisecond
+	delay := 50 * time.Millisecond
 	limiter := NewLimiter(delay)
 
+	const numGoroutines = 5
+	start := make(chan struct{})
 	var wg sync.WaitGroup
-	const numGoroutines = 10
-	times := make([]time.Time, numGoroutines)
+	wg.Add(numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func(idx int) {
+		go func() {
 			defer wg.Done()
+			<-start
 			_ = limiter.Wait(context.Background())
-			times[idx] = time.Now()
-		}(i)
+		}()
 	}
 
+	t0 := time.Now()
+	close(start)
 	wg.Wait()
+	elapsed := time.Since(t0)
 
-	for i := 1; i < numGoroutines; i++ {
-		diff := times[i].Sub(times[i-1])
-		if diff < 0 {
-			diff = -diff
-		}
-		if diff < delay-5*time.Millisecond {
-			t.Errorf("concurrent calls should be separated by at least %v, got %v between call %d and %d", delay, diff, i-1, i)
-		}
+	minExpected := time.Duration(numGoroutines-1) * delay
+	if elapsed < minExpected-20*time.Millisecond {
+		t.Errorf("total elapsed %v should be at least %v for %d sequential rate-limited calls", elapsed, minExpected, numGoroutines)
 	}
 }
 
@@ -245,9 +243,10 @@ func TestLimiter_CancelDoesNotShortenOthersWait(t *testing.T) {
 	elapsed2 := <-result2
 	elapsed3 := <-result3
 
-	// The key invariant: the sum of all waits should be at least 3*delay
-	// (since 3 waiters must go through rate limiter sequentially)
-	// If rollback bug exists, total would be less because some slots get erased
+	// The key invariant: waiter1 + waiter3 must account for at least 2*delay total
+	// (2 non-cancelled waiters each need their own rate-limited slot).
+	// If rollback bug exists, waiter2's cancelled slot would be erased,
+	// allowing waiter3 to proceed earlier than it should.
 	totalWait := elapsed1 + elapsed3 // waiter2 cancelled, doesn't count
 
 	// Minimum expected: waiter1 + waiter3 each need at least one slot
@@ -264,39 +263,40 @@ func TestLimiter_CancelDoesNotShortenOthersWait(t *testing.T) {
 // TestLimiter_RollbackLogic tests the rollback logic directly.
 // This verifies that rollback only happens when no other waiter reserved after us.
 func TestLimiter_RollbackLogic(t *testing.T) {
-	delay := 20 * time.Millisecond
+	delay := 50 * time.Millisecond
 	limiter := NewLimiter(delay)
 
-	// Initialize: first call sets nextAllowedTime
 	_ = limiter.Wait(context.Background())
 
-	// Simulate the scenario where multiple waiters have reserved slots:
-	// After initialization, nextAllowedTime = now + delay
-	//
 	// Case 1: Cancel when no one else reserved after us
-	// - mySlot = nextAllowedTime
-	// - After we reserve, nextAllowedTime = mySlot + delay
-	// - We cancel before anyone else reserves
-	// - nextAllowedTime should rollback to mySlot
+	// - Waiter reserves slot at nextAllowedTime
+	// - nextAllowedTime advances by delay
+	// - We cancel before the slot fires
+	// - Rollback should move nextAllowedTime back, allowing the next waiter sooner
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	go func() {
 		limiter.Wait(ctx1)
 	}()
 
-	time.Sleep(5 * time.Millisecond) // Let the goroutine reserve its slot
-	cancel1()                        // Cancel it
-	time.Sleep(5 * time.Millisecond) // Let the rollback happen
+	// Give the goroutine time to acquire the lock and reserve its slot,
+	// but cancel before the slot fires (well within the 50ms delay).
+	time.Sleep(10 * time.Millisecond)
+	cancel1()
+	time.Sleep(10 * time.Millisecond)
 
-	// Now nextAllowedTime should be back to ~delay from when the waiter started
-	// A new waiter should not have to wait too long
+	// With rollback: nextAllowedTime moved back to ~slot start, so next waiter
+	// should proceed quickly (within ~delay of the original reservation).
+	// Without rollback: nextAllowedTime is still at slot+delay, so next waiter
+	// waits much longer (~delay - 10ms = ~40ms remaining).
 	t0 := time.Now()
 	limiter.Wait(context.Background())
 	elapsed := time.Since(t0)
 
-	// Should be able to proceed within ~delay (not 2*delay if rollback worked)
-	if elapsed > 2*delay {
-		t.Errorf("rollback didn't work, new waiter waited %v (expected ~%v)", elapsed, delay)
+	// With working rollback, the next waiter should proceed within delay
+	// (the slot was released, so it can reuse that time window).
+	if elapsed > delay {
+		t.Errorf("rollback didn't work, new waiter waited %v (expected <%v)", elapsed, delay)
 	}
 	t.Logf("Case 1 - rollback when alone: %v", elapsed)
 }

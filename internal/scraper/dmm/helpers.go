@@ -140,7 +140,7 @@ func extractContentIDCandidates(doc *goquery.Document, searchIDs []string) []con
 }
 
 // extractCandidateURLs extracts and prioritizes URLs from search results
-func (s *Scraper) extractCandidateURLs(doc *goquery.Document, contentID string) []urlCandidate {
+func (s *scraper) extractCandidateURLs(doc *goquery.Document, contentID string) []urlCandidate {
 	var candidates []urlCandidate
 
 	// URL patterns to exclude (unsupported page structures)

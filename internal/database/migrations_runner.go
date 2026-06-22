@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/javinizer/javinizer-go/internal/configutil"
+	"github.com/javinizer/javinizer-go/internal/config"
 	dbmigrations "github.com/javinizer/javinizer-go/internal/database/migrations"
 	"github.com/pressly/goose/v3"
 	gooselock "github.com/pressly/goose/v3/lock"
+	"github.com/spf13/afero"
 )
 
 const (
@@ -24,6 +24,10 @@ const (
 	migrationLockRetry    = 250 * time.Millisecond
 )
 
+// startupMigrationMu serializes :memory: DB migrations within a single process.
+// This is only used for the in-memory DSN path (tests) — production uses fileMigrationLocker.
+// Package-level is acceptable because :memory: databases are process-scoped;
+// concurrent test processes each get their own in-memory DB.
 var startupMigrationMu sync.Mutex
 
 // RunMigrationsOnStartup applies all pending versioned database migrations.
@@ -43,11 +47,11 @@ func (db *DB) RunMigrationsOnStartup(ctx context.Context) (err error) {
 		return fmt.Errorf("get sql database handle: %w", err)
 	}
 
-	if err := EnsureMigrationHashTable(sqlDB); err != nil {
+	if err := ensureMigrationHashTable(sqlDB); err != nil {
 		return fmt.Errorf("ensure migration hash table: %w", err)
 	}
 
-	migrationLocker, err := newStartupMigrationLocker(db.dsn)
+	migrationLocker, err := newStartupMigrationLocker(db.dsn, db.fs)
 	if err != nil {
 		return fmt.Errorf("initialize startup migration lock: %w", err)
 	}
@@ -80,7 +84,7 @@ func (db *DB) RunMigrationsOnStartup(ctx context.Context) (err error) {
 
 	backupPath := ""
 	if pending {
-		backupPath, err = createSQLiteBackupSnapshot(ctx, sqlDB, db.dsn)
+		backupPath, err = createSQLiteBackupSnapshot(ctx, sqlDB, db.dsn, db.fs)
 		if err != nil {
 			return fmt.Errorf("create pre-migration backup: %w", err)
 		}
@@ -90,7 +94,7 @@ func (db *DB) RunMigrationsOnStartup(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("read baseline migration: %w", err)
 	}
-	baselineHash := ComputeMigrationHash(baselineContent)
+	baselineHash := computeMigrationHash(baselineContent)
 
 	storedHash, err := GetStoredHash(sqlDB, "000001_baseline.sql")
 	if err != nil {
@@ -166,26 +170,26 @@ func (l *fileMigrationLocker) Unlock(_ context.Context, _ *sql.DB) error {
 	return l.fileLock.Close()
 }
 
-func newStartupMigrationLocker(dsn string) (gooselock.Locker, error) {
+func newStartupMigrationLocker(dsn string, fs afero.Fs) (gooselock.Locker, error) {
 	dbPath, ok := sqliteFilePathFromDSN(dsn)
 	if !ok {
 		return processMigrationLocker{}, nil
 	}
 	lockPath := dbPath + ".migration.lock"
-	if err := os.MkdirAll(filepath.Dir(lockPath), configutil.DirPerm); err != nil {
+	if err := fs.MkdirAll(filepath.Dir(lockPath), config.DirPerm); err != nil {
 		return nil, fmt.Errorf("create migration lock directory: %w", err)
 	}
 	return &fileMigrationLocker{fileLock: flock.New(lockPath)}, nil
 }
 
-func createSQLiteBackupSnapshot(ctx context.Context, db *sql.DB, dsn string) (string, error) {
+func createSQLiteBackupSnapshot(ctx context.Context, db *sql.DB, dsn string, fs afero.Fs) (string, error) {
 	dbPath, ok := sqliteFilePathFromDSN(dsn)
 	if !ok {
 		return "", nil
 	}
 
 	backupPath := fmt.Sprintf("%s.%s.backup", dbPath, time.Now().UTC().Format("20060102T150405Z"))
-	if err := os.MkdirAll(filepath.Dir(backupPath), configutil.DirPerm); err != nil {
+	if err := fs.MkdirAll(filepath.Dir(backupPath), config.DirPerm); err != nil {
 		return "", fmt.Errorf("create backup directory: %w", err)
 	}
 

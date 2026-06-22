@@ -9,19 +9,18 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
-	ws "github.com/javinizer/javinizer-go/internal/websocket"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
 // Test helpers for creating mock repositories
 
-// mockScraperWithResults implements Scraper and returns predefined results
+// MockScraperWithResults implements Scraper and returns predefined results
 // For security testing, it echoes back the ID in the result to verify sanitization
 type MockScraperWithResults struct {
 	name    string
@@ -43,7 +42,7 @@ func (m *MockScraperWithResults) Search(_ context.Context, id string) (*models.S
 	return &result, nil
 }
 
-func (m *MockScraperWithResults) GetURL(id string) (string, error) {
+func (m *MockScraperWithResults) GetURL(_ context.Context, id string) (string, error) {
 	return "", nil
 }
 
@@ -51,8 +50,8 @@ func (m *MockScraperWithResults) IsEnabled() bool {
 	return m.enabled
 }
 
-func (m *MockScraperWithResults) Config() *config.ScraperSettings {
-	return &config.ScraperSettings{}
+func (m *MockScraperWithResults) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{}
 }
 
 func (m *MockScraperWithResults) Close() error {
@@ -71,21 +70,14 @@ func NewMockScraperWithResults(name string, enabled bool, result *models.Scraper
 
 // NewMockMovieRepo creates a test movie repository with in-memory database.
 func NewMockMovieRepo() *database.MovieRepository {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
-
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{
+		Type: "sqlite",
+		DSN:  ":memory:",
+	})
 	if err != nil {
 		panic(err)
 	}
-	if err := db.AutoMigrate(); err != nil {
+	if err := db.RunMigrationsOnStartup(context.Background()); err != nil {
 		panic(err)
 	}
 	return database.NewMovieRepository(db)
@@ -93,40 +85,31 @@ func NewMockMovieRepo() *database.MovieRepository {
 
 // NewMockActressRepo creates a test actress repository with in-memory database.
 func NewMockActressRepo() *database.ActressRepository {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  ":memory:",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
-	}
-
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{
+		Type: "sqlite",
+		DSN:  ":memory:",
+	})
 	if err != nil {
 		panic(err)
 	}
-	if err := db.AutoMigrate(); err != nil {
+	if err := db.RunMigrationsOnStartup(context.Background()); err != nil {
 		panic(err)
 	}
 	return database.NewActressRepository(db)
 }
 
-// CreateTestDeps creates minimal ServerDependencies for testing.
-func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.ServerDependencies {
+// CreateTestDeps creates minimal *core.APIDeps for testing.
+// Per DEEP-2: the APIRuntime is stored internally and can be retrieved
+// via GetTestRuntime(deps). This avoids requiring all test callers to
+// change their variable unpacking while still providing runtime access.
+func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.APIDeps {
 	t.Helper()
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	dbCfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  dbPath + "?_journal_mode=WAL&_busy_timeout=10000",
-		},
-		Logging: config.LoggingConfig{
-			Level: "error",
-		},
+	dbCfg := &database.Config{
+		Type: "sqlite",
+		DSN:  dbPath + "?_journal_mode=WAL&_busy_timeout=10000",
 	}
 
 	db, err := database.New(dbCfg)
@@ -140,65 +123,85 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.S
 		}
 	})
 
-	if err := db.AutoMigrate(); err != nil {
+	if err := db.RunMigrationsOnStartup(context.Background()); err != nil {
 		t.Fatalf("Failed to migrate test database: %v", err)
 	}
 
-	// Initialize repositories
-	movieRepo := database.NewMovieRepository(db)
-	actressRepo := database.NewActressRepository(db)
-	jobRepo := database.NewJobRepository(db)
-	batchFileOpRepo := database.NewBatchFileOperationRepository(db)
-
 	// Initialize scraper registry
-	registry := models.NewScraperRegistry()
+	registry := scraperutil.NewScraperRegistry()
 
-	// Initialize aggregator
-	agg := aggregator.NewWithDatabase(cfg, db)
-
-	// Initialize matcher
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	if err != nil {
-		t.Fatalf("Failed to create matcher: %v", err)
-	}
+	// Initialize repositories via db.Repositories()
+	repos := db.Repositories()
 
 	// Initialize job queue with jobRepo for persistence
-	jobQueue := worker.NewJobQueue(jobRepo, "", nil)
+	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, nil, nil)
 
-	deps := &core.ServerDependencies{
-		ConfigFile:      configFile,
-		Registry:        registry,
-		DB:              db,
-		Aggregator:      agg,
-		MovieRepo:       movieRepo,
-		ActressRepo:     actressRepo,
-		JobRepo:         jobRepo,
-		BatchFileOpRepo: batchFileOpRepo,
-		Matcher:         mat,
-		JobQueue:        jobQueue,
-		Runtime:         core.NewRuntimeState(),
+	deps := &core.APIDeps{
+		CoreDeps: &commandutil.CoreDeps{
+			ScraperRegistry: registry,
+			DB:              db,
+		},
+		ConfigFile: configFile,
+		Repos:      repos,
+		JobStore:   jobStore,
 	}
-	// Initialize atomic config pointer
-	deps.SetConfig(cfg)
-	core.SetDefaultRuntimeState(deps.Runtime)
+
+	// Create APIRuntime which owns mutable state
+	rt := core.NewAPIRuntime(deps)
+	rt.SetConfig(cfg)
+	rt.EnsureRuntime()
+
+	// Initialize web socket on the runtime for tests that need it
+	rtState := rt.GetRuntime()
+	rtState.ResetWebSocketHub()
+	rtState.SetWebSocketUpgraderForTesting(websocket.Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	})
+
+	// Store the runtime so tests can retrieve it via GetTestRuntime
+	runtimeMap.Store(deps, rt)
 
 	return deps
 }
 
+// runtimeMap stores the APIRuntime associated with each APIDeps created by CreateTestDeps.
+// This allows tests to retrieve the runtime without the APIDeps back-reference that
+// was removed in DEEP-2.
+var runtimeMap sync.Map
+
+// GetTestRuntime returns the APIRuntime associated with the given APIDeps.
+// If no runtime has been registered (e.g., the deps was created manually
+// rather than via CreateTestDeps), a new APIRuntime is created, stored,
+// and returned. This prevents nil-pointer dereferences in test helpers
+// that construct *APIDeps directly and then call runtime methods.
+func GetTestRuntime(deps *core.APIDeps) *core.APIRuntime {
+	val, ok := runtimeMap.Load(deps)
+	if ok {
+		return val.(*core.APIRuntime)
+	}
+
+	// Auto-create and register a runtime for manually-constructed deps.
+	rt := core.NewAPIRuntime(deps)
+	runtimeMap.Store(deps, rt)
+	return rt
+}
+
+// SetTestRuntime associates an APIRuntime with the given APIDeps.
+// This is useful for test helpers that construct *APIDeps directly
+// (without CreateTestDeps) and need to register the runtime so that
+// GetTestRuntime can find it later.
+func SetTestRuntime(deps *core.APIDeps, rt *core.APIRuntime) {
+	runtimeMap.Store(deps, rt)
+}
+
 var wsTestMu sync.Mutex
 
-// InitTestWebSocket initializes runtime websocket state for tests.
-func InitTestWebSocket(t *testing.T) {
+// InitTestWebSocket initializes the given runtime's websocket state for tests.
+func InitTestWebSocket(t *testing.T, runtime *core.RuntimeState) {
 	t.Helper()
 
 	wsTestMu.Lock()
 	defer wsTestMu.Unlock()
-
-	runtime := core.DefaultRuntimeState()
-	if runtime == nil {
-		runtime = core.NewRuntimeState()
-		core.SetDefaultRuntimeState(runtime)
-	}
 
 	runtime.ResetWebSocketHub()
 	runtime.SetWebSocketUpgraderForTesting(websocket.Upgrader{
@@ -210,33 +213,15 @@ func InitTestWebSocket(t *testing.T) {
 	})
 }
 
-// CleanupServerHub gracefully shuts down websocket runtime for dependencies.
-func CleanupServerHub(t *testing.T, deps *core.ServerDependencies) {
+// CleanupServerHub gracefully shuts down websocket runtime for the given APIRuntime.
+func CleanupServerHub(t *testing.T, rt *core.APIRuntime) {
 	t.Helper()
-	if deps == nil {
+	if rt == nil {
 		return
 	}
-	deps.Shutdown()
-	time.Sleep(100 * time.Millisecond)
-}
-
-// CurrentHub returns the default websocket hub for assertions.
-func CurrentHub() *ws.Hub {
-	runtime := core.DefaultRuntimeState()
-	if runtime == nil {
-		return nil
+	rtState := rt.GetRuntime()
+	if rtState != nil {
+		rtState.Shutdown()
 	}
-	return runtime.WebSocketHub()
-}
-
-// StartStandaloneHub starts a websocket hub with cancellation for dedicated tests.
-func StartStandaloneHub() (*ws.Hub, context.CancelFunc, <-chan struct{}) {
-	hub := ws.NewHub()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		hub.Run(ctx)
-		close(done)
-	}()
-	return hub, cancel, done
+	time.Sleep(100 * time.Millisecond)
 }

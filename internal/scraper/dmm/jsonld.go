@@ -11,28 +11,28 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 )
 
-// JSONLDProduct represents the Product schema from JSON-LD
-type JSONLDProduct struct {
+// jsonldProduct represents the Product schema from JSON-LD
+type jsonldProduct struct {
 	Context         string                 `json:"@context"`
 	Type            string                 `json:"@type"`
 	Name            string                 `json:"name"`
 	Description     string                 `json:"description"`
-	Image           interface{}            `json:"image"` // Can be string or array
+	Image           any                    `json:"image"` // Can be string or array
 	SKU             string                 `json:"sku"`
-	Brand           *JSONLDBrand           `json:"brand"`
-	SubjectOf       *JSONLDVideoObject     `json:"subjectOf"`
-	Offers          *JSONLDOffer           `json:"offers"`
-	AggregateRating *JSONLDAggregateRating `json:"aggregateRating"`
+	Brand           *jsonldBrand           `json:"brand"`
+	SubjectOf       *jsonldVideoObject     `json:"subjectOf"`
+	Offers          *jsonldOffer           `json:"offers"`
+	AggregateRating *jsonldAggregateRating `json:"aggregateRating"`
 }
 
-// JSONLDBrand represents the Brand schema
-type JSONLDBrand struct {
+// jsonldBrand represents the Brand schema
+type jsonldBrand struct {
 	Type string `json:"@type"`
 	Name string `json:"name"`
 }
 
-// JSONLDVideoObject represents the VideoObject schema
-type JSONLDVideoObject struct {
+// jsonldVideoObject represents the VideoObject schema
+type jsonldVideoObject struct {
 	Type         string   `json:"@type"`
 	Name         string   `json:"name"`
 	Description  string   `json:"description"`
@@ -42,16 +42,16 @@ type JSONLDVideoObject struct {
 	Genre        []string `json:"genre"`
 }
 
-// JSONLDOffer represents the Offer schema
-type JSONLDOffer struct {
+// jsonldOffer represents the Offer schema
+type jsonldOffer struct {
 	Type          string  `json:"@type"`
 	Availability  string  `json:"availability"`
 	PriceCurrency string  `json:"priceCurrency"`
 	Price         float64 `json:"price"`
 }
 
-// JSONLDAggregateRating represents the AggregateRating schema
-type JSONLDAggregateRating struct {
+// jsonldAggregateRating represents the AggregateRating schema
+type jsonldAggregateRating struct {
 	Type        string  `json:"@type"`
 	RatingValue float64 `json:"ratingValue"`
 	RatingCount int     `json:"ratingCount"`
@@ -59,14 +59,14 @@ type JSONLDAggregateRating struct {
 
 // extractJSONLD extracts and parses JSON-LD data from video.dmm.co.jp pages
 // Returns the first Product-type JSON-LD found, or nil if none
-func extractJSONLD(doc *goquery.Document) *JSONLDProduct {
-	var product *JSONLDProduct
+func extractJSONLD(doc *goquery.Document) *jsonldProduct {
+	var product *jsonldProduct
 
 	doc.Find(`script[type="application/ld+json"]`).EachWithBreak(func(i int, sel *goquery.Selection) bool {
 		jsonText := sel.Text()
 
-		// Try to parse as JSONLDProduct
-		var p JSONLDProduct
+		// Try to parse as jsonldProduct
+		var p jsonldProduct
 		if err := json.Unmarshal([]byte(jsonText), &p); err != nil {
 			logging.Debugf("DMM JSON-LD: Failed to parse JSON-LD #%d: %v", i+1, err)
 			return true // Continue to next script
@@ -87,18 +87,20 @@ func extractJSONLD(doc *goquery.Document) *JSONLDProduct {
 
 // getImagesFromJSONLD extracts image URLs from JSON-LD image field
 // Handles both string and array formats
-func getImagesFromJSONLD(imageField interface{}) []string {
+func getImagesFromJSONLD(imageField any) []string {
 	images := make([]string, 0)
 
 	switch v := imageField.(type) {
 	case string:
+		// Single image as string
 		if v != "" {
-			images = append(images, v)
+			images = append(images, imageutil.NormalizeDMMScreenshotURL(v))
 		}
-	case []interface{}:
+	case []any:
+		// Array of images
 		for _, img := range v {
 			if imgStr, ok := img.(string); ok && imgStr != "" {
-				images = append(images, imgStr)
+				images = append(images, imageutil.NormalizeDMMScreenshotURL(imgStr))
 			}
 		}
 	default:
@@ -126,8 +128,8 @@ func parseReleaseDateFromJSONLD(uploadDate string) *time.Time {
 
 // extractMetadataFromJSONLD is a helper function that extracts all available metadata
 // from JSON-LD and returns it in a structured way for easy use in parseHTML
-func extractMetadataFromJSONLD(doc *goquery.Document) map[string]interface{} {
-	metadata := make(map[string]interface{})
+func extractMetadataFromJSONLD(doc *goquery.Document) map[string]any {
+	metadata := make(map[string]any)
 
 	product := extractJSONLD(doc)
 	if product == nil {
@@ -159,13 +161,13 @@ func extractMetadataFromJSONLD(doc *goquery.Document) map[string]interface{} {
 	if product.Image != nil {
 		images := getImagesFromJSONLD(product.Image)
 		if len(images) > 0 {
-			metadata["cover_url"] = imageutil.UpgradeCoverResolution(imageutil.NormalizeDMMScreenshotURL(images[0]))
+			// First image is usually the cover
+			// Images already normalized by getImagesFromJSONLD -> imageutil.NormalizeDMMScreenshotURL
+			metadata["cover_url"] = imageutil.UpgradeCoverResolution(images[0])
 
+			// Rest are screenshots (skip first which is cover)
 			if len(images) > 1 {
-				screenshots := make([]string, 0, len(images)-1)
-				for _, raw := range images[1:] {
-					screenshots = append(screenshots, imageutil.NormalizeDMMScreenshotURL(raw))
-				}
+				screenshots := append([]string{}, images[1:]...)
 				metadata["screenshots"] = screenshots
 				logging.Debugf("DMM JSON-LD: Extracted %d screenshots from image array", len(screenshots))
 			}
@@ -218,7 +220,7 @@ func extractMetadataFromJSONLD(doc *goquery.Document) map[string]interface{} {
 }
 
 // getStringFromMetadata safely retrieves a string value from metadata map
-func getStringFromMetadata(metadata map[string]interface{}, key string) string {
+func getStringFromMetadata(metadata map[string]any, key string) string {
 	if val, ok := metadata[key]; ok {
 		if strVal, ok := val.(string); ok {
 			return strVal
@@ -228,7 +230,7 @@ func getStringFromMetadata(metadata map[string]interface{}, key string) string {
 }
 
 // getStringSliceFromMetadata safely retrieves a []string value from metadata map
-func getStringSliceFromMetadata(metadata map[string]interface{}, key string) []string {
+func getStringSliceFromMetadata(metadata map[string]any, key string) []string {
 	if val, ok := metadata[key]; ok {
 		if sliceVal, ok := val.([]string); ok {
 			return sliceVal
@@ -238,7 +240,7 @@ func getStringSliceFromMetadata(metadata map[string]interface{}, key string) []s
 }
 
 // getTimeFromMetadata safely retrieves a *time.Time value from metadata map
-func getTimeFromMetadata(metadata map[string]interface{}, key string) *time.Time {
+func getTimeFromMetadata(metadata map[string]any, key string) *time.Time {
 	if val, ok := metadata[key]; ok {
 		if timeVal, ok := val.(*time.Time); ok {
 			return timeVal
@@ -248,7 +250,7 @@ func getTimeFromMetadata(metadata map[string]interface{}, key string) *time.Time
 }
 
 // getFloat64FromMetadata safely retrieves a float64 value from metadata map
-func getFloat64FromMetadata(metadata map[string]interface{}, key string) float64 {
+func getFloat64FromMetadata(metadata map[string]any, key string) float64 {
 	if val, ok := metadata[key]; ok {
 		// Handle both float64 and int
 		switch v := val.(type) {
@@ -266,7 +268,7 @@ func getFloat64FromMetadata(metadata map[string]interface{}, key string) float64
 }
 
 // getIntFromMetadata safely retrieves an int value from metadata map
-func getIntFromMetadata(metadata map[string]interface{}, key string) int {
+func getIntFromMetadata(metadata map[string]any, key string) int {
 	if val, ok := metadata[key]; ok {
 		// Handle both int and float64
 		switch v := val.(type) {

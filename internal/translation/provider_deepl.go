@@ -8,6 +8,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 const sourceLangAuto = "auto"
@@ -18,24 +21,42 @@ type deepLTranslateResponse struct {
 	} `json:"translations"`
 }
 
-func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
-	mode := strings.ToLower(strings.TrimSpace(s.cfg.DeepL.Mode))
+type DeepLProvider struct {
+	cfg        Config
+	httpClient httpclient.HTTPClient
+}
+
+func NewDeepLProvider(cfg Config, httpClient httpclient.HTTPClient) *DeepLProvider {
+	return &DeepLProvider{cfg: cfg, httpClient: httpClient}
+}
+
+func (p *DeepLProvider) Name() string { return "deepl" }
+
+func (p *DeepLProvider) Translate(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
+	if p == nil {
+		return nil, fmt.Errorf("nil receiver: *DeepLProvider")
+	}
+	mode := models.DeepLMode(strings.ToLower(strings.TrimSpace(string(p.cfg.DeepL.Mode))))
 	if mode == "" {
-		mode = "free"
+		mode = models.DeepLModeFree
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(s.cfg.DeepL.BaseURL), "/")
+	baseURL := strings.TrimRight(strings.TrimSpace(p.cfg.DeepL.BaseURL), "/")
 	if baseURL == "" {
-		if mode == "pro" {
+		if mode == models.DeepLModePro {
 			baseURL = "https://api.deepl.com"
 		} else {
 			baseURL = "https://api-free.deepl.com"
 		}
 	}
 
-	apiKey := strings.TrimSpace(s.cfg.DeepL.APIKey)
+	apiKey := strings.TrimSpace(p.cfg.DeepL.APIKey)
 	if apiKey == "" {
 		return nil, fmt.Errorf("deepl api_key is required")
+	}
+
+	if len(texts) == 0 {
+		return &translationResult{}, nil
 	}
 
 	type deepLRequest struct {
@@ -48,7 +69,7 @@ func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang
 		Text:       texts,
 		TargetLang: strings.ToUpper(targetLang),
 	}
-	if sourceLang != "" && sourceLang != sourceLangAuto {
+	if sourceLang != "" && sourceLang != "auto" {
 		reqBody.SourceLang = strings.ToUpper(sourceLang)
 	}
 
@@ -64,7 +85,7 @@ func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "DeepL-Auth-Key "+apiKey)
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +96,7 @@ func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &TranslationError{
+		return nil, &translationError{
 			Kind:       TranslationErrorHTTPStatus,
 			StatusCode: resp.StatusCode,
 			Message:    fmt.Sprintf("deepl translation failed with status %d: %s", resp.StatusCode, string(respBody)),
@@ -92,5 +113,5 @@ func (s *Service) translateWithDeepL(ctx context.Context, sourceLang, targetLang
 		result = append(result, item.Text)
 	}
 
-	return &translationResult{texts: result}, nil
+	return &translationResult{Texts: result}, nil
 }

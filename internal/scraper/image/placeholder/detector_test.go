@@ -12,7 +12,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 func TestDefaultDMMPlaceholderHashes(t *testing.T) {
@@ -27,7 +27,7 @@ func TestConfigFromSettings(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		settings      *config.ScraperSettings
+		settings      *models.ScraperSettings
 		defaultHashes []string
 		wantEnabled   bool
 		wantThreshold int64
@@ -39,25 +39,23 @@ func TestConfigFromSettings(t *testing.T) {
 			settings:      nil,
 			defaultHashes: defaultHashes,
 			wantEnabled:   true,
-			wantThreshold: DefaultThresholdKB * 1024,
+			wantThreshold: defaultThresholdKB * 1024,
 			wantHashCount: 1,
 			wantContains:  defaultHashes,
 		},
 		{
-			name:          "empty extra returns default config",
-			settings:      &config.ScraperSettings{},
+			name:          "empty settings returns default config",
+			settings:      &models.ScraperSettings{},
 			defaultHashes: defaultHashes,
 			wantEnabled:   true,
-			wantThreshold: DefaultThresholdKB * 1024,
+			wantThreshold: defaultThresholdKB * 1024,
 			wantHashCount: 1,
 			wantContains:  defaultHashes,
 		},
 		{
-			name: "user threshold in extra",
-			settings: &config.ScraperSettings{
-				Extra: map[string]any{
-					ConfigKeyThreshold: 20,
-				},
+			name: "user threshold in settings",
+			settings: &models.ScraperSettings{
+				PlaceholderThresholdKB: 20,
 			},
 			defaultHashes: defaultHashes,
 			wantEnabled:   true,
@@ -66,80 +64,24 @@ func TestConfigFromSettings(t *testing.T) {
 			wantContains:  defaultHashes,
 		},
 		{
-			name: "float64 threshold from json unmarshal",
-			settings: &config.ScraperSettings{
-				Extra: map[string]any{
-					ConfigKeyThreshold: float64(15),
-				},
+			name: "user hashes in settings merged with defaults",
+			settings: &models.ScraperSettings{
+				ExtraPlaceholderHashes: []string{testHash},
 			},
 			defaultHashes: defaultHashes,
 			wantEnabled:   true,
-			wantThreshold: 15 * 1024,
-			wantHashCount: 1,
-			wantContains:  defaultHashes,
-		},
-		{
-			name: "user hashes in extra merged with defaults",
-			settings: &config.ScraperSettings{
-				Extra: map[string]any{
-					ConfigKeyHashes: []string{testHash},
-				},
-			},
-			defaultHashes: defaultHashes,
-			wantEnabled:   true,
-			wantThreshold: DefaultThresholdKB * 1024,
+			wantThreshold: defaultThresholdKB * 1024,
 			wantHashCount: 2,
 			wantContains:  []string{defaultHashes[0], testHash},
-		},
-		{
-			name: "interface slice from json",
-			settings: &config.ScraperSettings{
-				Extra: map[string]any{
-					ConfigKeyHashes: []interface{}{testHash},
-				},
-			},
-			defaultHashes: defaultHashes,
-			wantEnabled:   true,
-			wantThreshold: DefaultThresholdKB * 1024,
-			wantHashCount: 2,
-			wantContains:  []string{defaultHashes[0], testHash},
-		},
-		{
-			name: "invalid hash length filtered out",
-			settings: &config.ScraperSettings{
-				Extra: map[string]any{
-					ConfigKeyHashes: []interface{}{"invalid", testHash},
-				},
-			},
-			defaultHashes: defaultHashes,
-			wantEnabled:   true,
-			wantThreshold: DefaultThresholdKB * 1024,
-			wantHashCount: 2,
-			wantContains:  []string{defaultHashes[0], testHash},
-		},
-		{
-			name: "negative threshold uses default",
-			settings: &config.ScraperSettings{
-				Extra: map[string]any{
-					ConfigKeyThreshold: -5,
-				},
-			},
-			defaultHashes: defaultHashes,
-			wantEnabled:   true,
-			wantThreshold: DefaultThresholdKB * 1024,
-			wantHashCount: 1,
-			wantContains:  defaultHashes,
 		},
 		{
 			name: "zero threshold uses default",
-			settings: &config.ScraperSettings{
-				Extra: map[string]any{
-					ConfigKeyThreshold: 0,
-				},
+			settings: &models.ScraperSettings{
+				PlaceholderThresholdKB: 0,
 			},
 			defaultHashes: defaultHashes,
 			wantEnabled:   true,
-			wantThreshold: DefaultThresholdKB * 1024,
+			wantThreshold: defaultThresholdKB * 1024,
 			wantHashCount: 1,
 			wantContains:  defaultHashes,
 		},
@@ -303,7 +245,7 @@ func TestIsPlaceholder(t *testing.T) {
 
 			client := resty.New()
 
-			result, err := IsPlaceholder(ctx, client, server.URL, tt.cfg)
+			result, err := isPlaceholder(ctx, client, server.URL, tt.cfg)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -322,7 +264,7 @@ func TestIsPlaceholder_EmptyURL(t *testing.T) {
 	client := resty.New()
 	ctx := context.Background()
 
-	result, err := IsPlaceholder(ctx, client, "", Config{Enabled: true, Threshold: 10 * 1024, Hashes: []string{}})
+	result, err := isPlaceholder(ctx, client, "", Config{Enabled: true, Threshold: 10 * 1024, Hashes: []string{}})
 	assert.False(t, result)
 	assert.Error(t, err)
 }

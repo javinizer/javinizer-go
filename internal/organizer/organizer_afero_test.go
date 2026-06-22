@@ -1,17 +1,16 @@
 package organizer
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/matcher"
-	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/testutil"
-	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,14 +28,14 @@ func TestOrganizerWithAfero_MoveFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create organizer with afero
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(fs, cfg, nil)
+	org := NewOrganizer(fs, cfg, nil, nil)
 
 	// Use testutil builder for Movie
 	movie := testutil.NewMovieBuilder().
@@ -44,20 +43,16 @@ func TestOrganizerWithAfero_MoveFile(t *testing.T) {
 		WithTitle("Test Movie").
 		Build()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "IPX-123.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-123",
+	match := models.FileMatchInfo{
+		Path: sourcePath, Name: "IPX-123.mp4", Extension: ".mp4",
+		MovieID: "IPX-123",
 	}
 
 	// Plan and execute
-	plan, err := org.Plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false)
 	require.NoError(t, err)
 
-	result, err := org.Execute(plan, false)
+	result, err := org.execute(plan)
 	require.NoError(t, err)
 	assert.True(t, result.Moved)
 
@@ -83,15 +78,15 @@ func TestOrganizerWithAfero_MoveWithDirectoryCreation(t *testing.T) {
 	err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 	require.NoError(t, err)
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:    "<STUDIO>",
 		SubfolderFormat: []string{"<YEAR>"},
 		FileFormat:      "<ID>",
 		RenameFile:      true,
 		MoveSubtitles:   false,
-		OperationMode:   types.OperationModeOrganize,
+		OperationMode:   operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(fs, cfg, nil)
+	org := NewOrganizer(fs, cfg, nil, nil)
 
 	releaseDate := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
 	movie := testutil.NewMovieBuilder().
@@ -100,19 +95,15 @@ func TestOrganizerWithAfero_MoveWithDirectoryCreation(t *testing.T) {
 		WithReleaseDate(releaseDate).
 		Build()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "IPX-123.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-123",
+	match := models.FileMatchInfo{
+		Path: sourcePath, Name: "IPX-123.mp4", Extension: ".mp4",
+		MovieID: "IPX-123",
 	}
 
-	plan, err := org.Plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false)
 	require.NoError(t, err)
 
-	result, err := org.Execute(plan, false)
+	result, err := org.execute(plan)
 	require.NoError(t, err)
 	assert.True(t, result.Moved)
 
@@ -131,29 +122,29 @@ func TestOrganizerWithAfero_CopyPreservesOriginal(t *testing.T) {
 	err := afero.WriteFile(fs, sourcePath, sourceContent, 0644)
 	require.NoError(t, err)
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(fs, cfg, nil)
+	org := NewOrganizer(fs, cfg, nil, nil)
 
 	movie := testutil.NewMovieBuilder().WithID("IPX-123").Build()
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "IPX-123.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-123",
+	match := models.FileMatchInfo{
+		Path: sourcePath, Name: "IPX-123.mp4", Extension: ".mp4",
+		MovieID: "IPX-123",
 	}
 
-	plan, err := org.Plan(match, movie, "/movies", false)
-	require.NoError(t, err)
-
-	result, err := org.Copy(plan, false)
+	// Plan is no longer needed since we use Organize directly
+	result, err := org.Organize(context.Background(), OrganizeCmd{
+		Match:     match,
+		Movie:     movie,
+		DestDir:   "/movies",
+		MoveFiles: false,
+		LinkMode:  LinkModeNone,
+	})
 	require.NoError(t, err)
 	assert.True(t, result.Moved, "Copy should mark as 'moved' (success)")
 
@@ -190,34 +181,30 @@ func TestOrganizerWithAfero_MoveCollision(t *testing.T) {
 	err = afero.WriteFile(fs, destPath, []byte("existing content"), 0644)
 	require.NoError(t, err)
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(fs, cfg, nil)
+	org := NewOrganizer(fs, cfg, nil, nil)
 
 	movie := testutil.NewMovieBuilder().WithID("IPX-123").Build()
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "IPX-123.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-123",
+	match := models.FileMatchInfo{
+		Path: sourcePath, Name: "IPX-123.mp4", Extension: ".mp4",
+		MovieID: "IPX-123",
 	}
 
 	// Plan without forceUpdate
-	plan, err := org.Plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false)
 	require.NoError(t, err)
 
 	// Should detect conflict
 	assert.NotEmpty(t, plan.Conflicts, "Should detect conflict")
 
 	// Execute should fail
-	_, err = org.Execute(plan, false)
+	_, err = org.execute(plan)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "conflicts detected")
 
@@ -233,14 +220,14 @@ func TestOrganizerWithAfero_ComplexTemplate(t *testing.T) {
 	err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 	require.NoError(t, err)
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> [<STUDIO>] - <TITLE> (<YEAR>)",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(fs, cfg, nil)
+	org := NewOrganizer(fs, cfg, nil, nil)
 
 	releaseDate := time.Date(2023, 6, 15, 0, 0, 0, 0, time.UTC)
 	movie := testutil.NewMovieBuilder().
@@ -250,16 +237,12 @@ func TestOrganizerWithAfero_ComplexTemplate(t *testing.T) {
 		WithReleaseDate(releaseDate).
 		Build()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "IPX-123.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-123",
+	match := models.FileMatchInfo{
+		Path: sourcePath, Name: "IPX-123.mp4", Extension: ".mp4",
+		MovieID: "IPX-123",
 	}
 
-	plan, err := org.Plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false)
 	require.NoError(t, err)
 
 	// Expected: "IPX-123 [IdeaPocket] - Test Movie (2023)"
@@ -271,8 +254,8 @@ func TestOrganizerWithAfero_ComplexTemplate(t *testing.T) {
 // TestOrganizerWithAfero_ValidatePlan tests plan validation
 func TestOrganizerWithAfero_ValidatePlan(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &config.OutputConfig{}
-	org := NewOrganizer(fs, cfg, nil)
+	cfg := &Config{}
+	org := NewOrganizer(fs, cfg, nil, nil)
 
 	t.Run("double slashes in path", func(t *testing.T) {
 		// Create source file so validation can proceed
@@ -288,7 +271,7 @@ func TestOrganizerWithAfero_ValidatePlan(t *testing.T) {
 			Conflicts:  []string{},
 		}
 
-		issues := org.ValidatePlan(plan)
+		issues := org.validatePlan(plan)
 		assert.NotEmpty(t, issues, "Should detect double slashes")
 		assert.Contains(t, issues[0], "double slashes")
 	})
@@ -309,7 +292,7 @@ func TestOrganizerWithAfero_ValidatePlan(t *testing.T) {
 			Conflicts:  []string{},
 		}
 
-		issues := org.ValidatePlan(plan)
+		issues := org.validatePlan(plan)
 		for _, issue := range issues {
 			if strings.Contains(issue, "identical") {
 				t.Errorf("Should not report identical paths as issue (validation removed), got: %s", issue)
@@ -331,7 +314,7 @@ func TestOrganizerWithAfero_ValidatePlan(t *testing.T) {
 			Conflicts:  []string{},
 		}
 
-		issues := org.ValidatePlan(plan)
+		issues := org.validatePlan(plan)
 		assert.NotEmpty(t, issues, "Should detect empty target directory")
 	})
 }
@@ -343,30 +326,29 @@ func TestOrganizerWithAfero_DryRun(t *testing.T) {
 	err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 	require.NoError(t, err)
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(fs, cfg, nil)
+	org := NewOrganizer(fs, cfg, nil, nil)
 
 	movie := testutil.NewMovieBuilder().WithID("IPX-123").Build()
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "IPX-123.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-123",
+	match := models.FileMatchInfo{
+		Path: sourcePath, Name: "IPX-123.mp4", Extension: ".mp4",
+		MovieID: "IPX-123",
 	}
 
-	plan, err := org.Plan(match, movie, "/movies", false)
-	require.NoError(t, err)
-
-	// Execute in dry run mode
-	result, err := org.Execute(plan, true)
+	// Execute in dry run mode via Organize seam
+	result, err := org.Organize(context.Background(), OrganizeCmd{
+		Match:     match,
+		Movie:     movie,
+		DestDir:   "/movies",
+		MoveFiles: true,
+		DryRun:    true,
+	})
 	require.NoError(t, err)
 
 	// Result populated but no actual move
@@ -389,14 +371,14 @@ func TestOrganizerWithAfero_PathLengthTruncation(t *testing.T) {
 	err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 	require.NoError(t, err)
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID> - <TITLE>",
 		FileFormat:    "<ID>",
 		RenameFile:    true,
 		MoveSubtitles: false,
 		MaxPathLength: 50, // Very short limit
 	}
-	org := NewOrganizer(fs, cfg, nil)
+	org := NewOrganizer(fs, cfg, nil, nil)
 
 	longTitle := "This is an extremely long movie title that will cause path length issues"
 	movie := testutil.NewMovieBuilder().
@@ -404,17 +386,13 @@ func TestOrganizerWithAfero_PathLengthTruncation(t *testing.T) {
 		WithTitle(longTitle).
 		Build()
 
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      "IPX-123.mp4",
-			Extension: ".mp4",
-		},
-		ID: "IPX-123",
+	match := models.FileMatchInfo{
+		Path: sourcePath, Name: "IPX-123.mp4", Extension: ".mp4",
+		MovieID: "IPX-123",
 	}
 
 	// Plan should handle path length by truncating
-	plan, err := org.Plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false)
 
 	// Either plan succeeds with truncation, or returns error
 	if err != nil {
@@ -434,26 +412,22 @@ func TestOrganizerWithAfero_RenameFileDisabled(t *testing.T) {
 	err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 	require.NoError(t, err)
 
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:  "<ID>",
 		FileFormat:    "<ID>",
 		RenameFile:    false,
 		MoveSubtitles: false,
-		OperationMode: types.OperationModeOrganize,
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	org := NewOrganizer(fs, cfg, nil)
+	org := NewOrganizer(fs, cfg, nil, nil)
 
 	movie := testutil.NewMovieBuilder().WithID("IPX-123").Build()
-	match := matcher.MatchResult{
-		File: scanner.FileInfo{
-			Path:      sourcePath,
-			Name:      originalFilename,
-			Extension: ".mp4",
-		},
-		ID: "IPX-123",
+	match := models.FileMatchInfo{
+		Path: sourcePath, Name: originalFilename, Extension: ".mp4",
+		MovieID: "IPX-123",
 	}
 
-	plan, err := org.Plan(match, movie, "/movies", false)
+	plan, err := org.plan(match, movie, "/movies", false)
 	require.NoError(t, err)
 
 	// File name should be preserved
@@ -468,120 +442,104 @@ func TestOrganizerWithAfero_EmptyFilenameAfterSanitization(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("empty movie ID falls back to match ID", func(t *testing.T) {
-		cfg := &config.OutputConfig{
+		cfg := &Config{
 			FolderFormat:  "<ID> - <TITLE>",
 			FileFormat:    "<ID>",
 			RenameFile:    true,
 			MoveSubtitles: false,
-			OperationMode: types.OperationModeOrganize,
+			OperationMode: operationmode.OperationModeOrganize,
 		}
-		org := NewOrganizer(fs, cfg, nil)
+		org := NewOrganizer(fs, cfg, nil, nil)
 
 		movie := testutil.NewMovieBuilder().
 			WithID("").
 			WithTitle("Test").
 			Build()
 
-		match := matcher.MatchResult{
-			File: scanner.FileInfo{
-				Path:      sourcePath,
-				Name:      "ABF-345.sd 5 (1).mkv",
-				Extension: ".mkv",
-			},
-			ID: "ABF-345",
+		match := models.FileMatchInfo{
+			Path: sourcePath, Name: "ABF-345.sd 5 (1).mkv", Extension: ".mkv",
+			MovieID: "ABF-345",
 		}
 
-		plan, err := org.Plan(match, movie, "/dest", false)
+		plan, err := org.plan(match, movie, "/dest", false)
 		require.NoError(t, err)
 
 		assert.Equal(t, "ABF-345.mkv", plan.TargetFile)
 	})
 
 	t.Run("title with only invalid chars still produces valid filename", func(t *testing.T) {
-		cfg := &config.OutputConfig{
+		cfg := &Config{
 			FolderFormat:  "<ID>",
 			FileFormat:    "<ID> - <TITLE>",
 			RenameFile:    true,
 			MoveSubtitles: false,
-			OperationMode: types.OperationModeOrganize,
+			OperationMode: operationmode.OperationModeOrganize,
 		}
-		org := NewOrganizer(fs, cfg, nil)
+		org := NewOrganizer(fs, cfg, nil, nil)
 
 		movie := testutil.NewMovieBuilder().
 			WithID("ABF-345").
 			WithTitle("::***??").
 			Build()
 
-		match := matcher.MatchResult{
-			File: scanner.FileInfo{
-				Path:      sourcePath,
-				Name:      "ABF-345.sd 5 (1).mkv",
-				Extension: ".mkv",
-			},
-			ID: "ABF-345",
+		match := models.FileMatchInfo{
+			Path: sourcePath, Name: "ABF-345.sd 5 (1).mkv", Extension: ".mkv",
+			MovieID: "ABF-345",
 		}
 
-		plan, err := org.Plan(match, movie, "/dest", false)
+		plan, err := org.plan(match, movie, "/dest", false)
 		require.NoError(t, err)
 
 		assert.Equal(t, "ABF-345 - - -.mkv", plan.TargetFile)
 	})
 
 	t.Run("file format with only sanitizable content falls back to match ID", func(t *testing.T) {
-		cfg := &config.OutputConfig{
+		cfg := &Config{
 			FolderFormat:  "<ID>",
 			FileFormat:    "<TITLE>",
 			RenameFile:    true,
 			MoveSubtitles: false,
-			OperationMode: types.OperationModeOrganize,
+			OperationMode: operationmode.OperationModeOrganize,
 		}
-		org := NewOrganizer(fs, cfg, nil)
+		org := NewOrganizer(fs, cfg, nil, nil)
 
 		movie := testutil.NewMovieBuilder().
 			WithID("ABF-345").
 			WithTitle("").
 			Build()
 
-		match := matcher.MatchResult{
-			File: scanner.FileInfo{
-				Path:      sourcePath,
-				Name:      "ABF-345.sd 5 (1).mkv",
-				Extension: ".mkv",
-			},
-			ID: "ABF-345",
+		match := models.FileMatchInfo{
+			Path: sourcePath, Name: "ABF-345.sd 5 (1).mkv", Extension: ".mkv",
+			MovieID: "ABF-345",
 		}
 
-		plan, err := org.Plan(match, movie, "/dest", false)
+		plan, err := org.plan(match, movie, "/dest", false)
 		require.NoError(t, err)
 
 		assert.Equal(t, "ABF-345.mkv", plan.TargetFile)
 	})
 
 	t.Run("all fallbacks sanitize to empty uses safe default", func(t *testing.T) {
-		cfg := &config.OutputConfig{
+		cfg := &Config{
 			FolderFormat:  "<ID>",
 			FileFormat:    "<TITLE>",
 			RenameFile:    true,
 			MoveSubtitles: false,
-			OperationMode: types.OperationModeOrganize,
+			OperationMode: operationmode.OperationModeOrganize,
 		}
-		org := NewOrganizer(fs, cfg, nil)
+		org := NewOrganizer(fs, cfg, nil, nil)
 
 		movie := testutil.NewMovieBuilder().
 			WithID("").
 			WithTitle("").
 			Build()
 
-		match := matcher.MatchResult{
-			File: scanner.FileInfo{
-				Path:      "/source/   ....mkv",
-				Name:      "   ....mkv",
-				Extension: ".mkv",
-			},
-			ID: "",
+		match := models.FileMatchInfo{
+			Path: "/source/   ....mkv", Name: "   ....mkv", Extension: ".mkv",
+			MovieID: "",
 		}
 
-		plan, err := org.Plan(match, movie, "/dest", false)
+		plan, err := org.plan(match, movie, "/dest", false)
 		require.NoError(t, err)
 
 		assert.Equal(t, "file.mkv", plan.TargetFile,

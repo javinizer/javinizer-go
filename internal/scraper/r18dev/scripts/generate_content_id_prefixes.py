@@ -94,18 +94,3 @@ def main():
     for series in sorted(series_prefixes.keys()):
         prefixes = sorted(series_prefixes[series], key=prefix_sort_key)
         prefix_strs = ', '.join(f'"{p}"' for p in prefixes)
-        lines.append(f'\t"{series}": {{{prefix_strs}}},')
-
-    lines.append('}')
-    lines.append('')
-
-    with open(output_path, 'w') as f:
-        f.write('\n'.join(lines))
-
-    import os
-    print(f"Wrote {len(series_prefixes)} series -> {sum(len(v) for v in series_prefixes.values())} prefix entries")
-    print(f"Output: {output_path} ({os.path.getsize(output_path) / 1024:.1f} KB)")
-
-
-if __name__ == '__main__':
-    main()

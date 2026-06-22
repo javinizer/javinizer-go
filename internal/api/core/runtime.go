@@ -8,40 +8,27 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/poster"
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 )
 
 // RuntimeState holds mutable server runtime components.
 type RuntimeState struct {
-	mu            sync.RWMutex
-	wsHub         *ws.Hub
-	wsHubCancel   context.CancelFunc
-	wsHubShutdown chan struct{}
-	wsUpgrader    websocket.Upgrader
-}
+	mu             sync.RWMutex
+	wsHub          *ws.Hub
+	wsHubCancel    context.CancelFunc
+	wsHubShutdown  chan struct{}
+	wsUpgrader     websocket.Upgrader
+	ConfigUpdateMu sync.Mutex // serializes config updates (was package-level ConfigUpdateMutex)
 
-var (
-	defaultRuntimeMu sync.RWMutex
-	defaultRuntime   *RuntimeState
-)
+	// posterManager is lazily initialized on first access and invalidated
+	// on config reload. Protected by mu.
+	posterManager poster.PosterManagerInterface
+}
 
 // NewRuntimeState creates an initialized runtime container.
 func NewRuntimeState() *RuntimeState {
 	return &RuntimeState{}
-}
-
-// SetDefaultRuntimeState stores runtime state used by components that cannot receive deps directly.
-func SetDefaultRuntimeState(runtime *RuntimeState) {
-	defaultRuntimeMu.Lock()
-	defer defaultRuntimeMu.Unlock()
-	defaultRuntime = runtime
-}
-
-// DefaultRuntimeState returns the shared runtime state.
-func DefaultRuntimeState() *RuntimeState {
-	defaultRuntimeMu.RLock()
-	defer defaultRuntimeMu.RUnlock()
-	return defaultRuntime
 }
 
 // Shutdown stops active runtime goroutines.
@@ -120,5 +107,42 @@ func (r *RuntimeState) SetWebSocketUpgraderForTesting(upgrader websocket.Upgrade
 	r.SetWebSocketUpgrader(upgrader)
 }
 
-// NoopOriginCheck allows all origins, used by tests.
-func NoopOriginCheck(_ *http.Request) bool { return true }
+// GetPosterManager returns the cached PosterManager, constructing it on first access.
+// The createFn callback is invoked only when the manager is nil (first access or
+// after invalidation). Returns nil if createFn returns nil.
+func (r *RuntimeState) GetPosterManager(createFn func() poster.PosterManagerInterface) poster.PosterManagerInterface {
+	r.mu.RLock()
+	pm := r.posterManager
+	r.mu.RUnlock()
+	if pm != nil {
+		return pm
+	}
+
+	newPM := createFn()
+	if newPM == nil {
+		return nil
+	}
+
+	r.mu.Lock()
+	if r.posterManager != nil {
+		r.mu.Unlock()
+		return r.posterManager
+	}
+	r.posterManager = newPM
+	r.mu.Unlock()
+
+	return newPM
+}
+
+// InvalidatePosterManager nils the cached poster manager so it is reconstructed
+// on next access. Called during config reload.
+func (r *RuntimeState) InvalidatePosterManager() {
+	r.mu.Lock()
+	r.posterManager = nil
+	r.mu.Unlock()
+}
+
+// noopOriginCheck allows all origins, used by tests.
+//
+//nolint:unused // used by same-package tests
+func noopOriginCheck(_ *http.Request) bool { return true }

@@ -7,8 +7,8 @@ import (
 	"unicode"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 const (
@@ -19,7 +19,7 @@ const (
 type ScraperClient struct {
 	Client       *resty.Client
 	FlareSolverr *FlareSolverr
-	ProxyProfile *config.ProxyProfile
+	ProxyProfile *models.ProxyProfile
 }
 
 type ScraperOption func(*scraperConfig)
@@ -27,9 +27,9 @@ type ScraperOption func(*scraperConfig)
 type scraperConfig struct {
 	timeout            time.Duration
 	retryCount         int
-	globalProxy        config.ProxyConfig
-	globalFlareSolverr config.FlareSolverrConfig
-	scraperProxy       *config.ProxyConfig
+	globalProxy        models.ProxyConfig
+	globalFlareSolverr models.FlareSolverrConfig
+	scraperProxy       *models.ProxyConfig
 	flareSolverr       bool
 	headers            map[string]string
 	cookies            map[string]string
@@ -40,8 +40,8 @@ func defaultConfig() scraperConfig {
 	return scraperConfig{
 		timeout:            DefaultTimeout,
 		retryCount:         DefaultRetryCount,
-		globalProxy:        config.ProxyConfig{},
-		globalFlareSolverr: config.FlareSolverrConfig{},
+		globalProxy:        models.ProxyConfig{},
+		globalFlareSolverr: models.FlareSolverrConfig{},
 		scraperProxy:       nil,
 		flareSolverr:       false,
 		headers:            make(map[string]string),
@@ -50,7 +50,7 @@ func defaultConfig() scraperConfig {
 	}
 }
 
-func NewScraperClientBuilder() *ScraperClientBuilder {
+func newScraperClientBuilder() *ScraperClientBuilder {
 	return &ScraperClientBuilder{
 		config: defaultConfig(),
 	}
@@ -60,45 +60,39 @@ type ScraperClientBuilder struct {
 	config scraperConfig
 }
 
-func WithTimeout(timeout time.Duration) ScraperOption {
+func withTimeout(timeout time.Duration) ScraperOption {
 	return func(c *scraperConfig) {
 		c.timeout = timeout
 	}
 }
 
-func WithRetryCount(count int) ScraperOption {
+func withRetryCount(count int) ScraperOption {
 	return func(c *scraperConfig) {
 		c.retryCount = count
 	}
 }
 
-func WithGlobalProxy(global config.ProxyConfig) ScraperOption {
+func withGlobalProxy(global models.ProxyConfig) ScraperOption {
 	return func(c *scraperConfig) {
 		c.globalProxy = global
 	}
 }
 
-func WithGlobalFlareSolverr(cfg config.FlareSolverrConfig) ScraperOption {
+func withGlobalFlareSolverr(cfg models.FlareSolverrConfig) ScraperOption {
 	return func(c *scraperConfig) {
 		c.globalFlareSolverr = cfg
 	}
 }
 
-func WithScraperProxy(scraper *config.ProxyConfig) ScraperOption {
+func withScraperProxy(scraper *models.ProxyConfig) ScraperOption {
 	return func(c *scraperConfig) {
 		c.scraperProxy = scraper
 	}
 }
 
-func WithFlareSolverr(enabled bool) ScraperOption {
+func withFlareSolverr(enabled bool) ScraperOption {
 	return func(c *scraperConfig) {
 		c.flareSolverr = enabled
-	}
-}
-
-func WithHeader(key, value string) ScraperOption {
-	return func(c *scraperConfig) {
-		c.headers[key] = value
 	}
 }
 
@@ -110,15 +104,9 @@ func WithHeaders(headers map[string]string) ScraperOption {
 	}
 }
 
-func WithCookies(cookies map[string]string) ScraperOption {
+func withCookies(cookies map[string]string) ScraperOption {
 	return func(c *scraperConfig) {
 		c.cookies = cookies
-	}
-}
-
-func WithProxyProfileReturn(enabled bool) ScraperOption {
-	return func(c *scraperConfig) {
-		c.returnProxyProfile = enabled
 	}
 }
 
@@ -127,10 +115,6 @@ func (b *ScraperClientBuilder) Apply(opts ...ScraperOption) *ScraperClientBuilde
 		opt(&b.config)
 	}
 	return b
-}
-
-func (b *ScraperClientBuilder) Build() (*ScraperClient, error) {
-	return b.build(b.config.returnProxyProfile)
 }
 
 func (b *ScraperClientBuilder) BuildClient() (*resty.Client, error) {
@@ -149,7 +133,7 @@ func (b *ScraperClientBuilder) BuildWithFlareSolverr() (*resty.Client, *FlareSol
 	return sc.Client, sc.FlareSolverr, nil
 }
 
-func (b *ScraperClientBuilder) BuildWithProxy() (*resty.Client, *config.ProxyProfile, error) {
+func (b *ScraperClientBuilder) BuildWithProxy() (*resty.Client, *models.ProxyProfile, error) {
 	sc, err := b.build(true)
 	if err != nil {
 		return nil, nil, err
@@ -160,7 +144,7 @@ func (b *ScraperClientBuilder) BuildWithProxy() (*resty.Client, *config.ProxyPro
 func (b *ScraperClientBuilder) build(returnProxyProfile bool) (*ScraperClient, error) {
 	cfg := b.config
 
-	proxyProfile := config.ResolveScraperProxy(cfg.globalProxy, cfg.scraperProxy)
+	proxyProfile := models.ResolveScraperProxy(cfg.globalProxy, cfg.scraperProxy)
 
 	timeout := cfg.timeout
 	if timeout == 0 {
@@ -177,16 +161,19 @@ func (b *ScraperClientBuilder) build(returnProxyProfile bool) (*ScraperClient, e
 	var err error
 
 	if cfg.flareSolverr && cfg.globalFlareSolverr.Enabled {
-		client, fs, err = NewRestyClientWithFlareSolverr(
+		result, fsErr := NewRestyClientWithFlareSolverr(
 			proxyProfile,
 			cfg.globalFlareSolverr,
 			timeout,
 			retryCount,
 		)
-		if err != nil {
-			logging.Warnf("ScraperClientBuilder: FlareSolverr creation failed, falling back: %v", err)
+		if fsErr != nil {
+			logging.Warnf("ScraperClientBuilder: FlareSolverr creation failed, falling back: %v", fsErr)
 			client, err = NewRestyClient(proxyProfile, timeout, retryCount)
 			fs = nil
+		} else {
+			client = result.Client
+			fs = result.FlareSolverr
 		}
 	} else {
 		client, err = NewRestyClient(proxyProfile, timeout, retryCount)
@@ -225,17 +212,17 @@ func (b *ScraperClientBuilder) build(returnProxyProfile bool) (*ScraperClient, e
 func (b *ScraperClientBuilder) buildCookieHeader(cookies map[string]string) string {
 	parts := make([]string, 0, len(cookies))
 	for name, value := range cookies {
-		if !IsValidCookieName(name) {
+		if !isValidCookieName(name) {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s=%s", name, SanitizeCookieValue(value)))
+		parts = append(parts, fmt.Sprintf("%s=%s", name, sanitizeCookieValue(value)))
 	}
 	return strings.Join(parts, "; ")
 }
 
-// IsValidCookieName validates a cookie name against RFC 6265 token rules.
+// isValidCookieName validates a cookie name against RFC 6265 token rules.
 // Cookie names must be valid tokens: alphanumeric, dash, underscore, and a few special chars.
-func IsValidCookieName(name string) bool {
+func isValidCookieName(name string) bool {
 	if name == "" {
 		return false
 	}
@@ -257,9 +244,9 @@ func isTokenChar(r rune) bool {
 		r == '*' || r == '+' || r == '.' || r == '^' || r == '`' || r == '|' || r == '~'
 }
 
-// SanitizeCookieValue removes characters forbidden in RFC 6265 cookie values.
+// sanitizeCookieValue removes characters forbidden in RFC 6265 cookie values.
 // Prevents header injection and ensures parsing stability.
-func SanitizeCookieValue(value string) string {
+func sanitizeCookieValue(value string) string {
 	return strings.Map(func(r rune) rune {
 		if r == ';' || r == '"' || r == '\\' || r == '\r' || r == '\n' || unicode.IsControl(r) {
 			return -1
@@ -268,31 +255,31 @@ func SanitizeCookieValue(value string) string {
 	}, value)
 }
 
-func FromScraperSettings(settings *config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig, opts ...ScraperOption) *ScraperClientBuilder {
-	builder := NewScraperClientBuilder()
+func FromScraperSettings(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig, opts ...ScraperOption) *ScraperClientBuilder {
+	builder := newScraperClientBuilder()
 
 	if settings != nil {
 		if settings.Timeout > 0 {
-			builder.Apply(WithTimeout(time.Duration(settings.Timeout) * time.Second))
+			builder.Apply(withTimeout(time.Duration(settings.Timeout) * time.Second))
 		}
 		if settings.RetryCount > 0 {
-			builder.Apply(WithRetryCount(settings.RetryCount))
+			builder.Apply(withRetryCount(settings.RetryCount))
 		}
 		if settings.Proxy != nil {
-			builder.Apply(WithScraperProxy(settings.Proxy))
+			builder.Apply(withScraperProxy(settings.Proxy))
 		}
-		builder.Apply(WithFlareSolverr(settings.UseFlareSolverr))
+		builder.Apply(withFlareSolverr(settings.UseFlareSolverr))
 
 		if len(settings.Cookies) > 0 {
-			builder.Apply(WithCookies(settings.Cookies))
+			builder.Apply(withCookies(settings.Cookies))
 		}
 	}
 
 	if globalProxy != nil {
-		builder.Apply(WithGlobalProxy(*globalProxy))
+		builder.Apply(withGlobalProxy(*globalProxy))
 	}
 
-	builder.Apply(WithGlobalFlareSolverr(globalFlareSolverr))
+	builder.Apply(withGlobalFlareSolverr(globalFlareSolverr))
 	builder.Apply(opts...)
 
 	return builder

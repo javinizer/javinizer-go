@@ -1,8 +1,13 @@
 package system
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/version"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 // healthCheck godoc
@@ -10,17 +15,17 @@ import (
 // @Description Check API health status and list all enabled scrapers. Returns version information and build metadata.
 // @Tags system
 // @Produce json
-// @Success 200 {object} HealthResponse
+// @Success 200 {object} contracts.HealthResponse
 // @Router /health [get]
-func healthCheck(deps *ServerDependencies) gin.HandlerFunc {
+func healthCheck(deps *core.APIDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Use getter to get current registry (respects config reloads)
-		registry := deps.GetRegistry()
+		// Use accessor to get current registry (respects config reloads)
+		registry := deps.GetScraperLister()
 		scrapers := []string{}
-		for _, s := range registry.GetEnabled() {
+		for _, s := range registry.GetEnabledInstances() {
 			scrapers = append(scrapers, s.Name())
 		}
-		c.JSON(200, HealthResponse{
+		c.JSON(http.StatusOK, contracts.HealthResponse{
 			Status:    "ok",
 			Scrapers:  scrapers,
 			Version:   version.Short(),

@@ -4,193 +4,153 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Color palette
 var (
-	ColorPrimary    = lipgloss.Color("#8B5CF6") // Bright Purple
-	ColorSuccess    = lipgloss.Color("#22C55E") // Bright Green
-	ColorWarning    = lipgloss.Color("#FBBF24") // Bright Amber
-	ColorError      = lipgloss.Color("#EF4444") // Red
-	ColorInfo       = lipgloss.Color("#60A5FA") // Bright Blue
-	ColorMuted      = lipgloss.Color("#9CA3AF") // Light Gray
-	ColorBorder     = lipgloss.Color("#6B7280") // Medium gray
-	ColorBackground = lipgloss.Color("#111827") // Very dark
-	ColorForeground = lipgloss.Color("#F9FAFB") // Very light
-	ColorHighlight  = lipgloss.Color("#A78BFA") // Light purple
-	ColorTab        = lipgloss.Color("#4B5563") // Medium dark gray
-	ColorTabActive  = lipgloss.Color("#8B5CF6") // Active tab purple
+	colorPrimary    = lipgloss.Color("#8B5CF6")
+	colorSuccess    = lipgloss.Color("#22C55E")
+	colorWarning    = lipgloss.Color("#FBBF24")
+	colorError      = lipgloss.Color("#EF4444")
+	colorInfo       = lipgloss.Color("#60A5FA")
+	colorMuted      = lipgloss.Color("#9CA3AF")
+	colorBorder     = lipgloss.Color("#6B7280")
+	colorBackground = lipgloss.Color("#111827")
+	colorForeground = lipgloss.Color("#F9FAFB")
+	colorTab        = lipgloss.Color("#4B5563")
+	colorTabActive  = lipgloss.Color("#8B5CF6")
 )
 
-// Styles
 var (
-	// Header styles
-	HeaderStyle = lipgloss.NewStyle().
+	headerStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(ColorPrimary).
-			Background(ColorBackground).
+			Foreground(colorPrimary).
+			Background(colorBackground).
 			Padding(0, 1)
 
-	StatusStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted).
+	statusStyle = lipgloss.NewStyle().
+			Foreground(colorMuted).
 			Padding(0, 1)
 
-	// Border styles
-	BorderStyle = lipgloss.NewStyle().
+	borderStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorBorder).
+			BorderForeground(colorBorder).
 			Padding(0, 1)
 
-	ActiveBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(ColorPrimary).
-				Padding(0, 1)
-
-	// Title styles
-	TitleStyle = lipgloss.NewStyle().
+	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(ColorPrimary).
+			Foreground(colorPrimary).
 			MarginBottom(1)
 
-	SubtitleStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted).
-			Italic(true)
-
-	// List item styles
-	SelectedItemStyle = lipgloss.NewStyle().
-				Foreground(ColorPrimary).
+	selectedItemStyle = lipgloss.NewStyle().
+				Foreground(colorPrimary).
 				Bold(true).
 				PaddingLeft(2)
 
-	UnselectedItemStyle = lipgloss.NewStyle().
-				Foreground(ColorForeground).
+	unselectedItemStyle = lipgloss.NewStyle().
+				Foreground(colorForeground).
 				PaddingLeft(2)
 
-	CheckedItemStyle = lipgloss.NewStyle().
-				Foreground(ColorSuccess).
-				PaddingLeft(2)
+	progressBarStyle = lipgloss.NewStyle().
+				Foreground(colorPrimary)
 
-	// Progress bar styles
-	ProgressBarStyle = lipgloss.NewStyle().
-				Foreground(ColorPrimary)
+	progressEmptyStyle = lipgloss.NewStyle().
+				Foreground(colorMuted)
 
-	ProgressEmptyStyle = lipgloss.NewStyle().
-				Foreground(ColorMuted)
-
-	// Status badge styles
-	SuccessBadge = lipgloss.NewStyle().
-			Foreground(ColorSuccess).
+	successBadge = lipgloss.NewStyle().
+			Foreground(colorSuccess).
 			Bold(true)
 
-	ErrorBadge = lipgloss.NewStyle().
-			Foreground(ColorError).
+	errorBadge = lipgloss.NewStyle().
+			Foreground(colorError).
 			Bold(true)
 
-	WarningBadge = lipgloss.NewStyle().
-			Foreground(ColorWarning).
+	warningBadge = lipgloss.NewStyle().
+			Foreground(colorWarning).
 			Bold(true)
 
-	InfoBadge = lipgloss.NewStyle().
-			Foreground(ColorInfo).
+	infoBadge = lipgloss.NewStyle().
+			Foreground(colorInfo).
 			Bold(true)
 
-	RunningBadge = lipgloss.NewStyle().
-			Foreground(ColorPrimary).
+	runningBadge = lipgloss.NewStyle().
+			Foreground(colorPrimary).
 			Bold(true)
 
-	// Log styles
-	LogDebugStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted)
+	logDebugStyle = lipgloss.NewStyle().
+			Foreground(colorMuted)
 
-	LogInfoStyle = lipgloss.NewStyle().
-			Foreground(ColorInfo)
+	logInfoStyle = lipgloss.NewStyle().
+			Foreground(colorInfo)
 
-	LogWarnStyle = lipgloss.NewStyle().
-			Foreground(ColorWarning)
+	logWarnStyle = lipgloss.NewStyle().
+			Foreground(colorWarning)
 
-	LogErrorStyle = lipgloss.NewStyle().
-			Foreground(ColorError).
+	logErrorStyle = lipgloss.NewStyle().
+			Foreground(colorError).
 			Bold(true)
 
-	// Help styles
-	HelpKeyStyle = lipgloss.NewStyle().
-			Foreground(ColorPrimary).
+	helpKeyStyle = lipgloss.NewStyle().
+			Foreground(colorPrimary).
 			Bold(true)
 
-	HelpDescStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted)
+	helpDescStyle = lipgloss.NewStyle().
+			Foreground(colorMuted)
 
-	HelpSeparatorStyle = lipgloss.NewStyle().
-				Foreground(ColorBorder)
+	helpSeparatorStyle = lipgloss.NewStyle().
+				Foreground(colorBorder)
 
-	// Dimmed text
-	DimmedStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted)
+	dimmedStyle = lipgloss.NewStyle().
+			Foreground(colorMuted)
 
-	// Highlight
-	HighlightStyle = lipgloss.NewStyle().
-			Foreground(ColorPrimary).
+	highlightStyle = lipgloss.NewStyle().
+			Foreground(colorPrimary).
 			Bold(true)
 
-	// Error text
-	ErrorStyle = lipgloss.NewStyle().
-			Foreground(ColorError).
+	errorStyle = lipgloss.NewStyle().
+			Foreground(colorError).
 			Bold(true)
 
-	// Success text
-	SuccessStyle = lipgloss.NewStyle().
-			Foreground(ColorSuccess).
+	successStyle = lipgloss.NewStyle().
+			Foreground(colorSuccess).
 			Bold(true)
 
-	// Tab styles
-	TabStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted).
-			Background(ColorTab).
+	tabStyle = lipgloss.NewStyle().
+			Foreground(colorMuted).
+			Background(colorTab).
 			Padding(0, 2).
 			MarginRight(1)
 
-	ActiveTabStyle = lipgloss.NewStyle().
-			Foreground(ColorForeground).
-			Background(ColorTabActive).
+	activeTabStyle = lipgloss.NewStyle().
+			Foreground(colorForeground).
+			Background(colorTabActive).
 			Padding(0, 2).
 			MarginRight(1).
 			Bold(true)
 
-	// Panel style with lighter border
-	PanelStyle = lipgloss.NewStyle().
+	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorBorder).
+			BorderForeground(colorBorder).
 			Padding(1, 2)
 )
 
-// Helper functions for styled text
-
-func Success(text string) string {
-	return SuccessStyle.Render(text)
+func success(text string) string {
+	return successStyle.Render(text)
 }
 
-func Error(text string) string {
-	return ErrorStyle.Render(text)
+func errorStyled(text string) string {
+	return errorStyle.Render(text)
 }
 
-func Warning(text string) string {
-	return WarningBadge.Render(text)
+func warning(text string) string {
+	return warningBadge.Render(text)
 }
 
-func Info(text string) string {
-	return InfoBadge.Render(text)
+func dimmed(text string) string {
+	return dimmedStyle.Render(text)
 }
 
-func Dimmed(text string) string {
-	return DimmedStyle.Render(text)
+func highlight(text string) string {
+	return highlightStyle.Render(text)
 }
 
-func Highlight(text string) string {
-	return HighlightStyle.Render(text)
-}
-
-func Title(text string) string {
-	return TitleStyle.Render(text)
-}
-
-func Subtitle(text string) string {
-	return SubtitleStyle.Render(text)
+func title(text string) string {
+	return titleStyle.Render(text)
 }

@@ -3,6 +3,7 @@ package tokyohot
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -12,7 +13,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/challengedetect"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -30,21 +31,22 @@ var (
 	tokyoHotShortIDRe = regexp.MustCompile(`(?i)^([A-Za-z]{1,2})[-_]?(\d{2,5})$`)
 )
 
-// Scraper implements the TokyoHot scraper.
-type Scraper struct {
+// scraper implements the TokyoHot scraper.
+type scraper struct {
 	client        *resty.Client
 	enabled       bool
 	baseURL       string
 	language      string
-	proxyOverride *config.ProxyConfig
-	downloadProxy *config.ProxyConfig
+	proxyOverride *models.ProxyConfig
+	downloadProxy *models.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings // stores the full settings for Config() method
+	settings      models.ScraperSettings // stores the full settings for Config() method
 }
 
 // New creates a new TokyoHot scraper.
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+// newScraper creates a new TokyoHot scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
 			httpclient.StandardHTMLHeaders(),
 			httpclient.UserAgentHeader(settings.UserAgent),
@@ -61,7 +63,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 
 	lang := scraperutil.NormalizeLanguage(settings.Language)
 
-	s := &Scraper{
+	s := &scraper{
 		client:        client,
 		enabled:       settings.Enabled,
 		baseURL:       base,
@@ -69,7 +71,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
-		settings:      settings,
+		settings:      *settings,
 	}
 
 	if result.ProxyEnabled && strings.TrimSpace(result.ProxyProfile.URL) != "" {
@@ -80,22 +82,23 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 }
 
 // Name returns the scraper identifier.
-func (s *Scraper) Name() string { return "tokyohot" }
+func (s *scraper) Name() string { return "tokyohot" }
 
 // IsEnabled returns whether the scraper is enabled.
-func (s *Scraper) IsEnabled() bool { return s.enabled }
+func (s *scraper) IsEnabled() bool { return s.enabled }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	return nil
 }
 
-func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
+func (s *scraper) ResolveSearchQuery(input string) (string, bool) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return "", false
@@ -120,19 +123,19 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 }
 
 // ResolveDownloadProxyForHost declares TokyoHot-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
 	}
 	if host == "tokyo-hot.com" || strings.HasSuffix(host, ".tokyo-hot.com") {
-		return s.downloadProxy, s.proxyOverride, true
+		return s.settings.DownloadProxy, s.settings.Proxy, true
 	}
 	return nil, nil, false
 }
 
 // GetURL finds the TokyoHot detail URL for an ID.
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -141,7 +144,7 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 	return host == "tokyo-hot.com" || strings.HasSuffix(host, ".tokyo-hot.com")
 }
 
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse URL: %w", err)
@@ -165,7 +168,7 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from TokyoHot URL")
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("TokyoHot", "URL not handled by TokyoHot scraper")
 	}
@@ -184,7 +187,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, models.NewScraperNotFoundError("TokyoHot", "page not found")
 	}
 	if status == 429 {
-		return nil, models.NewScraperStatusError("TokyoHot", 429, "rate limited")
+		return nil, models.NewScraperStatusError("TokyoHot", http.StatusTooManyRequests, "rate limited")
 	}
 	if status == 403 || status == 451 {
 		return nil, models.NewScraperStatusError("TokyoHot", status, "access blocked")
@@ -201,11 +204,11 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	return parseDetailPage(doc, detailURL, id, s.language), nil
 }
 
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -272,7 +275,7 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 }
 
 // Search searches TokyoHot and extracts metadata.
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("TokyoHot scraper is disabled")
 	}
@@ -296,6 +299,12 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	}
 
 	return parseDetailPage(doc, detailURL, id, s.language), nil
+}
+
+// ParseHTML parses a TokyoHot detail page from a goquery.Document.
+// This is the documented parsing seam for testing.
+func ParseHTML(doc *goquery.Document, sourceURL, language string) *models.ScraperResult {
+	return parseDetailPage(doc, sourceURL, "", language)
 }
 
 func parseDetailPage(doc *goquery.Document, sourceURL, fallbackID, language string) *models.ScraperResult {
@@ -578,7 +587,7 @@ func splitNames(raw string) []string {
 	return out
 }
 
-func (s *Scraper) applyLanguage(rawURL string) string {
+func (s *scraper) applyLanguage(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return rawURL
@@ -596,7 +605,7 @@ func (s *Scraper) applyLanguage(rawURL string) string {
 	return u.String()
 }
 
-func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
+func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}
@@ -606,7 +615,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 		return "", 0, err
 	}
 	html := resp.String()
-	if resp.StatusCode() == 200 && models.IsCloudflareChallengePage(html) {
+	if resp.StatusCode() == 200 && challengedetect.IsCloudflareChallengePage(html) {
 		return "", resp.StatusCode(), models.NewScraperChallengeError(
 			"TokyoHot",
 			"TokyoHot returned a Cloudflare challenge page (request blocked; adjust proxy/IP)",

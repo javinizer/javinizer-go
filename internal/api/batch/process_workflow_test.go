@@ -15,23 +15,23 @@ import (
 
 func writeWorkflowNFO(t *testing.T, path, id, title string) {
 	t.Helper()
-
-	gen := nfo.NewGenerator(afero.NewOsFs(), &nfo.Config{})
+	fs := afero.NewOsFs()
+	gen := nfo.NewGenerator(fs, &nfo.Config{})
 	if err := gen.WriteNFO(&nfo.Movie{ID: id, Title: title}, path); err != nil {
-		t.Fatalf("WriteNFO() error = %v", err)
+		t.Fatalf("writeWorkflowNFO() error = %v", err)
 	}
 }
 
 func TestProcessUpdateMode_GeneratesMergedNFO(t *testing.T) {
 	initTestWebSocket(t)
 
-	cfg := config.DefaultConfig()
-	cfg.Output.DownloadCover = false
-	cfg.Output.DownloadPoster = false
-	cfg.Output.DownloadExtrafanart = false
-	cfg.Output.DownloadTrailer = false
-	cfg.Output.DownloadActress = false
-	cfg.Metadata.NFO.FilenameTemplate = "<ID>.nfo"
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Download.DownloadCover = false
+	cfg.Output.Download.DownloadPoster = false
+	cfg.Output.Download.DownloadExtrafanart = false
+	cfg.Output.Download.DownloadTrailer = false
+	cfg.Output.Download.DownloadActress = false
+	cfg.Metadata.NFO.Format.FilenameTemplate = "<ID>.nfo"
 
 	deps := createTestDeps(t, cfg, "")
 	tempDir := t.TempDir()
@@ -41,12 +41,11 @@ func TestProcessUpdateMode_GeneratesMergedNFO(t *testing.T) {
 	}
 	writeWorkflowNFO(t, filepath.Join(tempDir, "ABC-123.nfo"), "ABC-123", "Existing Title")
 
-	job := deps.JobQueue.CreateJob([]string{filePath})
-	job.UpdateFileResult(filePath, &worker.FileResult{
-		FilePath: filePath,
-		MovieID:  "ABC-123",
-		Status:   worker.JobStatusCompleted,
-		Data: &models.Movie{
+	job := deps.JobStore.CreateJobBatch([]string{filePath})
+	setJobResult(job, filePath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "ABC-123"},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{
 			ID:        "ABC-123",
 			ContentID: "abc123",
 			Title:     "Scraped Title",
@@ -54,10 +53,10 @@ func TestProcessUpdateMode_GeneratesMergedNFO(t *testing.T) {
 		},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
+	testStartUpdateApply(context.Background(), job, cfg, deps.CoreDeps.DB, deps.CoreDeps.ScraperRegistry, nil, &updateOptions{})
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusCompleted {
+	if status.Status != models.JobStatusCompleted {
 		t.Fatalf("job status = %q, want completed", status.Status)
 	}
 
@@ -73,14 +72,14 @@ func TestProcessUpdateMode_GeneratesMergedNFO(t *testing.T) {
 func TestProcessUpdateMode_TemplatedTitleNotDoubleApplied(t *testing.T) {
 	initTestWebSocket(t)
 
-	cfg := config.DefaultConfig()
-	cfg.Output.DownloadCover = false
-	cfg.Output.DownloadPoster = false
-	cfg.Output.DownloadExtrafanart = false
-	cfg.Output.DownloadTrailer = false
-	cfg.Output.DownloadActress = false
-	cfg.Metadata.NFO.FilenameTemplate = "<ID>.nfo"
-	cfg.Metadata.NFO.DisplayTitle = "[<ID>] <TITLE>"
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Download.DownloadCover = false
+	cfg.Output.Download.DownloadPoster = false
+	cfg.Output.Download.DownloadExtrafanart = false
+	cfg.Output.Download.DownloadTrailer = false
+	cfg.Output.Download.DownloadActress = false
+	cfg.Metadata.NFO.Format.FilenameTemplate = "<ID>.nfo"
+	cfg.Metadata.NFO.Format.DisplayTitle = "[<ID>] <TITLE>"
 
 	deps := createTestDeps(t, cfg, "")
 	tempDir := t.TempDir()
@@ -90,22 +89,21 @@ func TestProcessUpdateMode_TemplatedTitleNotDoubleApplied(t *testing.T) {
 	}
 	writeWorkflowNFO(t, filepath.Join(tempDir, "ABC-123.nfo"), "ABC-123", "[ABC-123] Existing Templated Title")
 
-	job := deps.JobQueue.CreateJob([]string{filePath})
-	job.UpdateFileResult(filePath, &worker.FileResult{
-		FilePath: filePath,
-		MovieID:  "ABC-123",
-		Status:   worker.JobStatusCompleted,
-		Data: &models.Movie{
+	job := deps.JobStore.CreateJobBatch([]string{filePath})
+	setJobResult(job, filePath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "ABC-123"},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{
 			ID:        "ABC-123",
 			ContentID: "abc123",
 			Title:     "Scraped Title",
 		},
 	})
 
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, context.Background(), nil, &UpdateOptions{})
+	testStartUpdateApply(context.Background(), job, cfg, deps.CoreDeps.DB, deps.CoreDeps.ScraperRegistry, nil, &updateOptions{})
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusCompleted {
+	if status.Status != models.JobStatusCompleted {
 		t.Fatalf("job status = %q, want completed", status.Status)
 	}
 
@@ -121,12 +119,12 @@ func TestProcessUpdateMode_TemplatedTitleNotDoubleApplied(t *testing.T) {
 func TestProcessUpdateMode_CancelledContextMarksJobCancelled(t *testing.T) {
 	initTestWebSocket(t)
 
-	cfg := config.DefaultConfig()
-	cfg.Output.DownloadCover = false
-	cfg.Output.DownloadPoster = false
-	cfg.Output.DownloadExtrafanart = false
-	cfg.Output.DownloadTrailer = false
-	cfg.Output.DownloadActress = false
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Download.DownloadCover = false
+	cfg.Output.Download.DownloadPoster = false
+	cfg.Output.Download.DownloadExtrafanart = false
+	cfg.Output.Download.DownloadTrailer = false
+	cfg.Output.Download.DownloadActress = false
 
 	deps := createTestDeps(t, cfg, "")
 	tempDir := t.TempDir()
@@ -135,12 +133,11 @@ func TestProcessUpdateMode_CancelledContextMarksJobCancelled(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	job := deps.JobQueue.CreateJob([]string{filePath})
-	job.UpdateFileResult(filePath, &worker.FileResult{
-		FilePath: filePath,
-		MovieID:  "XYZ-999",
-		Status:   worker.JobStatusCompleted,
-		Data: &models.Movie{
+	job := deps.JobStore.CreateJobBatch([]string{filePath})
+	setJobResult(job, filePath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "XYZ-999"},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{
 			ID:        "XYZ-999",
 			ContentID: "xyz999",
 			Title:     "Cancelable",
@@ -149,9 +146,9 @@ func TestProcessUpdateMode_CancelledContextMarksJobCancelled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	processUpdateMode(job, cfg, deps.DB, deps.Registry, ctx, nil, &UpdateOptions{})
+	testStartUpdateApply(ctx, job, cfg, deps.CoreDeps.DB, deps.CoreDeps.ScraperRegistry, nil, &updateOptions{})
 
-	if status := job.GetStatus(); status.Status != worker.JobStatusCancelled {
+	if status := job.GetStatus(); status.Status != models.JobStatusCancelled {
 		t.Fatalf("job status = %q, want cancelled", status.Status)
 	}
 }
@@ -159,16 +156,16 @@ func TestProcessUpdateMode_CancelledContextMarksJobCancelled(t *testing.T) {
 func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 	initTestWebSocket(t)
 
-	cfg := config.DefaultConfig()
-	cfg.Output.FolderFormat = "<ID>"
-	cfg.Output.FileFormat = "<ID>"
-	cfg.Output.SubfolderFormat = []string{} // Disable subfolder for this test
-	cfg.Output.DownloadCover = false
-	cfg.Output.DownloadPoster = false
-	cfg.Output.DownloadExtrafanart = false
-	cfg.Output.DownloadTrailer = false
-	cfg.Output.DownloadActress = false
-	cfg.Metadata.NFO.FilenameTemplate = "<ID>.nfo"
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Template.FolderFormat = "<ID>"
+	cfg.Output.Template.FileFormat = "<ID>"
+	cfg.Output.Template.SubfolderFormat = []string{} // Disable subfolder for this test
+	cfg.Output.Download.DownloadCover = false
+	cfg.Output.Download.DownloadPoster = false
+	cfg.Output.Download.DownloadExtrafanart = false
+	cfg.Output.Download.DownloadTrailer = false
+	cfg.Output.Download.DownloadActress = false
+	cfg.Metadata.NFO.Format.FilenameTemplate = "<ID>.nfo"
 
 	deps := createTestDeps(t, cfg, "")
 	sourceDir := t.TempDir()
@@ -178,12 +175,11 @@ func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	job := deps.JobQueue.CreateJob([]string{filePath})
-	job.UpdateFileResult(filePath, &worker.FileResult{
-		FilePath: filePath,
-		MovieID:  "IPX-777",
-		Status:   worker.JobStatusCompleted,
-		Data: &models.Movie{
+	job := deps.JobStore.CreateJobBatch([]string{filePath})
+	setJobResult(job, filePath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "IPX-777", Extension: ".mp4"},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{
 			ID:        "IPX-777",
 			ContentID: "ipx777",
 			Title:     "Organized Movie",
@@ -191,10 +187,10 @@ func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 		},
 	})
 
-	processOrganizeJob(context.Background(), job, deps.JobQueue, destDir, true, "", false, false, deps.DB, cfg, deps.Registry, nil)
+	testStartOrganizeApply(context.Background(), job, deps.JobStore, destDir, true, "", false, false, deps.CoreDeps.DB, cfg, deps.CoreDeps.ScraperRegistry, nil)
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusOrganized {
+	if status.Status != models.JobStatusOrganized {
 		t.Fatalf("job status = %q, want organized", status.Status)
 	}
 
@@ -210,13 +206,13 @@ func TestProcessOrganizeJob_CopiesFileAndGeneratesNFO(t *testing.T) {
 func TestProcessOrganizeJob_CancelledContext(t *testing.T) {
 	initTestWebSocket(t)
 
-	cfg := config.DefaultConfig()
-	cfg.Output.DownloadCover = false
-	cfg.Output.DownloadPoster = false
-	cfg.Output.DownloadExtrafanart = false
-	cfg.Output.DownloadTrailer = false
-	cfg.Output.DownloadActress = false
-	cfg.Metadata.NFO.Enabled = false
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Output.Download.DownloadCover = false
+	cfg.Output.Download.DownloadPoster = false
+	cfg.Output.Download.DownloadExtrafanart = false
+	cfg.Output.Download.DownloadTrailer = false
+	cfg.Output.Download.DownloadActress = false
+	cfg.Metadata.NFO.Feature.Enabled = false
 
 	deps := createTestDeps(t, cfg, "")
 	tempDir := t.TempDir()
@@ -225,12 +221,11 @@ func TestProcessOrganizeJob_CancelledContext(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	job := deps.JobQueue.CreateJob([]string{filePath})
-	job.UpdateFileResult(filePath, &worker.FileResult{
-		FilePath: filePath,
-		MovieID:  "IPX-999",
-		Status:   worker.JobStatusCompleted,
-		Data: &models.Movie{
+	job := deps.JobStore.CreateJobBatch([]string{filePath})
+	setJobResult(job, filePath, &worker.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "IPX-999"},
+		Status:        models.JobStatusCompleted,
+		Movie: &models.Movie{
 			ID:        "IPX-999",
 			ContentID: "ipx999",
 			Title:     "Test Movie",
@@ -240,10 +235,10 @@ func TestProcessOrganizeJob_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	processOrganizeJob(ctx, job, deps.JobQueue, t.TempDir(), false, "", false, false, deps.DB, cfg, deps.Registry, nil)
+	testStartOrganizeApply(ctx, job, deps.JobStore, t.TempDir(), false, "", false, false, deps.CoreDeps.DB, cfg, deps.CoreDeps.ScraperRegistry, nil)
 
 	status := job.GetStatus()
-	if status.Status != worker.JobStatusCancelled {
+	if status.Status != models.JobStatusCancelled {
 		t.Fatalf("job status = %q, want cancelled", status.Status)
 	}
 }

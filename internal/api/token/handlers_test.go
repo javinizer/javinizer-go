@@ -2,15 +2,14 @@ package token
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -19,16 +18,14 @@ import (
 
 func TestRegisterRoutes(t *testing.T) {
 	repo, _ := setupHandlerTestDB(t)
-	deps := &core.ServerDependencies{
-		ApiTokenRepo: repo,
-	}
+	svc := NewTokenService(repo)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	protected := router.Group("/api/v1")
 	writeProtected := router.Group("/api/v1")
 
-	RegisterRoutes(protected, writeProtected, deps)
+	RegisterRoutes(protected, writeProtected, svc)
 
 	routes := router.Routes()
 	routeMap := make(map[string]bool)
@@ -46,8 +43,8 @@ func setupHandlerTestDB(t *testing.T) (*database.ApiTokenRepository, *gorm.DB) {
 	t.Helper()
 	gormDB, err := gorm.Open(sqlite.Open("file::memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, gormDB.AutoMigrate(&models.ApiToken{}))
 	db := &database.DB{DB: gormDB}
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	repo := database.NewApiTokenRepository(db)
 	return repo, gormDB
 }
@@ -55,17 +52,15 @@ func setupHandlerTestDB(t *testing.T) (*database.ApiTokenRepository, *gorm.DB) {
 func setupHandlerRouter(repo *database.ApiTokenRepository) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 
-	deps := &core.ServerDependencies{
-		ApiTokenRepo: repo,
-	}
+	svc := NewTokenService(repo)
 
 	router := gin.New()
 	api := router.Group("/api/v1")
 
-	api.POST("/tokens", createToken(deps))
-	api.GET("/tokens", listTokens(deps))
-	api.DELETE("/tokens/:id", revokeToken(deps))
-	api.POST("/tokens/:id/regenerate", regenerateToken(deps))
+	api.POST("/tokens", createToken(svc))
+	api.GET("/tokens", listTokens(svc))
+	api.DELETE("/tokens/:id", revokeToken(svc))
+	api.POST("/tokens/:id/regenerate", regenerateToken(svc))
 
 	return router
 }
@@ -127,8 +122,8 @@ func Test_listTokens(t *testing.T) {
 	t.Run("returns list of active tokens", func(t *testing.T) {
 		repo, _ := setupHandlerTestDB(t)
 		svc := NewTokenService(repo)
-		svc.Create("list-a")
-		svc.Create("list-b")
+		svc.Create(context.Background(), "list-a")
+		svc.Create(context.Background(), "list-b")
 		router := setupHandlerRouter(repo)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/tokens", nil)
@@ -163,7 +158,7 @@ func Test_listTokens(t *testing.T) {
 func Test_revokeToken(t *testing.T) {
 	repo, _ := setupHandlerTestDB(t)
 	svc := NewTokenService(repo)
-	apiToken, _, err := svc.Create("revoke-handler")
+	apiToken, _, err := svc.Create(context.Background(), "revoke-handler")
 	require.NoError(t, err)
 
 	router := setupHandlerRouter(repo)
@@ -179,7 +174,7 @@ func Test_revokeToken(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, "token revoked", resp["message"])
 
-		found, err := repo.FindByID(apiToken.ID)
+		found, err := repo.FindByID(context.Background(), apiToken.ID)
 		require.NoError(t, err)
 		assert.NotNil(t, found.RevokedAt)
 	})
@@ -195,7 +190,7 @@ func Test_revokeToken(t *testing.T) {
 func Test_regenerateToken(t *testing.T) {
 	repo, _ := setupHandlerTestDB(t)
 	svc := NewTokenService(repo)
-	apiToken, oldFullToken, err := svc.Create("regen-handler")
+	apiToken, oldFullToken, err := svc.Create(context.Background(), "regen-handler")
 	require.NoError(t, err)
 
 	router := setupHandlerRouter(repo)
@@ -213,7 +208,7 @@ func Test_regenerateToken(t *testing.T) {
 		assert.NotEqual(t, oldFullToken, resp.Token)
 		assert.True(t, len(resp.Token) > 0)
 
-		_, err := repo.FindByTokenHash(HashToken(oldFullToken))
+		_, err := repo.FindByTokenHash(context.Background(), HashToken(oldFullToken))
 		assert.Error(t, err, "old token hash should not be found after regenerate")
 	})
 
@@ -225,37 +220,17 @@ func Test_regenerateToken(t *testing.T) {
 	})
 }
 
-func setupFailingHandlerRouter() *gin.Engine {
-	gin.SetMode(gin.TestMode)
-
-	gormDB, _ := gorm.Open(sqlite.Open("file::memory:"), &gorm.Config{})
-	db := &database.DB{DB: gormDB}
-
-	deps := &core.ServerDependencies{
-		ApiTokenRepo: database.NewApiTokenRepository(db),
-	}
-
-	router := gin.New()
-	api := router.Group("/api/v1")
-	api.POST("/tokens", createToken(deps))
-	api.GET("/tokens", listTokens(deps))
-	api.DELETE("/tokens/:id", revokeToken(deps))
-	api.POST("/tokens/:id/regenerate", regenerateToken(deps))
-
-	return router
-}
-
 func Test_createToken_InternalError(t *testing.T) {
 	gormDB, _ := gorm.Open(sqlite.Open("file::memory:"), &gorm.Config{})
 	db := &database.DB{DB: gormDB}
 	_ = db.Close()
 
-	deps := &core.ServerDependencies{ApiTokenRepo: database.NewApiTokenRepository(db)}
+	svc := NewTokenService(database.NewApiTokenRepository(db))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	api := router.Group("/api/v1")
-	api.POST("/tokens", createToken(deps))
+	api.POST("/tokens", createToken(svc))
 
 	body, _ := json.Marshal(createTokenRequest{Name: "fail-test"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tokens", bytes.NewReader(body))
@@ -271,12 +246,12 @@ func Test_revokeToken_InternalError(t *testing.T) {
 	db := &database.DB{DB: gormDB}
 	_ = db.Close()
 
-	deps := &core.ServerDependencies{ApiTokenRepo: database.NewApiTokenRepository(db)}
+	svc := NewTokenService(database.NewApiTokenRepository(db))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	api := router.Group("/api/v1")
-	api.DELETE("/tokens/:id", revokeToken(deps))
+	api.DELETE("/tokens/:id", revokeToken(svc))
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/tokens/some-id", nil)
 	w := httptest.NewRecorder()
@@ -290,12 +265,12 @@ func Test_regenerateToken_InternalError(t *testing.T) {
 	db := &database.DB{DB: gormDB}
 	_ = db.Close()
 
-	deps := &core.ServerDependencies{ApiTokenRepo: database.NewApiTokenRepository(db)}
+	svc := NewTokenService(database.NewApiTokenRepository(db))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	api := router.Group("/api/v1")
-	api.POST("/tokens/:id/regenerate", regenerateToken(deps))
+	api.POST("/tokens/:id/regenerate", regenerateToken(svc))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tokens/some-id/regenerate", nil)
 	w := httptest.NewRecorder()

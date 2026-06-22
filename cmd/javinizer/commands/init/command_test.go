@@ -70,7 +70,7 @@ func TestRunInit_Success(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "data", "javinizer.db")
 
 	// Create initial config
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	err := config.Save(testCfg, configPath)
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestRunInit_DatabaseMigrations(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "data", "javinizer.db")
 
 	// Create initial config
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	err := config.Save(testCfg, configPath)
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestRunInit_DatabaseMigrations(t *testing.T) {
 	require.NoError(t, err)
 
 	// Connect to the created database
-	db, err := database.New(cfgLoaded)
+	db, err := database.New(&database.Config{Type: cfgLoaded.Database.Type, DSN: cfgLoaded.Database.DSN, LogLevel: cfgLoaded.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
@@ -176,7 +176,7 @@ func TestRunInit_DirectoryCreation(t *testing.T) {
 	dbPath := filepath.Join(dataDir, "javinizer.db")
 
 	// Create initial config
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	err := config.Save(testCfg, configPath)
 	require.NoError(t, err)
@@ -213,7 +213,7 @@ func TestRunInit_ConfigFileContent(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "data", "javinizer.db")
 
 	// Create initial config
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	err := config.Save(testCfg, configPath)
 	require.NoError(t, err)
@@ -241,8 +241,8 @@ func TestRunInit_ConfigFileContent(t *testing.T) {
 	assert.NotEmpty(t, cfgLoaded.Database.DSN, "database DSN should be set")
 	assert.Equal(t, "sqlite", cfgLoaded.Database.Type, "default database type should be sqlite")
 	assert.NotEmpty(t, cfgLoaded.Scrapers.Priority, "scraper priority should be set")
-	assert.NotEmpty(t, cfgLoaded.Output.FolderFormat, "folder format should be set")
-	assert.NotEmpty(t, cfgLoaded.Output.FileFormat, "file format should be set")
+	assert.NotEmpty(t, cfgLoaded.Output.Template.FolderFormat, "folder format should be set")
+	assert.NotEmpty(t, cfgLoaded.Output.Template.FileFormat, "file format should be set")
 
 	// Verify scrapers are configured
 	assert.True(t, len(cfgLoaded.Scrapers.Priority) > 0, "should have at least one scraper in priority")
@@ -255,7 +255,7 @@ func TestRunInit_RepeatedInitialization(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "data", "javinizer.db")
 
 	// Create initial config
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = dbPath
 	err := config.Save(testCfg, configPath)
 	require.NoError(t, err)

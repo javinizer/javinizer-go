@@ -15,14 +15,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
-type noPosterStubScraper struct{}
+type noPosterStubScraper struct {
+}
 
 func (s *noPosterStubScraper) Name() string { return "stub-no-poster" }
 
@@ -40,7 +44,7 @@ func (s *noPosterStubScraper) Search(_ context.Context, id string) (*models.Scra
 	}, nil
 }
 
-func (s *noPosterStubScraper) GetURL(id string) (string, error) {
+func (s *noPosterStubScraper) GetURL(_ context.Context, id string) (string, error) {
 	return "https://example.invalid/" + id, nil
 }
 
@@ -48,8 +52,8 @@ func (s *noPosterStubScraper) IsEnabled() bool { return true }
 
 func (s *noPosterStubScraper) Close() error { return nil }
 
-func (s *noPosterStubScraper) Config() *config.ScraperSettings {
-	return &config.ScraperSettings{Enabled: true}
+func (s *noPosterStubScraper) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: true}
 }
 
 func writeJPEG(t *testing.T, path string, width, height int) {
@@ -70,113 +74,102 @@ func TestRescrapeBatchMovie_EdgePaths(t *testing.T) {
 	initTestWebSocket(t)
 	gin.SetMode(gin.TestMode)
 
-	t.Run("invalid preset returns bad request", func(t *testing.T) {
-		cfg := config.DefaultConfig()
+	t.Run("invalid preset rejected at API boundary", func(t *testing.T) {
+		cfg := config.DefaultConfig(nil, nil)
 		deps := createTestDeps(t, cfg, "")
-		job := deps.JobQueue.CreateJob([]string{"/tmp/IPX-901.mp4"})
-		job.UpdateFileResult("/tmp/IPX-901.mp4", &worker.FileResult{
-			FilePath: "/tmp/IPX-901.mp4",
-			MovieID:  "IPX-901",
-			Status:   worker.JobStatusCompleted,
-			Data:     &models.Movie{ID: "IPX-901"},
+		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-901.mp4"})
+		setJobResult(job, "/tmp/IPX-901.mp4", &worker.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-901.mp4", MovieID: "IPX-901"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "IPX-901"},
 		})
 
-		status := job.GetStatus()
-		resultID := status.Results["/tmp/IPX-901.mp4"].ResultID
-
 		router := gin.New()
-		router.POST("/batch/:id/results/:resultId/rescrape", rescrapeBatchMovie(deps))
+		router.POST("/batch/:id/results/:resultId/rescrape", rescrapeBatchMovie(testkit.GetTestRuntime(deps)))
 
-		body, err := json.Marshal(BatchRescrapeRequest{
+		body, err := json.Marshal(contracts.BatchRescrapeRequest{
 			SelectedScrapers: []string{"stub-no-poster"},
 			Preset:           "invalid",
 		})
 		require.NoError(t, err)
 
-		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.ID+"/results/"+resultID+"/rescrape", bytes.NewBuffer(body))
+		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/IPX-901/rescrape", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		assert.Contains(t, rec.Body.String(), "invalid preset")
+		// API layer now validates presets at the boundary — invalid presets
+		// are rejected with HTTP 400 before reaching the pipeline.
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
 	t.Run("scraper failure returns internal error", func(t *testing.T) {
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		deps := createTestDeps(t, cfg, "")
-		job := deps.JobQueue.CreateJob([]string{"/tmp/IPX-902.mp4"})
-		job.UpdateFileResult("/tmp/IPX-902.mp4", &worker.FileResult{
-			FilePath: "/tmp/IPX-902.mp4",
-			MovieID:  "IPX-902",
-			Status:   worker.JobStatusCompleted,
-			Data:     &models.Movie{ID: "IPX-902"},
+		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-902.mp4"})
+		setJobResult(job, "/tmp/IPX-902.mp4", &worker.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-902.mp4", MovieID: "IPX-902"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "IPX-902"},
 		})
 
-		status := job.GetStatus()
-		resultID := status.Results["/tmp/IPX-902.mp4"].ResultID
-
 		router := gin.New()
-		router.POST("/batch/:id/results/:resultId/rescrape", rescrapeBatchMovie(deps))
+		router.POST("/batch/:id/results/:resultId/rescrape", rescrapeBatchMovie(testkit.GetTestRuntime(deps)))
 
-		body, err := json.Marshal(BatchRescrapeRequest{
+		body, err := json.Marshal(contracts.BatchRescrapeRequest{
 			SelectedScrapers:  []string{"missing-scraper"},
 			ManualSearchInput: "IPX-902",
 		})
 		require.NoError(t, err)
 
-		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.ID+"/results/"+resultID+"/rescrape", bytes.NewBuffer(body))
+		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/IPX-902/rescrape", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 
-		require.Equal(t, http.StatusInternalServerError, rec.Code)
+		require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 		assert.Contains(t, rec.Body.String(), "Rescrape failed")
 	})
 
 	t.Run("successful rescrape updates job state", func(t *testing.T) {
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		deps := createTestDeps(t, cfg, "")
-		deps.Registry.Register(&noPosterStubScraper{})
+		deps.CoreDeps.GetRegistry().RegisterInstance(&noPosterStubScraper{})
 
-		job := deps.JobQueue.CreateJob([]string{"/tmp/IPX-903.mp4"})
-		job.UpdateFileResult("/tmp/IPX-903.mp4", &worker.FileResult{
-			FilePath: "/tmp/IPX-903.mp4",
-			MovieID:  "IPX-903",
-			Status:   worker.JobStatusCompleted,
-			Data:     &models.Movie{ID: "IPX-903", Title: "Old Title"},
+		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-903.mp4"})
+		setJobResult(job, "/tmp/IPX-903.mp4", &worker.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-903.mp4", MovieID: "IPX-903"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "IPX-903", Title: "Old Title"},
 		})
 
-		status := job.GetStatus()
-		resultID := status.Results["/tmp/IPX-903.mp4"].ResultID
-
 		router := gin.New()
-		router.POST("/batch/:id/results/:resultId/rescrape", rescrapeBatchMovie(deps))
+		router.POST("/batch/:id/results/:resultId/rescrape", rescrapeBatchMovie(testkit.GetTestRuntime(deps)))
 
-		body, err := json.Marshal(BatchRescrapeRequest{
+		body, err := json.Marshal(contracts.BatchRescrapeRequest{
 			SelectedScrapers:  []string{"stub-no-poster"},
 			ManualSearchInput: "IPX-903",
 		})
 		require.NoError(t, err)
 
-		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.ID+"/results/"+resultID+"/rescrape", bytes.NewBuffer(body))
+		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/IPX-903/rescrape", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-		var resp BatchRescrapeResponse
+		var resp contracts.BatchRescrapeResponse
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		require.NotNil(t, resp.Movie)
 		assert.Equal(t, "IPX-903", resp.Movie.ID)
 		assert.Equal(t, "Rescrape Edge Test", resp.Movie.Title)
 
-		status = job.GetStatus()
+		status := job.GetStatus()
 		updated := status.Results["/tmp/IPX-903.mp4"]
 		require.NotNil(t, updated)
-		assert.Equal(t, worker.JobStatusCompleted, updated.Status)
-		assert.Equal(t, "IPX-903", updated.MovieID)
+		assert.Equal(t, models.JobStatusCompleted, updated.Status)
+		assert.Equal(t, "IPX-903", updated.FileMatchInfo.MovieID)
 	})
 }
 
@@ -192,13 +185,13 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		_ = os.Chdir(originalWD)
 	})
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	deps := createTestDeps(t, cfg, "")
 	router := gin.New()
-	router.POST("/batch/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(deps))
+	router.POST("/batch/:id/results/:resultId/poster-crop", updateBatchMoviePosterCrop(testkit.GetTestRuntime(deps)))
 
 	t.Run("rejects invalid movie id path", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/batch/job-any/results/../bad/poster-crop", bytes.NewBufferString(`{"x":1,"y":1,"width":10,"height":10}`))
+		req := httptest.NewRequest(http.MethodPost, "/batch/job-any/movies/../bad/poster-crop", bytes.NewBufferString(`{"x":1,"y":1,"width":10,"height":10}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -206,7 +199,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 	})
 
 	t.Run("rejects invalid body", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/batch/missing/results/nonexistent-result-id/poster-crop", bytes.NewBufferString("{bad-json"))
+		req := httptest.NewRequest(http.MethodPost, "/batch/missing/results/IPX-100/poster-crop", bytes.NewBufferString("{bad-json"))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -214,7 +207,7 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 	})
 
 	t.Run("job not found", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/batch/does-not-exist/results/nonexistent-result-id/poster-crop", bytes.NewBufferString(`{"x":0,"y":0,"width":10,"height":10}`))
+		req := httptest.NewRequest(http.MethodPost, "/batch/does-not-exist/results/IPX-100/poster-crop", bytes.NewBufferString(`{"x":0,"y":0,"width":10,"height":10}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -223,68 +216,56 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 	})
 
 	t.Run("invalid poster id derived from movie data", func(t *testing.T) {
-		job := deps.JobQueue.CreateJob([]string{"/tmp/IPX-777.mp4"})
-		job.UpdateFileResult("/tmp/IPX-777.mp4", &worker.FileResult{
-			FilePath: "/tmp/IPX-777.mp4",
-			MovieID:  "IPX-777",
-			Status:   worker.JobStatusCompleted,
-			Data:     &models.Movie{ID: "../bad"},
+		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-777.mp4"})
+		setJobResult(job, "/tmp/IPX-777.mp4", &worker.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-777.mp4", MovieID: "IPX-777"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "../bad"},
 		})
 
-		status777 := job.GetStatus()
-		resultID777 := status777.Results["/tmp/IPX-777.mp4"].ResultID
-
-		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.ID+"/results/"+resultID777+"/poster-crop", bytes.NewBufferString(`{"x":0,"y":0,"width":10,"height":10}`))
+		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/IPX-777/poster-crop", bytes.NewBufferString(`{"x":0,"y":0,"width":10,"height":10}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
-		assert.Contains(t, rec.Body.String(), "Invalid movie ID for poster crop")
+		assert.Contains(t, rec.Body.String(), "invalid movie ID for poster operation")
 	})
 
 	t.Run("falls back to existing cropped image when full image is missing", func(t *testing.T) {
-		job := deps.JobQueue.CreateJob([]string{"/tmp/IPX-778.mp4"})
-		job.UpdateFileResult("/tmp/IPX-778.mp4", &worker.FileResult{
-			FilePath: "/tmp/IPX-778.mp4",
-			MovieID:  "IPX-778",
-			Status:   worker.JobStatusCompleted,
-			Data:     &models.Movie{ID: "IPX-778", Title: "Fallback Crop"},
+		job := createJobWithWF(deps, cfg, []string{"/tmp/IPX-778.mp4"})
+		setJobResult(job, "/tmp/IPX-778.mp4", &worker.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/IPX-778.mp4", MovieID: "IPX-778"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "IPX-778", Title: "Fallback Crop"},
 		})
 
-		status778 := job.GetStatus()
-		resultID778 := status778.Results["/tmp/IPX-778.mp4"].ResultID
-
-		posterDir := filepath.Join("data", "temp", "posters", job.ID)
+		posterDir := filepath.Join("data", "temp", "posters", job.GetID())
 		require.NoError(t, os.MkdirAll(posterDir, 0o755))
 		writeJPEG(t, filepath.Join(posterDir, "IPX-778.jpg"), 900, 600)
 
-		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.ID+"/results/"+resultID778+"/poster-crop", bytes.NewBufferString(`{"x":100,"y":0,"width":472,"height":600}`))
+		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/IPX-778/poster-crop", bytes.NewBufferString(`{"x":100,"y":0,"width":472,"height":600}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		assert.Contains(t, rec.Body.String(), "/api/v1/temp/posters/"+job.ID+"/IPX-778.jpg")
+		assert.Contains(t, rec.Body.String(), "/api/v1/temp/posters/"+job.GetID()+"/IPX-778.jpg")
 	})
 
 	t.Run("movie lookup fallback by data movie id", func(t *testing.T) {
-		job := deps.JobQueue.CreateJob([]string{"/tmp/ALT-001.mp4"})
-		job.UpdateFileResult("/tmp/ALT-001.mp4", &worker.FileResult{
-			FilePath: "/tmp/ALT-001.mp4",
-			MovieID:  "LEGACY-001",
-			Status:   worker.JobStatusCompleted,
-			Data:     &models.Movie{ID: "ALT-001", Title: "Movie ID Fallback"},
+		job := createJobWithWF(deps, cfg, []string{"/tmp/ALT-001.mp4"})
+		setJobResult(job, "/tmp/ALT-001.mp4", &worker.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ALT-001.mp4", MovieID: "LEGACY-001"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "ALT-001", Title: "Movie ID Fallback"},
 		})
 
-		statusAlt := job.GetStatus()
-		resultIDAlt := statusAlt.Results["/tmp/ALT-001.mp4"].ResultID
-
-		posterDir := filepath.Join("data", "temp", "posters", job.ID)
+		posterDir := filepath.Join("data", "temp", "posters", job.GetID())
 		require.NoError(t, os.MkdirAll(posterDir, 0o755))
 		writeJPEG(t, filepath.Join(posterDir, "ALT-001-full.jpg"), 1000, 600)
 
-		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.ID+"/results/"+resultIDAlt+"/poster-crop", bytes.NewBufferString(`{"x":200,"y":0,"width":472,"height":600}`))
+		req := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/LEGACY-001/poster-crop", bytes.NewBufferString(`{"x":200,"y":0,"width":472,"height":600}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -293,10 +274,9 @@ func TestUpdateBatchMoviePosterCrop_EdgePaths(t *testing.T) {
 		status := job.GetStatus()
 		result := status.Results["/tmp/ALT-001.mp4"]
 		require.NotNil(t, result)
-		movie, ok := result.Data.(*models.Movie)
-		require.True(t, ok)
-		assert.Equal(t, "ALT-001", result.MovieID)
-		assert.Contains(t, movie.CroppedPosterURL, "/api/v1/temp/posters/"+job.ID+"/ALT-001.jpg")
-		assert.False(t, movie.ShouldCropPoster)
+		require.NotNil(t, result.Movie)
+		assert.Equal(t, "ALT-001", result.FileMatchInfo.MovieID)
+		assert.Contains(t, result.Movie.Poster.CroppedPosterURL, "/api/v1/temp/posters/"+job.GetID()+"/ALT-001.jpg")
+		assert.False(t, result.Movie.Poster.ShouldCropPoster)
 	})
 }

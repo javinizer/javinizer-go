@@ -37,12 +37,6 @@ func RegisterMigration(m Migration) {
 	}
 }
 
-//nolint:unused // Used in tests
-func getMigration(fromVersion int) (Migration, bool) {
-	m, ok := migrations[fromVersion]
-	return m, ok
-}
-
 func MigrateToCurrent(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")
@@ -64,11 +58,6 @@ func MigrateToCurrent(cfg *Config) error {
 	}
 
 	return nil
-}
-
-func ResetMigrations() {
-	migrations = make(map[int]Migration)
-	migrationContext = MigrationContext{}
 }
 
 type LegacyMigration struct{}
@@ -101,7 +90,7 @@ func (m *LegacyMigration) Migrate(cfg *Config) error {
 		}
 	}
 
-	newCfg := DefaultConfig()
+	newCfg := DefaultConfig(nil, nil)
 	*cfg = *newCfg
 
 	return nil

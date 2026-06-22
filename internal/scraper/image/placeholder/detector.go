@@ -15,7 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-func IsPlaceholder(ctx context.Context, client *resty.Client, url string, cfg Config) (bool, error) {
+func isPlaceholder(ctx context.Context, client *resty.Client, url string, cfg Config) (bool, error) {
 	if url == "" {
 		return false, fmt.Errorf("empty URL")
 	}
@@ -40,7 +40,7 @@ func IsPlaceholder(ctx context.Context, client *resty.Client, url string, cfg Co
 	}
 
 	if resp.StatusCode() >= 400 {
-		return false, models.NewScraperHTTPError("placeholder", resp.StatusCode(), "HEAD request failed")
+		return false, models.NewScraperStatusError("placeholder", resp.StatusCode(), "HEAD request failed")
 	}
 
 	contentLengthStr := resp.Header().Get("Content-Length")
@@ -77,7 +77,7 @@ func IsPlaceholder(ctx context.Context, client *resty.Client, url string, cfg Co
 	}
 
 	if downloadResp.StatusCode >= 400 {
-		return false, models.NewScraperHTTPError("placeholder", downloadResp.StatusCode, "download failed")
+		return false, models.NewScraperStatusError("placeholder", downloadResp.StatusCode, "download failed")
 	}
 
 	hasher := sha256.New()
@@ -136,7 +136,7 @@ func FilterURLs(ctx context.Context, client *resty.Client, urls []string, cfg Co
 	filteredCount := 0
 
 	for _, url := range urls {
-		isPlaceholder, err := IsPlaceholder(ctx, client, url, cfg)
+		isPlaceholder, err := isPlaceholder(ctx, client, url, cfg)
 		if err != nil {
 			logging.Warnf("placeholder: check failed for %s: %v", url, err)
 			filtered = append(filtered, url)

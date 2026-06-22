@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
@@ -27,7 +26,7 @@ func NewTestClient(server *httptest.Server) *resty.Client {
 }
 
 func TestScraper_Name(t *testing.T) {
-	s := &Scraper{rateLimiter: ratelimit.NewLimiter(0)}
+	s := &scraper{rateLimiter: ratelimit.NewLimiter(0)}
 	assert.Equal(t, "javstash", s.Name())
 }
 
@@ -42,73 +41,39 @@ func TestScraper_IsEnabled(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Scraper{enabled: tt.enabled, rateLimiter: ratelimit.NewLimiter(0)}
+			s := &scraper{enabled: tt.enabled, rateLimiter: ratelimit.NewLimiter(0)}
 			assert.Equal(t, tt.want, s.IsEnabled())
 		})
 	}
 }
 
-func TestScraper_ValidateConfig(t *testing.T) {
+func TestValidateScraperSettings(t *testing.T) {
 	tests := []struct {
 		name    string
-		cfg     *config.ScraperSettings
+		cfg     *models.ScraperSettings
 		wantErr bool
 		errMsg  string
 	}{
 		{
-			name:    "nil config",
-			cfg:     nil,
-			wantErr: true,
-			errMsg:  "config is nil",
-		},
-		{
-			name: "disabled",
-			cfg: &config.ScraperSettings{
-				Enabled: false,
-			},
+			name:    "disabled",
+			cfg:     &models.ScraperSettings{Enabled: false},
 			wantErr: false,
 		},
 		{
-			name: "enabled without api key",
-			cfg: &config.ScraperSettings{
-				Enabled: true,
-			},
+			name:    "enabled without api key",
+			cfg:     &models.ScraperSettings{Enabled: true, Timeout: 30},
 			wantErr: true,
 			errMsg:  "api_key is required",
 		},
 		{
-			name: "enabled with api key",
-			cfg: &config.ScraperSettings{
-				Enabled: true,
-				Extra:   map[string]any{"api_key": "test-key"},
-			},
+			name:    "enabled with api key",
+			cfg:     &models.ScraperSettings{Enabled: true, APIKey: "test-key", Timeout: 30},
 			wantErr: false,
-		},
-		{
-			name: "negative rate limit",
-			cfg: &config.ScraperSettings{
-				Enabled:   true,
-				Extra:     map[string]any{"api_key": "test-key"},
-				RateLimit: -1,
-			},
-			wantErr: true,
-			errMsg:  "rate_limit must be non-negative",
-		},
-		{
-			name: "negative retry count",
-			cfg: &config.ScraperSettings{
-				Enabled:    true,
-				Extra:      map[string]any{"api_key": "test-key"},
-				RetryCount: -1,
-			},
-			wantErr: true,
-			errMsg:  "retry_count must be non-negative",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Scraper{rateLimiter: ratelimit.NewLimiter(0)}
-			err := s.ValidateConfig(tt.cfg)
+			err := validateScraperSettings(tt.cfg)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errMsg)
@@ -120,7 +85,7 @@ func TestScraper_ValidateConfig(t *testing.T) {
 }
 
 func TestScraper_Search_MissingAPIKey(t *testing.T) {
-	s := &Scraper{
+	s := &scraper{
 		enabled:     true,
 		apiKey:      "",
 		rateLimiter: ratelimit.NewLimiter(0),
@@ -131,7 +96,7 @@ func TestScraper_Search_MissingAPIKey(t *testing.T) {
 }
 
 func TestScraper_Search_EmptyID(t *testing.T) {
-	s := &Scraper{
+	s := &scraper{
 		enabled:     true,
 		apiKey:      "test-key",
 		rateLimiter: ratelimit.NewLimiter(0),
@@ -146,16 +111,16 @@ func TestScraper_Search_EmptyID(t *testing.T) {
 }
 
 func TestScraper_GetURL_EmptyID(t *testing.T) {
-	s := &Scraper{
+	s := &scraper{
 		enabled:     true,
 		apiKey:      "test-key",
 		rateLimiter: ratelimit.NewLimiter(0),
 	}
-	_, err := s.GetURL("")
+	_, err := s.GetURL(context.Background(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "id cannot be empty")
 
-	_, err = s.GetURL("   ")
+	_, err = s.GetURL(context.Background(), "   ")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "id cannot be empty")
 }
@@ -177,7 +142,7 @@ func TestScraper_Search_Success(t *testing.T) {
 					"duration": 120,
 					"director": "Test Director",
 					"details": "Test description",
-					"studio": {"id": "s1", "name": "Test Studio"},
+					"studio": {"id": "s1", "name": "Test studio"},
 					"performers": [{"performer": {"id": "p1", "name": "Actress Name"}}],
 					"tags": [{"id": "t1", "name": "Tag1"}, {"id": "t2", "name": "Tag2"}],
 					"images": [{"id": "i1", "url": "https://example.com/image.jpg"}],
@@ -191,13 +156,13 @@ func TestScraper_Search_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	s := &Scraper{
+	s := &scraper{
 		enabled:     true,
 		apiKey:      "test-api-key",
 		baseURL:     server.URL,
 		client:      NewTestClient(server),
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{},
+		settings:    models.ScraperSettings{},
 	}
 
 	result, err := s.Search(context.Background(), "IPX-535")
@@ -207,7 +172,7 @@ func TestScraper_Search_Success(t *testing.T) {
 	assert.Equal(t, 2, result.Runtime)
 	assert.Equal(t, "Test Director", result.Director)
 	assert.Equal(t, "Test description", result.Description)
-	assert.Equal(t, "Test Studio", result.Maker)
+	assert.Equal(t, "Test studio", result.Maker)
 	assert.Equal(t, "ipx00535", result.ContentID, "ContentID should be extracted from DMM URL")
 	assert.Equal(t, "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=ipx00535/", result.SourceURL)
 	assert.Len(t, result.Actresses, 1)
@@ -249,7 +214,7 @@ func TestExtractDMMContentID(t *testing.T) {
 			expected: "",
 		},
 		{
-			name:     "DMM URL without trailing slash",
+			name:     "DMM url without trailing slash",
 			url:      "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=abw00102",
 			expected: "abw00102",
 		},
@@ -274,13 +239,13 @@ func TestScraper_Search_NotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	s := &Scraper{
+	s := &scraper{
 		enabled:     true,
 		apiKey:      "test-api-key",
 		baseURL:     server.URL,
 		client:      NewTestClient(server),
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{},
+		settings:    models.ScraperSettings{},
 	}
 
 	_, err := s.Search(context.Background(), "NOTFOUND-999")
@@ -298,13 +263,13 @@ func TestScraper_Search_Unauthorized(t *testing.T) {
 	}))
 	defer server.Close()
 
-	s := &Scraper{
+	s := &scraper{
 		enabled:     true,
 		apiKey:      "test-api-key",
 		baseURL:     server.URL,
 		client:      NewTestClient(server),
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    config.ScraperSettings{},
+		settings:    models.ScraperSettings{},
 	}
 
 	_, err := s.Search(context.Background(), "IPX-535")
@@ -331,7 +296,7 @@ func TestNormalizeLanguage(t *testing.T) {
 }
 
 func TestCanHandleURL(t *testing.T) {
-	s := &Scraper{baseURL: "https://javstash.org/graphql", rateLimiter: ratelimit.NewLimiter(0)}
+	s := &scraper{baseURL: "https://javstash.org/graphql", rateLimiter: ratelimit.NewLimiter(0)}
 
 	tests := []struct {
 		name     string
@@ -341,7 +306,7 @@ func TestCanHandleURL(t *testing.T) {
 		{"javstash.org", "https://javstash.org/scenes/abc123", true},
 		{"www.javstash.org", "https://www.javstash.org/scenes/abc123", true},
 		{"other site", "https://www.example.com/scenes/abc123", false},
-		{"malformed URL", "not-a-url", false},
+		{"malformed url", "not-a-url", false},
 		{"empty", "", false},
 	}
 
@@ -354,7 +319,7 @@ func TestCanHandleURL(t *testing.T) {
 }
 
 func TestExtractIDFromURL(t *testing.T) {
-	s := &Scraper{baseURL: "https://javstash.org/graphql", rateLimiter: ratelimit.NewLimiter(0)}
+	s := &scraper{baseURL: "https://javstash.org/graphql", rateLimiter: ratelimit.NewLimiter(0)}
 
 	tests := []struct {
 		name     string
@@ -383,7 +348,7 @@ func TestExtractIDFromURL(t *testing.T) {
 }
 
 func TestScrapeURL_ReturnsNotSupported(t *testing.T) {
-	s := &Scraper{enabled: true, apiKey: "test-key", rateLimiter: ratelimit.NewLimiter(0)}
+	s := &scraper{enabled: true, apiKey: "test-key", rateLimiter: ratelimit.NewLimiter(0)}
 
 	_, err := s.ScrapeURL(context.Background(), "https://javstash.org/scenes/abc123")
 	require.Error(t, err)
@@ -391,8 +356,7 @@ func TestScrapeURL_ReturnsNotSupported(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance_JavStash(t *testing.T) {
-	s := &Scraper{rateLimiter: ratelimit.NewLimiter(0)}
+	s := &scraper{rateLimiter: ratelimit.NewLimiter(0)}
 	var _ models.Scraper = s
-	var _ models.URLHandler = s
-	var _ models.DirectURLScraper = s
+	var _ models.Scraper = s
 }

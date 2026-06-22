@@ -1,671 +1,5 @@
 basePath: /
 definitions:
-  config.APIConfig:
-    properties:
-      security:
-        $ref: '#/definitions/config.SecurityConfig'
-    type: object
-  config.ActressDatabaseConfig:
-    properties:
-      auto_add:
-        description: Automatically add new actresses to database
-        type: boolean
-      convert_alias:
-        description: Convert actress names using alias database
-        type: boolean
-      enabled:
-        description: Enable actress image lookup from database
-        type: boolean
-    type: object
-  config.AnthropicTranslationConfig:
-    properties:
-      api_key:
-        description: Required
-        type: string
-      base_url:
-        description: e.g., https://api.anthropic.com
-        type: string
-      model:
-        description: e.g., claude-sonnet-4-20250514
-        type: string
-    type: object
-  config.BrowserConfig:
-    properties:
-      binary_path:
-        description: Chrome/Chromium path (auto-discovered if empty)
-        type: string
-      block_css:
-        description: 'Block CSS for speed (default: false)'
-        type: boolean
-      block_images:
-        description: 'Block images for speed (default: true)'
-        type: boolean
-      debug_visible:
-        description: 'Show browser window for debugging (default: false)'
-        type: boolean
-      enabled:
-        description: 'Master kill-switch (default: false)'
-        type: boolean
-      headless:
-        description: 'Run headless (default: true)'
-        type: boolean
-      max_retries:
-        description: 'Retry attempts (default: 3)'
-        type: integer
-      slow_mo:
-        description: 'Slow motion delay ms (default: 0)'
-        type: integer
-      stealth_mode:
-        description: 'Anti-detection measures (default: true)'
-        type: boolean
-      timeout:
-        description: 'Operation timeout in seconds (default: 30)'
-        type: integer
-      user_agent:
-        description: Override UA (empty = use scraper's)
-        type: string
-      window_height:
-        description: 'Viewport height (default: 1080)'
-        type: integer
-      window_width:
-        description: 'Viewport width (default: 1920)'
-        type: integer
-    type: object
-  config.CompletenessConfig:
-    properties:
-      enabled:
-        type: boolean
-      tiers:
-        $ref: '#/definitions/config.CompletenessTierConfig'
-    type: object
-  config.CompletenessTierConfig:
-    properties:
-      essential:
-        $ref: '#/definitions/config.CompletenessTierDefinition'
-      important:
-        $ref: '#/definitions/config.CompletenessTierDefinition'
-      nice_to_have:
-        $ref: '#/definitions/config.CompletenessTierDefinition'
-    type: object
-  config.CompletenessTierDefinition:
-    properties:
-      fields:
-        description: Movie field names assigned to this tier
-        items:
-          type: string
-        type: array
-      weight:
-        description: Percentage weight (0-100, must sum to 100 across tiers)
-        type: integer
-    type: object
-  config.DatabaseConfig:
-    properties:
-      dsn:
-        description: Data Source Name
-        type: string
-      log_level:
-        description: 'Database query logging: silent, error, warn, info (default:
-          silent)'
-        type: string
-      type:
-        description: sqlite (currently only supported backend)
-        type: string
-    type: object
-  config.DeepLTranslationConfig:
-    properties:
-      api_key:
-        description: DeepL API key
-        type: string
-      base_url:
-        description: Optional override (defaults to mode-specific endpoint)
-        type: string
-      mode:
-        description: free or pro
-        type: string
-    type: object
-  config.FlareSolverrConfig:
-    properties:
-      enabled:
-        description: Enable FlareSolverr for bypassing Cloudflare
-        type: boolean
-      max_retries:
-        description: 'Max retry attempts for FlareSolverr calls (default: 3)'
-        type: integer
-      session_ttl:
-        description: 'Session TTL in seconds (default: 300)'
-        type: integer
-      timeout:
-        description: 'Request timeout in seconds (default: 30)'
-        type: integer
-      url:
-        description: 'FlareSolverr endpoint (default: http://localhost:8191/v1)'
-        type: string
-    type: object
-  config.GenreReplacementConfig:
-    properties:
-      auto_add:
-        description: Automatically add new genres to database (identity mapping)
-        type: boolean
-      enabled:
-        description: Enable genre replacement from database
-        type: boolean
-    type: object
-  config.GoogleTranslationConfig:
-    properties:
-      api_key:
-        description: Required for paid mode
-        type: string
-      base_url:
-        description: Optional override
-        type: string
-      mode:
-        description: free or paid
-        type: string
-    type: object
-  config.LoggingConfig:
-    properties:
-      compress:
-        description: Compress rotated files
-        type: boolean
-      format:
-        description: json, text
-        type: string
-      level:
-        description: debug, info, warn, error
-        type: string
-      max_age_days:
-        description: Max age in days to keep log files (0 = no limit)
-        type: integer
-      max_backups:
-        description: Max number of old log files to keep (0 = unlimited)
-        type: integer
-      max_size_mb:
-        description: Max size in MB before rotation (0 = no rotation)
-        type: integer
-      output:
-        description: stdout, file path
-        type: string
-    type: object
-  config.MatchingConfig:
-    properties:
-      exclude_patterns:
-        items:
-          type: string
-        type: array
-      extensions:
-        items:
-          type: string
-        type: array
-      min_size_mb:
-        type: integer
-      regex_enabled:
-        type: boolean
-      regex_pattern:
-        type: string
-    type: object
-  config.MediaInfoConfig:
-    properties:
-      cli_enabled:
-        description: 'Enable MediaInfo CLI fallback (default: false)'
-        type: boolean
-      cli_path:
-        description: 'Path to mediainfo binary (default: "mediainfo")'
-        type: string
-      cli_timeout:
-        description: 'Timeout in seconds for CLI execution (default: 30)'
-        type: integer
-    type: object
-  config.MetadataConfig:
-    properties:
-      actress_database:
-        allOf:
-        - $ref: '#/definitions/config.ActressDatabaseConfig'
-        description: Actress image database (SQLite-backed)
-      completeness:
-        allOf:
-        - $ref: '#/definitions/config.CompletenessConfig'
-        description: Completeness scoring configuration
-      genre_replacement:
-        allOf:
-        - $ref: '#/definitions/config.GenreReplacementConfig'
-        description: Genre replacement/normalization (SQLite-backed)
-      ignore_genres:
-        items:
-          type: string
-        type: array
-      nfo:
-        $ref: '#/definitions/config.NFOConfig'
-      priority:
-        $ref: '#/definitions/config.PriorityConfig'
-      required_fields:
-        items:
-          type: string
-        type: array
-      tag_database:
-        allOf:
-        - $ref: '#/definitions/config.TagDatabaseConfig'
-        description: Per-movie tag database (SQLite-backed)
-      translation:
-        allOf:
-        - $ref: '#/definitions/config.TranslationConfig'
-        description: Metadata translation pipeline
-      word_replacement:
-        allOf:
-        - $ref: '#/definitions/config.WordReplacementConfig'
-        description: Word uncensor/text replacement (SQLite-backed)
-    type: object
-  config.NFOConfig:
-    properties:
-      actress_as_tag:
-        type: boolean
-      actress_language_ja:
-        type: boolean
-      add_generic_role:
-        description: Add generic "Actress" role to all actresses
-        type: boolean
-      alt_name_role:
-        description: Use alternate name (Japanese) in role field
-        type: boolean
-      credits:
-        items:
-          type: string
-        type: array
-      display_title:
-        type: string
-      enabled:
-        type: boolean
-      filename_template:
-        type: string
-      first_name_order:
-        type: boolean
-      include_fanart:
-        type: boolean
-      include_originalpath:
-        description: Include source filename in NFO
-        type: boolean
-      include_stream_details:
-        type: boolean
-      include_trailer:
-        type: boolean
-      per_file:
-        description: Create separate NFO for each multi-part file
-        type: boolean
-      rating_source:
-        type: string
-      tag:
-        items:
-          type: string
-        type: array
-      tagline:
-        type: string
-      unknown_actress_mode:
-        description: skip (default) or fallback
-        type: string
-      unknown_actress_text:
-        description: Text for fallback mode
-        type: string
-    type: object
-  config.OpenAICompatibleTranslationConfig:
-    properties:
-      api_key:
-        description: Optional for local endpoints
-        type: string
-      base_url:
-        description: e.g., http://localhost:11434/v1
-        type: string
-      enable_thinking:
-        description: Toggle reasoning/thinking when supported by the backend
-        type: boolean
-      model:
-        description: e.g., llama3.1
-        type: string
-    type: object
-  config.OpenAITranslationConfig:
-    properties:
-      api_key:
-        description: API key for the provider
-        type: string
-      base_url:
-        description: OpenAI-compatible base URL (e.g., https://api.openai.com/v1)
-        type: string
-      model:
-        description: Model name (e.g., gpt-4o-mini)
-        type: string
-    type: object
-  config.OutputConfig:
-    properties:
-      actress_delimiter:
-        description: 'Delimiter between actress names when joining <ACTORS>/<ACTRESSES>
-          with no in-tag DELIM= modifier (default: ", ")'
-        type: string
-      actress_folder:
-        type: string
-      actress_format:
-        type: string
-      actress_language_ja:
-        description: 'true = prefer JapaneseName over First/Last for <ACTORS>/<ACTRESS>
-          in folder/file naming (default: false), mirrors nfo.actress_language_ja;
-          tag-level <ACTORS:JA> still takes precedence'
-        type: boolean
-      allow_revert:
-        description: 'Enable revert operations (default: false — opt-in for safety)'
-        type: boolean
-      download_actress:
-        type: boolean
-      download_cover:
-        type: boolean
-      download_extrafanart:
-        type: boolean
-      download_poster:
-        type: boolean
-      download_proxy:
-        allOf:
-        - $ref: '#/definitions/config.ProxyConfig'
-        description: Separate proxy for downloads (optional)
-      download_timeout:
-        description: 'Timeout in seconds for HTTP downloads (default: 60)'
-        type: integer
-      download_trailer:
-        type: boolean
-      fanart_format:
-        type: string
-      file_format:
-        type: string
-      first_name_order:
-        description: 'true = FirstName LastName, false = LastName FirstName (default:
-          false)'
-        type: boolean
-      folder_format:
-        type: string
-      group_actress:
-        description: 'Replace multiple actresses with group name in templates (default:
-          false)'
-        type: boolean
-      group_actress_name:
-        description: 'Folder name when group_actress is enabled and multiple actresses
-          (default: "@Group")'
-        type: string
-      group_unknown_actress_name:
-        description: 'Folder name when group_actress is enabled and the actress list
-          is empty or unknown (default: "@Unknown")'
-        type: string
-      max_path_length:
-        type: integer
-      max_poster_height:
-        description: Max height in px for cropped posters; 0 = no cap (preserve source
-          resolution). When the cropped poster exceeds this height it is downscaled
-          preserving aspect ratio.
-        type: integer
-      max_title_length:
-        type: integer
-      move_files:
-        description: 'Move files instead of copying (default: false / copy)'
-        type: boolean
-      move_subtitles:
-        type: boolean
-      operation_mode:
-        type: string
-      poster_format:
-        type: string
-      rename_file:
-        description: 'Rename files using file_format template (default: true)'
-        type: boolean
-      screenshot_folder:
-        type: string
-      screenshot_format:
-        type: string
-      screenshot_padding:
-        type: integer
-      subfolder_format:
-        items:
-          type: string
-        type: array
-      subtitle_extensions:
-        items:
-          type: string
-        type: array
-      trailer_format:
-        type: string
-    type: object
-  config.PerformanceConfig:
-    properties:
-      buffer_size:
-        description: 'Channel buffer size (default: 100)'
-        type: integer
-      max_workers:
-        description: 'Maximum concurrent workers (default: 5)'
-        type: integer
-      update_interval:
-        description: 'UI update interval in milliseconds (default: 100)'
-        type: integer
-      worker_timeout:
-        description: 'Timeout per task in seconds (default: 300)'
-        type: integer
-    type: object
-  config.PriorityConfig:
-    properties:
-      priority:
-        description: |-
-          Priority is the global scraper execution order.
-          If empty, derived from registered scraper priorities at initialization.
-          If set, used directly for all metadata fields that lack a Fields override.
-        items:
-          type: string
-        type: array
-    type: object
-  config.ProxyConfig:
-    properties:
-      default_profile:
-        description: Default profile name (for global scrapers.proxy)
-        type: string
-      enabled:
-        description: Enable proxy for HTTP requests
-        type: boolean
-      profile:
-        description: Named profile to use (for scraper-specific overrides)
-        type: string
-      profiles:
-        additionalProperties:
-          $ref: '#/definitions/config.ProxyProfile'
-        description: Named proxy profiles (global scrapers.proxy)
-        type: object
-    type: object
-  config.ProxyProfile:
-    properties:
-      password:
-        type: string
-      url:
-        type: string
-      username:
-        type: string
-    type: object
-  config.RateLimitConfig:
-    properties:
-      requests_per_minute:
-        type: integer
-    type: object
-  config.ScrapersConfig:
-    properties:
-      browser:
-        allOf:
-        - $ref: '#/definitions/config.BrowserConfig'
-        description: 'NEW: Global Browser configuration block'
-      flaresolverr:
-        allOf:
-        - $ref: '#/definitions/config.FlareSolverrConfig'
-        description: Global FlareSolverr config for Cloudflare bypass
-      priority:
-        description: Global scraper priority order
-        items:
-          type: string
-        type: array
-      proxy:
-        allOf:
-        - $ref: '#/definitions/config.ProxyConfig'
-        description: Default HTTP/SOCKS5 proxy for scraper requests
-      referer:
-        description: 'Referer header for CDN compatibility (default: https://www.dmm.co.jp/)'
-        type: string
-      request_timeout_seconds:
-        description: 'Overall request timeout in seconds (default: 60)'
-        type: integer
-      scrape_actress:
-        description: 'NEW: Global scrape_actress default (opt-out behavior, default:
-          true)'
-        type: boolean
-      timeout_seconds:
-        description: 'HTTP client timeout in seconds (default: 30)'
-        type: integer
-      user_agent:
-        type: string
-    type: object
-  config.SecurityConfig:
-    properties:
-      allow_unc:
-        type: boolean
-      allowed_directories:
-        items:
-          type: string
-        type: array
-      allowed_origins:
-        items:
-          type: string
-        type: array
-      allowed_unc_servers:
-        items:
-          type: string
-        type: array
-      denied_directories:
-        items:
-          type: string
-        type: array
-      force_secure_cookies:
-        type: boolean
-      max_files_per_scan:
-        type: integer
-      rate_limit:
-        $ref: '#/definitions/config.RateLimitConfig'
-      scan_timeout_seconds:
-        type: integer
-      trusted_proxies:
-        items:
-          type: string
-        type: array
-    type: object
-  config.ServerConfig:
-    properties:
-      host:
-        type: string
-      port:
-        type: integer
-    type: object
-  config.SystemConfig:
-    properties:
-      temp_dir:
-        description: |-
-          TempDir is the base directory for temporary files (default: "data/temp").
-          Can be overridden with JAVINIZER_TEMP_DIR environment variable.
-          Subdirectory "posters/{jobID}" is created for batch job temp posters.
-        type: string
-      umask:
-        description: |-
-          Umask for file creation (e.g., "002" for rwxrwxr-x)
-          Can be overridden with UMASK environment variable
-        type: string
-      version_check_enabled:
-        description: VersionCheckEnabled enables checking for new releases
-        type: boolean
-      version_check_interval_hours:
-        description: VersionCheckIntervalHours is the interval between version checks
-          in hours
-        type: integer
-    type: object
-  config.TagDatabaseConfig:
-    properties:
-      enabled:
-        description: Enable per-movie tag lookup from database
-        type: boolean
-    type: object
-  config.TranslationConfig:
-    properties:
-      anthropic:
-        allOf:
-        - $ref: '#/definitions/config.AnthropicTranslationConfig'
-        description: Anthropic (Claude) provider settings
-      apply_to_primary:
-        description: Replace primary movie metadata with translated text
-        type: boolean
-      deepl:
-        allOf:
-        - $ref: '#/definitions/config.DeepLTranslationConfig'
-        description: DeepL provider settings
-      enabled:
-        description: Enable metadata translation after aggregation
-        type: boolean
-      fields:
-        allOf:
-        - $ref: '#/definitions/config.TranslationFieldsConfig'
-        description: Per-field translation controls
-      google:
-        allOf:
-        - $ref: '#/definitions/config.GoogleTranslationConfig'
-        description: Google provider settings
-      openai:
-        allOf:
-        - $ref: '#/definitions/config.OpenAITranslationConfig'
-        description: OpenAI/OpenAI-compatible provider settings
-      openai_compatible:
-        allOf:
-        - $ref: '#/definitions/config.OpenAICompatibleTranslationConfig'
-        description: OpenAI-compatible (Ollama, vLLM, etc.) provider settings
-      overwrite_existing_target:
-        description: Overwrite target-language translation if already present
-        type: boolean
-      provider:
-        description: openai, openai-compatible, anthropic, deepl, google
-        type: string
-      source_language:
-        description: Source language code (e.g., en, ja, auto)
-        type: string
-      target_language:
-        description: Target language code (e.g., en, ja, zh)
-        type: string
-      timeout_seconds:
-        description: Request timeout in seconds
-        type: integer
-    type: object
-  config.TranslationFieldsConfig:
-    properties:
-      actresses:
-        type: boolean
-      description:
-        type: boolean
-      director:
-        type: boolean
-      genres:
-        type: boolean
-      label:
-        type: boolean
-      maker:
-        type: boolean
-      original_title:
-        type: boolean
-      series:
-        type: boolean
-      title:
-        type: boolean
-    type: object
-  config.WebUIConfig:
-    properties:
-      default_review_view:
-        type: string
-    type: object
-  config.WordReplacementConfig:
-    properties:
-      enabled:
-        description: Enable word replacement from database
-        type: boolean
-    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeConflict:
     properties:
       default_resolution:
@@ -677,6 +11,105 @@ definitions:
       source_value: {}
       target_value: {}
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergePreviewRequest:
+    properties:
+      source_id:
+        example: 34
+        type: integer
+      target_id:
+        example: 12
+        type: integer
+    required:
+    - source_id
+    - target_id
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergePreviewResponse:
+    properties:
+      conflicts:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeConflict'
+        type: array
+      default_resolutions:
+        additionalProperties:
+          type: string
+        type: object
+      proposed_merged:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+      source:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+      target:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeRequest:
+    properties:
+      resolutions:
+        additionalProperties:
+          type: string
+        example:
+          dmm_id: target
+          japanese_name: source
+        type: object
+      source_id:
+        example: 34
+        type: integer
+      target_id:
+        example: 12
+        type: integer
+    required:
+    - source_id
+    - target_id
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeResponse:
+    properties:
+      aliases_added:
+        example: 5
+        type: integer
+      conflicts_resolved:
+        example: 3
+        type: integer
+      merged_actress:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+      merged_from_id:
+        example: 34
+        type: integer
+      updated_movies:
+        example: 27
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.AuthCredentialsRequest:
+    properties:
+      password:
+        example: your-password
+        type: string
+      remember_me:
+        example: true
+        type: boolean
+      username:
+        example: admin
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.AuthStatusResponse:
+    properties:
+      authenticated:
+        example: false
+        type: boolean
+      initialized:
+        example: true
+        type: boolean
+      username:
+        example: admin
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.AvailableScrapersResponse:
+    properties:
+      scrapers:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScraperInfo'
+        type: array
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeFailed:
     properties:
       error:
@@ -686,15 +119,37 @@ definitions:
         example: uuid-1
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeRequest:
+    properties:
+      result_ids:
+        example:
+        - uuid-1
+        - uuid-2
+        items:
+          type: string
+        type: array
+    required:
+    - result_ids
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeResponse:
+    properties:
+      excluded:
+        items:
+          type: string
+        type: array
+      failed:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeFailed'
+        type: array
+      job:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse'
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchFileResult:
     properties:
       actress_sources:
         additionalProperties:
           type: string
-        description: Actress-level source by scraper/NFO
         type: object
-      data:
-        description: Movie data
       ended_at:
         type: string
       error:
@@ -702,12 +157,13 @@ definitions:
       field_sources:
         additionalProperties:
           type: string
-        description: Field-level source by scraper/NFO
         type: object
       file_path:
         type: string
       is_multi_part:
         type: boolean
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
       movie_id:
         type: string
       part_number:
@@ -715,11 +171,12 @@ definitions:
       part_suffix:
         type: string
       result_id:
+        description: Stable UUID — survives movie_id changes
         type: string
       started_at:
         type: string
       status:
-        type: string
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.JobStatus'
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobListResponse:
     properties:
@@ -727,6 +184,9 @@ definitions:
         items:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse'
         type: array
+      total:
+        description: Total number of jobs (before pagination), for pagination metadata
+        type: integer
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse:
     properties:
@@ -742,12 +202,16 @@ definitions:
         type: object
       failed:
         type: integer
+      files:
+        items:
+          type: string
+        type: array
       id:
         type: string
       operation_count:
         type: integer
       operation_mode_override:
-        type: string
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_operationmode.OperationMode'
       persist_error:
         type: string
       progress:
@@ -761,11 +225,130 @@ definitions:
       started_at:
         type: string
       status:
-        type: string
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.JobStatus'
       total_files:
         type: integer
       update:
         type: boolean
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BatchRescrapeRequest:
+    properties:
+      array_strategy:
+        description: 'For Update mode: merge, replace'
+        example: merge
+        type: string
+      force:
+        example: false
+        type: boolean
+      manual_search_input:
+        example: IPX-535
+        type: string
+      preset:
+        description: 'Merge strategy preset: conservative, gap-fill, aggressive (overrides
+          scalar/array strategies)'
+        example: conservative
+        type: string
+      scalar_strategy:
+        description: 'For Update mode: prefer-nfo, prefer-scraper, preserve-existing,
+          fill-missing-only'
+        example: prefer-nfo
+        type: string
+      selected_scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BatchRescrapeResponse:
+    properties:
+      actress_sources:
+        additionalProperties:
+          type: string
+        type: object
+      field_sources:
+        additionalProperties:
+          type: string
+        type: object
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BatchScrapeRequest:
+    properties:
+      array_strategy:
+        description: 'For Update mode: merge, replace'
+        example: merge
+        type: string
+      destination:
+        description: Persisted on job for UI retrieval; required for organize mode,
+          optional for in-place modes
+        example: /path/to/output
+        type: string
+      files:
+        items:
+          type: string
+        type: array
+      force:
+        example: false
+        type: boolean
+      operation_mode:
+        description: 'Override config.output.operation_mode: organize, in-place, in-place-norenamefolder,
+          metadata-artwork, preview'
+        example: organize
+        type: string
+      preset:
+        description: 'Merge strategy preset: conservative, gap-fill, aggressive (overrides
+          scalar/array strategies)'
+        example: conservative
+        type: string
+      scalar_strategy:
+        description: 'For Update mode: prefer-nfo, prefer-scraper, preserve-existing,
+          fill-missing-only'
+        example: prefer-nfo
+        type: string
+      selected_scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+      strict:
+        example: false
+        type: boolean
+      update:
+        description: 'Update mode: only create/update metadata files without moving
+          video files'
+        example: false
+        type: boolean
+    required:
+    - files
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BatchScrapeResponse:
+    properties:
+      job_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BrowseRequest:
+    properties:
+      path:
+        example: /path/to/directory
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.BrowseResponse:
+    properties:
+      current_path:
+        example: /path/to/directory
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo'
+        type: array
+      parent_path:
+        example: /path/to
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.DataSource:
     properties:
@@ -781,6 +364,16 @@ definitions:
         description: '"scraper" or "nfo"'
         example: nfo
         type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse:
+    properties:
+      error:
+        example: Movie not found
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference:
     properties:
@@ -827,6 +420,28 @@ definitions:
         example: 1024000000
         type: integer
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.HealthResponse:
+    properties:
+      build_date:
+        example: "2026-02-23T00:00:00Z"
+        type: string
+      commit:
+        example: abc123def456
+        type: string
+      scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+      status:
+        example: ok
+        type: string
+      version:
+        example: v1.2.3
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.JobListItem:
     properties:
       completed:
@@ -863,11 +478,19 @@ definitions:
         example: "2026-04-12T10:00:00Z"
         type: string
       status:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.JobStatus'
         example: organized
-        type: string
       total_files:
         example: 10
         type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.JobListResponse:
+    properties:
+      jobs:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.JobListItem'
+        type: array
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics:
     properties:
@@ -890,6 +513,194 @@ definitions:
         example: 15
         type: integer
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.MovieResponse:
+    properties:
+      merge_stats:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
+        description: Merge statistics when NFO merging occurred
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+      provenance:
+        additionalProperties:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
+        description: Field-level data source tracking
+        type: object
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.MovieView:
+    properties:
+      actresses:
+        description: Relationships
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        type: array
+      code:
+        description: Canonical JAV code (e.g., "IPX-535"). Renamed from content_id.
+        example: IPX-535
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        description: Audit timestamps
+        type: string
+      cropped_poster_url:
+        type: string
+      description:
+        description: Metadata
+        type: string
+      director:
+        type: string
+      display_title:
+        description: Titles
+        example: IPX-535 Beautiful Woman
+        type: string
+      genres:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre'
+        type: array
+      id:
+        description: Secondary identifier — often equals Code but can differ.
+        example: IPX-535
+        type: string
+      label:
+        description: Sub-label
+        type: string
+      maker:
+        description: Studio/maker
+        type: string
+      original_cropped_poster_url:
+        type: string
+      original_filename:
+        type: string
+      original_poster_url:
+        type: string
+      original_should_crop_poster:
+        type: boolean
+      original_title:
+        example: 美人
+        type: string
+      poster_url:
+        description: Poster / cover (flattened from PosterState — no custom marshaler
+          needed)
+        type: string
+      rating_score:
+        type: number
+      rating_votes:
+        type: integer
+      rating_warning:
+        type: string
+      release_date:
+        type: string
+      release_year:
+        type: integer
+      runtime:
+        description: in minutes
+        type: integer
+      screenshot_urls:
+        items:
+          type: string
+        type: array
+      series:
+        description: Series name
+        type: string
+      should_crop_poster:
+        type: boolean
+      source_name:
+        description: Source provenance
+        type: string
+      source_url:
+        type: string
+      title:
+        example: Beautiful Woman
+        type: string
+      trailer_url:
+        description: Media
+        type: string
+      translations:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.MovieTranslation'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.MoviesResponse:
+    properties:
+      count:
+        example: 20
+        type: integer
+      movies:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.NFOComparisonRequest:
+    properties:
+      array_strategy:
+        description: 'Array field merge strategy: merge or replace'
+        example: merge
+        type: string
+      nfo_path:
+        description: 'Optional: explicit NFO path'
+        example: /path/to/movie.nfo
+        type: string
+      preset:
+        description: 'Merge strategy preset: conservative, gap-fill, or aggressive
+          (overrides scalar/array strategies)'
+        example: conservative
+        type: string
+      scalar_strategy:
+        description: 'Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing,
+          or fill-missing-only'
+        example: prefer-nfo
+        type: string
+      selected_scrapers:
+        description: 'Optional: custom scrapers for comparison'
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.NFOComparisonResponse:
+    properties:
+      differences:
+        description: List of fields that differ
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference'
+        type: array
+      merge_stats:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
+        description: Merge statistics
+      merged_data:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+        description: Result of merging
+      movie_id:
+        example: IPX-535
+        type: string
+      nfo_data:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+        description: Data from NFO file
+      nfo_exists:
+        example: true
+        type: boolean
+      nfo_path:
+        description: Returns filename only for security
+        example: movie.nfo
+        type: string
+      provenance:
+        additionalProperties:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
+        description: Field-level provenance
+        type: object
+      scraped_data:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+        description: Fresh scraped data
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.OperationItem:
     properties:
       created_at:
@@ -908,17 +719,144 @@ definitions:
         example: /dest/ABC-123 [Studio]/ABC-123.mp4
         type: string
       operation_type:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.OperationTypeEnum'
         example: move
-        type: string
       original_path:
         example: /source/ABC-123.mp4
         type: string
       revert_status:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.RevertStatusEnum'
         example: pending
-        type: string
       reverted_at:
         example: "2026-04-12T11:00:00Z"
         type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.OperationListResponse:
+    properties:
+      job_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      job_status:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.JobStatus'
+        example: organized
+      operations:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OperationItem'
+        type: array
+      total:
+        example: 10
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.OrganizePreviewRequest:
+    properties:
+      copy_only:
+        example: false
+        type: boolean
+      destination:
+        description: Required for organize and preview modes; optional for in-place
+          modes
+        example: /path/to/output
+        type: string
+      link_mode:
+        description: Validated at the API layer (HTTP 400 for invalid)
+        example: hard
+        type: string
+      movie:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+        description: Optional movie override for previewing unsaved edits
+      operation_mode:
+        description: Validated at the API layer (HTTP 400 for invalid)
+        example: organize
+        type: string
+      skip_download:
+        type: boolean
+      skip_nfo:
+        type: boolean
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.OrganizePreviewResponse:
+    properties:
+      extrafanart_path:
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/extrafanart
+        type: string
+      fanart_path:
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-fanart.jpg
+        type: string
+      file_name:
+        example: IPX-535
+        type: string
+      folder_name:
+        example: IPX-535 [IdeaPocket] - Beautiful Woman (2021)
+        type: string
+      full_path:
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.mp4
+        type: string
+      nfo_path:
+        description: 'Deprecated: Use NFOPaths instead. Remove in v2.0.'
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.nfo
+        type: string
+      nfo_paths:
+        description: 'For per_file=true multi-part: all NFO file paths'
+        items:
+          type: string
+        type: array
+      operation_mode:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_operationmode.OperationMode'
+        description: Which mode was used for preview
+        example: organize
+      poster_path:
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-poster.jpg
+        type: string
+      screenshots:
+        example:
+        - fanart1.jpg
+        - fanart2.jpg
+        - fanart3.jpg
+        items:
+          type: string
+        type: array
+      source_path:
+        description: Original file path (for in-place modes)
+        example: /source/folder/ABC-123.mp4
+        type: string
+      subfolder_path:
+        description: Subfolder hierarchy relative to destination (e.g. "Studio/Year")
+        example: IdeaPocket/2025
+        type: string
+      trailer_path:
+        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-trailer.mp4
+        type: string
+      video_files:
+        description: 'For multi-part files: all video file paths'
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.OrganizeRequest:
+    properties:
+      copy_only:
+        example: false
+        type: boolean
+      destination:
+        description: Required for organize mode; optional for in-place modes
+        example: /path/to/output
+        type: string
+      link_mode:
+        description: Validated at the API layer (HTTP 400 for invalid)
+        example: hard
+        type: string
+      operation_mode:
+        description: Validated at the API layer (HTTP 400 for invalid)
+        example: organize
+        type: string
+      skip_download:
+        type: boolean
+      skip_nfo:
+        type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.OverlapInfo:
     properties:
@@ -932,6 +870,30 @@ definitions:
         example: 3
         type: integer
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteRequest:
+    properties:
+      limit:
+        example: 10
+        type: integer
+      path:
+        example: /path/to/vid
+        type: string
+    required:
+    - path
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteResponse:
+    properties:
+      base_path:
+        example: /path/to
+        type: string
+      input_path:
+        example: /path/to/vid
+        type: string
+      suggestions:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteSuggestion'
+        type: array
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteSuggestion:
     properties:
       is_dir:
@@ -943,6 +905,107 @@ definitions:
       path:
         example: /path/to/videos
         type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.PosterCropRequest:
+    properties:
+      height:
+        minimum: 1
+        type: integer
+      max_poster_height:
+        description: |-
+          MaxPosterHeight optional override for the max poster height (px). 0 = no cap.
+          When omitted, the configured output.max_poster_height is used.
+        type: integer
+      width:
+        minimum: 1
+        type: integer
+      x:
+        minimum: 0
+        type: integer
+      "y":
+        minimum: 0
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.PosterCropResponse:
+    properties:
+      cropped_poster_url:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.PosterFromURLRequest:
+    properties:
+      url:
+        type: string
+    required:
+    - url
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.PosterFromURLResponse:
+    properties:
+      cropped_poster_url:
+        type: string
+      poster_url:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ProxyTestRequest:
+    properties:
+      flaresolverr:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.FlareSolverrConfig'
+        description: FlareSolverr config (separate from ProxyConfig)
+      mode:
+        description: direct or flaresolverr
+        enum:
+        - direct
+        - flaresolverr
+        type: string
+      proxy:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ProxyConfig'
+      target_url:
+        description: Optional override target URL
+        type: string
+    required:
+    - mode
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ProxyTestResponse:
+    properties:
+      duration_ms:
+        type: integer
+      flaresolverr_url:
+        description: FlareSolverr endpoint used
+        type: string
+      message:
+        type: string
+      mode:
+        type: string
+      proxy_url:
+        description: Redacted proxy URL
+        type: string
+      status_code:
+        type: integer
+      success:
+        type: boolean
+      target_url:
+        type: string
+      token_expires_at:
+        description: Unix timestamp when token expires
+        type: integer
+      verification_token:
+        description: Token for save authorization
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.RescrapeRequest:
+    properties:
+      force:
+        example: false
+        type: boolean
+      selected_scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+    required:
+    - selected_scrapers
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.RevertCheckResponse:
     properties:
@@ -972,11 +1035,101 @@ definitions:
         example: /source/ABC-123.mp4
         type: string
       outcome:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.RevertOutcomeEnum'
         example: skipped
-        type: string
       reason:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.RevertReasonEnum'
         example: anchor_missing
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.RevertResultResponse:
+    properties:
+      errors:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.RevertFileError'
+        type: array
+      failed:
+        example: 1
+        type: integer
+      job_id:
+        example: 550e8400-e29b-41d4-a716-446655440000
         type: string
+      skipped:
+        example: 1
+        type: integer
+      status:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.JobStatus'
+        example: reverted
+      succeeded:
+        example: 9
+        type: integer
+      total:
+        example: 10
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ScanRequest:
+    properties:
+      filter:
+        description: Filter folder/file names (case-insensitive substring match)
+        example: STSK
+        type: string
+      path:
+        example: /path/to/videos
+        type: string
+      recursive:
+        example: true
+        type: boolean
+    required:
+    - path
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ScanResponse:
+    properties:
+      count:
+        example: 10
+        type: integer
+      files:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo'
+        type: array
+      skipped:
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ScrapeRequest:
+    properties:
+      force:
+        example: false
+        type: boolean
+      id:
+        example: IPX-535
+        type: string
+      selected_scrapers:
+        example:
+        - r18dev
+        - dmm
+        items:
+          type: string
+        type: array
+    required:
+    - id
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ScrapeResponse:
+    properties:
+      cached:
+        example: false
+        type: boolean
+      errors:
+        items:
+          type: string
+        type: array
+      movie:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+      sources_used:
+        example: 2
+        type: integer
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ScraperInfo:
     properties:
@@ -998,7 +1151,7 @@ definitions:
     properties:
       choices:
         items:
-          $ref: '#/definitions/models.ScraperChoice'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ScraperChoice'
         type: array
       default: {}
       description:
@@ -1023,515 +1176,36 @@ definitions:
         example: seconds
         type: string
     type: object
-  internal_api_actress.Actress:
+  github_com_javinizer_javinizer-go_internal_api_contracts.TranslationModelsRequest:
     properties:
-      aliases:
-        description: Pipe-separated
+      api_key:
+        description: Provider API key
         type: string
-      created_at:
+      base_url:
+        description: API base URL (e.g., https://api.openai.com/v1)
         type: string
-      dmm_id:
-        description: Real DMM actress ID when available (unique only for values >
-          0)
-        type: integer
-      first_name:
-        type: string
-      id:
-        type: integer
-      japanese_name:
-        type: string
-      last_name:
-        type: string
-      thumb_url:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  internal_api_actress.ActressMergePreviewRequest:
-    properties:
-      source_id:
-        example: 34
-        type: integer
-      target_id:
-        example: 12
-        type: integer
-    required:
-    - source_id
-    - target_id
-    type: object
-  internal_api_actress.ActressMergePreviewResponse:
-    properties:
-      conflicts:
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeConflict'
-        type: array
-      default_resolutions:
-        additionalProperties:
-          type: string
-        type: object
-      proposed_merged:
-        $ref: '#/definitions/models.Actress'
-      source:
-        $ref: '#/definitions/models.Actress'
-      target:
-        $ref: '#/definitions/models.Actress'
-    type: object
-  internal_api_actress.ActressMergeRequest:
-    properties:
-      resolutions:
-        additionalProperties:
-          type: string
-        example:
-          dmm_id: target
-          japanese_name: source
-        type: object
-      source_id:
-        example: 34
-        type: integer
-      target_id:
-        example: 12
-        type: integer
-    required:
-    - source_id
-    - target_id
-    type: object
-  internal_api_actress.ActressMergeResponse:
-    properties:
-      aliases_added:
-        example: 5
-        type: integer
-      conflicts_resolved:
-        example: 3
-        type: integer
-      merged_actress:
-        $ref: '#/definitions/models.Actress'
-      merged_from_id:
-        example: 34
-        type: integer
-      updated_movies:
-        example: 27
-        type: integer
-    type: object
-  internal_api_actress.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_actress.actressRequest:
-    properties:
-      aliases:
-        type: string
-      dmm_id:
-        type: integer
-      first_name:
-        type: string
-      japanese_name:
-        type: string
-      last_name:
-        type: string
-      thumb_url:
-        type: string
-    type: object
-  internal_api_actress.actressesResponse:
-    properties:
-      actresses:
-        items:
-          $ref: '#/definitions/models.Actress'
-        type: array
-      count:
-        type: integer
-      limit:
-        type: integer
-      offset:
-        type: integer
-      total:
-        type: integer
-    type: object
-  internal_api_auth.AuthCredentialsRequest:
-    properties:
-      password:
-        example: your-password
-        type: string
-      remember_me:
-        example: true
-        type: boolean
-      username:
-        example: admin
+      provider:
+        description: openai (OpenAI-compatible only for now)
         type: string
     required:
-    - password
-    - username
+    - base_url
+    - provider
     type: object
-  internal_api_auth.AuthStatusResponse:
+  github_com_javinizer_javinizer-go_internal_api_contracts.TranslationModelsResponse:
     properties:
-      authenticated:
-        example: false
-        type: boolean
-      initialized:
-        example: true
-        type: boolean
-      username:
-        example: admin
-        type: string
-    type: object
-  internal_api_auth.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
+      models:
         items:
           type: string
         type: array
     type: object
-  internal_api_batch.BatchExcludeRequest:
-    properties:
-      result_ids:
-        example:
-        - uuid-1
-        - uuid-2
-        items:
-          type: string
-        type: array
-    required:
-    - result_ids
-    type: object
-  internal_api_batch.BatchExcludeResponse:
-    properties:
-      excluded:
-        items:
-          type: string
-        type: array
-      failed:
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeFailed'
-        type: array
-      job:
-        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse'
-    type: object
-  internal_api_batch.BatchJobResponse:
-    properties:
-      completed:
-        type: integer
-      completed_at:
-        type: string
-      destination:
-        type: string
-      excluded:
-        additionalProperties:
-          type: boolean
-        type: object
-      failed:
-        type: integer
-      id:
-        type: string
-      operation_count:
-        type: integer
-      operation_mode_override:
-        type: string
-      persist_error:
-        type: string
-      progress:
-        type: number
-      results:
-        additionalProperties:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchFileResult'
-        type: object
-      reverted_count:
-        type: integer
-      started_at:
-        type: string
-      status:
-        type: string
-      total_files:
-        type: integer
-      update:
-        type: boolean
-    type: object
-  internal_api_batch.BatchRescrapeRequest:
-    properties:
-      array_strategy:
-        description: 'For Update mode: merge, replace'
-        example: merge
-        type: string
-      force:
-        example: false
-        type: boolean
-      manual_search_input:
-        example: IPX-535
-        type: string
-      preset:
-        description: 'Merge strategy preset: conservative, gap-fill, aggressive (overrides
-          scalar/array strategies)'
-        example: conservative
-        type: string
-      scalar_strategy:
-        description: 'For Update mode: prefer-nfo, prefer-scraper, preserve-existing,
-          fill-missing-only'
-        example: prefer-nfo
-        type: string
-      selected_scrapers:
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_batch.BatchRescrapeResponse:
-    properties:
-      actress_sources:
-        additionalProperties:
-          type: string
-        type: object
-      field_sources:
-        additionalProperties:
-          type: string
-        type: object
-      movie:
-        $ref: '#/definitions/models.Movie'
-    type: object
-  internal_api_batch.BatchScrapeRequest:
-    properties:
-      array_strategy:
-        description: 'For Update mode: merge, replace'
-        example: merge
-        type: string
-      destination:
-        example: /path/to/output
-        type: string
-      files:
-        items:
-          type: string
-        type: array
-      force:
-        example: false
-        type: boolean
-      operation_mode:
-        description: 'Override config.output.operation_mode: organize, in-place, in-place-norenamefolder,
-          metadata-artwork, preview'
-        example: organize
-        type: string
-      preset:
-        description: 'Merge strategy preset: conservative, gap-fill, aggressive (overrides
-          scalar/array strategies)'
-        example: conservative
-        type: string
-      scalar_strategy:
-        description: 'For Update mode: prefer-nfo, prefer-scraper, preserve-existing,
-          fill-missing-only'
-        example: prefer-nfo
-        type: string
-      selected_scrapers:
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-      strict:
-        example: false
-        type: boolean
-      update:
-        description: 'Update mode: only create/update metadata files without moving
-          video files'
-        example: false
-        type: boolean
-    required:
-    - files
-    type: object
-  internal_api_batch.BatchScrapeResponse:
-    properties:
-      job_id:
-        example: 550e8400-e29b-41d4-a716-446655440000
-        type: string
-    type: object
-  internal_api_batch.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_batch.MovieResponse:
-    properties:
-      merge_stats:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
-        description: Merge statistics when NFO merging occurred
-      movie:
-        $ref: '#/definitions/models.Movie'
-      provenance:
-        additionalProperties:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
-        description: Field-level data source tracking
-        type: object
-    type: object
-  internal_api_batch.OrganizePreviewRequest:
-    properties:
-      copy_only:
-        example: false
-        type: boolean
-      destination:
-        example: /path/to/output
-        type: string
-      link_mode:
-        enum:
-        - hard
-        - soft
-        example: hard
-        type: string
-      movie:
-        allOf:
-        - $ref: '#/definitions/models.Movie'
-        description: Optional movie override for previewing unsaved edits
-      operation_mode:
-        example: organize
-        type: string
-      skip_download:
-        type: boolean
-      skip_nfo:
-        type: boolean
-    required:
-    - destination
-    type: object
-  internal_api_batch.OrganizePreviewResponse:
-    properties:
-      extrafanart_path:
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/extrafanart
-        type: string
-      fanart_path:
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-fanart.jpg
-        type: string
-      file_name:
-        example: IPX-535
-        type: string
-      folder_name:
-        example: IPX-535 [IdeaPocket] - Beautiful Woman (2021)
-        type: string
-      full_path:
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.mp4
-        type: string
-      nfo_path:
-        description: Single NFO (backward compatibility)
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535.nfo
-        type: string
-      nfo_paths:
-        description: 'For per_file=true multi-part: all NFO file paths'
-        items:
-          type: string
-        type: array
-      operation_mode:
-        description: Which mode was used for preview
-        example: organize
-        type: string
-      poster_path:
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-poster.jpg
-        type: string
-      screenshots:
-        example:
-        - fanart1.jpg
-        - fanart2.jpg
-        - fanart3.jpg
-        items:
-          type: string
-        type: array
-      source_path:
-        description: Original file path (for in-place modes)
-        example: /source/folder/ABC-123.mp4
-        type: string
-      subfolder_path:
-        description: Subfolder hierarchy relative to destination (e.g. "Studio/Year")
-        example: IdeaPocket/2025
-        type: string
-      trailer_path:
-        description: Empty if trailer download disabled or no trailer URL
-        example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-trailer.mp4
-        type: string
-      video_files:
-        description: 'For multi-part files: all video file paths'
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_batch.OrganizeRequest:
-    properties:
-      copy_only:
-        example: false
-        type: boolean
-      destination:
-        example: /path/to/output
-        type: string
-      link_mode:
-        enum:
-        - hard
-        - soft
-        example: hard
-        type: string
-      operation_mode:
-        example: organize
-        type: string
-      skip_download:
-        type: boolean
-      skip_nfo:
-        type: boolean
-    required:
-    - destination
-    type: object
-  internal_api_batch.PosterCropRequest:
-    properties:
-      height:
-        minimum: 1
-        type: integer
-      max_poster_height:
-        description: Optional override for the max poster height. 0 = no cap. When
-          omitted, the configured output.max_poster_height is used.
-        type: integer
-      width:
-        minimum: 1
-        type: integer
-      x:
-        minimum: 0
-        type: integer
-      "y":
-        minimum: 0
-        type: integer
-    type: object
-  internal_api_batch.PosterCropResponse:
-    properties:
-      cropped_poster_url:
-        type: string
-    type: object
-  internal_api_batch.PosterFromURLRequest:
-    properties:
-      url:
-        type: string
-    required:
-    - url
-    type: object
-  internal_api_batch.PosterFromURLResponse:
-    properties:
-      cropped_poster_url:
-        type: string
-      poster_url:
-        type: string
-    type: object
-  internal_api_batch.UpdateMovieRequest:
+  github_com_javinizer_javinizer-go_internal_api_contracts.UpdateMovieRequest:
     properties:
       movie:
-        $ref: '#/definitions/models.Movie'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
     required:
     - movie
     type: object
-  internal_api_batch.UpdateRequest:
+  github_com_javinizer_javinizer-go_internal_api_contracts.UpdateRequest:
     properties:
       array_strategy:
         enum:
@@ -1552,6 +1226,7 @@ definitions:
         enum:
         - prefer-scraper
         - prefer-nfo
+        - merge-arrays
         - preserve-existing
         - fill-missing-only
         type: string
@@ -1560,15 +1235,1086 @@ definitions:
       skip_nfo:
         type: boolean
     type: object
-  internal_api_events.ErrorResponse:
+  github_com_javinizer_javinizer-go_internal_config.APIConfig:
     properties:
-      error:
-        example: Movie not found
+      security:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.SecurityConfig'
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.ActressDatabaseConfig:
+    properties:
+      auto_add:
+        description: Automatically add new actresses to database
+        type: boolean
+      convert_alias:
+        description: Convert actress names using alias database
+        type: boolean
+      enabled:
+        description: Enable actress image lookup from database
+        type: boolean
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig:
+    properties:
+      api_key:
+        description: Required
         type: string
-      errors:
+      base_url:
+        description: e.g., https://api.anthropic.com
+        type: string
+      model:
+        description: e.g., claude-sonnet-4-20250514
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.DatabaseConfig:
+    properties:
+      dsn:
+        description: Data Source Name
+        type: string
+      log_level:
+        description: 'Database query logging: silent, error, warn, info (default:
+          silent)'
+        type: string
+      type:
+        description: sqlite (currently only supported backend)
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.DeepLTranslationConfig:
+    properties:
+      api_key:
+        description: DeepL API key
+        type: string
+      base_url:
+        description: Optional override (defaults to mode-specific endpoint)
+        type: string
+      mode:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.DeepLMode'
+        description: free or pro
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig:
+    properties:
+      auto_add:
+        description: Automatically add new genres to database (identity mapping)
+        type: boolean
+      enabled:
+        description: Enable genre replacement from database
+        type: boolean
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.GoogleTranslationConfig:
+    properties:
+      api_key:
+        description: Required for paid mode
+        type: string
+      base_url:
+        description: Optional override
+        type: string
+      mode:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.GoogleMode'
+        description: free or paid
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.LoggingConfig:
+    properties:
+      compress:
+        description: Compress rotated files
+        type: boolean
+      format:
+        description: json, text
+        type: string
+      level:
+        description: debug, info, warn, error
+        type: string
+      max_age_days:
+        description: Max age in days to keep log files (0 = no limit)
+        type: integer
+      max_backups:
+        description: Max number of old log files to keep (0 = unlimited)
+        type: integer
+      max_size_mb:
+        description: Max size in MB before rotation (0 = no rotation)
+        type: integer
+      output:
+        description: stdout, file path
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.MatchingConfig:
+    properties:
+      exclude_patterns:
         items:
           type: string
         type: array
+      extensions:
+        items:
+          type: string
+        type: array
+      min_size_mb:
+        type: integer
+      regex_enabled:
+        type: boolean
+      regex_pattern:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.MetadataConfig:
+    properties:
+      actress_database:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ActressDatabaseConfig'
+        description: Actress image database (SQLite-backed)
+      completeness:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.completenessConfig'
+        description: Completeness scoring configuration
+      genre_replacement:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.GenreReplacementConfig'
+        description: Genre replacement/normalization (SQLite-backed)
+      ignore_genres:
+        items:
+          type: string
+        type: array
+      nfo:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOConfig'
+      priority:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.PriorityConfig'
+      required_fields:
+        items:
+          type: string
+        type: array
+      tag_database:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.tagDatabaseConfig'
+        description: Per-movie tag database (SQLite-backed)
+      translation:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationConfig'
+        description: Metadata translation pipeline
+      word_replacement:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig'
+        description: Word uncensor/text replacement (SQLite-backed)
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.NFOConfig:
+    properties:
+      extra:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOExtraConfig'
+      feature:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOFeatureConfig'
+      format:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOFormatConfig'
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.NFOExtraConfig:
+    properties:
+      credits:
+        items:
+          type: string
+        type: array
+      tag:
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.NFOFeatureConfig:
+    properties:
+      actress_as_tag:
+        type: boolean
+      add_generic_role:
+        description: Add generic "Actress" role to all actresses
+        type: boolean
+      alt_name_role:
+        description: Use alternate name (Japanese) in role field
+        type: boolean
+      enabled:
+        type: boolean
+      include_fanart:
+        type: boolean
+      include_originalpath:
+        description: Include source filename in NFO
+        type: boolean
+      include_stream_details:
+        type: boolean
+      include_trailer:
+        type: boolean
+      per_file:
+        description: Create separate NFO for each multi-part file
+        type: boolean
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.NFOFormatConfig:
+    properties:
+      actress_language_ja:
+        type: boolean
+      display_title:
+        type: string
+      filename_template:
+        type: string
+      first_name_order:
+        type: boolean
+      rating_source:
+        type: string
+      tagline:
+        type: string
+      unknown_actress_mode:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.UnknownActressMode'
+        description: skip (default) or fallback
+      unknown_actress_text:
+        description: Text for fallback mode
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig:
+    properties:
+      api_key:
+        description: Optional for local endpoints
+        type: string
+      base_url:
+        description: e.g., http://localhost:11434/v1
+        type: string
+      enable_thinking:
+        description: Toggle reasoning/thinking when supported by the backend
+        type: boolean
+      model:
+        description: e.g., llama3.1
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.OpenAITranslationConfig:
+    properties:
+      api_key:
+        description: API key for the provider
+        type: string
+      base_url:
+        description: OpenAI-compatible base URL (e.g., https://api.openai.com/v1)
+        type: string
+      model:
+        description: Model name (e.g., gpt-4o-mini)
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.OutputConfig:
+    properties:
+      download:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OutputDownloadConfig'
+      mediaFormat:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OutputMediaFormatConfig'
+      operation:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OutputOperationConfig'
+      template:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OutputTemplateConfig'
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.OutputDownloadConfig:
+    properties:
+      download_actress:
+        type: boolean
+      download_cover:
+        type: boolean
+      download_extrafanart:
+        type: boolean
+      download_poster:
+        type: boolean
+      download_proxy:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ProxyConfig'
+        description: Separate proxy for downloads (optional)
+      download_timeout:
+        description: 'Timeout in seconds for HTTP downloads (default: 60)'
+        type: integer
+      download_trailer:
+        type: boolean
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.OutputMediaFormatConfig:
+    properties:
+      actress_folder:
+        type: string
+      actress_format:
+        type: string
+      fanart_format:
+        type: string
+      max_poster_height:
+        description: Max height in px for cropped posters; 0 = no cap (preserve source
+          resolution). When the cropped poster exceeds this height it is downscaled
+          preserving aspect ratio.
+        type: integer
+      poster_format:
+        type: string
+      screenshot_folder:
+        type: string
+      screenshot_format:
+        type: string
+      screenshot_padding:
+        type: integer
+      trailer_format:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.OutputOperationConfig:
+    properties:
+      allow_revert:
+        description: 'Enable revert operations (default: false — opt-in for safety)'
+        type: boolean
+      group_actress:
+        description: 'Replace multiple actresses with group name in templates (default:
+          false)'
+        type: boolean
+      group_actress_name:
+        description: 'Folder name when group_actress is enabled and multiple actresses
+          (default: "@Group")'
+        type: string
+      group_unknown_actress_name:
+        description: 'Folder name when group_actress is enabled and the actress list
+          is empty or unknown (default: "@Unknown")'
+        type: string
+      move_subtitles:
+        type: boolean
+      operation_mode:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_operationmode.OperationMode'
+      rename_file:
+        description: 'Rename files using file_format template (default: true)'
+        type: boolean
+      subtitle_extensions:
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.OutputTemplateConfig:
+    properties:
+      actress_delimiter:
+        description: 'Delimiter between actress names when joining <ACTORS>/<ACTRESSES>
+          with no in-tag DELIM= modifier (default: ", ")'
+        type: string
+      file_format:
+        type: string
+      first_name_order:
+        description: 'true = FirstName LastName, false = LastName FirstName (default:
+          false)'
+        type: boolean
+      folder_format:
+        type: string
+      max_path_length:
+        type: integer
+      max_title_length:
+        type: integer
+      subfolder_format:
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.PerformanceConfig:
+    properties:
+      buffer_size:
+        description: 'Channel buffer size (default: 100)'
+        type: integer
+      max_workers:
+        description: 'Maximum concurrent workers (default: 5)'
+        type: integer
+      update_interval:
+        description: 'UI update interval in milliseconds (default: 100)'
+        type: integer
+      worker_timeout:
+        description: 'Timeout per task in seconds (default: 300)'
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.PriorityConfig:
+    properties:
+      priority:
+        description: |-
+          Priority is the global scraper execution order.
+          If empty, derived from registered scraper priorities at initialization.
+          If set, used directly for all metadata fields that lack a Fields override.
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.RateLimitConfig:
+    properties:
+      requests_per_minute:
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.ScrapersConfig:
+    properties:
+      browser:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.BrowserConfig'
+        description: Global Browser configuration block
+      flaresolverr:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.FlareSolverrConfig'
+        description: Global FlareSolverr config for Cloudflare bypass
+      priority:
+        description: Global scraper priority order
+        items:
+          type: string
+        type: array
+      proxy:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ProxyConfig'
+        description: Default HTTP/SOCKS5 proxy for scraper requests
+      referer:
+        description: 'Referer header for CDN compatibility (default: https://www.dmm.co.jp/)'
+        type: string
+      request_timeout_seconds:
+        description: 'Overall request timeout in seconds (default: 60)'
+        type: integer
+      scrape_actress:
+        description: 'Global scrape_actress default (opt-out, default: true)'
+        type: boolean
+      timeout_seconds:
+        description: 'HTTP client timeout in seconds (default: 30)'
+        type: integer
+      user_agent:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.SecurityConfig:
+    properties:
+      allow_unc:
+        type: boolean
+      allowed_directories:
+        items:
+          type: string
+        type: array
+      allowed_origins:
+        items:
+          type: string
+        type: array
+      allowed_unc_servers:
+        items:
+          type: string
+        type: array
+      denied_directories:
+        items:
+          type: string
+        type: array
+      force_secure_cookies:
+        type: boolean
+      max_files_per_scan:
+        type: integer
+      rate_limit:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.RateLimitConfig'
+      scan_timeout_seconds:
+        type: integer
+      trusted_proxies:
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.ServerConfig:
+    properties:
+      host:
+        type: string
+      port:
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.SystemConfig:
+    properties:
+      temp_dir:
+        description: |-
+          TempDir is the base directory for temporary files (default: "data/temp").
+          Can be overridden with JAVINIZER_TEMP_DIR environment variable.
+          Subdirectory "posters/{jobID}" is created for batch job temp posters.
+        type: string
+      umask:
+        description: |-
+          Umask for file creation (e.g., "002" for rwxrwxr-x)
+          Can be overridden with UMASK environment variable
+        type: string
+      version_check_enabled:
+        description: VersionCheckEnabled enables checking for new releases
+        type: boolean
+      version_check_interval_hours:
+        description: VersionCheckIntervalHours is the interval between version checks
+          in hours
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.TranslationConfig:
+    properties:
+      anthropic:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig'
+        description: Anthropic (Claude) provider settings
+      apply_to_primary:
+        description: Replace primary movie metadata with translated text
+        type: boolean
+      deepl:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.DeepLTranslationConfig'
+        description: DeepL provider settings
+      enabled:
+        description: Enable metadata translation after aggregation
+        type: boolean
+      fields:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.TranslationFieldsConfig'
+        description: Per-field translation controls
+      google:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.GoogleTranslationConfig'
+        description: Google provider settings
+      openai:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OpenAITranslationConfig'
+        description: OpenAI/OpenAI-compatible provider settings
+      openai_compatible:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig'
+        description: OpenAI-compatible (Ollama, vLLM, etc.) provider settings
+      overwrite_existing_target:
+        description: Overwrite target-language translation if already present
+        type: boolean
+      provider:
+        description: openai, openai-compatible, anthropic, deepl, google
+        type: string
+      source_language:
+        description: Source language code (e.g., en, ja, auto)
+        type: string
+      target_language:
+        description: Target language code (e.g., en, ja, zh)
+        type: string
+      timeout_seconds:
+        description: Request timeout in seconds
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.TranslationFieldsConfig:
+    properties:
+      actresses:
+        type: boolean
+      description:
+        type: boolean
+      director:
+        type: boolean
+      genres:
+        type: boolean
+      label:
+        type: boolean
+      maker:
+        type: boolean
+      original_title:
+        type: boolean
+      series:
+        type: boolean
+      title:
+        type: boolean
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.WordReplacementConfig:
+    properties:
+      enabled:
+        description: Enable word replacement from database
+        type: boolean
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.completenessConfig:
+    properties:
+      enabled:
+        type: boolean
+      tiers:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.completenessTierConfig'
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.completenessTierConfig:
+    properties:
+      essential:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.completenessTierDefinition'
+      important:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.completenessTierDefinition'
+      nice_to_have:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.completenessTierDefinition'
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.completenessTierDefinition:
+    properties:
+      fields:
+        description: Movie field names assigned to this tier
+        items:
+          type: string
+        type: array
+      weight:
+        description: Percentage weight (0-100, must sum to 100 across tiers)
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.mediaInfoConfig:
+    properties:
+      cli_enabled:
+        description: 'Enable MediaInfo CLI fallback (default: false)'
+        type: boolean
+      cli_path:
+        description: 'Path to mediainfo binary (default: "mediainfo")'
+        type: string
+      cli_timeout:
+        description: 'Timeout in seconds for CLI execution (default: 30)'
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.tagDatabaseConfig:
+    properties:
+      enabled:
+        description: Enable per-movie tag lookup from database
+        type: boolean
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.webUIConfig:
+    properties:
+      default_review_view:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.Actress:
+    properties:
+      aliases:
+        description: Pipe-separated
+        type: string
+      created_at:
+        type: string
+      dmm_id:
+        description: Real DMM actress ID when available (unique only for values >
+          0)
+        type: integer
+      first_name:
+        type: string
+      id:
+        type: integer
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      thumb_url:
+        type: string
+      translations:
+        description: |-
+          Translations carries optional translation data for API response enrichment.
+          Not persisted in database — gorm:"-" prevents auto-migration/association.
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressTranslation'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.ActressTranslation:
+    properties:
+      actress_id:
+        type: integer
+      created_at:
+        type: string
+      display_name:
+        type: string
+      first_name:
+        type: string
+      id:
+        type: integer
+      japanese_name:
+        type: string
+      language:
+        type: string
+      last_name:
+        type: string
+      source_name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.BrowserConfig:
+    properties:
+      binary_path:
+        type: string
+      block_css:
+        type: boolean
+      block_images:
+        type: boolean
+      debug_visible:
+        type: boolean
+      enabled:
+        type: boolean
+      headless:
+        type: boolean
+      max_retries:
+        type: integer
+      slow_mo:
+        type: integer
+      stealth_mode:
+        type: boolean
+      timeout:
+        type: integer
+      user_agent:
+        type: string
+      window_height:
+        type: integer
+      window_width:
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.DeepLMode:
+    enum:
+    - free
+    - pro
+    type: string
+    x-enum-varnames:
+    - DeepLModeFree
+    - DeepLModePro
+  github_com_javinizer_javinizer-go_internal_models.Event:
+    properties:
+      context:
+        description: JSON-encoded details
+        type: string
+      created_at:
+        type: string
+      event_type:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.EventCategory'
+      id:
+        type: integer
+      message:
+        type: string
+      severity:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.EventSeverity'
+      source:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.EventCategory:
+    enum:
+    - scraper
+    - organize
+    - system
+    type: string
+    x-enum-varnames:
+    - EventCategoryScraper
+    - EventCategoryOrganize
+    - EventCategorySystem
+  github_com_javinizer_javinizer-go_internal_models.EventSeverity:
+    enum:
+    - debug
+    - info
+    - warn
+    - error
+    type: string
+    x-enum-varnames:
+    - SeverityDebug
+    - SeverityInfo
+    - SeverityWarn
+    - SeverityError
+  github_com_javinizer_javinizer-go_internal_models.FlareSolverrConfig:
+    properties:
+      enabled:
+        type: boolean
+      max_retries:
+        type: integer
+      session_ttl:
+        type: integer
+      timeout:
+        type: integer
+      url:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.Genre:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+      translations:
+        description: |-
+          Translations carries optional translation data for API response enrichment.
+          Not persisted in database — gorm:"-" prevents auto-migration/association.
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.GenreTranslation'
+        type: array
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.GenreReplacement:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      original:
+        type: string
+      replacement:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.GenreTranslation:
+    properties:
+      created_at:
+        type: string
+      genre_id:
+        type: integer
+      id:
+        type: integer
+      language:
+        type: string
+      name:
+        type: string
+      source_name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.GoogleMode:
+    enum:
+    - free
+    - paid
+    type: string
+    x-enum-varnames:
+    - GoogleModeFree
+    - GoogleModePaid
+  github_com_javinizer_javinizer-go_internal_models.HistoryOperation:
+    enum:
+    - scrape
+    - organize
+    - download
+    - nfo
+    type: string
+    x-enum-varnames:
+    - HistoryOpScrape
+    - HistoryOpOrganize
+    - HistoryOpDownload
+    - HistoryOpNFO
+  github_com_javinizer_javinizer-go_internal_models.HistoryStatus:
+    enum:
+    - success
+    - failed
+    - reverted
+    type: string
+    x-enum-varnames:
+    - HistoryStatusSuccess
+    - HistoryStatusFailed
+    - HistoryStatusReverted
+  github_com_javinizer_javinizer-go_internal_models.JobStatus:
+    enum:
+    - pending
+    - running
+    - completed
+    - failed
+    - cancelled
+    - organized
+    - reverted
+    type: string
+    x-enum-varnames:
+    - JobStatusPending
+    - JobStatusRunning
+    - JobStatusCompleted
+    - JobStatusFailed
+    - JobStatusCancelled
+    - JobStatusOrganized
+    - JobStatusReverted
+  github_com_javinizer_javinizer-go_internal_models.MovieTranslation:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      director:
+        type: string
+      id:
+        type: integer
+      label:
+        type: string
+      language:
+        description: 'ISO 639-1: en, ja, zh, etc.'
+        type: string
+      maker:
+        type: string
+      movie_id:
+        type: string
+      original_title:
+        description: Japanese/original language title
+        type: string
+      series:
+        type: string
+      settings_hash:
+        description: Hash of translation settings used
+        type: string
+      source_name:
+        description: Which scraper provided this translation
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.OperationTypeEnum:
+    enum:
+    - move
+    - copy
+    - hardlink
+    - symlink
+    - update
+    type: string
+    x-enum-comments:
+      OperationTypeUpdate: update-mode organize (NFO overwrite, no file move) per
+        HIST-05
+    x-enum-descriptions:
+    - ""
+    - ""
+    - ""
+    - ""
+    - update-mode organize (NFO overwrite, no file move) per HIST-05
+    x-enum-varnames:
+    - OperationTypeMove
+    - OperationTypeCopy
+    - OperationTypeHardlink
+    - OperationTypeSymlink
+    - OperationTypeUpdate
+  github_com_javinizer_javinizer-go_internal_models.ProxyConfig:
+    properties:
+      default_profile:
+        type: string
+      enabled:
+        type: boolean
+      profile:
+        type: string
+      profiles:
+        additionalProperties:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scraperconfig.ProxyProfile'
+        type: object
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.RevertOutcomeEnum:
+    enum:
+    - reverted
+    - skipped
+    - failed
+    type: string
+    x-enum-comments:
+      RevertOutcomeFailed: Failed to revert
+      RevertOutcomeReverted: Successfully reverted
+      RevertOutcomeSkipped: Skipped (e.g., anchor missing)
+    x-enum-descriptions:
+    - Successfully reverted
+    - Skipped (e.g., anchor missing)
+    - Failed to revert
+    x-enum-varnames:
+    - RevertOutcomeReverted
+    - RevertOutcomeSkipped
+    - RevertOutcomeFailed
+  github_com_javinizer_javinizer-go_internal_models.RevertReasonEnum:
+    enum:
+    - anchor_missing
+    - destination_conflict
+    - access_denied
+    - unexpected_path_state
+    - nfo_restore_failed
+    - generated_cleanup_failed
+    type: string
+    x-enum-comments:
+      RevertReasonAccessDenied: Permission error during revert
+      RevertReasonAnchorMissing: Video file missing at expected path
+      RevertReasonDestinationConflict: Original path already occupied
+      RevertReasonGeneratedCleanupFailed: Generated file cleanup failed
+      RevertReasonNFORestoreFailed: NFO write failed
+      RevertReasonUnexpectedPathState: File in unexpected state
+    x-enum-descriptions:
+    - Video file missing at expected path
+    - Original path already occupied
+    - Permission error during revert
+    - File in unexpected state
+    - NFO write failed
+    - Generated file cleanup failed
+    x-enum-varnames:
+    - RevertReasonAnchorMissing
+    - RevertReasonDestinationConflict
+    - RevertReasonAccessDenied
+    - RevertReasonUnexpectedPathState
+    - RevertReasonNFORestoreFailed
+    - RevertReasonGeneratedCleanupFailed
+  github_com_javinizer_javinizer-go_internal_models.RevertStatusEnum:
+    enum:
+    - applied
+    - reverted
+    - failed
+    type: string
+    x-enum-comments:
+      RevertStatusApplied: Renamed from "pending" — D-01
+    x-enum-descriptions:
+    - Renamed from "pending" — D-01
+    - ""
+    - ""
+    x-enum-varnames:
+    - RevertStatusApplied
+    - RevertStatusReverted
+    - RevertStatusFailed
+  github_com_javinizer_javinizer-go_internal_models.ScraperChoice:
+    properties:
+      label:
+        example: English
+        type: string
+      value:
+        example: en
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_models.UnknownActressMode:
+    enum:
+    - skip
+    - fallback
+    type: string
+    x-enum-varnames:
+    - UnknownActressModeSkip
+    - UnknownActressModeFallback
+  github_com_javinizer_javinizer-go_internal_operationmode.OperationMode:
+    enum:
+    - organize
+    - in-place
+    - in-place-norenamefolder
+    - metadata-artwork
+    - preview
+    type: string
+    x-enum-varnames:
+    - OperationModeOrganize
+    - OperationModeInPlace
+    - OperationModeInPlaceNoRenameFolder
+    - OperationModeMetadataArtwork
+    - OperationModePreview
+  github_com_javinizer_javinizer-go_internal_scraperconfig.ProxyProfile:
+    properties:
+      password:
+        type: string
+      url:
+        type: string
+      username:
+        type: string
+    type: object
+  internal_api_actress.actressRequest:
+    properties:
+      aliases:
+        type: string
+      dmm_id:
+        type: integer
+      first_name:
+        type: string
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      thumb_url:
+        type: string
+    type: object
+  internal_api_actress.actressSearchResponse:
+    properties:
+      aliases:
+        description: Pipe-separated
+        type: string
+      created_at:
+        type: string
+      dmm_id:
+        description: Real DMM actress ID when available (unique only for values >
+          0)
+        type: integer
+      first_name:
+        type: string
+      id:
+        type: integer
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      thumb_url:
+        type: string
+      translations:
+        description: |-
+          Translations carries optional translation data for API response enrichment.
+          Not persisted in database — gorm:"-" prevents auto-migration/association.
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressTranslation'
+        type: array
+      updated_at:
+        type: string
+    type: object
+  internal_api_actress.actressesResponse:
+    properties:
+      actresses:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        type: array
+      count:
+        type: integer
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
     type: object
   internal_api_events.deleteEventsResponse:
     properties:
@@ -1581,7 +2327,7 @@ definitions:
     properties:
       events:
         items:
-          $ref: '#/definitions/models.Event'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Event'
         type: array
       total:
         type: integer
@@ -1606,110 +2352,14 @@ definitions:
       total:
         type: integer
     type: object
-  internal_api_file.BrowseRequest:
-    properties:
-      path:
-        example: /path/to/directory
-        type: string
-    type: object
-  internal_api_file.BrowseResponse:
-    properties:
-      current_path:
-        example: /path/to/directory
-        type: string
-      items:
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo'
-        type: array
-      parent_path:
-        example: /path/to
-        type: string
-    type: object
-  internal_api_file.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_file.PathAutocompleteRequest:
-    properties:
-      limit:
-        example: 10
-        type: integer
-      path:
-        example: /path/to/vid
-        type: string
-    required:
-    - path
-    type: object
-  internal_api_file.PathAutocompleteResponse:
-    properties:
-      base_path:
-        example: /path/to
-        type: string
-      input_path:
-        example: /path/to/vid
-        type: string
-      suggestions:
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteSuggestion'
-        type: array
-    type: object
-  internal_api_file.ScanRequest:
-    properties:
-      filter:
-        description: Filter folder/file names (case-insensitive substring match)
-        example: STSK
-        type: string
-      path:
-        example: /path/to/videos
-        type: string
-      recursive:
-        example: true
-        type: boolean
-    required:
-    - path
-    type: object
-  internal_api_file.ScanResponse:
+  internal_api_genre.genreListResponse:
     properties:
       count:
-        example: 10
         type: integer
-      files:
+      genres:
         items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Genre'
         type: array
-      skipped:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_genre.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_genre.GenreReplacement:
-    properties:
-      created_at:
-        type: string
-      id:
-        type: integer
-      original:
-        type: string
-      replacement:
-        type: string
-      updated_at:
-        type: string
     type: object
   internal_api_genre.genreReplacementCreateRequest:
     properties:
@@ -1728,7 +2378,7 @@ definitions:
         type: integer
       replacements:
         items:
-          $ref: '#/definitions/models.GenreReplacement'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.GenreReplacement'
         type: array
       total:
         type: integer
@@ -1737,16 +2387,6 @@ definitions:
     properties:
       deleted:
         type: integer
-    type: object
-  internal_api_history.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
     type: object
   internal_api_history.HistoryListResponse:
     properties:
@@ -1778,11 +2418,11 @@ definitions:
       new_path:
         type: string
       operation:
-        type: string
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.HistoryOperation'
       original_path:
         type: string
       status:
-        type: string
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.HistoryStatus'
     type: object
   internal_api_history.HistoryStats:
     properties:
@@ -1799,263 +2439,6 @@ definitions:
         type: integer
       total:
         type: integer
-    type: object
-  internal_api_jobs.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_jobs.JobListItem:
-    properties:
-      completed:
-        example: 9
-        type: integer
-      completed_at:
-        example: "2026-04-12T10:05:00Z"
-        type: string
-      destination:
-        example: /path/to/output
-        type: string
-      failed:
-        example: 1
-        type: integer
-      id:
-        example: 550e8400-e29b-41d4-a716-446655440000
-        type: string
-      operation_count:
-        example: 10
-        type: integer
-      organized_at:
-        example: "2026-04-12T10:05:00Z"
-        type: string
-      progress:
-        example: 0.9
-        type: number
-      reverted_at:
-        example: "2026-04-12T11:00:00Z"
-        type: string
-      reverted_count:
-        example: 7
-        type: integer
-      started_at:
-        example: "2026-04-12T10:00:00Z"
-        type: string
-      status:
-        example: organized
-        type: string
-      total_files:
-        example: 10
-        type: integer
-    type: object
-  internal_api_jobs.JobListResponse:
-    properties:
-      jobs:
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.JobListItem'
-        type: array
-    type: object
-  internal_api_jobs.OperationListResponse:
-    properties:
-      job_id:
-        example: 550e8400-e29b-41d4-a716-446655440000
-        type: string
-      job_status:
-        example: organized
-        type: string
-      operations:
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OperationItem'
-        type: array
-      total:
-        example: 10
-        type: integer
-    type: object
-  internal_api_jobs.RevertResultResponse:
-    properties:
-      errors:
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.RevertFileError'
-        type: array
-      failed:
-        example: 1
-        type: integer
-      job_id:
-        example: 550e8400-e29b-41d4-a716-446655440000
-        type: string
-      skipped:
-        example: 1
-        type: integer
-      status:
-        example: reverted
-        type: string
-      succeeded:
-        example: 9
-        type: integer
-      total:
-        example: 10
-        type: integer
-    type: object
-  internal_api_movie.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_movie.MovieResponse:
-    properties:
-      merge_stats:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
-        description: Merge statistics when NFO merging occurred
-      movie:
-        $ref: '#/definitions/models.Movie'
-      provenance:
-        additionalProperties:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
-        description: Field-level data source tracking
-        type: object
-    type: object
-  internal_api_movie.MoviesResponse:
-    properties:
-      count:
-        example: 20
-        type: integer
-      movies:
-        items:
-          $ref: '#/definitions/models.Movie'
-        type: array
-    type: object
-  internal_api_movie.NFOComparisonRequest:
-    properties:
-      array_strategy:
-        description: 'Array field merge strategy: merge or replace'
-        example: merge
-        type: string
-      nfo_path:
-        description: 'Optional: explicit NFO path'
-        example: /path/to/movie.nfo
-        type: string
-      preset:
-        description: 'Merge strategy preset: conservative, gap-fill, or aggressive
-          (overrides scalar/array strategies)'
-        example: conservative
-        type: string
-      scalar_strategy:
-        description: 'Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing,
-          or fill-missing-only'
-        example: prefer-nfo
-        type: string
-      selected_scrapers:
-        description: 'Optional: custom scrapers for comparison'
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_movie.NFOComparisonResponse:
-    properties:
-      differences:
-        description: List of fields that differ
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.FieldDifference'
-        type: array
-      merge_stats:
-        allOf:
-        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MergeStatistics'
-        description: Merge statistics
-      merged_data:
-        allOf:
-        - $ref: '#/definitions/models.Movie'
-        description: Result of merging
-      movie_id:
-        example: IPX-535
-        type: string
-      nfo_data:
-        allOf:
-        - $ref: '#/definitions/models.Movie'
-        description: Data from NFO file
-      nfo_exists:
-        example: true
-        type: boolean
-      nfo_path:
-        description: Returns filename only for security
-        example: movie.nfo
-        type: string
-      provenance:
-        additionalProperties:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
-        description: Field-level provenance
-        type: object
-      scraped_data:
-        allOf:
-        - $ref: '#/definitions/models.Movie'
-        description: Fresh scraped data
-    type: object
-  internal_api_movie.RescrapeRequest:
-    properties:
-      force:
-        example: false
-        type: boolean
-      selected_scrapers:
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-    required:
-    - selected_scrapers
-    type: object
-  internal_api_movie.ScrapeRequest:
-    properties:
-      force:
-        example: false
-        type: boolean
-      id:
-        example: IPX-535
-        type: string
-      selected_scrapers:
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-    required:
-    - id
-    type: object
-  internal_api_movie.ScrapeResponse:
-    properties:
-      cached:
-        example: false
-        type: boolean
-      errors:
-        items:
-          type: string
-        type: array
-      movie:
-        $ref: '#/definitions/models.Movie'
-      sources_used:
-        example: 2
-        type: integer
-    type: object
-  internal_api_system.AvailableScrapersResponse:
-    properties:
-      scrapers:
-        items:
-          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScraperInfo'
-        type: array
     type: object
   internal_api_system.DeepLUsageRequest:
     properties:
@@ -2081,159 +2464,38 @@ definitions:
       start_time:
         type: string
     type: object
-  internal_api_system.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_system.HealthResponse:
-    properties:
-      build_date:
-        example: "2026-02-23T00:00:00Z"
-        type: string
-      commit:
-        example: abc123def456
-        type: string
-      scrapers:
-        example:
-        - r18dev
-        - dmm
-        items:
-          type: string
-        type: array
-      status:
-        example: ok
-        type: string
-      version:
-        example: v1.2.3
-        type: string
-    type: object
-  internal_api_system.ProxyTestRequest:
-    properties:
-      flaresolverr:
-        allOf:
-        - $ref: '#/definitions/config.FlareSolverrConfig'
-        description: FlareSolverr config (separate from ProxyConfig)
-      mode:
-        description: direct or flaresolverr
-        enum:
-        - direct
-        - flaresolverr
-        type: string
-      proxy:
-        $ref: '#/definitions/config.ProxyConfig'
-      target_url:
-        description: Optional override target URL
-        type: string
-    required:
-    - mode
-    type: object
-  internal_api_system.ProxyTestResponse:
-    properties:
-      duration_ms:
-        type: integer
-      flaresolverr_url:
-        description: FlareSolverr endpoint used
-        type: string
-      message:
-        type: string
-      mode:
-        type: string
-      proxy_url:
-        description: Redacted proxy URL
-        type: string
-      status_code:
-        type: integer
-      success:
-        type: boolean
-      target_url:
-        type: string
-      token_expires_at:
-        description: Unix timestamp when token expires
-        type: integer
-      verification_token:
-        description: Token for save authorization
-        type: string
-    type: object
-  internal_api_system.TranslationModelsRequest:
-    properties:
-      api_key:
-        description: Provider API key
-        type: string
-      base_url:
-        description: API base URL (e.g., https://api.openai.com/v1)
-        type: string
-      provider:
-        description: openai (OpenAI-compatible only for now)
-        type: string
-    required:
-    - base_url
-    - provider
-    type: object
-  internal_api_system.TranslationModelsResponse:
-    properties:
-      models:
-        items:
-          type: string
-        type: array
-    type: object
   internal_api_system.UpdateConfigRequest:
     properties:
       api:
-        $ref: '#/definitions/config.APIConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.APIConfig'
       config_version:
         type: integer
       database:
-        $ref: '#/definitions/config.DatabaseConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.DatabaseConfig'
       file_matching:
-        $ref: '#/definitions/config.MatchingConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.MatchingConfig'
       logging:
-        $ref: '#/definitions/config.LoggingConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.LoggingConfig'
       mediainfo:
-        $ref: '#/definitions/config.MediaInfoConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.mediaInfoConfig'
       metadata:
-        $ref: '#/definitions/config.MetadataConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.MetadataConfig'
       output:
-        $ref: '#/definitions/config.OutputConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OutputConfig'
       performance:
-        $ref: '#/definitions/config.PerformanceConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.PerformanceConfig'
       proxy_verification_tokens:
         additionalProperties:
           type: string
         type: object
       scrapers:
-        $ref: '#/definitions/config.ScrapersConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ScrapersConfig'
       server:
-        $ref: '#/definitions/config.ServerConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.ServerConfig'
       system:
-        $ref: '#/definitions/config.SystemConfig'
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.SystemConfig'
       webui:
-        $ref: '#/definitions/config.WebUIConfig'
-    type: object
-  internal_api_temp.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
-    type: object
-  internal_api_token.ErrorResponse:
-    properties:
-      error:
-        example: Movie not found
-        type: string
-      errors:
-        items:
-          type: string
-        type: array
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.webUIConfig'
     type: object
   internal_api_token.createTokenRequest:
     properties:
@@ -2307,201 +2569,6 @@ definitions:
         description: Whether an update is available
         type: boolean
     type: object
-  models.Actress:
-    properties:
-      aliases:
-        description: Pipe-separated
-        type: string
-      created_at:
-        type: string
-      dmm_id:
-        description: Real DMM actress ID when available (unique only for values >
-          0)
-        type: integer
-      first_name:
-        type: string
-      id:
-        type: integer
-      japanese_name:
-        type: string
-      last_name:
-        type: string
-      thumb_url:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  models.Event:
-    properties:
-      context:
-        description: JSON-encoded details
-        type: string
-      created_at:
-        type: string
-      event_type:
-        type: string
-      id:
-        type: integer
-      message:
-        type: string
-      severity:
-        type: string
-      source:
-        type: string
-    type: object
-  models.Genre:
-    properties:
-      id:
-        type: integer
-      name:
-        type: string
-    type: object
-  models.GenreReplacement:
-    properties:
-      created_at:
-        type: string
-      id:
-        type: integer
-      original:
-        type: string
-      replacement:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  models.Movie:
-    properties:
-      actresses:
-        description: Relationships
-        items:
-          $ref: '#/definitions/models.Actress'
-        type: array
-      content_id:
-        type: string
-      cover_url:
-        description: Landscape/fanart image
-        type: string
-      created_at:
-        type: string
-      cropped_poster_url:
-        description: URL to the cropped poster (persisted)
-        type: string
-      description:
-        type: string
-      director:
-        type: string
-      display_title:
-        type: string
-      genres:
-        items:
-          $ref: '#/definitions/models.Genre'
-        type: array
-      id:
-        type: string
-      label:
-        description: Sub-label
-        type: string
-      maker:
-        description: Studio/maker
-        type: string
-      original_cropped_poster_url:
-        type: string
-      original_filename:
-        type: string
-      original_poster_url:
-        type: string
-      original_should_crop_poster:
-        type: boolean
-      original_title:
-        description: Japanese/original language title
-        type: string
-      poster_url:
-        description: Portrait/box art image
-        type: string
-      rating_score:
-        type: number
-      rating_votes:
-        type: integer
-      rating_warning:
-        type: string
-      release_date:
-        type: string
-      release_year:
-        type: integer
-      runtime:
-        description: in minutes
-        type: integer
-      screenshot_urls:
-        items:
-          type: string
-        type: array
-      series:
-        description: Series name
-        type: string
-      should_crop_poster:
-        description: Whether poster needs cropping from cover
-        type: boolean
-      source_name:
-        description: Metadata
-        type: string
-      source_url:
-        type: string
-      title:
-        type: string
-      trailer_url:
-        type: string
-      translations:
-        description: Translations
-        items:
-          $ref: '#/definitions/models.MovieTranslation'
-        type: array
-      updated_at:
-        type: string
-    type: object
-  models.MovieTranslation:
-    properties:
-      created_at:
-        type: string
-      description:
-        type: string
-      director:
-        type: string
-      id:
-        type: integer
-      label:
-        type: string
-      language:
-        description: 'ISO 639-1: en, ja, zh, etc.'
-        type: string
-      maker:
-        type: string
-      movie_id:
-        type: string
-      original_title:
-        description: Japanese/original language title
-        type: string
-      series:
-        type: string
-      settings_hash:
-        description: Hash of translation settings used
-        type: string
-      source_name:
-        description: Which scraper provided this translation
-        type: string
-      title:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  models.ScraperChoice:
-    properties:
-      label:
-        example: English
-        type: string
-      value:
-        example: en
-        type: string
-    type: object
 host: localhost:8080
 info:
   contact:
@@ -2545,6 +2612,10 @@ paths:
         in: query
         name: offset
         type: integer
+      - description: Language code to include translations for (e.g., 'en')
+        in: query
+        name: include_translations
+        type: string
       produces:
       - application/json
       responses:
@@ -2555,11 +2626,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List actresses
       tags:
       - actress
@@ -2568,7 +2639,7 @@ paths:
       - application/json
       description: Create a new actress record with the provided details
       parameters:
-      - description: Actress details
+      - description: models.Actress details
         in: body
         name: request
         required: true
@@ -2580,15 +2651,15 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_api_actress.Actress'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Create actress
       tags:
       - actress
@@ -2596,7 +2667,7 @@ paths:
     delete:
       description: Delete an actress record by ID
       parameters:
-      - description: Actress ID
+      - description: models.Actress ID
         in: path
         name: id
         required: true
@@ -2613,45 +2684,49 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Delete actress
       tags:
       - actress
     get:
       description: Retrieve a single actress by their database ID
       parameters:
-      - description: Actress ID
+      - description: models.Actress ID
         in: path
         name: id
         required: true
         type: integer
+      - description: Language code to include translations for (e.g., 'en')
+        in: query
+        name: include_translations
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_actress.Actress'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get actress by ID
       tags:
       - actress
@@ -2660,7 +2735,7 @@ paths:
       - application/json
       description: Update an existing actress record by ID
       parameters:
-      - description: Actress ID
+      - description: models.Actress ID
         in: path
         name: id
         required: true
@@ -2677,19 +2752,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_actress.Actress'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update actress
       tags:
       - actress
@@ -2705,30 +2780,30 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_actress.ActressMergeRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_actress.ActressMergeResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Merge duplicated actresses
       tags:
       - actress
@@ -2744,30 +2819,30 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_actress.ActressMergePreviewRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergePreviewRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_actress.ActressMergePreviewResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergePreviewResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Preview actress merge
       tags:
       - actress
@@ -2787,16 +2862,16 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_api_actress.Actress'
+              $ref: '#/definitions/internal_api_actress.actressSearchResponse'
             type: array
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_actress.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Search actresses
       tags:
       - actress
@@ -2811,30 +2886,30 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_auth.AuthCredentialsRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.AuthCredentialsRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_auth.AuthStatusResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.AuthStatusResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "429":
           description: Too Many Requests
           schema:
-            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Login
       tags:
       - auth
@@ -2865,7 +2940,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_auth.AuthCredentialsRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.AuthCredentialsRequest'
       - description: Bootstrap secret for remote setup
         in: header
         name: X-Setup-Secret
@@ -2876,23 +2951,23 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_auth.AuthStatusResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.AuthStatusResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Initialize authentication
       tags:
       - auth
@@ -2906,17 +2981,33 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_auth.AuthStatusResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.AuthStatusResponse'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/internal_api_auth.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get authentication status
       tags:
       - auth
   /api/v1/batch:
     get:
-      description: Get a list of batch jobs with operation counts
+      description: Get a paginated list of batch jobs with operation counts. Only
+        job metadata is included; use GET /batch/{id} with include_data=true for full
+        results.
+      parameters:
+      - default: 50
+        description: Maximum number of jobs to return (default 50, max 200)
+        in: query
+        maximum: 200
+        minimum: 1
+        name: limit
+        type: integer
+      - default: 0
+        description: Number of jobs to skip (default 0)
+        in: query
+        minimum: 0
+        name: offset
+        type: integer
       produces:
       - application/json
       responses:
@@ -2927,7 +3018,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List batch jobs
       tags:
       - web
@@ -2953,15 +3044,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Delete batch job
       tags:
       - web
@@ -2979,11 +3070,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_batch.BatchJobResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get batch job status
       tags:
       - web
@@ -3008,7 +3099,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Cancel batch job
       tags:
       - web
@@ -3017,34 +3108,34 @@ paths:
       consumes:
       - application/json
       description: 'Exclude multiple movies from a batch job in a single request.
-        Best-effort: excludes as many as possible and returns per-movie failures.'
+        Best-effort: excludes as many as possible and returns per-result failures.'
       parameters:
       - description: Job ID
         in: path
         name: id
         required: true
         type: string
-      - description: Movie IDs to exclude
+      - description: Result IDs to exclude
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_batch.BatchExcludeRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_batch.BatchExcludeResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchExcludeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Bulk exclude movies from batch organization
       tags:
       - web
@@ -3065,7 +3156,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_batch.OrganizeRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OrganizeRequest'
       produces:
       - application/json
       responses:
@@ -3078,11 +3169,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Organize batch job files
       tags:
       - web
@@ -3107,22 +3198,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_batch.UpdateMovieRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.UpdateMovieRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_batch.MovieResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update movie in batch job
       tags:
       - web
@@ -3152,7 +3243,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Exclude movie from batch organization
       tags:
       - web
@@ -3178,22 +3269,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_batch.PosterCropRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.PosterCropRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_batch.PosterCropResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.PosterCropResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update manual poster crop in batch job
       tags:
       - web
@@ -3219,26 +3310,26 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_batch.PosterFromURLRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.PosterFromURLRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_batch.PosterFromURLResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.PosterFromURLResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Download poster from URL
       tags:
       - web
@@ -3263,22 +3354,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_batch.OrganizePreviewRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OrganizePreviewRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_batch.OrganizePreviewResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OrganizePreviewResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Preview organize output
       tags:
       - web
@@ -3304,30 +3395,30 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_batch.BatchRescrapeRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchRescrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_batch.BatchRescrapeResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchRescrapeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "410":
           description: Gone
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Rescrape movie in batch job
       tags:
       - web
@@ -3347,7 +3438,7 @@ paths:
         in: body
         name: request
         schema:
-          $ref: '#/definitions/internal_api_batch.UpdateRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.UpdateRequest'
       produces:
       - application/json
       responses:
@@ -3360,11 +3451,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update batch job files
       tags:
       - web
@@ -3380,18 +3471,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_batch.BatchScrapeRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchScrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_batch.BatchScrapeResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BatchScrapeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_batch.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Batch scrape movies
       tags:
       - web
@@ -3406,18 +3497,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_file.BrowseRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BrowseRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_file.BrowseResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.BrowseResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_file.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Browse directory
       tags:
       - web
@@ -3432,18 +3523,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_file.PathAutocompleteRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_file.PathAutocompleteResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.PathAutocompleteResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_file.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Autocomplete directory path
       tags:
       - web
@@ -3463,7 +3554,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_system.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get configuration
       tags:
       - system
@@ -3490,35 +3581,14 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_system.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_system.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update configuration
       tags:
       - system
-  /api/v1/cwd:
-    get:
-      description: Returns the server's default browse directory. For Docker deployments,
-        returns the first allowed directory (typically /media). For manual deployments,
-        returns current working directory if no allowed directories configured.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/internal_api_file.ErrorResponse'
-      summary: Get current working directory
-      tags:
-      - web
   /api/v1/events:
     delete:
       description: Delete events older than a specified number of days
@@ -3538,11 +3608,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_events.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_events.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Delete old events
       tags:
       - events
@@ -3590,11 +3660,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_events.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_events.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List events
       tags:
       - events
@@ -3611,10 +3681,32 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_events.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get event statistics
       tags:
       - events
+  /api/v1/genres:
+    get:
+      description: Get a list of all genres, optionally including translations
+      parameters:
+      - description: Language code to include translations for (e.g., 'en')
+        in: query
+        name: include_translations
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_genre.genreListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: List genres
+      tags:
+      - genres
   /api/v1/genres/replacements:
     delete:
       description: Delete a genre replacement rule by original genre name
@@ -3639,15 +3731,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Delete genre replacement
       tags:
       - genres
@@ -3674,7 +3766,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List genre replacements
       tags:
       - genres
@@ -3696,19 +3788,19 @@ paths:
         "200":
           description: Already exists
           schema:
-            $ref: '#/definitions/internal_api_genre.GenreReplacement'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.GenreReplacement'
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_api_genre.GenreReplacement'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.GenreReplacement'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_genre.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Create genre replacement
       tags:
       - genres
@@ -3734,11 +3826,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_history.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_history.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Delete history records in bulk
       tags:
       - history
@@ -3775,11 +3867,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_history.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_history.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List history records
       tags:
       - history
@@ -3804,15 +3896,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_history.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_history.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_history.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Delete a history record
       tags:
       - history
@@ -3829,7 +3921,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_history.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get history statistics
       tags:
       - history
@@ -3848,11 +3940,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_jobs.JobListResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.JobListResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List batch jobs
       tags:
       - jobs
@@ -3871,15 +3963,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_jobs.JobListItem'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.JobListItem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get a single batch job
       tags:
       - jobs
@@ -3899,15 +3991,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_jobs.OperationListResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OperationListResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List operations for a batch job
       tags:
       - jobs
@@ -3931,27 +4023,27 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_jobs.RevertResultResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.RevertResultResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "403":
           description: Revert is disabled
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Revert a specific movie within a batch job
       tags:
       - jobs
@@ -3971,27 +4063,27 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_jobs.RevertResultResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.RevertResultResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "403":
           description: Revert is disabled
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Revert a batch job
       tags:
       - jobs
@@ -4016,15 +4108,15 @@ paths:
         "403":
           description: Revert is disabled
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_jobs.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Check for overlapping batches before revert
       tags:
       - jobs
@@ -4048,11 +4140,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_movie.MoviesResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MoviesResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List cached movies
       tags:
       - movies
@@ -4066,21 +4158,17 @@ paths:
         name: id
         required: true
         type: string
-      - description: Include field-level provenance data
-        in: query
-        name: include_provenance
-        type: boolean
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_movie.MovieResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get movie by ID
       tags:
       - movies
@@ -4100,26 +4188,26 @@ paths:
         in: body
         name: request
         schema:
-          $ref: '#/definitions/internal_api_movie.NFOComparisonRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.NFOComparisonRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_movie.NFOComparisonResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.NFOComparisonResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Compare NFO with scraped data
       tags:
       - movies
@@ -4139,26 +4227,26 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_movie.RescrapeRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.RescrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_movie.MovieResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Rescrape movie with specific scrapers
       tags:
       - movies
@@ -4180,7 +4268,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_temp.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Serve cropped poster image
       tags:
       - temp
@@ -4196,18 +4284,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_system.ProxyTestRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ProxyTestRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_system.ProxyTestResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ProxyTestResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_system.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Test proxy connectivity
       tags:
       - system
@@ -4222,22 +4310,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_file.ScanRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScanRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_file.ScanResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScanResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_file.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_file.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Scan directory for video files
       tags:
       - web
@@ -4252,26 +4340,26 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_movie.ScrapeRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScrapeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_movie.ScrapeResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScrapeResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_movie.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Scrape movie metadata
       tags:
       - movies
@@ -4285,11 +4373,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_system.AvailableScrapersResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.AvailableScrapersResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_system.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get available scrapers
       tags:
       - system
@@ -4311,11 +4399,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_temp.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/internal_api_temp.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Proxy remote images
       tags:
       - temp
@@ -4342,7 +4430,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_temp.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Serve temporary poster image
       tags:
       - temp
@@ -4359,7 +4447,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_token.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List API tokens
       tags:
       - tokens
@@ -4384,7 +4472,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_token.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Create API token
       tags:
       - tokens
@@ -4409,11 +4497,11 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_token.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_token.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Revoke API token
       tags:
       - tokens
@@ -4437,11 +4525,11 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_api_token.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_api_token.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Regenerate API token
       tags:
       - tokens
@@ -4467,11 +4555,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_system.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/internal_api_system.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get DeepL usage information
       tags:
       - system
@@ -4486,22 +4574,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_api_system.TranslationModelsRequest'
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.TranslationModelsRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_system.TranslationModelsResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.TranslationModelsResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_api_system.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/internal_api_system.ErrorResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get translation models
       tags:
       - system
@@ -4542,7 +4630,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_system.HealthResponse'
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.HealthResponse'
       summary: Health check
       tags:
       - system

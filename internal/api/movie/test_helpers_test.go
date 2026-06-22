@@ -10,8 +10,9 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-func createTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.ServerDependencies {
-	return testkit.CreateTestDeps(t, cfg, configFile)
+func createTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.APIDeps {
+	deps := testkit.CreateTestDeps(t, cfg, configFile)
+	return deps
 }
 
 type mockScraperWithResults struct {
@@ -32,9 +33,9 @@ func (m *mockScraperWithResults) Search(_ context.Context, id string) (*models.S
 	return &result, nil
 }
 
-func (m *mockScraperWithResults) GetURL(id string) (string, error) { return "", nil }
-func (m *mockScraperWithResults) IsEnabled() bool                  { return m.enabled }
-func (m *mockScraperWithResults) Close() error                     { return nil }
-func (m *mockScraperWithResults) Config() *config.ScraperSettings {
-	return &config.ScraperSettings{Enabled: m.enabled}
+func (m *mockScraperWithResults) GetURL(_ context.Context, id string) (string, error) { return "", nil }
+func (m *mockScraperWithResults) IsEnabled() bool                                     { return m.enabled }
+func (m *mockScraperWithResults) Close() error                                        { return nil }
+func (m *mockScraperWithResults) Config() *models.ScraperSettings {
+	return &models.ScraperSettings{Enabled: m.enabled}
 }

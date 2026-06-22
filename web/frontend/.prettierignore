@@ -1,0 +1,31 @@
+# Build output
+build/
+.svelte-kit/
+dist/
+
+# Dependencies
+node_modules/
+
+# Generated vendored runtime
+package-lock.json
+pnpm-lock.yaml
+
+# Svelte components are formatted/linted by svelte-check, not prettier
+# (prettier-plugin-svelte has a getVisitorKeys incompatibility with prettier 3.8).
+*.svelte
+
+# Test fixtures include intentionally-invalid files (e.g. invalid-import.json
+# exercises error-handling paths) — prettier must not reject them.
+tests/fixtures/
+
+# Playwright output
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Auth state written by the fullstack E2E global-setup
+tests/fullstack/.auth/
+
+# Generated SvelteKit types
+src/routes/$types.ts

@@ -88,7 +88,7 @@ func TestDecodeConfigAndYAMLHelpers(t *testing.T) {
 	})
 
 	t.Run("configToYAMLDocument and parse/encode helpers", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := DefaultConfig(nil, nil)
 		cfg.Server.Port = 3210
 
 		doc, err := configToYAMLDocument(cfg)
@@ -260,7 +260,7 @@ func TestSaveAndLoadOrCreateBranches(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.yaml")
 		require.NoError(t, os.WriteFile(path, []byte("server: ["), 0o644))
 
-		cfg := DefaultConfig()
+		cfg := DefaultConfig(nil, nil)
 		cfg.Server.Port = 18080
 		require.NoError(t, Save(cfg, path))
 
@@ -331,7 +331,7 @@ func TestSaveAndLoadOrCreateBranches(t *testing.T) {
 		t.Setenv("JAVINIZER_INIT_ALLOWED_DIRECTORIES", "/media")
 
 		path := filepath.Join(t.TempDir(), "config.yaml")
-		existing := DefaultConfig()
+		existing := DefaultConfig(nil, nil)
 		existing.Server.Host = "127.0.0.1"
 		existing.API.Security.AllowedDirectories = []string{"/existing"}
 		require.NoError(t, Save(existing, path))

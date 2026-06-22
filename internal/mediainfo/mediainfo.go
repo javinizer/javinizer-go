@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"context"
 	"fmt"
 	"os"
 )
@@ -27,16 +28,16 @@ type VideoInfo struct {
 	Container string // "mp4", "mkv", "avi", etc.
 }
 
-// Analyze extracts metadata from a video file using the ProberRegistry
+// Analyze extracts metadata from a video file using the proberRegistry
 // Supports: MP4, MKV, MOV, AVI
 // Falls back to MediaInfo CLI if enabled and native parsers fail
 // Returns partial info if some fields are unavailable
-func Analyze(filePath string) (*VideoInfo, error) {
-	return AnalyzeWithConfig(filePath, nil)
+func Analyze(ctx context.Context, filePath string) (*VideoInfo, error) {
+	return analyzeWithConfig(ctx, filePath, nil)
 }
 
-// AnalyzeWithConfig extracts metadata using custom configuration
-func AnalyzeWithConfig(filePath string, cfg *MediaInfoConfig) (*VideoInfo, error) {
+// analyzeWithConfig extracts metadata using custom configuration
+func analyzeWithConfig(ctx context.Context, filePath string, cfg *mediaInfoConfig) (*VideoInfo, error) {
 	// Open file
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -46,12 +47,12 @@ func AnalyzeWithConfig(filePath string, cfg *MediaInfoConfig) (*VideoInfo, error
 
 	// Initialize registry if needed
 	if cfg == nil {
-		cfg = DefaultMediaInfoConfig()
+		cfg = defaultMediaInfoConfig()
 	}
-	registry := NewProberRegistry(cfg)
+	registry := newProberRegistry(cfg)
 
-	// Use registry to probe with fallback
-	info, err := registry.ProbeWithFallback(f)
+	// Use registry to probe with fallback (f is *os.File which satisfies FileReader)
+	info, err := registry.probeWithFallback(ctx, f)
 	if err != nil {
 		return nil, err
 	}
@@ -107,9 +108,11 @@ func (v *VideoInfo) GetResolution() string {
 	return "SD"
 }
 
-// GetAudioChannelDescription returns human-readable audio channel description
+// getAudioChannelDescription returns human-readable audio channel description
 // Examples: "Stereo", "5.1", "7.1"
-func (v *VideoInfo) GetAudioChannelDescription() string {
+//
+//nolint:unused // used by same-package tests
+func (v *VideoInfo) getAudioChannelDescription() string {
 	switch v.AudioChannels {
 	case 1:
 		return "Mono"

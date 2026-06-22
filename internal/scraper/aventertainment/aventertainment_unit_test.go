@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,7 +14,7 @@ import (
 // TestResolveSearchQuery tests the ID normalization and format resolution
 func TestResolveSearchQuery(t *testing.T) {
 	settings := testSettings(true)
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name   string
@@ -1195,20 +1195,20 @@ func TestExtractDetailLinks(t *testing.T) {
 // TestApplyLanguage tests language application to URLs
 func TestApplyLanguage(t *testing.T) {
 	// Test language normalization
-	enSettings := config.ScraperSettings{
+	enSettings := models.ScraperSettings{
 		Enabled:   true,
 		Language:  "en",
 		RateLimit: 0,
 	}
-	enScraper := New(enSettings, nil, config.FlareSolverrConfig{})
+	enScraper := newScraper(&enSettings, nil, models.FlareSolverrConfig{})
 	assert.Equal(t, "en", enScraper.language)
 
-	jaSettings := config.ScraperSettings{
+	jaSettings := models.ScraperSettings{
 		Enabled:   true,
 		Language:  "ja",
 		RateLimit: 0,
 	}
-	jaScraper := New(jaSettings, nil, config.FlareSolverrConfig{})
+	jaScraper := newScraper(&jaSettings, nil, models.FlareSolverrConfig{})
 	assert.Equal(t, "ja", jaScraper.language)
 
 	// Test normalizeLanguage helper

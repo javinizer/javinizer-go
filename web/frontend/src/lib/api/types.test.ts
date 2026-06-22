@@ -20,7 +20,7 @@ import type {
 	NFOConfig,
 	TranslationConfig,
 	TranslationFieldsConfig,
-	ProxyProfile
+	ProxyProfile,
 } from './types';
 
 describe('types.ts has no unnecessary any', () => {
@@ -63,7 +63,13 @@ describe('types.ts has no unnecessary any', () => {
 		const req: ProxyTestRequest = {
 			mode: 'direct',
 			proxy: { enabled: true },
-			flaresolverr: { enabled: true, url: 'http://localhost:8191', timeout: 30, max_retries: 3, session_ttl: 300 },
+			flaresolverr: {
+				enabled: true,
+				url: 'http://localhost:8191',
+				timeout: 30,
+				max_retries: 3,
+				session_ttl: 300,
+			},
 		};
 		assertType<ProxyConfig>(req.proxy);
 		assertType<FlareSolverrConfig | undefined>(req.flaresolverr);
@@ -82,8 +88,26 @@ describe('types.ts has no unnecessary any', () => {
 
 	it('ScrapersConfig allows scraper overrides via index', () => {
 		const sc: ScrapersConfig = {};
-		sc.javbus = { enabled: true, language: 'ja', timeout: 30, rate_limit: 0, retry_count: 0, user_agent: '', use_flaresolverr: false, use_browser: false };
-		assertType<ScraperSettings | string | number | boolean | string[] | FlareSolverrConfig | ProxyConfig | undefined>(sc.javbus);
+		sc.javbus = {
+			enabled: true,
+			language: 'ja',
+			timeout: 30,
+			rate_limit: 0,
+			retry_count: 0,
+			user_agent: '',
+			use_flaresolverr: false,
+			use_browser: false,
+		};
+		assertType<
+			| ScraperSettings
+			| string
+			| number
+			| boolean
+			| string[]
+			| FlareSolverrConfig
+			| ProxyConfig
+			| undefined
+		>(sc.javbus);
 	});
 
 	it('Config has all Go-backed sections typed', () => {
@@ -103,7 +127,13 @@ describe('types.ts has no unnecessary any', () => {
 		const server: ServerConfig = { host: 'localhost', port: 8080 };
 		const profile: ProxyProfile = { url: 'http://proxy:8080', username: 'user', password: 'pass' };
 		const proxy: ProxyConfig = { enabled: true, profile: 'main', profiles: { main: profile } };
-		const fs: FlareSolverrConfig = { enabled: true, url: 'http://localhost:8191', timeout: 30, max_retries: 3, session_ttl: 300 };
+		const fs: FlareSolverrConfig = {
+			enabled: true,
+			url: 'http://localhost:8191',
+			timeout: 30,
+			max_retries: 3,
+			session_ttl: 300,
+		};
 		const nfo: NFOConfig = { enabled: true, display_title: '{title}', filename_template: '{id}' };
 		const fields: TranslationFieldsConfig = { title: true, description: true };
 		const translation: TranslationConfig = { enabled: true, provider: 'openai' };

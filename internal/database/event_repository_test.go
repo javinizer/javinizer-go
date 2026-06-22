@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -24,7 +25,7 @@ func TestEventRepository_Create(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 	}
 
-	err := repo.Create(event)
+	err := repo.Create(context.TODO(), event)
 	require.NoError(t, err)
 	assert.NotZero(t, event.ID)
 }
@@ -41,9 +42,9 @@ func TestEventRepository_FindByID(t *testing.T) {
 		Source:    "organizer",
 		CreatedAt: time.Now().UTC(),
 	}
-	require.NoError(t, repo.Create(event))
+	require.NoError(t, repo.Create(context.TODO(), event))
 
-	found, err := repo.FindByID(event.ID)
+	found, err := repo.FindByID(context.TODO(), event.ID)
 	require.NoError(t, err)
 	assert.Equal(t, models.EventCategoryOrganize, found.EventType)
 	assert.Equal(t, models.SeverityInfo, found.Severity)
@@ -56,7 +57,7 @@ func TestEventRepository_FindByID_NotFound(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewEventRepository(db)
 
-	_, err := repo.FindByID(99999)
+	_, err := repo.FindByID(context.TODO(), 99999)
 	assert.Error(t, err)
 }
 
@@ -67,7 +68,7 @@ func TestEventRepository_FindByType(t *testing.T) {
 
 	// Create events with different types
 	eventTypes := []struct {
-		eventType string
+		eventType models.EventCategory
 		message   string
 	}{
 		{models.EventCategoryScraper, "scraper event 1"},
@@ -83,11 +84,11 @@ func TestEventRepository_FindByType(t *testing.T) {
 			Source:    "test",
 			CreatedAt: time.Now().UTC(),
 		}
-		require.NoError(t, repo.Create(event))
+		require.NoError(t, repo.Create(context.TODO(), event))
 	}
 
 	// Find only scraper events
-	scraperEvents, err := repo.FindByType(models.EventCategoryScraper, 10, 0)
+	scraperEvents, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, scraperEvents, 2)
 	for _, e := range scraperEvents {
@@ -95,13 +96,13 @@ func TestEventRepository_FindByType(t *testing.T) {
 	}
 
 	// Find only organize events
-	organizeEvents, err := repo.FindByType(models.EventCategoryOrganize, 10, 0)
+	organizeEvents, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryOrganize}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, organizeEvents, 1)
 	assert.Equal(t, models.EventCategoryOrganize, organizeEvents[0].EventType)
 
 	// Find only system events
-	systemEvents, err := repo.FindByType(models.EventCategorySystem, 10, 0)
+	systemEvents, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategorySystem}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, systemEvents, 1)
 	assert.Equal(t, models.EventCategorySystem, systemEvents[0].EventType)
@@ -114,7 +115,7 @@ func TestEventRepository_FindBySeverity(t *testing.T) {
 
 	// Create events with different severities
 	severities := []struct {
-		severity string
+		severity models.EventSeverity
 		message  string
 	}{
 		{models.SeverityInfo, "info event 1"},
@@ -130,11 +131,11 @@ func TestEventRepository_FindBySeverity(t *testing.T) {
 			Source:    "test",
 			CreatedAt: time.Now().UTC(),
 		}
-		require.NoError(t, repo.Create(event))
+		require.NoError(t, repo.Create(context.TODO(), event))
 	}
 
 	// Find only info events
-	infoEvents, err := repo.FindBySeverity(models.SeverityInfo, 10, 0)
+	infoEvents, err := repo.FindFiltered(context.TODO(), EventFilter{Severity: models.SeverityInfo}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, infoEvents, 2)
 	for _, e := range infoEvents {
@@ -142,7 +143,7 @@ func TestEventRepository_FindBySeverity(t *testing.T) {
 	}
 
 	// Find only error events
-	errorEvents, err := repo.FindBySeverity(models.SeverityError, 10, 0)
+	errorEvents, err := repo.FindFiltered(context.TODO(), EventFilter{Severity: models.SeverityError}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, errorEvents, 1)
 	assert.Equal(t, models.SeverityError, errorEvents[0].Severity)
@@ -160,23 +161,23 @@ func TestEventRepository_FindByTypeAndSeverity(t *testing.T) {
 		{EventType: models.EventCategoryOrganize, Severity: models.SeverityInfo, Message: "organize info", Source: "test", CreatedAt: time.Now().UTC()},
 	}
 	for _, e := range events {
-		require.NoError(t, repo.Create(e))
+		require.NoError(t, repo.Create(context.TODO(), e))
 	}
 
 	// Find scraper errors
-	scraperErrors, err := repo.FindByTypeAndSeverity(models.EventCategoryScraper, models.SeverityError, 10, 0)
+	scraperErrors, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper, Severity: models.SeverityError}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, scraperErrors, 1)
 	assert.Equal(t, "scraper error", scraperErrors[0].Message)
 
 	// Find scraper info
-	scraperInfo, err := repo.FindByTypeAndSeverity(models.EventCategoryScraper, models.SeverityInfo, 10, 0)
+	scraperInfo, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper, Severity: models.SeverityInfo}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, scraperInfo, 1)
 	assert.Equal(t, "scraper info", scraperInfo[0].Message)
 
 	// Find organize errors (none exist)
-	organizeErrors, err := repo.FindByTypeAndSeverity(models.EventCategoryOrganize, models.SeverityError, 10, 0)
+	organizeErrors, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryOrganize, Severity: models.SeverityError}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, organizeErrors, 0)
 }
@@ -195,14 +196,14 @@ func TestEventRepository_FindByDateRange(t *testing.T) {
 		{EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "now event", Source: "test", CreatedAt: now},
 	}
 	for _, e := range events {
-		require.NoError(t, repo.Create(e))
+		require.NoError(t, repo.Create(context.TODO(), e))
 	}
 
 	// Find events in the last 2 hours (inclusive start, exclusive end is not how GORM works;
 	// we use >= start AND < end per plan specification)
 	start := now.Add(-2 * time.Hour)
 	end := now.Add(1 * time.Minute) // slightly in the future to include "now"
-	found, err := repo.FindByDateRange(start, end, 10, 0)
+	found, err := repo.FindFiltered(context.TODO(), EventFilter{Start: &start, End: &end}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, found, 2) // "recent event" and "now event"
 
@@ -218,7 +219,7 @@ func TestEventRepository_Count(t *testing.T) {
 	repo := NewEventRepository(db)
 
 	// Initially zero
-	count, err := repo.Count()
+	count, err := repo.Count(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count)
 
@@ -231,10 +232,10 @@ func TestEventRepository_Count(t *testing.T) {
 			Source:    "test",
 			CreatedAt: time.Now().UTC(),
 		}
-		require.NoError(t, repo.Create(event))
+		require.NoError(t, repo.Create(context.TODO(), event))
 	}
 
-	count, err = repo.Count()
+	count, err = repo.Count(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), count)
 }
@@ -246,25 +247,25 @@ func TestEventRepository_CountByType(t *testing.T) {
 
 	// Create 3 scraper events and 2 system events
 	for i := 0; i < 3; i++ {
-		require.NoError(t, repo.Create(&models.Event{
+		require.NoError(t, repo.Create(context.TODO(), &models.Event{
 			EventType: models.EventCategoryScraper, Severity: models.SeverityInfo, Message: "s", Source: "test", CreatedAt: time.Now().UTC(),
 		}))
 	}
 	for i := 0; i < 2; i++ {
-		require.NoError(t, repo.Create(&models.Event{
+		require.NoError(t, repo.Create(context.TODO(), &models.Event{
 			EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "sy", Source: "test", CreatedAt: time.Now().UTC(),
 		}))
 	}
 
-	scraperCount, err := repo.CountByType(models.EventCategoryScraper)
+	scraperCount, err := repo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), scraperCount)
 
-	systemCount, err := repo.CountByType(models.EventCategorySystem)
+	systemCount, err := repo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategorySystem})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), systemCount)
 
-	organizeCount, err := repo.CountByType(models.EventCategoryOrganize)
+	organizeCount, err := repo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryOrganize})
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), organizeCount)
 }
@@ -275,21 +276,21 @@ func TestEventRepository_CountBySeverity(t *testing.T) {
 	repo := NewEventRepository(db)
 
 	// Create events with different severities
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityDebug, Message: "d", Source: "test", CreatedAt: time.Now().UTC(),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityError, Message: "e1", Source: "test", CreatedAt: time.Now().UTC(),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityError, Message: "e2", Source: "test", CreatedAt: time.Now().UTC(),
 	}))
 
-	errorCount, err := repo.CountBySeverity(models.SeverityError)
+	errorCount, err := repo.CountFiltered(context.TODO(), EventFilter{Severity: models.SeverityError})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), errorCount)
 
-	debugCount, err := repo.CountBySeverity(models.SeverityDebug)
+	debugCount, err := repo.CountFiltered(context.TODO(), EventFilter{Severity: models.SeverityDebug})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), debugCount)
 }
@@ -302,27 +303,28 @@ func TestEventRepository_DeleteOlderThan(t *testing.T) {
 	now := time.Now().UTC()
 
 	// Create old and new events
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "old event 1", Source: "test", CreatedAt: now.Add(-72 * time.Hour),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "old event 2", Source: "test", CreatedAt: now.Add(-48 * time.Hour),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "recent event", Source: "test", CreatedAt: now.Add(-1 * time.Hour),
 	}))
 
 	// Delete events older than 24 hours ago
 	cutoff := now.Add(-24 * time.Hour)
-	err := repo.DeleteOlderThan(cutoff)
+	deleted, err := repo.DeleteOlderThan(context.TODO(), cutoff)
 	require.NoError(t, err)
+	require.Positive(t, deleted, "should have deleted old events")
 
 	// Only recent event should remain
-	count, err := repo.Count()
+	count, err := repo.Count(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 
-	remaining, err := repo.FindBySeverity(models.SeverityInfo, 10, 0)
+	remaining, err := repo.FindFiltered(context.TODO(), EventFilter{Severity: models.SeverityInfo}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, remaining, 1)
 	assert.Equal(t, "recent event", remaining[0].Message)
@@ -336,7 +338,7 @@ func TestEventRepository_EventsTableIsIndependent(t *testing.T) {
 	bfoRepo := NewBatchFileOperationRepository(db)
 
 	// Create an event
-	require.NoError(t, eventRepo.Create(&models.Event{
+	require.NoError(t, eventRepo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategoryScraper,
 		Severity:  models.SeverityInfo,
 		Message:   "test event",
@@ -345,14 +347,14 @@ func TestEventRepository_EventsTableIsIndependent(t *testing.T) {
 	}))
 
 	// Create a history record
-	require.NoError(t, historyRepo.Create(&models.History{
+	require.NoError(t, historyRepo.Create(context.TODO(), &models.History{
 		MovieID:   "INDEP-001",
-		Operation: "scrape",
-		Status:    "success",
+		Operation: models.HistoryOpScrape,
+		Status:    models.HistoryStatusSuccess,
 	}))
 
 	// Create a batch file operation
-	require.NoError(t, bfoRepo.Create(&models.BatchFileOperation{
+	require.NoError(t, bfoRepo.Create(context.TODO(), &models.BatchFileOperation{
 		BatchJobID:    "indep-batch-001",
 		OriginalPath:  "/original/file.mp4",
 		NewPath:       "/new/file.mp4",
@@ -361,35 +363,35 @@ func TestEventRepository_EventsTableIsIndependent(t *testing.T) {
 	}))
 
 	// Verify all records exist
-	eventCount, err := eventRepo.Count()
+	eventCount, err := eventRepo.Count(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), eventCount)
 
-	historyCount, err := historyRepo.Count()
+	historyCount, err := historyRepo.Count(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), historyCount)
 
-	bfoCount, err := bfoRepo.CountByBatchJobID("indep-batch-001")
+	bfoCount, err := bfoRepo.CountByBatchJobID(context.TODO(), "indep-batch-001")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), bfoCount)
 
 	// Delete all events
 	cutoff := time.Now().UTC().Add(1 * time.Hour) // future cutoff deletes everything
-	err = eventRepo.DeleteOlderThan(cutoff)
+	_, err = eventRepo.DeleteOlderThan(context.TODO(), cutoff)
 	require.NoError(t, err)
 
 	// Verify events are gone
-	eventCount, err = eventRepo.Count()
+	eventCount, err = eventRepo.Count(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), eventCount)
 
 	// Verify history records still exist
-	historyCount, err = historyRepo.Count()
+	historyCount, err = historyRepo.Count(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), historyCount)
 
 	// Verify batch file operations still exist
-	bfoCount, err = bfoRepo.CountByBatchJobID("indep-batch-001")
+	bfoCount, err = bfoRepo.CountByBatchJobID(context.TODO(), "indep-batch-001")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), bfoCount)
 }
@@ -401,7 +403,7 @@ func TestEventRepository_FindByType_WithPagination(t *testing.T) {
 
 	// Create 5 scraper events
 	for i := 0; i < 5; i++ {
-		require.NoError(t, repo.Create(&models.Event{
+		require.NoError(t, repo.Create(context.TODO(), &models.Event{
 			EventType: models.EventCategoryScraper,
 			Severity:  models.SeverityInfo,
 			Message:   "scraper event",
@@ -411,17 +413,17 @@ func TestEventRepository_FindByType_WithPagination(t *testing.T) {
 	}
 
 	// Get first 2
-	page1, err := repo.FindByType(models.EventCategoryScraper, 2, 0)
+	page1, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper}, 2, 0)
 	require.NoError(t, err)
 	assert.Len(t, page1, 2)
 
 	// Get next 2
-	page2, err := repo.FindByType(models.EventCategoryScraper, 2, 2)
+	page2, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper}, 2, 2)
 	require.NoError(t, err)
 	assert.Len(t, page2, 2)
 
 	// Get last 1
-	page3, err := repo.FindByType(models.EventCategoryScraper, 2, 4)
+	page3, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper}, 2, 4)
 	require.NoError(t, err)
 	assert.Len(t, page3, 1)
 }
@@ -438,27 +440,27 @@ func TestEventRepository_FindBySource(t *testing.T) {
 		{EventType: models.EventCategoryOrganize, Severity: models.SeverityInfo, Message: "organize done", Source: "organizer", CreatedAt: time.Now().UTC()},
 	}
 	for _, e := range events {
-		require.NoError(t, repo.Create(e))
+		require.NoError(t, repo.Create(context.TODO(), e))
 	}
 
-	r18devEvents, err := repo.FindBySource("r18dev", 10, 0)
+	r18devEvents, err := repo.FindFiltered(context.TODO(), EventFilter{Source: "r18dev"}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, r18devEvents, 2)
 	for _, e := range r18devEvents {
 		assert.Equal(t, "r18dev", e.Source)
 	}
 
-	dmmEvents, err := repo.FindBySource("dmm", 10, 0)
+	dmmEvents, err := repo.FindFiltered(context.TODO(), EventFilter{Source: "dmm"}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, dmmEvents, 1)
 	assert.Equal(t, "dmm", dmmEvents[0].Source)
 
-	organizerEvents, err := repo.FindBySource("organizer", 10, 0)
+	organizerEvents, err := repo.FindFiltered(context.TODO(), EventFilter{Source: "organizer"}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, organizerEvents, 1)
 	assert.Equal(t, "organizer", organizerEvents[0].Source)
 
-	emptyEvents, err := repo.FindBySource("nonexistent", 10, 0)
+	emptyEvents, err := repo.FindFiltered(context.TODO(), EventFilter{Source: "nonexistent"}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, emptyEvents, 0)
 }
@@ -469,25 +471,25 @@ func TestEventRepository_CountBySource(t *testing.T) {
 	repo := NewEventRepository(db)
 
 	for i := 0; i < 3; i++ {
-		require.NoError(t, repo.Create(&models.Event{
+		require.NoError(t, repo.Create(context.TODO(), &models.Event{
 			EventType: models.EventCategoryScraper, Severity: models.SeverityInfo, Message: "r18dev event", Source: "r18dev", CreatedAt: time.Now().UTC(),
 		}))
 	}
 	for i := 0; i < 2; i++ {
-		require.NoError(t, repo.Create(&models.Event{
+		require.NoError(t, repo.Create(context.TODO(), &models.Event{
 			EventType: models.EventCategoryScraper, Severity: models.SeverityError, Message: "dmm event", Source: "dmm", CreatedAt: time.Now().UTC(),
 		}))
 	}
 
-	r18devCount, err := repo.CountBySource("r18dev")
+	r18devCount, err := repo.CountFiltered(context.TODO(), EventFilter{Source: "r18dev"})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), r18devCount)
 
-	dmmCount, err := repo.CountBySource("dmm")
+	dmmCount, err := repo.CountFiltered(context.TODO(), EventFilter{Source: "dmm"})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), dmmCount)
 
-	organizerCount, err := repo.CountBySource("organizer")
+	organizerCount, err := repo.CountFiltered(context.TODO(), EventFilter{Source: "organizer"})
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), organizerCount)
 }
@@ -498,17 +500,17 @@ func TestEventRepository_CountGroupBySource(t *testing.T) {
 	repo := NewEventRepository(db)
 
 	for i := 0; i < 3; i++ {
-		require.NoError(t, repo.Create(&models.Event{
+		require.NoError(t, repo.Create(context.TODO(), &models.Event{
 			EventType: models.EventCategoryScraper, Severity: models.SeverityInfo, Message: "r18dev", Source: "r18dev", CreatedAt: time.Now().UTC(),
 		}))
 	}
 	for i := 0; i < 2; i++ {
-		require.NoError(t, repo.Create(&models.Event{
+		require.NoError(t, repo.Create(context.TODO(), &models.Event{
 			EventType: models.EventCategoryScraper, Severity: models.SeverityError, Message: "dmm", Source: "dmm", CreatedAt: time.Now().UTC(),
 		}))
 	}
 
-	bySource, err := repo.CountGroupBySource()
+	bySource, err := repo.CountGroupBySource(context.TODO())
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), bySource["r18dev"])
 	assert.Equal(t, int64(2), bySource["dmm"])
@@ -528,18 +530,18 @@ func TestEventRepository_FindFiltered(t *testing.T) {
 		{EventType: models.EventCategorySystem, Severity: models.SeverityDebug, Message: "server start", Source: "server", CreatedAt: time.Now().UTC().Add(-10 * time.Minute)},
 	}
 	for _, e := range events {
-		require.NoError(t, repo.Create(e))
+		require.NoError(t, repo.Create(context.TODO(), e))
 	}
 
-	noFilter, err := repo.FindFiltered(EventFilter{}, 10, 0)
+	noFilter, err := repo.FindFiltered(context.TODO(), EventFilter{}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, noFilter, 5)
 
-	typeOnly, err := repo.FindFiltered(EventFilter{EventType: models.EventCategoryScraper}, 10, 0)
+	typeOnly, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, typeOnly, 2)
 
-	typeAndSource, err := repo.FindFiltered(EventFilter{EventType: models.EventCategoryOrganize, Source: "organizer"}, 10, 0)
+	typeAndSource, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryOrganize, Source: "organizer"}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, typeAndSource, 2)
 	for _, e := range typeAndSource {
@@ -547,17 +549,17 @@ func TestEventRepository_FindFiltered(t *testing.T) {
 		assert.Equal(t, "organizer", e.Source)
 	}
 
-	severityAndSource, err := repo.FindFiltered(EventFilter{Severity: models.SeverityInfo, Source: "r18dev"}, 10, 0)
+	severityAndSource, err := repo.FindFiltered(context.TODO(), EventFilter{Severity: models.SeverityInfo, Source: "r18dev"}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, severityAndSource, 1)
 	assert.Equal(t, "r18dev", severityAndSource[0].Source)
 
-	noMatch, err := repo.FindFiltered(EventFilter{EventType: models.EventCategorySystem, Source: "r18dev"}, 10, 0)
+	noMatch, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategorySystem, Source: "r18dev"}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, noMatch, 0)
 
 	now := time.Now().UTC()
-	withDateRange, err := repo.FindFiltered(EventFilter{Start: &now}, 10, 0)
+	withDateRange, err := repo.FindFiltered(context.TODO(), EventFilter{Start: &now}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, withDateRange, 0)
 }
@@ -568,23 +570,23 @@ func TestEventRepository_CountFiltered(t *testing.T) {
 	repo := NewEventRepository(db)
 
 	for i := 0; i < 3; i++ {
-		require.NoError(t, repo.Create(&models.Event{
+		require.NoError(t, repo.Create(context.TODO(), &models.Event{
 			EventType: models.EventCategoryScraper, Severity: models.SeverityInfo, Message: "r18dev", Source: "r18dev", CreatedAt: time.Now().UTC(),
 		}))
 	}
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategoryScraper, Severity: models.SeverityError, Message: "dmm", Source: "dmm", CreatedAt: time.Now().UTC(),
 	}))
 
-	total, err := repo.CountFiltered(EventFilter{})
+	total, err := repo.CountFiltered(context.TODO(), EventFilter{})
 	require.NoError(t, err)
 	assert.Equal(t, int64(4), total)
 
-	scraperCount, err := repo.CountFiltered(EventFilter{EventType: models.EventCategoryScraper})
+	scraperCount, err := repo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper})
 	require.NoError(t, err)
 	assert.Equal(t, int64(4), scraperCount)
 
-	r18devInfoCount, err := repo.CountFiltered(EventFilter{Source: "r18dev", Severity: models.SeverityInfo})
+	r18devInfoCount, err := repo.CountFiltered(context.TODO(), EventFilter{Source: "r18dev", Severity: models.SeverityInfo})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), r18devInfoCount)
 }
@@ -595,7 +597,7 @@ func TestEventRepository_List(t *testing.T) {
 	repo := NewEventRepository(db)
 
 	for i := 0; i < 5; i++ {
-		require.NoError(t, repo.Create(&models.Event{
+		require.NoError(t, repo.Create(context.TODO(), &models.Event{
 			EventType: models.EventCategorySystem,
 			Severity:  models.SeverityInfo,
 			Message:   fmt.Sprintf("event %d", i),
@@ -604,11 +606,11 @@ func TestEventRepository_List(t *testing.T) {
 		}))
 	}
 
-	events, err := repo.List(3, 0)
+	events, err := repo.List(context.TODO(), 3, 0)
 	require.NoError(t, err)
 	assert.Len(t, events, 3)
 
-	all, err := repo.List(10, 0)
+	all, err := repo.List(context.TODO(), 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, all, 5)
 }
@@ -618,25 +620,25 @@ func TestEventRepository_CountByTypeAndSeverity(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewEventRepository(db)
 
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategoryScraper, Severity: models.SeverityInfo, Message: "s1", Source: "test", CreatedAt: time.Now().UTC(),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategoryScraper, Severity: models.SeverityError, Message: "s2", Source: "test", CreatedAt: time.Now().UTC(),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategoryScraper, Severity: models.SeverityInfo, Message: "s3", Source: "test", CreatedAt: time.Now().UTC(),
 	}))
 
-	scraperInfo, err := repo.CountByTypeAndSeverity(models.EventCategoryScraper, models.SeverityInfo)
+	scraperInfo, err := repo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper, Severity: models.SeverityInfo})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), scraperInfo)
 
-	scraperError, err := repo.CountByTypeAndSeverity(models.EventCategoryScraper, models.SeverityError)
+	scraperError, err := repo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryScraper, Severity: models.SeverityError})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), scraperError)
 
-	noMatch, err := repo.CountByTypeAndSeverity(models.EventCategoryOrganize, models.SeverityInfo)
+	noMatch, err := repo.CountFiltered(context.TODO(), EventFilter{EventType: models.EventCategoryOrganize, Severity: models.SeverityInfo})
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), noMatch)
 }
@@ -648,25 +650,25 @@ func TestEventRepository_CountByDateRange(t *testing.T) {
 
 	now := time.Now().UTC()
 
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "old", Source: "test", CreatedAt: now.Add(-48 * time.Hour),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "recent", Source: "test", CreatedAt: now.Add(-1 * time.Hour),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "now", Source: "test", CreatedAt: now,
 	}))
 
 	start := now.Add(-2 * time.Hour)
 	end := now.Add(1 * time.Minute)
-	count, err := repo.CountByDateRange(start, end)
+	count, err := repo.CountFiltered(context.TODO(), EventFilter{Start: &start, End: &end})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
 	oldStart := now.Add(-72 * time.Hour)
 	oldEnd := now.Add(-24 * time.Hour)
-	oldCount, err := repo.CountByDateRange(oldStart, oldEnd)
+	oldCount, err := repo.CountFiltered(context.TODO(), EventFilter{Start: &oldStart, End: &oldEnd})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), oldCount)
 }
@@ -678,21 +680,21 @@ func TestEventRepository_FindFiltered_WithDateRange(t *testing.T) {
 
 	now := time.Now().UTC()
 
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "past", Source: "test", CreatedAt: now.Add(-48 * time.Hour),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "recent", Source: "test", CreatedAt: now.Add(-1 * time.Hour),
 	}))
 
 	past := now.Add(-2 * time.Hour)
-	found, err := repo.FindFiltered(EventFilter{Start: &past}, 10, 0)
+	found, err := repo.FindFiltered(context.TODO(), EventFilter{Start: &past}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, found, 1)
 	assert.Equal(t, "recent", found[0].Message)
 
 	end := now.Add(-30 * time.Minute)
-	beforeNow, err := repo.FindFiltered(EventFilter{End: &end}, 10, 0)
+	beforeNow, err := repo.FindFiltered(context.TODO(), EventFilter{End: &end}, 10, 0)
 	require.NoError(t, err)
 	assert.Len(t, beforeNow, 2)
 }
@@ -705,18 +707,18 @@ func TestEventRepository_OrderByCreatedAtDesc(t *testing.T) {
 	now := time.Now().UTC()
 
 	// Create events in chronological order
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "first", Source: "test", CreatedAt: now.Add(-2 * time.Hour),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "second", Source: "test", CreatedAt: now.Add(-1 * time.Hour),
 	}))
-	require.NoError(t, repo.Create(&models.Event{
+	require.NoError(t, repo.Create(context.TODO(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityInfo, Message: "third", Source: "test", CreatedAt: now,
 	}))
 
 	// Results should be ordered by created_at DESC (newest first)
-	events, err := repo.FindByType(models.EventCategorySystem, 10, 0)
+	events, err := repo.FindFiltered(context.TODO(), EventFilter{EventType: models.EventCategorySystem}, 10, 0)
 	require.NoError(t, err)
 	require.Len(t, events, 3)
 	assert.Equal(t, "third", events[0].Message)

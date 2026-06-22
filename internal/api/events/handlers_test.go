@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -15,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupEventsTestDeps(t *testing.T) (*ServerDependencies, *database.DB) {
+func setupEventsTestDeps(t *testing.T) (*core.APIDeps, *database.DB) {
 	t.Helper()
 
 	cfg := &config.Config{
@@ -28,22 +30,24 @@ func setupEventsTestDeps(t *testing.T) (*ServerDependencies, *database.DB) {
 		},
 	}
 
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	eventRepo := database.NewEventRepository(db)
 
-	deps := &ServerDependencies{
-		DB:        db,
-		EventRepo: eventRepo,
+	deps := &core.APIDeps{
+		Repos: database.Repositories{
+			SystemRepos: database.SystemRepos{
+				EventRepo: eventRepo,
+			},
+		},
 	}
-	deps.SetConfig(cfg)
 
 	return deps, db
 }
 
-func seedEventsData(t *testing.T, deps *ServerDependencies) {
+func seedEventsData(t *testing.T, deps *core.APIDeps) {
 	t.Helper()
 
 	events := []*models.Event{
@@ -56,7 +60,7 @@ func seedEventsData(t *testing.T, deps *ServerDependencies) {
 	}
 
 	for _, e := range events {
-		require.NoError(t, deps.EventRepo.Create(e))
+		require.NoError(t, deps.Repos.EventRepo.Create(context.Background(), e))
 	}
 }
 
@@ -212,7 +216,7 @@ func TestListEvents(t *testing.T) {
 			}
 
 			router := gin.New()
-			router.GET("/api/v1/events", listEvents(deps))
+			router.GET("/api/v1/events", listEvents(deps.Repos.EventRepo))
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/events"+tt.queryParams, nil)
 			w := httptest.NewRecorder()
@@ -246,9 +250,9 @@ func TestEventStats(t *testing.T) {
 			expectedStatus: http.StatusOK,
 			validateFn: func(t *testing.T, resp *eventStatsResponse) {
 				assert.Equal(t, int64(0), resp.Total)
-				assert.Equal(t, int64(0), resp.ByType[models.EventCategoryScraper])
-				assert.Equal(t, int64(0), resp.ByType[models.EventCategoryOrganize])
-				assert.Equal(t, int64(0), resp.ByType[models.EventCategorySystem])
+				assert.Equal(t, int64(0), resp.ByType[string(models.EventCategoryScraper)])
+				assert.Equal(t, int64(0), resp.ByType[string(models.EventCategoryOrganize)])
+				assert.Equal(t, int64(0), resp.ByType[string(models.EventCategorySystem)])
 				assert.Empty(t, resp.BySource)
 			},
 		},
@@ -258,13 +262,13 @@ func TestEventStats(t *testing.T) {
 			expectedStatus: http.StatusOK,
 			validateFn: func(t *testing.T, resp *eventStatsResponse) {
 				assert.Equal(t, int64(6), resp.Total)
-				assert.Equal(t, int64(2), resp.ByType[models.EventCategoryScraper])
-				assert.Equal(t, int64(2), resp.ByType[models.EventCategoryOrganize])
-				assert.Equal(t, int64(2), resp.ByType[models.EventCategorySystem])
-				assert.Equal(t, int64(1), resp.BySeverity[models.SeverityDebug])
-				assert.Equal(t, int64(3), resp.BySeverity[models.SeverityInfo])
-				assert.Equal(t, int64(1), resp.BySeverity[models.SeverityWarn])
-				assert.Equal(t, int64(1), resp.BySeverity[models.SeverityError])
+				assert.Equal(t, int64(2), resp.ByType[string(models.EventCategoryScraper)])
+				assert.Equal(t, int64(2), resp.ByType[string(models.EventCategoryOrganize)])
+				assert.Equal(t, int64(2), resp.ByType[string(models.EventCategorySystem)])
+				assert.Equal(t, int64(1), resp.BySeverity[string(models.SeverityDebug)])
+				assert.Equal(t, int64(3), resp.BySeverity[string(models.SeverityInfo)])
+				assert.Equal(t, int64(1), resp.BySeverity[string(models.SeverityWarn)])
+				assert.Equal(t, int64(1), resp.BySeverity[string(models.SeverityError)])
 				assert.Equal(t, int64(1), resp.BySource["r18dev"])
 				assert.Equal(t, int64(1), resp.BySource["dmm"])
 				assert.Equal(t, int64(2), resp.BySource["organizer"])
@@ -283,7 +287,7 @@ func TestEventStats(t *testing.T) {
 			}
 
 			router := gin.New()
-			router.GET("/api/v1/events/stats", eventStats(deps))
+			router.GET("/api/v1/events/stats", eventStats(deps.Repos.EventRepo))
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stats", nil)
 			w := httptest.NewRecorder()
@@ -308,21 +312,21 @@ func TestEventStats_ByType(t *testing.T) {
 	deps, db := setupEventsTestDeps(t)
 	defer func() { _ = db.Close() }()
 
-	require.NoError(t, deps.EventRepo.Create(&models.Event{
+	require.NoError(t, deps.Repos.EventRepo.Create(context.Background(), &models.Event{
 		EventType: models.EventCategoryScraper, Severity: models.SeverityInfo, Message: "scrape 1", Source: "r18dev", CreatedAt: time.Now(),
 	}))
-	require.NoError(t, deps.EventRepo.Create(&models.Event{
+	require.NoError(t, deps.Repos.EventRepo.Create(context.Background(), &models.Event{
 		EventType: models.EventCategoryScraper, Severity: models.SeverityError, Message: "scrape 2", Source: "dmm", CreatedAt: time.Now(),
 	}))
-	require.NoError(t, deps.EventRepo.Create(&models.Event{
+	require.NoError(t, deps.Repos.EventRepo.Create(context.Background(), &models.Event{
 		EventType: models.EventCategoryOrganize, Severity: models.SeverityWarn, Message: "organize 1", Source: "organizer", CreatedAt: time.Now(),
 	}))
-	require.NoError(t, deps.EventRepo.Create(&models.Event{
+	require.NoError(t, deps.Repos.EventRepo.Create(context.Background(), &models.Event{
 		EventType: models.EventCategorySystem, Severity: models.SeverityDebug, Message: "system 1", Source: "server", CreatedAt: time.Now(),
 	}))
 
 	router := gin.New()
-	router.GET("/api/v1/events/stats", eventStats(deps))
+	router.GET("/api/v1/events/stats", eventStats(deps.Repos.EventRepo))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stats", nil)
 	w := httptest.NewRecorder()
@@ -333,9 +337,9 @@ func TestEventStats_ByType(t *testing.T) {
 	var resp eventStatsResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, int64(4), resp.Total)
-	assert.Equal(t, int64(2), resp.ByType[models.EventCategoryScraper])
-	assert.Equal(t, int64(1), resp.ByType[models.EventCategoryOrganize])
-	assert.Equal(t, int64(1), resp.ByType[models.EventCategorySystem])
+	assert.Equal(t, int64(2), resp.ByType[string(models.EventCategoryScraper)])
+	assert.Equal(t, int64(1), resp.ByType[string(models.EventCategoryOrganize)])
+	assert.Equal(t, int64(1), resp.ByType[string(models.EventCategorySystem)])
 }
 
 func TestListEvents_InvalidDateFilter(t *testing.T) {
@@ -345,7 +349,7 @@ func TestListEvents_InvalidDateFilter(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	router := gin.New()
-	router.GET("/api/v1/events", listEvents(deps))
+	router.GET("/api/v1/events", listEvents(deps.Repos.EventRepo))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/events?start=invalid-date", nil)
 	w := httptest.NewRecorder()
@@ -422,11 +426,11 @@ func TestDeleteEvents(t *testing.T) {
 					Source:    "server",
 					CreatedAt: time.Now().Add(-48 * time.Hour), // 2 days ago
 				}
-				require.NoError(t, deps.EventRepo.Create(oldEvent))
+				require.NoError(t, deps.Repos.EventRepo.Create(context.Background(), oldEvent))
 			}
 
 			router := gin.New()
-			router.DELETE("/api/v1/events", deleteEvents(deps))
+			router.DELETE("/api/v1/events", deleteEvents(deps.Repos.EventRepo))
 
 			req := httptest.NewRequest(http.MethodDelete, "/api/v1/events"+tt.queryParams, nil)
 			w := httptest.NewRecorder()

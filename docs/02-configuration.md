@@ -163,7 +163,7 @@ scrapers:
   javlibrary:
     enabled: false
     language: "en"       # en, ja, cn, tw
-    request_delay: 1000  # milliseconds
+    rate_limit: 1000  # milliseconds
     base_url: "http://www.javlibrary.com"
     use_flaresolverr: true
 ```
@@ -177,7 +177,7 @@ scrapers:
   javdb:
     enabled: true
     base_url: "https://javdb.com"
-    request_delay: 1000
+    rate_limit: 1000
     use_flaresolverr: true
     proxy:                # Optional per-scraper override
       enabled: true

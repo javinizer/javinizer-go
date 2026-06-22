@@ -1,6 +1,7 @@
 package history
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -86,7 +87,7 @@ func runHistoryList(cmd *cobra.Command, args []string, configFile string) error 
 	}
 	defer func() { _ = deps.Close() }()
 
-	logger := history.NewLogger(deps.DB)
+	logger := history.NewLogger(database.NewHistoryRepository(deps.DB))
 
 	// Get flags
 	limit, _ := cmd.Flags().GetInt("limit")
@@ -96,12 +97,14 @@ func runHistoryList(cmd *cobra.Command, args []string, configFile string) error 
 	var records []models.History
 
 	// Apply filters
+	ctx := context.Background()
+
 	if operation != "" {
-		records, err = logger.GetByOperation(operation, limit)
+		records, err = logger.GetByOperation(ctx, models.HistoryOperation(operation), limit)
 	} else if status != "" {
-		records, err = logger.GetByStatus(status, limit)
+		records, err = logger.GetByStatus(ctx, models.HistoryStatus(status), limit)
 	} else {
-		records, err = logger.GetRecent(limit)
+		records, err = logger.GetRecent(ctx, limit)
 	}
 
 	if err != nil {
@@ -136,9 +139,9 @@ func runHistoryList(cmd *cobra.Command, args []string, configFile string) error 
 
 		statusIcon := "✅"
 		switch record.Status {
-		case "failed":
+		case models.HistoryStatusFailed:
 			statusIcon = "❌"
-		case "reverted":
+		case models.HistoryStatusReverted:
 			statusIcon = "↩️"
 		}
 
@@ -175,9 +178,9 @@ func runHistoryStats(cmd *cobra.Command, args []string, configFile string) error
 	}
 	defer func() { _ = deps.Close() }()
 
-	logger := history.NewLogger(deps.DB)
+	logger := history.NewLogger(database.NewHistoryRepository(deps.DB))
 
-	stats, err := logger.GetStats()
+	stats, err := logger.GetStats(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to retrieve stats: %w", err)
 	}
@@ -213,9 +216,9 @@ func runHistoryMovie(cmd *cobra.Command, args []string, configFile string) error
 	}
 	defer func() { _ = deps.Close() }()
 
-	logger := history.NewLogger(deps.DB)
+	logger := history.NewLogger(database.NewHistoryRepository(deps.DB))
 
-	records, err := logger.GetByMovieID(movieID)
+	records, err := logger.GetByMovieID(context.Background(), movieID)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve history: %w", err)
 	}
@@ -230,9 +233,9 @@ func runHistoryMovie(cmd *cobra.Command, args []string, configFile string) error
 	for _, record := range records {
 		statusIcon := "✅"
 		switch record.Status {
-		case "failed":
+		case models.HistoryStatusFailed:
 			statusIcon = "❌"
-		case "reverted":
+		case models.HistoryStatusReverted:
 			statusIcon = "↩️"
 		}
 
@@ -278,34 +281,34 @@ func runHistoryClean(cmd *cobra.Command, args []string, configFile string) error
 	}
 	defer func() { _ = deps.Close() }()
 
-	logger := history.NewLogger(deps.DB)
+	logger := history.NewLogger(database.NewHistoryRepository(deps.DB))
 
 	days, _ := cmd.Flags().GetInt("days")
 
 	// Get count before deletion
-	totalBefore, err := logger.GetRecent(0) // Get all
+	countBefore, err := logger.Count(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to count records: %w", err)
 	}
 
 	// Perform cleanup
-	if err := logger.CleanupOldRecords(time.Duration(days) * 24 * time.Hour); err != nil {
+	if err := logger.CleanupOldRecords(context.Background(), time.Duration(days)*24*time.Hour); err != nil {
 		return fmt.Errorf("failed to clean up history: %w", err)
 	}
 
 	// Get count after deletion
-	totalAfter, err := logger.GetRecent(0)
+	countAfter, err := logger.Count(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to count records: %w", err)
 	}
 
-	deleted := len(totalBefore) - len(totalAfter)
+	deleted := int(countBefore - countAfter)
 
 	if deleted == 0 {
 		fmt.Printf("No records older than %d days found\n", days)
 	} else {
 		fmt.Printf("✅ Cleaned up %d record(s) older than %d days\n", deleted, days)
-		fmt.Printf("Remaining: %d record(s)\n", len(totalAfter))
+		fmt.Printf("Remaining: %d record(s)\n", countAfter)
 	}
 
 	return nil
@@ -328,32 +331,32 @@ func runHistoryListBatch(cmd *cobra.Command, batchID string, configFile string) 
 	batchFileOpRepo := database.NewBatchFileOperationRepository(deps.DB)
 
 	// Load job
-	job, err := jobRepo.FindByID(batchID)
+	job, err := jobRepo.FindByID(context.Background(), batchID)
 	if err != nil {
 		return fmt.Errorf("batch job not found: %s", batchID)
 	}
 
 	// Load operations
-	ops, err := batchFileOpRepo.FindByBatchJobID(batchID)
+	ops, err := batchFileOpRepo.FindByBatchJobID(context.Background(), batchID)
 	if err != nil {
 		return fmt.Errorf("failed to load operations: %w", err)
 	}
 
 	// Compute counts
 	opCount := int64(len(ops))
-	revertedCount, _ := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(batchID, models.RevertStatusReverted)
-	pendingCount, _ := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(batchID, models.RevertStatusApplied)
+	revertedCount, _ := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(context.Background(), batchID, models.RevertStatusReverted)
+	pendingCount, _ := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(context.Background(), batchID, models.RevertStatusApplied)
 
 	// Print batch header
 	fmt.Printf("=== Batch Job: %s ===\n", batchID)
 
 	statusIcon := "✅"
 	switch job.Status {
-	case "reverted":
+	case models.JobStatusReverted:
 		statusIcon = "↩️"
-	case "failed":
+	case models.JobStatusFailed:
 		statusIcon = "❌"
-	case "pending", "running":
+	case models.JobStatusPending, models.JobStatusRunning:
 		statusIcon = "⏳"
 	}
 	fmt.Printf("Status:      %s %s\n", statusIcon, job.Status)

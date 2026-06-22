@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,10 +22,10 @@ func TestProberRegistry_ProbeWithFallback_UnsupportedFormat(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	cfg := DefaultMediaInfoConfig()
-	registry := NewProberRegistry(cfg)
+	cfg := defaultMediaInfoConfig()
+	registry := newProberRegistry(cfg)
 
-	_, err = registry.ProbeWithFallback(f)
+	_, err = registry.probeWithFallback(context.Background(), f)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported container format")
 }
@@ -41,17 +42,17 @@ func TestProberRegistry_ProbeWithFallback_SmallFile(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	cfg := DefaultMediaInfoConfig()
-	registry := NewProberRegistry(cfg)
+	cfg := defaultMediaInfoConfig()
+	registry := newProberRegistry(cfg)
 
-	_, err = registry.ProbeWithFallback(f)
+	_, err = registry.probeWithFallback(context.Background(), f)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read file header")
 }
 
 func TestAnalyzeWithConfig_InvalidFile(t *testing.T) {
-	cfg := DefaultMediaInfoConfig()
-	_, err := AnalyzeWithConfig("/nonexistent/file.mp4", cfg)
+	cfg := defaultMediaInfoConfig()
+	_, err := analyzeWithConfig(context.Background(), "/nonexistent/file.mp4", cfg)
 	assert.Error(t, err)
 }
 
@@ -62,31 +63,31 @@ func TestAnalyzeWithConfig_TooSmallFile(t *testing.T) {
 	err := os.WriteFile(smallPath, []byte("tiny"), 0644)
 	require.NoError(t, err)
 
-	cfg := DefaultMediaInfoConfig()
-	_, err = AnalyzeWithConfig(smallPath, cfg)
+	cfg := defaultMediaInfoConfig()
+	_, err = analyzeWithConfig(context.Background(), smallPath, cfg)
 	assert.Error(t, err)
 }
 
 func TestProberRegistry_NewProberRegistry_WithCLI(t *testing.T) {
-	cfg := &MediaInfoConfig{
+	cfg := &mediaInfoConfig{
 		CLIEnabled: true,
 		CLIPath:    "mediainfo",
 		CLITimeout: 30,
 	}
 
-	registry := NewProberRegistry(cfg)
+	registry := newProberRegistry(cfg)
 	assert.NotNil(t, registry)
 	assert.NotNil(t, registry.cliProber)
 }
 
 func TestProberRegistry_NewProberRegistry_WithoutCLI(t *testing.T) {
-	cfg := &MediaInfoConfig{
+	cfg := &mediaInfoConfig{
 		CLIEnabled: false,
 		CLIPath:    "mediainfo",
 		CLITimeout: 30,
 	}
 
-	registry := NewProberRegistry(cfg)
+	registry := newProberRegistry(cfg)
 	assert.NotNil(t, registry)
 	assert.Nil(t, registry.cliProber)
 }

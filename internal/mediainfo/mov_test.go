@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -115,8 +116,8 @@ func TestMOVProber_Probe(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMOVProber()
-	info, err := prober.Probe(f)
+	prober := newMOVProber()
+	info, err := prober.Probe(context.Background(), f)
 
 	if err != nil {
 		// Error is acceptable for minimal files
@@ -160,8 +161,8 @@ func TestMOVProber_Probe_M4V(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMOVProber()
-	result := prober.CanProbe(ftyp)
+	prober := newMOVProber()
+	result := prober.canProbe(ftyp)
 	assert.True(t, result, "MOV prober should handle M4V brand")
 }
 
@@ -199,8 +200,8 @@ func TestMOVProber_Probe_M4A(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMOVProber()
-	result := prober.CanProbe(ftyp)
+	prober := newMOVProber()
+	result := prober.canProbe(ftyp)
 	assert.True(t, result, "MOV prober should handle M4A brand")
 }
 
@@ -238,8 +239,8 @@ func TestMOVProber_Probe_FlashVideo(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMOVProber()
-	result := prober.CanProbe(ftyp)
+	prober := newMOVProber()
+	result := prober.canProbe(ftyp)
 	assert.True(t, result, "MOV prober should handle F4V brand")
 }
 
@@ -277,8 +278,8 @@ func TestMOVProber_Probe_MP4Brand(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMOVProber()
-	result := prober.CanProbe(ftyp)
+	prober := newMOVProber()
+	result := prober.canProbe(ftyp)
 	assert.False(t, result, "MOV prober should NOT handle standard MP4 (isom) brand")
 }
 
@@ -294,8 +295,8 @@ func TestMOVProber_Probe_SmallHeader(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMOVProber()
-	result := prober.CanProbe([]byte("ftyp"))
+	prober := newMOVProber()
+	result := prober.canProbe([]byte("ftyp"))
 	assert.False(t, result, "MOV prober should reject header too small")
 }
 
@@ -311,8 +312,8 @@ func TestMOVProber_Probe_NoFTyp(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMOVProber()
-	result := prober.CanProbe([]byte("RIFFxxxxAVI "))
+	prober := newMOVProber()
+	result := prober.canProbe([]byte("RIFFxxxxAVI "))
 	assert.False(t, result, "MOV prober should reject file without ftyp")
 }
 
@@ -329,8 +330,8 @@ func TestMOVProber_Probe_CorruptedHeader(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	prober := NewMOVProber()
-	result := prober.CanProbe([]byte("XXXX\x00\x00\x00\x00ftyp"))
+	prober := newMOVProber()
+	result := prober.canProbe([]byte("XXXX\x00\x00\x00\x00ftyp"))
 	assert.False(t, result, "MOV prober should reject corrupted header")
 }
 

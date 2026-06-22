@@ -39,7 +39,7 @@ function dismissDialog(id: string, value: string) {
 export function confirmDialog(
 	title: string,
 	message: string,
-	options?: { confirmLabel?: string; cancelLabel?: string; variant?: 'danger' }
+	options?: { confirmLabel?: string; cancelLabel?: string; variant?: 'danger' },
 ): Promise<boolean> {
 	return addDialog({
 		title,
@@ -50,9 +50,9 @@ export function confirmDialog(
 			{
 				label: options?.confirmLabel ?? 'Confirm',
 				variant: options?.variant === 'danger' ? 'destructive' : 'default',
-				value: 'confirm'
-			}
-		]
+				value: 'confirm',
+			},
+		],
 	}).then((v) => v === 'confirm');
 }
 
@@ -60,7 +60,7 @@ export function alertDialog(title: string, message: string): Promise<void> {
 	return addDialog({
 		title,
 		message,
-		buttons: [{ label: 'OK', variant: 'default', value: 'ok' }]
+		buttons: [{ label: 'OK', variant: 'default', value: 'ok' }],
 	}).then(() => {});
 }
 

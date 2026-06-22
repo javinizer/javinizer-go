@@ -1,15 +1,19 @@
 package batch
 
 import (
-	"encoding/json"
 	"fmt"
+	"net/http"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
@@ -19,93 +23,50 @@ import (
 // @Tags web
 // @Accept json
 // @Produce json
-// @Param request body BatchScrapeRequest true "Batch scrape parameters"
-// @Success 200 {object} BatchScrapeResponse
-// @Failure 400 {object} ErrorResponse
+// @Param request body contracts.BatchScrapeRequest true "Batch scrape parameters"
+// @Success 200 {object} contracts.BatchScrapeResponse
+// @Failure 400 {object} contracts.ErrorResponse
 // @Router /api/v1/batch/scrape [post]
-func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
+func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req BatchScrapeRequest
+		var req contracts.BatchScrapeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		// Apply preset if specified (overrides individual strategy fields)
-		if req.Preset != "" {
-			var presetErr error
-			req.ScalarStrategy, req.ArrayStrategy, presetErr = nfo.ApplyPreset(req.Preset, req.ScalarStrategy, req.ArrayStrategy)
-			if presetErr != nil {
-				c.JSON(400, ErrorResponse{Error: presetErr.Error()})
-				return
-			}
-			logging.Infof("Applied preset '%s': scalar=%s, array=%s", req.Preset, req.ScalarStrategy, req.ArrayStrategy)
-		}
-
 		// Security: Validate all submitted files against directory security settings
-		cfg := deps.GetConfig()
+		deps := rt.Deps()
+		apiCfg := rt.GetAPIConfig()
+		secCfg := apiCfg.SecurityConfig()
 		for _, filePath := range req.Files {
 			dir := filepath.Dir(filePath)
-			if !isDirAllowed(dir, cfg.API.Security.AllowedDirectories, cfg.API.Security.DeniedDirectories) {
+			if !isDirAllowed(deps.GetFs(), dir, secCfg.AllowedDirectories, secCfg.DeniedDirectories) {
 				// Security: Don't leak directory paths in error messages
-				c.JSON(403, ErrorResponse{Error: "Access denied to requested directory"})
+				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: "Access denied to requested directory"})
 				return
 			}
 		}
 
-		// Auto-discover sibling multi-part files
-		allFiles, fileMatchInfo := discoverSiblingPartsWithMetadata(req.Files, deps.GetMatcher(), cfg)
-
-		if len(allFiles) > len(req.Files) {
-			logging.Infof("Auto-discovered %d sibling files for batch job (original: %d, total: %d)",
-				len(allFiles)-len(req.Files), len(req.Files), len(allFiles))
-		}
-
-		// Create job with all files (original + discovered siblings)
-		job := deps.JobQueue.CreateJob(allFiles)
-
-		// Set destination for the job
-		if req.Destination != "" {
-			job.SetDestination(req.Destination)
-		}
-
-		// Set folder mode overrides for the job (used during organization)
-		if req.OperationMode != "" {
-			job.SetOperationModeOverride(req.OperationMode)
-		}
-
-		if req.Update {
-			job.SetUpdate(true)
-		}
-
-		// Populate file match metadata (multipart info from discovery)
-		for path, info := range fileMatchInfo {
-			job.SetFileMatchInfo(path, info)
-		}
-
-		// Start processing in background - use getters for thread-safe access
-		go processBatchJob(&BatchProcessOptions{
-			Job:                   job,
-			JobQueue:              deps.JobQueue,
-			Registry:              deps.GetRegistry(),
-			Aggregator:            deps.GetAggregator(),
-			MovieRepo:             deps.MovieRepo,
-			Matcher:               deps.GetMatcher(),
-			Strict:                req.Strict,
-			Force:                 req.Force,
-			UpdateMode:            req.Update,
-			Destination:           req.Destination,
-			Cfg:                   deps.GetConfig(),
-			SelectedScrapers:      req.SelectedScrapers,
-			ScalarStrategy:        req.ScalarStrategy,
-			ArrayStrategy:         req.ArrayStrategy,
-			DB:                    deps.DB,
-			OperationModeOverride: req.OperationMode,
-			Emitter:               deps.EventEmitter,
+		output, err := StartScrapeUseCase(c.Request.Context(), rt, StartScrapeInput{
+			Files:            req.Files,
+			Destination:      req.Destination,
+			OperationMode:    req.OperationMode,
+			Preset:           req.Preset,
+			ScalarStrategy:   req.ScalarStrategy,
+			ArrayStrategy:    req.ArrayStrategy,
+			Update:           &req.Update,
+			SelectedScrapers: req.SelectedScrapers,
+			Strict:           req.Strict,
+			Force:            req.Force,
 		})
+		if err != nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			return
+		}
 
-		c.JSON(200, BatchScrapeResponse{
-			JobID: job.ID,
+		c.JSON(http.StatusOK, contracts.BatchScrapeResponse{
+			JobID: output.JobID,
 		})
 	}
 }
@@ -116,11 +77,12 @@ func batchScrape(deps *ServerDependencies) gin.HandlerFunc {
 // @Tags web
 // @Produce json
 // @Param id path string true "Job ID"
-// @Success 200 {object} BatchJobResponse
-// @Failure 404 {object} ErrorResponse
+// @Success 200 {object} contracts.BatchJobResponse
+// @Failure 404 {object} contracts.ErrorResponse
 // @Router /api/v1/batch/{id} [get]
-func getBatchJob(deps *ServerDependencies) gin.HandlerFunc {
+func getBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		deps := rt.Deps()
 		jobID := c.Param("id")
 		includeData := c.Query("include_data") == "true"
 
@@ -132,123 +94,30 @@ func getBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 	}
 }
 
-func getBatchJobFull(deps *ServerDependencies, c *gin.Context, jobID string) {
-	job, ok := deps.JobQueue.GetJob(jobID)
+func getBatchJobFull(deps *core.APIDeps, c *gin.Context, jobID string) {
+	job, ok := deps.GetJobStore().GetJob(jobID)
 	if !ok {
-		c.JSON(404, ErrorResponse{Error: "Job not found"})
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
 		return
 	}
 
 	logging.Debugf("[GET /batch/%s] Returning full job with %d results, completed=%d, failed=%d",
 		jobID, len(job.Results), job.Completed, job.Failed)
 
-	var completedAt *string
-	if job.CompletedAt != nil {
-		str := job.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
-		completedAt = &str
-	}
-
-	results := make(map[string]*BatchFileResult)
-	for filePath, fileResult := range job.Results {
-		var endedAt *string
-		if fileResult.EndedAt != nil {
-			str := fileResult.EndedAt.Format("2006-01-02T15:04:05Z07:00")
-			endedAt = &str
-		}
-
-		results[filePath] = &BatchFileResult{
-			ResultID:       fileResult.ResultID,
-			FilePath:       fileResult.FilePath,
-			MovieID:        fileResult.MovieID,
-			Status:         string(fileResult.Status),
-			Error:          fileResult.Error,
-			FieldSources:   fileResult.FieldSources,
-			ActressSources: fileResult.ActressSources,
-			Data:           fileResult.Data,
-			StartedAt:      fileResult.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-			EndedAt:        endedAt,
-			IsMultiPart:    fileResult.IsMultiPart,
-			PartNumber:     fileResult.PartNumber,
-			PartSuffix:     fileResult.PartSuffix,
-		}
-	}
-
-	c.JSON(200, BatchJobResponse{
-		ID:                    job.ID,
-		Status:                string(job.Status),
-		TotalFiles:            job.TotalFiles,
-		Completed:             job.Completed,
-		Failed:                job.Failed,
-		Excluded:              job.Excluded,
-		Progress:              job.Progress,
-		Destination:           job.Destination,
-		Results:               results,
-		StartedAt:             job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-		CompletedAt:           completedAt,
-		OperationModeOverride: job.OperationModeOverride,
-		Update:                job.Update,
-		PersistError:          job.PersistError,
-	})
+	c.JSON(http.StatusOK, buildBatchJobResponse(job))
 }
 
-func getBatchJobSlim(deps *ServerDependencies, c *gin.Context, jobID string) {
-	jobPtr, ok := deps.JobQueue.GetJobPointer(jobID)
+func getBatchJobSlim(deps *core.APIDeps, c *gin.Context, jobID string) {
+	status, ok := deps.GetJobStore().GetJob(jobID)
 	if !ok {
-		c.JSON(404, ErrorResponse{Error: "Job not found"})
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
 		return
 	}
 
-	slim := jobPtr.GetStatusSlim()
-
 	logging.Debugf("[GET /batch/%s] Returning slim job with %d results, completed=%d, failed=%d",
-		jobID, len(slim.Results), slim.Completed, slim.Failed)
+		jobID, len(status.Results), status.Completed, status.Failed)
 
-	var completedAt *string
-	if slim.CompletedAt != nil {
-		str := slim.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
-		completedAt = &str
-	}
-
-	results := make(map[string]*contracts.BatchFileResultSlim)
-	for filePath, fileResult := range slim.Results {
-		var endedAt *string
-		if fileResult.EndedAt != nil {
-			str := fileResult.EndedAt.Format("2006-01-02T15:04:05Z07:00")
-			endedAt = &str
-		}
-
-		results[filePath] = &contracts.BatchFileResultSlim{
-			ResultID:       fileResult.ResultID,
-			FilePath:       fileResult.FilePath,
-			MovieID:        fileResult.MovieID,
-			Status:         string(fileResult.Status),
-			Error:          fileResult.Error,
-			FieldSources:   fileResult.FieldSources,
-			ActressSources: fileResult.ActressSources,
-			StartedAt:      fileResult.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-			EndedAt:        endedAt,
-			IsMultiPart:    fileResult.IsMultiPart,
-			PartNumber:     fileResult.PartNumber,
-			PartSuffix:     fileResult.PartSuffix,
-		}
-	}
-
-	c.JSON(200, contracts.BatchJobResponseSlim{
-		ID:                    slim.ID,
-		Status:                string(slim.Status),
-		TotalFiles:            slim.TotalFiles,
-		Completed:             slim.Completed,
-		Failed:                slim.Failed,
-		Excluded:              slim.Excluded,
-		Progress:              slim.Progress,
-		Destination:           slim.Destination,
-		Results:               results,
-		StartedAt:             slim.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-		CompletedAt:           completedAt,
-		OperationModeOverride: slim.OperationModeOverride,
-		Update:                slim.Update,
-		PersistError:          slim.PersistError,
-	})
+	c.JSON(http.StatusOK, buildBatchJobSlimResponse(status))
 }
 
 // cancelBatchJob godoc
@@ -258,30 +127,45 @@ func getBatchJobSlim(deps *ServerDependencies, c *gin.Context, jobID string) {
 // @Produce json
 // @Param id path string true "Job ID"
 // @Success 200 {object} map[string]string
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
 // @Router /api/v1/batch/{id}/cancel [post]
-func cancelBatchJob(deps *ServerDependencies) gin.HandlerFunc {
+func cancelBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		jobID := c.Param("id")
+		deps := rt.Deps()
+		job, err := prepareBatchRequest(deps, rt, c, withSkipRunningCheck())
+		if err != nil {
+			return
+		}
 
-		// Use GetJobPointer to get the real job (not a snapshot) so Cancel() works
-		job, ok := deps.JobQueue.GetJobPointer(jobID)
-		if !ok {
-			c.JSON(404, ErrorResponse{Error: "Job not found"})
+		status := job.GetStatus().Status
+		switch status {
+		case models.JobStatusCompleted, models.JobStatusFailed, models.JobStatusCancelled, models.JobStatusOrganized, models.JobStatusReverted:
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("Job is already %s", string(status))})
 			return
 		}
 
 		job.Cancel()
 
-		// Cleanup temp posters for cancelled job (batch job is gone, temp posters no longer needed)
-		// Use job's stored TempDir for consistent cleanup path
-		tempDir := job.GetTempDir()
+		tempDir := job.GetStatus().TempDir
 		if tempDir == "" {
-			tempDir = deps.GetConfig().System.TempDir
+			tempDir = rt.GetAPIConfig().BatchConfig().TempDir
 		}
-		go cleanupJobTempPosters(jobID, tempDir)
 
-		c.JSON(200, gin.H{"message": "Job cancelled successfully"})
+		// Wait for the job to reach a terminal state before cleaning up temp posters.
+		// Cancel() only sets the cancelled flag and cancels the context — the job's
+		// scrape/apply goroutines may still be running and reading/writing poster files.
+		// Deleting the temp poster directory while they're active causes file-not-found
+		// errors or partial writes.
+		go func() {
+			select {
+			case <-job.Done():
+			case <-time.After(5 * time.Second):
+				logging.Warnf("CancelJob: timed out waiting for job %s to finish, proceeding with cleanup", job.GetID())
+			}
+			cleanupJobTempPosters(deps.GetFs(), job.GetID(), tempDir)
+		}()
+
+		c.JSON(http.StatusOK, gin.H{"message": "Job cancelled successfully"})
 	}
 }
 
@@ -292,116 +176,104 @@ func cancelBatchJob(deps *ServerDependencies) gin.HandlerFunc {
 // @Produce json
 // @Param id path string true "Job ID"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/batch/{id} [delete]
-func deleteBatchJob(deps *ServerDependencies) gin.HandlerFunc {
+func deleteBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		deps := rt.Deps()
 		jobID := c.Param("id")
 
-		job, ok := deps.JobQueue.GetJobPointer(jobID)
-		if !ok {
-			c.JSON(404, ErrorResponse{Error: "Job not found"})
+		if err := deps.GetJobStore().DeleteJob(jobID); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error()})
+				return
+			}
+			if strings.Contains(err.Error(), "cannot delete running job") {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to delete job: %v", err)})
 			return
 		}
 
-		if job.GetStatus().Status == worker.JobStatusRunning {
-			c.JSON(400, ErrorResponse{Error: "Cannot delete running job. Cancel it first."})
-			return
-		}
-
-		tempDir := job.GetTempDir()
-		if tempDir == "" {
-			tempDir = deps.GetConfig().System.TempDir
-		}
-
-		if err := deps.JobQueue.DeleteJob(jobID, tempDir); err != nil {
-			c.JSON(500, ErrorResponse{Error: fmt.Sprintf("Failed to delete job: %v", err)})
-			return
-		}
-
-		c.JSON(200, gin.H{"message": "Job deleted successfully"})
+		c.JSON(http.StatusOK, gin.H{"message": "Job deleted successfully"})
 	}
 }
 
 // listBatchJobs godoc
 // @Summary List batch jobs
-// @Description Get a list of batch jobs with operation counts
+// @Description Get a paginated list of batch jobs with operation counts. Only job metadata is included; use GET /batch/{id} with include_data=true for full results.
 // @Tags web
 // @Produce json
+// @Param limit query int false "Maximum number of jobs to return (default 50, max 200)" minimum(1) maximum(200) default(50)
+// @Param offset query int false "Number of jobs to skip (default 0)" minimum(0) default(0)
 // @Success 200 {object} contracts.BatchJobListResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/batch [get]
-func listBatchJobs(deps *ServerDependencies) gin.HandlerFunc {
+func listBatchJobs(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		jobs, err := deps.JobRepo.List()
+		deps := rt.Deps()
+		// Parse pagination parameters with sensible defaults
+		limit := 50
+		offset := 0
+
+		if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 {
+			limit = l
+			if limit > 200 {
+				limit = 200
+			}
+		}
+		if o, err := strconv.Atoi(c.Query("offset")); err == nil && o >= 0 {
+			offset = o
+		}
+
+		output, err := ListJobsUseCase(c.Request.Context(), deps, ListJobsInput{
+			Limit:  limit,
+			Offset: offset,
+		})
 		if err != nil {
-			c.JSON(500, ErrorResponse{Error: "Failed to list jobs"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		response := contracts.BatchJobListResponse{
-			Jobs: make([]contracts.BatchJobResponse, 0, len(jobs)),
-		}
-
-		for _, job := range jobs {
-			var completedAt *string
-			if job.CompletedAt != nil {
-				str := job.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
-				completedAt = &str
-			}
-
-			var results map[string]*contracts.BatchFileResult
-			if job.Results != "" {
-				if err := json.Unmarshal([]byte(job.Results), &results); err != nil {
-					results = make(map[string]*contracts.BatchFileResult)
-				}
-			} else {
-				results = make(map[string]*contracts.BatchFileResult)
-			}
-
-			var excluded map[string]bool
-			if job.Excluded != "" {
-				if err := json.Unmarshal([]byte(job.Excluded), &excluded); err != nil {
-					excluded = make(map[string]bool)
-				}
-			} else {
-				excluded = make(map[string]bool)
-			}
-
-			opCount, err := deps.BatchFileOpRepo.CountByBatchJobID(job.ID)
-			if err != nil {
-				logging.Errorf("Failed to count operations for job %s: %v", job.ID, err)
-				c.JSON(500, ErrorResponse{Error: "Failed to retrieve operation counts"})
-				return
-			}
-
-			revertedCount, err := deps.BatchFileOpRepo.CountByBatchJobIDAndRevertStatus(job.ID, models.RevertStatusReverted)
-			if err != nil {
-				logging.Errorf("Failed to count reverted operations for job %s: %v", job.ID, err)
-				c.JSON(500, ErrorResponse{Error: "Failed to retrieve revert counts"})
-				return
-			}
-
-			response.Jobs = append(response.Jobs, contracts.BatchJobResponse{
-				ID:             job.ID,
-				Status:         job.Status,
-				TotalFiles:     job.TotalFiles,
-				Completed:      job.Completed,
-				Failed:         job.Failed,
-				OperationCount: opCount,
-				RevertedCount:  revertedCount,
-				Excluded:       excluded,
-				Progress:       job.Progress,
-				Destination:    job.Destination,
-				Results:        results,
-				StartedAt:      job.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-				CompletedAt:    completedAt,
-				Update:         job.Update,
-			})
-		}
-
-		c.JSON(200, response)
+		c.JSON(http.StatusOK, contracts.BatchJobListResponse{
+			Jobs:  output.Jobs,
+			Total: output.Total,
+		})
 	}
+}
+
+// parseAndConvertJobResults handles the three DB persistence formats for job results
+// and converts them into BatchFileResult for API responses. It delegates the actual
+// format detection and parsing to worker.ParseJobResultsJSON, then converts
+// MovieResult → BatchFileResult via movieResultToResponse.
+func parseAndConvertJobResults(job *models.Job) map[string]*contracts.BatchFileResult {
+	if job.Results == "" {
+		return make(map[string]*contracts.BatchFileResult)
+	}
+
+	parsed, err := worker.ParseJobResultsJSON([]byte(job.Results))
+	if err != nil {
+		logging.Warnf("Failed to parse results for job %s: %v", job.ID, err)
+		return make(map[string]*contracts.BatchFileResult)
+	}
+
+	results := make(map[string]*contracts.BatchFileResult, len(parsed.Results))
+	for filePath, mr := range parsed.Results {
+		var prov *worker.ProvenanceData
+		if parsed.Provenance != nil {
+			prov = parsed.Provenance[filePath]
+		}
+		result := movieResultToResponse(mr, prov)
+		if result.ResultID == "" {
+			// Deterministic UUID for legacy records that lack result_id.
+			// Uses uuid.NewSHA1 so the same file path always gets the same ID
+			// across API calls, preventing UI state thrash on polling.
+			result.ResultID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(filePath)).String()
+		}
+		results[filePath] = result
+	}
+	return results
 }

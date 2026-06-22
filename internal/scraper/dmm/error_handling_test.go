@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,12 +33,12 @@ import (
 func TestErrorMessages_ContainScraperName(t *testing.T) {
 	tests := []struct {
 		name        string
-		triggerFunc func(*Scraper) error
+		triggerFunc func(*scraper) error
 		wantPrefix  string
 	}{
 		{
 			name: "search error includes DMM",
-			triggerFunc: func(s *Scraper) error {
+			triggerFunc: func(s *scraper) error {
 				// Trigger error by providing invalid repo
 				_, err := s.ResolveContentID("TEST-123")
 				return err
@@ -47,8 +47,8 @@ func TestErrorMessages_ContainScraperName(t *testing.T) {
 		},
 		{
 			name: "GetURL error includes context",
-			triggerFunc: func(s *Scraper) error {
-				_, err := s.GetURL("INVALID-999")
+			triggerFunc: func(s *scraper) error {
+				_, err := s.GetURL(context.Background(), "INVALID-999")
 				return err
 			},
 			wantPrefix: "DMM",
@@ -57,10 +57,10 @@ func TestErrorMessages_ContainScraperName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled: true,
 			}
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil) // nil repo to trigger errors
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false)) // nil repo to trigger errors
 
 			err := tt.triggerFunc(scraper)
 
@@ -77,10 +77,10 @@ func TestErrorMessages_ContainScraperName(t *testing.T) {
 
 // TestErrorMessages_NoSensitiveData ensures no API keys or internal paths in errors
 func TestErrorMessages_NoSensitiveData(t *testing.T) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled: true,
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 	// Trigger various errors and check none leak sensitive data
 	sensitivePatterns := []string{
@@ -106,7 +106,7 @@ func TestErrorMessages_NoSensitiveData(t *testing.T) {
 		{
 			name: "GetURL error",
 			action: func() error {
-				_, err := scraper.GetURL("TEST-456")
+				_, err := scraper.GetURL(context.Background(), "TEST-456")
 				return err
 			},
 		},
@@ -130,14 +130,14 @@ func TestErrorMessages_NoSensitiveData(t *testing.T) {
 func TestResolveContentID_ErrorCases(t *testing.T) {
 	tests := []struct {
 		name        string
-		setupRepo   func() *database.ContentIDMappingRepository
+		setupRepo   func() database.ContentIDMappingRepositoryInterface
 		movieID     string
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name: "nil repository",
-			setupRepo: func() *database.ContentIDMappingRepository {
+			setupRepo: func() database.ContentIDMappingRepositoryInterface {
 				return nil
 			},
 			movieID:     "TEST-123",
@@ -148,12 +148,12 @@ func TestResolveContentID_ErrorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled: true,
 			}
 
 			repo := tt.setupRepo()
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), repo)
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
 			contentID, err := scraper.ResolveContentID(tt.movieID)
 
@@ -190,18 +190,18 @@ func TestGetURL_ErrorPropagation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{
+			settings := models.ScraperSettings{
 				Enabled: true,
 			}
 
-			var repo *database.ContentIDMappingRepository
+			var repo database.ContentIDMappingRepositoryInterface
 			if tt.setupRepo {
 				repo = database.NewContentIDMappingRepository(nil)
 			}
 
-			scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), repo)
+			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
-			url, err := scraper.GetURL(tt.movieID)
+			url, err := scraper.GetURL(context.Background(), tt.movieID)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -222,18 +222,18 @@ func TestSearch_ErrorHandling(t *testing.T) {
 	tests := []struct {
 		name        string
 		movieID     string
-		setupFunc   func() (*Scraper, func())
+		setupFunc   func() (*scraper, func())
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name:    "GetURL failure propagates",
 			movieID: "INVALID-123",
-			setupFunc: func() (*Scraper, func()) {
-				settings := config.ScraperSettings{
+			setupFunc: func() (*scraper, func()) {
+				settings := models.ScraperSettings{
 					Enabled: true,
 				}
-				scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil) // nil repo causes GetURL to fail
+				scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false)) // nil repo causes GetURL to fail
 				return scraper, func() {}
 			},
 			wantErr:     true,
@@ -264,10 +264,10 @@ func TestSearch_ErrorHandling(t *testing.T) {
 
 // Benchmark_ErrorHandling measures performance of error path
 func Benchmark_ErrorHandling(b *testing.B) {
-	settings := config.ScraperSettings{
+	settings := models.ScraperSettings{
 		Enabled: true,
 	}
-	scraper := New(settings, createTestGlobalConfig(&config.ProxyConfig{}, config.FlareSolverrConfig{}, false, false), nil)
+	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

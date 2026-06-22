@@ -2,6 +2,7 @@ package actress
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -82,8 +83,8 @@ func runMerge(cmd *cobra.Command, configFile string) error {
 	}
 	defer func() { _ = deps.Close() }()
 
-	repo := database.NewActressRepository(deps.GetDB())
-	preview, err := repo.PreviewMerge(targetID, sourceID)
+	repo := database.NewActressRepository(deps.DB)
+	preview, err := repo.PreviewMerge(context.Background(), targetID, sourceID)
 	if err != nil {
 		return err
 	}
@@ -114,7 +115,7 @@ func runMerge(cmd *cobra.Command, configFile string) error {
 		}
 	}
 
-	result, err := repo.Merge(targetID, sourceID, resolutions)
+	result, err := repo.Merge(context.Background(), targetID, sourceID, resolutions)
 	if err != nil {
 		return err
 	}
@@ -185,15 +186,15 @@ func runActressExport(cmd *cobra.Command, args []string, configFile string) erro
 	}
 	defer func() { _ = deps.Close() }()
 
-	repo := database.NewActressRepository(deps.GetDB())
-	actresses, err := repo.List(0, 0)
+	repo := database.NewActressRepository(deps.DB)
+	actresses, err := repo.List(context.Background(), 0, 0)
 	if err != nil {
-		return fmt.Errorf("failed to list actresses: %v", err)
+		return fmt.Errorf("failed to list actresses: %w", err)
 	}
 
 	data, err := json.MarshalIndent(actresses, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %v", err)
+		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
 	if len(args) == 0 {
@@ -202,7 +203,7 @@ func runActressExport(cmd *cobra.Command, args []string, configFile string) erro
 		_, _ = fmt.Printf("Exported %d actress(es) to stdout\n", len(actresses))
 	} else {
 		if err := os.WriteFile(args[0], data, 0644); err != nil {
-			return fmt.Errorf("failed to write file: %v", err)
+			return fmt.Errorf("failed to write file: %w", err)
 		}
 		fmt.Printf("Exported %d actress(es) to %s\n", len(actresses), args[0])
 	}
@@ -213,12 +214,12 @@ func runActressExport(cmd *cobra.Command, args []string, configFile string) erro
 func runActressImport(cmd *cobra.Command, args []string, configFile string) error {
 	fileData, err := os.ReadFile(args[0])
 	if err != nil {
-		return fmt.Errorf("failed to read file: %v", err)
+		return fmt.Errorf("failed to read file: %w", err)
 	}
 
 	var actresses []models.Actress
 	if err := json.Unmarshal(fileData, &actresses); err != nil {
-		return fmt.Errorf("failed to parse JSON: %v", err)
+		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
 	if len(actresses) == 0 {
@@ -236,7 +237,7 @@ func runActressImport(cmd *cobra.Command, args []string, configFile string) erro
 	}
 	defer func() { _ = deps.Close() }()
 
-	repo := database.NewActressRepository(deps.GetDB())
+	repo := database.NewActressRepository(deps.DB)
 	imported := 0
 	skipped := 0
 	errorsCount := 0
@@ -244,7 +245,7 @@ func runActressImport(cmd *cobra.Command, args []string, configFile string) erro
 	for i := range actresses {
 		a := &actresses[i]
 		if a.ID > 0 {
-			existing, err := repo.FindByID(a.ID)
+			existing, err := repo.FindByID(context.Background(), a.ID)
 			if err == nil {
 				if existing.FirstName == a.FirstName && existing.LastName == a.LastName &&
 					existing.JapaneseName == a.JapaneseName && existing.ThumbURL == a.ThumbURL &&
@@ -253,14 +254,14 @@ func runActressImport(cmd *cobra.Command, args []string, configFile string) erro
 					continue
 				}
 				a.UpdatedAt = existing.UpdatedAt
-				if err := repo.Update(a); err != nil {
+				if err := repo.Update(context.Background(), a); err != nil {
 					errorsCount++
 					continue
 				}
 				imported++
 				continue
 			}
-			if err := repo.Create(a); err != nil {
+			if err := repo.Create(context.Background(), a); err != nil {
 				errorsCount++
 				continue
 			}
@@ -268,7 +269,7 @@ func runActressImport(cmd *cobra.Command, args []string, configFile string) erro
 		} else {
 			var existing *models.Actress
 			if a.JapaneseName != "" {
-				existing, err = repo.FindByJapaneseName(a.JapaneseName)
+				existing, err = repo.FindByJapaneseName(context.Background(), a.JapaneseName)
 				if err == nil {
 					if existing.FirstName == a.FirstName && existing.LastName == a.LastName &&
 						existing.ThumbURL == a.ThumbURL && existing.Aliases == a.Aliases &&
@@ -278,7 +279,7 @@ func runActressImport(cmd *cobra.Command, args []string, configFile string) erro
 					}
 					a.ID = existing.ID
 					a.CreatedAt = existing.CreatedAt
-					if err := repo.Update(a); err != nil {
+					if err := repo.Update(context.Background(), a); err != nil {
 						errorsCount++
 						continue
 					}
@@ -286,7 +287,7 @@ func runActressImport(cmd *cobra.Command, args []string, configFile string) erro
 					continue
 				}
 			}
-			if err := repo.Create(a); err != nil {
+			if err := repo.Create(context.Background(), a); err != nil {
 				errorsCount++
 				continue
 			}

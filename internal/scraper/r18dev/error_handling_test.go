@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -81,14 +81,14 @@ func TestMalformedJSON_R18dev(t *testing.T) {
 func TestErrorMessages_ContainScraperName(t *testing.T) {
 	tests := []struct {
 		name       string
-		setupFunc  func() (*Scraper, error)
+		setupFunc  func() (*scraper, error)
 		wantPrefix string
 	}{
 		{
 			name: "empty search ID",
-			setupFunc: func() (*Scraper, error) {
-				settings := config.ScraperSettings{Enabled: true}
-				scraper := New(settings, nil, config.FlareSolverrConfig{})
+			setupFunc: func() (*scraper, error) {
+				settings := models.ScraperSettings{Enabled: true}
+				scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 				_, err := scraper.Search(context.Background(), "")
 				return scraper, err
 			},
@@ -113,8 +113,8 @@ func TestErrorMessages_ContainScraperName(t *testing.T) {
 
 // TestErrorMessages_NoSensitiveData ensures no API keys or internal paths in errors
 func TestErrorMessages_NoSensitiveData(t *testing.T) {
-	settings := config.ScraperSettings{Enabled: true}
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	settings := models.ScraperSettings{Enabled: true}
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 	// Trigger various errors and check none leak sensitive data
 	sensitivePatterns := []string{
@@ -133,7 +133,7 @@ func TestErrorMessages_NoSensitiveData(t *testing.T) {
 		{
 			name: "GetURL with empty ID",
 			action: func() error {
-				_, err := scraper.GetURL("")
+				_, err := scraper.GetURL(context.Background(), "")
 				return err
 			},
 		},
@@ -223,11 +223,11 @@ func TestMissingRequiredFields(t *testing.T) {
 
 // Benchmark_ErrorHandling measures performance of error path
 func Benchmark_ErrorHandling(b *testing.B) {
-	settings := config.ScraperSettings{Enabled: true}
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	settings := models.ScraperSettings{Enabled: true}
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = scraper.GetURL(fmt.Sprintf("TEST-%d", i))
+		_, _ = scraper.GetURL(context.Background(), fmt.Sprintf("TEST-%d", i))
 	}
 }

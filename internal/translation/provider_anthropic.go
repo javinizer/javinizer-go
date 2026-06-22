@@ -5,27 +5,44 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
-	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/httpclient"
 )
 
-func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
-	baseURL := strings.TrimRight(strings.TrimSpace(s.cfg.Anthropic.BaseURL), "/")
+type AnthropicProvider struct {
+	cfg        Config
+	httpClient httpclient.HTTPClient
+}
+
+func NewAnthropicProvider(cfg Config, httpClient httpclient.HTTPClient) *AnthropicProvider {
+	return &AnthropicProvider{cfg: cfg, httpClient: httpClient}
+}
+
+func (p *AnthropicProvider) Name() string { return "anthropic" }
+
+func (p *AnthropicProvider) Translate(ctx context.Context, sourceLang, targetLang string, texts []string) (*translationResult, error) {
+	if p == nil {
+		return nil, fmt.Errorf("nil receiver: *AnthropicProvider")
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(p.cfg.Anthropic.BaseURL), "/")
 	if baseURL == "" {
 		baseURL = "https://api.anthropic.com"
 	}
 
-	apiKey := strings.TrimSpace(s.cfg.Anthropic.APIKey)
+	apiKey := strings.TrimSpace(p.cfg.Anthropic.APIKey)
 	if apiKey == "" {
 		return nil, fmt.Errorf("anthropic api_key is required")
 	}
 
-	model := strings.TrimSpace(s.cfg.Anthropic.Model)
+	model := strings.TrimSpace(p.cfg.Anthropic.Model)
 	if model == "" {
 		model = "claude-sonnet-4-20250514"
+	}
+
+	if len(texts) == 0 {
+		return &translationResult{}, nil
 	}
 
 	systemPrompt, userPrompt, err := buildLLMTranslationPrompts(sourceLang, targetLang, texts)
@@ -33,54 +50,42 @@ func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, target
 		return nil, err
 	}
 
+	adapter := &anthropicChatAdapter{apiKey: apiKey}
+	return executeLLMChatTranslation(ctx, p.httpClient, adapter, "anthropic", baseURL, model, systemPrompt, userPrompt, len(texts))
+}
+
+// anthropicChatAdapter implements LLMChatAdapter for the Anthropic Messages API.
+type anthropicChatAdapter struct {
+	apiKey string
+}
+
+func (a *anthropicChatAdapter) BuildRequest(ctx context.Context, baseURL, model string, systemPrompt, userPrompt string, textCount int) (*http.Request, error) {
 	type anthropicMessage struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	}
-
-	requestBody := map[string]interface{}{
+	requestBody := map[string]any{
 		"model":      model,
 		"max_tokens": 4096,
 		"system":     systemPrompt,
 		"messages":   []anthropicMessage{{Role: "user", Content: userPrompt}},
 	}
-
 	body, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, err
 	}
 
-	logging.Debugf("Translation (anthropic): POST %s model=%s texts=%d", baseURL+"/v1/messages", model, len(texts))
-	logging.Debugf("Translation (anthropic): system prompt: %s", systemPrompt)
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("x-api-key", a.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("content-type", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	return req, nil
+}
 
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationResponseSize))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &TranslationError{
-			Kind:       TranslationErrorHTTPStatus,
-			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("anthropic translation failed with status %d: %s", resp.StatusCode, string(respBody)),
-		}
-	}
-
-	logging.Debugf("Translation (anthropic): response: %s", string(respBody))
-
+func (a *anthropicChatAdapter) DecodeResponse(providerName string, respBody []byte, textCount int) (*translationResult, error) {
 	var decoded struct {
 		Content []struct {
 			Type string `json:"type"`
@@ -88,11 +93,10 @@ func (s *Service) translateWithAnthropic(ctx context.Context, sourceLang, target
 		} `json:"content"`
 	}
 	if err := json.Unmarshal(respBody, &decoded); err != nil {
-		return nil, fmt.Errorf("failed to decode anthropic response: %w", err)
+		return nil, fmt.Errorf("failed to decode %s response: %w", providerName, err)
 	}
 	if len(decoded.Content) == 0 {
-		return nil, fmt.Errorf("anthropic response contained no content blocks")
+		return nil, fmt.Errorf("%s response contained no content blocks", providerName)
 	}
-
-	return buildLLMTranslationResult(strings.TrimSpace(decoded.Content[0].Text), len(texts))
+	return buildLLMTranslationResult(strings.TrimSpace(decoded.Content[0].Text), textCount)
 }

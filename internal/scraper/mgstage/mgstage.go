@@ -3,6 +3,7 @@ package mgstage
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -25,15 +25,15 @@ const (
 	productURL = baseURL + "/product/product_detail/%s/"
 )
 
-// Scraper implements the MGStage scraper
-type Scraper struct {
+// scraper implements the MGStage scraper.
+type scraper struct {
 	client        *resty.Client
 	enabled       bool
 	usingProxy    bool
-	proxyOverride *config.ProxyConfig
-	downloadProxy *config.ProxyConfig
+	proxyOverride *models.ProxyConfig
+	downloadProxy *models.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings
+	settings      models.ScraperSettings
 }
 
 var (
@@ -46,8 +46,9 @@ var (
 )
 
 // New creates a new MGStage scraper
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+// newScraper creates a new MGStage scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
 			httpclient.StandardHTMLHeaders(),
 			httpclient.UserAgentHeader(settings.UserAgent),
@@ -61,47 +62,48 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 
 	usingProxy := result.ProxyEnabled && strings.TrimSpace(result.ProxyProfile.URL) != ""
 
-	scraper := &Scraper{
+	scraper := &scraper{
 		client:        client,
 		enabled:       settings.Enabled,
 		usingProxy:    usingProxy,
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
-		settings:      settings,
+		settings:      *settings,
 	}
 
 	return scraper
 }
 
 // Name returns the scraper identifier
-func (s *Scraper) Name() string {
+func (s *scraper) Name() string {
 	return "mgstage"
 }
 
 // IsEnabled returns whether the scraper is enabled
-func (s *Scraper) IsEnabled() bool {
+func (s *scraper) IsEnabled() bool {
 	return s.enabled
 }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	return nil
 }
 
 // ResolveDownloadProxyForHost declares MGStage-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
 	}
 	if host == "mgstage.com" || strings.HasSuffix(host, ".mgstage.com") {
-		return s.downloadProxy, s.proxyOverride, true
+		return s.settings.DownloadProxy, s.settings.Proxy, true
 	}
 	return nil, nil, false
 }
@@ -109,7 +111,7 @@ func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig,
 // ResolveSearchQuery normalizes MGStage-specific IDs from free-form input.
 // This is primarily used by batch scraping to preserve 3-digit numeric prefixes
 // (e.g., "259LUXU-1806"), which generic filename matching can strip to "LUXU-1806".
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -118,14 +120,14 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 	return host == "mgstage.com" || strings.HasSuffix(host, ".mgstage.com")
 }
 
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	if m := mgstageURLIDRe.FindStringSubmatch(urlStr); len(m) > 1 {
 		return strings.ToUpper(m[1]), nil
 	}
 	return "", fmt.Errorf("failed to extract ID from MGStage URL")
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("MGStage", "URL not handled by MGStage scraper")
 	}
@@ -147,7 +149,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, models.NewScraperNotFoundError("MGStage", "page not found")
 	}
 	if resp.StatusCode() == 429 {
-		return nil, models.NewScraperStatusError("MGStage", 429, "rate limited")
+		return nil, models.NewScraperStatusError("MGStage", http.StatusTooManyRequests, "rate limited")
 	}
 	if resp.StatusCode() == 403 || resp.StatusCode() == 451 {
 		return nil, models.NewScraperStatusError("MGStage", resp.StatusCode(), "access blocked")
@@ -173,7 +175,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	return result, nil
 }
 
-func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
+func (s *scraper) ResolveSearchQuery(input string) (string, bool) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return "", false
@@ -204,11 +206,11 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 }
 
 // GetURL attempts to find the URL for a given movie ID using MGStage search
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	foundURL, err := s.searchByID(ctx, id)
 	if err == nil && foundURL != "" {
 		return foundURL, nil
@@ -228,7 +230,7 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 }
 
 // searchByID tries to find the product URL for a given ID via search and direct URL lookup.
-func (s *Scraper) searchByID(ctx context.Context, id string) (string, error) {
+func (s *scraper) searchByID(ctx context.Context, id string) (string, error) {
 	searchReqURL := fmt.Sprintf(searchURL, url.QueryEscape(id))
 
 	if err := s.rateLimiter.Wait(ctx); err != nil {
@@ -256,7 +258,7 @@ func (s *Scraper) searchByID(ctx context.Context, id string) (string, error) {
 }
 
 // findProductInSearchResults parses search HTML and returns the first matching product URL.
-func (s *Scraper) findProductInSearchResults(html string, id string) string {
+func (s *scraper) findProductInSearchResults(html string, id string) string {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return ""
@@ -290,7 +292,7 @@ func (s *Scraper) findProductInSearchResults(html string, id string) string {
 
 // checkDirectURL verifies that a direct product URL actually resolves to a product page
 // (not a redirect to the homepage, which MGStage returns for nonexistent IDs).
-func (s *Scraper) checkDirectURL(ctx context.Context, directURL string) bool {
+func (s *scraper) checkDirectURL(ctx context.Context, directURL string) bool {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return false
 	}
@@ -316,7 +318,7 @@ func (s *Scraper) checkDirectURL(ctx context.Context, directURL string) bool {
 }
 
 // Search searches for and scrapes metadata for a given movie ID with context support
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	url, err := s.getURLCtx(ctx, id)
 	if err != nil {
 		return nil, err
@@ -354,7 +356,14 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 }
 
 // parseHTML extracts metadata from MGStage HTML
-func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+// ParseHTML parses an MGStage detail page from a goquery.Document.
+// This is the documented parsing seam for testing; it delegates to the
+// internal parseHTML method.
+func (s *scraper) ParseHTML(doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+	return s.parseHTML(doc, sourceURL)
+}
+
+func (s *scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:           s.Name(),
 		SourceURL:        sourceURL,
@@ -448,7 +457,7 @@ func (s *Scraper) parseHTML(doc *goquery.Document, sourceURL string) (*models.Sc
 	return result, nil
 }
 
-func (s *Scraper) httpStatusError(stage string, statusCode int) error {
+func (s *scraper) httpStatusError(stage string, statusCode int) error {
 	msg := fmt.Sprintf("MGStage %s returned status code %d", stage, statusCode)
 	if statusCode == 403 {
 		if s.usingProxy {

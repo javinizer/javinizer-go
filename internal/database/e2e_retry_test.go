@@ -1,12 +1,12 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
@@ -15,16 +15,11 @@ import (
 
 func newDBForE2E(t *testing.T, dbPath string) *DB {
 	t.Helper()
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			Type: "sqlite",
-			DSN:  dbPath,
-		},
-		Logging: config.LoggingConfig{Level: "error"},
-	}
+	cfg := &Config{Type: "sqlite",
+		DSN: dbPath}
 	db, err := New(cfg)
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
@@ -137,7 +132,7 @@ func TestUpsert_StateIntegrityAfterSuccessiveUpserts(t *testing.T) {
 		id := ids[i%len(ids)]
 		genre := fmt.Sprintf("Genre%02d", i%10)
 
-		movie, err := repo.Upsert(&models.Movie{
+		movie, err := repo.Upsert(context.TODO(), &models.Movie{
 			ID:     id,
 			Title:  "E2E State Test",
 			Genres: []models.Genre{{Name: genre}},

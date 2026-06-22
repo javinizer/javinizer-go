@@ -1,29 +1,29 @@
 package mediainfo
 
 import (
-	"os"
+	"context"
 )
 
-// MOVProber implements the Prober interface for QuickTime MOV containers
+// movProber implements the prober interface for QuickTime MOV containers
 // MOV files use ISO Base Media File Format, same as MP4
-type MOVProber struct {
-	mp4Prober *MP4Prober
+type movProber struct {
+	mp4Prober *mp4Prober
 }
 
-// NewMOVProber creates a new MOV prober
-func NewMOVProber() *MOVProber {
-	return &MOVProber{
-		mp4Prober: NewMP4Prober(),
+// newMOVProber creates a new MOV prober
+func newMOVProber() *movProber {
+	return &movProber{
+		mp4Prober: newMP4Prober(),
 	}
 }
 
 // Name returns the prober identifier
-func (p *MOVProber) Name() string {
+func (p *movProber) Name() string {
 	return "mov"
 }
 
-// CanProbe checks if this prober can handle the file based on header
-func (p *MOVProber) CanProbe(header []byte) bool {
+// canProbe checks if this prober can handle the file based on header
+func (p *movProber) canProbe(header []byte) bool {
 	// MOV files also use 'ftyp' box but with QuickTime brands
 	// Check for ftyp at offset 4-7
 	if len(header) < 12 {
@@ -55,13 +55,13 @@ func (p *MOVProber) CanProbe(header []byte) bool {
 	}
 
 	// Some MOV files don't have QuickTime brands but are still MOV
-	// These will be handled by MP4Prober since the format is compatible
+	// These will be handled by mp4Prober since the format is compatible
 
 	return false
 }
 
 // Probe extracts metadata from the MOV file
-func (p *MOVProber) Probe(f *os.File) (*VideoInfo, error) {
+func (p *movProber) Probe(_ context.Context, f FileReader) (*VideoInfo, error) {
 	// MOV uses the same format as MP4, so we can reuse the MP4 parser
 	// The mp4ff library handles both MP4 and MOV containers
 	info, err := analyzeMP4(f)

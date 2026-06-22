@@ -7,24 +7,21 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scanner"
-	"github.com/javinizer/javinizer-go/internal/types"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 )
 
 func TestPlan_AppendsPartSuffix(t *testing.T) {
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:    "<ID> [<STUDIO>] - <TITLE>",
 		FileFormat:      "<ID><PARTSUFFIX>", // Use <PARTSUFFIX> placeholder for multi-part support
 		RenameFile:      true,
-		OperationMode:   types.OperationModeOrganize,
+		OperationMode:   operationmode.OperationModeOrganize,
 		SubfolderFormat: []string{},
 		MaxTitleLength:  0,
 		MaxPathLength:   260,
 	}
-	o := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	o := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 
 	movie := &models.Movie{
 		ID:          "IPX-535",
@@ -67,19 +64,15 @@ func TestPlan_AppendsPartSuffix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			match := matcher.MatchResult{
-				ID:          "IPX-535",
+			match := models.FileMatchInfo{
+				MovieID:     "IPX-535",
 				IsMultiPart: tt.partNumber > 0,
 				PartNumber:  tt.partNumber,
 				PartSuffix:  tt.partSuffix,
-				File: scanner.FileInfo{
-					Path:      "/src/IPX-535.mp4",
-					Name:      "IPX-535.mp4",
-					Extension: ".mp4",
-				},
+				Path:        "/src/IPX-535.mp4", Name: "IPX-535.mp4", Extension: ".mp4",
 			}
 
-			plan, err := o.Plan(match, movie, "/dest", false)
+			plan, err := o.plan(match, movie, "/dest", false)
 			if err != nil {
 				t.Fatalf("Plan failed: %v", err)
 			}
@@ -101,14 +94,14 @@ func TestPlan_AppendsPartSuffix(t *testing.T) {
 
 func TestOrganizeBatch_GroupsAndSortsParts(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfg := &config.OutputConfig{
+	cfg := &Config{
 		FolderFormat:    "<ID>",
 		FileFormat:      "<ID><PARTSUFFIX>", // Use <PARTSUFFIX> placeholder for multi-part support
 		RenameFile:      true,
-		OperationMode:   types.OperationModeOrganize,
+		OperationMode:   operationmode.OperationModeOrganize,
 		SubfolderFormat: []string{},
 	}
-	o := NewOrganizer(afero.NewOsFs(), cfg, nil)
+	o := NewOrganizer(afero.NewOsFs(), cfg, nil, nil)
 
 	movie := &models.Movie{
 		ID:    "IPX-535",
@@ -116,34 +109,26 @@ func TestOrganizeBatch_GroupsAndSortsParts(t *testing.T) {
 	}
 
 	// Create matches in non-sorted order
-	matches := []matcher.MatchResult{
+	matches := []models.FileMatchInfo{
 		{
-			ID:          "IPX-535",
+			MovieID:     "IPX-535",
 			IsMultiPart: true,
 			PartNumber:  2,
 			PartSuffix:  "-pt2",
-			File: scanner.FileInfo{
-				Path:      filepath.Join(tmpDir, "IPX-535-pt2.mp4"),
-				Name:      "IPX-535-pt2.mp4",
-				Extension: ".mp4",
-			},
+			Path:        filepath.Join(tmpDir, "IPX-535-pt2.mp4"), Name: "IPX-535-pt2.mp4", Extension: ".mp4",
 		},
 		{
-			ID:          "IPX-535",
+			MovieID:     "IPX-535",
 			IsMultiPart: true,
 			PartNumber:  1,
 			PartSuffix:  "-pt1",
-			File: scanner.FileInfo{
-				Path:      filepath.Join(tmpDir, "IPX-535-pt1.mp4"),
-				Name:      "IPX-535-pt1.mp4",
-				Extension: ".mp4",
-			},
+			Path:        filepath.Join(tmpDir, "IPX-535-pt1.mp4"), Name: "IPX-535-pt1.mp4", Extension: ".mp4",
 		},
 	}
 
 	// Create the source files
 	for _, match := range matches {
-		if err := os.WriteFile(match.File.Path, []byte("fake video"), 0644); err != nil {
+		if err := os.WriteFile(match.Path, []byte("fake video"), 0644); err != nil {
 			t.Fatalf("Failed to create test file: %v", err)
 		}
 	}
@@ -155,9 +140,9 @@ func TestOrganizeBatch_GroupsAndSortsParts(t *testing.T) {
 	destDir := filepath.Join(tmpDir, "dest")
 
 	// Run OrganizeBatch in dry-run mode
-	results, err := o.OrganizeBatch(matches, movies, destDir, true, false, false)
+	results, err := organizeBatchViaOrganizeSimple(o, matches, movies, destDir, true, false, false)
 	if err != nil {
-		t.Fatalf("OrganizeBatch failed: %v", err)
+		t.Fatalf("organizeBatchViaOrganizeSimple failed: %v", err)
 	}
 
 	// Verify results are in correct order (part 1 before part 2)

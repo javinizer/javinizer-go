@@ -53,7 +53,7 @@ func TestWriteCredentialsToDisk(t *testing.T) {
 		err = manager.writeCredentialsToDisk(creds)
 		require.NoError(t, err)
 
-		credPath := CredentialPathForConfig(configFile)
+		credPath := credentialPathForConfig(configFile)
 		data, err := os.ReadFile(credPath)
 		require.NoError(t, err)
 
@@ -119,7 +119,7 @@ func TestWriteCredentialsToDisk(t *testing.T) {
 		err = manager.writeCredentialsToDisk(creds)
 		require.NoError(t, err)
 
-		credPath := CredentialPathForConfig(configFile)
+		credPath := credentialPathForConfig(configFile)
 		_, err = os.Stat(credPath)
 		require.NoError(t, err)
 	})
@@ -150,7 +150,7 @@ func TestWriteCredentialsToDisk(t *testing.T) {
 		err = manager.writeCredentialsToDisk(creds)
 		require.NoError(t, err)
 
-		credPath := CredentialPathForConfig(configFile)
+		credPath := credentialPathForConfig(configFile)
 		info, err := os.Stat(credPath)
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
@@ -168,7 +168,7 @@ func TestWritePersistentSessionsLocked(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, manager.Setup("admin", "password123"))
 
-		sessionPath := SessionPathForConfig(configFile)
+		sessionPath := sessionPathForConfig(configFile)
 
 		sessionID, err := manager.Login("admin", "password123", true)
 		require.NoError(t, err)
@@ -197,7 +197,7 @@ func TestWritePersistentSessionsLocked(t *testing.T) {
 		_, err = manager.Login("admin", "password123", true)
 		require.NoError(t, err)
 
-		sessionPath := SessionPathForConfig(configFile)
+		sessionPath := sessionPathForConfig(configFile)
 		data, err := os.ReadFile(sessionPath)
 		require.NoError(t, err)
 
@@ -278,7 +278,7 @@ func TestWritePersistentSessionsLocked(t *testing.T) {
 		_, err = manager.Login("admin", "password123", true)
 		require.NoError(t, err)
 
-		sessionPath := SessionPathForConfig(configFile)
+		sessionPath := sessionPathForConfig(configFile)
 		info, err := os.Stat(sessionPath)
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
@@ -298,7 +298,7 @@ func TestWritePersistentSessionsLocked(t *testing.T) {
 		_, err = manager.Login("admin", "password123", true)
 		require.NoError(t, err)
 
-		sessionPath := SessionPathForConfig(configFile)
+		sessionPath := sessionPathForConfig(configFile)
 		data, err := os.ReadFile(sessionPath)
 		require.NoError(t, err)
 
@@ -347,7 +347,7 @@ func TestWritePersistentSessionsLocked_RemoveError(t *testing.T) {
 		require.NoError(t, manager.writePersistentSessionsLocked())
 		manager.mu.Unlock()
 
-		sessionPath := SessionPathForConfig(configFile)
+		sessionPath := sessionPathForConfig(configFile)
 		_, err = os.Stat(sessionPath)
 		require.NoError(t, err)
 
@@ -380,7 +380,7 @@ func TestWriteCredentialsToDisk_EnforcePermissionsError(t *testing.T) {
 		manager, err := NewAuthManager(configFile, time.Hour)
 		require.NoError(t, err)
 
-		credPath := CredentialPathForConfig(configFile)
+		credPath := credentialPathForConfig(configFile)
 		require.NoError(t, os.Mkdir(credPath, 0o755))
 
 		creds := &storedCredentials{
@@ -407,7 +407,7 @@ func TestLoadCredentialsFromDisk_Errors(t *testing.T) {
 		tmpDir := t.TempDir()
 		configFile := filepath.Join(tmpDir, "config.yaml")
 
-		credPath := CredentialPathForConfig(configFile)
+		credPath := credentialPathForConfig(configFile)
 		require.NoError(t, os.Mkdir(credPath, 0o755))
 
 		_, err := NewAuthManager(configFile, time.Hour)
@@ -423,7 +423,7 @@ func TestLoadCredentialsFromDisk_Errors(t *testing.T) {
 		tmpDir := t.TempDir()
 		configFile := filepath.Join(tmpDir, "config.yaml")
 
-		credPath := CredentialPathForConfig(configFile)
+		credPath := credentialPathForConfig(configFile)
 		require.NoError(t, syscall.Mkfifo(credPath, 0o600))
 
 		_, err := NewAuthManager(configFile, time.Hour)
@@ -442,7 +442,7 @@ func TestLoadCredentialsFromDisk_Errors(t *testing.T) {
 		targetPath := filepath.Join(tmpDir, "target")
 		require.NoError(t, os.WriteFile(targetPath, []byte("{}"), 0o600))
 
-		credPath := CredentialPathForConfig(configFile)
+		credPath := credentialPathForConfig(configFile)
 		require.NoError(t, os.Symlink(targetPath, credPath))
 
 		_, err := NewAuthManager(configFile, time.Hour)

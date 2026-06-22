@@ -1,9 +1,9 @@
 package mediainfo
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 )
 
@@ -18,24 +18,24 @@ const (
 	codecOPUS  = "opus"
 )
 
-type MKVProber struct{}
+type mkvProber struct{}
 
-func NewMKVProber() *MKVProber {
-	return &MKVProber{}
+func newMKVProber() *mkvProber {
+	return &mkvProber{}
 }
 
-func (p *MKVProber) Name() string {
+func (p *mkvProber) Name() string {
 	return "mkv"
 }
 
-func (p *MKVProber) CanProbe(header []byte) bool {
+func (p *mkvProber) canProbe(header []byte) bool {
 	if len(header) >= 4 {
 		return header[0] == 0x1A && header[1] == 0x45 && header[2] == 0xDF && header[3] == 0xA3
 	}
 	return false
 }
 
-func (p *MKVProber) Probe(f *os.File) (*VideoInfo, error) {
+func (p *mkvProber) Probe(_ context.Context, f FileReader) (*VideoInfo, error) {
 	return analyzeMKV(f)
 }
 
@@ -66,13 +66,17 @@ const (
 	elemCues          uint32 = 0x1C53BB6B
 )
 
-func analyzeMKV(f *os.File) (*VideoInfo, error) {
+func analyzeMKV(f FileReader) (*VideoInfo, error) {
 	info := &VideoInfo{
 		Container: "mkv",
 	}
 
-	stat, _ := f.Stat()
-	fileSize := stat.Size()
+	var fileSize int64
+	if stat, ok := f.(fileReaderStat); ok {
+		if fi, err := stat.Stat(); err == nil {
+			fileSize = fi.Size()
+		}
+	}
 
 	_, _ = f.Seek(0, io.SeekStart)
 

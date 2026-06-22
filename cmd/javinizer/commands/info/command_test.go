@@ -2,6 +2,7 @@ package info_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,16 +13,19 @@ import (
 
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/info"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/scraper"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/update"
 	appversion "github.com/javinizer/javinizer-go/internal/version"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	// Register scraper defaults for info display
-	_ "github.com/javinizer/javinizer-go/internal/scraper/dmm"
-	_ "github.com/javinizer/javinizer-go/internal/scraper/r18dev"
 )
+
+func init() {
+	reg := scraperutil.NewScraperRegistry()
+	scraper.RegisterAll(reg)
+}
 
 type failAfterNWriter struct {
 	failAt int
@@ -57,19 +61,19 @@ func WithScraperPriority(priority []string) ConfigOption {
 
 func WithOutputFolder(format string) ConfigOption {
 	return func(cfg *config.Config) {
-		cfg.Output.FolderFormat = format
+		cfg.Output.Template.FolderFormat = format
 	}
 }
 
 func WithOutputFile(format string) ConfigOption {
 	return func(cfg *config.Config) {
-		cfg.Output.FileFormat = format
+		cfg.Output.Template.FileFormat = format
 	}
 }
 
 func WithDownloadCover(enabled bool) ConfigOption {
 	return func(cfg *config.Config) {
-		cfg.Output.DownloadCover = enabled
+		cfg.Output.Download.DownloadCover = enabled
 	}
 }
 
@@ -85,12 +89,26 @@ func WithVersionCheckEnabled(enabled bool) ConfigOption {
 	}
 }
 
+func writeTestState(t *testing.T, path, ver, checkedAt string, available, prerelease bool, source update.UpdateSource) {
+	t.Helper()
+	state := map[string]any{
+		"version":    ver,
+		"checked_at": checkedAt,
+		"available":  available,
+		"prerelease": prerelease,
+		"source":     string(source),
+	}
+	data, err := json.Marshal(state)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+}
+
 func createTestConfig(t *testing.T, opts ...ConfigOption) (string, *config.Config) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.Database.DSN = filepath.Join(tmpDir, "test.db")
 
 	for _, opt := range opts {
@@ -366,7 +384,7 @@ func TestRunInfo_WithDefaultConfig(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
 	// Create config with all defaults
-	testCfg := config.DefaultConfig()
+	testCfg := config.DefaultConfig(nil, nil)
 	testCfg.Database.DSN = filepath.Join(tmpDir, "test.db")
 	err := config.Save(testCfg, configPath)
 	require.NoError(t, err, "Failed to save default config")
@@ -451,14 +469,7 @@ func TestRunInfo_UpdateSection_CachedState(t *testing.T) {
 
 	checkedAt := time.Now().UTC().Format(time.RFC3339)
 	statePath := filepath.Join(tempDataDir, "update_cache.json")
-	err := update.SaveStateToFile(statePath, &update.UpdateState{
-		Version:    "v9.9.9",
-		CheckedAt:  checkedAt,
-		Available:  true,
-		Prerelease: false,
-		Source:     "cached",
-	})
-	require.NoError(t, err)
+	writeTestState(t, statePath, "v9.9.9", checkedAt, true, false, update.UpdateSourceCached)
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")
@@ -487,14 +498,7 @@ func TestRunInfo_UpdateSection_PrereleaseWarning(t *testing.T) {
 	configPath, _ := createTestConfig(t, WithVersionCheckEnabled(true))
 
 	statePath := filepath.Join(tempDataDir, "update_cache.json")
-	err := update.SaveStateToFile(statePath, &update.UpdateState{
-		Version:    "v2.0.0-rc1",
-		CheckedAt:  time.Now().UTC().Format(time.RFC3339),
-		Available:  true,
-		Prerelease: true,
-		Source:     "cached",
-	})
-	require.NoError(t, err)
+	writeTestState(t, statePath, "v2.0.0-rc1", time.Now().UTC().Format(time.RFC3339), true, true, update.UpdateSourceCached)
 
 	rootCmd := &cobra.Command{Use: "root"}
 	rootCmd.PersistentFlags().String("config", configPath, "config file")

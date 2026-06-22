@@ -9,37 +9,36 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
-	"github.com/javinizer/javinizer-go/internal/types"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 )
 
 func init() {
-	RegisterTestScraperConfigs()
 }
 
 func TestOperationModeConstants(t *testing.T) {
 	testCases := []struct {
 		name     string
-		constant types.OperationMode
+		constant operationmode.OperationMode
 		want     string
 	}{
 		{
 			name:     "organize constant",
-			constant: types.OperationModeOrganize,
+			constant: operationmode.OperationModeOrganize,
 			want:     "organize",
 		},
 		{
 			name:     "in-place constant",
-			constant: types.OperationModeInPlace,
+			constant: operationmode.OperationModeInPlace,
 			want:     "in-place",
 		},
 		{
 			name:     "metadata-artwork constant",
-			constant: types.OperationModeMetadataArtwork,
+			constant: operationmode.OperationModeMetadataArtwork,
 			want:     "metadata-artwork",
 		},
 		{
 			name:     "preview constant",
-			constant: types.OperationModePreview,
+			constant: operationmode.OperationModePreview,
 			want:     "preview",
 		},
 	}
@@ -83,14 +82,14 @@ func TestIsValidOperationMode(t *testing.T) {
 			want:  false,
 		},
 		{
-			name:  "empty string is invalid",
+			name:  "empty string is valid (defaults to organize)",
 			input: "",
-			want:  false,
+			want:  true,
 		},
 		{
-			name:  "case sensitive - Organize is invalid",
+			name:  "case insensitive - Organize is valid",
 			input: "Organize",
-			want:  false,
+			want:  true,
 		},
 		{
 			name:  "underscore variant is invalid",
@@ -101,7 +100,8 @@ func TestIsValidOperationMode(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := types.IsValidOperationMode(tc.input)
+			_, err := operationmode.ParseOperationMode(tc.input)
+			got := err == nil || tc.input == ""
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -109,16 +109,16 @@ func TestIsValidOperationMode(t *testing.T) {
 
 func TestOutputConfigOperationModeField(t *testing.T) {
 	t.Run("OperationMode field has correct yaml tag", func(t *testing.T) {
-		cfg := DefaultConfig()
-		cfg.Output.OperationMode = types.OperationModeOrganize
+		cfg := DefaultConfig(nil, nil)
+		cfg.Output.Operation.OperationMode = operationmode.OperationModeOrganize
 		data, err := yaml.Marshal(cfg)
 		require.NoError(t, err)
 		assert.Contains(t, string(data), "operation_mode:")
 	})
 
 	t.Run("empty OperationMode serializes correctly", func(t *testing.T) {
-		cfg := DefaultConfig()
-		cfg.Output.OperationMode = ""
+		cfg := DefaultConfig(nil, nil)
+		cfg.Output.Operation.OperationMode = ""
 		data, err := yaml.Marshal(cfg)
 		require.NoError(t, err)
 		assert.Contains(t, string(data), "operation_mode:")
@@ -136,7 +136,7 @@ output:
 
 		cfg, err := Load(cfgPath)
 		require.NoError(t, err)
-		assert.Equal(t, types.OperationMode("organize"), cfg.Output.OperationMode)
+		assert.Equal(t, operationmode.OperationMode("organize"), cfg.Output.Operation.OperationMode)
 	})
 
 	t.Run("OperationMode in-place deserializes correctly", func(t *testing.T) {
@@ -151,12 +151,12 @@ output:
 
 		cfg, err := Load(cfgPath)
 		require.NoError(t, err)
-		assert.Equal(t, types.OperationModeInPlace, cfg.Output.OperationMode)
+		assert.Equal(t, operationmode.OperationModeInPlace, cfg.Output.Operation.OperationMode)
 	})
 
 	t.Run("default OperationMode is empty string", func(t *testing.T) {
-		cfg := DefaultConfig()
-		assert.Equal(t, types.OperationMode(""), cfg.Output.OperationMode)
+		cfg := DefaultConfig(nil, nil)
+		assert.Equal(t, operationmode.OperationMode(""), cfg.Output.Operation.OperationMode)
 	})
 }
 
@@ -164,37 +164,37 @@ func TestGetOperationMode(t *testing.T) {
 	testCases := []struct {
 		name  string
 		input string
-		want  types.OperationMode
+		want  operationmode.OperationMode
 	}{
 		{
 			name:  "organize returns organize",
 			input: "organize",
-			want:  types.OperationModeOrganize,
+			want:  operationmode.OperationModeOrganize,
 		},
 		{
 			name:  "in-place returns in-place",
 			input: "in-place",
-			want:  types.OperationModeInPlace,
+			want:  operationmode.OperationModeInPlace,
 		},
 		{
 			name:  "metadata-artwork returns metadata-artwork",
 			input: "metadata-artwork",
-			want:  types.OperationModeMetadataArtwork,
+			want:  operationmode.OperationModeMetadataArtwork,
 		},
 		{
 			name:  "preview returns preview",
 			input: "preview",
-			want:  types.OperationModePreview,
+			want:  operationmode.OperationModePreview,
 		},
 		{
 			name:  "empty string defaults to organize",
 			input: "",
-			want:  types.OperationModeOrganize,
+			want:  operationmode.OperationModeOrganize,
 		},
 		{
 			name:  "invalid string defaults to organize",
 			input: "invalid",
-			want:  types.OperationModeOrganize,
+			want:  operationmode.OperationModeOrganize,
 		},
 	}
 
@@ -208,16 +208,16 @@ func TestGetOperationMode(t *testing.T) {
 
 func TestOutputConfigGetOperationMode(t *testing.T) {
 	t.Run("OutputConfig.GetOperationMode delegates to GetOperationMode", func(t *testing.T) {
-		cfg := DefaultConfig()
-		cfg.Output.OperationMode = types.OperationModeInPlace
+		cfg := DefaultConfig(nil, nil)
+		cfg.Output.Operation.OperationMode = operationmode.OperationModeInPlace
 		got := cfg.Output.GetOperationMode()
-		assert.Equal(t, types.OperationModeInPlace, got)
+		assert.Equal(t, operationmode.OperationModeInPlace, got)
 	})
 
 	t.Run("empty OperationMode defaults to organize", func(t *testing.T) {
-		cfg := DefaultConfig()
-		cfg.Output.OperationMode = ""
+		cfg := DefaultConfig(nil, nil)
+		cfg.Output.Operation.OperationMode = ""
 		got := cfg.Output.GetOperationMode()
-		assert.Equal(t, types.OperationModeOrganize, got)
+		assert.Equal(t, operationmode.OperationModeOrganize, got)
 	})
 }

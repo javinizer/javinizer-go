@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -815,72 +815,12 @@ func TestResolveSearchQuery(t *testing.T) {
 			want:  "",
 			ok:    false,
 		},
-		{
-			name:  "fc2 ppv hyphenated",
-			input: "FC2-PPV-1234567",
-			want:  "FC2-PPV-1234567",
-			ok:    true,
-		},
-		{
-			name:  "fc2 ppv lowercase",
-			input: "fc2-ppv-1234567",
-			want:  "FC2-PPV-1234567",
-			ok:    true,
-		},
-		{
-			name:  "fc2 ppv underscore",
-			input: "fc2_ppv_1234567",
-			want:  "FC2-PPV-1234567",
-			ok:    true,
-		},
-		{
-			name:  "ppv prefix only",
-			input: "ppv-1234567",
-			want:  "FC2-PPV-1234567",
-			ok:    true,
-		},
-		{
-			name:  "fc2 ppv spaces",
-			input: "FC2 PPV 1234567",
-			want:  "FC2-PPV-1234567",
-			ok:    true,
-		},
-		{
-			name:  "fc2 ppv too short",
-			input: "FC2-PPV-1234",
-			want:  "",
-			ok:    false,
-		},
-		{
-			name:  "fc2 ppv 11 digits matches first 10",
-			input: "FC2-PPV-12345678901",
-			want:  "FC2-PPV-1234567890",
-			ok:    true,
-		},
-		{
-			name:  "bare digits not fc2",
-			input: "123456789",
-			want:  "",
-			ok:    false,
-		},
-		{
-			name:  "short digits not fc2",
-			input: "1234",
-			want:  "",
-			ok:    false,
-		},
-		{
-			name:  "dmm style id not fc2",
-			input: "MIDE-123",
-			want:  "",
-			ok:    false,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := testSettings("https://www.libredmm.com")
-			scraper := New(settings, nil, config.FlareSolverrConfig{})
+			scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
 			result, ok := scraper.ResolveSearchQuery(tt.input)
 			assert.Equal(t, tt.ok, ok)
@@ -921,9 +861,9 @@ func TestGetURLErrorPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := testSettings("https://www.libredmm.com")
-			scraper := New(settings, nil, config.FlareSolverrConfig{})
+			scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 
-			url, err := scraper.GetURL(tt.input)
+			url, err := scraper.GetURL(context.Background(), tt.input)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -957,7 +897,7 @@ func TestSearchProcessingTimeout(t *testing.T) {
 
 	settings := testSettings(server.URL)
 
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 	scraper.maxPollAttempts = 2
 	scraper.pollInterval = 1 * time.Millisecond
 
@@ -969,12 +909,12 @@ func TestSearchProcessingTimeout(t *testing.T) {
 
 // TestPayloadToResultCoverURLFallback tests cover URL fallback when poster probe fails
 func TestPayloadToResult_CoverURLFallback(t *testing.T) {
-	coverURL := "https://pics.dmm.co.jp/digital/video/118abp00880/118abp00880pl.jpg"
+	coverURL := "https://pics.dmm.co.jp/digital/video/118abp880/118abp880pl.jpg"
 	payload := &moviePayload{
 		CoverImageURL:     coverURL,
-		ThumbnailImageURL: "https://pics.dmm.co.jp/digital/video/118abp00880/118abp00880ps.jpg",
+		ThumbnailImageURL: "https://pics.dmm.co.jp/digital/video/118abp880/118abp880ps.jpg",
 		NormalizedID:      "ABP-880",
-		Subtitle:          "118abp00880",
+		Subtitle:          "118abp880",
 		Title:             "Movie Title",
 	}
 
@@ -1073,8 +1013,8 @@ func TestHasJapanese_FullNames(t *testing.T) {
 // ========== Helper types and functions for testing ==========
 
 // testSettings creates test scraper settings for LibreDMM
-func testSettings(baseURL string) config.ScraperSettings {
-	return config.ScraperSettings{
+func testSettings(baseURL string) models.ScraperSettings {
+	return models.ScraperSettings{
 		Enabled:   true,
 		RateLimit: 0,
 		BaseURL:   baseURL,

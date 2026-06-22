@@ -340,6 +340,19 @@
 			</main>
 			<ToastContainer />
 			<DialogContainer />
+			{#if bgJobId && !bgShowModal}
+				<BackgroundJobIndicator
+					jobId={bgJobId}
+					onReopen={reopenModal}
+					onDismiss={dismiss}
+				/>
+			{/if}
+			{#if bgShowModal && bgJobId}
+				<ProgressModal
+					jobId={bgJobId}
+					onClose={closeModal}
+				/>
+			{/if}
 		</div>
 	{/if}
 {/if}

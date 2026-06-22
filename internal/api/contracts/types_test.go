@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -116,9 +117,9 @@ func TestOrganizePreviewResponse_OperationMode(t *testing.T) {
 		FolderName:    "TEST-001",
 		FileName:      "TEST-001",
 		FullPath:      "/output/TEST-001/TEST-001.mp4",
-		OperationMode: "organize",
+		OperationMode: operationmode.OperationModeOrganize,
 	}
-	assert.Equal(t, "organize", resp.OperationMode)
+	assert.Equal(t, operationmode.OperationModeOrganize, resp.OperationMode)
 
 	data, err := json.Marshal(resp)
 	assert.NoError(t, err)

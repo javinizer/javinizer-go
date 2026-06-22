@@ -150,7 +150,7 @@ func TestParseModifier_LanguageSpecNormalization(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := engine.parseModifier("TITLE", tt.modifier)
+			got := engine.translationResolver.parseModifier("TITLE", tt.modifier)
 			assert.Equal(t, tt.want, got.languageSpec)
 			if tt.want != "" {
 				assert.True(t, got.isLanguage)
@@ -212,10 +212,10 @@ func TestParseModifier(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := engine.parseModifier(tt.tagName, tt.modifier)
+			got := engine.translationResolver.parseModifier(tt.tagName, tt.modifier)
 			assert.Equal(t, tt.wantIsLanguage, got.isLanguage, "isLanguage mismatch")
 			assert.Equal(t, tt.wantLangSpec, got.languageSpec, "languageSpec mismatch")
-			assert.Equal(t, tt.wantLegacy, got.legacyModifier, "legacyModifier mismatch")
+			assert.Equal(t, tt.wantLegacy, got.truncationModifier, "truncationModifier mismatch")
 			assert.Equal(t, tt.wantRejected, got.rejectedLanguage, "rejectedLanguage mismatch")
 		})
 	}
@@ -250,7 +250,7 @@ func TestIsNumericModifier(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := engine.isNumericModifier(tt.modifier)
+			got := engine.translationResolver.isNumericModifier(tt.modifier)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -299,7 +299,7 @@ func TestIsTranslatableTag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := engine.isTranslatableTag(tt.tagName)
+			got := engine.translationResolver.isTranslatableTag(tt.tagName)
 			assert.Equal(t, tt.want, got)
 		})
 	}

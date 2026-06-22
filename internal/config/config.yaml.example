@@ -100,7 +100,6 @@ scrapers:
         enabled: false                    # Master kill-switch (enable per-scraper below)
         binary_path: ""                   # Auto-discovered if empty
         timeout: 30                       # Operation timeout (seconds)
-        max_retries: 3                    # Retry attempts
         headless: true                    # Run headless (hide browser window)
         stealth_mode: true                # Anti-detection measures
         window_width: 1920               # Viewport width
@@ -116,7 +115,6 @@ scrapers:
         enabled: false
         url: "http://localhost:8191/v1"
         timeout: 30
-        max_retries: 3
         session_ttl: 300
     # HTTP/SOCKS5 proxy configuration.
     # - Define reusable profiles in `profiles`
@@ -141,34 +139,28 @@ scrapers:
         enabled: true
         language: en               # en | ja
         user_agent: Javinizer (+https://github.com/javinizer/javinizer-go) # Scraper-friendly source, uses Javinizer UA by default
-        request_delay: 1500          # Delay between requests in milliseconds (1.5 seconds to stay under 10 req/15s limit)
-        max_retries: 3               # Retry up to 3 times on rate limit (429)
         respect_retry_after: true    # Respect Retry-After header from server
+        # rate_limit: 0             # Delay between requests in milliseconds (0 = no delay)
+        # retry_count: 0            # Number of retries on failure (0 = no retries)
     dmm:
         enabled: false
         use_browser: true                # Enable browser for DMM streaming pages
         # scrape_actress: null          # Optional: inherit from global (true)
         # Or override: scrape_actress: false
-        request_delay: 0
-        max_retries: 0
         user_agent: ""
         use_flaresolverr: false
     libredmm:
         enabled: false
-        request_delay: 500
         base_url: "https://www.libredmm.com"
     mgstage:
         enabled: false            # Opt-in: requires age verification cookie (adc=1)
-        request_delay: 500        # Delay between requests in milliseconds
     # JavLibrary requires FlareSolverr for Cloudflare bypass.
     # Configure flaresolverr at scrapers.flaresolverr or at scraper level.
     javlibrary:
         enabled: false
         # Frontend scraper options:
         # language: en, ja, cn, tw
-        # request_delay: milliseconds between requests
         language: ja  # Default Japanese
-        request_delay: 1000
         base_url: "http://www.javlibrary.com"
         cookies:
             cf_clearance: ""
@@ -186,7 +178,6 @@ scrapers:
     # JavDB: configure flaresolverr at scrapers.flaresolverr or per-scraper
     javdb:
         enabled: false
-        request_delay: 1000
         base_url: "https://javdb.com"
         # Example: proxy profile (flaresolverr configured globally or per-scraper)
         # proxy:
@@ -196,44 +187,36 @@ scrapers:
     javbus:
         enabled: false
         language: ja
-        request_delay: 1000
         base_url: "https://www.javbus.com"
         # age=verified, dv=1, existmag=mag cookies are applied automatically by scraper.
         use_flaresolverr: false  # Enable to use global FlareSolverr for Cloudflare bypass
     jav321:
         enabled: false
-        request_delay: 1000
         base_url: "https://jp.jav321.com"
     tokyohot:
         enabled: false
         language: ja
-        request_delay: 1000
         base_url: "https://www.tokyo-hot.com"
     aventertainment:
         enabled: false
         language: en
-        request_delay: 1000
         base_url: "https://www.aventertainments.com"
         scrape_bonus_screens: false # Append bonus image files (e.g., "特典ファイル ... (48 Pics)") to screenshot URLs
     dlgetchu:
         enabled: false
-        request_delay: 1000
         base_url: "http://dl.getchu.com"
     caribbeancom:
         enabled: false
         language: ja
-        request_delay: 1000
         base_url: "https://www.caribbeancom.com"
     fc2:
         enabled: false
-        request_delay: 1000
         base_url: "https://adult.contents.fc2.com"
     javstash:
         enabled: false # Opt-in - requires API key from javstash.org
         api_key: "" # API key for authentication (or set JAVSTASH_API_KEY env var)
         base_url: "https://javstash.org/graphql"
         language: en # en | ja
-        request_delay: 1000
 metadata:
     priority:
         actress:

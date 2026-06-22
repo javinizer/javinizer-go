@@ -1,6 +1,7 @@
 package word
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -90,9 +91,9 @@ func runWordList(cmd *cobra.Command, args []string, configFile string) error {
 
 	repo := database.NewWordReplacementRepository(deps.DB)
 
-	replacements, err := repo.List()
+	replacements, err := repo.List(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to list word replacements: %v", err)
+		return fmt.Errorf("failed to list word replacements: %w", err)
 	}
 
 	if len(replacements) == 0 {
@@ -135,8 +136,8 @@ func runWordAdd(cmd *cobra.Command, args []string, configFile string) error {
 		Replacement: replacement,
 	}
 
-	if err := repo.Upsert(wordReplacement); err != nil {
-		return fmt.Errorf("failed to add word replacement: %v", err)
+	if err := repo.Upsert(context.Background(), wordReplacement); err != nil {
+		return fmt.Errorf("failed to add word replacement: %w", err)
 	}
 
 	fmt.Printf("Word replacement added: '%s' -> '%s'\n", original, replacement)
@@ -160,8 +161,8 @@ func runWordRemove(cmd *cobra.Command, args []string, configFile string) error {
 
 	repo := database.NewWordReplacementRepository(deps.DB)
 
-	if err := repo.Delete(original); err != nil {
-		return fmt.Errorf("failed to remove word replacement: %v", err)
+	if err := repo.Delete(context.Background(), original); err != nil {
+		return fmt.Errorf("failed to remove word replacement: %w", err)
 	}
 
 	fmt.Printf("Word replacement removed: '%s'\n", original)
@@ -183,9 +184,9 @@ func runWordExport(cmd *cobra.Command, args []string, configFile string) error {
 
 	repo := database.NewWordReplacementRepository(deps.DB)
 
-	replacements, err := repo.List()
+	replacements, err := repo.List(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to list word replacements: %v", err)
+		return fmt.Errorf("failed to list word replacements: %w", err)
 	}
 
 	sort.Slice(replacements, func(i, j int) bool {
@@ -194,7 +195,7 @@ func runWordExport(cmd *cobra.Command, args []string, configFile string) error {
 
 	data, err := json.MarshalIndent(replacements, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %v", err)
+		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
 	if len(args) == 0 {
@@ -203,7 +204,7 @@ func runWordExport(cmd *cobra.Command, args []string, configFile string) error {
 		fmt.Printf("Exported %d word replacement(s) to stdout\n", len(replacements))
 	} else {
 		if err := os.WriteFile(args[0], data, 0644); err != nil {
-			return fmt.Errorf("failed to write file: %v", err)
+			return fmt.Errorf("failed to write file: %w", err)
 		}
 		fmt.Printf("Exported %d word replacement(s) to %s\n", len(replacements), args[0])
 	}
@@ -216,12 +217,12 @@ func runWordImport(cmd *cobra.Command, args []string, configFile string) error {
 
 	fileData, err := os.ReadFile(args[0])
 	if err != nil {
-		return fmt.Errorf("failed to read file: %v", err)
+		return fmt.Errorf("failed to read file: %w", err)
 	}
 
 	var replacements []models.WordReplacement
 	if err := json.Unmarshal(fileData, &replacements); err != nil {
-		return fmt.Errorf("failed to parse JSON: %v", err)
+		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
 	if len(replacements) == 0 {
@@ -253,7 +254,7 @@ func runWordImport(cmd *cobra.Command, args []string, configFile string) error {
 			continue
 		}
 
-		existing, err := repo.FindByOriginal(r.Original)
+		existing, err := repo.FindByOriginal(context.Background(), r.Original)
 		if err == nil {
 			if existing.Replacement == r.Replacement {
 				skipped++
@@ -261,7 +262,7 @@ func runWordImport(cmd *cobra.Command, args []string, configFile string) error {
 			}
 		}
 
-		if err := repo.Upsert(r); err != nil {
+		if err := repo.Upsert(context.Background(), r); err != nil {
 			errorsCount++
 			continue
 		}

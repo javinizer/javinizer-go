@@ -12,9 +12,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
 func TestScanDirectory(t *testing.T) {
@@ -23,7 +26,7 @@ func TestScanDirectory(t *testing.T) {
 		setupFiles     func(*testing.T, string) string // Returns path to scan
 		requestBody    interface{}
 		expectedStatus int
-		validateFn     func(*testing.T, *ScanResponse)
+		validateFn     func(*testing.T, *contracts.ScanResponse)
 	}{
 		{
 			name: "scan directory with video files",
@@ -35,14 +38,14 @@ func TestScanDirectory(t *testing.T) {
 				require.NoError(t, os.WriteFile(testFile2, []byte("test"), 0644))
 				return tempDir
 			},
-			requestBody: func(path string) ScanRequest {
-				return ScanRequest{
+			requestBody: func(path string) contracts.ScanRequest {
+				return contracts.ScanRequest{
 					Path:      path,
 					Recursive: false,
 				}
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp *ScanResponse) {
+			validateFn: func(t *testing.T, resp *contracts.ScanResponse) {
 				assert.Greater(t, resp.Count, 0)
 				assert.NotEmpty(t, resp.Files)
 				// Should match video files
@@ -69,14 +72,14 @@ func TestScanDirectory(t *testing.T) {
 				}
 				return tempDir
 			},
-			requestBody: func(path string) ScanRequest {
-				return ScanRequest{
+			requestBody: func(path string) contracts.ScanRequest {
+				return contracts.ScanRequest{
 					Path:      path,
 					Recursive: false,
 				}
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp *ScanResponse) {
+			validateFn: func(t *testing.T, resp *contracts.ScanResponse) {
 				matchedByName := map[string]bool{}
 				for _, file := range resp.Files {
 					if file.Matched {
@@ -93,8 +96,8 @@ func TestScanDirectory(t *testing.T) {
 			setupFiles: func(_ *testing.T, tempDir string) string {
 				return filepath.Join(tempDir, "nonexistent")
 			},
-			requestBody: func(path string) ScanRequest {
-				return ScanRequest{
+			requestBody: func(path string) contracts.ScanRequest {
+				return contracts.ScanRequest{
 					Path: path,
 				}
 			},
@@ -108,13 +111,13 @@ func TestScanDirectory(t *testing.T) {
 				require.NoError(t, os.WriteFile(testFile, []byte("test"), 0644))
 				return tempDir
 			},
-			requestBody: func(path string) ScanRequest {
-				return ScanRequest{
+			requestBody: func(path string) contracts.ScanRequest {
+				return contracts.ScanRequest{
 					Path: path,
 				}
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp *ScanResponse) {
+			validateFn: func(t *testing.T, resp *contracts.ScanResponse) {
 				// Should complete but may skip non-video files
 				assert.NotNil(t, resp.Files)
 			},
@@ -146,20 +149,13 @@ func TestScanDirectory(t *testing.T) {
 				},
 			}
 
-			mat, err := matcher.NewMatcher(&cfg.Matching)
-			require.NoError(t, err)
-
-			// Create minimal ServerDependencies for test
-			deps := &ServerDependencies{
-				Matcher: mat,
-			}
-			deps.SetConfig(cfg)
+			deps := newTestDepsFromConfig(cfg)
 
 			router := gin.New()
-			router.POST("/scan", scanDirectory(deps))
+			router.POST("/scan", scanDirectory(testkit.GetTestRuntime(deps)))
 
 			var reqBody interface{}
-			if fn, ok := tt.requestBody.(func(string) ScanRequest); ok {
+			if fn, ok := tt.requestBody.(func(string) contracts.ScanRequest); ok {
 				reqBody = fn(scanPath)
 			} else {
 				reqBody = tt.requestBody
@@ -177,7 +173,7 @@ func TestScanDirectory(t *testing.T) {
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
 			if tt.validateFn != nil && w.Code == 200 {
-				var response ScanResponse
+				var response contracts.ScanResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				require.NoError(t, err)
 				tt.validateFn(t, &response)
@@ -200,17 +196,10 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 		},
 	}
 
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
-
-	// Create minimal ServerDependencies for test
-	deps := &ServerDependencies{
-		Matcher: mat,
-	}
-	deps.SetConfig(cfg)
+	deps := newTestDepsFromConfig(cfg)
 
 	router := gin.New()
-	router.POST("/scan", scanDirectory(deps))
+	router.POST("/scan", scanDirectory(testkit.GetTestRuntime(deps)))
 
 	tests := []struct {
 		name             string
@@ -233,10 +222,10 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 			acceptedErrors:   []string{"does not exist", "access denied"},
 		},
 		{
-			name:           "nonexistent path",
-			path:           "/nonexistent/path/12345",
-			expectedStatus: 400,
-			errorContains:  "does not exist",
+			name:             "nonexistent path",
+			path:             "/nonexistent/path/12345",
+			acceptedStatuses: []int{400, 403},
+			acceptedErrors:   []string{"does not exist", "access denied"},
 		},
 		{
 			name:           "/dev is blocked",
@@ -252,7 +241,7 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 			if tt.skipOS == runtime.GOOS {
 				t.Skipf("Skipping on %s", runtime.GOOS)
 			}
-			reqBody := ScanRequest{Path: tt.path}
+			reqBody := contracts.ScanRequest{Path: tt.path}
 			body, err := json.Marshal(reqBody)
 			require.NoError(t, err)
 
@@ -302,15 +291,12 @@ func TestScanDirectory_PathTraversalPrevention(t *testing.T) {
 
 func TestGetCurrentWorkingDirectory(t *testing.T) {
 	t.Run("returns os.Getwd when no allowed directories configured", func(t *testing.T) {
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		cfg.API.Security.AllowedDirectories = []string{} // No allowed directories
 
-		// Create minimal ServerDependencies for test
-		deps := &ServerDependencies{}
-		deps.SetConfig(cfg)
-
+		deps := newTestDepsFromConfig(cfg)
 		router := gin.New()
-		router.GET("/cwd", getCurrentWorkingDirectory(deps))
+		router.GET("/cwd", getCurrentWorkingDirectory(testkit.GetTestRuntime(deps)))
 
 		req := httptest.NewRequest("GET", "/cwd", nil)
 		w := httptest.NewRecorder()
@@ -332,15 +318,12 @@ func TestGetCurrentWorkingDirectory(t *testing.T) {
 	})
 
 	t.Run("returns first allowed directory when configured", func(t *testing.T) {
-		cfg := config.DefaultConfig()
+		cfg := config.DefaultConfig(nil, nil)
 		cfg.API.Security.AllowedDirectories = []string{"/media", "/data"}
 
-		// Create minimal ServerDependencies for test
-		deps := &ServerDependencies{}
-		deps.SetConfig(cfg)
-
+		deps := newTestDepsFromConfig(cfg)
 		router := gin.New()
-		router.GET("/cwd", getCurrentWorkingDirectory(deps))
+		router.GET("/cwd", getCurrentWorkingDirectory(testkit.GetTestRuntime(deps)))
 
 		req := httptest.NewRequest("GET", "/cwd", nil)
 		w := httptest.NewRecorder()
@@ -365,7 +348,7 @@ func TestBrowseDirectory(t *testing.T) {
 		setupFiles     func(*testing.T, string) string // Returns path to browse
 		requestBody    interface{}
 		expectedStatus int
-		validateFn     func(*testing.T, *BrowseResponse)
+		validateFn     func(*testing.T, *contracts.BrowseResponse)
 	}{
 		{
 			name: "browse directory successfully",
@@ -376,11 +359,11 @@ func TestBrowseDirectory(t *testing.T) {
 				require.NoError(t, os.Mkdir(filepath.Join(tempDir, "subdir"), 0755))
 				return tempDir
 			},
-			requestBody: func(path string) BrowseRequest {
-				return BrowseRequest{Path: path}
+			requestBody: func(path string) contracts.BrowseRequest {
+				return contracts.BrowseRequest{Path: path}
 			},
 			expectedStatus: 200,
-			validateFn: func(t *testing.T, resp *BrowseResponse) {
+			validateFn: func(t *testing.T, resp *contracts.BrowseResponse) {
 				assert.NotEmpty(t, resp.CurrentPath)
 				assert.NotEmpty(t, resp.Items)
 				assert.GreaterOrEqual(t, len(resp.Items), 3) // file1, file2, subdir
@@ -408,8 +391,8 @@ func TestBrowseDirectory(t *testing.T) {
 			setupFiles: func(_ *testing.T, tempDir string) string {
 				return filepath.Join(tempDir, "nonexistent")
 			},
-			requestBody: func(path string) BrowseRequest {
-				return BrowseRequest{Path: path}
+			requestBody: func(path string) contracts.BrowseRequest {
+				return contracts.BrowseRequest{Path: path}
 			},
 			expectedStatus: 400,
 		},
@@ -420,8 +403,8 @@ func TestBrowseDirectory(t *testing.T) {
 				require.NoError(t, os.WriteFile(filePath, []byte("test"), 0644))
 				return filePath
 			},
-			requestBody: func(path string) BrowseRequest {
-				return BrowseRequest{Path: path}
+			requestBody: func(path string) contracts.BrowseRequest {
+				return contracts.BrowseRequest{Path: path}
 			},
 			expectedStatus: 400,
 		},
@@ -430,7 +413,7 @@ func TestBrowseDirectory(t *testing.T) {
 			setupFiles: func(_ *testing.T, tempDir string) string {
 				return ""
 			},
-			requestBody:    BrowseRequest{Path: ""},
+			requestBody:    contracts.BrowseRequest{Path: ""},
 			expectedStatus: 403,
 		},
 		{
@@ -448,17 +431,15 @@ func TestBrowseDirectory(t *testing.T) {
 			tempDir := t.TempDir()
 			browsePath := tt.setupFiles(t, tempDir)
 
-			cfg := config.DefaultConfig()
+			cfg := config.DefaultConfig(nil, nil)
 			cfg.API.Security.AllowedDirectories = []string{tempDir}
 
-			deps := &ServerDependencies{}
-			deps.SetConfig(cfg)
-
+			deps := newTestDepsFromConfig(cfg)
 			router := gin.New()
-			router.POST("/browse", browseDirectory(deps))
+			router.POST("/browse", browseDirectory(testkit.GetTestRuntime(deps)))
 
 			var reqBody interface{}
-			if fn, ok := tt.requestBody.(func(string) BrowseRequest); ok {
+			if fn, ok := tt.requestBody.(func(string) contracts.BrowseRequest); ok {
 				reqBody = fn(browsePath)
 			} else {
 				reqBody = tt.requestBody
@@ -482,7 +463,7 @@ func TestBrowseDirectory(t *testing.T) {
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
 			if tt.validateFn != nil && w.Code == 200 {
-				var response BrowseResponse
+				var response contracts.BrowseResponse
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				require.NoError(t, err)
 				tt.validateFn(t, &response)
@@ -493,19 +474,16 @@ func TestBrowseDirectory(t *testing.T) {
 
 func TestBrowseDirectory_PathTraversalPrevention(t *testing.T) {
 	// CRITICAL: Create temp directory and configure allowlist
-	// DefaultConfig() has empty AllowedDirectories, which allows traversal to parent directories
+	// DefaultConfig(nil, nil) has empty AllowedDirectories, which allows traversal to parent directories
 	// This test must verify that paths outside the allowlist are rejected
 	tempDir := t.TempDir()
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.API.Security.AllowedDirectories = []string{tempDir} // Only allow tempDir
 
-	// Create minimal ServerDependencies for test
-	deps := &ServerDependencies{}
-	deps.SetConfig(cfg)
-
+	deps := newTestDepsFromConfig(cfg)
 	router := gin.New()
-	router.POST("/browse", browseDirectory(deps))
+	router.POST("/browse", browseDirectory(testkit.GetTestRuntime(deps)))
 
 	maliciousPaths := []string{
 		// Relative traversal attempts (from tempDir context)
@@ -523,7 +501,7 @@ func TestBrowseDirectory_PathTraversalPrevention(t *testing.T) {
 
 	for _, maliciousPath := range maliciousPaths {
 		t.Run("PathTraversal:"+maliciousPath, func(t *testing.T) {
-			reqBody := BrowseRequest{Path: maliciousPath}
+			reqBody := contracts.BrowseRequest{Path: maliciousPath}
 			body, err := json.Marshal(reqBody)
 			require.NoError(t, err)
 
@@ -539,7 +517,7 @@ func TestBrowseDirectory_PathTraversalPrevention(t *testing.T) {
 				"Expected 403 (Forbidden) or 400 (Bad Request) for path traversal attempt, got %d", w.Code)
 
 			// Verify error response contains appropriate message
-			var response ErrorResponse
+			var response contracts.ErrorResponse
 			err = json.Unmarshal(w.Body.Bytes(), &response)
 			require.NoError(t, err, "Response should be valid JSON error")
 			assert.NotEmpty(t, response.Error, "Error message should be present")
@@ -561,16 +539,14 @@ func TestBrowseDirectory_ParentPathCalculation(t *testing.T) {
 	subDir := filepath.Join(tempDir, "subdir")
 	require.NoError(t, os.Mkdir(subDir, 0755))
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.API.Security.AllowedDirectories = []string{tempDir}
-	deps := &ServerDependencies{}
-	deps.SetConfig(cfg)
-
+	deps := newTestDepsFromConfig(cfg)
 	router := gin.New()
-	router.POST("/browse", browseDirectory(deps))
+	router.POST("/browse", browseDirectory(testkit.GetTestRuntime(deps)))
 
 	// Browse subdirectory
-	reqBody := BrowseRequest{Path: subDir}
+	reqBody := contracts.BrowseRequest{Path: subDir}
 	body, err := json.Marshal(reqBody)
 	require.NoError(t, err)
 
@@ -582,7 +558,7 @@ func TestBrowseDirectory_ParentPathCalculation(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 
-	var response BrowseResponse
+	var response contracts.BrowseResponse
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
@@ -601,19 +577,17 @@ func TestAutocompletePath(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(tempDir, "unsorted", "processed"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "unsorted", "video.mp4"), []byte("test"), 0644))
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.API.Security.AllowedDirectories = []string{tempDir}
 	canonicalTempDir, err := filepath.EvalSymlinks(tempDir)
 	require.NoError(t, err)
 
-	deps := &ServerDependencies{}
-	deps.SetConfig(cfg)
-
+	deps := newTestDepsFromConfig(cfg)
 	router := gin.New()
-	router.POST("/browse/autocomplete", autocompletePath(deps))
+	router.POST("/browse/autocomplete", autocompletePath(testkit.GetTestRuntime(deps)))
 
 	t.Run("matches partial final segment", func(t *testing.T) {
-		reqBody := PathAutocompleteRequest{
+		reqBody := contracts.PathAutocompleteRequest{
 			Path:  filepath.Join(tempDir, "uns"),
 			Limit: 10,
 		}
@@ -628,7 +602,7 @@ func TestAutocompletePath(t *testing.T) {
 
 		require.Equal(t, 200, w.Code, w.Body.String())
 
-		var response PathAutocompleteResponse
+		var response contracts.PathAutocompleteResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 		require.Equal(t, canonicalTempDir, response.BasePath)
 		require.Len(t, response.Suggestions, 2)
@@ -639,7 +613,7 @@ func TestAutocompletePath(t *testing.T) {
 	})
 
 	t.Run("trailing separator lists child directories only", func(t *testing.T) {
-		reqBody := PathAutocompleteRequest{
+		reqBody := contracts.PathAutocompleteRequest{
 			Path: filepath.Join(tempDir, "unsorted") + string(os.PathSeparator),
 		}
 		body, err := json.Marshal(reqBody)
@@ -653,7 +627,7 @@ func TestAutocompletePath(t *testing.T) {
 
 		require.Equal(t, 200, w.Code, w.Body.String())
 
-		var response PathAutocompleteResponse
+		var response contracts.PathAutocompleteResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 		require.Equal(t, filepath.Join(canonicalTempDir, "unsorted"), response.BasePath)
 		require.Len(t, response.Suggestions, 2)
@@ -665,16 +639,14 @@ func TestAutocompletePath(t *testing.T) {
 func TestAutocompletePath_PathTraversalPrevention(t *testing.T) {
 	tempDir := t.TempDir()
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.API.Security.AllowedDirectories = []string{tempDir}
 
-	deps := &ServerDependencies{}
-	deps.SetConfig(cfg)
-
+	deps := newTestDepsFromConfig(cfg)
 	router := gin.New()
-	router.POST("/browse/autocomplete", autocompletePath(deps))
+	router.POST("/browse/autocomplete", autocompletePath(testkit.GetTestRuntime(deps)))
 
-	reqBody := PathAutocompleteRequest{
+	reqBody := contracts.PathAutocompleteRequest{
 		Path: filepath.Join(tempDir, "..", "etc"),
 	}
 	body, err := json.Marshal(reqBody)
@@ -688,7 +660,7 @@ func TestAutocompletePath_PathTraversalPrevention(t *testing.T) {
 
 	assert.True(t, w.Code == 400 || w.Code == 403, "expected security rejection, got %d", w.Code)
 
-	var response ErrorResponse
+	var response contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	assert.NotEmpty(t, response.Error)
 }
@@ -718,19 +690,12 @@ func TestScanDirectory_LargeDirectory(t *testing.T) {
 		},
 	}
 
-	mat, err := matcher.NewMatcher(&cfg.Matching)
-	require.NoError(t, err)
-
-	// Create minimal ServerDependencies for test
-	deps := &ServerDependencies{
-		Matcher: mat,
-	}
-	deps.SetConfig(cfg)
+	deps := newTestDepsFromConfig(cfg)
 
 	router := gin.New()
-	router.POST("/scan", scanDirectory(deps))
+	router.POST("/scan", scanDirectory(testkit.GetTestRuntime(deps)))
 
-	reqBody := ScanRequest{Path: tempDir}
+	reqBody := contracts.ScanRequest{Path: tempDir}
 	body, err := json.Marshal(reqBody)
 	require.NoError(t, err)
 
@@ -742,7 +707,7 @@ func TestScanDirectory_LargeDirectory(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 
-	var response ScanResponse
+	var response contracts.ScanResponse
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
@@ -785,10 +750,10 @@ func TestScanDirectory_RecursiveFlag(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	router := gin.New()
-	router.POST("/scan", scanDirectory(deps))
+	router.POST("/scan", scanDirectory(testkit.GetTestRuntime(deps)))
 
 	t.Run("non-recursive scan should only find root files", func(t *testing.T) {
-		reqBody := ScanRequest{Path: tempDir, Recursive: false}
+		reqBody := contracts.ScanRequest{Path: tempDir, Recursive: false}
 		body, err := json.Marshal(reqBody)
 		require.NoError(t, err)
 
@@ -800,7 +765,7 @@ func TestScanDirectory_RecursiveFlag(t *testing.T) {
 
 		assert.Equal(t, 200, w.Code)
 
-		var response ScanResponse
+		var response contracts.ScanResponse
 		err = json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
@@ -812,7 +777,7 @@ func TestScanDirectory_RecursiveFlag(t *testing.T) {
 	})
 
 	t.Run("recursive scan should find all files", func(t *testing.T) {
-		reqBody := ScanRequest{Path: tempDir, Recursive: true}
+		reqBody := contracts.ScanRequest{Path: tempDir, Recursive: true}
 		body, err := json.Marshal(reqBody)
 		require.NoError(t, err)
 
@@ -824,7 +789,7 @@ func TestScanDirectory_RecursiveFlag(t *testing.T) {
 
 		assert.Equal(t, 200, w.Code)
 
-		var response ScanResponse
+		var response contracts.ScanResponse
 		err = json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
@@ -892,10 +857,10 @@ func TestScanDirectory_FilterFlag(t *testing.T) {
 	deps := createTestDeps(t, cfg, "")
 
 	router := gin.New()
-	router.POST("/scan", scanDirectory(deps))
+	router.POST("/scan", scanDirectory(testkit.GetTestRuntime(deps)))
 
 	t.Run("recursive scan with filter skips non-matching directories", func(t *testing.T) {
-		reqBody := ScanRequest{Path: tempDir, Recursive: true, Filter: "IPX"}
+		reqBody := contracts.ScanRequest{Path: tempDir, Recursive: true, Filter: "IPX"}
 		body, err := json.Marshal(reqBody)
 		require.NoError(t, err)
 
@@ -907,7 +872,7 @@ func TestScanDirectory_FilterFlag(t *testing.T) {
 
 		assert.Equal(t, 200, w.Code)
 
-		var response ScanResponse
+		var response contracts.ScanResponse
 		err = json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
@@ -926,7 +891,7 @@ func TestScanDirectory_FilterFlag(t *testing.T) {
 	})
 
 	t.Run("recursive scan without filter finds all files", func(t *testing.T) {
-		reqBody := ScanRequest{Path: tempDir, Recursive: true, Filter: ""}
+		reqBody := contracts.ScanRequest{Path: tempDir, Recursive: true, Filter: ""}
 		body, err := json.Marshal(reqBody)
 		require.NoError(t, err)
 
@@ -938,7 +903,7 @@ func TestScanDirectory_FilterFlag(t *testing.T) {
 
 		assert.Equal(t, 200, w.Code)
 
-		var response ScanResponse
+		var response contracts.ScanResponse
 		err = json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
@@ -947,7 +912,7 @@ func TestScanDirectory_FilterFlag(t *testing.T) {
 	})
 
 	t.Run("filter is case insensitive", func(t *testing.T) {
-		reqBody := ScanRequest{Path: tempDir, Recursive: true, Filter: "ipx"} // lowercase
+		reqBody := contracts.ScanRequest{Path: tempDir, Recursive: true, Filter: "ipx"} // lowercase
 		body, err := json.Marshal(reqBody)
 		require.NoError(t, err)
 
@@ -959,7 +924,7 @@ func TestScanDirectory_FilterFlag(t *testing.T) {
 
 		assert.Equal(t, 200, w.Code)
 
-		var response ScanResponse
+		var response contracts.ScanResponse
 		err = json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 

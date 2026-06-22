@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -34,20 +34,21 @@ var (
 	productIDRegex    = regexp.MustCompile(`(?i)商品ID\s*:\s*FC2\s*PPV\s*(\d{5,10})`)
 )
 
-// Scraper implements the FC2 scraper.
-type Scraper struct {
+// scraper implements the FC2 scraper.
+type scraper struct {
 	client        *resty.Client
 	enabled       bool
 	baseURL       string
-	proxyOverride *config.ProxyConfig
-	downloadProxy *config.ProxyConfig
+	proxyOverride *models.ProxyConfig
+	downloadProxy *models.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings
+	settings      models.ScraperSettings
 }
 
 // New creates a new FC2 scraper.
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+// newScraper creates a new FC2 scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
 			httpclient.StandardHTMLHeaders(),
 			httpclient.UserAgentHeader(settings.UserAgent),
@@ -62,14 +63,14 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	}
 	base = strings.TrimRight(base, "/")
 
-	s := &Scraper{
+	s := &scraper{
 		client:        client,
 		enabled:       settings.Enabled,
 		baseURL:       base,
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
-		settings:      settings,
+		settings:      *settings,
 	}
 
 	if result.ProxyEnabled && strings.TrimSpace(result.ProxyProfile.URL) != "" {
@@ -80,35 +81,36 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 }
 
 // Name returns the scraper identifier.
-func (s *Scraper) Name() string { return "fc2" }
+func (s *scraper) Name() string { return "fc2" }
 
 // IsEnabled returns whether scraper is enabled.
-func (s *Scraper) IsEnabled() bool { return s.enabled }
+func (s *scraper) IsEnabled() bool { return s.enabled }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	return nil
 }
 
 // ResolveDownloadProxyForHost declares FC2-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
 	}
 	if host == "fc2.com" || strings.HasSuffix(host, ".fc2.com") {
-		return s.downloadProxy, s.proxyOverride, true
+		return s.settings.DownloadProxy, s.settings.Proxy, true
 	}
 	return nil, nil, false
 }
 
 // ResolveSearchQuery normalizes FC2/PPV identifiers from free-form input.
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -117,14 +119,14 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 	return host == "fc2.com" || strings.HasSuffix(host, ".fc2.com")
 }
 
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	if m := articleURLRegex.FindStringSubmatch(urlStr); len(m) > 1 {
 		return canonicalFC2ID(m[1]), nil
 	}
 	return "", fmt.Errorf("failed to extract ID from FC2 URL")
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("FC2", "URL not handled by FC2 scraper")
 	}
@@ -142,7 +144,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, models.NewScraperNotFoundError("FC2", "page not found")
 	}
 	if status == 429 {
-		return nil, models.NewScraperStatusError("FC2", 429, "rate limited")
+		return nil, models.NewScraperStatusError("FC2", http.StatusTooManyRequests, "rate limited")
 	}
 	if status == 403 || status == 451 {
 		return nil, models.NewScraperStatusError("FC2", status, "access blocked")
@@ -167,7 +169,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	return result, nil
 }
 
-func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
+func (s *scraper) ResolveSearchQuery(input string) (string, bool) {
 	articleID := extractArticleID(input)
 	if articleID == "" {
 		return "", false
@@ -175,11 +177,11 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	return canonicalFC2ID(articleID), true
 }
 
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -202,7 +204,7 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 }
 
 // Search scrapes metadata for a given FC2 ID.
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("FC2 scraper is disabled")
 	}
@@ -247,6 +249,12 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	}
 
 	return result, nil
+}
+
+// ParseHTML parses an FC2 detail page from a goquery.Document and the
+// original raw HTML string. This is the documented parsing seam for testing.
+func ParseHTML(doc *goquery.Document, html, sourceURL string) *models.ScraperResult {
+	return parseDetailPage(doc, html, sourceURL, "")
 }
 
 func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackArticleID string) *models.ScraperResult {
@@ -325,7 +333,7 @@ func extractRating(doc *goquery.Document) *models.Rating {
 			return true
 		}
 
-		var payload map[string]interface{}
+		var payload map[string]any
 		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 			return true
 		}
@@ -334,7 +342,7 @@ func extractRating(doc *goquery.Document) *models.Rating {
 		if !ok {
 			return true
 		}
-		agg, ok := aggRaw.(map[string]interface{})
+		agg, ok := aggRaw.(map[string]any)
 		if !ok {
 			return true
 		}
@@ -352,7 +360,7 @@ func extractRating(doc *goquery.Document) *models.Rating {
 	return rating
 }
 
-func toFloat64(v interface{}) float64 {
+func toFloat64(v any) float64 {
 	switch n := v.(type) {
 	case float64:
 		return n
@@ -376,7 +384,7 @@ func toFloat64(v interface{}) float64 {
 	return 0
 }
 
-func toInt(v interface{}) int {
+func toInt(v any) int {
 	switch n := v.(type) {
 	case int:
 		return n
@@ -605,11 +613,11 @@ func normalizeURL(raw, sourceURL string) string {
 	return base.ResolveReference(parsed).String()
 }
 
-func (s *Scraper) buildArticleURL(articleID string) string {
+func (s *scraper) buildArticleURL(articleID string) string {
 	return fmt.Sprintf("%s/article/%s/", s.baseURL, strings.TrimSpace(articleID))
 }
 
-func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
+func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}

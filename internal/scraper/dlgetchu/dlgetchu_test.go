@@ -11,14 +11,13 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 )
 
-func testSettings(baseURL string) config.ScraperSettings {
-	return config.ScraperSettings{
+func testSettings(baseURL string) *models.ScraperSettings {
+	return &models.ScraperSettings{
 		Enabled:   true,
 		RateLimit: 0,
 		BaseURL:   baseURL,
@@ -55,7 +54,7 @@ func TestSearch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	s := New(testSettings(server.URL), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings(server.URL), nil, models.FlareSolverrConfig{})
 	result, err := s.Search(context.Background(), "ABC-123")
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
@@ -279,7 +278,7 @@ func TestFetchPage(t *testing.T) {
 			defer server.Close()
 
 			settings := testSettings(server.URL)
-			s := New(settings, nil, config.FlareSolverrConfig{})
+			s := newScraper(settings, nil, models.FlareSolverrConfig{})
 
 			result, status, err := s.fetchPageCtx(context.Background(), server.URL)
 
@@ -380,8 +379,8 @@ func TestScraper_IsEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			settings := config.ScraperSettings{Enabled: tt.enabled}
-			scraper := New(settings, nil, config.FlareSolverrConfig{})
+			settings := models.ScraperSettings{Enabled: tt.enabled}
+			scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 			assert.Equal(t, tt.enabled, scraper.IsEnabled(), "IsEnabled should match config")
 		})
 	}
@@ -390,7 +389,7 @@ func TestScraper_IsEnabled(t *testing.T) {
 // TestScraper_Name tests the Name method
 func TestScraper_Name(t *testing.T) {
 	settings := testSettings("https://dl.getchu.com")
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(settings, nil, models.FlareSolverrConfig{})
 	assert.Equal(t, "dlgetchu", scraper.Name())
 }
 
@@ -419,8 +418,8 @@ func TestScraper_GetURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := testSettings("https://dl.getchu.com")
-			scraper := New(settings, nil, config.FlareSolverrConfig{})
-			url, err := scraper.GetURL(tt.id)
+			scraper := newScraper(settings, nil, models.FlareSolverrConfig{})
+			url, err := scraper.GetURL(context.Background(), tt.id)
 			if tt.expectedErr {
 				assert.Error(t, err, "GetURL should fail for empty ID")
 				assert.Empty(t, url)
@@ -439,11 +438,11 @@ func TestScraper_GetURLNumeric(t *testing.T) {
 	}
 
 	settings := testSettings("https://dl.getchu.com")
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(settings, nil, models.FlareSolverrConfig{})
 
 	// This test may fail if the URL doesn't exist
 	// It's designed to test the actual network behavior
-	url, err := scraper.GetURL("12345")
+	url, err := scraper.GetURL(context.Background(), "12345")
 	// Just check that it doesn't panic
 	_ = url
 	_ = err
@@ -482,10 +481,10 @@ func TestScraper_GetURL_Search(t *testing.T) {
 	defer server.Close()
 
 	settings := testSettings(server.URL)
-	s := New(settings, nil, config.FlareSolverrConfig{})
+	s := newScraper(settings, nil, models.FlareSolverrConfig{})
 
 	// Test search fallback
-	url, err := s.GetURL("ABC-123")
+	url, err := s.GetURL(context.Background(), "ABC-123")
 	assert.NoError(t, err, "GetURL should succeed with search fallback")
 	assert.Contains(t, url, "/i/item12345")
 }
@@ -609,7 +608,7 @@ func TestNormalizeFullWidthDigits(t *testing.T) {
 // TestResolveDownloadProxyForHost tests proxy resolution
 func TestResolveDownloadProxyForHost(t *testing.T) {
 	settings := testSettings("https://dl.getchu.com")
-	scraper := New(settings, nil, config.FlareSolverrConfig{})
+	scraper := newScraper(settings, nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -835,7 +834,7 @@ func TestResolveURLEdgeCases(t *testing.T) {
 func TestSearchDisabled(t *testing.T) {
 	settings := testSettings("https://dl.getchu.com")
 	settings.Enabled = false
-	s := New(settings, nil, config.FlareSolverrConfig{})
+	s := newScraper(settings, nil, models.FlareSolverrConfig{})
 
 	result, err := s.Search(context.Background(), "12345")
 
@@ -853,7 +852,7 @@ func TestSearchWithHTTPError(t *testing.T) {
 	defer server.Close()
 
 	settings := testSettings(server.URL)
-	s := New(settings, nil, config.FlareSolverrConfig{})
+	s := newScraper(settings, nil, models.FlareSolverrConfig{})
 
 	result, err := s.Search(context.Background(), "12345")
 
@@ -863,7 +862,7 @@ func TestSearchWithHTTPError(t *testing.T) {
 }
 
 func TestCanHandleURL(t *testing.T) {
-	s := New(testSettings("https://dl.getchu.com"), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings("https://dl.getchu.com"), nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -887,7 +886,7 @@ func TestCanHandleURL(t *testing.T) {
 }
 
 func TestExtractIDFromURL(t *testing.T) {
-	s := New(testSettings("https://dl.getchu.com"), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings("https://dl.getchu.com"), nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -917,8 +916,7 @@ func TestExtractIDFromURL(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance_DLgetchu(t *testing.T) {
-	s := New(testSettings("https://dl.getchu.com"), nil, config.FlareSolverrConfig{})
+	s := newScraper(testSettings("https://dl.getchu.com"), nil, models.FlareSolverrConfig{})
 	var _ models.Scraper = s
-	var _ models.URLHandler = s
-	var _ models.DirectURLScraper = s
+	var _ models.Scraper = s
 }

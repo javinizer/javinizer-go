@@ -3,6 +3,7 @@ package caribbeancom
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/challengedetect"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -36,21 +37,22 @@ var (
 	dateYMDRegex       = regexp.MustCompile(`(\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{4})`)
 )
 
-// Scraper implements the Caribbeancom scraper.
-type Scraper struct {
+// scraper implements the Caribbeancom scraper.
+type scraper struct {
 	client        *resty.Client
 	enabled       bool
 	baseURL       string
 	language      string
-	proxyOverride *config.ProxyConfig
-	downloadProxy *config.ProxyConfig
+	proxyOverride *models.ProxyConfig
+	downloadProxy *models.ProxyConfig
 	rateLimiter   *ratelimit.Limiter
-	settings      config.ScraperSettings // stores the full settings for Config() method
+	settings      models.ScraperSettings // stores the full settings for Config() method
 }
 
 // New creates a new Caribbeancom scraper.
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+// newScraper creates a new Caribbeancom scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.CombineHeaders(
 			httpclient.StandardHTMLHeaders(),
 			httpclient.UserAgentHeader(settings.UserAgent),
@@ -67,7 +69,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 
 	lang := normalizeLanguage(settings.Language)
 
-	s := &Scraper{
+	s := &scraper{
 		client:        client,
 		enabled:       settings.Enabled,
 		baseURL:       base,
@@ -75,7 +77,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
-		settings:      settings,
+		settings:      *settings,
 	}
 
 	if result.ProxyEnabled && strings.TrimSpace(result.ProxyProfile.URL) != "" {
@@ -86,35 +88,36 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 }
 
 // Name returns scraper identifier.
-func (s *Scraper) Name() string { return "caribbeancom" }
+func (s *scraper) Name() string { return "caribbeancom" }
 
 // IsEnabled returns whether scraper is enabled.
-func (s *Scraper) IsEnabled() bool { return s.enabled }
+func (s *scraper) IsEnabled() bool { return s.enabled }
 
 // Config returns the scraper's configuration
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
 // Close cleans up resources held by the scraper
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	return nil
 }
 
 // ResolveDownloadProxyForHost declares Caribbeancom-owned media hosts for downloader proxy routing.
-func (s *Scraper) ResolveDownloadProxyForHost(host string) (*config.ProxyConfig, *config.ProxyConfig, bool) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return nil, nil, false
 	}
 	if host == "caribbeancom.com" || strings.HasSuffix(host, ".caribbeancom.com") {
-		return s.downloadProxy, s.proxyOverride, true
+		return s.settings.DownloadProxy, s.settings.Proxy, true
 	}
 	return nil, nil, false
 }
 
 // ResolveSearchQuery normalizes Caribbeancom-style IDs from free-form input.
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -123,14 +126,14 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 	return host == "caribbeancom.com" || strings.HasSuffix(host, ".caribbeancom.com")
 }
 
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	if m := movieIDFromPageRe.FindStringSubmatch(urlStr); len(m) > 1 {
 		return normalizeMovieID(m[1]), nil
 	}
 	return "", fmt.Errorf("failed to extract ID from Caribbeancom URL")
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("Caribbeancom", "URL not handled by Caribbeancom scraper")
 	}
@@ -149,7 +152,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, models.NewScraperNotFoundError("Caribbeancom", "page not found")
 	}
 	if status == 429 {
-		return nil, models.NewScraperStatusError("Caribbeancom", 429, "rate limited")
+		return nil, models.NewScraperStatusError("Caribbeancom", http.StatusTooManyRequests, "rate limited")
 	}
 	if status == 403 || status == 451 {
 		return nil, models.NewScraperStatusError("Caribbeancom", status, "access blocked")
@@ -170,7 +173,7 @@ func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	return parseDetailPage(doc, html, detailURL, id, s.language), nil
 }
 
-func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
+func (s *scraper) ResolveSearchQuery(input string) (string, bool) {
 	input = strings.TrimSpace(strings.ToLower(input))
 	if input == "" {
 		return "", false
@@ -185,11 +188,11 @@ func (s *Scraper) ResolveSearchQuery(input string) (string, bool) {
 	return "", false
 }
 
-func (s *Scraper) GetURL(id string) (string, error) {
-	return s.getURLCtx(context.Background(), id)
+func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
+	return s.getURLCtx(ctx, id)
 }
 
-func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
+func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("movie ID cannot be empty")
@@ -209,7 +212,7 @@ func (s *Scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 }
 
 // Search scrapes metadata from Caribbeancom.
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("caribbeancom scraper is disabled")
 	}
@@ -265,6 +268,12 @@ func isMovieDetailPage(doc *goquery.Document, html string) bool {
 		}
 	}
 	return false
+}
+
+// ParseHTML parses a Caribbeancom detail page from a goquery.Document and the
+// original raw HTML string. This is the documented parsing seam for testing.
+func ParseHTML(doc *goquery.Document, html, sourceURL, language string) *models.ScraperResult {
+	return parseDetailPage(doc, html, sourceURL, "", language)
 }
 
 func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackID, language string) *models.ScraperResult {
@@ -624,7 +633,7 @@ func normalizeLanguage(v string) string {
 	return "ja"
 }
 
-func (s *Scraper) buildMoviePageURL(movieID string) string {
+func (s *scraper) buildMoviePageURL(movieID string) string {
 	movieID = normalizeMovieID(movieID)
 	// Always build the canonical Japanese path from baseURL, then let applyLanguage
 	// swap the hostname and inject the /eng/ prefix when language == "en".
@@ -634,7 +643,7 @@ func (s *Scraper) buildMoviePageURL(movieID string) string {
 	return s.applyLanguage(rawURL)
 }
 
-func (s *Scraper) applyLanguage(rawURL string) string {
+func (s *scraper) applyLanguage(rawURL string) string {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || u.Host == "" {
 		return rawURL
@@ -670,7 +679,7 @@ func (s *Scraper) applyLanguage(rawURL string) string {
 	return u.String()
 }
 
-func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
+func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, int, error) {
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", 0, err
 	}
@@ -683,7 +692,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 	decoded, err := decodeBody(resp)
 	if err != nil {
 		html := resp.String()
-		if resp.StatusCode() == 200 && models.IsCloudflareChallengePage(html) {
+		if resp.StatusCode() == 200 && challengedetect.IsCloudflareChallengePage(html) {
 			return "", resp.StatusCode(), models.NewScraperChallengeError(
 				"Caribbeancom",
 				"Caribbeancom returned a Cloudflare challenge page (request blocked; adjust proxy/IP)",
@@ -692,7 +701,7 @@ func (s *Scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 		return html, resp.StatusCode(), nil
 	}
 
-	if resp.StatusCode() == 200 && models.IsCloudflareChallengePage(decoded) {
+	if resp.StatusCode() == 200 && challengedetect.IsCloudflareChallengePage(decoded) {
 		return "", resp.StatusCode(), models.NewScraperChallengeError(
 			"Caribbeancom",
 			"Caribbeancom returned a Cloudflare challenge page (request blocked; adjust proxy/IP)",

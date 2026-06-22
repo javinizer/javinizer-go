@@ -11,7 +11,7 @@ import type {
 	ProxyConfig,
 	OpenAICompatibleTranslationConfig,
 	AnthropicTranslationConfig,
-	TranslationConfig
+	TranslationConfig,
 } from '$lib/api/types';
 
 export interface SettingsStore {
@@ -96,9 +96,19 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 		const globalProxyEnabled = config?.scrapers?.proxy?.enabled ?? false;
 		const flaresolverrEnabled = config?.scrapers?.flaresolverr?.enabled ?? false;
 
-		if (globalProxyEnabled && !isTestValid(deps.getGlobalProxyTestResult(), config?.scrapers?.proxy, TEST_VALIDITY_MS))
+		if (
+			globalProxyEnabled &&
+			!isTestValid(deps.getGlobalProxyTestResult(), config?.scrapers?.proxy, TEST_VALIDITY_MS)
+		)
 			return false;
-		if (flaresolverrEnabled && !isTestValid(deps.getGlobalFlareSolverrTestResult(), config?.scrapers?.flaresolverr, TEST_VALIDITY_MS))
+		if (
+			flaresolverrEnabled &&
+			!isTestValid(
+				deps.getGlobalFlareSolverrTestResult(),
+				config?.scrapers?.flaresolverr,
+				TEST_VALIDITY_MS,
+			)
+		)
 			return false;
 
 		for (const name of Object.keys(deps.getProfileTestResults())) {
@@ -136,7 +146,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 			profiles.main = {
 				url: cfg.scrapers.proxy?.default_profile ?? '',
 				username: '',
-				password: ''
+				password: '',
 			};
 		}
 
@@ -200,7 +210,8 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 
 		if (!translation.anthropic || typeof translation.anthropic !== 'object')
 			translation.anthropic = {} as AnthropicTranslationConfig;
-		if (!translation.anthropic.base_url) translation.anthropic.base_url = 'https://api.anthropic.com';
+		if (!translation.anthropic.base_url)
+			translation.anthropic.base_url = 'https://api.anthropic.com';
 		if (!translation.anthropic.model) translation.anthropic.model = '';
 		if (!translation.anthropic.api_key) translation.anthropic.api_key = '';
 	}
@@ -231,11 +242,11 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 			}
 			const payload = {
 				...config,
-				proxy_verification_tokens: buildVerificationTokenPayload()
+				proxy_verification_tokens: buildVerificationTokenPayload(),
 			};
 			await apiClient.request('/api/v1/config', {
 				method: 'PUT',
-				body: JSON.stringify(payload)
+				body: JSON.stringify(payload),
 			});
 		},
 		onSuccess: () => {
@@ -247,7 +258,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 		onError: (err: Error) => {
 			error = err.message;
 			toastStore.error(err.message, 5000);
-		}
+		},
 	}));
 
 	function handleSave() {
@@ -268,7 +279,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 		try {
 			const data = await apiClient.request<{ models: string[] }>('/api/v1/translation/models', {
 				method: 'POST',
-				body: JSON.stringify({ provider, base_url: baseUrl, api_key: apiKey })
+				body: JSON.stringify({ provider, base_url: baseUrl, api_key: apiKey }),
 			});
 			translationModelOptions = data.models || [];
 		} catch (e) {
@@ -281,22 +292,46 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 	}
 
 	return {
-		get config() { return config; },
-		set config(v) { config = v; },
-		get settingsConfig() { return settingsConfig; },
-		get configInitialized() { return configInitialized; },
-		set configInitialized(v) { configInitialized = v; },
-		get loading() { return loading; },
-		get error() { return error; },
-		set error(v) { error = v; },
+		get config() {
+			return config;
+		},
+		set config(v) {
+			config = v;
+		},
+		get settingsConfig() {
+			return settingsConfig;
+		},
+		get configInitialized() {
+			return configInitialized;
+		},
+		set configInitialized(v) {
+			configInitialized = v;
+		},
+		get loading() {
+			return loading;
+		},
+		get error() {
+			return error;
+		},
+		set error(v) {
+			error = v;
+		},
 		inputClass,
-		get configQuery() { return configQuery; },
+		get configQuery() {
+			return configQuery;
+		},
 		reloadConfig,
 		handleSave,
-		get saveConfigMutation() { return saveConfigMutation; },
+		get saveConfigMutation() {
+			return saveConfigMutation;
+		},
 		fetchTranslationModels,
-		get fetchingTranslationModels() { return fetchingTranslationModels; },
-		get translationModelOptions() { return translationModelOptions; },
+		get fetchingTranslationModels() {
+			return fetchingTranslationModels;
+		},
+		get translationModelOptions() {
+			return translationModelOptions;
+		},
 		ensureProxyProfilesInitialized,
 		ensureTranslationConfig,
 		updateProxyConfigBaseline,
@@ -304,7 +339,11 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 		canSafelySave,
 		hasUnsavedProxyChanges,
 		buildVerificationTokenPayload,
-		get proxyConfigBaseline() { return proxyConfigBaseline; },
-		get flaresolverrConfigBaseline() { return flaresolverrConfigBaseline; }
+		get proxyConfigBaseline() {
+			return proxyConfigBaseline;
+		},
+		get flaresolverrConfigBaseline() {
+			return flaresolverrConfigBaseline;
+		},
 	};
 }

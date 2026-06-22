@@ -8,18 +8,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-func newJavbusTestScraper(baseURL string) *Scraper {
-	settings := config.ScraperSettings{
+func newJavbusTestScraper(baseURL string) *scraper {
+	settings := models.ScraperSettings{
 		Enabled:   true,
 		Language:  "ja",
 		RateLimit: 0,
 		BaseURL:   baseURL,
 	}
-	return New(settings, nil, config.FlareSolverrConfig{})
+	return newScraper(&settings, nil, models.FlareSolverrConfig{})
 }
 
 func TestScraperGetURLAndSearch(t *testing.T) {
@@ -62,7 +61,7 @@ func TestScraperGetURLAndSearch(t *testing.T) {
 
 	scraper := newJavbusTestScraper(server.URL)
 
-	url, err := scraper.GetURL("ABC-123")
+	url, err := scraper.GetURL(context.Background(), "ABC-123")
 	if err != nil {
 		t.Fatalf("GetURL() error = %v", err)
 	}
@@ -109,7 +108,7 @@ func TestScraperGetURLAndSearch(t *testing.T) {
 func TestScraperGetURLAcceptsDirectHTTPURL(t *testing.T) {
 	scraper := newJavbusTestScraper("https://www.javbus.com")
 
-	got, err := scraper.GetURL("https://www.javbus.com/ABC-123")
+	got, err := scraper.GetURL(context.Background(), "https://www.javbus.com/ABC-123")
 	if err != nil {
 		t.Fatalf("GetURL() error = %v", err)
 	}
@@ -125,7 +124,7 @@ func TestScraperGetURLReturnsChallengeError(t *testing.T) {
 	defer server.Close()
 
 	scraper := newJavbusTestScraper(server.URL)
-	_, err := scraper.GetURL("ABC-123")
+	_, err := scraper.GetURL(context.Background(), "ABC-123")
 	if err == nil {
 		t.Fatal("expected challenge error")
 	}
@@ -142,7 +141,7 @@ func TestScraperSearchReturnsNotFoundAndDisabledErrors(t *testing.T) {
 		defer server.Close()
 
 		scraper := newJavbusTestScraper(server.URL)
-		_, err := scraper.GetURL("ABC-123")
+		_, err := scraper.GetURL(context.Background(), "ABC-123")
 		if err == nil {
 			t.Fatal("expected not found error")
 		}
@@ -152,8 +151,8 @@ func TestScraperSearchReturnsNotFoundAndDisabledErrors(t *testing.T) {
 	})
 
 	t.Run("disabled", func(t *testing.T) {
-		settings := config.ScraperSettings{Enabled: false}
-		scraper := New(settings, nil, config.FlareSolverrConfig{})
+		settings := models.ScraperSettings{Enabled: false}
+		scraper := newScraper(&settings, nil, models.FlareSolverrConfig{})
 		_, err := scraper.Search(context.Background(), "ABC-123")
 		if err == nil || !strings.Contains(err.Error(), "disabled") {
 			t.Fatalf("expected disabled error, got %v", err)

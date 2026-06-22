@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -23,32 +21,33 @@ const (
 	defaultBaseURL = "https://javstash.org/graphql"
 )
 
-type Scraper struct {
+// scraper implements the JavStash scraper.
+type scraper struct {
 	client      *resty.Client
 	enabled     bool
 	apiKey      string
 	baseURL     string
 	language    string
 	rateLimiter *ratelimit.Limiter
-	settings    config.ScraperSettings
+	settings    models.ScraperSettings
 }
 
-type GraphQLRequest struct {
-	Query         string                 `json:"query"`
-	Variables     map[string]interface{} `json:"variables,omitempty"`
-	OperationName string                 `json:"operationName,omitempty"`
+type graphQLRequest struct {
+	Query         string         `json:"query"`
+	Variables     map[string]any `json:"variables,omitempty"`
+	OperationName string         `json:"operationName,omitempty"`
 }
 
-type GraphQLResponse struct {
+type graphQLResponse struct {
 	Data struct {
-		SearchScene []Scene `json:"searchScene"`
+		SearchScene []scene `json:"searchScene"`
 	} `json:"data"`
 	Errors []struct {
 		Message string `json:"message"`
 	} `json:"errors,omitempty"`
 }
 
-type Scene struct {
+type scene struct {
 	ID          string      `json:"id"`
 	Code        string      `json:"code"`
 	Title       string      `json:"title"`
@@ -56,47 +55,42 @@ type Scene struct {
 	Duration    int         `json:"duration"`
 	Director    string      `json:"director"`
 	Details     string      `json:"details"`
-	Studio      *Studio     `json:"studio"`
-	Performers  []Performer `json:"performers"`
-	Tags        []Tag       `json:"tags"`
-	Images      []Image     `json:"images"`
-	URLs        []URL       `json:"urls"`
+	Studio      *studio     `json:"studio"`
+	Performers  []performer `json:"performers"`
+	Tags        []tag       `json:"tags"`
+	Images      []image     `json:"images"`
+	URLs        []urlEntry  `json:"urls"`
 }
 
-type Studio struct {
+type studio struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-type Performer struct {
+type performer struct {
 	Performer struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"performer"`
 }
 
-type Tag struct {
+type tag struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-type Image struct {
+type image struct {
 	ID  string `json:"id"`
 	URL string `json:"url"`
 }
 
-type URL struct {
+type urlEntry struct {
 	URL string `json:"url"`
 }
 
-func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globalFlareSolverr config.FlareSolverrConfig) *Scraper {
-	apiKey := ""
-	if v, ok := settings.Extra["api_key"].(string); ok {
-		apiKey = strings.TrimSpace(v)
-	}
-	if apiKey == "" {
-		apiKey = os.Getenv("JAVSTASH_API_KEY")
-	}
+// newScraper creates a new JavStash scraper.
+func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
+	apiKey := strings.TrimSpace(settings.APIKey)
 
 	baseURL := strings.TrimSpace(settings.BaseURL)
 	if baseURL == "" {
@@ -104,7 +98,7 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	result := httpclient.InitScraperClient(&settings, globalProxy, globalFlareSolverr,
+	result := httpclient.InitScraperClient(settings, globalProxy, globalFlareSolverr,
 		httpclient.WithScraperHeaders(httpclient.JSONAPIHeaders()),
 		httpclient.WithScraperHeaders(httpclient.UserAgentHeader(settings.UserAgent)),
 	)
@@ -112,14 +106,14 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 
 	lang := scraperutil.NormalizeLanguage(settings.Language)
 
-	s := &Scraper{
+	s := &scraper{
 		client:      client,
 		enabled:     settings.Enabled,
 		apiKey:      apiKey,
 		baseURL:     baseURL,
 		language:    lang,
 		rateLimiter: ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
-		settings:    settings,
+		settings:    *settings,
 	}
 
 	if settings.RateLimit > 0 {
@@ -129,45 +123,24 @@ func New(settings config.ScraperSettings, globalProxy *config.ProxyConfig, globa
 	return s
 }
 
-func (s *Scraper) Name() string {
+func (s *scraper) Name() string {
 	return "javstash"
 }
 
-func (s *Scraper) IsEnabled() bool {
+func (s *scraper) IsEnabled() bool {
 	return s.enabled
 }
 
-func (s *Scraper) Config() *config.ScraperSettings {
-	return s.settings.DeepCopy()
+func (s *scraper) Config() *models.ScraperSettings {
+	cloned := s.settings.Clone()
+	return &cloned
 }
 
-func (s *Scraper) Close() error {
+func (s *scraper) Close() error {
 	return nil
 }
 
-func (s *Scraper) ValidateConfig(cfg *config.ScraperSettings) error {
-	if err := config.ValidateCommonSettings("javstash", cfg); err != nil {
-		return err
-	}
-	if !cfg.Enabled {
-		return nil
-	}
-
-	apiKey := ""
-	if v, ok := cfg.Extra["api_key"].(string); ok {
-		apiKey = strings.TrimSpace(v)
-	}
-	if apiKey == "" {
-		apiKey = os.Getenv("JAVSTASH_API_KEY")
-	}
-	if apiKey == "" {
-		return fmt.Errorf("javstash: api_key is required (set in config or JAVSTASH_API_KEY env var)")
-	}
-
-	return nil
-}
-
-func (s *Scraper) CanHandleURL(rawURL string) bool {
+func (s *scraper) CanHandleURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
@@ -176,7 +149,7 @@ func (s *Scraper) CanHandleURL(rawURL string) bool {
 	return host == "javstash.org" || strings.HasSuffix(host, ".javstash.org")
 }
 
-func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
+func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse URL: %w", err)
@@ -191,18 +164,22 @@ func (s *Scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from JavStash URL")
 }
 
-func (s *Scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
+func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	return nil, models.NewScraperNotFoundError("Javstash", "JavStash is a GraphQL-based API and does not support direct URL scraping. Use ID-based search instead.")
 }
 
-func (s *Scraper) GetURL(id string) (string, error) {
+func (s *scraper) ResolveDownloadProxyForHost(host string) (*models.ProxyConfig, *models.ProxyConfig, bool) {
+	return nil, nil, false
+}
+
+func (s *scraper) GetURL(_ context.Context, id string) (string, error) {
 	if strings.TrimSpace(id) == "" {
 		return "", fmt.Errorf("javstash: id cannot be empty or whitespace")
 	}
 	return fmt.Sprintf("%s/scenes/%s", strings.TrimSuffix(s.baseURL, "/graphql"), id), nil
 }
 
-func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, fmt.Errorf("javstash: id cannot be empty or whitespace")
 	}
@@ -233,9 +210,9 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 	}`
 
-	req := GraphQLRequest{
+	req := graphQLRequest{
 		Query: query,
-		Variables: map[string]interface{}{
+		Variables: map[string]any{
 			"term":  searchTerm,
 			"limit": 5,
 		},
@@ -265,7 +242,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 			fmt.Sprintf("Javstash returned status %d", resp.StatusCode()))
 	}
 
-	var graphQLResp GraphQLResponse
+	var graphQLResp graphQLResponse
 	if err := json.Unmarshal(resp.Body(), &graphQLResp); err != nil {
 		return nil, fmt.Errorf("javstash: failed to parse response: %w", err)
 	}
@@ -284,7 +261,7 @@ func (s *Scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	return s.parseScene(&graphQLResp.Data.SearchScene[0], searchTerm)
 }
 
-func (s *Scraper) parseScene(scene *Scene, searchID string) (*models.ScraperResult, error) {
+func (s *scraper) parseScene(scene *scene, searchID string) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:      s.Name(),
 		SourceURL:   fmt.Sprintf("%s/scenes/%s", strings.TrimSuffix(s.baseURL, "/graphql"), scene.ID),

@@ -10,6 +10,11 @@ import (
 
 const osWindows = "windows"
 
+// currentOS allows tests to override the OS check for Windows-specific logic.
+// In production, it mirrors runtime.GOOS. Tests can set it to "windows" to
+// exercise the Windows code paths on non-Windows platforms.
+var currentOS = runtime.GOOS
+
 var windowsReservedNames = []string{
 	"CON", "PRN", "AUX", "NUL",
 	"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
@@ -17,7 +22,7 @@ var windowsReservedNames = []string{
 }
 
 func isReservedDeviceName(component string) bool {
-	if runtime.GOOS != osWindows {
+	if currentOS != osWindows {
 		return false
 	}
 
@@ -44,7 +49,7 @@ func isReservedDeviceName(component string) bool {
 }
 
 func stripTrailingChars(path string) string {
-	if runtime.GOOS != osWindows {
+	if currentOS != osWindows {
 		return path
 	}
 
@@ -88,7 +93,7 @@ func isUNCPath(path string) bool {
 }
 
 func normalizeUNCPath(path string, allowUNC bool, allowedUNCServers []string) (string, error) {
-	if runtime.GOOS != osWindows {
+	if currentOS != osWindows {
 		return path, nil
 	}
 
@@ -124,8 +129,54 @@ func normalizeUNCPath(path string, allowUNC bool, allowedUNCServers []string) (s
 	return normalized, nil
 }
 
+// normalizeWindowsPath removes Windows extended-path prefixes (\\?\, \\?\UNC\, \??\, \??\UNC\, \\.\, \\.\UNC\)
+// to prevent denylist bypass via extended-length path syntax.
+// Uses case-insensitive comparison to handle mixed-case prefixes (e.g., \\?\Unc\).
+// Handles Win32 namespace (\\?\), NT namespace (\??\), and device namespace (\\.\) aliases.
+func normalizeWindowsPath(path string) string {
+	if currentOS != osWindows {
+		return path
+	}
+
+	// Use case-insensitive check for extended path prefixes
+	lowerPath := strings.ToLower(path)
+
+	// Remove \\?\UNC\ prefix (UNC paths: \\?\UNC\server\share -> \\server\share)
+	// Check case-insensitively to prevent \\?\Unc\ or \\?\uNc\ bypass
+	if strings.HasPrefix(lowerPath, `\\?\unc\`) {
+		return `\\` + path[8:] // Keep the \\ prefix for UNC paths
+	}
+
+	// Remove \??\UNC\ prefix (NT namespace UNC: \??\UNC\server\share -> \\server\share)
+	if strings.HasPrefix(lowerPath, `\??\unc\`) {
+		return `\\` + path[8:] // Keep the \\ prefix for UNC paths
+	}
+
+	// Remove \\.\UNC\ prefix (device namespace UNC: \\.\UNC\server\share -> \\server\share)
+	if strings.HasPrefix(lowerPath, `\\.\unc\`) {
+		return `\\` + path[8:] // Keep the \\ prefix for UNC paths
+	}
+
+	// Remove \\?\ prefix (extended paths: \\?\C:\Windows -> C:\Windows)
+	if strings.HasPrefix(lowerPath, `\\?\`) {
+		return path[4:]
+	}
+
+	// Remove \??\ prefix (NT namespace: \??\C:\Windows -> C:\Windows)
+	if strings.HasPrefix(lowerPath, `\??\`) {
+		return path[4:]
+	}
+
+	// Remove \\.\ prefix (device namespace: \\.\C:\Windows -> C:\Windows)
+	if strings.HasPrefix(lowerPath, `\\.\`) {
+		return path[4:]
+	}
+
+	return path
+}
+
 func normalizePathForPlatform(path string) string {
-	if runtime.GOOS != osWindows {
+	if currentOS != osWindows {
 		return path
 	}
 

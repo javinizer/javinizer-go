@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"context"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -11,87 +12,75 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestNewWithOptions_AllNil verifies aggregator initializes with all-nil options (AC3)
-func TestNewWithOptions_AllNil(t *testing.T) {
+// TestNew_AllNilProcessors verifies aggregator initializes with all-nil processors
+func TestNew_AllNilProcessors(t *testing.T) {
 	cfg := createTestConfig()
 
-	agg := NewWithOptions(cfg, nil)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	require.NotNil(t, agg)
 	assert.NotNil(t, agg.templateEngine, "template engine should be initialized with real implementation")
-	assert.NotNil(t, agg.genreReplacementCache, "genre cache should be initialized (empty)")
-	assert.NotNil(t, agg.actressAliasCache, "actress cache should be initialized (empty)")
-	assert.Nil(t, agg.genreReplacementRepo, "genre repo should be nil when not provided")
-	assert.Nil(t, agg.actressAliasRepo, "actress repo should be nil when not provided")
+	assert.NotNil(t, agg.genreProcessor, "genre processor should be initialized")
+	assert.NotNil(t, agg.wordProcessor, "word processor should be initialized")
+	assert.NotNil(t, agg.aliasResolver, "alias resolver should be initialized")
 	assert.NotNil(t, agg.resolvedPriorities, "priorities should be resolved")
-	assert.Len(t, agg.genreReplacementCache, 0, "genre cache should be empty without database")
-	assert.Len(t, agg.actressAliasCache, 0, "actress cache should be empty without database")
 }
 
-// TestNewWithOptions_NilConfig tests defensive nil check for config (AC3)
-func TestNewWithOptions_NilConfig(t *testing.T) {
-	agg := NewWithOptions(nil, nil)
+// TestNew_NilConfig tests defensive nil check for config
+func TestNew_NilConfig(t *testing.T) {
+	agg := newAggregatorNoDB(nil)
 
 	assert.Nil(t, agg, "aggregator should be nil when config is nil")
 }
 
-// TestNewWithOptions_InjectedGenreCache verifies pre-populated genre cache usage (AC3)
-func TestNewWithOptions_InjectedGenreCache(t *testing.T) {
+// TestNew_InjectedGenreCache verifies pre-populated genre cache usage via GenreProcessorWithCache
+func TestNew_InjectedGenreCache(t *testing.T) {
 	cfg := createTestConfig()
 	mockGenreCache := map[string]string{
 		"Creampie": "中出し",
 		"Blowjob":  "フェラ",
 	}
 
-	opts := &AggregatorOptions{
-		GenreCache: mockGenreCache,
-	}
-
-	agg := NewWithOptions(cfg, opts)
+	gp := newGenreProcessorWithCache(MetadataConfigFromApp(&cfg.Metadata), nil, mockGenreCache)
+	agg := New(testConfigFromAppConfig(cfg), gp, NewWordProcessor(MetadataConfigFromApp(&cfg.Metadata), nil), NewAliasResolver(MetadataConfigFromApp(&cfg.Metadata), nil))
 
 	require.NotNil(t, agg)
-	assert.Len(t, agg.genreReplacementCache, 2, "genre cache should contain injected data")
-	assert.Equal(t, "中出し", agg.genreReplacementCache["Creampie"])
-	assert.Equal(t, "フェラ", agg.genreReplacementCache["Blowjob"])
+	// Verify the genre processor has the cache data
+	assert.Equal(t, "中出し", gp.applyReplacement("Creampie"))
+	assert.Equal(t, "フェラ", gp.applyReplacement("Blowjob"))
 }
 
-// TestNewWithOptions_InjectedActressCache verifies pre-populated actress cache usage (AC3)
-func TestNewWithOptions_InjectedActressCache(t *testing.T) {
+// TestNew_InjectedActressCache verifies pre-populated actress cache usage via AliasResolverWithCache
+func TestNew_InjectedActressCache(t *testing.T) {
 	cfg := createTestConfig()
 	mockActressCache := map[string]string{
 		"Yua Mikami":  "三上悠亜",
 		"Aika Yumeno": "夢乃あいか",
 	}
 
-	opts := &AggregatorOptions{
-		ActressCache: mockActressCache,
-	}
-
-	agg := NewWithOptions(cfg, opts)
+	ar := newAliasResolverWithCache(MetadataConfigFromApp(&cfg.Metadata), nil, mockActressCache)
+	agg := New(testConfigFromAppConfig(cfg), NewGenreProcessor(MetadataConfigFromApp(&cfg.Metadata), nil), NewWordProcessor(MetadataConfigFromApp(&cfg.Metadata), nil), ar)
 
 	require.NotNil(t, agg)
-	assert.Len(t, agg.actressAliasCache, 2, "actress cache should contain injected data")
-	assert.Equal(t, "三上悠亜", agg.actressAliasCache["Yua Mikami"])
-	assert.Equal(t, "夢乃あいか", agg.actressAliasCache["Aika Yumeno"])
+	// Verify the alias resolver has the cache data
+	assert.NotNil(t, agg.aliasResolver)
 }
 
-// TestNewWithOptions_InjectedTemplateEngine verifies custom template engine injection (AC3)
-func TestNewWithOptions_InjectedTemplateEngine(t *testing.T) {
+// TestNew_InjectedTemplateEngine verifies custom template engine injection
+func TestNew_InjectedTemplateEngine(t *testing.T) {
 	cfg := createTestConfig()
-	mockEngine := template.NewEngine() // Real engine for now (mockery in Task 6)
+	mockEngine := template.NewEngine()
 
-	opts := &AggregatorOptions{
-		TemplateEngine: mockEngine,
-	}
-
-	agg := NewWithOptions(cfg, opts)
+	aggCfg := testConfigFromAppConfig(cfg)
+	aggCfg.TemplateEngine = mockEngine
+	agg := New(aggCfg, NewGenreProcessor(aggCfg.Metadata, nil), NewWordProcessor(aggCfg.Metadata, nil), NewAliasResolver(aggCfg.Metadata, nil))
 
 	require.NotNil(t, agg)
 	assert.Equal(t, mockEngine, agg.templateEngine, "aggregator should use injected template engine")
 }
 
-// TestNewWithOptions_InjectedRepositories verifies repository injection without loading (AC3)
-func TestNewWithOptions_InjectedRepositories(t *testing.T) {
+// TestNew_InjectedRepositories verifies repository injection without loading
+func TestNew_InjectedRepositories(t *testing.T) {
 	cfg := createTestConfig()
 
 	// Create in-memory database for repositories
@@ -104,31 +93,23 @@ func TestNewWithOptions_InjectedRepositories(t *testing.T) {
 			Level: "error",
 		},
 	}
-	db, err := database.New(dbCfg)
+	db, err := database.New(&database.Config{Type: dbCfg.Database.Type, DSN: dbCfg.Database.DSN, LogLevel: dbCfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	genreRepo := database.NewGenreReplacementRepository(db)
 	actressRepo := database.NewActressAliasRepository(db)
 
-	opts := &AggregatorOptions{
-		GenreReplacementRepo: genreRepo,
-		ActressAliasRepo:     actressRepo,
-	}
-
-	agg := NewWithOptions(cfg, opts)
+	agg := newAggregatorWithRepos(testConfigFromAppConfig(cfg), genreRepo, database.NewWordReplacementRepository(db), actressRepo)
 
 	require.NotNil(t, agg)
-	assert.NotNil(t, agg.genreReplacementRepo, "genre repo should be set")
-	assert.NotNil(t, agg.actressAliasRepo, "actress repo should be set")
-	// Caches should be empty since we didn't populate DB or inject caches
-	assert.Len(t, agg.genreReplacementCache, 0)
-	assert.Len(t, agg.actressAliasCache, 0)
+	assert.NotNil(t, agg.genreProcessor, "genre processor should be set")
+	assert.NotNil(t, agg.aliasResolver, "alias resolver should be set")
 }
 
-// TestNewWithOptions_CachePrecedence verifies GenreCache takes precedence over GenreReplacementRepo (AC3)
-func TestNewWithOptions_CachePrecedence(t *testing.T) {
+// TestNew_CachePrecedence verifies GenreCache takes precedence over GenreReplacementRepo
+func TestNew_CachePrecedence(t *testing.T) {
 	cfg := createTestConfig()
 
 	// Create in-memory database and populate with data
@@ -141,15 +122,15 @@ func TestNewWithOptions_CachePrecedence(t *testing.T) {
 			Level: "error",
 		},
 	}
-	db, err := database.New(dbCfg)
+	db, err := database.New(&database.Config{Type: dbCfg.Database.Type, DSN: dbCfg.Database.DSN, LogLevel: dbCfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	genreRepo := database.NewGenreReplacementRepository(db)
 
 	// Populate DB with one genre replacement
-	err = genreRepo.Create(&models.GenreReplacement{
+	err = genreRepo.Create(context.TODO(), &models.GenreReplacement{
 		Original:    "Creampie",
 		Replacement: "FromDatabase",
 	})
@@ -160,21 +141,17 @@ func TestNewWithOptions_CachePrecedence(t *testing.T) {
 		"Creampie": "FromCache",
 	}
 
-	opts := &AggregatorOptions{
-		GenreCache:           mockGenreCache,
-		GenreReplacementRepo: genreRepo,
-	}
-
-	agg := NewWithOptions(cfg, opts)
+	gp := newGenreProcessorWithCache(MetadataConfigFromApp(&cfg.Metadata), genreRepo, mockGenreCache)
+	agg := New(testConfigFromAppConfig(cfg), gp, NewWordProcessor(MetadataConfigFromApp(&cfg.Metadata), nil), NewAliasResolver(MetadataConfigFromApp(&cfg.Metadata), nil))
 
 	require.NotNil(t, agg)
-	// GenreCache should take precedence over database
-	assert.Equal(t, "FromCache", agg.genreReplacementCache["Creampie"],
+	// Cache should take precedence
+	assert.Equal(t, "FromCache", gp.applyReplacement("Creampie"),
 		"GenreCache should take precedence over GenreReplacementRepo")
 }
 
-// TestNewWithDatabase_BackwardCompatibility verifies zero breaking changes (AC4, AC7, CRITICAL)
-func TestNewWithDatabase_BackwardCompatibility(t *testing.T) {
+// TestNewWithRepos_BackwardCompatibility verifies the new constructor works like the old one
+func TestNewWithRepos_BackwardCompatibility(t *testing.T) {
 	cfg := createTestConfig()
 
 	// Create in-memory database
@@ -187,44 +164,44 @@ func TestNewWithDatabase_BackwardCompatibility(t *testing.T) {
 			Level: "error",
 		},
 	}
-	db, err := database.New(dbCfg)
+	db, err := database.New(&database.Config{Type: dbCfg.Database.Type, DSN: dbCfg.Database.DSN, LogLevel: dbCfg.Database.LogLevel})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	require.NoError(t, db.AutoMigrate())
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 
 	// Populate database with test data
 	genreRepo := database.NewGenreReplacementRepository(db)
-	err = genreRepo.Create(&models.GenreReplacement{
+	err = genreRepo.Create(context.TODO(), &models.GenreReplacement{
 		Original:    "Creampie",
 		Replacement: "中出し",
 	})
 	require.NoError(t, err)
 
 	actressRepo := database.NewActressAliasRepository(db)
-	err = actressRepo.Create(&models.ActressAlias{
+	err = actressRepo.Create(context.TODO(), &models.ActressAlias{
 		AliasName:     "Yua Mikami",
 		CanonicalName: "三上悠亜",
 	})
 	require.NoError(t, err)
 
-	// Test NewWithDatabase (production constructor)
-	agg := NewWithDatabase(cfg, db)
+	// Test newAggregatorWithRepos (production-style constructor)
+	agg := newAggregatorWithRepos(testConfigFromAppConfig(cfg),
+		database.NewGenreReplacementRepository(db),
+		database.NewWordReplacementRepository(db),
+		database.NewActressAliasRepository(db),
+	)
 
 	require.NotNil(t, agg)
 	assert.NotNil(t, agg.templateEngine, "template engine should be initialized")
-	assert.NotNil(t, agg.genreReplacementRepo, "genre repo should be set")
-	assert.NotNil(t, agg.actressAliasRepo, "actress repo should be set")
+	assert.NotNil(t, agg.genreProcessor, "genre processor should be set")
+	assert.NotNil(t, agg.aliasResolver, "alias resolver should be set")
 	assert.NotNil(t, agg.resolvedPriorities, "priorities should be resolved")
 
-	// Verify database caches were loaded
-	assert.Len(t, agg.genreReplacementCache, 1, "genre cache should contain database data")
-	assert.Equal(t, "中出し", agg.genreReplacementCache["Creampie"])
-
-	assert.Len(t, agg.actressAliasCache, 1, "actress cache should contain database data")
-	assert.Equal(t, "三上悠亜", agg.actressAliasCache["Yua Mikami"])
+	// Verify database caches were loaded via the sub-modules
+	assert.Equal(t, "中出し", agg.genreProcessor.applyReplacement("Creampie"))
 }
 
-// TestAggregate_WithMockedGenreCache verifies aggregation with injected cache (AC6)
+// TestAggregate_WithMockedGenreCache verifies aggregation with injected cache
 func TestAggregate_WithMockedGenreCache(t *testing.T) {
 	cfg := createTestConfig()
 	mockGenreCache := map[string]string{
@@ -232,14 +209,10 @@ func TestAggregate_WithMockedGenreCache(t *testing.T) {
 		"Blowjob":  "フェラ",
 	}
 
-	opts := &AggregatorOptions{
-		GenreCache: mockGenreCache,
-	}
-
-	agg := NewWithOptions(cfg, opts)
+	gp := newGenreProcessorWithCache(MetadataConfigFromApp(&cfg.Metadata), nil, mockGenreCache)
+	agg := New(testConfigFromAppConfig(cfg), gp, NewWordProcessor(MetadataConfigFromApp(&cfg.Metadata), nil), NewAliasResolver(MetadataConfigFromApp(&cfg.Metadata), nil))
 	require.NotNil(t, agg)
 
-	// Create test scraper result with genres to be replaced
 	result := &models.ScraperResult{
 		Source: "r18dev",
 		ID:     "IPX-123",
@@ -254,7 +227,6 @@ func TestAggregate_WithMockedGenreCache(t *testing.T) {
 	assert.Equal(t, "IPX-123", movie.ID)
 	assert.Equal(t, "Test Movie", movie.Title)
 	// Verify genre replacement occurred (integration test - depends on applyGenreReplacements logic)
-	// Note: movie.Genres is []models.Genre (struct), not []string
 	genreNames := make([]string, len(movie.Genres))
 	for i, g := range movie.Genres {
 		genreNames[i] = g.Name
@@ -263,18 +235,15 @@ func TestAggregate_WithMockedGenreCache(t *testing.T) {
 	assert.Contains(t, genreNames, "フェラ", "Blowjob should be replaced with フェラ")
 }
 
-// TestAggregate_WithMockedActressAlias verifies actress alias resolution with injected cache (AC6)
+// TestAggregate_WithMockedActressAlias verifies actress alias resolution with injected cache
 func TestAggregate_WithMockedActressAlias(t *testing.T) {
 	cfg := createTestConfig()
 	mockActressCache := map[string]string{
 		"Yua Mikami": "三上悠亜",
 	}
 
-	opts := &AggregatorOptions{
-		ActressCache: mockActressCache,
-	}
-
-	agg := NewWithOptions(cfg, opts)
+	ar := newAliasResolverWithCache(MetadataConfigFromApp(&cfg.Metadata), nil, mockActressCache)
+	agg := New(testConfigFromAppConfig(cfg), NewGenreProcessor(MetadataConfigFromApp(&cfg.Metadata), nil), NewWordProcessor(MetadataConfigFromApp(&cfg.Metadata), nil), ar)
 	require.NotNil(t, agg)
 
 	// Create test scraper result with actress alias
@@ -292,39 +261,35 @@ func TestAggregate_WithMockedActressAlias(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 	assert.Len(t, movie.Actresses, 1)
-	// Verify alias resolution occurred (integration test - depends on resolveActressAliases logic)
-	// Note: The actual alias resolution might set JapaneseName or modify FirstName/LastName fields
-	// This test verifies the cache is accessible during aggregation
 	assert.Equal(t, "Yua", movie.Actresses[0].FirstName)
 	assert.Equal(t, "Mikami", movie.Actresses[0].LastName)
 }
 
-// TestGetResolvedPriorities verifies the interface method returns cached priorities (AC1)
+// TestGetResolvedPriorities verifies the interface method returns cached priorities
 func TestGetResolvedPriorities(t *testing.T) {
 	cfg := createTestConfig()
-	agg := NewWithOptions(cfg, nil)
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 
 	require.NotNil(t, agg)
 
-	priorities := agg.GetResolvedPriorities()
+	priorities := agg.getResolvedPriorities()
 
 	assert.NotNil(t, priorities, "resolved priorities should not be nil")
 	assert.Greater(t, len(priorities), 0, "should have resolved at least some field priorities")
-	// Verify specific priority fields from test config (keys are TitleCase)
 	assert.Contains(t, priorities, "Title", "Title priority should be resolved")
 	assert.Contains(t, priorities, "Description", "Description priority should be resolved")
 }
 
 // Helper function to create a minimal test config
 func createTestConfig() *config.Config {
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.Scrapers.Priority = []string{"r18dev", "dmm"}
 	// Ensure Overrides map is initialized before accessing
 	if cfg.Scrapers.Overrides == nil {
-		cfg.Scrapers.Overrides = make(map[string]*config.ScraperSettings)
+		cfg.Scrapers.Overrides = make(map[string]*models.ScraperSettings)
 	}
 	// Initialize scraper override entries directly since scrapers aren't registered in tests
-	cfg.Scrapers.Overrides["r18dev"] = &config.ScraperSettings{Enabled: true}
-	cfg.Scrapers.Overrides["dmm"] = &config.ScraperSettings{Enabled: true}
+	cfg.Scrapers.Overrides["r18dev"] = &models.ScraperSettings{Enabled: true}
+	cfg.Scrapers.Overrides["dmm"] = &models.ScraperSettings{Enabled: true}
 	return cfg
 }

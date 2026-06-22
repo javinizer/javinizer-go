@@ -1,9 +1,11 @@
 package internal_test
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,29 +67,33 @@ func TestFullWorkflow(t *testing.T) {
 	cfg := createTestConfig(dataDir)
 
 	// Initialize database
-	db, err := database.New(cfg)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	if err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer func() { _ = db.Close() }()
 
 	// Run migrations
-	if err := db.AutoMigrate(); err != nil {
+	if err := db.RunMigrationsOnStartup(context.Background()); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 
 	// Add genre replacements to database
 	genreRepo := database.NewGenreReplacementRepository(db)
-	if err := genreRepo.Upsert(&models.GenreReplacement{Original: "Blow", Replacement: "Blowjob"}); err != nil {
+	if err := genreRepo.Upsert(context.TODO(), &models.GenreReplacement{Original: "Blow", Replacement: "Blowjob"}); err != nil {
 		t.Fatalf("Failed to add genre replacement: %v", err)
 	}
-	if err := genreRepo.Upsert(&models.GenreReplacement{Original: "3P", Replacement: "Threesome"}); err != nil {
+	if err := genreRepo.Upsert(context.TODO(), &models.GenreReplacement{Original: "3P", Replacement: "Threesome"}); err != nil {
 		t.Fatalf("Failed to add genre replacement: %v", err)
 	}
 
 	// Step 1: Scan directory for video files
 	t.Log("Step 1: Scanning directory for video files")
-	scnr := scanner.NewScanner(afero.NewOsFs(), &cfg.Matching)
+	scnr := scanner.NewScanner(afero.NewOsFs(), &scanner.Config{
+		Extensions:      cfg.Matching.Extensions,
+		MinSizeMB:       cfg.Matching.MinSizeMB,
+		ExcludePatterns: cfg.Matching.ExcludePatterns,
+	})
 	scanResult, err := scnr.Scan(sourceDir)
 	if err != nil {
 		t.Fatalf("Scan failed: %v", err)
@@ -99,7 +105,7 @@ func TestFullWorkflow(t *testing.T) {
 
 	// Step 2: Match filenames to extract IDs
 	t.Log("Step 2: Matching filenames to extract IDs")
-	mtchr, err := matcher.NewMatcher(&cfg.Matching)
+	mtchr, err := matcher.NewMatcher(&matcher.Config{RegexEnabled: cfg.Matching.RegexEnabled, RegexPattern: cfg.Matching.RegexPattern})
 	if err != nil {
 		t.Fatalf("Failed to create matcher: %v", err)
 	}
@@ -123,7 +129,12 @@ func TestFullWorkflow(t *testing.T) {
 
 	// Step 4: Aggregate metadata from multiple sources
 	t.Log("Step 4: Aggregating metadata from multiple sources")
-	agg := aggregator.NewWithDatabase(cfg, db)
+	aggCfg := aggregator.ConfigFromAppConfig(cfg)
+	agg := aggregator.New(aggCfg,
+		aggregator.NewGenreProcessor(aggCfg.Metadata, database.NewGenreReplacementRepository(db)),
+		aggregator.NewWordProcessor(aggCfg.Metadata, database.NewWordReplacementRepository(db)),
+		aggregator.NewAliasResolver(aggCfg.Metadata, database.NewActressAliasRepository(db)),
+	)
 
 	movies := make(map[string]*models.Movie)
 	for id, results := range scraperResults {
@@ -148,19 +159,19 @@ func TestFullWorkflow(t *testing.T) {
 	// Step 5: Generate NFO files
 	t.Log("Step 5: Generating NFO files")
 	nfoConfig := &nfo.Config{
-		ActorFirstNameOrder:  true,
-		ActorJapaneseNames:   false,
-		UnknownActress:       cfg.Metadata.NFO.UnknownActressText,
-		NFOFilenameTemplate:  "<ID>.nfo",
+		FirstNameOrder:       true,
+		ActressLanguageJA:    false,
+		UnknownActressText:   cfg.Metadata.NFO.Format.UnknownActressText,
+		FilenameTemplate:     "<ID>.nfo",
 		IncludeStreamDetails: false,
 		IncludeFanart:        true,
 		IncludeTrailer:       true,
-		DefaultRatingSource:  "themoviedb",
+		RatingSource:         "themoviedb",
 	}
 	nfoGen := nfo.NewGenerator(afero.NewOsFs(), nfoConfig)
 
 	for id, movie := range movies {
-		if err := nfoGen.Generate(movie, tmpDir, "", ""); err != nil {
+		if err := nfoGen.Generate(context.Background(), movie, tmpDir, "", "", nil); err != nil {
 			t.Fatalf("NFO generation failed for %s: %v", id, err)
 		}
 
@@ -196,18 +207,18 @@ func TestFullWorkflow(t *testing.T) {
 		ctx := template.NewContextFromMovie(movie)
 
 		// Test folder format
-		folderName, err := tmplEngine.Execute(cfg.Output.FolderFormat, ctx)
+		folderName, err := tmplEngine.Execute(cfg.Output.Template.FolderFormat, ctx)
 		if err != nil {
 			t.Fatalf("Template execute failed for folder: %v", err)
 		}
-		t.Logf("  Folder template: %s -> %s", cfg.Output.FolderFormat, folderName)
+		t.Logf("  Folder template: %s -> %s", cfg.Output.Template.FolderFormat, folderName)
 
 		// Test file format
-		fileName, err := tmplEngine.Execute(cfg.Output.FileFormat, ctx)
+		fileName, err := tmplEngine.Execute(cfg.Output.Template.FileFormat, ctx)
 		if err != nil {
 			t.Fatalf("Template execute failed for file: %v", err)
 		}
-		t.Logf("  File template: %s -> %s", cfg.Output.FileFormat, fileName)
+		t.Logf("  File template: %s -> %s", cfg.Output.Template.FileFormat, fileName)
 
 		// Verify template contains expected values
 		if !containsString(folderName, id) {
@@ -217,7 +228,7 @@ func TestFullWorkflow(t *testing.T) {
 
 	// Step 7: Organize files
 	t.Log("Step 7: Organizing files")
-	org := organizer.NewOrganizer(afero.NewOsFs(), &cfg.Output, nil)
+	org := organizer.NewOrganizer(afero.NewOsFs(), organizer.ConfigFromAppConfig(cfg, nfo.NFONameConfigFromAppConfig(cfg)), nil, nil)
 
 	organized := 0
 	for _, match := range matches {
@@ -226,8 +237,25 @@ func TestFullWorkflow(t *testing.T) {
 			continue
 		}
 
+		fmi := models.FileMatchInfo{
+			Path:        match.File.Path,
+			Name:        match.File.Name,
+			Extension:   match.File.Extension,
+			MovieID:     match.ID,
+			IsMultiPart: match.IsMultiPart,
+			PartNumber:  match.PartNumber,
+			PartSuffix:  match.PartSuffix,
+		}
+
 		// Test dry run first
-		dryRunResult, err := org.Organize(match, movie, destDir, true, false, false)
+		dryRunResult, err := org.Organize(context.Background(), organizer.OrganizeCmd{
+			Match:       fmi,
+			Movie:       movie,
+			DestDir:     destDir,
+			DryRun:      true,
+			ForceUpdate: false,
+			MoveFiles:   true,
+		})
 		if err != nil {
 			t.Fatalf("Dry run organize failed: %v", err)
 		}
@@ -237,12 +265,19 @@ func TestFullWorkflow(t *testing.T) {
 		}
 
 		// Verify source still exists after dry run
-		if _, err := os.Stat(match.File.Path); err != nil {
+		if _, err := os.Stat(fmi.Path); err != nil {
 			t.Error("Source file missing after dry run")
 		}
 
 		// Now do actual organization
-		result, err := org.Organize(match, movie, destDir, false, false, false)
+		result, err := org.Organize(context.Background(), organizer.OrganizeCmd{
+			Match:       fmi,
+			Movie:       movie,
+			DestDir:     destDir,
+			DryRun:      false,
+			ForceUpdate: false,
+			MoveFiles:   true,
+		})
 		if err != nil {
 			t.Fatalf("Organize failed: %v", err)
 		}
@@ -252,7 +287,7 @@ func TestFullWorkflow(t *testing.T) {
 		}
 
 		// Verify file was moved
-		if _, err := os.Stat(match.File.Path); !os.IsNotExist(err) {
+		if _, err := os.Stat(fmi.Path); !os.IsNotExist(err) {
 			t.Error("Source file still exists after organize")
 		}
 
@@ -260,7 +295,7 @@ func TestFullWorkflow(t *testing.T) {
 			t.Errorf("Target file does not exist: %v", err)
 		}
 
-		t.Logf("  Organized: %s -> %s", match.File.Name, result.NewPath)
+		t.Logf("  Organized: %s -> %s", fmi.Name, result.NewPath)
 		organized++
 
 		// Verify organized file has correct content
@@ -272,8 +307,8 @@ func TestFullWorkflow(t *testing.T) {
 		// Find original content
 		var expectedContent string
 		for _, tf := range testFiles {
-			if containsString(match.File.Name, filepath.Base(tf.filename)) ||
-				containsString(tf.filename, filepath.Base(match.File.Name)) {
+			if containsString(fmi.Name, filepath.Base(tf.filename)) ||
+				containsString(tf.filename, filepath.Base(fmi.Name)) {
 				expectedContent = tf.content
 				break
 			}
@@ -290,10 +325,10 @@ func TestFullWorkflow(t *testing.T) {
 
 	// Step 8: Test downloader (dry run with mock URLs)
 	t.Log("Step 8: Testing downloader (mock)")
-	_ = downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), &cfg.Output, cfg.Scrapers.UserAgent, nil)
+	_ = downloader.NewDownloader(http.DefaultClient, afero.NewOsFs(), downloader.ConfigFromAppConfig(cfg, nfo.NFONameConfigFromAppConfig(cfg)), nil)
 
 	for id, movie := range movies {
-		if movie.CoverURL == "" {
+		if movie.Poster.CoverURL == "" {
 			continue
 		}
 
@@ -316,12 +351,12 @@ func TestFullWorkflow(t *testing.T) {
 
 	for _, movie := range movies {
 		// Save movie to database
-		if err := movieRepo.Create(movie); err != nil {
+		if err := movieRepo.Create(context.TODO(), movie); err != nil {
 			t.Fatalf("Failed to save movie to database: %v", err)
 		}
 
 		// Retrieve movie from database
-		retrieved, err := movieRepo.FindByID(movie.ID)
+		retrieved, err := movieRepo.FindByID(context.TODO(), movie.ID)
 		if err != nil {
 			t.Fatalf("Failed to retrieve movie from database: %v", err)
 		}
@@ -357,7 +392,7 @@ func TestFullWorkflow(t *testing.T) {
 
 // createTestConfig creates a test configuration using DefaultConfig with accessor methods
 func createTestConfig(dataDir string) *config.Config {
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 
 	// Server config (overriding port)
 	cfg.Server.Port = 8080
@@ -368,11 +403,11 @@ func createTestConfig(dataDir string) *config.Config {
 	cfg.Scrapers.Priority = []string{"r18dev", "dmm"}
 	// Initialize Overrides map if nil
 	if cfg.Scrapers.Overrides == nil {
-		cfg.Scrapers.Overrides = make(map[string]*config.ScraperSettings)
+		cfg.Scrapers.Overrides = make(map[string]*models.ScraperSettings)
 	}
-	cfg.Scrapers.Overrides["r18dev"] = &config.ScraperSettings{Enabled: true}
-	// Note: scrape_actress was previously in Extra, now in DMMConfig
-	cfg.Scrapers.Overrides["dmm"] = &config.ScraperSettings{Enabled: true}
+	cfg.Scrapers.Overrides["r18dev"] = &models.ScraperSettings{Enabled: true}
+	// Note: scrape_actress was previously in Extra, now in ScraperSettings
+	cfg.Scrapers.Overrides["dmm"] = &models.ScraperSettings{Enabled: true}
 
 	// Metadata config with global priority (Phase 3: per-field removed)
 	cfg.Metadata.Priority.Priority = []string{"r18dev", "dmm"}
@@ -381,10 +416,10 @@ func createTestConfig(dataDir string) *config.Config {
 	cfg.Metadata.IgnoreGenres = []string{"Sample", "Trailer"}
 
 	// NFO config
-	cfg.Metadata.NFO.FilenameTemplate = "<ID>.nfo"
-	cfg.Metadata.NFO.FirstNameOrder = true
-	cfg.Metadata.NFO.IncludeFanart = true
-	cfg.Metadata.NFO.IncludeTrailer = true
+	cfg.Metadata.NFO.Format.FilenameTemplate = "<ID>.nfo"
+	cfg.Metadata.NFO.Format.FirstNameOrder = true
+	cfg.Metadata.NFO.Feature.IncludeFanart = true
+	cfg.Metadata.NFO.Feature.IncludeTrailer = true
 
 	// Matching config
 	cfg.Matching.Extensions = []string{".mp4", ".mkv", ".avi", ".mov"}
@@ -392,10 +427,10 @@ func createTestConfig(dataDir string) *config.Config {
 	cfg.Matching.RegexPattern = `(?i)([a-z]{2,10})-?(\d{2,5})`
 
 	// Output config
-	cfg.Output.FolderFormat = "<ID> [<STUDIO>] - <TITLE> (<YEAR>)"
-	cfg.Output.FileFormat = "<ID>"
-	cfg.Output.ActressDelimiter = ", "
-	cfg.Output.DownloadCover = true
+	cfg.Output.Template.FolderFormat = "<ID> [<STUDIO>] - <TITLE> (<YEAR>)"
+	cfg.Output.Template.FileFormat = "<ID>"
+	cfg.Output.Template.ActressDelimiter = ", "
+	cfg.Output.Download.DownloadCover = true
 
 	// Database config
 	cfg.Database.DSN = filepath.Join(dataDir, "javinizer-test.db")
@@ -522,27 +557,5 @@ func createMockScraperResults() map[string][]*models.ScraperResult {
 
 // containsString checks if a string contains a substring
 func containsString(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && filepath.Base(s) == filepath.Base(substr) ||
-		s == substr || (len(substr) > 0 && len(s) >= len(substr) && s[:len(substr)] == substr) ||
-		(len(s) > 0 && len(substr) > 0 && s[0:min(len(s), len(substr))] == substr[0:min(len(s), len(substr))]) ||
-		contains(s, substr)
-}
-
-func contains(s, substr string) bool {
-	if len(substr) > len(s) {
-		return false
-	}
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return s == substr || strings.Contains(s, substr)
 }

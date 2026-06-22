@@ -4,15 +4,15 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/spf13/afero"
 )
 
 func validateBrowserURL(rawURL string) error {
@@ -44,19 +44,20 @@ func validateBrowserURL(rawURL string) error {
 }
 
 // isRunningInContainer detects if we're running inside a Docker container
-func isRunningInContainer() bool {
+// using the provided filesystem and environment lookup dependencies.
+func isRunningInContainer(fs afero.Fs, envLookup func(string) string) bool {
 	// Check for /.dockerenv file (Docker specific)
-	if _, err := os.Stat("/.dockerenv"); err == nil {
+	if _, err := fs.Stat("/.dockerenv"); err == nil {
 		return true
 	}
 
 	// Check for container environment variable (set in Dockerfile)
-	if os.Getenv("CHROME_BIN") != "" || os.Getenv("CHROME_PATH") != "" {
+	if envLookup("CHROME_BIN") != "" || envLookup("CHROME_PATH") != "" {
 		return true
 	}
 
 	// Check /proc/1/cgroup for docker/containerd
-	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
+	if data, err := afero.ReadFile(fs, "/proc/1/cgroup"); err == nil {
 		content := string(data)
 		if strings.Contains(content, "docker") || strings.Contains(content, "containerd") {
 			return true
@@ -66,8 +67,9 @@ func isRunningInContainer() bool {
 	return false
 }
 
-// FetchWithBrowser fetches a URL using Chrome browser automation with age verification cookies
-func FetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyProfile *config.ProxyProfile) (string, error) {
+// fetchWithBrowser fetches a URL using Chrome browser automation with age verification cookies.
+// envLookup and fs are injected dependencies for environment variable and filesystem access.
+func fetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyProfile *models.ProxyProfile, envLookup func(string) string, fs afero.Fs) (string, error) {
 	if timeout <= 0 {
 		timeout = 30 // Default timeout
 	}
@@ -90,7 +92,7 @@ func FetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyP
 	// Check if running in Docker container
 	// Chrome's sandbox doesn't work in containers due to namespace restrictions
 	// Trade-off: We run as non-root user, and the container itself provides isolation
-	if isRunningInContainer() {
+	if isRunningInContainer(fs, envLookup) {
 		logging.Debug("DMM Browser: Detected container environment, disabling Chrome sandbox and crashpad")
 		opts = append(opts,
 			chromedp.Flag("no-sandbox", true),
@@ -102,9 +104,9 @@ func FetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyP
 	// Only override Chrome binary path if explicitly set via environment variable
 	// This allows chromedp to use its built-in discovery on dev machines while
 	// respecting the container's CHROME_BIN setting in production
-	chromeBin := os.Getenv("CHROME_BIN")
+	chromeBin := envLookup("CHROME_BIN")
 	if chromeBin == "" {
-		chromeBin = os.Getenv("CHROME_PATH")
+		chromeBin = envLookup("CHROME_PATH")
 	}
 	if chromeBin != "" {
 		logging.Debugf("DMM Browser: Using explicit Chrome binary: %s", chromeBin)

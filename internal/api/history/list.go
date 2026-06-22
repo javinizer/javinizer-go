@@ -1,13 +1,15 @@
 package history
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/database"
-	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 // toHistoryRecord converts a models.History to a HistoryRecord for API responses.
@@ -56,10 +58,10 @@ func paginateAndConvert(all []models.History, limit, offset int) (records []Hist
 // @Param status query string false "Filter by status (success, failed, reverted)"
 // @Param movie_id query string false "Filter by movie ID"
 // @Success 200 {object} HistoryListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/history [get]
-func getHistory(historyRepo *database.HistoryRepository) gin.HandlerFunc {
+func getHistory(repo database.HistoryRepositoryInterface) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit, offset := core.ParsePagination(c, 50, 500)
 
@@ -71,42 +73,37 @@ func getHistory(historyRepo *database.HistoryRepository) gin.HandlerFunc {
 		var total int64
 
 		if movieID != "" {
-			history, findErr := historyRepo.FindByMovieID(movieID)
+			history, findErr := repo.FindByMovieID(c.Request.Context(), movieID)
 			if findErr != nil {
-				logging.Errorf("Failed to get history by movie ID: %v", findErr)
-				c.JSON(500, ErrorResponse{Error: "Failed to retrieve history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve history"})
 				return
 			}
 			records, total = paginateAndConvert(history, limit, offset)
 		} else if operation != "" {
-			history, findErr := historyRepo.FindByOperation(operation, 0)
+			history, findErr := repo.FindByOperation(c.Request.Context(), models.HistoryOperation(operation), 0)
 			if findErr != nil {
-				logging.Errorf("Failed to get history by operation: %v", findErr)
-				c.JSON(500, ErrorResponse{Error: "Failed to retrieve history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve history"})
 				return
 			}
 			records, total = paginateAndConvert(history, limit, offset)
 		} else if status != "" {
-			history, findErr := historyRepo.FindByStatus(status, 0)
+			history, findErr := repo.FindByStatus(c.Request.Context(), models.HistoryStatus(status), 0)
 			if findErr != nil {
-				logging.Errorf("Failed to get history by status: %v", findErr)
-				c.JSON(500, ErrorResponse{Error: "Failed to retrieve history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve history"})
 				return
 			}
 			records, total = paginateAndConvert(history, limit, offset)
 		} else {
 			var err error
-			total, err = historyRepo.Count()
+			total, err = repo.Count(c.Request.Context())
 			if err != nil {
-				logging.Errorf("Failed to count history: %v", err)
-				c.JSON(500, ErrorResponse{Error: "Failed to count history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to count history"})
 				return
 			}
 
-			history, findErr := historyRepo.List(limit, offset)
+			history, findErr := repo.List(c.Request.Context(), limit, offset)
 			if findErr != nil {
-				logging.Errorf("Failed to list history: %v", findErr)
-				c.JSON(500, ErrorResponse{Error: "Failed to retrieve history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve history"})
 				return
 			}
 
@@ -116,7 +113,7 @@ func getHistory(historyRepo *database.HistoryRepository) gin.HandlerFunc {
 			}
 		}
 
-		c.JSON(200, HistoryListResponse{
+		c.JSON(http.StatusOK, HistoryListResponse{
 			Records: records,
 			Total:   total,
 			Limit:   limit,

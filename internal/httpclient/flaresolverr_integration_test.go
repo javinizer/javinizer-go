@@ -1,14 +1,12 @@
-package httpclient_test
+package httpclient
 
 import (
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/javinizer/javinizer-go/internal/config"
-	httpclient "github.com/javinizer/javinizer-go/internal/httpclient"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func requireFlareSolverrIntegration(t *testing.T) {
@@ -31,7 +29,7 @@ func TestFlareSolverr_RealConnection(t *testing.T) {
 	t.Log("Starting FlareSolverr integration test...")
 
 	// Configure FlareSolverr with longer timeout for testing
-	cfg := config.FlareSolverrConfig{
+	cfg := models.FlareSolverrConfig{
 		Enabled:    true,
 		URL:        "http://localhost:8191/v1",
 		Timeout:    60, // 60 seconds timeout
@@ -39,7 +37,7 @@ func TestFlareSolverr_RealConnection(t *testing.T) {
 		SessionTTL: 300,
 	}
 
-	fs, err := httpclient.NewFlareSolverr(&cfg)
+	fs, err := newFlareSolverr(&cfg)
 	require.NoError(t, err)
 	require.NotNil(t, fs)
 
@@ -122,7 +120,7 @@ func TestFlareSolverr_JavLibraryConnection(t *testing.T) {
 	t.Log("Starting JavLibrary FlareSolverr integration test...")
 
 	// Configure FlareSolverr with longer timeout for JavLibrary
-	cfg := config.FlareSolverrConfig{
+	cfg := models.FlareSolverrConfig{
 		Enabled:    true,
 		URL:        "http://localhost:8191/v1",
 		Timeout:    90, // 90 seconds timeout for Cloudflare
@@ -130,7 +128,7 @@ func TestFlareSolverr_JavLibraryConnection(t *testing.T) {
 		SessionTTL: 300,
 	}
 
-	fs, err := httpclient.NewFlareSolverr(&cfg)
+	fs, err := newFlareSolverr(&cfg)
 	require.NoError(t, err)
 	require.NotNil(t, fs)
 
@@ -176,13 +174,13 @@ func TestFlareSolverr_JavLibraryConnection(t *testing.T) {
 func TestFlareSolverr_ConfigValidation(t *testing.T) {
 	tests := []struct {
 		name      string
-		cfg       config.FlareSolverrConfig
+		cfg       models.FlareSolverrConfig
 		wantError bool
 		errorMsg  string
 	}{
 		{
 			name: "valid config",
-			cfg: config.FlareSolverrConfig{
+			cfg: models.FlareSolverrConfig{
 				Enabled:    true,
 				URL:        "http://localhost:8191/v1",
 				Timeout:    30,
@@ -193,7 +191,7 @@ func TestFlareSolverr_ConfigValidation(t *testing.T) {
 		},
 		{
 			name: "empty URL",
-			cfg: config.FlareSolverrConfig{
+			cfg: models.FlareSolverrConfig{
 				Enabled:    true,
 				URL:        "",
 				Timeout:    30,
@@ -205,7 +203,7 @@ func TestFlareSolverr_ConfigValidation(t *testing.T) {
 		},
 		{
 			name: "disabled",
-			cfg: config.FlareSolverrConfig{
+			cfg: models.FlareSolverrConfig{
 				Enabled:    false,
 				URL:        "http://localhost:8191/v1",
 				Timeout:    30,
@@ -218,7 +216,7 @@ func TestFlareSolverr_ConfigValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fs, err := httpclient.NewFlareSolverr(&tt.cfg)
+			fs, err := newFlareSolverr(&tt.cfg)
 
 			if tt.wantError {
 				assert.Error(t, err)

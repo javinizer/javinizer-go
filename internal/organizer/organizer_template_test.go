@@ -5,12 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/scanner"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/testutil"
-	"github.com/javinizer/javinizer-go/internal/types"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,26 +72,22 @@ func TestOrganizerTemplate_SimplePatterns(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				OperationMode: types.OperationModeOrganize,
+				OperationMode: operationmode.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := tt.movieSetup()
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "IPX-123.mp4",
-					Extension: ".mp4",
-				},
-				ID: "IPX-123",
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "IPX-123.mp4", Extension: ".mp4",
+				MovieID: "IPX-123",
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedOutput)
@@ -172,26 +165,22 @@ func TestOrganizerTemplate_ComplexPatterns(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				OperationMode: types.OperationModeOrganize,
+				OperationMode: operationmode.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := tt.movieSetup()
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: movie.ID,
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: movie.ID,
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedOutput)
@@ -261,26 +250,22 @@ func TestOrganizerTemplate_ConditionalLogic(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				OperationMode: types.OperationModeOrganize,
+				OperationMode: operationmode.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := tt.movieSetup()
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: movie.ID,
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: movie.ID,
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedOutput)
@@ -349,26 +334,22 @@ func TestOrganizerTemplate_MissingFields(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:  tt.template,
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				OperationMode: types.OperationModeOrganize,
+				OperationMode: operationmode.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := tt.movieSetup()
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: movie.ID,
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: movie.ID,
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedOutput)
@@ -449,30 +430,26 @@ func TestOrganizerTemplate_SpecialCharacters(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:  "<ID> - <TITLE>",
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				OperationMode: types.OperationModeOrganize,
+				OperationMode: operationmode.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := testutil.NewMovieBuilder().
 				WithID("IPX-123").
 				WithTitle(tt.titleWithSpecial).
 				Build()
 
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: "IPX-123",
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: "IPX-123",
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedSanitized)
@@ -535,30 +512,26 @@ func TestOrganizerTemplate_UnicodeHandling(t *testing.T) {
 			err := afero.WriteFile(fs, sourcePath, []byte("content"), 0644)
 			require.NoError(t, err)
 
-			cfg := &config.OutputConfig{
+			cfg := &Config{
 				FolderFormat:  "<ID> - <TITLE>",
 				FileFormat:    "<ID>",
 				RenameFile:    true,
-				OperationMode: types.OperationModeOrganize,
+				OperationMode: operationmode.OperationModeOrganize,
 				MoveSubtitles: false,
 			}
-			org := NewOrganizer(fs, cfg, nil)
+			org := NewOrganizer(fs, cfg, nil, nil)
 
 			movie := testutil.NewMovieBuilder().
 				WithID("IPX-123").
 				WithTitle(tt.unicodeTitle).
 				Build()
 
-			match := matcher.MatchResult{
-				File: scanner.FileInfo{
-					Path:      sourcePath,
-					Name:      "test.mp4",
-					Extension: ".mp4",
-				},
-				ID: "IPX-123",
+			match := models.FileMatchInfo{
+				Path: sourcePath, Name: "test.mp4", Extension: ".mp4",
+				MovieID: "IPX-123",
 			}
 
-			plan, err := org.Plan(match, movie, "/movies", false)
+			plan, err := org.plan(match, movie, "/movies", false)
 			require.NoError(t, err)
 
 			expectedDir := filepath.Join("/movies", tt.expectedOutput)

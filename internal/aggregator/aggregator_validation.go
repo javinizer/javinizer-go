@@ -7,94 +7,84 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// validateRequiredFields checks if all required fields are present and non-empty
-func validateRequiredFields(movie *models.Movie, requiredFields []string) error {
+func validateRequiredFieldsScraped(scraped *models.Movie, requiredFields []string) error {
 	missingFields := []string{}
 
 	for _, fieldName := range requiredFields {
-		// Normalize field name to lowercase for case-insensitive comparison
 		fieldLower := strings.ToLower(fieldName)
 
-		// Check each field
 		switch fieldLower {
 		case "id":
-			if movie.ID == "" {
+			if scraped.ID == "" {
 				missingFields = append(missingFields, "ID")
 			}
 		case "contentid", "content_id":
-			if movie.ContentID == "" {
+			if scraped.ContentID == "" {
 				missingFields = append(missingFields, "ContentID")
 			}
 		case "title":
-			if movie.Title == "" {
+			if scraped.Title == "" {
 				missingFields = append(missingFields, "Title")
 			}
 		case "originaltitle", "original_title":
-			if movie.OriginalTitle == "" {
+			if scraped.OriginalTitle == "" {
 				missingFields = append(missingFields, "OriginalTitle")
 			}
 		case "description", "plot":
-			if movie.Description == "" {
+			if scraped.Description == "" {
 				missingFields = append(missingFields, "Description")
 			}
 		case "director":
-			if movie.Director == "" {
+			if scraped.Director == "" {
 				missingFields = append(missingFields, "Director")
 			}
 		case "maker", "studio":
-			if movie.Maker == "" {
+			if scraped.Maker == "" {
 				missingFields = append(missingFields, "Maker")
 			}
 		case "label":
-			if movie.Label == "" {
+			if scraped.Label == "" {
 				missingFields = append(missingFields, "Label")
 			}
 		case "series", "set":
-			if movie.Series == "" {
+			if scraped.Series == "" {
 				missingFields = append(missingFields, "Series")
 			}
 		case "releasedate", "release_date", "premiered":
-			if movie.ReleaseDate == nil {
+			if scraped.ReleaseDate == nil {
 				missingFields = append(missingFields, "ReleaseDate")
 			}
 		case "runtime":
-			if movie.Runtime == 0 {
+			if scraped.Runtime == 0 {
 				missingFields = append(missingFields, "Runtime")
 			}
 		case "coverurl", "cover_url", "cover":
-			if movie.CoverURL == "" {
+			if scraped.Poster.CoverURL == "" {
 				missingFields = append(missingFields, "CoverURL")
 			}
 		case "posterurl", "poster_url", "poster":
-			if movie.PosterURL == "" {
+			if scraped.Poster.PosterURL == "" {
 				missingFields = append(missingFields, "PosterURL")
 			}
 		case "trailerurl", "trailer_url", "trailer":
-			if movie.TrailerURL == "" {
+			if scraped.TrailerURL == "" {
 				missingFields = append(missingFields, "TrailerURL")
 			}
 		case "screenshots", "screenshot_url", "screenshoturl":
-			if len(movie.Screenshots) == 0 {
+			if len(scraped.Screenshots) == 0 {
 				missingFields = append(missingFields, "Screenshots")
 			}
 		case "actresses", "actress":
-			if len(movie.Actresses) == 0 {
+			if len(scraped.Actresses) == 0 {
 				missingFields = append(missingFields, "Actresses")
 			}
 		case "genres", "genre":
-			if len(movie.Genres) == 0 {
+			if len(scraped.Genres) == 0 {
 				missingFields = append(missingFields, "Genres")
 			}
 		case "rating", "ratingscore", "rating_score":
-			// RatingScore == 0 is a valid value (some content has no rating).
-			// We cannot distinguish "not scraped" from "intentionally 0" at validation time,
-			// so we accept any value including 0. When RatingVotes == 0, we simply do not
-			// add it to missingFields, allowing validation to pass.
-			// When RatingVotes > 0, we have explicit rating data from a scraper.
-
+			// RatingScore == 0 is a valid value — accept any.
 		default:
-			// Unknown field name - log warning but don't fail
-			// This allows for forward compatibility
 			continue
 		}
 	}

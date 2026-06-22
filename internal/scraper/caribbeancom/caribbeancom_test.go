@@ -6,14 +6,13 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestCanHandleURL(t *testing.T) {
-	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+	s := newScraper(&models.ScraperSettings{Enabled: true}, nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -36,7 +35,7 @@ func TestCanHandleURL(t *testing.T) {
 }
 
 func TestExtractIDFromURL_Caribbeancom(t *testing.T) {
-	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+	s := newScraper(&models.ScraperSettings{Enabled: true}, nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name     string
@@ -63,14 +62,13 @@ func TestExtractIDFromURL_Caribbeancom(t *testing.T) {
 }
 
 func TestScraperInterfaceCompliance_Caribbeancom(t *testing.T) {
-	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+	s := newScraper(&models.ScraperSettings{Enabled: true}, nil, models.FlareSolverrConfig{})
 	var _ models.Scraper = s
-	var _ models.URLHandler = s
-	var _ models.DirectURLScraper = s
+	var _ models.Scraper = s
 }
 
 func TestResolveSearchQuery(t *testing.T) {
-	s := New(config.ScraperSettings{Enabled: true}, nil, config.FlareSolverrConfig{})
+	s := newScraper(&models.ScraperSettings{Enabled: true}, nil, models.FlareSolverrConfig{})
 
 	tests := []struct {
 		name  string
@@ -275,11 +273,11 @@ func TestExtractActresses_IgnoresRelatedActors(t *testing.T) {
 }
 
 func TestApplyLanguage(t *testing.T) {
-	enSettings := config.ScraperSettings{Enabled: true, Language: "en"}
-	sEn := New(enSettings, nil, config.FlareSolverrConfig{})
+	enSettings := models.ScraperSettings{Enabled: true, Language: "en"}
+	sEn := newScraper(&enSettings, nil, models.FlareSolverrConfig{})
 
-	jaSettings := config.ScraperSettings{Enabled: true, Language: "ja"}
-	sJa := New(jaSettings, nil, config.FlareSolverrConfig{})
+	jaSettings := models.ScraperSettings{Enabled: true, Language: "ja"}
+	sJa := newScraper(&jaSettings, nil, models.FlareSolverrConfig{})
 
 	enURL := sEn.applyLanguage("https://www.caribbeancom.com/moviepages/120614-753/index.html")
 	if enURL != "https://en.caribbeancom.com/eng/moviepages/120614-753/index.html" {

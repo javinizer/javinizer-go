@@ -2,7 +2,6 @@ package fsutil
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -106,29 +105,6 @@ func TestCrossDeviceMoveFs_SourceRemoveFailure(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestCopyFileData_Basic(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	srcPath := filepath.Join(tmpDir, "source.txt")
-	err := os.WriteFile(srcPath, []byte("copy data test"), 0644)
-	assert.NoError(t, err)
-
-	dstPath := filepath.Join(tmpDir, "dest.txt")
-	err = copyFileData(srcPath, dstPath)
-	assert.NoError(t, err)
-
-	content, err := os.ReadFile(dstPath)
-	assert.NoError(t, err)
-	assert.Equal(t, []byte("copy data test"), content)
-}
-
-func TestCopyFileData_SourceNotFound(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	err := copyFileData(filepath.Join(tmpDir, "nonexistent.txt"), filepath.Join(tmpDir, "dest.txt"))
-	assert.Error(t, err)
-}
-
 func TestCopyFileDataFs_BasicMemMap(t *testing.T) {
 	fs := afero.NewMemMapFs()
 
@@ -148,15 +124,4 @@ func TestCopyFileDataFs_SourceNotFound(t *testing.T) {
 
 	err := copyFileDataFs(fs, "/nonexistent.txt", "/dest.txt")
 	assert.Error(t, err)
-}
-
-func TestMoveFile_SamePath(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	srcPath := filepath.Join(tmpDir, "source.txt")
-	err := os.WriteFile(srcPath, []byte("same path"), 0644)
-	assert.NoError(t, err)
-
-	err = MoveFile(srcPath, srcPath)
-	assert.NoError(t, err)
 }

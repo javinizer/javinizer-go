@@ -25,13 +25,21 @@ async function ensureLoggedIn(page: Page, baseURL: string | undefined) {
 		const passwords = page.locator('input[type="password"]');
 		await passwords.first().fill(password);
 		await passwords.nth(1).fill(password);
-		await page.getByRole('button', { name: /create/i }).first().click();
+		await page
+			.getByRole('button', { name: /create/i })
+			.first()
+			.click();
 	} else {
 		const loginUsername = page.locator('#login-username, input[name="username"]');
 		if (await loginUsername.isVisible().catch(() => false)) {
 			await loginUsername.fill(username);
-			await page.locator('#login-password, input[name="password"], input[type="password"]').fill(password);
-			await page.getByRole('button', { name: /sign|login/i }).first().click();
+			await page
+				.locator('#login-password, input[name="password"], input[type="password"]')
+				.fill(password);
+			await page
+				.getByRole('button', { name: /sign|login/i })
+				.first()
+				.click();
 		}
 	}
 
@@ -52,14 +60,20 @@ test.describe('API Token Management (UI)', () => {
 				const revokeBtn = tokenRows.nth(i).locator('button[title="Revoke token"]');
 				if (await revokeBtn.isVisible().catch(() => false)) {
 					await revokeBtn.click();
-					const confirmBtn = page.locator('button:has-text("Revoke"), button:has-text("Confirm"), button:has-text("Delete")').first();
+					const confirmBtn = page
+						.locator(
+							'button:has-text("Revoke"), button:has-text("Confirm"), button:has-text("Delete")',
+						)
+						.first();
 					if (await confirmBtn.isVisible().catch(() => false)) {
 						await confirmBtn.click();
 					}
 					await page.waitForTimeout(500);
 				}
 			}
-		} catch { /* cleanup */ }
+		} catch {
+			/* cleanup */
+		}
 	});
 
 	test('create token with name appears in list', async ({ page, baseURL }) => {

@@ -5,6 +5,7 @@
 package mocks
 
 import (
+	"context"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -39,16 +40,16 @@ func (_m *MockJobRepositoryInterface) EXPECT() *MockJobRepositoryInterface_Expec
 }
 
 // Create provides a mock function for the type MockJobRepositoryInterface
-func (_mock *MockJobRepositoryInterface) Create(job *models.Job) error {
-	ret := _mock.Called(job)
+func (_mock *MockJobRepositoryInterface) Create(ctx context.Context, job *models.Job) error {
+	ret := _mock.Called(ctx, job)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.Job) error); ok {
-		r0 = returnFunc(job)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Job) error); ok {
+		r0 = returnFunc(ctx, job)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -61,19 +62,25 @@ type MockJobRepositoryInterface_Create_Call struct {
 }
 
 // Create is a helper method to define mock.On call
+//   - ctx context.Context
 //   - job *models.Job
-func (_e *MockJobRepositoryInterface_Expecter) Create(job interface{}) *MockJobRepositoryInterface_Create_Call {
-	return &MockJobRepositoryInterface_Create_Call{Call: _e.mock.On("Create", job)}
+func (_e *MockJobRepositoryInterface_Expecter) Create(ctx interface{}, job interface{}) *MockJobRepositoryInterface_Create_Call {
+	return &MockJobRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, job)}
 }
 
-func (_c *MockJobRepositoryInterface_Create_Call) Run(run func(job *models.Job)) *MockJobRepositoryInterface_Create_Call {
+func (_c *MockJobRepositoryInterface_Create_Call) Run(run func(ctx context.Context, job *models.Job)) *MockJobRepositoryInterface_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.Job
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.Job)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.Job
+		if args[1] != nil {
+			arg1 = args[1].(*models.Job)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -84,22 +91,22 @@ func (_c *MockJobRepositoryInterface_Create_Call) Return(err error) *MockJobRepo
 	return _c
 }
 
-func (_c *MockJobRepositoryInterface_Create_Call) RunAndReturn(run func(job *models.Job) error) *MockJobRepositoryInterface_Create_Call {
+func (_c *MockJobRepositoryInterface_Create_Call) RunAndReturn(run func(ctx context.Context, job *models.Job) error) *MockJobRepositoryInterface_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Delete provides a mock function for the type MockJobRepositoryInterface
-func (_mock *MockJobRepositoryInterface) Delete(id string) error {
-	ret := _mock.Called(id)
+func (_mock *MockJobRepositoryInterface) Delete(ctx context.Context, id string) error {
+	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(string) error); ok {
-		r0 = returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, id)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -112,19 +119,25 @@ type MockJobRepositoryInterface_Delete_Call struct {
 }
 
 // Delete is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id string
-func (_e *MockJobRepositoryInterface_Expecter) Delete(id interface{}) *MockJobRepositoryInterface_Delete_Call {
-	return &MockJobRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", id)}
+func (_e *MockJobRepositoryInterface_Expecter) Delete(ctx interface{}, id interface{}) *MockJobRepositoryInterface_Delete_Call {
+	return &MockJobRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, id)}
 }
 
-func (_c *MockJobRepositoryInterface_Delete_Call) Run(run func(id string)) *MockJobRepositoryInterface_Delete_Call {
+func (_c *MockJobRepositoryInterface_Delete_Call) Run(run func(ctx context.Context, id string)) *MockJobRepositoryInterface_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -135,22 +148,22 @@ func (_c *MockJobRepositoryInterface_Delete_Call) Return(err error) *MockJobRepo
 	return _c
 }
 
-func (_c *MockJobRepositoryInterface_Delete_Call) RunAndReturn(run func(id string) error) *MockJobRepositoryInterface_Delete_Call {
+func (_c *MockJobRepositoryInterface_Delete_Call) RunAndReturn(run func(ctx context.Context, id string) error) *MockJobRepositoryInterface_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // DeleteOrganizedOlderThan provides a mock function for the type MockJobRepositoryInterface
-func (_mock *MockJobRepositoryInterface) DeleteOrganizedOlderThan(date time.Time) error {
-	ret := _mock.Called(date)
+func (_mock *MockJobRepositoryInterface) DeleteOrganizedOlderThan(ctx context.Context, date time.Time) error {
+	ret := _mock.Called(ctx, date)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteOrganizedOlderThan")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(time.Time) error); ok {
-		r0 = returnFunc(date)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time) error); ok {
+		r0 = returnFunc(ctx, date)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -163,19 +176,25 @@ type MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call struct {
 }
 
 // DeleteOrganizedOlderThan is a helper method to define mock.On call
+//   - ctx context.Context
 //   - date time.Time
-func (_e *MockJobRepositoryInterface_Expecter) DeleteOrganizedOlderThan(date interface{}) *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call {
-	return &MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call{Call: _e.mock.On("DeleteOrganizedOlderThan", date)}
+func (_e *MockJobRepositoryInterface_Expecter) DeleteOrganizedOlderThan(ctx interface{}, date interface{}) *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call {
+	return &MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call{Call: _e.mock.On("DeleteOrganizedOlderThan", ctx, date)}
 }
 
-func (_c *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call) Run(run func(date time.Time)) *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call {
+func (_c *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call) Run(run func(ctx context.Context, date time.Time)) *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 time.Time
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(time.Time)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 time.Time
+		if args[1] != nil {
+			arg1 = args[1].(time.Time)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -186,14 +205,14 @@ func (_c *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call) Return(err e
 	return _c
 }
 
-func (_c *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call) RunAndReturn(run func(date time.Time) error) *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call {
+func (_c *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call) RunAndReturn(run func(ctx context.Context, date time.Time) error) *MockJobRepositoryInterface_DeleteOrganizedOlderThan_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // FindByID provides a mock function for the type MockJobRepositoryInterface
-func (_mock *MockJobRepositoryInterface) FindByID(id string) (*models.Job, error) {
-	ret := _mock.Called(id)
+func (_mock *MockJobRepositoryInterface) FindByID(ctx context.Context, id string) (*models.Job, error) {
+	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FindByID")
@@ -201,18 +220,18 @@ func (_mock *MockJobRepositoryInterface) FindByID(id string) (*models.Job, error
 
 	var r0 *models.Job
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*models.Job, error)); ok {
-		return returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*models.Job, error)); ok {
+		return returnFunc(ctx, id)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *models.Job); ok {
-		r0 = returnFunc(id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *models.Job); ok {
+		r0 = returnFunc(ctx, id)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*models.Job)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
-		r1 = returnFunc(id)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, id)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -225,19 +244,25 @@ type MockJobRepositoryInterface_FindByID_Call struct {
 }
 
 // FindByID is a helper method to define mock.On call
+//   - ctx context.Context
 //   - id string
-func (_e *MockJobRepositoryInterface_Expecter) FindByID(id interface{}) *MockJobRepositoryInterface_FindByID_Call {
-	return &MockJobRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", id)}
+func (_e *MockJobRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockJobRepositoryInterface_FindByID_Call {
+	return &MockJobRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
-func (_c *MockJobRepositoryInterface_FindByID_Call) Run(run func(id string)) *MockJobRepositoryInterface_FindByID_Call {
+func (_c *MockJobRepositoryInterface_FindByID_Call) Run(run func(ctx context.Context, id string)) *MockJobRepositoryInterface_FindByID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -248,14 +273,14 @@ func (_c *MockJobRepositoryInterface_FindByID_Call) Return(job *models.Job, err 
 	return _c
 }
 
-func (_c *MockJobRepositoryInterface_FindByID_Call) RunAndReturn(run func(id string) (*models.Job, error)) *MockJobRepositoryInterface_FindByID_Call {
+func (_c *MockJobRepositoryInterface_FindByID_Call) RunAndReturn(run func(ctx context.Context, id string) (*models.Job, error)) *MockJobRepositoryInterface_FindByID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // List provides a mock function for the type MockJobRepositoryInterface
-func (_mock *MockJobRepositoryInterface) List() ([]models.Job, error) {
-	ret := _mock.Called()
+func (_mock *MockJobRepositoryInterface) List(ctx context.Context) ([]models.Job, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -263,18 +288,18 @@ func (_mock *MockJobRepositoryInterface) List() ([]models.Job, error) {
 
 	var r0 []models.Job
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() ([]models.Job, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]models.Job, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() []models.Job); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []models.Job); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]models.Job)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -287,13 +312,20 @@ type MockJobRepositoryInterface_List_Call struct {
 }
 
 // List is a helper method to define mock.On call
-func (_e *MockJobRepositoryInterface_Expecter) List() *MockJobRepositoryInterface_List_Call {
-	return &MockJobRepositoryInterface_List_Call{Call: _e.mock.On("List")}
+//   - ctx context.Context
+func (_e *MockJobRepositoryInterface_Expecter) List(ctx interface{}) *MockJobRepositoryInterface_List_Call {
+	return &MockJobRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx)}
 }
 
-func (_c *MockJobRepositoryInterface_List_Call) Run(run func()) *MockJobRepositoryInterface_List_Call {
+func (_c *MockJobRepositoryInterface_List_Call) Run(run func(ctx context.Context)) *MockJobRepositoryInterface_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -303,22 +335,22 @@ func (_c *MockJobRepositoryInterface_List_Call) Return(jobs []models.Job, err er
 	return _c
 }
 
-func (_c *MockJobRepositoryInterface_List_Call) RunAndReturn(run func() ([]models.Job, error)) *MockJobRepositoryInterface_List_Call {
+func (_c *MockJobRepositoryInterface_List_Call) RunAndReturn(run func(ctx context.Context) ([]models.Job, error)) *MockJobRepositoryInterface_List_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Update provides a mock function for the type MockJobRepositoryInterface
-func (_mock *MockJobRepositoryInterface) Update(job *models.Job) error {
-	ret := _mock.Called(job)
+func (_mock *MockJobRepositoryInterface) Update(ctx context.Context, job *models.Job) error {
+	ret := _mock.Called(ctx, job)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Update")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.Job) error); ok {
-		r0 = returnFunc(job)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Job) error); ok {
+		r0 = returnFunc(ctx, job)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -331,19 +363,25 @@ type MockJobRepositoryInterface_Update_Call struct {
 }
 
 // Update is a helper method to define mock.On call
+//   - ctx context.Context
 //   - job *models.Job
-func (_e *MockJobRepositoryInterface_Expecter) Update(job interface{}) *MockJobRepositoryInterface_Update_Call {
-	return &MockJobRepositoryInterface_Update_Call{Call: _e.mock.On("Update", job)}
+func (_e *MockJobRepositoryInterface_Expecter) Update(ctx interface{}, job interface{}) *MockJobRepositoryInterface_Update_Call {
+	return &MockJobRepositoryInterface_Update_Call{Call: _e.mock.On("Update", ctx, job)}
 }
 
-func (_c *MockJobRepositoryInterface_Update_Call) Run(run func(job *models.Job)) *MockJobRepositoryInterface_Update_Call {
+func (_c *MockJobRepositoryInterface_Update_Call) Run(run func(ctx context.Context, job *models.Job)) *MockJobRepositoryInterface_Update_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.Job
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.Job)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.Job
+		if args[1] != nil {
+			arg1 = args[1].(*models.Job)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -354,22 +392,22 @@ func (_c *MockJobRepositoryInterface_Update_Call) Return(err error) *MockJobRepo
 	return _c
 }
 
-func (_c *MockJobRepositoryInterface_Update_Call) RunAndReturn(run func(job *models.Job) error) *MockJobRepositoryInterface_Update_Call {
+func (_c *MockJobRepositoryInterface_Update_Call) RunAndReturn(run func(ctx context.Context, job *models.Job) error) *MockJobRepositoryInterface_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Upsert provides a mock function for the type MockJobRepositoryInterface
-func (_mock *MockJobRepositoryInterface) Upsert(job *models.Job) error {
-	ret := _mock.Called(job)
+func (_mock *MockJobRepositoryInterface) Upsert(ctx context.Context, job *models.Job) error {
+	ret := _mock.Called(ctx, job)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*models.Job) error); ok {
-		r0 = returnFunc(job)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Job) error); ok {
+		r0 = returnFunc(ctx, job)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -382,19 +420,25 @@ type MockJobRepositoryInterface_Upsert_Call struct {
 }
 
 // Upsert is a helper method to define mock.On call
+//   - ctx context.Context
 //   - job *models.Job
-func (_e *MockJobRepositoryInterface_Expecter) Upsert(job interface{}) *MockJobRepositoryInterface_Upsert_Call {
-	return &MockJobRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", job)}
+func (_e *MockJobRepositoryInterface_Expecter) Upsert(ctx interface{}, job interface{}) *MockJobRepositoryInterface_Upsert_Call {
+	return &MockJobRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, job)}
 }
 
-func (_c *MockJobRepositoryInterface_Upsert_Call) Run(run func(job *models.Job)) *MockJobRepositoryInterface_Upsert_Call {
+func (_c *MockJobRepositoryInterface_Upsert_Call) Run(run func(ctx context.Context, job *models.Job)) *MockJobRepositoryInterface_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *models.Job
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(*models.Job)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.Job
+		if args[1] != nil {
+			arg1 = args[1].(*models.Job)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -405,7 +449,7 @@ func (_c *MockJobRepositoryInterface_Upsert_Call) Return(err error) *MockJobRepo
 	return _c
 }
 
-func (_c *MockJobRepositoryInterface_Upsert_Call) RunAndReturn(run func(job *models.Job) error) *MockJobRepositoryInterface_Upsert_Call {
+func (_c *MockJobRepositoryInterface_Upsert_Call) RunAndReturn(run func(ctx context.Context, job *models.Job) error) *MockJobRepositoryInterface_Upsert_Call {
 	_c.Call.Return(run)
 	return _c
 }

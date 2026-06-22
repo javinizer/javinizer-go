@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
 )
@@ -25,14 +26,12 @@ import (
 // @Param jobId path string true "Job ID"
 // @Param filename path string true "Filename"
 // @Success 200 {file} binary
-// @Failure 404 {object} ErrorResponse
-func serveTempPoster(deps *ServerDependencies) gin.HandlerFunc {
+// @Failure 404 {object} contracts.ErrorResponse
+func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg := deps.GetConfig()
-		if cfg == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "server configuration unavailable"})
-			return
-		}
+		apiCfg := rt.GetAPIConfig()
+		tempCfg := apiCfg.TempConfig()
+		deps := rt.Deps()
 
 		jobID := c.Param("jobId")
 		filename := c.Param("filename")
@@ -54,9 +53,9 @@ func serveTempPoster(deps *ServerDependencies) gin.HandlerFunc {
 		// This ensures temp posters remain accessible even if system.temp_dir is changed
 		// If job is not in memory (evicted after 24h cleanup), falls back to config TempDir
 		// This is acceptable for ephemeral temp posters since they're cleaned up on organization
-		tempDir := cfg.System.TempDir
-		if deps.JobQueue != nil {
-			if job, ok := deps.JobQueue.GetJob(jobID); ok && job.TempDir != "" {
+		tempDir := tempCfg.TempDir
+		if deps.JobStore != nil {
+			if job, ok := deps.JobStore.GetJob(jobID); ok && job.TempDir != "" {
 				tempDir = job.TempDir
 			}
 		}
@@ -92,7 +91,7 @@ func serveTempPoster(deps *ServerDependencies) gin.HandlerFunc {
 // @Tags temp
 // @Param filename path string true "Filename"
 // @Success 200 {file} binary
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} contracts.ErrorResponse
 func serveCroppedPoster() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		filename := c.Param("filename")
@@ -136,15 +135,12 @@ func serveCroppedPoster() gin.HandlerFunc {
 // @Tags temp
 // @Param url query string true "Image URL"
 // @Success 200 {file} binary
-// @Failure 400 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
-func serveTempImage(deps *ServerDependencies) gin.HandlerFunc {
+// @Failure 400 {object} contracts.ErrorResponse
+// @Failure 502 {object} contracts.ErrorResponse
+func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg := deps.GetConfig()
-		if cfg == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "server configuration unavailable"})
-			return
-		}
+		apiCfg := rt.GetAPIConfig()
+		tempCfg := apiCfg.TempConfig()
 
 		rawURL := strings.TrimSpace(c.Query("url"))
 		if rawURL == "" {
@@ -171,9 +167,13 @@ func serveTempImage(deps *ServerDependencies) gin.HandlerFunc {
 			return
 		}
 
-		req.Header.Set("User-Agent", config.ResolveScraperUserAgent(cfg.Scrapers.UserAgent))
+		userAgent := tempCfg.ScraperUserAgent
+		if userAgent == "" {
+			userAgent = config.DefaultUserAgent
+		}
+		req.Header.Set("User-Agent", userAgent)
 		req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-		if referer := resolveTempImageReferer(parsedURL.String(), cfg.Scrapers.Referer); referer != "" {
+		if referer := resolveTempImageReferer(parsedURL.String(), tempCfg.ScraperReferer); referer != "" {
 			req.Header.Set("Referer", referer)
 		}
 
@@ -209,5 +209,5 @@ func serveTempImage(deps *ServerDependencies) gin.HandlerFunc {
 
 // resolveTempImageReferer selects a compatible Referer for preview image proxy requests.
 func resolveTempImageReferer(downloadURL, configuredReferer string) string {
-	return downloader.ResolveMediaReferer(downloadURL, configuredReferer)
+	return httpclient.ResolveMediaReferer(downloadURL, configuredReferer)
 }

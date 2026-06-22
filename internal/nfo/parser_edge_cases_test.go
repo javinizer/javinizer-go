@@ -11,7 +11,7 @@ import (
 func TestParseActorToActress_EdgeCases(t *testing.T) {
 	tests := []struct {
 		name                 string
-		actor                Actor
+		actor                actor
 		expectedFirstName    string
 		expectedLastName     string
 		expectedJapaneseName string
@@ -19,7 +19,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 	}{
 		{
 			name: "Standard JAV NFO: Name=Japanese, AltName=Romanized",
-			actor: Actor{
+			actor: actor{
 				Name:    "涼森れむ",
 				AltName: "Suzumori Remu",
 				Role:    "Actress",
@@ -31,7 +31,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "Name=Romanized, Role=Japanese (no AltName)",
-			actor: Actor{
+			actor: actor{
 				Name: "Yui Hatano",
 				Role: "波多野結衣",
 			},
@@ -42,7 +42,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "Name=Romanized, AltName=Romanized (different order), Role=Japanese",
-			actor: Actor{
+			actor: actor{
 				Name:    "Yui Hatano",
 				AltName: "Hatano Yui",
 				Role:    "波多野結衣",
@@ -54,7 +54,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "Name=Japanese only (no AltName, no Role)",
-			actor: Actor{
+			actor: actor{
 				Name: "涼森れむ",
 			},
 			expectedFirstName:    "",
@@ -64,7 +64,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "Name=Romanized only (no AltName, no Role)",
-			actor: Actor{
+			actor: actor{
 				Name: "Yui Hatano",
 			},
 			expectedFirstName:    "Yui",
@@ -74,7 +74,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "AltName and Role both present, Name=Japanese",
-			actor: Actor{
+			actor: actor{
 				Name:    "涼森れむ",
 				AltName: "Remu Suzumori",
 				Role:    "涼森 れむ", // With space
@@ -86,7 +86,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "Empty AltName, Name=Romanized with trailing space",
-			actor: Actor{
+			actor: actor{
 				Name: "Yui Hatano ",
 				Role: "波多野結衣",
 			},
@@ -97,7 +97,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "Single romanized name (no last name)",
-			actor: Actor{
+			actor: actor{
 				Name: "Madonna",
 				Role: "マドンナ",
 			},
@@ -108,7 +108,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "REVERSE FORMAT: Name=Romanized, AltName=Japanese",
-			actor: Actor{
+			actor: actor{
 				Name:    "Yui Hatano",
 				AltName: "波多野結衣",
 			},
@@ -119,7 +119,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "REVERSE FORMAT: Name=Romanized, AltName=Japanese, Role=Japanese",
-			actor: Actor{
+			actor: actor{
 				Name:    "Remu Suzumori",
 				AltName: "涼森れむ",
 				Role:    "涼森 れむ", // Role takes priority
@@ -131,7 +131,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "Both Name and AltName are Japanese",
-			actor: Actor{
+			actor: actor{
 				Name:    "涼森れむ",
 				AltName: "涼森 れむ", // With space
 			},
@@ -142,7 +142,7 @@ func TestParseActorToActress_EdgeCases(t *testing.T) {
 		},
 		{
 			name: "Both Name and AltName are Romanized",
-			actor: Actor{
+			actor: actor{
 				Name:    "Yui Hatano",
 				AltName: "Hatano Yui",
 			},

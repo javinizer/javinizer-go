@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
 func TestRevertCheck_RevertDisabled(t *testing.T) {
@@ -21,12 +24,12 @@ func TestRevertCheck_RevertDisabled(t *testing.T) {
 	deps, db := setupJobsTestDeps(t)
 	defer func() { _ = db.Close() }()
 
-	cfg := deps.GetConfig()
-	cfg.Output.AllowRevert = false
-	deps.SetConfig(cfg)
+	cfg := deps.CoreDeps.GetConfig()
+	cfg.Output.Operation.AllowRevert = false
+	testkit.GetTestRuntime(deps).InitAPIConfig() // Refresh APIConfig snapshot after mutating config
 
 	router := gin.New()
-	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(deps))
+	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(newTestJobDeps(deps)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/some-id/revert-check", nil)
 	w := httptest.NewRecorder()
@@ -48,7 +51,7 @@ func TestRevertCheck_JobNotFound(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	router := gin.New()
-	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(deps))
+	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(newTestJobDeps(deps)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/nonexistent-id/revert-check", nil)
 	w := httptest.NewRecorder()
@@ -72,17 +75,17 @@ func TestRevertCheck_NoAppliedOperations(t *testing.T) {
 	jobID := uuid.New().String()
 	job := &models.Job{
 		ID:         jobID,
-		Status:     string(models.JobStatusOrganized),
+		Status:     models.JobStatusOrganized,
 		TotalFiles: 0,
 		Completed:  0,
 		Failed:     0,
 		Progress:   1.0,
 		StartedAt:  time.Now().Add(-2 * time.Hour),
 	}
-	require.NoError(t, deps.JobRepo.Create(job))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), job))
 
 	router := gin.New()
-	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(deps))
+	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(newTestJobDeps(deps)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+jobID+"/revert-check", nil)
 	w := httptest.NewRecorder()
@@ -110,7 +113,7 @@ func TestRevertCheck_WithAppliedOps_NoOverlaps(t *testing.T) {
 	jobID := uuid.New().String()
 	job := &models.Job{
 		ID:          jobID,
-		Status:      string(models.JobStatusOrganized),
+		Status:      models.JobStatusOrganized,
 		TotalFiles:  1,
 		Completed:   1,
 		Failed:      0,
@@ -118,7 +121,7 @@ func TestRevertCheck_WithAppliedOps_NoOverlaps(t *testing.T) {
 		Destination: "/dest/organized",
 		StartedAt:   twoHoursAgo,
 	}
-	require.NoError(t, deps.JobRepo.Create(job))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), job))
 
 	op := &models.BatchFileOperation{
 		BatchJobID:    jobID,
@@ -128,10 +131,10 @@ func TestRevertCheck_WithAppliedOps_NoOverlaps(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
-	require.NoError(t, deps.BatchFileOpRepo.Create(op))
+	require.NoError(t, deps.Repos.BatchFileOpRepo.Create(context.Background(), op))
 
 	router := gin.New()
-	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(deps))
+	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(newTestJobDeps(deps)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+jobID+"/revert-check", nil)
 	w := httptest.NewRecorder()
@@ -160,7 +163,7 @@ func TestRevertCheck_WithOverlappingBatches(t *testing.T) {
 	targetJobID := uuid.New().String()
 	targetJob := &models.Job{
 		ID:          targetJobID,
-		Status:      string(models.JobStatusOrganized),
+		Status:      models.JobStatusOrganized,
 		TotalFiles:  1,
 		Completed:   1,
 		Failed:      0,
@@ -168,7 +171,7 @@ func TestRevertCheck_WithOverlappingBatches(t *testing.T) {
 		Destination: "/dest/target",
 		StartedAt:   twoHoursAgo,
 	}
-	require.NoError(t, deps.JobRepo.Create(targetJob))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), targetJob))
 
 	targetOp := &models.BatchFileOperation{
 		BatchJobID:    targetJobID,
@@ -178,12 +181,12 @@ func TestRevertCheck_WithOverlappingBatches(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
-	require.NoError(t, deps.BatchFileOpRepo.Create(targetOp))
+	require.NoError(t, deps.Repos.BatchFileOpRepo.Create(context.Background(), targetOp))
 
 	laterJobID := uuid.New().String()
 	laterJob := &models.Job{
 		ID:          laterJobID,
-		Status:      string(models.JobStatusOrganized),
+		Status:      models.JobStatusOrganized,
 		TotalFiles:  1,
 		Completed:   1,
 		Failed:      0,
@@ -191,7 +194,7 @@ func TestRevertCheck_WithOverlappingBatches(t *testing.T) {
 		Destination: "/dest/later",
 		StartedAt:   oneHourAgo,
 	}
-	require.NoError(t, deps.JobRepo.Create(laterJob))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), laterJob))
 
 	laterOp := &models.BatchFileOperation{
 		BatchJobID:    laterJobID,
@@ -201,10 +204,10 @@ func TestRevertCheck_WithOverlappingBatches(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
-	require.NoError(t, deps.BatchFileOpRepo.Create(laterOp))
+	require.NoError(t, deps.Repos.BatchFileOpRepo.Create(context.Background(), laterOp))
 
 	router := gin.New()
-	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(deps))
+	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(newTestJobDeps(deps)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+targetJobID+"/revert-check", nil)
 	w := httptest.NewRecorder()
@@ -235,7 +238,7 @@ func TestRevertCheck_SkipsRevertedJobs(t *testing.T) {
 	targetJobID := uuid.New().String()
 	targetJob := &models.Job{
 		ID:          targetJobID,
-		Status:      string(models.JobStatusOrganized),
+		Status:      models.JobStatusOrganized,
 		TotalFiles:  1,
 		Completed:   1,
 		Failed:      0,
@@ -243,7 +246,7 @@ func TestRevertCheck_SkipsRevertedJobs(t *testing.T) {
 		Destination: "/dest/target",
 		StartedAt:   twoHoursAgo,
 	}
-	require.NoError(t, deps.JobRepo.Create(targetJob))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), targetJob))
 
 	targetOp := &models.BatchFileOperation{
 		BatchJobID:    targetJobID,
@@ -253,12 +256,12 @@ func TestRevertCheck_SkipsRevertedJobs(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
-	require.NoError(t, deps.BatchFileOpRepo.Create(targetOp))
+	require.NoError(t, deps.Repos.BatchFileOpRepo.Create(context.Background(), targetOp))
 
 	revertedJobID := uuid.New().String()
 	revertedJob := &models.Job{
 		ID:          revertedJobID,
-		Status:      string(models.JobStatusReverted),
+		Status:      models.JobStatusReverted,
 		TotalFiles:  1,
 		Completed:   1,
 		Failed:      0,
@@ -267,10 +270,10 @@ func TestRevertCheck_SkipsRevertedJobs(t *testing.T) {
 		StartedAt:   oneHourAgo,
 		RevertedAt:  &now,
 	}
-	require.NoError(t, deps.JobRepo.Create(revertedJob))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), revertedJob))
 
 	router := gin.New()
-	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(deps))
+	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(newTestJobDeps(deps)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+targetJobID+"/revert-check", nil)
 	w := httptest.NewRecorder()
@@ -298,7 +301,7 @@ func TestRevertCheck_SkipsEarlierJobs(t *testing.T) {
 	targetJobID := uuid.New().String()
 	targetJob := &models.Job{
 		ID:          targetJobID,
-		Status:      string(models.JobStatusOrganized),
+		Status:      models.JobStatusOrganized,
 		TotalFiles:  1,
 		Completed:   1,
 		Failed:      0,
@@ -306,7 +309,7 @@ func TestRevertCheck_SkipsEarlierJobs(t *testing.T) {
 		Destination: "/dest/target",
 		StartedAt:   twoHoursAgo,
 	}
-	require.NoError(t, deps.JobRepo.Create(targetJob))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), targetJob))
 
 	targetOp := &models.BatchFileOperation{
 		BatchJobID:    targetJobID,
@@ -316,12 +319,12 @@ func TestRevertCheck_SkipsEarlierJobs(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
-	require.NoError(t, deps.BatchFileOpRepo.Create(targetOp))
+	require.NoError(t, deps.Repos.BatchFileOpRepo.Create(context.Background(), targetOp))
 
 	earlierJobID := uuid.New().String()
 	earlierJob := &models.Job{
 		ID:          earlierJobID,
-		Status:      string(models.JobStatusOrganized),
+		Status:      models.JobStatusOrganized,
 		TotalFiles:  1,
 		Completed:   1,
 		Failed:      0,
@@ -329,10 +332,10 @@ func TestRevertCheck_SkipsEarlierJobs(t *testing.T) {
 		Destination: "/dest/earlier",
 		StartedAt:   threeHoursAgo,
 	}
-	require.NoError(t, deps.JobRepo.Create(earlierJob))
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), earlierJob))
 
 	router := gin.New()
-	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(deps))
+	router.GET("/api/v1/jobs/:id/revert-check", revertCheck(newTestJobDeps(deps)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+targetJobID+"/revert-check", nil)
 	w := httptest.NewRecorder()

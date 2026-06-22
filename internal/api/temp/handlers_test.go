@@ -10,11 +10,22 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
+
+func newTestDeps(cfg *config.Config) *core.APIDeps {
+	deps := &core.APIDeps{}
+	rt := core.NewAPIRuntime(deps)
+	rt.SetConfig(cfg)
+	testkit.SetTestRuntime(deps, rt)
+	return deps
+}
 
 func TestServeTempPoster(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -32,10 +43,9 @@ func TestServeTempPoster(t *testing.T) {
 	require.NoError(t, os.WriteFile(posterPath, []byte("fake jpeg data"), 0644))
 
 	// Create deps with config that has TempDir set to tempDir
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.System.TempDir = tempDir
-	deps := &ServerDependencies{}
-	deps.SetConfig(cfg)
+	deps := newTestDeps(cfg)
 
 	tests := []struct {
 		name           string
@@ -90,7 +100,7 @@ func TestServeTempPoster(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			router := gin.New()
-			router.GET("/temp/posters/:jobId/:filename", serveTempPoster(deps))
+			router.GET("/temp/posters/:jobId/:filename", serveTempPoster(testkit.GetTestRuntime(deps)))
 
 			req := httptest.NewRequest(http.MethodGet, "/temp/posters/"+tt.jobID+"/"+tt.filename, nil)
 			w := httptest.NewRecorder()
@@ -118,13 +128,12 @@ func TestServeTempPoster_PathTraversalDefenseInDepth(t *testing.T) {
 	require.NoError(t, os.WriteFile(sensitiveFile, []byte("sensitive data"), 0644))
 
 	// Create deps with config that has TempDir set to tempDir
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.System.TempDir = tempDir
-	deps := &ServerDependencies{}
-	deps.SetConfig(cfg)
+	deps := newTestDeps(cfg)
 
 	router := gin.New()
-	router.GET("/temp/posters/:jobId/:filename", serveTempPoster(deps))
+	router.GET("/temp/posters/:jobId/:filename", serveTempPoster(testkit.GetTestRuntime(deps)))
 
 	// Try to access sensitive.jpg via path traversal (../sensitive.jpg from tempDir/posters/jobID/)
 	req := httptest.NewRequest(http.MethodGet, "/temp/posters/"+jobID+"/../sensitive.jpg", nil)
@@ -259,13 +268,12 @@ func TestServeTempPoster_ValidJpgExtensions(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(posterDir, "test.Jpg"), []byte("jpeg"), 0644))
 
 	// Create deps with config that has TempDir set to tempDir
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultConfig(nil, nil)
 	cfg.System.TempDir = tempDir
-	deps := &ServerDependencies{}
-	deps.SetConfig(cfg)
+	deps := newTestDeps(cfg)
 
 	router := gin.New()
-	router.GET("/temp/posters/:jobId/:filename", serveTempPoster(deps))
+	router.GET("/temp/posters/:jobId/:filename", serveTempPoster(testkit.GetTestRuntime(deps)))
 
 	tests := []struct {
 		filename       string
@@ -389,13 +397,12 @@ func TestServeTempImage(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			cfg := config.DefaultConfig()
+			cfg := config.DefaultConfig(nil, nil)
 			cfg.Scrapers.Referer = expectedReferer
-			deps := &ServerDependencies{}
-			deps.SetConfig(cfg)
+			deps := newTestDeps(cfg)
 
 			router := gin.New()
-			router.GET("/temp/image", serveTempImage(deps))
+			router.GET("/temp/image", serveTempImage(testkit.GetTestRuntime(deps)))
 
 			target := tt.imageURL
 			if target == "" {

@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-	getScraperProxyMode,
-	isTestValid,
-	isProxyConfigDirty
-} from './proxy-logic';
+import { getScraperProxyMode, isTestValid, isProxyConfigDirty } from './proxy-logic';
 
 // Regression tests for issues found in code review rounds 1-6
 describe('Regression: Code Review Issues', () => {
@@ -28,7 +24,7 @@ describe('Regression: Code Review Issues', () => {
 		const result = {
 			success: true,
 			timestamp: Date.now(),
-			configSnapshot: baseline
+			configSnapshot: baseline,
 		};
 
 		// Test is valid initially

@@ -2,38 +2,22 @@ package javstash
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/configutil"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-type JavstashConfig struct {
-	config.BaseScraperConfig `yaml:",inline"`
-	APIKey                   string `yaml:"api_key" json:"api_key"`
-	BaseURL                  string `yaml:"base_url" json:"base_url"`
-	Language                 string `yaml:"language" json:"language"`
-}
-
-func (c *JavstashConfig) ValidateConfig(sc *config.ScraperSettings) error {
-	if err := config.ValidateCommonSettings("javstash", sc); err != nil {
-		return err
-	}
-	if !sc.Enabled {
+// validateScraperSettings performs scraper-specific validation for javstash.
+func validateScraperSettings(ss *models.ScraperSettings) error {
+	if !ss.Enabled {
 		return nil
 	}
-	apiKey := ""
-	if v, ok := sc.Extra["api_key"].(string); ok {
-		apiKey = strings.TrimSpace(v)
-	}
+	apiKey := strings.TrimSpace(ss.APIKey)
 	if apiKey == "" {
-		apiKey = os.Getenv("JAVSTASH_API_KEY")
+		return fmt.Errorf("javstash: api_key is required (set in config)")
 	}
-	if apiKey == "" {
-		return fmt.Errorf("javstash: api_key is required (set in config or JAVSTASH_API_KEY env var)")
-	}
-	if err := configutil.ValidateHTTPBaseURL("javstash.base_url", sc.BaseURL); err != nil {
+	if err := config.ValidateHTTPBaseURL("javstash.base_url", ss.BaseURL); err != nil {
 		return err
 	}
 	return nil

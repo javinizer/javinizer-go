@@ -1,30 +1,25 @@
 package system
 
 import (
-	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"github.com/javinizer/javinizer-go/internal/api/core"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
-func scraperDisplayTitleAndOptions(name string, profileChoices []ScraperChoice) (string, []ScraperOption) {
-	// Try to get self-registered options from scraper
-	if provider, exists := scraperutil.GetScraperOptions(name); exists {
-		// Convert []any to []ScraperOption
-		options := make([]ScraperOption, 0, len(provider.Options)+10)
-		for _, opt := range provider.Options {
-			if so, ok := opt.(ScraperOption); ok {
-				options = append(options, so)
-			}
+func scraperDisplayTitleAndOptions(deps *core.APIDeps, name string, profileChoices []contracts.ScraperChoice) (string, []contracts.ScraperOption) {
+	if deps != nil {
+		if result, exists := deps.GetScraperOptions(name); exists {
+			options := make([]contracts.ScraperOption, 0, len(result.Options)+10)
+			options = append(options, result.Options...)
+
+			options = append(options, scraperUserAgentOptions()...)
+			options = append(options, scraperProxyOptions(profileChoices)...)
+			options = append(options, scraperDownloadProxyOptions(profileChoices)...)
+
+			return result.DisplayTitle, options
 		}
-
-		// Append common options (user agent, proxy, download proxy)
-		options = append(options, scraperUserAgentOptions()...)
-		options = append(options, scraperProxyOptions(profileChoices)...)
-		options = append(options, scraperDownloadProxyOptions(profileChoices)...)
-
-		return provider.DisplayTitle, options
 	}
 
-	// Fallback for scrapers without registered options:
-	// Return defaults with just common options
 	options := scraperUserAgentOptions()
 	options = append(options, scraperProxyOptions(profileChoices)...)
 	options = append(options, scraperDownloadProxyOptions(profileChoices)...)

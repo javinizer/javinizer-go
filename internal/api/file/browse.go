@@ -1,12 +1,15 @@
 package file
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/apperrors"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+
+	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
 // browseDirectory godoc
@@ -15,28 +18,25 @@ import (
 // @Tags web
 // @Accept json
 // @Produce json
-// @Param request body BrowseRequest true "Browse parameters"
-// @Success 200 {object} BrowseResponse
-// @Failure 400 {object} ErrorResponse
+// @Param request body contracts.BrowseRequest true "Browse parameters"
+// @Success 200 {object} contracts.BrowseResponse
+// @Failure 400 {object} contracts.ErrorResponse
 // @Router /api/v1/browse [post]
-func browseDirectory(deps *ServerDependencies) gin.HandlerFunc {
+func browseDirectory(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req BrowseRequest
+		var req contracts.BrowseRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
-		// Default to current directory if not specified
 		if req.Path == "" {
 			req.Path, _ = os.Getwd()
 		}
 
-		// Read current config (respects config reloads)
-		cfg := deps.GetConfig()
+		apiCfg := rt.GetAPIConfig()
 
-		// Use TOCTOU-safe validation that opens the directory
-		dirFile, validPath, err := core.ValidateAndOpenPath(req.Path, &cfg.API.Security)
+		dirFile, validPath, err := core.ValidateAndOpenPath(req.Path, apiCfg.SecurityConfig())
 		if err != nil {
 			apperrors.WriteAPIError(c, err)
 			return
@@ -46,12 +46,12 @@ func browseDirectory(deps *ServerDependencies) gin.HandlerFunc {
 		// Read directory contents using the open file handle (TOCTOU-safe)
 		entries, err := dirFile.ReadDir(-1)
 		if err != nil {
-			c.JSON(500, ErrorResponse{Error: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
 		// Build response
-		items := make([]FileInfo, 0, len(entries))
+		items := make([]contracts.FileInfo, 0, len(entries))
 		for _, entry := range entries {
 			fullPath := filepath.Join(validPath, entry.Name())
 			info, err := entry.Info()
@@ -59,7 +59,7 @@ func browseDirectory(deps *ServerDependencies) gin.HandlerFunc {
 				continue
 			}
 
-			items = append(items, FileInfo{
+			items = append(items, contracts.FileInfo{
 				Name:    entry.Name(),
 				Path:    fullPath,
 				IsDir:   entry.IsDir(),
@@ -74,7 +74,7 @@ func browseDirectory(deps *ServerDependencies) gin.HandlerFunc {
 			parentPath = "" // Root directory
 		}
 
-		c.JSON(200, BrowseResponse{
+		c.JSON(http.StatusOK, contracts.BrowseResponse{
 			CurrentPath: req.Path,
 			ParentPath:  parentPath,
 			Items:       items,
