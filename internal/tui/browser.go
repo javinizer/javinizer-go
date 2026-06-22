@@ -80,9 +80,15 @@ func (b *browser) ToggleSelection(path string) {
 		isCurrentlySelected := b.selected[path]
 		newState := !isCurrentlySelected
 
+		// Normalize the directory path so that child matching is consistent
+		// cross-platform. filepath.Dir returns OS-native separators
+		// (backslash on Windows); the input path must be normalized the same
+		// way for the equality to succeed when callers pass forward-slash paths.
+		normPath := filepath.Clean(path)
+
 		// Toggle all files in this directory
 		for i := range b.items {
-			if !b.items[i].IsDir && filepath.Dir(b.items[i].Path) == path {
+			if !b.items[i].IsDir && filepath.Dir(b.items[i].Path) == normPath {
 				b.selected[b.items[i].Path] = newState
 			}
 		}

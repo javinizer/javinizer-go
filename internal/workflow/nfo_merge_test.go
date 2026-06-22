@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -81,7 +82,7 @@ func TestMergeWithExistingNFO_PreserveNFO_PreservesExistingFields(t *testing.T) 
 	})
 
 	assert.True(t, result.Merged, "Should merge when existing NFO found")
-	assert.Equal(t, "/source/ABC-123.nfo", result.FoundNFOPath, "FoundNFOPath should be set")
+	assert.Equal(t, filepath.FromSlash("/source/ABC-123.nfo"), result.FoundNFOPath, "FoundNFOPath should be set")
 	assert.Equal(t, "Existing Title", result.Movie.Title, "Existing title should be preserved with PreserveNFO")
 }
 
@@ -134,5 +135,5 @@ func TestMergeWithExistingNFO_MalformedNFO_ReturnsUnmerged(t *testing.T) {
 
 	assert.False(t, result.Merged, "Should not merge when NFO is malformed")
 	assert.Equal(t, "Scraped Title", result.Movie.Title, "Title should remain from scraped data")
-	assert.Equal(t, "/source/ABC-123.nfo", result.FoundNFOPath, "FoundNFOPath should still be set even for malformed NFO")
+	assert.Equal(t, filepath.FromSlash("/source/ABC-123.nfo"), result.FoundNFOPath, "FoundNFOPath should still be set even for malformed NFO")
 }

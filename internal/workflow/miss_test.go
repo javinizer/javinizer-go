@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -667,7 +668,7 @@ func TestGenerateNFOPaths_SingleFileNFO(t *testing.T) {
 		&mockNFOFieldMergerForPreview{nfoFilename: "TEST-001.nfo"},
 		"/output/TEST-001",
 	)
-	assert.Equal(t, "/output/TEST-001/TEST-001.nfo", nfoPath)
+	assert.Equal(t, filepath.FromSlash("/output/TEST-001/TEST-001.nfo"), nfoPath)
 	assert.Nil(t, nfoPaths)
 }
 
