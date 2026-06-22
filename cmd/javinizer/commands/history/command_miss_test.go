@@ -3,6 +3,7 @@ package history
 import (
 	"bytes"
 	"context"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"io"
 	"os"
 	"path/filepath"
@@ -103,7 +104,8 @@ func TestRunHistoryClean_DeletesOldRecords(t *testing.T) {
 
 func TestRunHistoryClean_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	cmd := NewCommand()
 	rootCmd.AddCommand(cmd)
 	rootCmd.SetArgs([]string{"history", "clean"})
@@ -316,7 +318,8 @@ func TestRunHistoryListBatch_LongPaths(t *testing.T) {
 
 func TestRunHistoryListBatch_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	cmd := NewCommand()
 	rootCmd.AddCommand(cmd)
 	rootCmd.SetArgs([]string{"history", "list", "--batch", "some-id"})
@@ -329,7 +332,8 @@ func TestRunHistoryListBatch_InvalidConfig(t *testing.T) {
 
 func TestRunHistoryList_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	cmd := NewCommand()
 	rootCmd.AddCommand(cmd)
 	rootCmd.SetArgs([]string{"history", "list"})
@@ -428,7 +432,8 @@ func TestRunHistoryList_UsesOriginalPathWhenNewPathEmpty(t *testing.T) {
 
 func TestRunHistoryStats_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	cmd := NewCommand()
 	rootCmd.AddCommand(cmd)
 	rootCmd.SetArgs([]string{"history", "stats"})
@@ -441,7 +446,8 @@ func TestRunHistoryStats_InvalidConfig(t *testing.T) {
 
 func TestRunHistoryMovie_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	cmd := NewCommand()
 	rootCmd.AddCommand(cmd)
 	rootCmd.SetArgs([]string{"history", "movie", "IPX-001"})

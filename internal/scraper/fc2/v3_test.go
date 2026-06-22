@@ -2,10 +2,8 @@ package fc2
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -73,7 +71,11 @@ func (mt *fc2MockTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	}, nil
 }
 
-// TestScrapeURLV3_HTTPStatusErrors tests ScrapeURL with various HTTP errors
+// TestScrapeURLV3_HTTPStatusErrors tests ScrapeURL with various HTTP errors.
+// Uses fc2MockTransport (custom RoundTripper) instead of httptest.Server
+// because ScrapeURL receives an absolute FC2 URL and resty ignores
+// SetBaseURL for absolute URLs — the request would hit the real FC2 site
+// instead of the test server, making the test network-dependent.
 func TestScrapeURLV3_HTTPStatusErrors(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -88,16 +90,14 @@ func TestScrapeURLV3_HTTPStatusErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.statusCode)
-			}))
-			defer ts.Close()
+			client := resty.New()
+			httpClient := client.GetClient()
+			httpClient.Transport = &fc2MockTransport{response: "", statusCode: tt.statusCode}
 
-			client := resty.New().SetBaseURL(ts.URL)
 			scraper := &scraper{
 				client:      client,
 				enabled:     true,
-				baseURL:     ts.URL,
+				baseURL:     "https://adult.contents.fc2.com",
 				rateLimiter: ratelimit.NewLimiter(0),
 				settings:    models.ScraperSettings{Enabled: true},
 			}
@@ -108,19 +108,21 @@ func TestScrapeURLV3_HTTPStatusErrors(t *testing.T) {
 	}
 }
 
-// TestScrapeURLV3_NotFoundPage tests ScrapeURL when page shows not found content
+// TestScrapeURLV3_NotFoundPage tests ScrapeURL when page shows not found content.
+// Uses fc2MockTransport (custom RoundTripper) instead of httptest.Server
+// for the same reason as TestScrapeURLV3_HTTPStatusErrors.
 func TestScrapeURLV3_NotFoundPage(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, `<html><body>お探しの商品が見つかりませんでした</body></html>`)
-	}))
-	defer ts.Close()
+	client := resty.New()
+	httpClient := client.GetClient()
+	httpClient.Transport = &fc2MockTransport{
+		response:   `<html><body>お探しの商品が見つかりませんでした</body></html>`,
+		statusCode: 200,
+	}
 
-	client := resty.New().SetBaseURL(ts.URL)
 	scraper := &scraper{
 		client:      client,
 		enabled:     true,
-		baseURL:     ts.URL,
+		baseURL:     "https://adult.contents.fc2.com",
 		rateLimiter: ratelimit.NewLimiter(0),
 		settings:    models.ScraperSettings{Enabled: true},
 	}

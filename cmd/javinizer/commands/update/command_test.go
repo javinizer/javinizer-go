@@ -349,7 +349,7 @@ func TestRun_Integration_InvalidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Use a non-existent config file
-	invalidConfigPath := "/nonexistent/config.yaml"
+	invalidConfigPath := testutil.UnreachableConfigPath(t)
 
 	cmd := update.NewCommand()
 	err := update.Run(cmd, []string{tmpDir}, invalidConfigPath)

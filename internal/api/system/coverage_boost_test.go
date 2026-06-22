@@ -2,6 +2,8 @@ package system
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -83,13 +85,20 @@ func TestValidateAndApply_ValidationError(t *testing.T) {
 // --- ValidateAndApply: persist error branch (configFile is unwritable) ---
 
 func TestValidateAndApply_PersistError(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Create a directory at the config path so config.Save fails (cannot write
+	// a file where a directory exists). Works on all platforms including Windows
+	// where the blocker-file pattern (file-inside-a-file) may not prevent creation.
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	require.NoError(t, os.MkdirAll(configPath, 0755)) // config.yaml is a directory, not a file
+
 	deps := &core.APIDeps{}
 	rt := core.NewAPIRuntime(deps)
 	rt.SetConfig(defaultTestConfig())
 	testkit.SetTestRuntime(deps, rt)
 	deps.TokenStore = core.NewTokenStore()
 
-	svc := NewConfigUpdateService(testkit.GetTestRuntime(deps), "/nonexistent/dir/config.yaml")
+	svc := NewConfigUpdateService(testkit.GetTestRuntime(deps), configPath)
 	oldCfg := defaultTestConfig()
 	newCfg := defaultTestConfig()
 

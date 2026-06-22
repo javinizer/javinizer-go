@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -66,10 +67,11 @@ func TestMiss2_ScanSingle_NonLstaterFS(t *testing.T) {
 	cfg := &Config{Extensions: []string{".mp4"}}
 	s := NewScanner(nonLstaterFs, cfg)
 
-	_ = fs.MkdirAll("/test/dir", 0755)
-	_ = afero.WriteFile(fs, "/test/dir/movie.mp4", []byte("data"), 0644)
+	dir := filepath.Join(t.TempDir(), "dir")
+	_ = fs.MkdirAll(dir, 0755)
+	_ = afero.WriteFile(fs, filepath.Join(dir, "movie.mp4"), []byte("data"), 0644)
 
-	result, err := s.ScanSingle("/test/dir")
+	result, err := s.ScanSingle(dir)
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(result.Files))
 	assert.Equal(t, "movie.mp4", result.Files[0].Name)
@@ -83,10 +85,12 @@ func TestMiss2_ScanSingle_NonLstaterFS_SingleFile(t *testing.T) {
 	cfg := &Config{Extensions: []string{".mp4"}}
 	s := NewScanner(nonLstaterFs, cfg)
 
-	_ = fs.MkdirAll("/test", 0755)
-	_ = afero.WriteFile(fs, "/test/movie.mp4", []byte("data"), 0644)
+	tmpDir := t.TempDir()
+	_ = fs.MkdirAll(tmpDir, 0755)
+	moviePath := filepath.Join(tmpDir, "movie.mp4")
+	_ = afero.WriteFile(fs, moviePath, []byte("data"), 0644)
 
-	result, err := s.ScanSingle("/test/movie.mp4")
+	result, err := s.ScanSingle(moviePath)
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(result.Files))
 	assert.Equal(t, "movie.mp4", result.Files[0].Name)
@@ -100,10 +104,12 @@ func TestMiss2_ScanSingle_NonLstaterFS_ExcludedFile(t *testing.T) {
 	cfg := &Config{Extensions: []string{".mp4"}}
 	s := NewScanner(nonLstaterFs, cfg)
 
-	_ = fs.MkdirAll("/test", 0755)
-	_ = afero.WriteFile(fs, "/test/readme.txt", []byte("data"), 0644)
+	tmpDir := t.TempDir()
+	_ = fs.MkdirAll(tmpDir, 0755)
+	txtPath := filepath.Join(tmpDir, "readme.txt")
+	_ = afero.WriteFile(fs, txtPath, []byte("data"), 0644)
 
-	result, err := s.ScanSingle("/test/readme.txt")
+	result, err := s.ScanSingle(txtPath)
 	require.NoError(t, err)
 	assert.Equal(t, 0, len(result.Files))
 	assert.Equal(t, 1, result.SkippedCount)
@@ -150,14 +156,15 @@ func TestMiss2_Filter_NonExistentPath(t *testing.T) {
 
 func TestMiss2_ScanSingle_MemMapFs_MixedContent(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	require.NoError(t, fs.MkdirAll("/test/dir/subdir", 0755))
-	require.NoError(t, afero.WriteFile(fs, "/test/dir/movie.mp4", []byte("video"), 0644))
-	require.NoError(t, afero.WriteFile(fs, "/test/dir/readme.txt", []byte("text"), 0644))
+	dir := filepath.Join(t.TempDir(), "dir")
+	require.NoError(t, fs.MkdirAll(filepath.Join(dir, "subdir"), 0755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "movie.mp4"), []byte("video"), 0644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "readme.txt"), []byte("text"), 0644))
 
 	cfg := &Config{Extensions: []string{".mp4"}}
 	s := NewScanner(fs, cfg)
 
-	result, err := s.ScanSingle("/test/dir")
+	result, err := s.ScanSingle(dir)
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(result.Files))
 	assert.Equal(t, 1, result.SkippedCount) // readme.txt skipped

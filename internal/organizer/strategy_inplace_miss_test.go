@@ -286,7 +286,7 @@ func TestInPlaceStrategy_Plan_InPlaceConflictWithForceUpdate(t *testing.T) {
 	assert.True(t, plan.InPlace, "Should be InPlace for dedicated folder")
 	// Conflicts should include targetDir since it exists and is not same as oldDir
 	if len(plan.Conflicts) > 0 {
-		assert.Contains(t, plan.Conflicts, filepath.ToSlash("/source/ABC-123"))
+		assert.Contains(t, plan.Conflicts, filepath.FromSlash("/source/ABC-123"))
 	}
 }
 

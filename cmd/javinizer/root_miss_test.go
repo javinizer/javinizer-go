@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -61,6 +62,7 @@ func TestInitConfig_DownloadProxyEmptyURL(t *testing.T) {
 
 	cfgFile = configPath
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 }
 
 // TestInitConfig_DownloadProxyWithValidProfile tests the download proxy validation
@@ -88,6 +90,7 @@ func TestInitConfig_DownloadProxyWithValidProfile(t *testing.T) {
 
 	cfgFile = configPath
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 }
 
 // TestInitConfig_ProxyWithCredentials tests that sanitizeProxyURL strips
@@ -112,4 +115,5 @@ func TestInitConfig_ProxyWithCredentials(t *testing.T) {
 
 	cfgFile = configPath
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 }

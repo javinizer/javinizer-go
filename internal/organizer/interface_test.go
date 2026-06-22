@@ -206,7 +206,7 @@ func TestOrganizerInterface(t *testing.T) {
 		})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "organization validation failed")
-		assert.Contains(t, err.Error(), targetPath)
+		assert.Contains(t, err.Error(), filepath.FromSlash(targetPath))
 		assert.Nil(t, result)
 	})
 }

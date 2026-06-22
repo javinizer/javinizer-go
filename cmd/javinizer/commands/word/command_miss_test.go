@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,7 +39,8 @@ func setupMissTestDB(t *testing.T) string {
 
 func TestRunWordList_InvalidConfig(t *testing.T) {
 	cmd := &cobra.Command{}
-	err := runWordList(cmd, nil, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordList(cmd, nil, configPath)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load config")
 }
@@ -76,7 +78,8 @@ func TestRunWordList_EmptyAfterRemovingDefaults(t *testing.T) {
 
 func TestRunWordAdd_InvalidConfig(t *testing.T) {
 	cmd := &cobra.Command{}
-	err := runWordAdd(cmd, []string{"test", "replace"}, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordAdd(cmd, []string{"test", "replace"}, configPath)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load config")
 }
@@ -85,7 +88,8 @@ func TestRunWordAdd_InvalidConfig(t *testing.T) {
 
 func TestRunWordRemove_InvalidConfig(t *testing.T) {
 	cmd := &cobra.Command{}
-	err := runWordRemove(cmd, []string{"test"}, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordRemove(cmd, []string{"test"}, configPath)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load config")
 }
@@ -123,7 +127,8 @@ func TestRunWordRemove_Nonexistent(t *testing.T) {
 
 func TestRunWordExport_InvalidConfig(t *testing.T) {
 	cmd := &cobra.Command{}
-	err := runWordExport(cmd, nil, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordExport(cmd, nil, configPath)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load config")
 }
@@ -186,7 +191,8 @@ func TestRunWordImport_InvalidConfig(t *testing.T) {
 	require.NoError(t, os.WriteFile(importPath, importData, 0644))
 
 	cmd := &cobra.Command{}
-	err := runWordImport(cmd, []string{importPath}, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordImport(cmd, []string{importPath}, configPath)
 	assert.Error(t, err)
 }
 

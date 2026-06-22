@@ -2,6 +2,7 @@ package scrape_test
 
 import (
 	"context"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"testing"
 	"time"
@@ -131,7 +132,8 @@ func TestRun_ConfigNotFound(t *testing.T) {
 
 	cmd := scrape.NewCommand()
 
-	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-001"}, "/nonexistent/config.yaml", nil)
+	configPath := testutil.UnreachableConfigPath(t)
+	movie, results, err := scrape.Run(context.Background(), cmd, []string{"TEST-001"}, configPath, nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, movie)

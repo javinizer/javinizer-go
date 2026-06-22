@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,7 +55,8 @@ func TestRunAdd_Miss2_ViaCobra(t *testing.T) {
 
 func TestRunAdd_Miss2_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	cmd := genrecmd.NewCommand()
 	rootCmd.AddCommand(cmd)
 	rootCmd.SetArgs([]string{"genre", "add", "HD", "HighDef"})
@@ -82,7 +84,8 @@ func TestRunList_Miss2_ViaCobra(t *testing.T) {
 
 func TestRunList_Miss2_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	cmd := genrecmd.NewCommand()
 	rootCmd.AddCommand(cmd)
 	rootCmd.SetArgs([]string{"genre", "list"})
@@ -118,7 +121,8 @@ func TestRunRemove_Miss2_ViaCobra(t *testing.T) {
 
 func TestRunRemove_Miss2_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	cmd := genrecmd.NewCommand()
 	rootCmd.AddCommand(cmd)
 	rootCmd.SetArgs([]string{"genre", "remove", "HD"})
@@ -172,7 +176,8 @@ func TestRunGenreExport_Miss2_Stdout(t *testing.T) {
 
 func TestRunGenreExport_Miss2_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	cmd := genrecmd.NewCommand()
 	rootCmd.AddCommand(cmd)
 	rootCmd.SetArgs([]string{"genre", "export"})

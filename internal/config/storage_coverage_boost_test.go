@@ -232,7 +232,8 @@ func TestAcquireConfigFileLock_StaleLockReaped(t *testing.T) {
 
 func TestAcquireConfigFileLock_InvalidDir(t *testing.T) {
 	// Path in a nonexistent directory — lock file creation should fail.
-	_, err := acquireConfigFileLock("/nonexistent/dir/config.yaml")
+	configPath := unreachableConfigPath(t)
+	_, err := acquireConfigFileLock(configPath)
 	assert.Error(t, err)
 }
 
@@ -292,7 +293,8 @@ func TestAtomicReplaceFile_ReplaceExistingFile(t *testing.T) {
 }
 
 func TestAtomicReplaceFile_NonexistentDirectory(t *testing.T) {
-	err := atomicReplaceFile("/nonexistent/dir/file.yaml", []byte("data"), 0644)
+	configPath := unreachableConfigPath(t)
+	err := atomicReplaceFile(configPath, []byte("data"), 0644)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create temp config file")
 }

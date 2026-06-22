@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -73,6 +74,9 @@ func TestNewStartupMigrationLocker_FileDSN_Partial(t *testing.T) {
 func TestNewStartupMigrationLocker_MkdirAllError_Partial(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root can create directories anywhere")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permissions (chmod 0o000) not supported on Windows")
 	}
 
 	// Use a path where the parent directory can't be created

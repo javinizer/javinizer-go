@@ -152,6 +152,7 @@ func TestInitConfig_EnvironmentOverride(t *testing.T) {
 	// Call initConfig - it should use JAVINIZER_CONFIG
 	// We need to ensure the logger can be initialized
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 
 	// Verify cfgFile was set from environment variable
 	assert.Equal(t, configPath, cfgFile, "cfgFile should be set from JAVINIZER_CONFIG env var")
@@ -183,6 +184,7 @@ func TestInitConfig_VerboseFlagSetsDebug(t *testing.T) {
 
 	// Call initConfig
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 
 	// The verbose flag should cause debug logging
 	// We verify this indirectly by checking the flag was processed
@@ -216,6 +218,7 @@ func TestInitConfig_ProxyValidation_EmptyURL(t *testing.T) {
 
 	// Call initConfig - it should warn and disable the proxy
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 
 	// Test passes if initConfig doesn't panic or exit
 	// The proxy disabled logic is tested by the fact that initConfig completes
@@ -248,6 +251,7 @@ func TestInitConfig_ProxyValidation_ValidURL(t *testing.T) {
 
 	// Call initConfig - it should accept the valid proxy
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 
 	// Test passes if initConfig doesn't panic or exit
 }
@@ -282,6 +286,7 @@ func TestInitConfig_DownloadProxyValidation(t *testing.T) {
 
 	// Call initConfig
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 
 	// Test passes if initConfig doesn't panic
 }
@@ -307,6 +312,7 @@ func TestInitConfig_UmaskValid(t *testing.T) {
 
 	// Call initConfig - should apply umask without error
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 
 	// Test passes if initConfig doesn't panic
 }
@@ -332,6 +338,7 @@ func TestInitConfig_UmaskInvalid(t *testing.T) {
 
 	// Call initConfig - should warn but not fail
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 
 	// Test passes if initConfig doesn't panic (it should warn but continue)
 }
@@ -365,6 +372,7 @@ func TestInitConfig_MultipleEnvironmentVariables(t *testing.T) {
 
 	// Call initConfig with all env vars set
 	initConfig()
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"})
 
 	// Test passes if initConfig doesn't panic with multiple env vars
 }

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/testutil"
+
 	api "github.com/javinizer/javinizer-go/cmd/javinizer/commands/api"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	apiserver "github.com/javinizer/javinizer-go/internal/api/server"
@@ -490,7 +492,7 @@ func TestRun_TokenStoreInitialized(t *testing.T) {
 // TestRun_ErrorConfigNotFound verifies error when config doesn't exist
 func TestRun_ErrorConfigNotFound(t *testing.T) {
 	cmd := api.NewCommand()
-	nonExistentPath := "/nonexistent/config.yaml"
+	nonExistentPath := testutil.UnreachableConfigPath(t)
 
 	deps, err := api.Run(cmd, nonExistentPath, "", 0)
 	assert.Error(t, err, "should error when config not found")

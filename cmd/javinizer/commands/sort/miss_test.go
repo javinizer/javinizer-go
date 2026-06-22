@@ -377,7 +377,8 @@ func TestRun_InvalidConfig(t *testing.T) {
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 
-	runErr := sortcmd.Run(cmd, []string{tmpDir}, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	runErr := sortcmd.Run(cmd, []string{tmpDir}, configPath)
 	assert.Error(t, runErr)
 	assert.Contains(t, runErr.Error(), "failed to load config")
 }

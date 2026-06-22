@@ -151,7 +151,7 @@ func TestInPlaceMiss_Plan_InPlaceConflictWithMissingOldDir(t *testing.T) {
 	assert.True(t, plan.InPlace, "Should be InPlace for dedicated folder")
 	// The old dir exists and the target dir also exists — should have conflict
 	if len(plan.Conflicts) > 0 {
-		assert.Contains(t, plan.Conflicts, filepath.ToSlash("/source/ABC-123"))
+		assert.Contains(t, plan.Conflicts, filepath.FromSlash("/source/ABC-123"))
 	}
 }
 

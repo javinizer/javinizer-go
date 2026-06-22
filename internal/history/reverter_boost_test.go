@@ -24,44 +24,44 @@ import (
 
 func TestComputeRevertPrimaryPaths_StandardMove(t *testing.T) {
 	op := &models.BatchFileOperation{
-		OriginalPath:   "/src/ABC-123/ABC-123.mp4",
-		NewPath:        "/dst/ABC-123/ABC-123.mp4",
+		OriginalPath:   filepath.FromSlash("/src/ABC-123/ABC-123.mp4"),
+		NewPath:        filepath.FromSlash("/dst/ABC-123/ABC-123.mp4"),
 		InPlaceRenamed: false,
 	}
 	paths := computeRevertPrimaryPaths(op)
-	assert.Equal(t, "/dst/ABC-123/ABC-123.mp4", paths.SourcePath)
-	assert.Equal(t, "/src/ABC-123", paths.TargetDir)
-	assert.Equal(t, "/dst", paths.DestRoot)
+	assert.Equal(t, filepath.FromSlash("/dst/ABC-123/ABC-123.mp4"), paths.SourcePath)
+	assert.Equal(t, filepath.FromSlash("/src/ABC-123"), paths.TargetDir)
+	assert.Equal(t, filepath.FromSlash("/dst"), paths.DestRoot)
 }
 
 func TestComputeRevertPrimaryPaths_InPlaceRenamed(t *testing.T) {
 	op := &models.BatchFileOperation{
-		OriginalPath:    "/src/ABC-123/ABC-001.mp4",
-		NewPath:         "/src/ABC-123-renamed/ABC-123.mp4",
+		OriginalPath:    filepath.FromSlash("/src/ABC-123/ABC-001.mp4"),
+		NewPath:         filepath.FromSlash("/src/ABC-123-renamed/ABC-123.mp4"),
 		InPlaceRenamed:  true,
-		OriginalDirPath: "/src/ABC-123",
+		OriginalDirPath: filepath.FromSlash("/src/ABC-123"),
 	}
 	paths := computeRevertPrimaryPaths(op)
-	assert.Equal(t, "/src/ABC-123/ABC-123.mp4", paths.SourcePath)
-	assert.Equal(t, "/src/ABC-123", paths.TargetDir)
-	assert.Equal(t, "/src/ABC-123", paths.OriginalDirPath)
-	assert.Equal(t, "/src/ABC-123-renamed", paths.CurrentDir)
-	assert.Equal(t, "/src", paths.DestRoot)
+	assert.Equal(t, filepath.FromSlash("/src/ABC-123/ABC-123.mp4"), paths.SourcePath)
+	assert.Equal(t, filepath.FromSlash("/src/ABC-123"), paths.TargetDir)
+	assert.Equal(t, filepath.FromSlash("/src/ABC-123"), paths.OriginalDirPath)
+	assert.Equal(t, filepath.FromSlash("/src/ABC-123-renamed"), paths.CurrentDir)
+	assert.Equal(t, filepath.FromSlash("/src"), paths.DestRoot)
 }
 
 func TestComputeRevertPrimaryPaths_InPlaceRenamedNoOriginalDirPath(t *testing.T) {
 	// When InPlaceRenamed is true but OriginalDirPath is empty,
 	// falls through to the else branch (standard move)
 	op := &models.BatchFileOperation{
-		OriginalPath:    "/src/ABC-123/ABC-001.mp4",
-		NewPath:         "/src/ABC-123-renamed/ABC-123.mp4",
+		OriginalPath:    filepath.FromSlash("/src/ABC-123/ABC-001.mp4"),
+		NewPath:         filepath.FromSlash("/src/ABC-123-renamed/ABC-123.mp4"),
 		InPlaceRenamed:  true,
 		OriginalDirPath: "",
 	}
 	paths := computeRevertPrimaryPaths(op)
 	// Should fall through to standard move path
-	assert.Equal(t, "/src/ABC-123-renamed/ABC-123.mp4", paths.SourcePath)
-	assert.Equal(t, "/src/ABC-123", paths.TargetDir)
+	assert.Equal(t, filepath.FromSlash("/src/ABC-123-renamed/ABC-123.mp4"), paths.SourcePath)
+	assert.Equal(t, filepath.FromSlash("/src/ABC-123"), paths.TargetDir)
 }
 
 // ============================================================================
@@ -683,12 +683,12 @@ func TestSummarizeOutcomes_Empty(t *testing.T) {
 
 func TestCollectDestRoots(t *testing.T) {
 	ops := []models.BatchFileOperation{
-		{NewPath: "/out/ABC-123/ABC-123.mp4", InPlaceRenamed: false},
-		{NewPath: "/out/DEF-456/DEF-456.mp4", InPlaceRenamed: false},
-		{NewPath: "/out/GHI-789/GHI-789.mp4", InPlaceRenamed: true}, // skipped
+		{NewPath: filepath.FromSlash("/out/ABC-123/ABC-123.mp4"), InPlaceRenamed: false},
+		{NewPath: filepath.FromSlash("/out/DEF-456/DEF-456.mp4"), InPlaceRenamed: false},
+		{NewPath: filepath.FromSlash("/out/GHI-789/GHI-789.mp4"), InPlaceRenamed: true}, // skipped
 	}
 	roots := collectDestRoots(ops)
-	assert.True(t, roots["/out"])
+	assert.True(t, roots[filepath.FromSlash("/out")])
 	assert.Len(t, roots, 1) // Both ABC-123 and DEF-456 have same destRoot /out
 }
 

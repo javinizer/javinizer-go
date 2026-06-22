@@ -37,7 +37,8 @@ func TestAtomicReplaceFile_Overwrite(t *testing.T) {
 }
 
 func TestAtomicReplaceFile_InvalidPath(t *testing.T) {
-	err := atomicReplaceFile("/nonexistent/dir/file.yaml", []byte("data"), 0644)
+	configPath := unreachableConfigPath(t)
+	err := atomicReplaceFile(configPath, []byte("data"), 0644)
 	assert.Error(t, err)
 }
 

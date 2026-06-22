@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,7 +42,7 @@ func TestRunWordList_Miss2_DepsInitError(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	cfg := config.DefaultConfig(nil, nil)
-	cfg.Database.DSN = "/nonexistent/path/db.sqlite"
+	cfg.Database.DSN = testutil.UnreachableConfigPath(t)
 	require.NoError(t, config.Save(cfg, configPath))
 
 	cmd := &cobra.Command{}
@@ -55,7 +56,8 @@ func TestRunWordList_Miss2_DepsInitError(t *testing.T) {
 func TestRunWordList_Miss2_RepoListError(t *testing.T) {
 	// Use an empty/in-memory config that can't properly list
 	cmd := &cobra.Command{}
-	err := runWordList(cmd, nil, "/nonexistent/deep/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordList(cmd, nil, configPath)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load config")
 }
@@ -64,7 +66,8 @@ func TestRunWordList_Miss2_RepoListError(t *testing.T) {
 
 func TestRunWordAdd_Miss2_DepsInitError(t *testing.T) {
 	cmd := &cobra.Command{}
-	err := runWordAdd(cmd, []string{"test", "repl"}, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordAdd(cmd, []string{"test", "repl"}, configPath)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load config")
 }
@@ -73,7 +76,8 @@ func TestRunWordAdd_Miss2_DepsInitError(t *testing.T) {
 
 func TestRunWordRemove_Miss2_DepsInitError(t *testing.T) {
 	cmd := &cobra.Command{}
-	err := runWordRemove(cmd, []string{"test"}, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordRemove(cmd, []string{"test"}, configPath)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load config")
 }
@@ -82,7 +86,8 @@ func TestRunWordRemove_Miss2_DepsInitError(t *testing.T) {
 
 func TestRunWordExport_Miss2_DepsInitError(t *testing.T) {
 	cmd := &cobra.Command{}
-	err := runWordExport(cmd, nil, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordExport(cmd, nil, configPath)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load config")
 }
@@ -118,7 +123,8 @@ func TestRunWordImport_Miss2_DepsInitError(t *testing.T) {
 	require.NoError(t, os.WriteFile(importPath, importData, 0644))
 
 	cmd := &cobra.Command{}
-	err := runWordImport(cmd, []string{importPath}, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordImport(cmd, []string{importPath}, configPath)
 	assert.Error(t, err)
 }
 
@@ -147,7 +153,8 @@ func TestRunWordImport_Miss2_SkipsDefaults(t *testing.T) {
 func TestRunWordAdd_Miss2_UpsertError(t *testing.T) {
 	// Try adding with a bad config path to get deps error
 	cmd := &cobra.Command{}
-	err := runWordAdd(cmd, []string{"test", "repl"}, "/nonexistent/path/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runWordAdd(cmd, []string{"test", "repl"}, configPath)
 	assert.Error(t, err)
 }
 

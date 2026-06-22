@@ -117,7 +117,8 @@ func TestRun_Integration_InvalidConfig(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	cmd := sort.NewCommand()
-	runErr := sort.Run(cmd, []string{tmpDir}, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	runErr := sort.Run(cmd, []string{tmpDir}, configPath)
 
 	assert.Error(t, runErr)
 	assert.Contains(t, runErr.Error(), "failed to load config")

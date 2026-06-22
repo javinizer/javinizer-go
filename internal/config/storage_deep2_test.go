@@ -11,7 +11,9 @@ import (
 )
 
 func TestLoadDeep2_NonexistentFile(t *testing.T) {
-	cfg, err := Load("/nonexistent/path/config.yaml")
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "nonexistent.yaml")
+	cfg, err := Load(configPath)
 	assert.NoError(t, err)
 	assert.NotNil(t, cfg)
 	// Should return default config

@@ -3,6 +3,7 @@ package token
 import (
 	"bytes"
 	"context"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,7 +61,8 @@ func TestRunCreate_UnnamedToken(t *testing.T) {
 // TestRunCreate_InvalidConfig tests RunCreate with invalid config path.
 func TestRunCreate_InvalidConfig(t *testing.T) {
 	cmd := newCreateCommand()
-	result, err := RunCreate(cmd, nil, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	result, err := RunCreate(cmd, nil, configPath)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 }

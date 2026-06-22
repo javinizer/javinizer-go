@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -339,6 +340,9 @@ func TestNewStartupMigrationLocker_FileDSN(t *testing.T) {
 func TestNewStartupMigrationLocker_FileDSNWithMkdirError(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root can create directories anywhere")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permissions (chmod 0o000) not supported on Windows")
 	}
 
 	// Use a path in a non-existent directory that can't be created

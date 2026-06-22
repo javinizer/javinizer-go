@@ -175,7 +175,9 @@ func TestDecodeConfig(t *testing.T) {
 }
 
 func TestLoad_NonexistentPath(t *testing.T) {
-	cfg, err := Load("/nonexistent/path/config.yaml")
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "nonexistent.yaml")
+	cfg, err := Load(configPath)
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 }

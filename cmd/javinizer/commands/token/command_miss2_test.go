@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -275,7 +276,8 @@ func TestMiss2_RunList_JSONOutput(t *testing.T) {
 
 func TestMiss2_RunCreate_ConfigError(t *testing.T) {
 	cmd := newCreateCommand()
-	result, err := RunCreate(cmd, nil, "/nonexistent/path/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	result, err := RunCreate(cmd, nil, configPath)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 }
@@ -333,7 +335,8 @@ func TestMiss2_PrintJSON_Success(t *testing.T) {
 
 func TestMiss2_RunCreate_InvalidConfig(t *testing.T) {
 	cmd := newCreateCommand()
-	err := runCreate(cmd, "/nonexistent/path/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runCreate(cmd, configPath)
 	assert.Error(t, err)
 }
 
@@ -341,7 +344,8 @@ func TestMiss2_RunCreate_InvalidConfig(t *testing.T) {
 
 func TestMiss2_RunRevoke_InvalidConfig(t *testing.T) {
 	revokeCmd := newRevokeCommand()
-	err := runRevoke(revokeCmd, "/nonexistent/path/config.yaml", "some-id")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runRevoke(revokeCmd, configPath, "some-id")
 	assert.Error(t, err)
 }
 
@@ -349,7 +353,8 @@ func TestMiss2_RunRevoke_InvalidConfig(t *testing.T) {
 
 func TestMiss2_RunList_InvalidConfig(t *testing.T) {
 	listCmd := newListCommand()
-	err := runList(listCmd, "/nonexistent/path/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runList(listCmd, configPath)
 	assert.Error(t, err)
 }
 

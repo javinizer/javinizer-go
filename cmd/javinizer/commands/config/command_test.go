@@ -109,7 +109,9 @@ func TestMigrateCommand_Success(t *testing.T) {
 }
 
 func TestMigrateCommand_ConfigNotFound(t *testing.T) {
-	t.Setenv("JAVINIZER_CONFIG", "/nonexistent/path/config.yaml")
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "nonexistent-config.yaml")
+	t.Setenv("JAVINIZER_CONFIG", configPath)
 
 	rootCmd := &cobra.Command{Use: "root"}
 	configCmd := configcmd.NewCommand()

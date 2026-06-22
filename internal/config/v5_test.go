@@ -17,7 +17,9 @@ import (
 
 // TestLoadV5_NonexistentFile tests Load with nonexistent file
 func TestLoadV5_NonexistentFile(t *testing.T) {
-	cfg, err := Load("/nonexistent/path/config.yaml")
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "nonexistent.yaml")
+	cfg, err := Load(configPath)
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	// Should return default config

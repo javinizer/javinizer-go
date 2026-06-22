@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -13,6 +14,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// unreachableConfigPath returns a config path whose parent directory cannot be
+// created by MkdirAll, guaranteeing LoadOrCreate fails cross-platform.
+// Uses the same blocker-file pattern as testutil.UnreachableConfigPath but
+// avoids the import cycle (config -> testutil -> config).
+func unreachableConfigPath(t *testing.T) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	blocker := filepath.Join(tmpDir, "blocked")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0644))
+	return filepath.Join(blocker, "config.yaml")
+}
 func init() {
 }
 
@@ -933,7 +945,7 @@ func TestLegacyMigration_Migrate_ConfigPathNotExist(t *testing.T) {
 	defer restoreRealMigrations()
 
 	SetMigrationContext(MigrationContext{
-		ConfigPath: "/nonexistent/path/config.yaml",
+		ConfigPath: unreachableConfigPath(t),
 		DryRun:     false,
 	})
 
@@ -1218,6 +1230,9 @@ func TestIsProcessAlive_InvalidPID(t *testing.T) {
 }
 
 func TestIsProcessAlive_CurrentProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("isProcessAlive uses syscall.Signal(0) which is not supported on Windows")
+	}
 	// Current process should be alive
 	assert.True(t, isProcessAlive(os.Getpid()))
 }

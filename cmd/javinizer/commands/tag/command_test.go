@@ -269,7 +269,8 @@ func TestRunTagAllTags_Success(t *testing.T) {
 // TestRunTagAdd_InvalidConfig tests config loading error
 func TestRunTagAdd_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/invalid/path/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 
 	cmd := tag.NewCommand()
 	rootCmd.AddCommand(cmd)
@@ -348,7 +349,8 @@ func TestRunTagAdd_DuplicateTags(t *testing.T) {
 // TestRunTagList_InvalidConfig tests config loading error
 func TestRunTagList_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/invalid/path/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 
 	cmd := tag.NewCommand()
 	rootCmd.AddCommand(cmd)
@@ -427,7 +429,8 @@ func TestRunTagList_EmptyDatabase(t *testing.T) {
 // TestRunTagRemove_InvalidConfig tests config loading error
 func TestRunTagRemove_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/invalid/path/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 
 	cmd := tag.NewCommand()
 	rootCmd.AddCommand(cmd)
@@ -515,7 +518,8 @@ func TestRunTagRemove_AllTags(t *testing.T) {
 // TestRunTagSearch_InvalidConfig tests config loading error
 func TestRunTagSearch_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/invalid/path/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 
 	cmd := tag.NewCommand()
 	rootCmd.AddCommand(cmd)
@@ -576,7 +580,8 @@ func TestRunTagSearch_NoResults(t *testing.T) {
 // TestRunTagAllTags_InvalidConfig tests config loading error
 func TestRunTagAllTags_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/invalid/path/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 
 	cmd := tag.NewCommand()
 	rootCmd.AddCommand(cmd)

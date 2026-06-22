@@ -32,6 +32,7 @@ func TestPackageLevel_DebugAndDebugf(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "debug.log")
 	logging.InitLogger(&logging.Config{Level: "debug", Format: "text", Output: logFile})
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"}) // release file handle
 
 	logging.Debug("pkg-debug-msg")
 	logging.Debugf("pkg-debugf-%s", "formatted")
@@ -47,6 +48,7 @@ func TestPackageLevel_InfoAndInfof(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "info.log")
 	logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: logFile})
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"}) // release file handle
 
 	logging.Info("pkg-info-msg")
 	logging.Infof("pkg-infof-%s", "formatted")
@@ -62,6 +64,7 @@ func TestPackageLevel_WarnAndWarnf(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "warn.log")
 	logging.InitLogger(&logging.Config{Level: "warn", Format: "text", Output: logFile})
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"}) // release file handle
 
 	logging.Warn("pkg-warn-msg")
 	logging.Warnf("pkg-warnf-%s", "formatted")
@@ -77,6 +80,7 @@ func TestPackageLevel_ErrorAndErrorf(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "error.log")
 	logging.InitLogger(&logging.Config{Level: "error", Format: "text", Output: logFile})
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"}) // release file handle
 
 	logging.Error("pkg-error-msg")
 	logging.Errorf("pkg-errorf-%s", "formatted")
@@ -94,6 +98,7 @@ func TestWithField_LogsWithStructuredField(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "withfield.log")
 	logging.InitLogger(&logging.Config{Level: "info", Format: "json", Output: logFile})
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"}) // release file handle
 
 	logging.WithField("job_id", 42).Info("WithField test message")
 
@@ -108,6 +113,7 @@ func TestWithFields_LogsWithMultipleStructuredFields(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "withfields.log")
 	logging.InitLogger(&logging.Config{Level: "info", Format: "json", Output: logFile})
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"}) // release file handle
 
 	logging.WithFields(logrus.Fields{
 		"job_id": 42,
@@ -155,6 +161,7 @@ func TestL_LoggerCanLogAtAllLevels(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "all_levels.log")
 	logging.InitLogger(&logging.Config{Level: "debug", Format: "text", Output: logFile})
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"}) // release file handle
 
 	l := logging.L()
 	l.Debug("L-debug")
@@ -180,6 +187,7 @@ func TestGlobalLogger_CoversAllMethods(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "global_all.log")
 	logging.InitLogger(&logging.Config{Level: "debug", Format: "text", Output: logFile})
+	defer logging.InitLogger(&logging.Config{Level: "info", Format: "text", Output: "stdout"}) // release file handle
 
 	l := logging.GlobalLogger()
 	l.Debug("gl-debug")

@@ -98,3 +98,28 @@ func CreateTestVideoFile(t *testing.T, dir string, filename string) string {
 
 	return path
 }
+
+// UnreachableConfigPath returns a path to a config file that will cause
+// LoadOrCreate to fail. It writes invalid YAML content so that Load
+// returns a parse error reliably on all platforms, including Windows
+// where the previous blocker-file pattern did not prevent file creation.
+func UnreachableConfigPath(t *testing.T) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("not: valid: yaml: [[["), 0644))
+	return path
+}
+
+// InvalidConfigPath returns a path to a config file with invalid YAML content.
+// The file exists (so LoadOrCreate calls Load instead of createFromEmbedded),
+// but Load will fail with a parse error. This works reliably on all platforms,
+// including Windows where the UnreachableConfigPath blocker pattern may not
+// prevent file creation.
+func InvalidConfigPath(t *testing.T) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("not: valid: yaml: [[["), 0644))
+	return path
+}

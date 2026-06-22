@@ -235,7 +235,7 @@ func TestJoinPathUNC_WindowsBase(t *testing.T) {
 
 func TestJoinPathUNC_POSIXBase(t *testing.T) {
 	result := joinPathUNC("/base", "sub")
-	assert.Equal(t, "/base/sub", result)
+	assert.Equal(t, filepath.FromSlash("/base/sub"), result)
 }
 
 // --- pathDir ---

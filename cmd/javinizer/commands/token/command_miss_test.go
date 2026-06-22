@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,7 +40,8 @@ func setupMissTestDB(t *testing.T) string {
 
 func TestRunCreate_InvalidConfigPath(t *testing.T) {
 	cmd := newCreateCommand()
-	result, err := RunCreate(cmd, nil, "/nonexistent/path/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	result, err := RunCreate(cmd, nil, configPath)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 }
@@ -71,7 +73,8 @@ func TestRunCreate_TextOutputUnnamed(t *testing.T) {
 // --- RunRevoke error paths (lines 163-175) ---
 
 func TestRunRevoke_InvalidConfigPath(t *testing.T) {
-	result, err := RunRevoke(&cobra.Command{}, []string{"some-id"}, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	result, err := RunRevoke(&cobra.Command{}, []string{"some-id"}, configPath)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 }
@@ -133,7 +136,8 @@ func TestRunRevoke_TextOutputByPrefix(t *testing.T) {
 // --- RunList error paths (lines 249-270) ---
 
 func TestRunList_InvalidConfigPath(t *testing.T) {
-	result, err := RunList(&cobra.Command{}, nil, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	result, err := RunList(&cobra.Command{}, nil, configPath)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 }
@@ -318,7 +322,8 @@ func TestRunRevoke_ByIDWithPrefixFallback(t *testing.T) {
 func TestRunCreate_RunCreateErrorPropagated(t *testing.T) {
 	cmd := newCreateCommand()
 	// Invalid config will cause RunCreate to return error
-	err := runCreate(cmd, "/nonexistent/path/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runCreate(cmd, configPath)
 	assert.Error(t, err)
 }
 
@@ -327,7 +332,8 @@ func TestRunCreate_RunCreateErrorPropagated(t *testing.T) {
 func TestRunRevoke_RunRevokeErrorPropagated(t *testing.T) {
 	revokeCmd := newRevokeCommand()
 	// Invalid config will cause RunRevoke to return error
-	err := runRevoke(revokeCmd, "/nonexistent/path/config.yaml", "some-id")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runRevoke(revokeCmd, configPath, "some-id")
 	assert.Error(t, err)
 }
 
@@ -335,7 +341,8 @@ func TestRunRevoke_RunRevokeErrorPropagated(t *testing.T) {
 
 func TestRunList_RunListErrorPropagated(t *testing.T) {
 	listCmd := newListCommand()
-	err := runList(listCmd, "/nonexistent/path/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	err := runList(listCmd, configPath)
 	assert.Error(t, err)
 }
 

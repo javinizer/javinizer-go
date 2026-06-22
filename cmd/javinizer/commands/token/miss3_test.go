@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -53,7 +54,8 @@ func TestMiss3_RunCreate_Success(t *testing.T) {
 
 func TestMiss3_RunCreate_ConfigError(t *testing.T) {
 	cmd := newCreateCommand()
-	result, err := RunCreate(cmd, nil, "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	result, err := RunCreate(cmd, nil, configPath)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 }

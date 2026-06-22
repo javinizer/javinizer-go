@@ -2,6 +2,7 @@ package history
 
 import (
 	"context"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"path/filepath"
 	"time"
@@ -126,7 +127,8 @@ func TestRunHistoryRevert_InvalidConfig(t *testing.T) {
 	cmd.SetArgs([]string{"some-batch-id"})
 	// Use nonexistent config to trigger error
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	rootCmd.AddCommand(cmd)
 
 	rootCmd.SetArgs([]string{"revert", "some-batch-id"})

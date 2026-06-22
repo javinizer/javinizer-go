@@ -2,7 +2,9 @@ package database
 
 import (
 	"context"
-	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gofrs/flock"
@@ -1315,8 +1317,11 @@ func TestMiss4_MigrationLock_InMemoryDSN(t *testing.T) {
 
 func TestMiss4_MigrationLock_FileDSN_MkdirFail(t *testing.T) {
 	// Test newStartupMigrationLocker with a path that can't be created
-	// Use a very long path that should fail
-	longPath := fmt.Sprintf("/nonexistent/deeply/nested/dir/%s/test.db", string(make([]byte, 300)))
+	// Use a blocker file so that MkdirAll fails (parent is a file, not a directory)
+	tmpDir := t.TempDir()
+	blocker := filepath.Join(tmpDir, "blocked")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0644))
+	longPath := filepath.Join(blocker, strings.Repeat("a", 300), "test.db")
 	_, err := newStartupMigrationLocker(longPath, missDB(t).fs)
 	assert.Error(t, err)
 }

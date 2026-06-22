@@ -2,6 +2,7 @@ package scrape
 
 import (
 	"context"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,7 +10,8 @@ import (
 
 func TestRun_PanicRecovery_Internal(t *testing.T) {
 	cmd := NewCommand()
-	movie, results, err := Run(context.Background(), cmd, []string{"TEST-001"}, "/nonexistent/config.yaml", nil)
+	configPath := testutil.UnreachableConfigPath(t)
+	movie, results, err := Run(context.Background(), cmd, []string{"TEST-001"}, configPath, nil)
 
 	assert.Error(t, err, "Should return error for nonexistent config")
 	assert.Nil(t, movie)
@@ -18,6 +20,7 @@ func TestRun_PanicRecovery_Internal(t *testing.T) {
 
 func TestRun_NeverPanics_BadConfigPath(t *testing.T) {
 	cmd := NewCommand()
+	configPath := testutil.UnreachableConfigPath(t)
 
 	// Multiple scenarios that should return errors, not panics
 	tests := []struct {
@@ -25,7 +28,7 @@ func TestRun_NeverPanics_BadConfigPath(t *testing.T) {
 		configFile string
 		args       []string
 	}{
-		{"nonexistent config", "/nonexistent/path/config.yaml", []string{"TEST-001"}},
+		{"nonexistent config", configPath, []string{"TEST-001"}},
 		{"empty config path", "", []string{"TEST-001"}},
 	}
 

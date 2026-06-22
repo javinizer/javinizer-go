@@ -2,6 +2,7 @@ package scrape
 
 import (
 	"context"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"testing"
 
@@ -20,7 +21,8 @@ func TestRun_InvalidConfigPath(t *testing.T) {
 		t.Skip("integration test")
 	}
 	cmd := NewCommand()
-	movie, results, err := Run(context.Background(), cmd, []string{"TEST-001"}, "/nonexistent/config.yaml", nil)
+	configPath := testutil.UnreachableConfigPath(t)
+	movie, results, err := Run(context.Background(), cmd, []string{"TEST-001"}, configPath, nil)
 	assert.Error(t, err)
 	assert.Nil(t, movie)
 	assert.Nil(t, results)
@@ -69,7 +71,7 @@ func TestRun_BootstrapError(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := tmpDir + "/config.yaml"
 	cfg := config.DefaultConfig(nil, nil)
-	cfg.Database.DSN = "/nonexistent/deep/dir/test.db"
+	cfg.Database.DSN = testutil.UnreachableConfigPath(t)
 	require.NoError(t, config.Save(cfg, configPath))
 
 	// Run without injected deps — will try to bootstrap

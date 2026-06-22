@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"io"
 	"os"
 	"path/filepath"
@@ -394,7 +395,8 @@ func TestBoost_RunImport_UpsertsDifferent(t *testing.T) {
 
 func TestBoost_RunAdd_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	rootCmd.AddCommand(NewCommand())
 	rootCmd.SetArgs([]string{"genre", "add", "A", "B"})
 
@@ -404,7 +406,8 @@ func TestBoost_RunAdd_InvalidConfig(t *testing.T) {
 
 func TestBoost_RunList_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	rootCmd.AddCommand(NewCommand())
 	rootCmd.SetArgs([]string{"genre", "list"})
 
@@ -414,7 +417,8 @@ func TestBoost_RunList_InvalidConfig(t *testing.T) {
 
 func TestBoost_RunRemove_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	rootCmd.AddCommand(NewCommand())
 	rootCmd.SetArgs([]string{"genre", "remove", "A"})
 
@@ -424,7 +428,8 @@ func TestBoost_RunRemove_InvalidConfig(t *testing.T) {
 
 func TestBoost_RunExport_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	rootCmd.AddCommand(NewCommand())
 	rootCmd.SetArgs([]string{"genre", "export"})
 

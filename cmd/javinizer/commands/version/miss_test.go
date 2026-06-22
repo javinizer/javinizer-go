@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,7 +93,8 @@ system:
 // --- NewCommand: --check with bad config file ---
 
 func TestMiss_NewCommand_CheckBadConfig(t *testing.T) {
-	t.Setenv("JAVINIZER_CONFIG", "/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	t.Setenv("JAVINIZER_CONFIG", configPath)
 
 	cmd := NewCommand()
 	var out bytes.Buffer
@@ -127,7 +129,8 @@ system:
 // --- loadConfigForCheck: invalid config ---
 
 func TestMiss_LoadConfigForCheck_InvalidConfig(t *testing.T) {
-	_, err := loadConfigForCheck("/nonexistent/config.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	_, err := loadConfigForCheck(configPath)
 	require.Error(t, err)
 }
 
@@ -145,7 +148,8 @@ system:
 	require.NoError(t, os.WriteFile(cfgPath, []byte(configText), 0644))
 	t.Setenv("JAVINIZER_CONFIG", cfgPath)
 
-	cfg, err := loadConfigForCheck("/nonexistent/path.yaml")
+	configPath := testutil.UnreachableConfigPath(t)
+	cfg, err := loadConfigForCheck(configPath)
 	require.NoError(t, err)
 	assert.False(t, cfg.System.VersionCheckEnabled)
 }

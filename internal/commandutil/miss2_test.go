@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
@@ -22,9 +23,8 @@ import (
 // --- RunBatchCommand tests ---
 
 func TestRunBatchCommand_ConfigLoadError(t *testing.T) {
-	// Use an invalid config file path that cannot be loaded
-	tmpDir := t.TempDir()
-	invalidConfigPath := filepath.Join(tmpDir, "nonexistent", "config.yaml")
+	// Use an invalid config file path that will cause LoadOrCreate to fail
+	invalidConfigPath := testutil.InvalidConfigPath(t)
 
 	var buf bytes.Buffer
 	opts := BatchCommandOptions{
@@ -35,7 +35,7 @@ func TestRunBatchCommand_ConfigLoadError(t *testing.T) {
 	}
 
 	err := RunBatchCommand(context.Background(), &buf, opts)
-	// Should fail because the config directory doesn't exist for creation
+	// Should fail because the config file has invalid YAML
 	assert.Error(t, err)
 }
 

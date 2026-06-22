@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -114,7 +115,8 @@ func TestRunMerge_MissingRequiredFlags(t *testing.T) {
 
 func TestRunMerge_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	rootCmd.AddCommand(NewCommand())
 	rootCmd.SetArgs([]string{
 		"actress", "merge",
@@ -431,7 +433,8 @@ func TestRunActressExport_WriteFileError(t *testing.T) {
 
 func TestRunActressExport_InvalidConfig(t *testing.T) {
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	rootCmd.AddCommand(NewCommand())
 	rootCmd.SetArgs([]string{"actress", "export"})
 
@@ -462,7 +465,8 @@ func TestRunActressImport_InvalidConfig(t *testing.T) {
 	require.NoError(t, os.WriteFile(importPath, importData, 0644))
 
 	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", "/nonexistent/config.yaml", "config file")
+	configPath := testutil.UnreachableConfigPath(t)
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
 	rootCmd.AddCommand(NewCommand())
 	rootCmd.SetArgs([]string{"actress", "import", importPath})
 
