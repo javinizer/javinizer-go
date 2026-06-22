@@ -105,14 +105,15 @@ func TestScanWithFilter_SymlinkRoot(t *testing.T) {
 
 func TestScanSingle_MemMapFs(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	require.NoError(t, fs.MkdirAll("/test/dir", 0755))
-	require.NoError(t, afero.WriteFile(fs, "/test/dir/movie.mp4", []byte("video data"), 0644))
-	require.NoError(t, afero.WriteFile(fs, "/test/dir/readme.txt", []byte("text data"), 0644))
+	dir := filepath.Join(t.TempDir(), "dir")
+	require.NoError(t, fs.MkdirAll(dir, 0755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "movie.mp4"), []byte("video data"), 0644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "readme.txt"), []byte("text data"), 0644))
 
 	cfg := &Config{Extensions: []string{".mp4"}}
 	s := NewScanner(fs, cfg)
 
-	result, err := s.ScanSingle("/test/dir")
+	result, err := s.ScanSingle(dir)
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(result.Files))
 	assert.Equal(t, "movie.mp4", result.Files[0].Name)
@@ -120,13 +121,15 @@ func TestScanSingle_MemMapFs(t *testing.T) {
 
 func TestScanSingle_MemMapFs_SingleFile(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	require.NoError(t, fs.MkdirAll("/test", 0755))
-	require.NoError(t, afero.WriteFile(fs, "/test/movie.mp4", []byte("video data"), 0644))
+	tmpDir := t.TempDir()
+	require.NoError(t, fs.MkdirAll(tmpDir, 0755))
+	moviePath := filepath.Join(tmpDir, "movie.mp4")
+	require.NoError(t, afero.WriteFile(fs, moviePath, []byte("video data"), 0644))
 
 	cfg := &Config{Extensions: []string{".mp4"}}
 	s := NewScanner(fs, cfg)
 
-	result, err := s.ScanSingle("/test/movie.mp4")
+	result, err := s.ScanSingle(moviePath)
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(result.Files))
 	assert.Equal(t, "movie.mp4", result.Files[0].Name)
@@ -134,14 +137,15 @@ func TestScanSingle_MemMapFs_SingleFile(t *testing.T) {
 
 func TestScanSingle_MemMapFs_ExcludePatterns(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	require.NoError(t, fs.MkdirAll("/test/dir", 0755))
-	require.NoError(t, afero.WriteFile(fs, "/test/dir/movie.mp4", []byte("video data"), 0644))
-	require.NoError(t, afero.WriteFile(fs, "/test/dir/movie-trailer.mp4", []byte("trailer data"), 0644))
+	dir := filepath.Join(t.TempDir(), "dir")
+	require.NoError(t, fs.MkdirAll(dir, 0755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "movie.mp4"), []byte("video data"), 0644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "movie-trailer.mp4"), []byte("trailer data"), 0644))
 
 	cfg := &Config{Extensions: []string{".mp4"}, ExcludePatterns: []string{"*-trailer*"}}
 	s := NewScanner(fs, cfg)
 
-	result, err := s.ScanSingle("/test/dir")
+	result, err := s.ScanSingle(dir)
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(result.Files))
 	assert.Equal(t, "movie.mp4", result.Files[0].Name)
@@ -149,13 +153,15 @@ func TestScanSingle_MemMapFs_ExcludePatterns(t *testing.T) {
 
 func TestScanSingle_MemMapFs_SingleFileExcluded(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	require.NoError(t, fs.MkdirAll("/test", 0755))
-	require.NoError(t, afero.WriteFile(fs, "/test/movie-trailer.mp4", []byte("trailer data"), 0644))
+	tmpDir := t.TempDir()
+	require.NoError(t, fs.MkdirAll(tmpDir, 0755))
+	trailerPath := filepath.Join(tmpDir, "movie-trailer.mp4")
+	require.NoError(t, afero.WriteFile(fs, trailerPath, []byte("trailer data"), 0644))
 
 	cfg := &Config{Extensions: []string{".mp4"}, ExcludePatterns: []string{"*-trailer*"}}
 	s := NewScanner(fs, cfg)
 
-	result, err := s.ScanSingle("/test/movie-trailer.mp4")
+	result, err := s.ScanSingle(trailerPath)
 	require.NoError(t, err)
 	assert.Equal(t, 0, len(result.Files))
 	assert.Equal(t, 1, result.SkippedCount)
@@ -165,13 +171,14 @@ func TestScanSingle_MemMapFs_SingleFileExcluded(t *testing.T) {
 
 func TestScanSingle_MemMapFs_SubdirectorySkipped(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	require.NoError(t, fs.MkdirAll("/test/dir/subdir", 0755))
-	require.NoError(t, afero.WriteFile(fs, "/test/dir/movie.mp4", []byte("video data"), 0644))
+	dir := filepath.Join(t.TempDir(), "dir")
+	require.NoError(t, fs.MkdirAll(filepath.Join(dir, "subdir"), 0755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(dir, "movie.mp4"), []byte("video data"), 0644))
 
 	cfg := &Config{Extensions: []string{".mp4"}}
 	s := NewScanner(fs, cfg)
 
-	result, err := s.ScanSingle("/test/dir")
+	result, err := s.ScanSingle(dir)
 	require.NoError(t, err)
 	// Non-recursive: should find movie.mp4 but not recurse into subdir
 	assert.Equal(t, 1, len(result.Files))
