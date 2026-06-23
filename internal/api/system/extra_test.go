@@ -1050,7 +1050,10 @@ func TestUpdateConfig_EmptyLogOutputDefaultsAndReloadsNonFatally(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code,
-		"reload must succeed: Normalize defaults empty output and InitLogger failure is non-fatal")
+		"reload returns 200 regardless: InitLogger failure is non-fatal in reloadComponents")
+	// The 200 above would pass even without the Normalize fix (reloadComponents
+	// swallows InitLogger errors). The assertion below is the real pin for the
+	// Normalize change: without it, updated.Logging.Output would remain "".
 	updated := deps.GetConfig()
 	assert.Equal(t, config.DefaultConfig().Logging.Output, updated.Logging.Output,
 		"empty logging.output should be defaulted by Normalize before reload")

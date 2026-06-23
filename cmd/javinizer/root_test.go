@@ -402,7 +402,6 @@ func TestIsTUICommand(t *testing.T) {
 	tuiCmd := &cobra.Command{Use: "tui [path]"}
 	childCmd := &cobra.Command{Use: "something"}
 	tuiCmd.AddCommand(childCmd)
-	tuiCmd.AddCommand(childCmd)
 
 	scrapeCmd := &cobra.Command{Use: "scrape"}
 
@@ -466,12 +465,12 @@ func TestInitConfig_TUICommandStripsStdoutFromStartup(t *testing.T) {
 
 	_ = w.Close()
 	os.Stdout = origStdout
-	buf := make([]byte, 8192)
-	n, _ := r.Read(buf)
+	outBuf, err := io.ReadAll(r)
+	require.NoError(t, err)
 	_ = r.Close()
 
-	if n > 0 && strings.Contains(string(buf[:n]), "Log file") {
-		t.Errorf("startup \"Log file\" message leaked to stdout in TUI mode: %q", string(buf[:n]))
+	if strings.Contains(string(outBuf), "Log file") {
+		t.Errorf("startup \"Log file\" message leaked to stdout in TUI mode: %q", string(outBuf))
 	}
 
 	content, err := os.ReadFile(logFile)
@@ -573,11 +572,11 @@ func TestInitConfig_TUICommandWithVerbose_DebugLevelFileOnly(t *testing.T) {
 
 	_ = w.Close()
 	os.Stdout = origStdout
-	buf := make([]byte, 8192)
-	n, _ := r.Read(buf)
+	outBuf, err := io.ReadAll(r)
+	require.NoError(t, err)
 	_ = r.Close()
-	if n > 0 && (strings.Contains(string(buf[:n]), "Log file") || strings.Contains(string(buf[:n]), "Loaded configuration")) {
-		t.Errorf("debug-level startup messages leaked to stdout in TUI verbose mode: %q", string(buf[:n]))
+	if strings.Contains(string(outBuf), "Log file") || strings.Contains(string(outBuf), "Loaded configuration") {
+		t.Errorf("debug-level startup messages leaked to stdout in TUI verbose mode: %q", string(outBuf))
 	}
 
 	content, err := os.ReadFile(logFile)
@@ -685,10 +684,10 @@ func TestInitConfig_NonTUICommand_KeepsStdoutOutput(t *testing.T) {
 
 	_ = w.Close()
 	os.Stdout = origStdout
-	buf := make([]byte, 8192)
-	n, _ := r.Read(buf)
+	outBuf, err := io.ReadAll(r)
+	require.NoError(t, err)
 	_ = r.Close()
-	if n == 0 || !strings.Contains(string(buf[:n]), "Log file") {
-		t.Errorf("non-TUI command should retain stdout output, but Log file was not captured: %q", string(buf[:n]))
+	if !strings.Contains(string(outBuf), "Log file") {
+		t.Errorf("non-TUI command should retain stdout output, but Log file was not captured: %q", string(outBuf))
 	}
 }
