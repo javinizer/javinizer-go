@@ -150,7 +150,7 @@ func (sm *settingsManager) toggle() string {
 	}
 
 	// Push the full snapshot to the processor
-	sm.deps.apply(sm.snapshot)
+	sm.apply()
 
 	return desc
 }
@@ -158,7 +158,7 @@ func (sm *settingsManager) toggle() string {
 // setDryRun sets the dry-run mode and pushes the snapshot.
 func (sm *settingsManager) setDryRun(dryRun bool) {
 	sm.snapshot.DryRun = dryRun
-	sm.deps.apply(sm.snapshot)
+	sm.apply()
 	if dryRun {
 		sm.deps.log("info", "DRY RUN mode enabled - no changes will be made")
 	}
@@ -167,7 +167,7 @@ func (sm *settingsManager) setDryRun(dryRun bool) {
 // setMoveFiles sets the move-files mode and pushes the snapshot.
 func (sm *settingsManager) setMoveFiles(moveFiles bool) {
 	sm.snapshot.MoveFiles = moveFiles
-	sm.deps.apply(sm.snapshot)
+	sm.apply()
 }
 
 // setUpdateMode sets update mode and pushes the snapshot.
@@ -180,12 +180,14 @@ func (sm *settingsManager) setUpdateMode(updateMode bool) {
 	} else {
 		sm.snapshot.OrganizeEnabled = true
 	}
-	sm.deps.apply(sm.snapshot)
+	sm.apply()
 }
 
 // apply pushes the full snapshot to the processor via deps.
 // This is the centralized push method — callers should use this after
 // any direct mutation of sm.snapshot (e.g., from manualSearchDeps).
 func (sm *settingsManager) apply() {
-	sm.deps.apply(sm.snapshot)
+	if sm.deps.apply != nil {
+		sm.deps.apply(sm.snapshot)
+	}
 }

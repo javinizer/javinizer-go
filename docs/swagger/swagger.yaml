@@ -1558,6 +1558,9 @@ definitions:
         description: 'Folder name when group_actress is enabled and the actress list
           is empty or unknown (default: "@Unknown")'
         type: string
+      move_files:
+        description: 'Move files instead of copying (default: false / copy)'
+        type: boolean
       move_subtitles:
         type: boolean
       operation_mode:
@@ -1576,6 +1579,11 @@ definitions:
         description: 'Delimiter between actress names when joining <ACTORS>/<ACTRESSES>
           with no in-tag DELIM= modifier (default: ", ")'
         type: string
+      actress_language_ja:
+        description: 'true = prefer JapaneseName over First/Last for <ACTORS>/<ACTRESS>
+          in folder/file naming (default: false), mirrors nfo.actress_language_ja;
+          tag-level <ACTORS:JA> still takes precedence'
+        type: boolean
       file_format:
         type: string
       first_name_order:

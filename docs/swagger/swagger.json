@@ -5364,6 +5364,10 @@
                     "description": "Folder name when group_actress is enabled and the actress list is empty or unknown (default: \"@Unknown\")",
                     "type": "string"
                 },
+                "move_files": {
+                    "description": "Move files instead of copying (default: false / copy)",
+                    "type": "boolean"
+                },
                 "move_subtitles": {
                     "type": "boolean"
                 },
@@ -5388,6 +5392,10 @@
                 "actress_delimiter": {
                     "description": "Delimiter between actress names when joining \u003cACTORS\u003e/\u003cACTRESSES\u003e with no in-tag DELIM= modifier (default: \", \")",
                     "type": "string"
+                },
+                "actress_language_ja": {
+                    "description": "true = prefer JapaneseName over First/Last for \u003cACTORS\u003e/\u003cACTRESS\u003e in folder/file naming (default: false), mirrors nfo.actress_language_ja; tag-level \u003cACTORS:JA\u003e still takes precedence",
+                    "type": "boolean"
                 },
                 "file_format": {
                     "type": "string"
