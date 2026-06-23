@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -83,6 +85,33 @@ func TestResolveMoveMode(t *testing.T) {
 	}
 }
 
+// TestValidateMoveLinkMode verifies move mode and link mode are mutually exclusive,
+// regardless of whether move mode came from config or the --move flag (issue #36).
+func TestValidateMoveLinkMode(t *testing.T) {
+	tests := []struct {
+		name      string
+		effective bool
+		linkMode  organizer.LinkMode
+		wantErr   bool
+	}{
+		{"move on, link none -> ok", true, organizer.LinkModeNone, false},
+		{"move off, link hard -> ok", false, organizer.LinkModeHard, false},
+		{"move off, link soft -> ok", false, organizer.LinkModeSoft, false},
+		{"move on, link hard -> error", true, organizer.LinkModeHard, true},
+		{"move on, link soft -> error", true, organizer.LinkModeSoft, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateMoveLinkMode(tc.effective, tc.linkMode)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 // TestSaveConfigPersistsMoveFiles verifies toggling moveFiles and calling saveConfig
 // writes move_files to config.yaml (reloaded and asserted via the parsed struct).
 func TestSaveConfigPersistsMoveFiles(t *testing.T) {
@@ -125,11 +154,12 @@ func TestSaveConfigDoesNotLeakSessionOverrides(t *testing.T) {
 	require.NoError(t, config.Save(disk, configPath))
 
 	// In-memory cfg has session overrides applied (as the TUI command does):
-	// --extrafanart, and the TUI-mode logging.output rewrite.
+	// --extrafanart, --scraper-priority, and the TUI-mode logging.output rewrite.
 	loaded, err := config.Load(configPath)
 	require.NoError(t, err)
 	loaded.Output.DownloadExtrafanart = true // --extrafanart override
 	loaded.Logging.Output = "data/logs/javinizer-tui.log"
+	loaded.Scrapers.Priority = []string{"custom-scraper"} // --scraper-priority override
 
 	m := New(loaded)
 	m.SetConfigPath(configPath)
@@ -148,6 +178,8 @@ func TestSaveConfigDoesNotLeakSessionOverrides(t *testing.T) {
 		"--extrafanart session override must not be persisted to config")
 	assert.Equal(t, "stdout", reloaded.Logging.Output,
 		"TUI-mode logging.output rewrite must not be persisted to config")
+	assert.NotContains(t, reloaded.Scrapers.Priority, "custom-scraper",
+		"--scraper-priority session override must not be persisted to config")
 }
 
 // TestSaveConfigEndToEndRestart verifies the full issue #36 scenario: a model
@@ -195,17 +227,57 @@ func TestSaveConfigNoOpWithoutPath(t *testing.T) {
 }
 
 // TestSaveConfigNoOpWhenFileUnreadable verifies saveConfig logs and does not panic
-// when the on-disk config cannot be reloaded.
+// when the on-disk config cannot be reloaded, and leaves the file untouched.
 func TestSaveConfigNoOpWhenFileUnreadable(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	// Write invalid YAML so config.Load fails
-	require.NoError(t, os.WriteFile(configPath, []byte("output: [invalid\n  not: valid"), 0o644))
+	// Write invalid YAML so config.Update's internal load fails
+	invalid := []byte("output: [invalid\n  not: valid")
+	require.NoError(t, os.WriteFile(configPath, invalid, 0o644))
 
 	cfg := config.DefaultConfig()
 	m := New(cfg)
 	m.SetConfigPath(configPath)
 	m.moveFiles = true
 	assert.NotPanics(t, func() { m.saveConfig() })
+
+	// The corrupt file must be left as-is (no partial write)
+	content, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, string(invalid), string(content), "corrupt config must not be rewritten")
+}
+
+// TestHandleSettingsKeys_ToggleMoveFiles verifies the real TUI keypress path:
+// a space at settings cursor 3 toggles moveFiles, syncs the processor, and persists.
+func TestHandleSettingsKeys_ToggleMoveFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	cfg := config.DefaultConfig()
+	cfg.Output.MoveFiles = false
+	require.NoError(t, config.Save(cfg, configPath))
+
+	loaded, err := config.Load(configPath)
+	require.NoError(t, err)
+	m := New(loaded)
+	m.SetConfigPath(configPath)
+	m.currentView = ViewSettings
+	m.settingsCursor = 3 // "Move Files" row
+
+	// Attach a processor to verify the toggle propagates
+	proc := NewProcessingCoordinator(nil, nil, nil, nil, nil, nil, nil, nil, "", false)
+	m.SetProcessor(proc)
+	require.False(t, m.moveFiles)
+	require.False(t, proc.moveFiles)
+
+	// Simulate pressing space at the Move Files row
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m2 := updated.(*Model)
+
+	assert.True(t, m2.moveFiles, "space at cursor 3 should toggle moveFiles on")
+	assert.True(t, proc.moveFiles, "processor should be synced")
+
+	reloaded, err := config.Load(configPath)
+	require.NoError(t, err)
+	assert.True(t, reloaded.Output.MoveFiles, "toggle should persist move_files")
 }

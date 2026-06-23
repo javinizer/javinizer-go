@@ -86,9 +86,6 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if moveFiles && linkMode != organizer.LinkModeNone {
-		return fmt.Errorf("--link-mode can only be used when --move is disabled")
-	}
 	if preset != "" {
 		scalarStrategy, arrayStrategy, err = nfo.ApplyPreset(preset, scalarStrategy, arrayStrategy)
 		if err != nil {
@@ -118,11 +115,10 @@ func run(cmd *cobra.Command, args []string) error {
 	// Resolve effective move mode: an explicit --move flag overrides config.yaml (issue #36).
 	// Without --move, the TUI loads move_files from config so the setting persists across restarts.
 	effectiveMove := tui.ResolveMoveMode(cfg.Output.MoveFiles, cmd.Flags().Changed("move"), moveFiles)
-
 	// --link-mode is incompatible with move mode, whether move mode came from the
 	// --move flag or from move_files in config (issue #36).
-	if effectiveMove && linkMode != organizer.LinkModeNone {
-		return fmt.Errorf("--link-mode can only be used when move mode is disabled (move_files is false and --move is not set)")
+	if err := tui.ValidateMoveLinkMode(effectiveMove, linkMode); err != nil {
+		return err
 	}
 
 	// Override config with flag if scraper priority is provided
@@ -297,10 +293,12 @@ func run(cmd *cobra.Command, args []string) error {
 	// Set worker pool and progress channel in model
 	model.SetWorkerPool(workerPool, progressChan)
 
-	// Set processor in model
-	model.SetProcessor(processor)
-	// Sync the resolved move mode to the model's display state (issue #36)
+	// Set the resolved move mode on the model BEFORE the processor so SetProcessor's
+	// defensive sync propagates the correct value (no transient mismatch when --move
+	// overrides config) (issue #36).
 	model.SetMoveFiles(effectiveMove)
+	// Set processor in model (syncs moveFiles, dryRun, updateMode to the processor)
+	model.SetProcessor(processor)
 
 	// Set destination path AFTER processor is set
 	model.SetDestPath(destPath)

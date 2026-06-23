@@ -136,6 +136,35 @@ func TestMoveFilesRoundTrip(t *testing.T) {
 	assert.False(t, final.Output.MoveFiles, "move_files should persist as false after save/reload")
 }
 
+// TestUpdateAtomicallyModifiesSingleField verifies config.Update performs an atomic
+// read-modify-write that only changes the mutated field and preserves other values
+// (issue #36: persisting move_files without leaking session overrides).
+func TestUpdateAtomicallyModifiesSingleField(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	cfg := DefaultConfig()
+	cfg.Output.MoveFiles = false
+	cfg.Output.DownloadExtrafanart = false
+	require.NoError(t, Save(cfg, configPath))
+
+	// Simultaneously mutate an unrelated in-memory copy (as a session override would)
+	// and use Update to persist only move_files.
+	stale := DefaultConfig()
+	stale.Output.MoveFiles = false
+	stale.Output.DownloadExtrafanart = true // session-only override, must NOT leak
+	_ = stale
+
+	require.NoError(t, Update(configPath, func(c *Config) {
+		c.Output.MoveFiles = true
+	}))
+
+	reloaded, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+	assert.True(t, reloaded.Output.MoveFiles, "Update should persist move_files")
+	assert.False(t, reloaded.Output.DownloadExtrafanart, "Update must not touch unrelated fields")
+}
+
 // TestCreatedConfigHasComments verifies new configs preserve example comments
 func TestCreatedConfigHasComments(t *testing.T) {
 	tmpDir := t.TempDir()

@@ -15,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
@@ -488,27 +489,35 @@ func ResolveMoveMode(configMoveFiles, moveFlagSet, moveFlagValue bool) bool {
 	return configMoveFiles
 }
 
+// ValidateMoveLinkMode returns an error if move mode and link mode are both
+// enabled, since they are mutually exclusive. effectiveMove may originate from
+// config's move_files or the --move flag.
+func ValidateMoveLinkMode(effectiveMove bool, linkMode organizer.LinkMode) error {
+	if effectiveMove && linkMode != organizer.LinkModeNone {
+		return fmt.Errorf("--link-mode can only be used when move mode is disabled (move_files is false and --move is not set)")
+	}
+	return nil
+}
+
 // SetConfigPath records the config.yaml path so TUI settings can be persisted.
 func (m *Model) SetConfigPath(path string) {
 	m.configPath = path
 }
 
-// saveConfig persists the Move Files setting to config.yaml. It reloads the
-// on-disk config fresh and writes only move_files, so session-only CLI/env
-// overrides applied to the in-memory cfg (e.g. --extrafanart, the TUI-mode
-// logging.output rewrite, --scraper-priority, LOG_LEVEL) are NOT leaked to
-// disk on toggle (issue #36).
+// saveConfig persists the Move Files setting to config.yaml. It uses config.Update
+// (atomic read-modify-write under the file lock) so only move_files is written and
+// session-only CLI/env overrides applied to the in-memory cfg (e.g. --extrafanart,
+// the TUI-mode logging.output rewrite, --scraper-priority, LOG_LEVEL) are NOT
+// leaked to disk, and a concurrent writer's changes cannot be silently reverted
+// (issue #36).
 func (m *Model) saveConfig() {
 	if m.config == nil || m.configPath == "" {
 		return
 	}
-	diskCfg, err := config.Load(m.configPath)
+	err := config.Update(m.configPath, func(c *config.Config) {
+		c.Output.MoveFiles = m.moveFiles
+	})
 	if err != nil {
-		m.AddLog("error", fmt.Sprintf("Failed to reload config to save Move Files setting: %v", err))
-		return
-	}
-	diskCfg.Output.MoveFiles = m.moveFiles
-	if err := config.Save(diskCfg, m.configPath); err != nil {
 		m.AddLog("error", fmt.Sprintf("Failed to save Move Files setting to config: %v", err))
 		return
 	}
