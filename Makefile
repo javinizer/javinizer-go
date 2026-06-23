@@ -1,6 +1,6 @@
 .PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder web-test
 .PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci ci-full config-drift check-import-guard simulate-ci
-.PHONY: fmt lint vet vuln swagger docs mocks
+.PHONY: fmt lint vet vuln swagger docs mocks test-e2e-fullstack test-e2e-field-drop
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
 .PHONY: docker-build docker-build-no-cache docker-run docker-stop docker-clean docker-push docker-test docker-logs docker-help

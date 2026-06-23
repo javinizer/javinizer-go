@@ -725,12 +725,12 @@ type mockWorkflow struct {
     movieIDs []string
 }
 
-func (m *mockWorkflow) Scrape(_ context.Context, cmd scrape.ScrapeCmd, _ workflow.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
+func (m *mockWorkflow) Scrape(_ context.Context, cmd scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
     m.movieIDs = append(m.movieIDs, cmd.MovieID)
     return &scrape.ScrapeResult{}, &workflow.OrchestrationMeta{}, nil
 }
 
-func (m *mockWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ workflow.ProgressFunc) (*workflow.ApplyResult, error) {
+func (m *mockWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
     return nil, nil
 }
 
