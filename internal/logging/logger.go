@@ -284,6 +284,18 @@ func WithFields(fields logrus.Fields) *logrus.Entry {
 	return L().WithFields(fields)
 }
 
+// FileOnlyOutput returns the comma-separated file targets from output, stripping
+// stdout/stderr. If no file targets remain, defaultPath is returned. Used by
+// the TUI to ensure logs go to file only (not the terminal) so the TUI display
+// isn't corrupted.
+func FileOnlyOutput(output, defaultPath string) string {
+	files := GetFileOutputs(output)
+	if len(files) == 0 {
+		return defaultPath
+	}
+	return strings.Join(files, ",")
+}
+
 // GetFileOutputs extracts file paths from a comma-separated output string.
 // Returns only file paths (excludes "stdout" and "stderr").
 // Returns nil if no file outputs are found.

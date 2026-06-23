@@ -131,22 +131,26 @@ func run(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 
-	// For TUI mode, log to file only (not stdout)
-	if cfg.Logging.Output == "stdout" {
-		cfg.Logging.Output = "data/logs/javinizer-tui.log"
-		// Reinitialize logger
-		logCfg := &logging.Config{
-			Level:  cfg.Logging.Level,
-			Format: cfg.Logging.Format,
-			Output: cfg.Logging.Output,
-		}
-		if verboseFlag {
-			logCfg.Level = "debug"
-		}
-		if err := logging.InitLogger(logCfg); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-			os.Exit(1)
-		}
+	// For TUI mode, log to file only — strip stdout/stderr targets so logs don't
+	// leak into the terminal and corrupt the TUI display. The default config uses
+	// "stdout,data/logs/javinizer.log" (dual output); the previous check only
+	// handled the pure "stdout" case, so dual-output leaked into the TUI.
+	cfg.Logging.Output = logging.FileOnlyOutput(cfg.Logging.Output, "data/logs/javinizer-tui.log")
+	logCfg := &logging.Config{
+		Level:      cfg.Logging.Level,
+		Format:     cfg.Logging.Format,
+		Output:     cfg.Logging.Output,
+		MaxSizeMB:  cfg.Logging.MaxSizeMB,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAgeDays: cfg.Logging.MaxAgeDays,
+		Compress:   cfg.Logging.Compress,
+	}
+	if verboseFlag {
+		logCfg.Level = "debug"
+	}
+	if err := logging.InitLogger(logCfg); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
 	}
 
 	logging.Infof("Starting TUI mode for path: %s", sourcePath)

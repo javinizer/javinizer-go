@@ -524,3 +524,60 @@ func TestGetFileOutputs(t *testing.T) {
 		})
 	}
 }
+
+// TestFileOnlyOutput verifies stdout/stderr are stripped for TUI mode, with a
+// default applied when no file targets remain (issue: logs leaking into TUI).
+func TestFileOnlyOutput(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      string
+		defaultPath string
+		expected    string
+	}{
+		{
+			name:        "dual stdout+file strips stdout",
+			output:      "stdout,data/logs/javinizer.log",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "data/logs/javinizer.log",
+		},
+		{
+			name:        "pure stdout falls back to default",
+			output:      "stdout",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "data/logs/javinizer-tui.log",
+		},
+		{
+			name:        "stdout+stderr falls back to default",
+			output:      "stdout,stderr",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "data/logs/javinizer-tui.log",
+		},
+		{
+			name:        "multiple files preserved",
+			output:      "stdout,/var/log/a.log,/var/log/b.log",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "/var/log/a.log,/var/log/b.log",
+		},
+		{
+			name:        "empty falls back to default",
+			output:      "",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "data/logs/javinizer-tui.log",
+		},
+		{
+			name:        "file only unchanged",
+			output:      "/var/log/javinizer.log",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "/var/log/javinizer.log",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FileOnlyOutput(tt.output, tt.defaultPath)
+			if result != tt.expected {
+				t.Errorf("FileOnlyOutput(%q, %q) = %q, want %q", tt.output, tt.defaultPath, result, tt.expected)
+			}
+		})
+	}
+}
