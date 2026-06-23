@@ -98,7 +98,12 @@ func normalize(cfg *Config) bool {
 	for name, defaultLang := range languageDefaults {
 		if _, ok := cfg.Scrapers.Overrides[name]; ok {
 			if scraper := cfg.Scrapers.Overrides[name]; scraper != nil {
-				changed = normalizeField(&scraper.Language, defaultLang, true) || changed
+				// Only set default when empty — trim/lowercase happens in Validate(),
+				// not normalize(), so the original value (including whitespace) is preserved.
+				if strings.TrimSpace(scraper.Language) == "" {
+					scraper.Language = defaultLang
+					changed = true
+				}
 			}
 		}
 	}

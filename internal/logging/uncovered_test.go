@@ -23,7 +23,8 @@ func TestInitLogger_EmptyOutputDefaultsToStdoutUncovered(t *testing.T) {
 		Output: "",
 	}
 	err := InitLogger(cfg)
-	assert.NoError(t, err)
+	assert.Error(t, err, "empty output should return error, not silently default to stdout")
+	assert.Contains(t, err.Error(), "no valid log outputs")
 }
 
 func TestInitLogger_MultipleCommaOutputsUncovered(t *testing.T) {

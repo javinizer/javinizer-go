@@ -236,7 +236,7 @@ func TestInitLogger_Miss_StderrOutput(t *testing.T) {
 	Error("Stderr test")
 }
 
-// --- InitLogger: empty output defaults to stdout ---
+// --- InitLogger: empty output returns error (no silent stdout default) ---
 
 func TestInitLogger_Miss_EmptyOutputDefaultsToStdout(t *testing.T) {
 	cfg := &Config{
@@ -244,8 +244,9 @@ func TestInitLogger_Miss_EmptyOutputDefaultsToStdout(t *testing.T) {
 		Format: "text",
 		Output: "",
 	}
-	require.NoError(t, InitLogger(cfg))
-	Info("Empty output test")
+	err := InitLogger(cfg)
+	require.Error(t, err, "empty output should return error, not silently default to stdout")
+	assert.Contains(t, err.Error(), "no valid log outputs")
 }
 
 // --- InitLogger: rotation with existing file ---
