@@ -132,9 +132,15 @@ func InitLogger(cfg *Config) error {
 		}
 	}
 
-	// If no valid outputs, default to stdout
+	// If no valid outputs were configured, return an error rather than silently
+	// falling back to os.Stdout. A silent stdout fallback can corrupt TUI/
+	// AltScreen displays and hides misconfigurations (e.g. an empty output string
+	// produced by FileOnlyOutput with an empty defaultPath).
 	if len(writers) == 0 {
-		writers = append(writers, os.Stdout)
+		for _, c := range closers {
+			_ = c.Close()
+		}
+		return fmt.Errorf("no valid log outputs configured in %q (expected stdout, stderr, or a file path)", cfg.Output)
 	}
 
 	// Set output to multi-writer if multiple outputs

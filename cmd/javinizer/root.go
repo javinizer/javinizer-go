@@ -35,6 +35,7 @@ var (
 	cfgFile           string
 	verboseFlag       bool
 	originalLogOutput string
+	currentCmd        *cobra.Command
 )
 
 // rootCmd represents the base command
@@ -58,6 +59,7 @@ func init() {
 		if shouldSkipConfigInit(cmd) {
 			return
 		}
+		currentCmd = cmd
 		initConfig()
 	}
 
@@ -95,6 +97,18 @@ func shouldSkipConfigInit(cmd *cobra.Command) bool {
 	// `javinizer --version` should stay lightweight and side-effect free.
 	versionFlag := cmd.Flags().Lookup("version")
 	return versionFlag != nil && versionFlag.Changed
+}
+
+// isTUICommand reports whether cmd (or any ancestor) is the tui subcommand.
+// Used to suppress stdout logging during initial setup so startup messages don't
+// leak to the terminal before the TUI's AltScreen activates.
+func isTUICommand(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == "tui" {
+			return true
+		}
+	}
+	return false
 }
 
 // Execute runs the root command
@@ -152,6 +166,15 @@ func initConfig() {
 	// Override level to debug if --verbose flag is set
 	if verboseFlag {
 		logCfg.Level = "debug"
+	}
+
+	// For the TUI subcommand, strip stdout/stderr from the FIRST logger so startup
+	// messages (e.g. "Log file: ...") don't leak to the terminal before AltScreen
+	// activates. Only logCfg.Output is modified; cfg.Logging.Output is left intact
+	// so the JAVINIZER_LOG_DIR relocation check below still compares correctly.
+	// The TUI's run() reinitializes the logger via configureTUILogging afterwards.
+	if isTUICommand(currentCmd) {
+		logCfg.Output = logging.FileOnlyOutput(logCfg.Output, "data/logs/javinizer-tui.log")
 	}
 
 	if err := logging.InitLogger(logCfg); err != nil {

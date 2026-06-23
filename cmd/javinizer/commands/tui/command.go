@@ -135,19 +135,7 @@ func run(cmd *cobra.Command, args []string) error {
 	// leak into the terminal and corrupt the TUI display. The default config uses
 	// "stdout,data/logs/javinizer.log" (dual output); the previous check only
 	// handled the pure "stdout" case, so dual-output leaked into the TUI.
-	cfg.Logging.Output = logging.FileOnlyOutput(cfg.Logging.Output, "data/logs/javinizer-tui.log")
-	logCfg := &logging.Config{
-		Level:      cfg.Logging.Level,
-		Format:     cfg.Logging.Format,
-		Output:     cfg.Logging.Output,
-		MaxSizeMB:  cfg.Logging.MaxSizeMB,
-		MaxBackups: cfg.Logging.MaxBackups,
-		MaxAgeDays: cfg.Logging.MaxAgeDays,
-		Compress:   cfg.Logging.Compress,
-	}
-	if verboseFlag {
-		logCfg.Level = "debug"
-	}
+	logCfg := configureTUILogging(cfg, verboseFlag)
 	if err := logging.InitLogger(logCfg); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
@@ -484,4 +472,26 @@ func BuildFileTree(basePath string, files []scanner.FileInfo, matchMap map[strin
 	}
 
 	return result
+}
+
+// configureTUILogging builds a file-only logging config for TUI mode, stripping
+// stdout/stderr targets so logs don't leak into the terminal and corrupt the
+// TUI display. Rotation settings (max_size_mb, max_backups, max_age_days,
+// compress) are preserved, and the verbose flag overrides the level to debug.
+// The returned config is intended for logging.InitLogger.
+func configureTUILogging(cfg *config.Config, verbose bool) *logging.Config {
+	output := logging.FileOnlyOutput(cfg.Logging.Output, "data/logs/javinizer-tui.log")
+	logCfg := &logging.Config{
+		Level:      cfg.Logging.Level,
+		Format:     cfg.Logging.Format,
+		Output:     output,
+		MaxSizeMB:  cfg.Logging.MaxSizeMB,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAgeDays: cfg.Logging.MaxAgeDays,
+		Compress:   cfg.Logging.Compress,
+	}
+	if verbose {
+		logCfg.Level = "debug"
+	}
+	return logCfg
 }

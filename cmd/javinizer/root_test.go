@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -388,5 +390,85 @@ func TestSanitizeProxyURL(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.expected, sanitizeProxyURL(tc.input))
 		})
+	}
+}
+
+// TestIsTUICommand verifies the TUI-subcommand detection used to suppress stdout
+// logging during initial setup (so startup messages don't leak before AltScreen).
+func TestIsTUICommand(t *testing.T) {
+	tuiCmd := &cobra.Command{Use: "tui"}
+	childCmd := &cobra.Command{Use: "something"}
+	childCmd.Parent() // no-op; parent set below
+	tuiCmd.AddCommand(childCmd)
+
+	scrapeCmd := &cobra.Command{Use: "scrape"}
+
+	tests := []struct {
+		name     string
+		cmd      *cobra.Command
+		expected bool
+	}{
+		{"tui command", tuiCmd, true},
+		{"child of tui walks up to tui", childCmd, true},
+		{"unrelated command", scrapeCmd, false},
+		{"nil command", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isTUICommand(tt.cmd))
+		})
+	}
+}
+
+// TestInitConfig_TUICommandStripsStdoutFromStartup proves the pre-alt-screen
+// startup leak (issue N1) is fixed: when the TUI subcommand is invoked, the
+// initial logger is file-only, so the "Log file: ..." startup message does not
+// reach stdout. Without the fix, the default "stdout,file" output would leak it.
+func TestInitConfig_TUICommandStripsStdoutFromStartup(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "tui-startup.yaml")
+	logFile := filepath.Join(tmpDir, "tui-startup.log")
+
+	testCfg := config.DefaultConfig()
+	testCfg.Database.DSN = filepath.Join(tmpDir, "test.db")
+	testCfg.Logging.Output = "stdout," + logFile // dual output — would leak without the fix
+	require.NoError(t, config.Save(testCfg, configPath))
+
+	t.Setenv("JAVINIZER_CONFIG", configPath)
+	origCfgFile := cfgFile
+	cfgFile = ""
+	defer func() { cfgFile = origCfgFile }()
+
+	origLogOutput := originalLogOutput
+	defer func() { originalLogOutput = origLogOutput }()
+
+	origCmd := currentCmd
+	defer func() { currentCmd = origCmd }()
+	currentCmd = &cobra.Command{Use: "tui"}
+
+	defer logging.CloseLogger()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origStdout := os.Stdout
+	os.Stdout = w
+
+	initConfig()
+
+	_ = w.Close()
+	os.Stdout = origStdout
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	_ = r.Close()
+
+	if n > 0 && strings.Contains(string(buf[:n]), "Log file") {
+		t.Errorf("startup \"Log file\" message leaked to stdout in TUI mode: %q", string(buf[:n]))
+	}
+
+	content, err := os.ReadFile(logFile)
+	require.NoError(t, err, "log file target should exist and receive logs")
+	if !strings.Contains(string(content), "Log file") {
+		t.Errorf("log file did not receive the startup message; content: %s", string(content))
 	}
 }
