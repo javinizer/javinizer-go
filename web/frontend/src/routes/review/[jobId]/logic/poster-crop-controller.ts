@@ -36,7 +36,9 @@ interface PosterCropControllerDeps {
 	getCropDragState: () => PosterCropDragState | null;
 	setCropDragState: (state: PosterCropDragState | null) => void;
 	getPosterCropStates: () => Map<string, PosterCropState>;
-	mutatePosterCrop: (jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number) => void;
+	applyPosterFromUrlAsync: (resultId: string, url: string) => Promise<void>;
+	mutatePosterCropAsync: (jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number) => Promise<void>;
+	setCropApplying: (applying: boolean) => void;
 	now?: () => number;
 }
 
@@ -219,14 +221,32 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		return `left:${left}px;top:${top}px;width:${width}px;height:${height}px;box-shadow:0 0 0 9999px rgba(0,0,0,0.45);`;
 	}
 
-	function applyPosterCrop() {
+	async function applyPosterCrop() {
 		const currentMovie = deps.getCurrentMovie();
 		const currentResult = deps.getCurrentResult();
 		const cropBoxVal = deps.getCropBox();
 		if (!currentMovie || !currentResult || !cropBoxVal) return;
 
-		const maxPosterHeight = deps.getMaxPosterHeight();
-		deps.mutatePosterCrop(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined);
+		deps.setCropApplying(true);
+		try {
+			// If the poster URL was edited client-side (not yet persisted to the
+			// server), persist it first so the crop endpoint operates on the
+			// edited image ({movieId}-full.jpg) rather than the stale scraped
+			// poster that still lives server-side. Without this, the crop modal
+			// shows the edited URL (via the image proxy) but the backend would
+			// crop the original scraped image, reverting the preview.
+			const serverPosterUrl = currentResult.data?.poster_url;
+			if (currentMovie.poster_url && serverPosterUrl && currentMovie.poster_url !== serverPosterUrl) {
+				await deps.applyPosterFromUrlAsync(currentResult.result_id, currentMovie.poster_url);
+			}
+
+			const maxPosterHeight = deps.getMaxPosterHeight();
+			await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined);
+		} catch {
+			// Errors are surfaced via toasts in the mutation handlers; abort the flow.
+		} finally {
+			deps.setCropApplying(false);
+		}
 	}
 
 	function handleWindowResize() {

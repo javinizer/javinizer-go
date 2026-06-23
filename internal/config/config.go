@@ -166,6 +166,7 @@ type OutputConfig struct {
 	MaxPathLength           int                 `yaml:"max_path_length" json:"max_path_length"`
 	MaxPosterHeight         int                 `yaml:"max_poster_height" json:"max_poster_height"` // Max height in px for cropped posters; 0 = no cap (preserve source resolution). When the cropped poster exceeds this height it is downscaled preserving aspect ratio.
 	MoveSubtitles           bool                `yaml:"move_subtitles" json:"move_subtitles"`
+	MoveFiles               bool                `yaml:"move_files" json:"move_files"` // Move files instead of copying (default: false / copy)
 	SubtitleExtensions      []string            `yaml:"subtitle_extensions" json:"subtitle_extensions"`
 	OperationMode           types.OperationMode `yaml:"operation_mode" json:"operation_mode"`
 	RenameFile              bool                `yaml:"rename_file" json:"rename_file"`                               // Rename files using file_format template (default: true)

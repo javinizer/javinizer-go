@@ -15,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scanner"
 	"github.com/javinizer/javinizer-go/internal/worker"
 )
@@ -104,16 +105,17 @@ type Model struct {
 	totalFilesCount    int       // Total number of files processed
 
 	// Runtime settings (can be toggled in Settings view)
-	forceUpdate         bool // Replace existing files (images, NFO)
-	forceRefresh        bool // Clear DB cache and rescrape metadata
-	moveFiles           bool // Move instead of copy
-	scrapeEnabled       bool // Enable metadata scraping
-	downloadEnabled     bool // Enable media downloads
-	downloadExtrafanart bool // Enable extrafanart (screenshots) downloads
-	organizeEnabled     bool // Enable file organization
-	nfoEnabled          bool // Enable NFO generation
-	updateMode          bool // Update mode: only create/update metadata without moving files
-	settingsCursor      int  // Cursor position in settings view
+	forceUpdate         bool               // Replace existing files (images, NFO)
+	forceRefresh        bool               // Clear DB cache and rescrape metadata
+	moveFiles           bool               // Move instead of copy
+	linkMode            organizer.LinkMode // Link mode (mutually exclusive with moveFiles)
+	scrapeEnabled       bool               // Enable metadata scraping
+	downloadEnabled     bool               // Enable media downloads
+	downloadExtrafanart bool               // Enable extrafanart (screenshots) downloads
+	organizeEnabled     bool               // Enable file organization
+	nfoEnabled          bool               // Enable NFO generation
+	updateMode          bool               // Update mode: only create/update metadata without moving files
+	settingsCursor      int                // Cursor position in settings view
 
 	// Statistics
 	stats       worker.ProgressStats
@@ -140,6 +142,8 @@ type Model struct {
 	logViewer    *LogViewer
 	settingsView *SettingsView
 	helpView     *HelpView
+
+	configPath string // path to config.yaml for persisting TUI settings
 }
 
 // FileItem represents a file in the browser
@@ -190,7 +194,7 @@ func New(cfg *config.Config) *Model {
 		// Runtime settings defaults
 		forceUpdate:         false,
 		forceRefresh:        false,
-		moveFiles:           false,
+		moveFiles:           cfg.Output.MoveFiles, // Initialize from config (issue #36)
 		scrapeEnabled:       true,
 		downloadEnabled:     true,
 		downloadExtrafanart: cfg.Output.DownloadExtrafanart, // Initialize from config
@@ -442,10 +446,11 @@ func (m *Model) GetSelectedFiles() []string {
 // SetProcessor sets the processing coordinator
 func (m *Model) SetProcessor(processor *ProcessingCoordinator) {
 	m.processor = processor
-	// Sync dry-run state to processor
+	// Sync runtime state to processor
 	if m.processor != nil {
 		m.processor.SetDryRun(m.dryRun)
 		m.processor.SetUpdateMode(m.updateMode)
+		m.processor.SetMoveFiles(m.moveFiles)
 	}
 }
 
@@ -465,6 +470,73 @@ func (m *Model) SetDryRun(dryRun bool) {
 	if dryRun {
 		m.AddLog("info", "DRY RUN mode enabled - no changes will be made")
 	}
+}
+
+// SetMoveFiles sets the move-files mode and syncs it to the processor.
+func (m *Model) SetMoveFiles(moveFiles bool) {
+	m.moveFiles = moveFiles
+	if m.processor != nil {
+		m.processor.SetMoveFiles(moveFiles)
+	}
+}
+
+// SetLinkMode records the link mode so the runtime move-files toggle can guard
+// against the move+link combination rejected at startup (ValidateMoveLinkMode).
+// Link mode is set at startup via --link-mode and is not toggled at runtime.
+func (m *Model) SetLinkMode(mode organizer.LinkMode) {
+	m.linkMode = mode
+}
+
+// canEnableMoveMode reports whether move mode can be enabled at runtime. Move and
+// link modes are mutually exclusive (ValidateMoveLinkMode); if link mode is active,
+// enabling move is refused to preserve the startup invariant.
+func (m *Model) canEnableMoveMode() bool {
+	return m.linkMode == organizer.LinkModeNone
+}
+
+// ResolveMoveMode determines the effective move mode for the TUI: an explicit
+// --move flag overrides config.yaml's move_files; otherwise the config value
+// is used (issue #36).
+func ResolveMoveMode(configMoveFiles, moveFlagSet, moveFlagValue bool) bool {
+	if moveFlagSet {
+		return moveFlagValue
+	}
+	return configMoveFiles
+}
+
+// ValidateMoveLinkMode returns an error if move mode and link mode are both
+// enabled, since they are mutually exclusive. effectiveMove may originate from
+// config's move_files or the --move flag.
+func ValidateMoveLinkMode(effectiveMove bool, linkMode organizer.LinkMode) error {
+	if effectiveMove && linkMode != organizer.LinkModeNone {
+		return fmt.Errorf("--link-mode can only be used when move mode is disabled (move_files is false and --move is not set)")
+	}
+	return nil
+}
+
+// SetConfigPath records the config.yaml path so TUI settings can be persisted.
+func (m *Model) SetConfigPath(path string) {
+	m.configPath = path
+}
+
+// saveConfig persists the Move Files setting to config.yaml. It uses config.Update
+// (atomic read-modify-write under the file lock) so only move_files is written and
+// session-only CLI/env overrides applied to the in-memory cfg (e.g. --extrafanart,
+// the TUI-mode logging.output rewrite, --scraper-priority, LOG_LEVEL) are NOT
+// leaked to disk, and a concurrent writer's changes cannot be silently reverted
+// (issue #36).
+func (m *Model) saveConfig() {
+	if m.config == nil || m.configPath == "" {
+		return
+	}
+	err := config.Update(m.configPath, func(c *config.Config) {
+		c.Output.MoveFiles = m.moveFiles
+	})
+	if err != nil {
+		m.AddLog("error", fmt.Sprintf("Failed to save Move Files setting to config: %v", err))
+		return
+	}
+	m.AddLog("info", "Move Files setting saved to config")
 }
 
 // SetUpdateMode sets update mode and syncs it to processor.

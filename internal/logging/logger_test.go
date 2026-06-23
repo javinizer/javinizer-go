@@ -5,6 +5,7 @@ package logging
 // but avoid using t.Parallel() in this package.
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -165,6 +166,58 @@ func TestInitLogger_AutoCreateDirectory(t *testing.T) {
 
 	if _, err := os.Stat(logFile); os.IsNotExist(err) {
 		t.Fatal("Log file was not created in nested directory")
+	}
+}
+
+// TestInitLogger_NoValidOutputsReturnsError pins that an empty/invalid output no
+// longer silently falls back to os.Stdout (which would leak into the TUI). Such
+// a configuration is a misconfiguration and must surface as an error instead of
+// a silent stdout leak.
+func TestInitLogger_NoValidOutputsReturnsError(t *testing.T) {
+	for _, output := range []string{"", "   ", ",", " , "} {
+		cfg := &Config{Level: "info", Format: "text", Output: output}
+		err := InitLogger(cfg)
+		if err == nil {
+			t.Errorf("InitLogger(Output=%q) expected an error, got nil", output)
+		}
+		if err != nil && !strings.Contains(err.Error(), "no valid log outputs") {
+			t.Errorf("InitLogger(Output=%q) error = %v, want it to mention 'no valid log outputs'", output, err)
+		}
+	}
+}
+
+// TestInitLogger_FileOnlyOutput_EmptyDefaultNoLeak proves the defense-in-depth:
+// FileOnlyOutput with an empty defaultPath returns "", and InitLogger then errors
+// rather than leaking to stdout. This guards the latent leak vector flagged in
+// review (empty defaultPath + no file targets).
+func TestInitLogger_FileOnlyOutput_EmptyDefaultNoLeak(t *testing.T) {
+	stripped := FileOnlyOutput("stdout", "")
+	if stripped != "" {
+		t.Fatalf("FileOnlyOutput with empty defaultPath should return empty, got %q", stripped)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	origStdout := os.Stdout
+	os.Stdout = w
+
+	initErr := InitLogger(&Config{Level: "info", Format: "text", Output: stripped})
+
+	_ = w.Close()
+	os.Stdout = origStdout
+	outBuf, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
+	_ = r.Close()
+
+	if initErr == nil {
+		t.Errorf("InitLogger with empty output should have errored instead of leaking to stdout")
+	}
+	if len(outBuf) > 0 {
+		t.Errorf("unexpected stdout output during error path: %q", string(outBuf))
 	}
 }
 
@@ -522,5 +575,167 @@ func TestGetFileOutputs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestFileOnlyOutput verifies stdout/stderr are stripped for TUI mode, with a
+// default applied when no file targets remain (issue: logs leaking into TUI).
+func TestFileOnlyOutput(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      string
+		defaultPath string
+		expected    string
+	}{
+		{
+			name:        "dual stdout+file strips stdout",
+			output:      "stdout,data/logs/javinizer.log",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "data/logs/javinizer.log",
+		},
+		{
+			name:        "pure stdout falls back to default",
+			output:      "stdout",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "data/logs/javinizer-tui.log",
+		},
+		{
+			name:        "stdout+stderr falls back to default",
+			output:      "stdout,stderr",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "data/logs/javinizer-tui.log",
+		},
+		{
+			name:        "multiple files preserved",
+			output:      "stdout,/var/log/a.log,/var/log/b.log",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "/var/log/a.log,/var/log/b.log",
+		},
+		{
+			name:        "empty falls back to default",
+			output:      "",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "data/logs/javinizer-tui.log",
+		},
+		{
+			name:        "file only unchanged",
+			output:      "/var/log/javinizer.log",
+			defaultPath: "data/logs/javinizer-tui.log",
+			expected:    "/var/log/javinizer.log",
+		},
+		{
+			name:        "whitespace trimmed",
+			output:      "stdout , data/logs/x.log ",
+			defaultPath: "data/logs/tui.log",
+			expected:    "data/logs/x.log",
+		},
+		// Empty defaultPath with no file targets returns "". The safety net against
+		// the resulting stdout leak now lives in InitLogger (TestInitLogger_NoValidOutputsReturnsError),
+		// which errors instead of silently falling back to os.Stdout.
+		{
+			name:        "empty defaultPath and no file targets returns empty",
+			output:      "stdout",
+			defaultPath: "",
+			expected:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FileOnlyOutput(tt.output, tt.defaultPath)
+			if result != tt.expected {
+				t.Errorf("FileOnlyOutput(%q, %q) = %q, want %q", tt.output, tt.defaultPath, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestInitLogger_FileOnlyOutput_NoStdoutLeak proves end-to-end that when the
+// output string is run through FileOnlyOutput (stripping stdout/stderr), no log
+// output reaches os.Stdout. This is the guarantee the TUI relies on: even with
+// the default "stdout,file" config, the TUI's terminal stays clean.
+func TestInitLogger_FileOnlyOutput_NoStdoutLeak(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "noleak.log")
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	origStdout := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = origStdout }() // restore on all paths, including t.Fatalf
+
+	stripped := FileOnlyOutput("stdout,"+logFile, "data/logs/javinizer-tui.log")
+	if stripped != logFile {
+		t.Fatalf("FileOnlyOutput did not strip stdout: got %q", stripped)
+	}
+
+	if err := InitLogger(&Config{Level: "info", Format: "text", Output: stripped}); err != nil {
+		os.Stdout = origStdout
+		_ = w.Close()
+		_ = r.Close()
+		t.Fatalf("InitLogger: %v", err)
+	}
+	defer CloseLogger()
+
+	Info("this must not leak to stdout")
+
+	_ = w.Close()
+	os.Stdout = origStdout
+
+	outBuf, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
+	_ = r.Close()
+	if strings.Contains(string(outBuf), "this must not leak to stdout") {
+		t.Errorf("stdout leak detected: pipe captured %q", string(outBuf))
+	}
+
+	content, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	if !strings.Contains(string(content), "this must not leak to stdout") {
+		t.Errorf("log file did not receive the message; content: %s", string(content))
+	}
+}
+
+// TestInitLogger_StdoutNotStripped_DoesLeak proves the leak detector above is not
+// vacuous: without FileOnlyOutput, a "stdout,file" output DOES write to os.Stdout.
+// This is the regression the TUI fix prevents, and confirms the capture mechanism
+// actually detects leaks.
+func TestInitLogger_StdoutNotStripped_DoesLeak(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "leak.log")
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	origStdout := os.Stdout
+	os.Stdout = w
+
+	if err := InitLogger(&Config{Level: "info", Format: "text", Output: "stdout," + logFile}); err != nil {
+		os.Stdout = origStdout
+		_ = w.Close()
+		_ = r.Close()
+		t.Fatalf("InitLogger: %v", err)
+	}
+	defer CloseLogger()
+
+	Info("this SHOULD leak to stdout")
+
+	_ = w.Close()
+	os.Stdout = origStdout
+
+	outBuf, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
+	_ = r.Close()
+	if !strings.Contains(string(outBuf), "this SHOULD leak to stdout") {
+		t.Errorf("expected stdout leak but pipe captured nothing relevant: %q", string(outBuf))
 	}
 }

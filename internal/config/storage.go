@@ -440,6 +440,51 @@ func Save(cfg *Config, path string) error {
 	}
 	defer unlock()
 
+	return writeLocked(path, cfg)
+}
+
+// Update atomically reads, mutates, and writes the config under an exclusive
+// file lock. Use this instead of Load+Save when persisting a single setting
+// to avoid a TOCTOU race where a concurrent writer's changes (e.g. from
+// `javinizer api`) between the read and write are silently reverted.
+func Update(path string, mutate func(*Config)) error {
+	if mutate == nil {
+		return fmt.Errorf("config.Update: mutate callback must not be nil")
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, DirPerm); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	unlock, err := acquireConfigFileLock(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	cfg, err := loadLocked(path)
+	if err != nil {
+		return err
+	}
+	mutate(cfg)
+	return writeLocked(path, cfg)
+}
+
+// loadLocked reads and decodes the config from path. Caller must hold the file lock.
+func loadLocked(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return DefaultConfig(), nil
+		}
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+	return decodeConfig(data)
+}
+
+// writeLocked merges cfg into the existing on-disk config (preserving comments)
+// and atomically writes it. Caller must hold the file lock.
+func writeLocked(path string, cfg *Config) error {
 	targetDoc, err := configToYAMLDocument(cfg)
 	if err != nil {
 		return err

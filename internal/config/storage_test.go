@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -109,6 +110,110 @@ func TestLoadOrCreateIdempotent(t *testing.T) {
 	assert.Equal(t, cfg1.Server.Host, cfg2.Server.Host, "server.host should match")
 	assert.Equal(t, cfg1.Server.Port, cfg2.Server.Port, "server.port should match")
 	assert.Equal(t, cfg1.Scrapers.UserAgent, cfg2.Scrapers.UserAgent, "user_agent should match")
+}
+
+// TestMoveFilesRoundTrip verifies the move_files setting survives a save/load cycle (issue #36).
+func TestMoveFilesRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	cfg, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+
+	// Enable move mode and persist
+	cfg.Output.MoveFiles = true
+	require.NoError(t, Save(cfg, configPath))
+
+	// Reload and confirm the setting persisted
+	reloaded, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+	assert.True(t, reloaded.Output.MoveFiles, "move_files should persist as true after save/reload")
+
+	// Flip back to false and confirm that also persists
+	reloaded.Output.MoveFiles = false
+	require.NoError(t, Save(reloaded, configPath))
+	final, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+	assert.False(t, final.Output.MoveFiles, "move_files should persist as false after save/reload")
+}
+
+// TestUpdateAtomicallyModifiesSingleField verifies config.Update performs an atomic
+// read-modify-write that only changes the mutated field and preserves other values
+// (issue #36: persisting move_files without leaking session overrides).
+func TestUpdateAtomicallyModifiesSingleField(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	cfg := DefaultConfig()
+	cfg.Output.MoveFiles = false
+	cfg.Output.DownloadExtrafanart = false
+	require.NoError(t, Save(cfg, configPath))
+
+	// Use Update to persist only move_files (simulating a TUI toggle).
+	require.NoError(t, Update(configPath, func(c *Config) {
+		c.Output.MoveFiles = true
+	}))
+
+	reloaded, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+	assert.True(t, reloaded.Output.MoveFiles, "Update should persist move_files")
+	assert.False(t, reloaded.Output.DownloadExtrafanart, "Update must not touch unrelated fields")
+}
+
+// TestUpdateConcurrentWritersNoLostUpdates proves config.Update is an atomic
+// read-modify-write: 100 concurrent increments of a counter field must all
+// survive (no lost updates). With an unlocked Load+Save, many increments
+// would be lost. This is the TOCTOU regression test for issue #36.
+func TestUpdateConcurrentWritersNoLostUpdates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrency test in short mode")
+	}
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	cfg := DefaultConfig()
+	cfg.Output.MaxPosterHeight = 0
+	require.NoError(t, Save(cfg, configPath))
+
+	const N = 100
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = Update(configPath, func(c *Config) { c.Output.MaxPosterHeight++ })
+		}()
+	}
+	wg.Wait()
+
+	reloaded, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, N, reloaded.Output.MaxPosterHeight, "no concurrent updates should be lost (atomic RMW under lock)")
+}
+
+// TestUpdateOnMissingFileWritesDefaults verifies Update on a non-existent path
+// writes a config with the mutation applied (loadLocked returns DefaultConfig()
+// for missing files).
+func TestUpdateOnMissingFileWritesDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	require.NoError(t, Update(configPath, func(c *Config) { c.Output.MoveFiles = true }))
+
+	reloaded, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+	assert.True(t, reloaded.Output.MoveFiles, "Update on a missing file should write the mutation")
+}
+
+// TestUpdate_NilMutateReturnsError guards against a nil callback panicking inside
+// the locked read-modify-write (CodeRabbit finding).
+func TestUpdate_NilMutateReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	require.NoError(t, Save(DefaultConfig(), configPath))
+
+	err := Update(configPath, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutate", "error should explain the nil callback")
 }
 
 // TestCreatedConfigHasComments verifies new configs preserve example comments

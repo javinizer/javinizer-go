@@ -62,6 +62,15 @@ func Normalize(cfg *Config) bool {
 	changed := false
 	changed = normalizeField(&cfg.Database.Type, "sqlite", true) || changed
 
+	// Logging.Output: default to the standard dual-output target if empty. A config
+	// saved via the API (JSON) without an explicit output would otherwise leave
+	// InitLogger with no valid targets, which now errors instead of silently
+	// falling back to stdout.
+	if strings.TrimSpace(cfg.Logging.Output) == "" {
+		cfg.Logging.Output = DefaultConfig().Logging.Output
+		changed = true
+	}
+
 	languageDefaults := map[string]string{
 		"r18dev":          "en",
 		"javlibrary":      "en",

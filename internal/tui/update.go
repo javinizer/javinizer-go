@@ -501,7 +501,15 @@ func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 
 		case 3:
-			m.moveFiles = !m.moveFiles
+			newMove := !m.moveFiles
+			// --link-mode is incompatible with move mode (issue #36); startup rejects
+			// this combo via ValidateMoveLinkMode. Refuse the runtime toggle when
+			// enabling move while link mode is active, preserving the invariant.
+			if newMove && !m.canEnableMoveMode() {
+				m.AddLog("warn", "Cannot enable move mode while link mode is active; restart without --link-mode to use move mode")
+				break
+			}
+			m.moveFiles = newMove
 			if m.processor != nil {
 				m.processor.SetMoveFiles(m.moveFiles)
 			}
@@ -510,6 +518,7 @@ func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.AddLog("info", "Copy mode enabled - files will be copied")
 			}
+			m.saveConfig()
 
 		case 4:
 			m.scrapeEnabled = !m.scrapeEnabled

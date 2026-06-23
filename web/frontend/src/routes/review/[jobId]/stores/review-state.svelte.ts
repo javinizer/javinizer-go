@@ -132,6 +132,7 @@ export function createReviewState(pageStore: Page) {
 	let cropBox = $state<PosterCropBox | null>(null);
 	let maxPosterHeight = $state<number | null>(null);
 	let cropDragState = $state<PosterCropDragState | null>(null);
+	let cropApplying = $state(false);
 	let posterPreviewOverrides = new SvelteMap<string, PosterPreviewOverride>();
 	let posterCropStates = new SvelteMap<string, PosterCropState>();
 
@@ -678,9 +679,11 @@ export function createReviewState(pageStore: Page) {
 		getCropDragState: () => cropDragState,
 		setCropDragState: (state) => { cropDragState = state; },
 		getPosterCropStates: () => posterCropStates,
-		mutatePosterCrop: (mutationJobId, resultId, crop, maxPosterHeightArg) => {
-			mutations.posterCropMutation.mutate({ jobId: mutationJobId, resultId, crop, maxPosterHeight: maxPosterHeightArg });
-		}
+		applyPosterFromUrlAsync: (resultId, url) => mutations.applyPosterFromUrlAsync(resultId, url),
+		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg) => {
+			return mutations.applyPosterCropAsync(mutationJobId, resultId, crop, maxPosterHeightArg);
+		},
+		setCropApplying: (applying) => { cropApplying = applying; }
 	});
 
 	const reviewPageController = createReviewPageController({
@@ -1008,6 +1011,7 @@ export function createReviewState(pageStore: Page) {
 		get canOrganize() { return canOrganize; },
 		posterFromUrlMutation: mutations.posterFromUrlMutation,
 		posterCropMutation: mutations.posterCropMutation,
+		get posterCropSaving() { return mutations.posterCropMutation.isPending || cropApplying; },
 		bulkExcludeMutation: mutations.bulkExcludeMutation,
 		bulkRescrapeMutation: mutations.bulkRescrapeMutation,
 		resolvePosterUrl,

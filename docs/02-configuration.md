@@ -1233,7 +1233,8 @@ output:
     - .smi
     - .vtt
   rename_folder_in_place: false
-  move_to_folder: true
+  # Move files instead of copying (default: false / copy). Persisted by the TUI Settings toggle.
+  move_files: false
   rename_file: true
   group_actress: false
   # group_actress_name: "@Group"

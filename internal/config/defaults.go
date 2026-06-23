@@ -231,6 +231,7 @@ func DefaultConfig() *Config {
 			MaxPathLength:           240,
 			MaxPosterHeight:         0, // No cap — preserve source resolution
 			MoveSubtitles:           false,
+			MoveFiles:               false,
 			SubtitleExtensions:      []string{".srt", ".ass", ".ssa", ".smi", ".vtt"},
 			OperationMode:           "",
 			RenameFile:              true,       // Rename files by default

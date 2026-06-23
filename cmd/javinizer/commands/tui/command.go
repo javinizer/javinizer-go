@@ -58,6 +58,7 @@ func NewCommand() *cobra.Command {
 func run(cmd *cobra.Command, args []string) error {
 	// Get config file from persistent flag
 	configFile, _ := cmd.Flags().GetString("config")
+	configFile = resolveConfigPath(configFile)
 
 	// Get source path - prioritize flag over positional argument
 	sourcePath := "."
@@ -86,9 +87,6 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if moveFiles && linkMode != organizer.LinkModeNone {
-		return fmt.Errorf("--link-mode can only be used when --move is disabled")
-	}
 	if preset != "" {
 		scalarStrategy, arrayStrategy, err = nfo.ApplyPreset(preset, scalarStrategy, arrayStrategy)
 		if err != nil {
@@ -115,6 +113,15 @@ func run(cmd *cobra.Command, args []string) error {
 		cfg.Output.DownloadExtrafanart = true
 	}
 
+	// Resolve effective move mode: an explicit --move flag overrides config.yaml (issue #36).
+	// Without --move, the TUI loads move_files from config so the setting persists across restarts.
+	effectiveMove := tui.ResolveMoveMode(cfg.Output.MoveFiles, cmd.Flags().Changed("move"), moveFiles)
+	// --link-mode is incompatible with move mode, whether move mode came from the
+	// --move flag or from move_files in config (issue #36).
+	if err := tui.ValidateMoveLinkMode(effectiveMove, linkMode); err != nil {
+		return err
+	}
+
 	// Override config with flag if scraper priority is provided
 	if len(scraperPriority) > 0 {
 		cfg.Scrapers.Priority = scraperPriority
@@ -125,22 +132,14 @@ func run(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 
-	// For TUI mode, log to file only (not stdout)
-	if cfg.Logging.Output == "stdout" {
-		cfg.Logging.Output = "data/logs/javinizer-tui.log"
-		// Reinitialize logger
-		logCfg := &logging.Config{
-			Level:  cfg.Logging.Level,
-			Format: cfg.Logging.Format,
-			Output: cfg.Logging.Output,
-		}
-		if verboseFlag {
-			logCfg.Level = "debug"
-		}
-		if err := logging.InitLogger(logCfg); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-			os.Exit(1)
-		}
+	// For TUI mode, log to file only — strip stdout/stderr targets so logs don't
+	// leak into the terminal and corrupt the TUI display. The default config uses
+	// "stdout,data/logs/javinizer.log" (dual output); the previous check only
+	// handled the pure "stdout" case, so dual-output leaked into the TUI.
+	logCfg := configureTUILogging(cfg, verboseFlag)
+	if err := logging.InitLogger(logCfg); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
 	}
 
 	logging.Infof("Starting TUI mode for path: %s", sourcePath)
@@ -160,6 +159,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Create TUI model
 	model := tui.New(cfg)
+	model.SetConfigPath(configFile)
 
 	// Scan for files before starting TUI
 	logging.Info("Scanning for video files...")
@@ -274,7 +274,7 @@ func run(cmd *cobra.Command, args []string) error {
 		org,
 		nfoGen,
 		destPath,
-		moveFiles,
+		effectiveMove,
 	)
 	processor.SetConfig(cfg)
 	processor.SetOptionsFromConfig(cfg)
@@ -286,7 +286,14 @@ func run(cmd *cobra.Command, args []string) error {
 	// Set worker pool and progress channel in model
 	model.SetWorkerPool(workerPool, progressChan)
 
-	// Set processor in model
+	// Set the resolved move mode on the model BEFORE the processor so SetProcessor's
+	// defensive sync propagates the correct value (no transient mismatch when --move
+	// overrides config) (issue #36).
+	model.SetMoveFiles(effectiveMove)
+	// Record link mode so the runtime move-files toggle can guard against the
+	// move+link combo rejected at startup (ValidateMoveLinkMode) (issue #36).
+	model.SetLinkMode(linkMode)
+	// Set processor in model (syncs moveFiles, dryRun, updateMode to the processor)
 	model.SetProcessor(processor)
 
 	// Set destination path AFTER processor is set
@@ -469,4 +476,37 @@ func BuildFileTree(basePath string, files []scanner.FileInfo, matchMap map[strin
 	}
 
 	return result
+}
+
+// resolveConfigPath returns the config file path to load and persist, honoring
+// the JAVINIZER_CONFIG env override so the TUI uses the same path the rest of the
+// app (root.go initConfig) does. Without this, LoadOrCreate would load from the
+// env path while SetConfigPath persisted to the --config flag path.
+func resolveConfigPath(flagValue string) string {
+	if envConfig := os.Getenv("JAVINIZER_CONFIG"); envConfig != "" {
+		return envConfig
+	}
+	return flagValue
+}
+
+// configureTUILogging builds a file-only logging config for TUI mode, stripping
+// stdout/stderr targets so logs don't leak into the terminal and corrupt the
+// TUI display. Rotation settings (max_size_mb, max_backups, max_age_days,
+// compress) are preserved, and the verbose flag overrides the level to debug.
+// The returned config is intended for logging.InitLogger.
+func configureTUILogging(cfg *config.Config, verbose bool) *logging.Config {
+	output := logging.FileOnlyOutput(cfg.Logging.Output, "data/logs/javinizer-tui.log")
+	logCfg := &logging.Config{
+		Level:      cfg.Logging.Level,
+		Format:     cfg.Logging.Format,
+		Output:     output,
+		MaxSizeMB:  cfg.Logging.MaxSizeMB,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAgeDays: cfg.Logging.MaxAgeDays,
+		Compress:   cfg.Logging.Compress,
+	}
+	if verbose {
+		logCfg.Level = "debug"
+	}
+	return logCfg
 }
