@@ -5,6 +5,7 @@ package logging
 // but avoid using t.Parallel() in this package.
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -206,15 +207,17 @@ func TestInitLogger_FileOnlyOutput_EmptyDefaultNoLeak(t *testing.T) {
 
 	_ = w.Close()
 	os.Stdout = origStdout
-	buf := make([]byte, 4096)
-	n, _ := r.Read(buf)
+	outBuf, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
 	_ = r.Close()
 
 	if initErr == nil {
 		t.Errorf("InitLogger with empty output should have errored instead of leaking to stdout")
 	}
-	if n > 0 {
-		t.Errorf("unexpected stdout output during error path: %q", string(buf[:n]))
+	if len(outBuf) > 0 {
+		t.Errorf("unexpected stdout output during error path: %q", string(outBuf))
 	}
 }
 
@@ -680,11 +683,13 @@ func TestInitLogger_FileOnlyOutput_NoStdoutLeak(t *testing.T) {
 	_ = w.Close()
 	os.Stdout = origStdout
 
-	buf := make([]byte, 4096)
-	n, _ := r.Read(buf)
+	outBuf, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
 	_ = r.Close()
-	if n > 0 && strings.Contains(string(buf[:n]), "this must not leak to stdout") {
-		t.Errorf("stdout leak detected: pipe captured %q", string(buf[:n]))
+	if strings.Contains(string(outBuf), "this must not leak to stdout") {
+		t.Errorf("stdout leak detected: pipe captured %q", string(outBuf))
 	}
 
 	content, err := os.ReadFile(logFile)
@@ -724,10 +729,12 @@ func TestInitLogger_StdoutNotStripped_DoesLeak(t *testing.T) {
 	_ = w.Close()
 	os.Stdout = origStdout
 
-	buf := make([]byte, 4096)
-	n, _ := r.Read(buf)
+	outBuf, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
 	_ = r.Close()
-	if n == 0 || !strings.Contains(string(buf[:n]), "this SHOULD leak to stdout") {
-		t.Errorf("expected stdout leak but pipe captured nothing relevant: %q", string(buf[:n]))
+	if !strings.Contains(string(outBuf), "this SHOULD leak to stdout") {
+		t.Errorf("expected stdout leak but pipe captured nothing relevant: %q", string(outBuf))
 	}
 }
