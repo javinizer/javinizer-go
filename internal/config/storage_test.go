@@ -111,6 +111,31 @@ func TestLoadOrCreateIdempotent(t *testing.T) {
 	assert.Equal(t, cfg1.Scrapers.UserAgent, cfg2.Scrapers.UserAgent, "user_agent should match")
 }
 
+// TestMoveFilesRoundTrip verifies the move_files setting survives a save/load cycle (issue #36).
+func TestMoveFilesRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	cfg, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+
+	// Enable move mode and persist
+	cfg.Output.MoveFiles = true
+	require.NoError(t, Save(cfg, configPath))
+
+	// Reload and confirm the setting persisted
+	reloaded, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+	assert.True(t, reloaded.Output.MoveFiles, "move_files should persist as true after save/reload")
+
+	// Flip back to false and confirm that also persists
+	reloaded.Output.MoveFiles = false
+	require.NoError(t, Save(reloaded, configPath))
+	final, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+	assert.False(t, final.Output.MoveFiles, "move_files should persist as false after save/reload")
+}
+
 // TestCreatedConfigHasComments verifies new configs preserve example comments
 func TestCreatedConfigHasComments(t *testing.T) {
 	tmpDir := t.TempDir()

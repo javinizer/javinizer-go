@@ -3650,6 +3650,10 @@ const docTemplate = `{
                 "max_title_length": {
                     "type": "integer"
                 },
+                "move_files": {
+                    "description": "Move files instead of copying (default: false / copy)",
+                    "type": "boolean"
+                },
                 "move_subtitles": {
                     "type": "boolean"
                 },

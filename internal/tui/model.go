@@ -140,6 +140,8 @@ type Model struct {
 	logViewer    *LogViewer
 	settingsView *SettingsView
 	helpView     *HelpView
+
+	configPath string // path to config.yaml for persisting TUI settings
 }
 
 // FileItem represents a file in the browser
@@ -190,7 +192,7 @@ func New(cfg *config.Config) *Model {
 		// Runtime settings defaults
 		forceUpdate:         false,
 		forceRefresh:        false,
-		moveFiles:           false,
+		moveFiles:           cfg.Output.MoveFiles, // Initialize from config (issue #36)
 		scrapeEnabled:       true,
 		downloadEnabled:     true,
 		downloadExtrafanart: cfg.Output.DownloadExtrafanart, // Initialize from config
@@ -464,6 +466,33 @@ func (m *Model) SetDryRun(dryRun bool) {
 	}
 	if dryRun {
 		m.AddLog("info", "DRY RUN mode enabled - no changes will be made")
+	}
+}
+
+// SetMoveFiles sets the move-files mode and syncs it to the processor.
+func (m *Model) SetMoveFiles(moveFiles bool) {
+	m.moveFiles = moveFiles
+	if m.processor != nil {
+		m.processor.SetMoveFiles(moveFiles)
+	}
+}
+
+// SetConfigPath records the config.yaml path so TUI settings can be persisted.
+func (m *Model) SetConfigPath(path string) {
+	m.configPath = path
+}
+
+// saveConfig persists the current TUI-backed settings (move_files) to config.yaml.
+// Other settings are left as-is; the merge-based Save preserves existing keys/comments.
+func (m *Model) saveConfig() {
+	if m.config == nil || m.configPath == "" {
+		return
+	}
+	m.config.Output.MoveFiles = m.moveFiles
+	if err := config.Save(m.config, m.configPath); err != nil {
+		m.AddLog("error", fmt.Sprintf("Failed to save Move Files setting to config: %v", err))
+	} else {
+		m.AddLog("info", "Move Files setting saved to config")
 	}
 }
 

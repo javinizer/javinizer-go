@@ -510,6 +510,7 @@ func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.AddLog("info", "Copy mode enabled - files will be copied")
 			}
+			m.saveConfig()
 
 		case 4:
 			m.scrapeEnabled = !m.scrapeEnabled

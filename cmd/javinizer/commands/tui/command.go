@@ -115,6 +115,13 @@ func run(cmd *cobra.Command, args []string) error {
 		cfg.Output.DownloadExtrafanart = true
 	}
 
+	// Resolve effective move mode: an explicit --move flag overrides config.yaml (issue #36).
+	// Without --move, the TUI loads move_files from config so the setting persists across restarts.
+	effectiveMove := cfg.Output.MoveFiles
+	if cmd.Flags().Changed("move") {
+		effectiveMove = moveFiles
+	}
+
 	// Override config with flag if scraper priority is provided
 	if len(scraperPriority) > 0 {
 		cfg.Scrapers.Priority = scraperPriority
@@ -160,6 +167,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Create TUI model
 	model := tui.New(cfg)
+	model.SetConfigPath(configFile)
 
 	// Scan for files before starting TUI
 	logging.Info("Scanning for video files...")
@@ -274,7 +282,7 @@ func run(cmd *cobra.Command, args []string) error {
 		org,
 		nfoGen,
 		destPath,
-		moveFiles,
+		effectiveMove,
 	)
 	processor.SetConfig(cfg)
 	processor.SetOptionsFromConfig(cfg)
@@ -288,6 +296,8 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Set processor in model
 	model.SetProcessor(processor)
+	// Sync the resolved move mode to the model's display state (issue #36)
+	model.SetMoveFiles(effectiveMove)
 
 	// Set destination path AFTER processor is set
 	model.SetDestPath(destPath)
