@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.15-alpha] - 2026-06-23
+
+### Fixed
+
+- Persist edited poster URL before manual crop so the crop endpoint operates on the edited image, not the stale server-side poster (issue #37)
+- Persist Move Files setting across restarts via a real Output.MoveFiles config field; --move flag remains a session-only override (issue #36)
+- Prevent config leakage and harden move-files persistence: saveConfig reloads from disk so session-only CLI/env overrides are not written to config.yaml
+- Use atomic config.Update (read-modify-write under the file lock) for move-files persistence, eliminating a TOCTOU race and lost updates
+- Strip stdout/stderr from the TUI logger so logs don't leak into the terminal (the default dual-output "stdout,file" config was leaking)
+- Harden the TUI log-leak fix: InitLogger errors on zero valid outputs instead of silently falling back to stdout; fix the pre-alt-screen startup leak via isTUICommand; extract a pure configureTUILogging helper
+- Resolve JAVINIZER_CONFIG in the TUI so LoadOrCreate and SetConfigPath use the same path (config persistence broke when the env var was set)
+- Guard the runtime move-files toggle against the move+link combo rejected at startup (ValidateMoveLinkMode)
+- Honor JAVINIZER_LOG_DIR in the TUI fallback log path and report the actual relocated log path
+- Nil-guard config.Update against a nil mutate callback
+
+### Changed
+
+- Add end-to-end stdout-leak tests (os.Pipe capture) plus a non-vacuous contrast test
+- Add tests for resolveConfigPath, canEnableMoveMode/runtime guard, JAVINIZER_LOG_DIR fallback, and config.Update nil-guard
+- Prove config.Update atomicity with a 100-writer concurrency test (no lost updates)
+- Cover persist-before-crop in the poster crop controller
+- Use the real TUI command in the isTUICommand detection test; use io.ReadAll for stdout pipe capture consistency
+
 ## [v0.3.14-alpha] - 2026-06-22
 
 ### Fixed
