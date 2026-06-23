@@ -164,8 +164,9 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 	if s.reconPosterGen != nil {
 		batchJob.deps.PosterGen = s.reconPosterGen
 	}
-	// BatchCfg is a value type — only overwrite if non-zero to avoid clobbering
-	// a BatchCfg that might have been set from a JobConfig for new jobs.
+	// BatchCfg is a value type — only overwrite if non-zero to avoid writing
+	// a zero-value config before SetReconstructionDeps has been called.
+	// SetReconstructionDeps always overwrites BatchCfg unconditionally.
 	if s.reconBatchCfg.MaxWorkers > 0 || s.reconBatchCfg.WorkerTimeout > 0 || len(s.reconBatchCfg.ScraperPriority) > 0 || s.reconBatchCfg.NFOEnabled {
 		batchJob.deps.BatchCfg = s.reconBatchCfg
 	}

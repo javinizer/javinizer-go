@@ -16,8 +16,8 @@ import (
 
 // unreachableConfigPath returns a config path whose parent directory cannot be
 // created by MkdirAll, guaranteeing LoadOrCreate fails cross-platform.
-// Uses the same blocker-file pattern as testutil.UnreachableConfigPath but
-// avoids the import cycle (config -> testutil -> config).
+// Uses a blocker-file pattern (distinct from testutil.InvalidConfigPath which
+// uses invalid YAML) to avoid the import cycle (config -> testutil -> config).
 func unreachableConfigPath(t *testing.T) string {
 	t.Helper()
 	tmpDir := t.TempDir()

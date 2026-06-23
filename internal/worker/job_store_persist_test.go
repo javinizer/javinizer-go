@@ -66,7 +66,7 @@ func TestReconstructBatchJob_PersistFn(t *testing.T) {
 	t.Parallel()
 
 	mockRepo := &mockJobRepoForPersist{}
-	jq := NewJobStore(mockRepo, nil, nil, "/tmp/javtest", nil, nil)
+	jq := NewJobStore(mockRepo, nil, nil, t.TempDir(), nil, nil)
 
 	// Create and store a job via the JobStore so it goes through the normal path
 	jobCfg := &JobConfig{
@@ -128,7 +128,7 @@ func TestReconstructBatchJob_PersistJobByIDPersistsResults(t *testing.T) {
 	t.Parallel()
 
 	mockRepo := &mockJobRepoForPersist{}
-	jq := NewJobStore(mockRepo, nil, nil, "/tmp/javtest", nil, nil)
+	jq := NewJobStore(mockRepo, nil, nil, t.TempDir(), nil, nil)
 
 	// Create a job with results so we can reconstruct it
 	jobCfg := &JobConfig{

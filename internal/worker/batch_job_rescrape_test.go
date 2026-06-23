@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -97,7 +98,7 @@ func (m *mockRescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseIn
 // or nil for reconstructed jobs (job.deps.WF == nil). This makes the WF state explicit
 // and prevents accidentally forgetting to clear job.deps.WF for reconstructed scenarios.
 func newJobWithRescrapeMock(results map[string]*MovieResult, fileMatchInfo map[string]models.FileMatchInfo, wf workflow.WorkflowInterface) (*BatchJob, *mockRescrapePhase) {
-	jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+	jq := NewJobStore(nil, nil, nil, os.TempDir(), nil, nil)
 	job := jq.CreateJobBatch([]string{})
 	job.results.Results = results
 	if fileMatchInfo != nil {

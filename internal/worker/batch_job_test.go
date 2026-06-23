@@ -104,7 +104,7 @@ func TestNewBatchJobDeps(t *testing.T) {
 
 func TestBatchJob_CompleteRescrape(t *testing.T) {
 	t.Run("active job with matching revision returns success and updates Results", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4"})
 		job.SetResultDirect("file1.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "OLD-001"},
@@ -187,7 +187,7 @@ func TestBatchJob_CompleteRescrape(t *testing.T) {
 	})
 
 	t.Run("skips poster cleanup when another result still uses old movie ID", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"file1.mp4", "file2.mp4"})
 		job.SetResultDirect("file1.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "file1.mp4", MovieID: "SHARED-001"},
@@ -573,7 +573,7 @@ func TestBatchJob_StartApply_UpdateNilPreservesExisting(t *testing.T) {
 
 func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 	t.Run("backs up original poster values on first crop", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
 		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
@@ -594,7 +594,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 	})
 
 	t.Run("does not overwrite backup on second crop", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
 		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
@@ -613,7 +613,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 	})
 
 	t.Run("updates all file parts for multipart movie", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001-cd1.mp4", "/tmp/ABC-001-cd2.mp4"})
 		job.SetResultDirect("/tmp/ABC-001-cd1.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001-cd1.mp4", MovieID: "ABC-001"},
@@ -632,7 +632,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 	})
 
 	t.Run("skips nil movie without error", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
 		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
@@ -644,7 +644,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 	})
 
 	t.Run("preserves original ShouldCropPoster value despite subsequent false assignment", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
 		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
@@ -663,7 +663,7 @@ func TestBatchJob_UpdatePosterCrop(t *testing.T) {
 
 func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 	t.Run("backs up and updates poster URL and cropped URL", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
 		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
@@ -684,7 +684,7 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 	})
 
 	t.Run("does not overwrite backup on second update", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
 		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
@@ -702,7 +702,7 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 	})
 
 	t.Run("updates all file parts for multipart movie", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001-cd1.mp4", "/tmp/ABC-001-cd2.mp4"})
 		job.SetResultDirect("/tmp/ABC-001-cd1.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001-cd1.mp4", MovieID: "ABC-001"},
@@ -721,7 +721,7 @@ func TestBatchJob_UpdatePosterFromURL(t *testing.T) {
 	})
 
 	t.Run("skips nil movie without error", func(t *testing.T) {
-		jq := NewJobStore(nil, nil, nil, "/tmp/javtest", nil, nil)
+		jq := NewJobStore(nil, nil, nil, t.TempDir(), nil, nil)
 		job := jq.CreateJobBatch([]string{"/tmp/ABC-001.mp4"})
 		job.SetResultDirect("/tmp/ABC-001.mp4", &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: "/tmp/ABC-001.mp4", MovieID: "ABC-001"},
