@@ -1,11 +1,10 @@
-//go:build !windows
-
 package auth
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -75,6 +74,9 @@ func TestStorageMiss3_WriteCredentials_MkdirAllError(t *testing.T) {
 // Line 106: creating temp file fails (read-only directory)
 
 func TestStorageMiss3_WriteCredentials_CreateTempError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod(0555) does not create read-only directories on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("root can write to read-only directories")
 	}
@@ -184,6 +186,9 @@ func TestStorageMiss3_WriteSessions_MkdirAllError(t *testing.T) {
 // Line 233: creating temp session file fails
 
 func TestStorageMiss3_WriteSessions_CreateTempError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod(0555) does not create read-only directories on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("root can write to read-only directories")
 	}

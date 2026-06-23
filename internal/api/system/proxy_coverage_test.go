@@ -387,6 +387,10 @@ func TestProxyCov_DirectTokenScopeIsGlobal(t *testing.T) {
 		TargetURL: target.URL,
 		Proxy: models.ProxyConfig{
 			Enabled: true,
+			Profile: "main", // Frontend sends the default profile name here, not DefaultProfile
+			Profiles: map[string]models.ProxyProfile{
+				"main": {URL: proxy.URL},
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -405,12 +409,20 @@ func TestProxyCov_DirectTokenScopeIsGlobal(t *testing.T) {
 
 	// The token must validate with scope "global", not "direct" — config-save
 	// validation (config.go) only checks "global" and "flaresolverr" scopes.
-	// The hash matches req.Proxy (what was tested), which in the real frontend flow
-	// is the same config the user saves.
-	testProxyCfg := models.ProxyConfig{Enabled: true}
-	hash, _ := core.HashProxyConfig(testProxyCfg)
+	// The hash must match what the save endpoint would compute: the frontend
+	// sends Profile="main" in the test request, but the saved config stores
+	// it as DefaultProfile. The test endpoint normalizes Profile→DefaultProfile
+	// before hashing, so the hash matches newCfg.Scrapers.Proxy.
+	saveProxyCfg := models.ProxyConfig{
+		Enabled:        true,
+		DefaultProfile: "main",
+		Profiles: map[string]models.ProxyProfile{
+			"main": {URL: proxy.URL},
+		},
+	}
+	hash, _ := core.HashProxyConfig(saveProxyCfg)
 	assert.True(t, tokenStore.Validate(response.VerificationToken, "global", hash),
-		"direct proxy test token should validate with scope 'global'")
+		"direct proxy test token should validate with scope 'global' and match the save-endpoint hash")
 	assert.False(t, tokenStore.Validate(response.VerificationToken, "direct", hash),
 		"direct proxy test token should NOT have scope 'direct'")
 }

@@ -87,13 +87,13 @@ func TestValidateAndApply_ValidationError(t *testing.T) {
 
 func TestValidateAndApply_PersistError(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("config.Save with directory-as-path behaves differently on Windows")
+		t.Skip("os.Rename over a directory may succeed on Windows via replaceFileOnWindows, so the persist error path is not reliably triggered")
 	}
 
 	tmpDir := t.TempDir()
-	// Create a directory at the config path so config.Save fails (cannot write
-	// a file where a directory exists). Works on all platforms including Windows
-	// where the blocker-file pattern (file-inside-a-file) may not prevent creation.
+	// Create a directory at the config path so config.Save fails. config.Save
+	// writes a temp file then os.Renames it into place — os.Rename fails on
+	// Unix when the destination is a directory, but may succeed on Windows.
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	require.NoError(t, os.MkdirAll(configPath, 0755)) // config.yaml is a directory, not a file
 

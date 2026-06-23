@@ -465,7 +465,7 @@ func TestReconstructBatchJob_RestoresMovieRepo(t *testing.T) {
 
 	mockRepo := &mockJobRepoForPersist{}
 	mockMovieRepo := newMockMovieRepoForReconstruct(t)
-	jq := NewJobStore(mockRepo, nil, mockMovieRepo, "/tmp/javtest", nil, nil)
+	jq := NewJobStore(mockRepo, nil, mockMovieRepo, t.TempDir(), nil, nil)
 
 	dbJob := &models.Job{
 		ID:         "test-recon-movie-repo",
@@ -501,7 +501,7 @@ func TestReconstructBatchJob_RestoresBatchCfgAndPosterGen(t *testing.T) {
 	}
 
 	mockRepo := &mockJobRepoForPersist{}
-	jq := NewJobStore(mockRepo, nil, nil, "/tmp/javtest", nil, nil)
+	jq := NewJobStore(mockRepo, nil, nil, t.TempDir(), nil, nil)
 	jq.SetReconstructionDeps(m, pg, batchCfg)
 
 	dbJob := &models.Job{
@@ -531,7 +531,7 @@ func TestSetReconstructionDeps_RehydratesExistingJobs(t *testing.T) {
 	t.Parallel()
 
 	mockRepo := &mockJobRepoForPersist{}
-	jq := NewJobStore(mockRepo, nil, nil, "/tmp/javtest", nil, nil)
+	jq := NewJobStore(mockRepo, nil, nil, t.TempDir(), nil, nil)
 
 	// Simulate a job loaded from DB at startup (before SetReconstructionDeps)
 	dbJob := &models.Job{

@@ -104,7 +104,17 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 				var configHash string
 				var hashErr error
 				if req.Mode == "direct" {
-					configHash, hashErr = core.HashProxyConfig(req.Proxy)
+					// Normalize: the frontend sends the default profile name in the
+					// Profile field of the test request, but the saved config stores
+					// it in DefaultProfile. Copy Profile → DefaultProfile (and clear
+					// Profile) so the hash matches what validateProxySaveConfig
+					// computes from newCfg.Scrapers.Proxy.
+					normalized := req.Proxy
+					if normalized.DefaultProfile == "" && normalized.Profile != "" {
+						normalized.DefaultProfile = normalized.Profile
+						normalized.Profile = ""
+					}
+					configHash, hashErr = core.HashProxyConfig(normalized)
 				} else {
 					configHash, hashErr = core.HashProxyConfig(req.FlareSolverr)
 				}
