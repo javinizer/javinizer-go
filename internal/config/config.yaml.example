@@ -161,6 +161,7 @@ scrapers:
         # Frontend scraper options:
         # language: en, ja, cn, tw
         language: ja  # Default Japanese
+        # rate_limit: 1000  # Delay between requests in milliseconds (0 = no delay)
         base_url: "http://www.javlibrary.com"
         cookies:
             cf_clearance: ""
@@ -179,6 +180,7 @@ scrapers:
     javdb:
         enabled: false
         base_url: "https://javdb.com"
+        # rate_limit: 1000  # Delay between requests in milliseconds (0 = no delay)
         # Example: proxy profile (flaresolverr configured globally or per-scraper)
         # proxy:
         #   enabled: true

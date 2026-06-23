@@ -573,7 +573,7 @@ scrapers:
 
     db, err := database.New(cfg)
     require.NoError(t, err)
-    err = db.RunMigrationsOnStartup()
+    err = db.RunMigrationsOnStartup(context.Background())
     require.NoError(t, err)
 
     return tmpFile, db
