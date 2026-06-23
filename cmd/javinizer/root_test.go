@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	tuicmd "github.com/javinizer/javinizer-go/cmd/javinizer/commands/tui"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/version"
@@ -397,9 +398,9 @@ func TestSanitizeProxyURL(t *testing.T) {
 // TestIsTUICommand verifies the TUI-subcommand detection used to suppress stdout
 // logging during initial setup (so startup messages don't leak before AltScreen).
 func TestIsTUICommand(t *testing.T) {
-	// Use the real Use string from cmd/javinizer/commands/tui/command.go so a
-	// future rename (e.g. "tui-app") breaks this test, not just production.
-	tuiCmd := &cobra.Command{Use: "tui [path]"}
+	// Use the REAL TUI command (fresh instance) so a future rename in
+	// cmd/javinizer/commands/tui/command.go breaks this test, not just production.
+	tuiCmd := tuicmd.NewCommand()
 	childCmd := &cobra.Command{Use: "something"}
 	tuiCmd.AddCommand(childCmd)
 
