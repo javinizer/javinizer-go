@@ -698,7 +698,7 @@ func NewProcessor(wf workflow.WorkflowInterface) *Processor {
 
 func (p *Processor) ScrapeFiles(ctx context.Context, movieIDs []string) error {
     for _, movieID := range movieIDs {
-        _, err := p.wf.Scrape(ctx, scrape.ScrapeCmd{MovieID: movieID}, nil)
+        _, _, err := p.wf.Scrape(ctx, scrape.ScrapeCmd{MovieID: movieID}, nil)
         if err != nil {
             return err
         }
@@ -725,9 +725,9 @@ type mockWorkflow struct {
     movieIDs []string
 }
 
-func (m *mockWorkflow) Scrape(_ context.Context, cmd scrape.ScrapeCmd, _ workflow.ProgressFunc) (*scrape.ScrapeResult, error) {
+func (m *mockWorkflow) Scrape(_ context.Context, cmd scrape.ScrapeCmd, _ workflow.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
     m.movieIDs = append(m.movieIDs, cmd.MovieID)
-    return &scrape.ScrapeResult{}, nil
+    return &scrape.ScrapeResult{}, &workflow.OrchestrationMeta{}, nil
 }
 
 func (m *mockWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ workflow.ProgressFunc) (*workflow.ApplyResult, error) {
