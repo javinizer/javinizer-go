@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -148,13 +149,7 @@ func TestUpdateAtomicallyModifiesSingleField(t *testing.T) {
 	cfg.Output.DownloadExtrafanart = false
 	require.NoError(t, Save(cfg, configPath))
 
-	// Simultaneously mutate an unrelated in-memory copy (as a session override would)
-	// and use Update to persist only move_files.
-	stale := DefaultConfig()
-	stale.Output.MoveFiles = false
-	stale.Output.DownloadExtrafanart = true // session-only override, must NOT leak
-	_ = stale
-
+	// Use Update to persist only move_files (simulating a TUI toggle).
 	require.NoError(t, Update(configPath, func(c *Config) {
 		c.Output.MoveFiles = true
 	}))
@@ -163,6 +158,50 @@ func TestUpdateAtomicallyModifiesSingleField(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, reloaded.Output.MoveFiles, "Update should persist move_files")
 	assert.False(t, reloaded.Output.DownloadExtrafanart, "Update must not touch unrelated fields")
+}
+
+// TestUpdateConcurrentWritersNoLostUpdates proves config.Update is an atomic
+// read-modify-write: 100 concurrent increments of a counter field must all
+// survive (no lost updates). With an unlocked Load+Save, many increments
+// would be lost. This is the TOCTOU regression test for issue #36.
+func TestUpdateConcurrentWritersNoLostUpdates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrency test in short mode")
+	}
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	cfg := DefaultConfig()
+	cfg.Output.MaxPosterHeight = 0
+	require.NoError(t, Save(cfg, configPath))
+
+	const N = 100
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = Update(configPath, func(c *Config) { c.Output.MaxPosterHeight++ })
+		}()
+	}
+	wg.Wait()
+
+	reloaded, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, N, reloaded.Output.MaxPosterHeight, "no concurrent updates should be lost (atomic RMW under lock)")
+}
+
+// TestUpdateOnMissingFileWritesDefaults verifies Update on a non-existent path
+// writes a config with the mutation applied (loadLocked returns DefaultConfig()
+// for missing files).
+func TestUpdateOnMissingFileWritesDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	require.NoError(t, Update(configPath, func(c *Config) { c.Output.MoveFiles = true }))
+
+	reloaded, err := LoadOrCreate(configPath)
+	require.NoError(t, err)
+	assert.True(t, reloaded.Output.MoveFiles, "Update on a missing file should write the mutation")
 }
 
 // TestCreatedConfigHasComments verifies new configs preserve example comments

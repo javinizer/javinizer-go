@@ -280,4 +280,13 @@ func TestHandleSettingsKeys_ToggleMoveFiles(t *testing.T) {
 	reloaded, err := config.Load(configPath)
 	require.NoError(t, err)
 	assert.True(t, reloaded.Output.MoveFiles, "toggle should persist move_files")
+
+	// Toggle back off through the same keypress path (true -> false)
+	updated2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m3 := updated2.(*Model)
+	assert.False(t, m3.moveFiles, "second space should toggle moveFiles off")
+	assert.False(t, proc.moveFiles, "processor should sync back to false")
+	reloaded2, err := config.Load(configPath)
+	require.NoError(t, err)
+	assert.False(t, reloaded2.Output.MoveFiles, "toggle-off should persist")
 }
