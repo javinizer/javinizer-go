@@ -366,7 +366,7 @@
 
 <PosterCropModal
 	bind:show={s.showPosterCropModal}
-	posterCropSaving={s.posterCropMutation.isPending}
+	posterCropSaving={s.posterCropSaving}
 	posterCropLoadError={s.posterCropLoadError}
 	cropSourceURL={s.cropSourceURL}
 	cropMetrics={s.cropMetrics}

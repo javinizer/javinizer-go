@@ -106,6 +106,11 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		posterFromUrlMutation.mutate({ resultId, url });
 	}
 
+	async function applyPosterFromUrlAsync(resultId: string, url: string) {
+		if (!deps.getJob()) return;
+		await posterFromUrlMutation.mutateAsync({ resultId, url });
+	}
+
 	const excludeMovieMutation = createMutation(() => ({
 		mutationFn: async ({ jobId: mutationJobId, resultId }: { jobId: string; resultId: string }) => {
 			return deps.excludeBatchMovie(mutationJobId, resultId);
@@ -196,6 +201,10 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		}
 	}));
 
+	async function applyPosterCropAsync(jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number) {
+		await posterCropMutation.mutateAsync({ jobId, resultId, crop, maxPosterHeight });
+	}
+
 	const bulkExcludeMutation = createMutation(() => ({
 		mutationFn: async ({ resultIds }: { resultIds: string[] }) => {
 			return deps.batchExcludeMovies(deps.getJobId(), { result_ids: resultIds });
@@ -259,10 +268,12 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 	return {
 		posterFromUrlMutation,
 		applyPosterFromUrl,
+		applyPosterFromUrlAsync,
 		excludeMovieMutation,
 		bulkExcludeMutation,
 		bulkRescrapeMutation,
 		saveEditsMutation,
-		posterCropMutation
+		posterCropMutation,
+		applyPosterCropAsync
 	};
 }
