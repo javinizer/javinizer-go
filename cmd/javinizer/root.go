@@ -172,18 +172,29 @@ func initConfig() {
 	// messages (e.g. "Log file: ...") don't leak to the terminal before AltScreen
 	// activates. Only logCfg.Output is modified; cfg.Logging.Output is left intact
 	// so the JAVINIZER_LOG_DIR relocation check below still compares correctly.
+	// When the config has no file target at all (e.g. pure "stdout"), the fallback
+	// path honors JAVINIZER_LOG_DIR so logs still land in the env-configured dir.
 	// The TUI's run() reinitializes the logger via configureTUILogging afterwards.
 	if isTUICommand(currentCmd) {
-		logCfg.Output = logging.FileOnlyOutput(logCfg.Output, "data/logs/javinizer-tui.log")
+		defaultTUILog := "data/logs/javinizer-tui.log"
+		if len(logging.GetFileOutputs(logCfg.Output)) == 0 {
+			if envLogDir := os.Getenv("JAVINIZER_LOG_DIR"); envLogDir != "" {
+				defaultTUILog = filepath.Join(envLogDir, "javinizer-tui.log")
+			}
+		}
+		logCfg.Output = logging.FileOnlyOutput(logCfg.Output, defaultTUILog)
 	}
+	actualLogOutput := logCfg.Output
 
 	if err := logging.InitLogger(logCfg); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Log file output location (INFO level for visibility)
-	if logPaths := logging.GetFileOutputs(cfg.Logging.Output); len(logPaths) > 0 {
+	// Log file output location (INFO level for visibility). Use the actual logger
+	// output (which for the TUI is the stripped/relocated file-only path) rather than
+	// the original cfg.Logging.Output, so the reported path matches what is written.
+	if logPaths := logging.GetFileOutputs(actualLogOutput); len(logPaths) > 0 {
 		for _, path := range logPaths {
 			absPath, err := filepath.Abs(path)
 			if err != nil {

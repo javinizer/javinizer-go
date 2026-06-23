@@ -448,6 +448,9 @@ func Save(cfg *Config, path string) error {
 // to avoid a TOCTOU race where a concurrent writer's changes (e.g. from
 // `javinizer api`) between the read and write are silently reverted.
 func Update(path string, mutate func(*Config)) error {
+	if mutate == nil {
+		return fmt.Errorf("config.Update: mutate callback must not be nil")
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, DirPerm); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)

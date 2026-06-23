@@ -423,6 +423,21 @@ func TestIsTUICommand(t *testing.T) {
 	}
 }
 
+// TestIsTUICommand_DetectsRealRegisteredCommand ensures isTUICommand detects the
+// actual TUI command registered on rootCmd, not just a hardcoded mock — so a
+// future rename of the TUI command breaks this test (and surfaces the regression).
+func TestIsTUICommand_DetectsRealRegisteredCommand(t *testing.T) {
+	var realTUI *cobra.Command
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "tui" {
+			realTUI = c
+			break
+		}
+	}
+	require.NotNil(t, realTUI, "the real tui command should be registered on rootCmd")
+	assert.True(t, isTUICommand(realTUI), "isTUICommand must detect the real registered tui command")
+}
+
 // TestInitConfig_TUICommandStripsStdoutFromStartup proves the pre-alt-screen
 // startup leak (issue N1) is fixed: when the TUI subcommand is invoked, the
 // initial logger is file-only, so the "Log file: ..." startup message does not
@@ -531,6 +546,62 @@ func TestInitConfig_TUICommandWithJavinizerLogDir_PreservesRelocation(t *testing
 	relocatedLog := filepath.Join(logDir, "javinizer.log")
 	content, err := os.ReadFile(relocatedLog)
 	require.NoError(t, err, "relocated log file should exist in JAVINIZER_LOG_DIR")
+	assert.Contains(t, string(content), "Log file")
+}
+
+// TestInitConfig_TUICommandPureStdoutWithLogDir verifies the fallback TUI log
+// path honors JAVINIZER_LOG_DIR when the config has NO file target (pure
+// "stdout"): logs land in the env-configured dir instead of the hardcoded
+// data/logs/javinizer-tui.log (CodeRabbit finding).
+func TestInitConfig_TUICommandPureStdoutWithLogDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "purestdout.yaml")
+	logDir := filepath.Join(tmpDir, "envlogs")
+
+	testCfg := config.DefaultConfig()
+	testCfg.Database.DSN = filepath.Join(tmpDir, "test.db")
+	testCfg.Logging.Output = "stdout" // no file target at all
+	require.NoError(t, config.Save(testCfg, configPath))
+
+	t.Setenv("JAVINIZER_CONFIG", configPath)
+	t.Setenv("JAVINIZER_LOG_DIR", logDir)
+	origCfgFile := cfgFile
+	cfgFile = ""
+	defer func() { cfgFile = origCfgFile }()
+	origLogOutput := originalLogOutput
+	defer func() { originalLogOutput = origLogOutput }()
+	origVerbose := verboseFlag
+	verboseFlag = false
+	defer func() { verboseFlag = origVerbose }()
+	origCmd := currentCmd
+	defer func() { currentCmd = origCmd }()
+	currentCmd = &cobra.Command{Use: "tui [path]"}
+	defer logging.CloseLogger()
+	// Defensive: if the fix regresses, InitLogger would create the hardcoded fallback
+	// in the repo root; clean it up so the test never pollutes the working tree.
+	defer func() { _ = os.RemoveAll("data/logs/javinizer-tui.log") }()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origStdout := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = origStdout }()
+
+	initConfig()
+
+	_ = w.Close()
+	os.Stdout = origStdout
+	outBuf, err := io.ReadAll(r)
+	require.NoError(t, err)
+	_ = r.Close()
+	if strings.Contains(string(outBuf), "Log file") {
+		t.Errorf("startup message leaked to stdout: %q", string(outBuf))
+	}
+
+	// The fallback honored JAVINIZER_LOG_DIR (not the hardcoded data/logs path).
+	envLog := filepath.Join(logDir, "javinizer-tui.log")
+	content, err := os.ReadFile(envLog)
+	require.NoError(t, err, "fallback log should land in JAVINIZER_LOG_DIR, not data/logs/")
 	assert.Contains(t, string(content), "Log file")
 }
 

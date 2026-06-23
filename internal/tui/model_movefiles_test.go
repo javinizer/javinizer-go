@@ -194,7 +194,8 @@ func TestSaveConfigEndToEndRestart(t *testing.T) {
 	require.NoError(t, config.Save(cfg, configPath))
 
 	// Session 1: start in copy mode, toggle to move mode, persist
-	loaded, _ := config.Load(configPath)
+	loaded, err := config.Load(configPath)
+	require.NoError(t, err)
 	m1 := New(loaded)
 	m1.SetConfigPath(configPath)
 	require.False(t, m1.moveFiles, "should start in copy mode")
@@ -289,4 +290,58 @@ func TestHandleSettingsKeys_ToggleMoveFiles(t *testing.T) {
 	reloaded2, err := config.Load(configPath)
 	require.NoError(t, err)
 	assert.False(t, reloaded2.Output.MoveFiles, "toggle-off should persist")
+}
+
+// TestCanEnableMoveMode verifies the guard predicate used by the runtime toggle.
+func TestCanEnableMoveMode(t *testing.T) {
+	m := New(config.DefaultConfig())
+	assert.True(t, m.canEnableMoveMode(), "no link mode -> move can be enabled")
+
+	m.SetLinkMode(organizer.LinkModeHard)
+	assert.False(t, m.canEnableMoveMode(), "hard link mode -> move cannot be enabled")
+
+	m.SetLinkMode(organizer.LinkModeSoft)
+	assert.False(t, m.canEnableMoveMode(), "soft link mode -> move cannot be enabled")
+
+	m.SetLinkMode(organizer.LinkModeNone)
+	assert.True(t, m.canEnableMoveMode(), "link mode cleared -> move can be enabled")
+}
+
+// TestHandleSettingsKeys_ToggleMoveFiles_RefusedWithLinkMode verifies the runtime
+// guard: enabling move mode is refused while link mode is active, since move+link
+// is mutually exclusive (ValidateMoveLinkMode rejects it at startup). The toggle
+// must not change moveFiles, sync the processor, or persist.
+func TestHandleSettingsKeys_ToggleMoveFiles_RefusedWithLinkMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	cfg := config.DefaultConfig()
+	cfg.Output.MoveFiles = false
+	require.NoError(t, config.Save(cfg, configPath))
+
+	loaded, err := config.Load(configPath)
+	require.NoError(t, err)
+	m := New(loaded)
+	m.SetConfigPath(configPath)
+	m.SetLinkMode(organizer.LinkModeHard) // simulate --link-mode hard
+	m.currentView = ViewSettings
+	m.settingsCursor = 3 // "Move Files" row
+
+	proc := NewProcessingCoordinator(nil, nil, nil, nil, nil, nil, nil, nil, "", false)
+	m.SetProcessor(proc)
+	require.False(t, m.moveFiles)
+
+	// Attempt to toggle move on — must be refused due to link mode.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m2 := updated.(*Model)
+
+	assert.False(t, m2.moveFiles, "move mode must NOT enable while link mode is active")
+	assert.False(t, proc.moveFiles, "processor must remain in copy mode")
+
+	reloaded, err := config.Load(configPath)
+	require.NoError(t, err)
+	assert.False(t, reloaded.Output.MoveFiles, "refused toggle must not persist move_files")
+
+	require.NotEmpty(t, m2.logs, "a warning should be logged when the toggle is refused")
+	last := m2.logs[len(m2.logs)-1]
+	assert.Equal(t, "warn", last.Level, "refused toggle should log a warning")
 }

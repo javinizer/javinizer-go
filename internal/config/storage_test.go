@@ -204,6 +204,18 @@ func TestUpdateOnMissingFileWritesDefaults(t *testing.T) {
 	assert.True(t, reloaded.Output.MoveFiles, "Update on a missing file should write the mutation")
 }
 
+// TestUpdate_NilMutateReturnsError guards against a nil callback panicking inside
+// the locked read-modify-write (CodeRabbit finding).
+func TestUpdate_NilMutateReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	require.NoError(t, Save(DefaultConfig(), configPath))
+
+	err := Update(configPath, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutate", "error should explain the nil callback")
+}
+
 // TestCreatedConfigHasComments verifies new configs preserve example comments
 func TestCreatedConfigHasComments(t *testing.T) {
 	tmpDir := t.TempDir()

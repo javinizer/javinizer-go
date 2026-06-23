@@ -58,6 +58,7 @@ func NewCommand() *cobra.Command {
 func run(cmd *cobra.Command, args []string) error {
 	// Get config file from persistent flag
 	configFile, _ := cmd.Flags().GetString("config")
+	configFile = resolveConfigPath(configFile)
 
 	// Get source path - prioritize flag over positional argument
 	sourcePath := "."
@@ -289,6 +290,9 @@ func run(cmd *cobra.Command, args []string) error {
 	// defensive sync propagates the correct value (no transient mismatch when --move
 	// overrides config) (issue #36).
 	model.SetMoveFiles(effectiveMove)
+	// Record link mode so the runtime move-files toggle can guard against the
+	// move+link combo rejected at startup (ValidateMoveLinkMode) (issue #36).
+	model.SetLinkMode(linkMode)
 	// Set processor in model (syncs moveFiles, dryRun, updateMode to the processor)
 	model.SetProcessor(processor)
 
@@ -472,6 +476,17 @@ func BuildFileTree(basePath string, files []scanner.FileInfo, matchMap map[strin
 	}
 
 	return result
+}
+
+// resolveConfigPath returns the config file path to load and persist, honoring
+// the JAVINIZER_CONFIG env override so the TUI uses the same path the rest of the
+// app (root.go initConfig) does. Without this, LoadOrCreate would load from the
+// env path while SetConfigPath persisted to the --config flag path.
+func resolveConfigPath(flagValue string) string {
+	if envConfig := os.Getenv("JAVINIZER_CONFIG"); envConfig != "" {
+		return envConfig
+	}
+	return flagValue
 }
 
 // configureTUILogging builds a file-only logging config for TUI mode, stripping

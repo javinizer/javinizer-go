@@ -96,3 +96,19 @@ func TestConfigureTUILogging_EmptyOutputFallsBackToDefault(t *testing.T) {
 	assert.Equal(t, "data/logs/javinizer-tui.log", logCfg.Output,
 		"empty config output should fall back to the TUI default file")
 }
+
+// TestResolveConfigPath verifies the TUI loads AND persists via the same path the
+// rest of the app uses: JAVINIZER_CONFIG overrides the --config flag (mirrors
+// root.go initConfig). Without this, SetConfigPath would persist to the flag path
+// while LoadOrCreate loaded from the env path.
+func TestResolveConfigPath(t *testing.T) {
+	t.Setenv("JAVINIZER_CONFIG", "/custom/env-config.yaml")
+	assert.Equal(t, "/custom/env-config.yaml", resolveConfigPath("configs/config.yaml"),
+		"JAVINIZER_CONFIG should override the --config flag value")
+}
+
+func TestResolveConfigPath_FallsBackToFlag(t *testing.T) {
+	t.Setenv("JAVINIZER_CONFIG", "")
+	assert.Equal(t, "configs/config.yaml", resolveConfigPath("configs/config.yaml"),
+		"empty JAVINIZER_CONFIG should fall back to the --config flag value")
+}

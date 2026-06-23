@@ -664,6 +664,7 @@ func TestInitLogger_FileOnlyOutput_NoStdoutLeak(t *testing.T) {
 	}
 	origStdout := os.Stdout
 	os.Stdout = w
+	defer func() { os.Stdout = origStdout }() // restore on all paths, including t.Fatalf
 
 	stripped := FileOnlyOutput("stdout,"+logFile, "data/logs/javinizer-tui.log")
 	if stripped != logFile {

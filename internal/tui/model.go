@@ -105,16 +105,17 @@ type Model struct {
 	totalFilesCount    int       // Total number of files processed
 
 	// Runtime settings (can be toggled in Settings view)
-	forceUpdate         bool // Replace existing files (images, NFO)
-	forceRefresh        bool // Clear DB cache and rescrape metadata
-	moveFiles           bool // Move instead of copy
-	scrapeEnabled       bool // Enable metadata scraping
-	downloadEnabled     bool // Enable media downloads
-	downloadExtrafanart bool // Enable extrafanart (screenshots) downloads
-	organizeEnabled     bool // Enable file organization
-	nfoEnabled          bool // Enable NFO generation
-	updateMode          bool // Update mode: only create/update metadata without moving files
-	settingsCursor      int  // Cursor position in settings view
+	forceUpdate         bool               // Replace existing files (images, NFO)
+	forceRefresh        bool               // Clear DB cache and rescrape metadata
+	moveFiles           bool               // Move instead of copy
+	linkMode            organizer.LinkMode // Link mode (mutually exclusive with moveFiles)
+	scrapeEnabled       bool               // Enable metadata scraping
+	downloadEnabled     bool               // Enable media downloads
+	downloadExtrafanart bool               // Enable extrafanart (screenshots) downloads
+	organizeEnabled     bool               // Enable file organization
+	nfoEnabled          bool               // Enable NFO generation
+	updateMode          bool               // Update mode: only create/update metadata without moving files
+	settingsCursor      int                // Cursor position in settings view
 
 	// Statistics
 	stats       worker.ProgressStats
@@ -477,6 +478,20 @@ func (m *Model) SetMoveFiles(moveFiles bool) {
 	if m.processor != nil {
 		m.processor.SetMoveFiles(moveFiles)
 	}
+}
+
+// SetLinkMode records the link mode so the runtime move-files toggle can guard
+// against the move+link combination rejected at startup (ValidateMoveLinkMode).
+// Link mode is set at startup via --link-mode and is not toggled at runtime.
+func (m *Model) SetLinkMode(mode organizer.LinkMode) {
+	m.linkMode = mode
+}
+
+// canEnableMoveMode reports whether move mode can be enabled at runtime. Move and
+// link modes are mutually exclusive (ValidateMoveLinkMode); if link mode is active,
+// enabling move is refused to preserve the startup invariant.
+func (m *Model) canEnableMoveMode() bool {
+	return m.linkMode == organizer.LinkModeNone
 }
 
 // ResolveMoveMode determines the effective move mode for the TUI: an explicit
