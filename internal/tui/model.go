@@ -444,10 +444,11 @@ func (m *Model) GetSelectedFiles() []string {
 // SetProcessor sets the processing coordinator
 func (m *Model) SetProcessor(processor *ProcessingCoordinator) {
 	m.processor = processor
-	// Sync dry-run state to processor
+	// Sync runtime state to processor
 	if m.processor != nil {
 		m.processor.SetDryRun(m.dryRun)
 		m.processor.SetUpdateMode(m.updateMode)
+		m.processor.SetMoveFiles(m.moveFiles)
 	}
 }
 
@@ -477,23 +478,41 @@ func (m *Model) SetMoveFiles(moveFiles bool) {
 	}
 }
 
+// ResolveMoveMode determines the effective move mode for the TUI: an explicit
+// --move flag overrides config.yaml's move_files; otherwise the config value
+// is used (issue #36).
+func ResolveMoveMode(configMoveFiles, moveFlagSet, moveFlagValue bool) bool {
+	if moveFlagSet {
+		return moveFlagValue
+	}
+	return configMoveFiles
+}
+
 // SetConfigPath records the config.yaml path so TUI settings can be persisted.
 func (m *Model) SetConfigPath(path string) {
 	m.configPath = path
 }
 
-// saveConfig persists the current TUI-backed settings (move_files) to config.yaml.
-// Other settings are left as-is; the merge-based Save preserves existing keys/comments.
+// saveConfig persists the Move Files setting to config.yaml. It reloads the
+// on-disk config fresh and writes only move_files, so session-only CLI/env
+// overrides applied to the in-memory cfg (e.g. --extrafanart, the TUI-mode
+// logging.output rewrite, --scraper-priority, LOG_LEVEL) are NOT leaked to
+// disk on toggle (issue #36).
 func (m *Model) saveConfig() {
 	if m.config == nil || m.configPath == "" {
 		return
 	}
-	m.config.Output.MoveFiles = m.moveFiles
-	if err := config.Save(m.config, m.configPath); err != nil {
-		m.AddLog("error", fmt.Sprintf("Failed to save Move Files setting to config: %v", err))
-	} else {
-		m.AddLog("info", "Move Files setting saved to config")
+	diskCfg, err := config.Load(m.configPath)
+	if err != nil {
+		m.AddLog("error", fmt.Sprintf("Failed to reload config to save Move Files setting: %v", err))
+		return
 	}
+	diskCfg.Output.MoveFiles = m.moveFiles
+	if err := config.Save(diskCfg, m.configPath); err != nil {
+		m.AddLog("error", fmt.Sprintf("Failed to save Move Files setting to config: %v", err))
+		return
+	}
+	m.AddLog("info", "Move Files setting saved to config")
 }
 
 // SetUpdateMode sets update mode and syncs it to processor.

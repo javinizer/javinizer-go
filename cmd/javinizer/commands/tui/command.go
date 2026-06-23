@@ -117,9 +117,12 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Resolve effective move mode: an explicit --move flag overrides config.yaml (issue #36).
 	// Without --move, the TUI loads move_files from config so the setting persists across restarts.
-	effectiveMove := cfg.Output.MoveFiles
-	if cmd.Flags().Changed("move") {
-		effectiveMove = moveFiles
+	effectiveMove := tui.ResolveMoveMode(cfg.Output.MoveFiles, cmd.Flags().Changed("move"), moveFiles)
+
+	// --link-mode is incompatible with move mode, whether move mode came from the
+	// --move flag or from move_files in config (issue #36).
+	if effectiveMove && linkMode != organizer.LinkModeNone {
+		return fmt.Errorf("--link-mode can only be used when move mode is disabled (move_files is false and --move is not set)")
 	}
 
 	// Override config with flag if scraper priority is provided
