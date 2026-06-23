@@ -86,3 +86,13 @@ func TestConfigureTUILogging_ReturnsLoggingConfig(t *testing.T) {
 	assert.Equal(t, "json", logCfg.Format)
 	assert.Equal(t, "data/logs/x.log", logCfg.Output)
 }
+
+func TestConfigureTUILogging_EmptyOutputFallsBackToDefault(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Logging.Output = "" // no targets at all
+
+	logCfg := configureTUILogging(cfg, false)
+
+	assert.Equal(t, "data/logs/javinizer-tui.log", logCfg.Output,
+		"empty config output should fall back to the TUI default file")
+}

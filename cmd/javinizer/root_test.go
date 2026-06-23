@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -396,9 +397,11 @@ func TestSanitizeProxyURL(t *testing.T) {
 // TestIsTUICommand verifies the TUI-subcommand detection used to suppress stdout
 // logging during initial setup (so startup messages don't leak before AltScreen).
 func TestIsTUICommand(t *testing.T) {
-	tuiCmd := &cobra.Command{Use: "tui"}
+	// Use the real Use string from cmd/javinizer/commands/tui/command.go so a
+	// future rename (e.g. "tui-app") breaks this test, not just production.
+	tuiCmd := &cobra.Command{Use: "tui [path]"}
 	childCmd := &cobra.Command{Use: "something"}
-	childCmd.Parent() // no-op; parent set below
+	tuiCmd.AddCommand(childCmd)
 	tuiCmd.AddCommand(childCmd)
 
 	scrapeCmd := &cobra.Command{Use: "scrape"}
@@ -443,9 +446,13 @@ func TestInitConfig_TUICommandStripsStdoutFromStartup(t *testing.T) {
 	origLogOutput := originalLogOutput
 	defer func() { originalLogOutput = origLogOutput }()
 
+	origVerbose := verboseFlag
+	verboseFlag = false
+	defer func() { verboseFlag = origVerbose }()
+
 	origCmd := currentCmd
 	defer func() { currentCmd = origCmd }()
-	currentCmd = &cobra.Command{Use: "tui"}
+	currentCmd = &cobra.Command{Use: "tui [path]"}
 
 	defer logging.CloseLogger()
 
@@ -453,6 +460,7 @@ func TestInitConfig_TUICommandStripsStdoutFromStartup(t *testing.T) {
 	require.NoError(t, err)
 	origStdout := os.Stdout
 	os.Stdout = w
+	defer func() { os.Stdout = origStdout }() // defensive: restore even if initConfig os.Exit's
 
 	initConfig()
 
@@ -470,5 +478,217 @@ func TestInitConfig_TUICommandStripsStdoutFromStartup(t *testing.T) {
 	require.NoError(t, err, "log file target should exist and receive logs")
 	if !strings.Contains(string(content), "Log file") {
 		t.Errorf("log file did not receive the startup message; content: %s", string(content))
+	}
+}
+
+// TestInitConfig_TUICommandWithJavinizerLogDir_PreservesRelocation
+// verifies the JAVINIZER_LOG_DIR + TUI interaction: the stdout strip must use
+// the env-relocated file target (so logs land in JAVINIZER_LOG_DIR) while stdout
+// stays clean. This exercises the round-2 review Medium concern that the strip
+// cooperates with JAVINIZER_LOG_DIR file relocation.
+func TestInitConfig_TUICommandWithJavinizerLogDir_PreservesRelocation(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "logdir.yaml")
+	logDir := filepath.Join(tmpDir, "customlogs")
+
+	testCfg := config.DefaultConfig()
+	testCfg.Database.DSN = filepath.Join(tmpDir, "test.db")
+	testCfg.Logging.Output = "stdout,data/logs/javinizer.log"
+	require.NoError(t, config.Save(testCfg, configPath))
+
+	t.Setenv("JAVINIZER_CONFIG", configPath)
+	t.Setenv("JAVINIZER_LOG_DIR", logDir)
+	origCfgFile := cfgFile
+	cfgFile = ""
+	defer func() { cfgFile = origCfgFile }()
+	origLogOutput := originalLogOutput
+	defer func() { originalLogOutput = origLogOutput }()
+	origVerbose := verboseFlag
+	verboseFlag = false
+	defer func() { verboseFlag = origVerbose }()
+	origCmd := currentCmd
+	defer func() { currentCmd = origCmd }()
+	currentCmd = &cobra.Command{Use: "tui [path]"}
+	defer logging.CloseLogger()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origStdout := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = origStdout }()
+
+	initConfig()
+
+	_ = w.Close()
+	os.Stdout = origStdout
+	outBuf, err := io.ReadAll(r)
+	require.NoError(t, err)
+	_ = r.Close()
+	if strings.Contains(string(outBuf), "Log file") {
+		t.Errorf("startup message leaked to stdout in TUI+JAVINIZER_LOG_DIR mode: %q", string(outBuf))
+	}
+
+	// The logger used the env-relocated file target, so logs land in JAVINIZER_LOG_DIR.
+	relocatedLog := filepath.Join(logDir, "javinizer.log")
+	content, err := os.ReadFile(relocatedLog)
+	require.NoError(t, err, "relocated log file should exist in JAVINIZER_LOG_DIR")
+	assert.Contains(t, string(content), "Log file")
+}
+
+// TestInitConfig_TUICommandWithVerbose_DebugLevelFileOnly verifies that the
+// verbose flag combines with the TUI stdout-strip: debug-level startup messages
+// go to the file only, never stdout.
+func TestInitConfig_TUICommandWithVerbose_DebugLevelFileOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "verbose.yaml")
+	logFile := filepath.Join(tmpDir, "verbose.log")
+
+	testCfg := config.DefaultConfig()
+	testCfg.Database.DSN = filepath.Join(tmpDir, "test.db")
+	testCfg.Logging.Output = "stdout," + logFile
+	testCfg.Logging.Level = "info"
+	require.NoError(t, config.Save(testCfg, configPath))
+
+	t.Setenv("JAVINIZER_CONFIG", configPath)
+	origCfgFile := cfgFile
+	cfgFile = ""
+	defer func() { cfgFile = origCfgFile }()
+	origLogOutput := originalLogOutput
+	defer func() { originalLogOutput = origLogOutput }()
+	origVerbose := verboseFlag
+	verboseFlag = true
+	defer func() { verboseFlag = origVerbose }()
+	origCmd := currentCmd
+	defer func() { currentCmd = origCmd }()
+	currentCmd = &cobra.Command{Use: "tui [path]"}
+	defer logging.CloseLogger()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origStdout := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = origStdout }()
+
+	initConfig()
+
+	_ = w.Close()
+	os.Stdout = origStdout
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	_ = r.Close()
+	if n > 0 && (strings.Contains(string(buf[:n]), "Log file") || strings.Contains(string(buf[:n]), "Loaded configuration")) {
+		t.Errorf("debug-level startup messages leaked to stdout in TUI verbose mode: %q", string(buf[:n]))
+	}
+
+	content, err := os.ReadFile(logFile)
+	require.NoError(t, err, "log file should exist")
+	// debug level emits the "Loaded configuration from:" message.
+	assert.Contains(t, string(content), "Loaded configuration from:",
+		"verbose flag should produce debug-level output in the log file")
+}
+
+// TestInitConfig_TUICommandStripsStderr verifies stderr targets are also
+// stripped in the TUI startup path (FileOnlyOutput excludes both stdout and
+// stderr), so stderr doesn't corrupt the TUI either.
+func TestInitConfig_TUICommandStripsStderr(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "stderr.yaml")
+	logFile := filepath.Join(tmpDir, "stderr.log")
+
+	testCfg := config.DefaultConfig()
+	testCfg.Database.DSN = filepath.Join(tmpDir, "test.db")
+	testCfg.Logging.Output = "stdout,stderr," + logFile
+	require.NoError(t, config.Save(testCfg, configPath))
+
+	t.Setenv("JAVINIZER_CONFIG", configPath)
+	origCfgFile := cfgFile
+	cfgFile = ""
+	defer func() { cfgFile = origCfgFile }()
+	origLogOutput := originalLogOutput
+	defer func() { originalLogOutput = origLogOutput }()
+	origVerbose := verboseFlag
+	verboseFlag = false
+	defer func() { verboseFlag = origVerbose }()
+	origCmd := currentCmd
+	defer func() { currentCmd = origCmd }()
+	currentCmd = &cobra.Command{Use: "tui [path]"}
+	defer logging.CloseLogger()
+
+	// Capture both stdout and stderr.
+	rOut, wOut, err := os.Pipe()
+	require.NoError(t, err)
+	rErr, wErr, err := os.Pipe()
+	require.NoError(t, err)
+	origStdout, origStderr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = wOut, wErr
+	defer func() { os.Stdout, os.Stderr = origStdout, origStderr }()
+
+	initConfig()
+
+	_ = wOut.Close()
+	_ = wErr.Close()
+	os.Stdout, os.Stderr = origStdout, origStderr
+	outBuf, err := io.ReadAll(rOut)
+	require.NoError(t, err)
+	errBuf, err := io.ReadAll(rErr)
+	require.NoError(t, err)
+	_ = rOut.Close()
+	_ = rErr.Close()
+
+	if strings.Contains(string(outBuf), "Log file") {
+		t.Errorf("startup message leaked to stdout: %q", string(outBuf))
+	}
+	if strings.Contains(string(errBuf), "Log file") {
+		t.Errorf("startup message leaked to stderr: %q", string(errBuf))
+	}
+
+	content, err := os.ReadFile(logFile)
+	require.NoError(t, err, "log file should exist")
+	assert.Contains(t, string(content), "Log file")
+}
+
+// TestInitConfig_NonTUICommand_KeepsStdoutOutput is a negative test: for a
+// non-TUI command (e.g. scrape), stdout is NOT stripped — the logger keeps the
+// configured stdout target so CLI/API output remains visible. Guards against
+// over-stripping.
+func TestInitConfig_NonTUICommand_KeepsStdoutOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "nontui.yaml")
+	logFile := filepath.Join(tmpDir, "nontui.log")
+
+	testCfg := config.DefaultConfig()
+	testCfg.Database.DSN = filepath.Join(tmpDir, "test.db")
+	testCfg.Logging.Output = "stdout," + logFile
+	require.NoError(t, config.Save(testCfg, configPath))
+
+	t.Setenv("JAVINIZER_CONFIG", configPath)
+	origCfgFile := cfgFile
+	cfgFile = ""
+	defer func() { cfgFile = origCfgFile }()
+	origLogOutput := originalLogOutput
+	defer func() { originalLogOutput = origLogOutput }()
+	origVerbose := verboseFlag
+	verboseFlag = false
+	defer func() { verboseFlag = origVerbose }()
+	origCmd := currentCmd
+	defer func() { currentCmd = origCmd }()
+	currentCmd = &cobra.Command{Use: "scrape [pattern]"} // non-TUI command
+	defer logging.CloseLogger()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origStdout := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = origStdout }()
+
+	initConfig()
+
+	_ = w.Close()
+	os.Stdout = origStdout
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	_ = r.Close()
+	if n == 0 || !strings.Contains(string(buf[:n]), "Log file") {
+		t.Errorf("non-TUI command should retain stdout output, but Log file was not captured: %q", string(buf[:n]))
 	}
 }

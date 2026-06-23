@@ -1025,3 +1025,33 @@ func TestPreserveRedactedSecrets(t *testing.T) {
 		assert.Equal(t, "real-dsn-value", newCfg.Database.DSN)
 	})
 }
+
+// TestUpdateConfig_EmptyLogOutputDefaultsAndReloadsNonFatally verifies that an API
+// config update with an empty logging.output does not break the reload: Normalize
+// (via Prepare) defaults it to the standard dual-output target, so InitLogger gets
+// a valid output and the reload succeeds (200). This guards the round-2 review
+// concern that the InitLogger zero-output error could surface via the API path.
+func TestUpdateConfig_EmptyLogOutputDefaultsAndReloadsNonFatally(t *testing.T) {
+	tempConfigFile := filepath.Join(t.TempDir(), "config.yaml")
+	deps := createTestDeps(t, config.DefaultConfig(), tempConfigFile)
+
+	router := gin.New()
+	router.PUT("/config", updateConfig(deps))
+
+	cfg := config.DefaultConfig()
+	cfg.Logging.Output = "" // empty — previously could reach InitLogger with no valid targets
+
+	body, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPut, "/config", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"reload must succeed: Normalize defaults empty output and InitLogger failure is non-fatal")
+	updated := deps.GetConfig()
+	assert.Equal(t, config.DefaultConfig().Logging.Output, updated.Logging.Output,
+		"empty logging.output should be defaulted by Normalize before reload")
+}
