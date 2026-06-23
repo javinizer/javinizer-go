@@ -264,7 +264,7 @@ func TestStartApply_Miss_CfgWFOverride(t *testing.T) {
 	err := job.Controller().StartApply(context.Background(), ApplyPhaseConfig{
 		Destination:           "/tmp/test",
 		OperationModeOverride: "organize",
-		TempDir:               "/tmp/javtest",
+		TempDir:               t.TempDir(),
 	})
 	require.NoError(t, err)
 }

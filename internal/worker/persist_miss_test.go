@@ -42,7 +42,7 @@ func TestSnapshotForPersist_AllFieldsPopulated(t *testing.T) {
 	})
 	job.cfg.destination = "/output"
 	job.cfg.update = true
-	job.cfg.tempDir = "/tmp/javtest"
+	job.cfg.tempDir = t.TempDir()
 	job.cfg.operationMode = "organize"
 
 	dbJob, ok := snapshotForPersist(job)
@@ -51,7 +51,8 @@ func TestSnapshotForPersist_AllFieldsPopulated(t *testing.T) {
 	assert.Equal(t, job.ID.String(), dbJob.ID)
 	assert.Equal(t, "/output", dbJob.Destination)
 	assert.True(t, dbJob.Update)
-	assert.Equal(t, "/tmp/javtest", dbJob.TempDir)
+	tempDir := job.cfg.tempDir
+	assert.Equal(t, tempDir, dbJob.TempDir)
 	assert.Equal(t, "organize", string(dbJob.OperationModeOverride))
 
 	// Verify results JSON is a valid envelope
@@ -188,7 +189,7 @@ func TestReconstructBatchJob_TempPosterCleanup(t *testing.T) {
 	dbJob := &models.Job{
 		ID:      "poster-cleanup-job",
 		Status:  models.JobStatusCompleted,
-		TempDir: "/tmp/javtest",
+		TempDir: t.TempDir(),
 		Results: `{"domain":{"/path/file1.mp4":{"file_match_info":{"path":"/path/file1.mp4","movie_id":"PC-001"},"status":"completed","movie":{"id":"PC-001","poster_url":"","cropped_poster_url":"cropped.jpg"}}}}`,
 	}
 

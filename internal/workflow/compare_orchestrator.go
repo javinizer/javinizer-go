@@ -78,7 +78,7 @@ func (o *compareOrchImpl) Execute(ctx context.Context, cmd CompareCmd) (*Compare
 
 	// Step 2: Scrape fresh data.
 	if o.scraper == nil {
-		return nil, fmt.Errorf("workflow scraper not configured (movieRepo was nil at construction)")
+		return nil, fmt.Errorf("workflow scraper not configured (scraper was nil at construction)")
 	}
 	scrapeResult, scrapeErr := o.scraper.Scrape(ctx, scrape.ScrapeCmd{
 		MovieID:          cmd.MovieID,

@@ -285,6 +285,10 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 
 // stepMerge merges scraped data with any existing NFO on disk.
 func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps *stepCompletion) error {
+	if o.nfo == nil {
+		steps.Merged = true
+		return nil
+	}
 	mergeRes := o.nfo.MergeWithExistingNFO(state.movie, nfo.MergeWithExistingOptions{
 		Match:          cmd.Match,
 		ForceOverwrite: cmd.Merge.ForceOverwrite,

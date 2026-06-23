@@ -12,7 +12,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -452,9 +451,7 @@ func (s *stubReconPosterGen) GeneratePoster(_ context.Context, _ string, _ *mode
 // mockMovieRepoForReconstruct is a minimal MovieRepositoryInterface for reconstruction tests.
 // Uses the generated mock so the interface stays in sync automatically.
 func newMockMovieRepoForReconstruct(t *testing.T) *mocks.MockMovieRepositoryInterface {
-	m := mocks.NewMockMovieRepositoryInterface(t)
-	m.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&models.Movie{}, nil).Maybe()
-	return m
+	return mocks.NewMockMovieRepositoryInterface(t)
 }
 
 // TestReconstructBatchJob_RestoresMovieRepo verifies that wireJobDeps sets

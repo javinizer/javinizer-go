@@ -79,7 +79,7 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd, prog
 	}
 
 	if o.scraper == nil {
-		return nil, nil, fmt.Errorf("workflow scraper not configured (movieRepo was nil at construction)")
+		return nil, nil, fmt.Errorf("workflow scraper not configured (scraper was nil at construction)")
 	}
 
 	// Step 2: Scrape (core query).

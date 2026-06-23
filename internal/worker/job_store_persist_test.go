@@ -94,7 +94,7 @@ func TestReconstructBatchJob_PersistFn(t *testing.T) {
 		Completed:   1,
 		Progress:    100,
 		Destination: "/dest/path",
-		TempDir:     "/tmp/javtest",
+		TempDir:     t.TempDir(),
 		StartedAt:   time.Now(),
 	}
 	filesJSON, _ := json.Marshal([]string{"/path/file1.mp4"})
@@ -153,7 +153,7 @@ func TestReconstructBatchJob_PersistJobByIDPersistsResults(t *testing.T) {
 		TotalFiles: 1,
 		Completed:  1,
 		Progress:   100,
-		TempDir:    "/tmp/javtest",
+		TempDir:    t.TempDir(),
 		StartedAt:  time.Now(),
 	}
 	filesJSON, _ := json.Marshal([]string{"/path/file1.mp4"})
