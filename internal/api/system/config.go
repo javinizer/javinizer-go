@@ -96,8 +96,8 @@ func reloadComponents(rt *core.APIRuntime, deps *core.APIDeps, newCfg *config.Co
 	// The workflow factory creates aggregator/matcher from config on each request,
 	// so ReloadConfig does not need to construct them.
 	//
-	// Reuse the existing APIRuntime so that its WebSocket hub, serverCtx, and
-	// tempCleanupStop are preserved. Only fall back to NewAPIRuntime if the
+	// Reuse the existing APIRuntime so that its WebSocket hub and serverCtx
+	// are preserved. Only fall back to NewAPIRuntime if the
 	// runtime hasn't been initialized yet (should not happen in production).
 	if rt == nil {
 		logging.Warn("No existing APIRuntime found, creating a new one")

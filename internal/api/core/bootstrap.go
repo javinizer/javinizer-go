@@ -70,9 +70,14 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	rt.SetConfig(cfg)
 	rt.EnsureRuntime()
 
-	// Start periodic cleanup of stale temp poster directories.
-	// The stop channel is stored on the APIRuntime for graceful shutdown.
-	rt.SetTempCleanupStop(jobStore.StartStaleTempCleanup())
+	// Temp poster cleanup is intentionally NOT started automatically.
+	// Running CleanupStaleTempDirs on startup (or on a periodic ticker) wipes
+	// temp poster artifacts for terminal/orphaned jobs, but the DB still holds
+	// their cropped_poster_url — leaving a disentangled state where the list
+	// view renders broken thumbnails after every restart. This was a regression
+	// vs v0.3.15-alpha, which only cleaned temp dirs on explicit job deletion.
+	// Cleanup therefore happens only via DeleteJob -> CleanJobTempDir, which
+	// removes the job record and its temp dir together.
 
 	if err := eventEmitter.EmitSystemEvent(context.Background(), "server", "Javinizer API server initialized", models.SeverityInfo, map[string]any{
 		"host": cfg.Server.Host,

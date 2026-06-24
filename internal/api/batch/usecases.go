@@ -84,7 +84,7 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 		// which broke /jobs page thumbnails (frontend getFirstPoster reads
 		// job.results inline). parseAndConvertJobResults also handles the legacy
 		// "data" JSON field via worker.ParseJobResultsJSON.
-		results := parseAndConvertJobResults(&job)
+		results := parseAndConvertJobResults(&job, deps.GetFs())
 
 		response.Jobs = append(response.Jobs, contracts.BatchJobResponse{
 			ID:                    job.ID,

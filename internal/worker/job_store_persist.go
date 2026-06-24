@@ -3,14 +3,11 @@ package worker
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
-	"github.com/spf13/afero"
 )
 
 // DataTypeMovie identifies that a result's Data field contains a Movie.
@@ -185,27 +182,12 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 		batchJob.mu.Unlock()
 	}
 
-	// Use the job's stored TempDir to check for temp posters
-	if batchJob.cfg.tempDir != "" {
-		fs := s.fs
-		if fs == nil {
-			fs = afero.NewOsFs()
-		}
-		posterDir := filepath.Join(batchJob.cfg.tempDir, "posters", dbJob.ID)
-		for _, result := range batchJob.results.Results {
-			if result.Movie == nil {
-				continue
-			}
-			if result.Movie.Poster.CroppedPosterURL == "" {
-				continue
-			}
-			tempPosterPath := filepath.Join(posterDir, result.Movie.ID+".jpg")
-			if _, err := fs.Stat(tempPosterPath); os.IsNotExist(err) {
-				result.Movie.Poster.CroppedPosterURL = ""
-				logging.Debugf("[Job %s] Cleared missing temp poster URL for %s", dbJob.ID, result.Movie.ID)
-			}
-		}
-	}
+	// Drop cropped_poster_url values whose temp artifact is missing on disk
+	// so the detail view stays consistent with the list view (see
+	// ClearMissingTempPosters). This clears URLs only; it never deletes files.
+	// Safe to mutate results unlocked: the job is not yet registered in s.jobs,
+	// so no concurrent reader can observe it (see loadFromDatabase / NewJobStore).
+	ClearMissingTempPosters(s.fs, batchJob.cfg.tempDir, dbJob.ID, batchJob.results.Results)
 
 	// Close Done channel for all states — reconstructed jobs are snapshots
 	// from the database and should not block Wait() callers.

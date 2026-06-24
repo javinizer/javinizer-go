@@ -44,6 +44,9 @@ func (r *APIRuntime) ReplaceReloadable(cfg *config.Config, registry *scraperutil
 // to construct aggregator or matcher directly — the workflow factory creates them
 // from config on each request.
 func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("ReloadConfig: config is nil")
+	}
 	reg := scraperutil.NewScraperRegistry()
 	scraper.RegisterAll(reg)
 

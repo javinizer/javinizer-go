@@ -15,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/spf13/afero"
 )
 
 // batchScrape godoc
@@ -249,7 +250,12 @@ func listBatchJobs(rt *core.APIRuntime) gin.HandlerFunc {
 // and converts them into BatchFileResult for API responses. It delegates the actual
 // format detection and parsing to worker.ParseJobResultsJSON, then converts
 // MovieResult → BatchFileResult via movieResultToResponse.
-func parseAndConvertJobResults(job *models.Job) map[string]*contracts.BatchFileResult {
+//
+// fs is used to drop cropped_poster_url values whose temp artifact is missing on
+// disk (worker.ClearMissingTempPosters), keeping the list view consistent with the
+// detail view so the frontend falls back to poster_url instead of a broken image.
+// A nil fs falls back to the real filesystem.
+func parseAndConvertJobResults(job *models.Job, fs afero.Fs) map[string]*contracts.BatchFileResult {
 	if job.Results == "" {
 		return make(map[string]*contracts.BatchFileResult)
 	}
@@ -259,6 +265,11 @@ func parseAndConvertJobResults(job *models.Job) map[string]*contracts.BatchFileR
 		logging.Warnf("Failed to parse results for job %s: %v", job.ID, err)
 		return make(map[string]*contracts.BatchFileResult)
 	}
+
+	// Drop cropped_poster_url values pointing at temp posters that no longer
+	// exist on disk (e.g. after upgrade from a version that did not preserve the
+	// temp dir). Mirrors reconstructBatchJob so list and detail views agree.
+	worker.ClearMissingTempPosters(fs, job.TempDir, job.ID, parsed.Results)
 
 	results := make(map[string]*contracts.BatchFileResult, len(parsed.Results))
 	for filePath, mr := range parsed.Results {

@@ -51,13 +51,6 @@ func TestAPIDeps_Shutdown(t *testing.T) {
 		<-ctx.Done()
 		assert.Error(t, ctx.Err())
 	})
-
-	t.Run("stops temp cleanup", func(t *testing.T) {
-		stop := make(chan struct{})
-		rt := &APIRuntime{tempCleanupStop: stop}
-		rt.Shutdown()
-		assert.Nil(t, rt.tempCleanupStop, "tempCleanupStop should be nil after shutdown")
-	})
 }
 
 func TestAPIDeps_GetRuntime(t *testing.T) {

@@ -121,6 +121,71 @@ func (c *TempDirCleaner) CleanJobTempDir(id string) {
 	}
 }
 
+// ClearMissingTempPosters clears CroppedPosterURL on each result movie whose
+// cropped temp poster file no longer exists on disk.
+//
+// This keeps API responses consistent across the detail view (reconstructBatchJob)
+// and the list view (parseAndConvertJobResults): when the local temp artifact is
+// gone — e.g. after upgrading from a version whose temp dir was not preserved, or
+// after manual temp-dir deletion — the stale URL is dropped so the frontend falls
+// back to the remote poster_url instead of rendering a broken image. It does NOT
+// delete anything; directory removal is the responsibility of CleanJobTempDir on
+// explicit job deletion.
+//
+// No-op when tempDir is empty or no result has a cropped URL to check. A nil fs
+// falls back to the real filesystem.
+//
+// Uses a single directory read instead of one Stat per result: the list endpoint
+// may load dozens of jobs × many results per request, so batching avoids an N×M
+// syscall fan-out. If the poster directory does not exist, every cropped URL is
+// cleared; any other read error (permission, I/O) leaves URLs intact. Membership
+// is checked by entry NAME (movieID+".jpg"), so a dangling symlink would count
+// as present — acceptable because the poster generator always writes regular
+// files; the only behavioral difference from the prior per-file os.IsNotExist
+// check is that theoretical symlink edge case, which does not occur in practice.
+func ClearMissingTempPosters(fs afero.Fs, tempDir, jobID string, results map[string]*MovieResult) {
+	if tempDir == "" {
+		return
+	}
+	// Collect only results with a cropped URL to check — avoids a ReadDir when
+	// nothing needs checking (e.g. jobs whose movies never had a cropped poster).
+	toCheck := make([]*MovieResult, 0, len(results))
+	for _, result := range results {
+		if result != nil && result.Movie != nil && result.Movie.Poster.CroppedPosterURL != "" {
+			toCheck = append(toCheck, result)
+		}
+	}
+	if len(toCheck) == 0 {
+		return
+	}
+	if fs == nil {
+		fs = afero.NewOsFs()
+	}
+	posterDir := filepath.Join(tempDir, "posters", jobID)
+
+	entries, err := afero.ReadDir(fs, posterDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			for _, result := range toCheck {
+				result.Movie.Poster.CroppedPosterURL = ""
+				logging.Debugf("[Job %s] Cleared missing temp poster URL for %s (no poster dir)", jobID, result.Movie.ID)
+			}
+		}
+		return
+	}
+
+	existing := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		existing[e.Name()] = true
+	}
+	for _, result := range toCheck {
+		if !existing[result.Movie.ID+".jpg"] {
+			result.Movie.Poster.CroppedPosterURL = ""
+			logging.Debugf("[Job %s] Cleared missing temp poster URL for %s", jobID, result.Movie.ID)
+		}
+	}
+}
+
 // StartStaleTempCleanup starts a background goroutine that periodically cleans
 // up stale temp poster directories. Returns a stop channel that should be closed
 // on shutdown to stop the cleanup loop.

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -26,6 +27,13 @@ import (
 //
 // Returns: cleaned absolute path, error
 func validateScanPath(userPath string, cfg *SecurityNarrowConfig) (string, error) {
+	if cfg == nil {
+		// Programmer error — a nil security config must never reach validation.
+		// Return a descriptive error rather than apperrors.ErrAllowedDirsEmpty
+		// (403 Forbidden), which would mischaracterize this as a user-facing
+		// authorization failure instead of an internal wiring bug.
+		return "", fmt.Errorf("validateScanPath: security config is required")
+	}
 	v := NewPathValidatorWithUNC(
 		afero.NewOsFs(),
 		cfg.AllowedDirectories,

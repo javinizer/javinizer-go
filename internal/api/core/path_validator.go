@@ -221,6 +221,12 @@ func (v *PathValidator) isDenied(canonicalPath string) bool {
 
 	// Config-provided denylist
 	for _, blocked := range v.deny {
+		// Skip blank entries: filepath.Clean("") == "." would resolve to the
+		// process working directory and unintentionally deny it and its children.
+		// Mirrors the allowlist blank-skip below in IsDirAllowed.
+		if strings.TrimSpace(blocked) == "" {
+			continue
+		}
 		expandedBlocked := expandHomeDir(blocked)
 		cleanBlocked := filepath.Clean(expandedBlocked)
 		if absBlocked, err := filepath.Abs(cleanBlocked); err == nil {
@@ -269,6 +275,11 @@ func (v *PathValidator) IsDirAllowed(dir string) bool {
 
 	// Config-provided denylist
 	for _, blocked := range v.deny {
+		// Skip blank entries: filepath.Clean("") == "." would resolve to the
+		// process working directory and unintentionally deny it and its children.
+		if strings.TrimSpace(blocked) == "" {
+			continue
+		}
 		expandedBlocked := expandHomeDir(blocked)
 		cleanBlocked := filepath.Clean(expandedBlocked)
 		if absBlocked, err := filepath.Abs(cleanBlocked); err == nil {

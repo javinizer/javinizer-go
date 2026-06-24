@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -235,7 +236,7 @@ func TestRebase_ListEndpointHandlesEnvelopeFormat(t *testing.T) {
 		Results: envelopeJSON,
 	}
 
-	results := parseAndConvertJobResults(job)
+	results := parseAndConvertJobResults(job, nil)
 
 	require.Len(t, results, 1)
 
@@ -278,7 +279,7 @@ func TestRebase_ListEndpointHandlesLegacyFormat(t *testing.T) {
 		Results: legacyResults,
 	}
 
-	results := parseAndConvertJobResults(job)
+	results := parseAndConvertJobResults(job, nil)
 
 	require.Len(t, results, 1)
 
@@ -319,7 +320,7 @@ func TestRebase_ListEndpointHandlesOldMovieResultFormat(t *testing.T) {
 		Results: oldResults,
 	}
 
-	results := parseAndConvertJobResults(job)
+	results := parseAndConvertJobResults(job, nil)
 
 	require.Len(t, results, 1)
 
@@ -331,4 +332,44 @@ func TestRebase_ListEndpointHandlesOldMovieResultFormat(t *testing.T) {
 	require.NotNil(t, r.Movie)
 	assert.Equal(t, "MID-001", r.Movie.ID)
 	assert.Equal(t, "https://example.com/mid-poster.jpg", r.Movie.PosterURL)
+}
+
+// TestRebase_ListEndpointClearsStaleCroppedPoster verifies the list endpoint
+// path drops cropped_poster_url when the temp poster file no longer exists on
+// disk (e.g. after upgrading from v0.3.15-alpha whose temp dir was not
+// preserved), while preserving the remote poster_url fallback. This keeps the
+// list view consistent with the detail view (reconstructBatchJob).
+func TestRebase_ListEndpointClearsStaleCroppedPoster(t *testing.T) {
+	movieResultJSON := `{
+		"result_id": "stale-uuid",
+		"file_match_info": {"path": "/videos/ABCD-123.mp4", "movie_id": "ABCD-123"},
+		"status": "completed",
+		"movie": {
+			"id": "ABCD-123",
+			"content_id": "ABCD-123",
+			"title": "Stale Poster",
+			"poster_url": "https://example.com/poster.jpg",
+			"cropped_poster_url": "/api/v1/temp/posters/stale-job/ABCD-123.jpg?v=123"
+		},
+		"started_at": "2024-01-15T10:00:00Z"
+	}`
+	envelopeJSON := `{"domain": {"/videos/ABCD-123.mp4": ` + movieResultJSON + `}}`
+
+	job := &models.Job{
+		ID:      "stale-job",
+		TempDir: "/tmp/does-not-exist-javinizer-stale",
+		Status:  models.JobStatusCompleted,
+		Results: envelopeJSON,
+	}
+
+	// MemMapFs has no file at the poster path → cropped URL must be cleared.
+	results := parseAndConvertJobResults(job, afero.NewMemMapFs())
+
+	require.Len(t, results, 1)
+	r := results["/videos/ABCD-123.mp4"]
+	require.NotNil(t, r.Movie)
+	assert.Empty(t, r.Movie.CroppedPosterURL,
+		"stale cropped_poster_url must be cleared so the frontend falls back to poster_url")
+	assert.Equal(t, "https://example.com/poster.jpg", r.Movie.PosterURL,
+		"remote poster_url fallback must be preserved")
 }

@@ -121,11 +121,6 @@ type APIRuntime struct {
 	serverCtxOnce sync.Once
 	serverCtx     context.Context
 	serverCancel  context.CancelFunc
-
-	// tempCleanupStop is the channel to stop the periodic stale temp dir
-	// cleanup goroutine. Closed on shutdown to signal the background goroutine
-	// to exit.
-	tempCleanupStop chan struct{}
 }
 
 // NewAPIRuntime creates an APIRuntime that manages the given APIDeps.
@@ -375,7 +370,7 @@ func (r *APIRuntime) GetPosterManager() poster.PosterManagerInterface {
 	})
 }
 
-// Server lifecycle methods (ServerCtx, Shutdown, SetTempCleanupStop) are defined in server_lifecycle.go.
+// Server lifecycle methods (ServerCtx, Shutdown) are defined in server_lifecycle.go.
 
 // SetConfig sets the full application config and rebuilds the APIConfig snapshot.
 // This is a convenience method for test setup. Production code should use
