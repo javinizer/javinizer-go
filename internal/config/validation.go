@@ -158,7 +158,7 @@ func validateTranslationProviderInternal(c *Config) error {
 
 	provider := strings.ToLower(strings.TrimSpace(t.Provider))
 	if provider == "" {
-		provider = "openai"
+		provider = translationProviderOpenAI
 	}
 
 	timeoutSeconds := t.TimeoutSeconds
@@ -190,7 +190,7 @@ func validateTranslationProviderInternal(c *Config) error {
 	}
 
 	switch provider {
-	case "openai":
+	case translationProviderOpenAI:
 		if err := validateHTTPBaseURL("metadata.translation.openai.base_url", openAIBaseURL); err != nil {
 			return err
 		}
@@ -243,7 +243,7 @@ func validateTranslationProviderInternal(c *Config) error {
 
 	// REGV-04: Validate API key presence at config time
 	switch provider {
-	case "openai":
+	case translationProviderOpenAI:
 		if strings.TrimSpace(t.OpenAI.APIKey) == "" {
 			return fmt.Errorf("metadata.translation.openai.api_key is required when provider=openai")
 		}

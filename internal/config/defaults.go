@@ -95,7 +95,7 @@ func defaultTranslationConfig() TranslationConfig {
 	thinkingDisabled := false
 	return TranslationConfig{
 		Enabled:                 false, // Opt-in to avoid API calls unless explicitly configured
-		Provider:                "openai",
+		Provider:                translationProviderOpenAI,
 		SourceLanguage:          "ja", // Japanese content translated to English
 		TargetLanguage:          "en",
 		TimeoutSeconds:          60,

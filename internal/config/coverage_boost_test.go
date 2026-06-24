@@ -1291,3 +1291,35 @@ func TestScrapersConfig_UnmarshalYAML_InvalidNode(t *testing.T) {
 	err := sc.UnmarshalYAML(node)
 	assert.Error(t, err)
 }
+
+// TestValidateConfig_EmptyScrapersPriorityErrors is a regression test for
+// cycle-1 MINOR-8. An explicitly empty scrapers.priority (yaml `priority: []`
+// or `priority: null`) means the user configured no scrapers; without a guard
+// the aggregator's resolved priorities would be empty and every assign* loop
+// would iterate nothing -> a blank movie (silent data loss). DefaultConfig
+// seeds the 14-scraper default before user values overlay, so an empty slice
+// uniquely identifies explicit empty intent. Validate must surface it as an
+// error rather than silently producing a blank movie.
+func TestPrepare_EmptyScrapersPriorityErrors(t *testing.T) {
+	cfg := DefaultConfig(nil, nil)
+	require.NotEmpty(t, cfg.Scrapers.Priority, "precondition: DefaultConfig seeds a non-empty default priority")
+
+	// Explicit empty -> error (the silent-data-loss case). The guard lives in
+	// Prepare (not ValidateConfig) because DefaultConfig seeds defaults during
+	// Load, so an empty slice here uniquely identifies explicit empty intent.
+	cfg.Scrapers.Priority = []string{}
+	_, err := Prepare(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "scrapers.priority")
+
+	// Explicit nil -> same error (yaml `priority: null`).
+	cfg.Scrapers.Priority = nil
+	_, err = Prepare(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "scrapers.priority")
+
+	// Non-empty (the default) -> no error.
+	cfg.Scrapers.Priority = []string{"r18dev"}
+	_, err = Prepare(cfg)
+	assert.NoError(t, err)
+}

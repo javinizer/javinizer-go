@@ -49,7 +49,7 @@ func normalizeTranslationConfig(t *TranslationConfig) bool {
 	}
 
 	changed := false
-	changed = normalizeField(&t.Provider, "openai", true) || changed
+	changed = normalizeField(&t.Provider, translationProviderOpenAI, true) || changed
 	changed = normalizeField(&t.SourceLanguage, "auto", false) || changed
 	changed = normalizeField(&t.TargetLanguage, "ja", false) || changed
 	changed = normalizeField(&t.OpenAI.BaseURL, "https://api.openai.com/v1", false) || changed
@@ -153,6 +153,20 @@ func Prepare(cfg *Config) (bool, error) {
 	}
 
 	normalized := normalize(cfg)
+
+	// An explicitly empty scrapers.priority (yaml `priority: []` or `priority:
+	// null`) means the user configured no scrapers. DefaultConfig seeds the
+	// 14-scraper default before user values overlay during Load, so by the time
+	// Prepare runs an empty slice uniquely identifies that explicit intent (a
+	// missing key keeps the default). Without this guard the aggregator's
+	// resolved priorities would be empty and every assign* loop would iterate
+	// nothing -> a blank movie (silent data loss). Surface it as a config error.
+	// (Cycle-1 MINOR-8.) This lives in Prepare (not ValidateConfig) so pure
+	// validation tests that build minimal Config structs for unrelated fields
+	// (e.g. FlareSolverr) are not forced to set a priority.
+	if len(cfg.Scrapers.Priority) == 0 {
+		return normalized, fmt.Errorf("scrapers.priority must list at least one scraper (it is empty — set it to a scraper name or remove the key to use the default order)")
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return normalized, fmt.Errorf("invalid configuration: %w", err)

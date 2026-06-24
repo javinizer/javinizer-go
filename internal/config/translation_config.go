@@ -10,6 +10,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// translationProviderOpenAI is the canonical name of the OpenAI translation
+// provider, used as the default and in provider switches across the config
+// package. Centralized as a constant to satisfy goconst and keep the literal
+// in one place.
+const translationProviderOpenAI = "openai"
+
 // MetadataConfig holds metadata aggregation settings
 type MetadataConfig struct {
 	Priority         PriorityConfig         `yaml:"priority" json:"priority"`
@@ -330,7 +336,7 @@ func (tc *TranslationConfig) SettingsHash() string {
 
 	// Add provider-specific model settings (these affect output)
 	switch tc.Provider {
-	case "openai":
+	case translationProviderOpenAI:
 		hashInput.OpenAIModel = tc.OpenAI.Model
 	case "openai_compatible", "openai-compatible":
 		hashInput.OpenAICompatibleModel = tc.OpenAICompatible.Model
