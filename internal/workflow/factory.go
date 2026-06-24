@@ -197,10 +197,15 @@ func buildScraper(scrapeCfg *scrape.Config, aggCfg *aggregator.Config, translato
 	// MovieRepo is strictly required — it is accessed unconditionally during
 	// scraping and persistence. The other repos (ActressRepo, ActressAliasRepo,
 	// GenreReplacementRepo, WordReplacementRepo) are passed to the aggregator
-	// and scraper constructors, which tolerate nil values (they short-circuit
-	// the respective processing steps). This allows partial wiring in setups
-	// that only exercise input validation without a full DB (e.g. security
-	// tests).
+	// and scraper constructors, which tolerate nil values:
+	//   - scrape.New nil-checks actressRepo (scrape.go:227) and movieRepo
+	//     (cache.go:18), skipping enrichment / cache lookup when nil.
+	//   - The aggregator's GenreProcessor / WordProcessor / AliasResolver handle
+	//     nil replacement repos by no-oping the respective processing steps.
+	// This allows partial wiring in setups that only exercise input validation
+	// without a full DB (e.g. security tests that construct a workflow with nil
+	// repos to test request validation paths). Adding hard nil checks here would
+	// reject those valid partial-wiring scenarios.
 	if content.MovieRepo == nil {
 		return nil, nil, fmt.Errorf("buildScraper: movieRepo must not be nil")
 	}

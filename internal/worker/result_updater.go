@@ -24,11 +24,16 @@ func (ru *resultUpdater) UpdateFileResult(filePath string, result *MovieResult) 
 	existing := ru.Results[filePath]
 	stateReindexFilePathLocked(ru.resultTrackerState, filePath, existing, result)
 	if existing != nil {
-		switch existing.Status {
-		case models.JobStatusCompleted:
-			ru.Completed--
-		case models.JobStatusFailed:
-			ru.Failed--
+		// Only decrement counters if the file was not excluded — excluded files
+		// were never counted, so decrementing them would cause counter drift.
+		// Matches the guard pattern in AtomicUpdateFileResult.
+		if !ru.Excluded[filePath] {
+			switch existing.Status {
+			case models.JobStatusCompleted:
+				ru.Completed--
+			case models.JobStatusFailed:
+				ru.Failed--
+			}
 		}
 		result.Revision = existing.Revision + 1
 		if existing.ResultID != "" {

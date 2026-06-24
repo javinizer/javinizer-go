@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -152,58 +153,37 @@ func timePtrEqual(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
-// formatActressList formats an actress list as "N actresses: name1, name2, ..."
-// truncated to 3 names max for readability.
-func formatActressList(actresses []models.Actress) string {
-	n := len(actresses)
+// formatList formats a slice as "N <itemType>: name1, name2, ..." truncated to
+// 3 names max for readability. The getName callback extracts the display name
+// from each item.
+func formatList[T any](items []T, getName func(T) string, itemType string) string {
+	n := len(items)
 	if n == 0 {
-		return "0 actresses"
+		return fmt.Sprintf("0 %s", itemType)
 	}
 	const maxShow = 3
 	names := make([]string, 0, min(n, maxShow))
-	for i, a := range actresses {
+	for i, item := range items {
 		if i >= maxShow {
 			break
 		}
-		names = append(names, a.FullName())
+		names = append(names, getName(item))
 	}
-	listStr := ""
-	for i, name := range names {
-		if i > 0 {
-			listStr += ", "
-		}
-		listStr += name
-	}
+	listStr := strings.Join(names, ", ")
 	if n > maxShow {
-		return fmt.Sprintf("%d actresses: %s, ...", n, listStr)
+		return fmt.Sprintf("%d %s: %s, ...", n, itemType, listStr)
 	}
-	return fmt.Sprintf("%d actresses: %s", n, listStr)
+	return fmt.Sprintf("%d %s: %s", n, itemType, listStr)
+}
+
+// formatActressList formats an actress list as "N actresses: name1, name2, ..."
+// truncated to 3 names max for readability.
+func formatActressList(actresses []models.Actress) string {
+	return formatList(actresses, func(a models.Actress) string { return a.FullName() }, "actresses")
 }
 
 // formatGenreList formats a genre list as "N genres: name1, name2, ..."
 // truncated to 3 names max for readability.
 func formatGenreList(genres []models.Genre) string {
-	n := len(genres)
-	if n == 0 {
-		return "0 genres"
-	}
-	const maxShow = 3
-	names := make([]string, 0, min(n, maxShow))
-	for i, g := range genres {
-		if i >= maxShow {
-			break
-		}
-		names = append(names, g.Name)
-	}
-	listStr := ""
-	for i, name := range names {
-		if i > 0 {
-			listStr += ", "
-		}
-		listStr += name
-	}
-	if n > maxShow {
-		return fmt.Sprintf("%d genres: %s, ...", n, listStr)
-	}
-	return fmt.Sprintf("%d genres: %s", n, listStr)
+	return formatList(genres, func(g models.Genre) string { return g.Name }, "genres")
 }

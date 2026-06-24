@@ -57,6 +57,9 @@ func (r *APIRuntime) ReloadConfig(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize scraper registry: %w", err)
 	}
+	if r.deps.CoreDeps == nil {
+		return fmt.Errorf("ReloadConfig: CoreDeps is not initialized")
+	}
 	r.deps.CoreDeps.ReplaceReloadable(cfg, newRegistry)
 
 	// Rebuild APIConfig and invalidate the workflow factories.

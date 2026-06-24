@@ -112,9 +112,13 @@ func reloadComponents(rt *core.APIRuntime, deps *core.APIDeps, newCfg *config.Co
 	// Reload logging configuration (non-fatal - keep current logger if reload fails)
 	logging.Debug("Reinitializing logging configuration...")
 	loggingCfg := &logging.Config{
-		Level:  newCfg.Logging.Level,
-		Format: newCfg.Logging.Format,
-		Output: newCfg.Logging.Output,
+		Level:      newCfg.Logging.Level,
+		Format:     newCfg.Logging.Format,
+		Output:     newCfg.Logging.Output,
+		MaxSizeMB:  newCfg.Logging.MaxSizeMB,
+		MaxBackups: newCfg.Logging.MaxBackups,
+		MaxAgeDays: newCfg.Logging.MaxAgeDays,
+		Compress:   newCfg.Logging.Compress,
 	}
 	if err := logging.InitLogger(loggingCfg); err != nil {
 		// Log warning but don't fail the entire reload - keep using current logger

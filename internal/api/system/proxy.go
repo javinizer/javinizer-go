@@ -170,6 +170,7 @@ func TestDirectProxy(ctx context.Context, targetURL string, proxyProfile *models
 		result.Message = fmt.Sprintf("failed to create proxy transport: %v", err)
 		return result
 	}
+	defer transport.CloseIdleConnections()
 	ssrf.WrapTransportWithSSRFCheck(transport)
 
 	client := resty.New()
@@ -182,6 +183,7 @@ func TestDirectProxy(ctx context.Context, targetURL string, proxyProfile *models
 	}
 
 	httpResp, err := client.R().
+		SetContext(ctx).
 		SetHeader("User-Agent", userAgent).
 		SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").
 		Get(targetURL)

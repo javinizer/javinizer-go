@@ -51,11 +51,11 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	c.job.lifecycle.setCancelFunc(cancel)
 	if err := c.markStarted(models.JobStatusPending); err != nil {
 		cancel()
 		return err
 	}
+	c.job.lifecycle.setCancelFunc(cancel)
 	if persistFn != nil {
 		persistFn()
 	}
@@ -102,11 +102,11 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	c.job.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(ctx)
-	c.job.lifecycle.setCancelFunc(cancel)
 	if err := c.markStarted(models.JobStatusCompleted); err != nil {
 		cancel()
 		return err
 	}
+	c.job.lifecycle.setCancelFunc(cancel)
 	if persistFn != nil {
 		persistFn()
 	}
@@ -360,7 +360,10 @@ func (c *jobController) resolveBatchCfg() BatchJobConfig {
 // reconstructed jobs (loaded from DB with nil deps.WF) before calling
 // phase methods. Freshly-created jobs already have deps.WF set at
 // construction time via JobConfig.BatchJobDeps.WF.
-// Not goroutine-safe — callers must serialize with phase execution.
+//
+// Callers must ensure no phase is actively using the old workflow when calling
+// this — the mutex protects concurrent SetWorkflow calls, but does not prevent
+// a running phase from seeing an inconsistent workflow mid-execution.
 func (c *jobController) SetWorkflow(wf workflow.WorkflowInterface) {
 	c.job.mu.Lock()
 	c.job.deps.WF = wf
