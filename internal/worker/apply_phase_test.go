@@ -129,6 +129,224 @@ func TestApplyPhase_Run_OnPhaseCompleteInvokedWithCounts(t *testing.T) {
 	assert.Equal(t, 0, gotFailed, "failed count must be zero for an all-success apply")
 }
 
+func TestApplyPhase_Run_OnFileProgressAdvancesPerFile(t *testing.T) {
+	// OnFileProgress is the API-layer hook that broadcasts an incremental
+	// WebSocket ProgressMessage (0-100) after each file's apply completes.
+	// Without it, the only WS progress the frontend receives during organize is
+	// the terminal 100% from OnPhaseComplete, so the bar jumps 0→100 — exactly
+	// the user-reported bug. Asserts the hook fires once per processed file,
+	// every call carries the correct total, and the processed counts are a
+	// gap-free permutation of 1..N (each invocation receives a unique atomic
+	// increment in completion order — set membership, not delivery order, is the
+	// correct invariant under MaxWorkers > 1). Files are processed concurrently
+	// (MaxWorkers > 1), so the hook is invoked from multiple goroutines;
+	// collection is mutex-guarded to catch data races under -race.
+	wf := &stubApplyWorkflow{
+		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}},
+	}
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency = concurrencyConfig{MaxWorkers: 4, WorkerTimeout: 0}
+	for i := 0; i < 5; i++ {
+		path := fmt.Sprintf("/source/IPX-777-%d.mp4", i)
+		inputs.Results[path] = &MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: "IPX-777"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "IPX-777"},
+		}
+	}
+
+	var mu sync.Mutex
+	var calls []struct {
+		processed int
+		total     int
+	}
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+		OnFileProgress: func(processed, total int) {
+			mu.Lock()
+			calls = append(calls, struct {
+				processed int
+				total     int
+			}{processed, total})
+			mu.Unlock()
+		},
+	})
+
+	require.Len(t, calls, 5, "OnFileProgress must fire once per file (5 files)")
+	for _, c := range calls {
+		assert.Equal(t, 5, c.total, "every call must carry the total file count")
+		assert.GreaterOrEqual(t, c.processed, 1, "processed must be >= 1")
+		assert.LessOrEqual(t, c.processed, 5, "processed must not exceed total")
+	}
+	// The processed values are a permutation of 1..5 (one per file, assigned
+	// atomically in completion order) — verify the set is exactly {1,2,3,4,5}.
+	// Set membership (not ordered sequence) is the correct check: under
+	// MaxWorkers:4 completion order is nondeterministic, but each atomic
+	// increment yields a unique gap-free value, so the set must be {1..5}.
+	seen := make(map[int]bool, 5)
+	for _, c := range calls {
+		seen[c.processed] = true
+	}
+	assert.Equal(t, map[int]bool{1: true, 2: true, 3: true, 4: true, 5: true}, seen,
+		"processed counts must be exactly 1..5 with no duplicates or gaps")
+}
+
+func TestApplyPhase_Run_OnFileProgressNilIsNoOp(t *testing.T) {
+	// Opt-out guard: OnFileProgress is optional (nil = no per-file progress).
+	// Run must not panic when the hook is nil — the apply phase guards
+	// `cfg.OnFileProgress != nil` before invoking it. Other tests in this file
+	// already omit OnFileProgress and pass, but this pins the nil-safety
+	// explicitly so a future change that drops the nil guard fails here.
+	wf := &stubApplyWorkflow{
+		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}},
+	}
+	inputs := makeApplyInputs(wf)
+	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-777"},
+	}
+	assert.NotPanics(t, func() {
+		NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+			OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+			MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+			Destination:     "/output",
+			// OnFileProgress intentionally nil
+		})
+	})
+	lc := inputs.Lifecycle.(*stubLifecycle)
+	assert.True(t, lc.organized, "run still succeeds with nil OnFileProgress")
+}
+
+func TestApplyPhase_Run_OnFileProgressNotCalledWhenNoEligibleItems(t *testing.T) {
+	// total<=0 guard: when there are zero eligible items (all results are
+	// non-completed or excluded), items is empty, boundedFanOut runs no work
+	// closures, and OnFileProgress must never fire — the hook isn't invoked with
+	// a bogus total=0. (The total<=0 case at the broadcast boundary is handled by
+	// organizeProgressPercent; here we assert the call site never fires at all.)
+	// Results present but not completed → filtered out of items.
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}}}
+	inputs := makeApplyInputs(wf)
+	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
+		Status:        models.JobStatusFailed, // not completed → excluded from apply items
+		Movie:         &models.Movie{ID: "IPX-777"},
+	}
+	var callCount int
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+		OnFileProgress:  func(processed, total int) { callCount++ },
+	})
+	assert.Equal(t, 0, callCount, "OnFileProgress must not fire when there are no eligible items")
+}
+
+func TestApplyPhase_Run_OnFileProgressFiresOnFailedApply(t *testing.T) {
+	// MAJOR-T3 guard: a file counts as processed whether its apply SUCCEEDED or
+	// FAILED — the bar tracks throughput, not success rate. OnFileProgress is
+	// invoked after applyFile returns regardless of outcome, so it must fire once
+	// per eligible file even when every apply errors. A regression that moved the
+	// call inside the success branch would stop advancing the bar on any failed
+	// file and pass the rest of the suite — this test fails in that case.
+	wf := &stubApplyWorkflow{applyErr: fmt.Errorf("disk full")}
+	inputs := makeApplyInputs(wf)
+	for i := 0; i < 3; i++ {
+		path := fmt.Sprintf("/source/IPX-777-%d.mp4", i)
+		inputs.Results[path] = &MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: "IPX-777"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "IPX-777"},
+		}
+	}
+	var (
+		mu      sync.Mutex
+		calls   []int
+		maxSeen int
+	)
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+		OnFileProgress: func(processed, total int) {
+			mu.Lock()
+			calls = append(calls, processed)
+			if processed > maxSeen {
+				maxSeen = processed
+			}
+			mu.Unlock()
+		},
+	})
+	require.Len(t, calls, 3, "OnFileProgress must fire once per file even when all applies fail")
+	assert.Equal(t, 3, maxSeen, "final processed must reach the total despite all failures")
+	seen := make(map[int]bool, 3)
+	for _, p := range calls {
+		seen[p] = true
+	}
+	assert.Equal(t, map[int]bool{1: true, 2: true, 3: true}, seen,
+		"processed counts must be a gap-free permutation of 1..3 (throughput, not success)")
+}
+
+func TestApplyPhase_Run_OnFileProgressCancelledAtFanoutEndSkipsPhaseComplete(t *testing.T) {
+	// Cancellation guard: when ctx is cancelled, Run's post-fanout ctx.Err()
+	// branch calls MarkCancelled and returns BEFORE invoking OnPhaseComplete (no
+	// terminal 100% broadcast on cancel). This tests the “ctx already cancelled
+	// when fanout completes” path, NOT mid-flight cancellation: stubApplyWorkflow
+	// ignores ctx and boundedFanOut does not short-circuit in-flight work, so all
+	// items run to completion and OnFileProgress fires for each before the
+	// cancellation check. (Mid-flight abort is a boundedFanOut property, not an
+	// apply-phase one, and is out of scope here.) Asserts: all 3 files are
+	// processed (fileCalls==3), processed never exceeds total, OnPhaseComplete is
+	// skipped, and MarkCancelled is set. The frontend's poll loop detects the
+	// 'cancelled' job status and finalizes failure, so no terminal WS progress is
+	// wanted on cancel.
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}}}
+	inputs := makeApplyInputs(wf)
+	for i := 0; i < 3; i++ {
+		path := fmt.Sprintf("/source/IPX-777-%d.mp4", i)
+		inputs.Results[path] = &MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: "IPX-777"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "IPX-777"},
+		}
+	}
+	var (
+		mu               sync.Mutex
+		fileCalls        int
+		phaseCompleteCnt int
+		maxProcessed     int
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancelled: fanout still runs all items (boundedFanOut ignores ctx for dispatch)
+	NewApplyPhase().Run(ctx, inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+		OnFileProgress: func(processed, total int) {
+			mu.Lock()
+			fileCalls++
+			if processed > maxProcessed {
+				maxProcessed = processed
+			}
+			mu.Unlock()
+		},
+		OnPhaseComplete: func(organized, failed int) {
+			mu.Lock()
+			phaseCompleteCnt++
+			mu.Unlock()
+		},
+	})
+	lc := inputs.Lifecycle.(*stubLifecycle)
+	assert.True(t, lc.cancelled, "cancelled ctx must MarkCancelled")
+	assert.False(t, lc.organized, "must not mark organized on cancel")
+	assert.False(t, lc.completed, "must not mark completed on cancel")
+	assert.Equal(t, 3, fileCalls, "all items complete before the cancellation check, so OnFileProgress fires for each")
+	assert.Equal(t, 0, phaseCompleteCnt, "OnPhaseComplete must NOT fire on cancellation (no terminal 100%)")
+	assert.LessOrEqual(t, maxProcessed, 3, "processed must never exceed total even on cancel")
+}
+
 func TestApplyPhase_Run_FailedApply(t *testing.T) {
 	wf := &stubApplyWorkflow{
 		applyErr: fmt.Errorf("disk full"),

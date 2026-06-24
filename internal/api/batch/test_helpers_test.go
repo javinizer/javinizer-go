@@ -1,12 +1,16 @@
 package batch
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"sync"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -16,7 +20,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
-	"github.com/javinizer/javinizer-go/internal/websocket"
+	ws "github.com/javinizer/javinizer-go/internal/websocket"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
@@ -57,27 +61,6 @@ func rescrapeDepsFromCore(d *core.APIDeps) *core.APIDeps {
 // testkit.InitTestWebSocket or testkit.StartStandaloneHub directly.
 func initTestWebSocket(t *testing.T) {
 	// No-op: WebSocket is initialized in CreateTestDeps
-}
-
-type mockWebSocketHub struct {
-	mu       sync.Mutex
-	messages []*websocket.ProgressMessage
-}
-
-func (m *mockWebSocketHub) BroadcastProgress(msg *websocket.ProgressMessage) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	cp := *msg
-	m.messages = append(m.messages, &cp)
-	return nil
-}
-
-func (m *mockWebSocketHub) GetMessages() []*websocket.ProgressMessage {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]*websocket.ProgressMessage, len(m.messages))
-	copy(out, m.messages)
-	return out
 }
 
 func testStartScrape(ctx context.Context, job *worker.BatchJob, cfg *config.Config, db *database.DB, registry *scraperutil.ScraperRegistry, selectedScrapers []string, strict bool, force bool) error {
@@ -278,5 +261,94 @@ func excludeFile(job *worker.BatchJob, filePath string) {
 
 	if job.ResultsWriter().IsAllExcluded() {
 		job.Lifecycle().Cancel()
+	}
+}
+
+// newTestWSConn establishes a real local WebSocket connection pair (server +
+// client) for end-to-end hub-broadcast tests, mirroring the websocket package's
+// createTestConnections. Returns (serverConn, clientConn, server). The caller
+// wraps serverConn in ws.NewClient, registers it on a running hub, starts its
+// WritePump, and reads broadcasts from clientConn. Caller MUST close the conns
+// and server (t.Cleanup is recommended). Used by the e2e organize-progress
+// wiring test to prove the resolver's production sink delivers to a real client.
+func newTestWSConn(t *testing.T) (*websocket.Conn, *websocket.Conn, *httptest.Server) {
+	t.Helper()
+	var upgrader = websocket.Upgrader{ReadBufferSize: 1024, WriteBufferSize: 1024}
+	serverConnCh := make(chan *websocket.Conn, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade failed: %v", err)
+			return
+		}
+		serverConnCh <- conn
+	}))
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	clientConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket failed: %v", err)
+	}
+	select {
+	case serverConn := <-serverConnCh:
+		return serverConn, clientConn, server
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for server-side websocket connection")
+		return nil, nil, nil
+	}
+}
+
+// registerClientOnHub registers a real ws.Client (wrapping serverConn) on the
+// running hub, starts its WritePump so broadcasts reach clientConn, and waits
+// deterministically (by spec, not just by runtime scheduler behavior) for
+// registration to complete. Readiness is confirmed by a probe round-trip: a
+// probe message is broadcast and we block until clientConn receives it. A
+// broadcast is only forwarded to REGISTERED clients, so receiving the probe
+// proves the hub's Run loop has processed the registration.
+//
+// Why retry: Hub.Run drains its register and broadcast channels via a select
+// whose case choice among multiple-ready cases is not spec-guaranteed, so a
+// single probe could (in principle) be processed before the registration and
+// dropped, leaving the helper blocked. The loop re-broadcasts the probe on
+// each read timeout: by the second iteration the register has been drained
+// (registration is ~nanoseconds), so a subsequent probe is guaranteed to be
+// forwarded — making success independent of select ordering. Bounded by an
+// overall deadline so a genuinely broken setup fails fast rather than hanging.
+// Any non-probe frame (e.g. a ping) received while waiting is drained and
+// skipped. Cleanup of conns/server is the caller's responsibility.
+func registerClientOnHub(t *testing.T, hub *ws.Hub, serverConn *websocket.Conn, clientConn *websocket.Conn) {
+	t.Helper()
+	const probeJobID = "__probe_ready__"
+	probe := &ws.ProgressMessage{JobID: probeJobID, Status: ws.ProgressStatusPending}
+	client := ws.NewClient(serverConn)
+	hub.Register(client)
+	go client.WritePump()
+
+	const (
+		probeInterval   = 20 * time.Millisecond
+		overallDeadline = 2 * time.Second
+	)
+	deadline := time.Now().Add(overallDeadline)
+	for {
+		if err := hub.BroadcastProgress(probe); err != nil {
+			t.Fatalf("probe broadcast failed: %v", err)
+		}
+		// Short per-attempt read deadline: on timeout, re-broadcast and retry
+		// (the register has by now been drained, so the next probe is delivered).
+		if err := clientConn.SetReadDeadline(time.Now().Add(probeInterval)); err != nil {
+			t.Fatalf("set probe read deadline: %v", err)
+		}
+		_, data, err := clientConn.ReadMessage()
+		if err == nil {
+			if bytes.Contains(data, []byte(probeJobID)) {
+				return // registration confirmed; pipeline ready for the real broadcast
+			}
+			// not the probe (e.g. a ping frame payload) — drain and keep reading
+			// the current probe without re-broadcasting.
+			continue
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("did not receive probe (hub registration not processed within %v): %v", overallDeadline, err)
+		}
+		// read timed out — loop re-broadcasts the probe and retries
 	}
 }

@@ -86,9 +86,24 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		})
 	}
 
+	total := len(items)
+	var processed int64
 	outcomes := boundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
-			return applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, inputs, cfg)
+			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, inputs, cfg)
+			// Report per-file progress so the frontend bar advances 0→100 across
+			// files instead of jumping straight to 100 on OnPhaseComplete. A file
+			// counts as processed whether it succeeded or failed — the bar tracks
+			// throughput, not success rate (per-file success/failure is surfaced
+			// separately via OnPhaseComplete + the controller's polling fallback).
+			// This closure runs once per item, so total (= len(items)) is always > 0
+			// here; the total<=0 case is handled at the broadcast boundary by
+			// organizeProgressPercent and is unreachable from this call site.
+			if cfg.OnFileProgress != nil {
+				done := int(atomic.AddInt64(&processed, 1))
+				cfg.OnFileProgress(done, total)
+			}
+			return outcome
 		},
 	)
 

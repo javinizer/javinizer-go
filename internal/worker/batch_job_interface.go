@@ -543,4 +543,16 @@ type ApplyPhaseConfig struct {
 	// the organize/update flow in real time, mirroring main's process_organize.go
 	// which called broadcastProgress inline at the end of organize.
 	OnPhaseComplete func(organized, failed int)
+
+	// OnFileProgress is invoked after each file's apply completes (success or
+	// failure) with the running count of processed files and the total file
+	// count. The API layer wires this to broadcast an incremental WebSocket
+	// ProgressMessage (0-100) so the frontend progress bar advances per file
+	// instead of jumping straight from 0 to 100 on the terminal
+	// organization_completed message. Without it, the only WS progress message
+	// the frontend receives during organize is the final 100% broadcast, so the
+	// bar sits at 0% for the entire run and snaps to 100% at the end. Called
+	// concurrently from worker goroutines; the broadcaster must be goroutine-
+	// safe (the WS hub's Broadcast is). Nil = no per-file progress reporting.
+	OnFileProgress func(processed, total int)
 }
