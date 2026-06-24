@@ -57,7 +57,7 @@ func setupCompleteServer(t *testing.T) (*gin.Engine, *core.APIDeps) {
 	testkit.SetTestRuntime(deps, rt)
 	deps.TokenStore = core.NewTokenStore()
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	t.Cleanup(func() { cleanupServerHub(t, deps) })
 
 	return router, deps

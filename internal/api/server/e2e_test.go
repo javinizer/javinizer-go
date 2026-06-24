@@ -83,7 +83,7 @@ func setupDBAndServer(t *testing.T) (*gin.Engine, *ServerDependencies) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 	}
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	t.Cleanup(func() { cleanupServerHub(t, deps) })
 	return router, deps
 }

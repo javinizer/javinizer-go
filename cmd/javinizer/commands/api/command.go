@@ -57,10 +57,10 @@ func NewCommand() *cobra.Command {
 // Run executes the API command initialization without starting the server.
 // Exported for testing purposes (Epic 7 Story 7.1).
 // Returns initialized APIDeps for the API server.
-func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (*apicore.APIDeps, error) {
+func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (*apicore.APIDeps, *apicore.APIRuntime, error) {
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
+		return nil, nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
 	config.ApplyEnvironmentOverrides(cfg)
@@ -73,14 +73,14 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 	}
 
 	if _, err := config.Prepare(cfg); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
+		return nil, nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	logging.Infof("Loaded configuration from %s", configFile)
 
 	authManager, err := apiauth.NewAuthManager(configFile, apiauth.DefaultSessionTTL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize authentication: %w", err)
+		return nil, nil, fmt.Errorf("failed to initialize authentication: %w", err)
 	}
 
 	// E2E test mode: disable rate limiting for automated login
@@ -89,31 +89,27 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 		authManager.SetDisableRateLimit(true)
 	}
 
-	apiDeps, err := apicore.BootstrapAPI(cfg, configFile, authManager)
+	apiDeps, rt, err := apicore.BootstrapAPI(cfg, configFile, authManager)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	authManager.SetApiTokenRepo(apiDeps.Repos.ApiTokenRepo)
 
-	return apiDeps, nil
+	return apiDeps, rt, nil
 }
 
 func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) error {
-	deps, err := Run(cmd, configFile, hostFlag, portFlag)
+	deps, rt, err := Run(cmd, configFile, hostFlag, portFlag)
 	if err != nil {
 		log.Fatalf("Failed to initialize API dependencies: %v", err)
 	}
 	defer func() {
-		rt := deps.GetRuntime()
-		if rt == nil {
-			rt = apicore.NewAPIRuntime(deps)
-		}
 		rt.Shutdown()
 		_ = deps.CoreDeps.DB.Close()
 	}()
 
-	router := apiserver.NewServer(deps)
+	router := apiserver.NewServer(rt)
 
 	apiserver.LogServerInfo(deps.CoreDeps.GetConfig())
 

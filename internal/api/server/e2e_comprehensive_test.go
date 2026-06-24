@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/api/auth"
+	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,7 +75,7 @@ func TestComprehensiveE2E(t *testing.T) {
 		manager.SetApiTokenRepo(deps.Repos.ApiTokenRepo)
 
 		deps.Auth = manager
-		router = NewServer(deps)
+		router = NewServer(testkit.GetTestRuntime(deps))
 
 		// Verify auth is initialized
 		w := doReq("GET", "/api/v1/auth/status", nil)

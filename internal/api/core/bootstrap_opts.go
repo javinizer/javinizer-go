@@ -17,16 +17,16 @@ import (
 // a deterministic mock scraper at the scraper seam while exercising the real
 // API server, real worker pipeline, real result tracker, real DB, and real
 // HTTP frontend/proxy stack end-to-end.
-func BootstrapAPIWithOpts(cfg *config.Config, configFile string, auth commandutil.AuthProvider, depsOpts *commandutil.DependenciesOptions) (*APIDeps, error) {
+func BootstrapAPIWithOpts(cfg *config.Config, configFile string, auth commandutil.AuthProvider, depsOpts *commandutil.DependenciesOptions) (*APIDeps, *APIRuntime, error) {
 	if cfg == nil {
-		return nil, fmt.Errorf("config cannot be nil")
+		return nil, nil, fmt.Errorf("config cannot be nil")
 	}
 	if depsOpts == nil {
 		return BootstrapAPI(cfg, configFile, auth)
 	}
 	coreDeps, err := commandutil.NewDependenciesWithOptions(cfg, depsOpts)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return bootstrapAPIDeps(cfg, configFile, auth, coreDeps)
 }

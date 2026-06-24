@@ -58,7 +58,7 @@ func TestNewServer(t *testing.T) {
 	// Initialize atomic config pointer
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 	require.NotNil(t, router)
 
@@ -164,7 +164,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 	testkit.GetTestRuntime(deps)
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	actual := make([]string, 0, len(router.Routes()))
@@ -341,7 +341,7 @@ func TestNewServer_CORSHeaders(t *testing.T) {
 	// Initialize atomic config pointer
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	// Test OPTIONS request (CORS preflight)
@@ -389,7 +389,7 @@ func TestNewServer_StaticFiles(t *testing.T) {
 	// Initialize atomic config pointer
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	// Test that docs endpoint is registered
@@ -433,7 +433,7 @@ func TestServeScalarDocs(t *testing.T) {
 	// Initialize atomic config pointer
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	req := httptest.NewRequest("GET", "/docs", nil)
@@ -514,7 +514,7 @@ func TestNewServer_GinMode(t *testing.T) {
 			// Initialize atomic config pointer
 			testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-			router := NewServer(deps)
+			router := NewServer(testkit.GetTestRuntime(deps))
 			defer cleanupServerHub(t, deps)
 			require.NotNil(t, router)
 
@@ -572,7 +572,7 @@ func TestNewServer_AllEndpointsAccessible(t *testing.T) {
 	// Initialize atomic config pointer
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	// Test GET endpoints
@@ -634,7 +634,7 @@ func TestNewServer_SecurityHeaders(t *testing.T) {
 	// Initialize atomic config pointer
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	t.Run("CORS rejects wildcard and blocked origins", func(t *testing.T) {
@@ -692,7 +692,7 @@ func TestNewServer_InvalidRoutes(t *testing.T) {
 	// Initialize atomic config pointer
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	invalidRoutes := []string{
@@ -744,7 +744,7 @@ func TestNewServer_SPARouteFallbackForHTML(t *testing.T) {
 	testkit.GetTestRuntime(deps)
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	req := httptest.NewRequest("GET", "/some/spa/route", nil)
@@ -799,7 +799,7 @@ func TestNewServer_RobotsTxtServed(t *testing.T) {
 	testkit.GetTestRuntime(deps)
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	req := httptest.NewRequest("GET", "/robots.txt", nil)
@@ -841,7 +841,7 @@ func TestServerDependencies_Shutdown(t *testing.T) {
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	// Create server to initialize wsCancel
-	_ = NewServer(deps)
+	_ = NewServer(testkit.GetTestRuntime(deps))
 
 	// Test that Shutdown doesn't panic
 	assert.NotPanics(t, func() {
@@ -1043,7 +1043,7 @@ func TestNewServer_GenreDepsCallbackWired(t *testing.T) {
 	testkit.GetTestRuntime(deps)
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
-	_ = NewServer(deps)
+	_ = NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	// Verify cache invalidation callback is producible from deps.

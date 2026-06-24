@@ -140,3 +140,24 @@ func TestPathValidator_Validate_Miss_AllEmptyEntriesInAllowList(t *testing.T) {
 	_, err := v.ValidateDir("/some/path")
 	require.Error(t, err)
 }
+
+// --- IsDirAllowed: blank-only and mixed-blank allowlist entries ---
+
+func TestPathValidator_IsDirAllowed_BlankOnlyAllowList(t *testing.T) {
+	tempDir := t.TempDir()
+	v := NewPathValidator(afero.NewOsFs(), []string{"", "  "}, nil)
+	assert.False(t, v.IsDirAllowed(tempDir), "all-blank allowlist should deny by default")
+}
+
+func TestPathValidator_IsDirAllowed_MixedBlankAllowListSkipsBlanks(t *testing.T) {
+	allowedDir := t.TempDir()
+	// Mixed allowlist with blank entries — blank entries should be skipped,
+	// not cleaned to "." (CWD) and accidentally allowed.
+	v := NewPathValidator(afero.NewOsFs(), []string{"", allowedDir, "  "}, nil)
+	assert.True(t, v.IsDirAllowed(allowedDir), "valid entry should be allowed despite blank siblings")
+
+	// A path NOT under allowedDir should still be denied — the blank entry
+	// must not expand to CWD and allow it.
+	otherDir := t.TempDir()
+	assert.False(t, v.IsDirAllowed(otherDir), "blank entry must not allow CWD")
+}

@@ -45,7 +45,7 @@ func setupAuthenticatedTestServer(t *testing.T) (*gin.Engine, *core.APIDeps) {
 		t.Fatalf("failed to init auth manager: %v", err)
 	}
 	deps.Auth = manager
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	return router, deps
 }
 

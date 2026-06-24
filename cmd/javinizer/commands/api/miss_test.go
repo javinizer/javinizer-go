@@ -24,7 +24,7 @@ func TestRun_LoggingInfoPath(t *testing.T) {
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
@@ -41,7 +41,7 @@ func TestRun_E2EAuthRateLimitDisabled(t *testing.T) {
 	t.Setenv("JAVINIZER_E2E_AUTH", "true")
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
@@ -76,7 +76,7 @@ system:
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	assert.Error(t, err, "should fail with invalid config")
 	assert.Nil(t, deps)
 	assert.Contains(t, err.Error(), "invalid configuration")
@@ -107,7 +107,7 @@ system:
 
 	cmd := api.NewCommand()
 	// This should succeed since config is valid
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	if err != nil {
 		assert.Nil(t, deps)
 	} else {
@@ -125,7 +125,7 @@ func TestRun_SetApiTokenRepo(t *testing.T) {
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()

@@ -198,8 +198,9 @@ func buildScraper(scrapeCfg *scrape.Config, aggCfg *aggregator.Config, translato
 	// scraping and persistence. The other repos (ActressRepo, ActressAliasRepo,
 	// GenreReplacementRepo, WordReplacementRepo) are passed to the aggregator
 	// and scraper constructors, which tolerate nil values:
-	//   - scrape.New nil-checks actressRepo (scrape.go:227) and movieRepo
-	//     (cache.go:18), skipping enrichment / cache lookup when nil.
+	//   - scrape.New tolerates nil actressRepo (scrape.go:227, nil-checked
+	//     before enrichActressesFromDB) and nil movieRepo (cache.go:18,
+	//     nil-checked in tryCache before FindByID).
 	//   - The aggregator's GenreProcessor / WordProcessor / AliasResolver handle
 	//     nil replacement repos by no-oping the respective processing steps.
 	// This allows partial wiring in setups that only exercise input validation

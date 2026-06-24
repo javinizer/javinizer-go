@@ -20,14 +20,16 @@ import (
 // The AuthProvider must be constructed by the caller (it depends on api/auth which
 // cannot be imported here due to the import cycle: api/auth → api/core).
 // Callers should defer deps.CoreDeps.DB.Close() to release resources.
-func BootstrapAPI(cfg *config.Config, configFile string, auth commandutil.AuthProvider) (*APIDeps, error) {
+// Returns the APIRuntime so callers can call rt.Shutdown() for graceful
+// termination of background goroutines (e.g. temp cleanup).
+func BootstrapAPI(cfg *config.Config, configFile string, auth commandutil.AuthProvider) (*APIDeps, *APIRuntime, error) {
 	if cfg == nil {
-		return nil, fmt.Errorf("config cannot be nil")
+		return nil, nil, fmt.Errorf("config cannot be nil")
 	}
 
 	coreDeps, err := commandutil.NewDependencies(cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	return bootstrapAPIDeps(cfg, configFile, auth, coreDeps)
@@ -39,7 +41,7 @@ func BootstrapAPI(cfg *config.Config, configFile string, auth commandutil.AuthPr
 // caller-supplied CoreDeps via DependenciesOptions). E2E binaries use the
 // latter to inject a deterministic mock scraper at the scraper seam while
 // exercising the same wiring path as production.
-func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.AuthProvider, coreDeps *commandutil.CoreDeps) (*APIDeps, error) {
+func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.AuthProvider, coreDeps *commandutil.CoreDeps) (*APIDeps, *APIRuntime, error) {
 	logging.Infof("Registered %d scrapers", len(coreDeps.ScraperRegistry.GetAllInstances()))
 
 	repos := coreDeps.DB.Repositories()
@@ -64,7 +66,6 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	// on apiDeps. Must be done before SetConfig/InitAPIConfig since those now
 	// delegate to APIRuntime.
 	rt := NewAPIRuntime(apiDeps)
-	apiDeps.runtime = rt
 
 	rt.SetConfig(cfg)
 	rt.EnsureRuntime()
@@ -80,5 +81,5 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 		logging.Warnf("Failed to emit server startup event: %v", err)
 	}
 
-	return apiDeps, nil
+	return apiDeps, rt, nil
 }

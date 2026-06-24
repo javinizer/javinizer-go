@@ -90,7 +90,7 @@ system:
 }
 
 // createTestAPIServer creates a test API server with minimal dependencies
-func createTestAPIServer(t *testing.T) *core.APIDeps {
+func createTestAPIServer(t *testing.T) *core.APIRuntime {
 	t.Helper()
 
 	// Create test config
@@ -143,15 +143,16 @@ func createTestAPIServer(t *testing.T) *core.APIDeps {
 	}
 	deps.CoreDeps.SetConfig(cfg)
 
-	return deps
+	rt := core.NewAPIRuntime(deps)
+	return rt
 }
 
 // TestAPIServer_HealthCheck tests the health check endpoint
 func TestAPIServer_HealthCheck(t *testing.T) {
-	deps := createTestAPIServer(t)
-	defer func() { _ = deps.CoreDeps.DB.Close() }()
+	rt := createTestAPIServer(t)
+	defer func() { _ = rt.Deps().CoreDeps.DB.Close() }()
 
-	router := apiserver.NewServer(deps)
+	router := apiserver.NewServer(rt)
 
 	req, _ := http.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -168,7 +169,8 @@ func TestAPIServer_HealthCheck(t *testing.T) {
 
 // TestAPIServer_ListMovies tests the list movies endpoint
 func TestAPIServer_ListMovies(t *testing.T) {
-	deps := createTestAPIServer(t)
+	rt := createTestAPIServer(t)
+	deps := rt.Deps()
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	// Insert test movie
@@ -176,7 +178,7 @@ func TestAPIServer_ListMovies(t *testing.T) {
 	_, err := deps.Repos.MovieRepo.Upsert(context.TODO(), movie)
 	require.NoError(t, err)
 
-	router := apiserver.NewServer(deps)
+	router := apiserver.NewServer(rt)
 
 	req, _ := http.NewRequest("GET", "/api/v1/movies", nil)
 	w := httptest.NewRecorder()
@@ -195,7 +197,8 @@ func TestAPIServer_ListMovies(t *testing.T) {
 
 // TestAPIServer_GetMovie tests the get movie by ID endpoint
 func TestAPIServer_GetMovie(t *testing.T) {
-	deps := createTestAPIServer(t)
+	rt := createTestAPIServer(t)
+	deps := rt.Deps()
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
 	// Insert test movie
@@ -203,7 +206,7 @@ func TestAPIServer_GetMovie(t *testing.T) {
 	_, err := deps.Repos.MovieRepo.Upsert(context.TODO(), movie)
 	require.NoError(t, err)
 
-	router := apiserver.NewServer(deps)
+	router := apiserver.NewServer(rt)
 
 	req, _ := http.NewRequest("GET", "/api/v1/movies/IPX-123", nil)
 	w := httptest.NewRecorder()
@@ -222,10 +225,10 @@ func TestAPIServer_GetMovie(t *testing.T) {
 
 // TestAPIServer_GetMovie_NotFound tests 404 for non-existent movie
 func TestAPIServer_GetMovie_NotFound(t *testing.T) {
-	deps := createTestAPIServer(t)
-	defer func() { _ = deps.CoreDeps.DB.Close() }()
+	rt := createTestAPIServer(t)
+	defer func() { _ = rt.Deps().CoreDeps.DB.Close() }()
 
-	router := apiserver.NewServer(deps)
+	router := apiserver.NewServer(rt)
 
 	req, _ := http.NewRequest("GET", "/api/v1/movies/NONEXISTENT-999", nil)
 	w := httptest.NewRecorder()
@@ -288,7 +291,7 @@ func TestRun_HostFlagOverride(t *testing.T) {
 	cmd := api.NewCommand()
 	customHost := "127.0.0.1"
 
-	deps, err := api.Run(cmd, configPath, customHost, 0)
+	deps, _, err := api.Run(cmd, configPath, customHost, 0)
 	require.NoError(t, err)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
@@ -313,7 +316,7 @@ func TestRun_PortFlagOverride(t *testing.T) {
 	cmd := api.NewCommand()
 	customPort := 9090
 
-	deps, err := api.Run(cmd, configPath, "", customPort)
+	deps, _, err := api.Run(cmd, configPath, "", customPort)
 	require.NoError(t, err)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
@@ -339,7 +342,7 @@ func TestRun_BothFlagsOverride(t *testing.T) {
 	customHost := "0.0.0.0"
 	customPort := 3000
 
-	deps, err := api.Run(cmd, configPath, customHost, customPort)
+	deps, _, err := api.Run(cmd, configPath, customHost, customPort)
 	require.NoError(t, err)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
 
@@ -356,7 +359,7 @@ func TestRun_ConfigLoading(t *testing.T) {
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
@@ -374,7 +377,7 @@ func TestRun_DatabaseInit(t *testing.T) {
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
@@ -396,7 +399,7 @@ func TestRun_ScraperRegistry(t *testing.T) {
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
@@ -415,7 +418,7 @@ func TestRun_Repositories(t *testing.T) {
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
@@ -438,7 +441,7 @@ func TestRun_ReloadConfig(t *testing.T) {
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
@@ -458,7 +461,7 @@ func TestRun_JobStore(t *testing.T) {
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
@@ -480,7 +483,7 @@ func TestRun_TokenStoreInitialized(t *testing.T) {
 	configPath, _ := setupTagTestDB(t)
 
 	cmd := api.NewCommand()
-	deps, err := api.Run(cmd, configPath, "", 0)
+	deps, _, err := api.Run(cmd, configPath, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	defer func() { _ = deps.CoreDeps.DB.Close() }()
@@ -494,7 +497,7 @@ func TestRun_ErrorConfigNotFound(t *testing.T) {
 	cmd := api.NewCommand()
 	nonExistentPath := testutil.UnreachableConfigPath(t)
 
-	deps, err := api.Run(cmd, nonExistentPath, "", 0)
+	deps, _, err := api.Run(cmd, nonExistentPath, "", 0)
 	assert.Error(t, err, "should error when config not found")
 	assert.Nil(t, deps)
 	assert.Contains(t, err.Error(), "failed to load config")
@@ -546,7 +549,7 @@ system:
 		t.Setenv("DEEPL_API_KEY", "test-deepl-key-from-env")
 
 		cmd := api.NewCommand()
-		deps, err := api.Run(cmd, configPath, "", 0)
+		deps, _, err := api.Run(cmd, configPath, "", 0)
 		require.NoError(t, err, "DEEPL_API_KEY env var should satisfy validation when config api_key is empty")
 		require.NotNil(t, deps)
 		defer func() { _ = deps.CoreDeps.DB.Close() }()
@@ -594,7 +597,7 @@ system:
 		t.Setenv("DEEPL_API_KEY", "")
 
 		cmd := api.NewCommand()
-		deps, err := api.Run(cmd, configPath, "", 0)
+		deps, _, err := api.Run(cmd, configPath, "", 0)
 		assert.Error(t, err, "should still fail when deepl api_key is missing from both config and env")
 		assert.Nil(t, deps)
 		assert.Contains(t, err.Error(), "invalid configuration")
@@ -636,7 +639,7 @@ system:
 		t.Setenv("OPENAI_API_KEY", "sk-test-openai-key-from-env")
 
 		cmd := api.NewCommand()
-		deps, err := api.Run(cmd, configPath, "", 0)
+		deps, _, err := api.Run(cmd, configPath, "", 0)
 		require.NoError(t, err, "OPENAI_API_KEY env var should satisfy validation")
 		require.NotNil(t, deps)
 		defer func() { _ = deps.CoreDeps.DB.Close() }()

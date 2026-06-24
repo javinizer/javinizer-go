@@ -142,7 +142,7 @@ func TestCORS_OriginValidation(t *testing.T) {
 			rt.SetConfig(cfg)
 			testkit.SetTestRuntime(deps, rt)
 
-			router := NewServer(deps)
+			router := NewServer(testkit.GetTestRuntime(deps))
 			defer cleanupServerHub(t, deps)
 
 			req := httptest.NewRequest("GET", "/health", nil)
@@ -233,7 +233,7 @@ func TestCORS_PreflightRequest(t *testing.T) {
 			rt.SetConfig(cfg)
 			testkit.SetTestRuntime(deps, rt)
 
-			router := NewServer(deps)
+			router := NewServer(testkit.GetTestRuntime(deps))
 			defer cleanupServerHub(t, deps)
 
 			req := httptest.NewRequest("OPTIONS", "/api/v1/scrape", nil)
@@ -429,7 +429,7 @@ func TestSecurity_InputValidation(t *testing.T) {
 	rt.SetConfig(cfg)
 	testkit.SetTestRuntime(deps, rt)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	tests := []struct {
@@ -651,7 +651,7 @@ func TestSecurity_ErrorMessageLeakage(t *testing.T) {
 	rt.SetConfig(cfg)
 	testkit.SetTestRuntime(deps, rt)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	// Test scrape endpoint with error
@@ -722,7 +722,7 @@ func TestSecurity_RateLimitingHeaders(t *testing.T) {
 	rt.SetConfig(cfg)
 	testkit.SetTestRuntime(deps, rt)
 
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 	defer cleanupServerHub(t, deps)
 
 	req := httptest.NewRequest("GET", "/health", nil)
@@ -823,7 +823,7 @@ func TestSecurity_WebSocketOriginValidation(t *testing.T) {
 			rt.SetConfig(cfg)
 			testkit.SetTestRuntime(deps, rt)
 
-			router := NewServer(deps)
+			router := NewServer(testkit.GetTestRuntime(deps))
 			defer cleanupServerHub(t, deps)
 
 			// Create WebSocket upgrade request

@@ -272,7 +272,7 @@ func (l *dbRevertLog) CaptureSnapshot(ctx context.Context, opID OperationID, cmd
 
 	preRecord, err := l.repo.FindByID(ctx, recordID)
 	if err != nil {
-		resolveLogger(l.logger).Warnf("[revert-log] CaptureSnapshot: failed to find record %s: %v", opID, err)
+		resolveLogger(l.logger).Warnf("[revert-log] CaptureSnapshot: failed to find record %d (opID: %s): %v", recordID, opID, err)
 		return
 	}
 	if preRecord == nil {

@@ -158,7 +158,7 @@ func setupTestServer(t *testing.T) (*gin.Engine, *ServerDependencies) {
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	// Create Gin router with all middleware and handlers
-	router := NewServer(deps)
+	router := NewServer(testkit.GetTestRuntime(deps))
 
 	// Register cleanup for WebSocket hub goroutine
 	t.Cleanup(func() {

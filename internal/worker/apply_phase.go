@@ -336,8 +336,9 @@ func trackApplyResults(outcomes []applyFileOutcome, organized *int64, failed *in
 		if o.Success {
 			atomic.AddInt64(organized, 1)
 		}
-		// A panicked file is also a failure — it must contribute to failCount
-		// so that MarkOrganized() is not called when panics occurred.
+		// Count panics as failures too. Currently setPanic() sets both Panic
+		// and Failed, so the || o.Panic is defensive — it future-proofs against
+		// changes to setPanic that might set only Panic without Failed.
 		if o.Failed || o.Panic {
 			atomic.AddInt64(failed, 1)
 		}

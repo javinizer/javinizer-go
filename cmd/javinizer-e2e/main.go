@@ -143,7 +143,7 @@ func run() error {
 	// Bootstrap API deps with the mock-scraper registry + injected DB so
 	// commandutil.NewDependenciesWithOptions uses our registry instead of
 	// running scraper.RegisterAll + the real-scraper instantiation.
-	apiDeps, err := apicore.BootstrapAPIWithOpts(cfg, "", authManager,
+	apiDeps, rt, err := apicore.BootstrapAPIWithOpts(cfg, "", authManager,
 		&commandutil.DependenciesOptions{
 			DB:              db,
 			ScraperRegistry: registry,
@@ -154,10 +154,9 @@ func run() error {
 	}
 	authManager.SetApiTokenRepo(apiDeps.Repos.ApiTokenRepo)
 
-	rt := apicore.NewAPIRuntime(apiDeps)
 	defer rt.Shutdown()
 
-	router := apiserver.NewServer(apiDeps)
+	router := apiserver.NewServer(rt)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	apiserver.LogServerInfo(cfg)

@@ -24,7 +24,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBootstrapAPI_NilConfig(t *testing.T) {
-	_, err := BootstrapAPI(nil, "", nil)
+	_, _, err := BootstrapAPI(nil, "", nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "config cannot be nil")
 }
@@ -33,16 +33,13 @@ func TestBootstrapAPI_ValidConfig(t *testing.T) {
 	cfg := config.DefaultConfig(nil, nil)
 	cfg.Database.DSN = ":memory:"
 
-	deps, err := BootstrapAPI(cfg, "config.yaml", nil)
+	deps, rt, err := BootstrapAPI(cfg, "config.yaml", nil)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
+	require.NotNil(t, rt)
 
 	t.Cleanup(func() {
-		// BootstrapAPI creates its own APIRuntime internally. Since the
-		// back-reference was removed in DEEP-2, we create a fresh runtime
-		// for shutdown. The original runtime's tempCleanupStop is already
-		// tied to the deps.CoreDeps.DB lifecycle which closes in cleanup.
-		NewAPIRuntime(deps).Shutdown()
+		rt.Shutdown()
 		if deps.CoreDeps.DB != nil {
 			_ = deps.CoreDeps.DB.Close()
 		}
@@ -56,8 +53,7 @@ func TestBootstrapAPI_ValidConfig(t *testing.T) {
 	assert.NotNil(t, deps.JobStore)
 	assert.NotNil(t, deps.TokenStore)
 
-	// APIConfig should be accessible through a fresh runtime with config synced
-	rt := NewAPIRuntime(deps)
+	// APIConfig should be accessible through the bootstrap runtime with config synced
 	rt.SetConfig(cfg)
 	apiCfg := rt.GetAPIConfig()
 	assert.Equal(t, cfg.Server.Host, apiCfg.Host)
@@ -990,11 +986,10 @@ func TestBootstrapAPI_EmitEventError(t *testing.T) {
 	// This exercises the emit event error path (line 63-65)
 	// The event emitter may fail if the DB isn't fully ready, but BootstrapAPI
 	// only logs the warning and continues.
-	deps, err := BootstrapAPI(cfg, "config.yaml", nil)
+	deps, rt, err := BootstrapAPI(cfg, "config.yaml", nil)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
 	t.Cleanup(func() {
-		rt := NewAPIRuntime(deps)
 		rt.Shutdown()
 		if deps.CoreDeps.DB != nil {
 			_ = deps.CoreDeps.DB.Close()

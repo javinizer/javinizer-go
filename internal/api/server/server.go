@@ -114,15 +114,11 @@ func acceptsHTML(c *gin.Context) bool {
 }
 
 // NewServer creates and configures the Gin router with all API endpoints.
-func NewServer(deps *core.APIDeps) *gin.Engine {
-	// Reuse the APIRuntime created during bootstrap (if available) so that the
-	// temp cleanup stop channel and other lifecycle state are preserved for
-	// graceful shutdown. Fall back to creating a new one for direct construction
-	// (e.g. tests that build APIDeps without calling BootstrapAPI).
-	rt := deps.GetRuntime()
-	if rt == nil {
-		rt = core.NewAPIRuntime(deps)
-	}
+// NewServer builds the Gin engine from an APIRuntime. The runtime must be
+// initialized (InitAPIConfig called) — BootstrapAPI handles this. Callers
+// that construct APIDeps directly (e.g. tests) should create the APIRuntime
+// via NewAPIRuntime and call InitAPIConfig before passing it here.
+func NewServer(rt *core.APIRuntime) *gin.Engine {
 	rt.InitAPIConfig()
 
 	runtime := rt.EnsureRuntime()

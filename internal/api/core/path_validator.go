@@ -299,6 +299,9 @@ func (v *PathValidator) IsDirAllowed(dir string) bool {
 
 	// Allowlist check
 	for _, allowed := range v.allow {
+		if strings.TrimSpace(allowed) == "" {
+			continue
+		}
 		expandedAllowed := expandHomeDir(allowed)
 		cleanAllowed := filepath.Clean(expandedAllowed)
 		if absAllowed, err := filepath.Abs(cleanAllowed); err == nil {

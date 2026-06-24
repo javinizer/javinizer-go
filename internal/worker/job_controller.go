@@ -51,11 +51,16 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
+	// Store the cancel func BEFORE markStarted so that a concurrent Cancel()
+	// call sets the status to Cancelled, causing markStarted to fail (status
+	// != expectedFrom) and preventing the goroutine from starting with an
+	// uncancelled context. If markStarted fails, the explicit cancel() call
+	// is a safe no-op on the already-cancelled context.
+	c.job.lifecycle.setCancelFunc(cancel)
 	if err := c.markStarted(models.JobStatusPending); err != nil {
 		cancel()
 		return err
 	}
-	c.job.lifecycle.setCancelFunc(cancel)
 	if persistFn != nil {
 		persistFn()
 	}
@@ -102,11 +107,12 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	c.job.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(ctx)
+	// Same ordering as StartScrape: setCancelFunc before markStarted.
+	c.job.lifecycle.setCancelFunc(cancel)
 	if err := c.markStarted(models.JobStatusCompleted); err != nil {
 		cancel()
 		return err
 	}
-	c.job.lifecycle.setCancelFunc(cancel)
 	if persistFn != nil {
 		persistFn()
 	}
