@@ -384,7 +384,7 @@
 
 <RescrapeModal
 	bind:show={s.showRescrapeModal}
-	rescraping={s.rescrapingStates.get(s.rescrapeMovieId) || false || s.bulkRescraping}
+	rescraping={s.rescrapingStates.get(s.rescrapeResultId) || false || s.bulkRescraping}
 	rescrapeMovieId={s.rescrapeMovieId}
 	rescrapeMovieName={s.currentMovie?.id}
 	bulkMovieCount={s.bulkRescrapeMovieIds.length || undefined}

@@ -139,9 +139,11 @@ func TestActressMerger_DifferentDMMIDsBothNonZero(t *testing.T) {
 
 	actresses := merger.Merge(sources, opts)
 
-	// Both DMMID keys (100 and 200) point to the same actress pointer,
-	// so we get 2 results from iteration but they share the same values.
-	require.Len(t, actresses, 2)
+	// Two sources return the same actress (matched by name) with DIFFERENT
+	// non-zero DMMIDs. The first DMMID (higher priority r18dev) wins and the
+	// actress is emitted ONCE. (The buggy else-if re-indexed the same pointer
+	// under the second DMMID key, causing Phase 2 to emit a duplicate.)
+	require.Len(t, actresses, 1)
 	// DMMID should come from r18dev (higher priority)
 	for _, a := range actresses {
 		assert.Equal(t, "Yui", a.FirstName)

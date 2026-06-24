@@ -304,10 +304,13 @@ func TestMergeBoolField_BothEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	// Both false values are meaningful (not empty), so conflict resolution applies
+	// Both ShouldCropPoster values are false (the zero/default). Under the
+	// restored isEmpty predicate (!v), a false value IS empty, so the field
+	// is recorded as empty (Source="empty") with NO conflict. (The buggy
+	// predicate `return false` treated false as meaningful, falsely recording
+	// a conflict + "scraper" source.)
 	assert.Equal(t, false, result.Merged.Poster.ShouldCropPoster)
-	assert.Equal(t, "scraper", result.Provenance["ShouldCropPoster"].Source)
-	assert.Greater(t, result.Stats.ConflictsResolved, 0)
+	assert.Equal(t, "empty", result.Provenance["ShouldCropPoster"].Source)
 }
 
 // TestMergeFloatField_PreferScraper_EmptyNFO tests prefer-scraper with empty NFO

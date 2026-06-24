@@ -316,6 +316,7 @@ func TestIsFieldEmpty_Miss2_VariousFields(t *testing.T) {
 		OriginalFileName: "test.mp4",
 		SourceName:       "r18dev",
 		SourceURL:        "https://example.com",
+		Poster:           models.PosterState{ShouldCropPoster: true},
 	}
 
 	// These should NOT be empty
@@ -327,7 +328,7 @@ func TestIsFieldEmpty_Miss2_VariousFields(t *testing.T) {
 	assert.False(t, isFieldEmptySpec("Runtime", movie))
 	assert.False(t, isFieldEmptySpec("RatingScore", movie))
 	assert.False(t, isFieldEmptySpec("RatingVotes", movie))
-	assert.False(t, isFieldEmptySpec("ShouldCropPoster", movie)) // Always false
+	assert.False(t, isFieldEmptySpec("ShouldCropPoster", movie)) // true → !true == false (not empty)
 
 	// Default case (unknown field)
 	assert.True(t, isFieldEmptySpec("UnknownField", movie))

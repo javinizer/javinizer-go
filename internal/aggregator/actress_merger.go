@@ -111,9 +111,11 @@ func (m *actressMerger) Merge(sources []actressSource, opts actressMergeOptions)
 						delete(actressByName, nameKey)
 					}
 					actressByDMMID[info.DMMID] = existing
-				} else if existing.DMMID != 0 && info.DMMID != 0 && existing.DMMID != info.DMMID {
-					actressByDMMID[info.DMMID] = existing
 				}
+				// When two sources disagree on a non-zero DMMID for the same
+				// actress (matched by name), the first DMMID wins. Re-indexing the
+				// same pointer under the second DMMID here caused Phase 2 to emit
+				// the actress twice (duplicate <actor> in NFO / DB rows).
 				if existing.FirstName == "" && info.FirstName != "" {
 					existing.FirstName = info.FirstName
 				}

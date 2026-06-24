@@ -1491,3 +1491,72 @@ func TestActressDMMIDZeroNotDeduplicated(t *testing.T) {
 	assert.Equal(t, "未知の女優", actresses[0].JapaneseName)
 	assert.Equal(t, "https://r18dev.example.com/thumb1.jpg", actresses[0].ThumbURL)
 }
+
+// TestGetRatingByPriorityWithSource_SkipsOutOfRange is a regression test for
+// out-of-range rating scores. A scraper returning a 0–100 percentage (or
+// garbage) must be skipped and the next valid priority source used, rather
+// than the corrupt score being persisted into movie/DB/NFO. Old
+// getRatingByPriority did `if !isRatingScoreValid(score) { warn; continue }`;
+// the rewrite dropped the range check.
+func TestGetRatingByPriorityWithSource_SkipsOutOfRange(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{Priority: []string{"r18dev", "dmm"}},
+		Metadata: config.MetadataConfig{
+			Priority: config.PriorityConfig{Priority: []string{"r18dev", "dmm"}},
+		},
+	}
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
+
+	results := map[string]*models.ScraperResult{
+		"r18dev": {Source: "r18dev", Rating: &models.Rating{Score: 85.0, Votes: 100}}, // out-of-range
+		"dmm":    {Source: "dmm", Rating: &models.Rating{Score: 7.5, Votes: 200}},     // valid
+	}
+	score, votes, source := agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
+	assert.Equal(t, 7.5, score, "out-of-range priority-1 score should be skipped for valid priority-2")
+	assert.Equal(t, 200, votes)
+	assert.Equal(t, "dmm", source)
+
+	// When every source is out-of-range, nothing is stored (score 0, no source).
+	results["dmm"].Rating.Score = 50.0
+	score, votes, source = agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
+	assert.Equal(t, 0.0, score, "all-out-of-range should yield no score")
+	assert.Equal(t, 0, votes)
+	assert.Equal(t, "", source)
+}
+
+// TestAggregate_GenresWordReplacementApplied is a regression test for the
+// genre word-replacement drop: configured WORD replacements must be applied to
+// each genre token before genre replacement + ignore. The rewrite dropped this
+// and wordProcessor.applyToMovie does not touch movie.Genres, so user word maps
+// no longer normalized genre tokens. (The pre-existing
+// TestAggregate_GenresWordReplacement actually tests GENRE replacement via the
+// genreProcessor cache, not word replacement — which is why this slipped.)
+func TestAggregate_GenresWordReplacementApplied(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{Priority: []string{"r18dev"}},
+		Metadata: config.MetadataConfig{
+			Priority:         config.PriorityConfig{Priority: []string{"r18dev"}},
+			WordReplacement:  config.WordReplacementConfig{Enabled: true},
+			GenreReplacement: config.GenreReplacementConfig{Enabled: false},
+		},
+	}
+	meta := MetadataConfigFromApp(&cfg.Metadata)
+	// Word map "HD" -> "FHD": genre "HD Video" must become "FHD Video".
+	wp := newWordProcessorWithCache(meta, nil, map[string]string{"HD": "FHD"})
+	agg := New(testConfigFromAppConfig(cfg), NewGenreProcessor(meta, nil), wp, NewAliasResolver(meta, nil))
+
+	results := []*models.ScraperResult{
+		{Source: "r18dev", ID: "IPX-1", Title: "T", Genres: []string{"HD Video", "Drama"}},
+	}
+	movie, _, err := agg.Aggregate(results)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+
+	names := make([]string, len(movie.Genres))
+	for i, g := range movie.Genres {
+		names[i] = g.Name
+	}
+	assert.Contains(t, names, "FHD Video", "word replacement should normalize genre token HD->FHD")
+	assert.NotContains(t, names, "HD Video")
+	assert.Contains(t, names, "Drama")
+}

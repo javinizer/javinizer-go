@@ -659,7 +659,7 @@ func TestIsFieldEmpty_AllFields_Partial(t *testing.T) {
 	assert.True(t, isFieldEmptySpec("PosterURL", m))
 	assert.True(t, isFieldEmptySpec("CoverURL", m))
 	assert.True(t, isFieldEmptySpec("CroppedPosterURL", m))
-	assert.False(t, isFieldEmptySpec("ShouldCropPoster", m)) // always returns false
+	assert.True(t, isFieldEmptySpec("ShouldCropPoster", m)) // false (default) → !false == true (empty)
 	assert.True(t, isFieldEmptySpec("OriginalPosterURL", m))
 	assert.True(t, isFieldEmptySpec("OriginalCroppedPosterURL", m))
 	assert.True(t, isFieldEmptySpec("OriginalShouldCropPoster", m))

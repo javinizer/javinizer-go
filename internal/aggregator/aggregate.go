@@ -215,9 +215,17 @@ func (a *Aggregator) assignGenres(movie *models.Movie, resultsBySource map[strin
 	genreNames, genreSource := a.getGenresByPriorityWithSource(resultsBySource, priority)
 	movie.Genres = make([]models.Genre, 0, len(genreNames))
 	for _, name := range genreNames {
+		// Apply configured word replacements to each genre token before genre
+		// replacement + ignore-check. The old genre loop (deleted genre.go)
+		// did `name = a.applyWordReplacement(name)` first; the rewrite dropped
+		// it and wordProcessor.applyToMovie does not touch movie.Genres, so
+		// user word maps no longer normalized genre tokens.
 		replacedName := name
+		if a.wordProcessor != nil {
+			replacedName = a.wordProcessor.Apply(replacedName)
+		}
 		if a.genreProcessor != nil {
-			replacedName = a.genreProcessor.applyReplacement(name)
+			replacedName = a.genreProcessor.applyReplacement(replacedName)
 		}
 		ignored := false
 		if a.genreProcessor != nil {
@@ -262,7 +270,17 @@ func (a *Aggregator) getRatingByPriorityWithSource(
 	for _, source := range priority {
 		if result, exists := results[source]; exists {
 			if result.Rating != nil && (result.Rating.Score > 0 || result.Rating.Votes > 0) {
-				return result.Rating.Score, result.Rating.Votes, source
+				score := result.Rating.Score
+				// Skip corrupt/out-of-range scores and keep scanning for the
+				// first *valid* priority source. The old getRatingByPriority
+				// did `if !isRatingScoreValid(score) { warn; continue }` —
+				// without this, a scraper returning a 0–100 percentage or
+				// garbage is persisted into movie/DB/NFO instead of being
+				// defensively discarded and replaced by the next source.
+				if score > 0 && (score < ratingMinValid || score > ratingMaxValid) {
+					continue
+				}
+				return score, result.Rating.Votes, source
 			}
 		}
 	}

@@ -500,6 +500,7 @@ func TestIsFieldEmpty_AllFields(t *testing.T) {
 		OriginalFileName: "file.mp4",
 		SourceName:       "r18dev",
 		SourceURL:        "http://source",
+		Poster:           models.PosterState{ShouldCropPoster: true},
 		Actresses:        []models.Actress{{JapaneseName: "A"}},
 		Genres:           []models.Genre{{Name: "Action"}},
 		Screenshots:      []string{"http://ss.jpg"},
@@ -528,7 +529,7 @@ func TestIsFieldEmpty_AllFields(t *testing.T) {
 	assert.False(t, isFieldEmptySpec("Translations", movie))
 	assert.False(t, isFieldEmptySpec("SourceName", movie))
 	assert.False(t, isFieldEmptySpec("SourceURL", movie))
-	// ShouldCropPoster is never empty (bool)
+	// ShouldCropPoster=true is a meaningful (non-empty) value: !true == false
 	assert.False(t, isFieldEmptySpec("ShouldCropPoster", movie))
 	// Unknown field should be empty
 	assert.True(t, isFieldEmptySpec("UnknownField", movie))

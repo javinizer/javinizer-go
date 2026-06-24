@@ -561,3 +561,34 @@ func TestApplyPhase_Run_MultipleFiles(t *testing.T) {
 	assert.True(t, lc.organized, "MarkOrganized should be called when all files succeed")
 	assert.Equal(t, 2, wf.getApplyCalled(), "Workflow.Apply should be called for each file")
 }
+
+// TestApplyPhase_Run_CancellationMarksCancelled is a regression test for the
+// apply-cancellation status. A mid-apply cancellation is not an organize
+// failure: the file was scraped successfully, just not organized. The per-file
+// FileResult must be JobStatusCancelled (mirroring scrape_phase.go), NOT
+// JobStatusFailed. Old OrganizeTask returned the error to the pool without
+// relabelling the row, so cancelled-but-scraped files stayed Completed.
+func TestApplyPhase_Run_CancellationMarksCancelled(t *testing.T) {
+	wf := &stubApplyWorkflow{applyErr: context.Canceled}
+	inputs := makeApplyInputs(wf)
+	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-777", Title: "Test Movie"},
+	}
+
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+	})
+
+	updater := inputs.Updater.(*stubUpdater)
+	r := updater.getResult("/source/IPX-777.mp4")
+	require.NotNil(t, r, "Updater should have a result for the cancelled apply")
+	assert.Equal(t, models.JobStatusCancelled, r.Status,
+		"cancelled apply should mark the file Cancelled, not Failed")
+	// The prior scrape-phase Movie is preserved on the cancel path too.
+	require.NotNil(t, r.Movie)
+	assert.Equal(t, "IPX-777", r.Movie.ID)
+}

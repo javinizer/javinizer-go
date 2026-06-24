@@ -168,7 +168,7 @@ var float64MergeSpecs = []scalarMergeSpec[float64]{
 
 // boolMergeSpecs lists all bool scalar fields to merge.
 var boolMergeSpecs = []scalarMergeSpec[bool]{
-	{"ShouldCropPoster", func(m *models.Movie) bool { return m.Poster.ShouldCropPoster }, func(m *models.Movie) bool { return m.Poster.ShouldCropPoster }, func(m *models.Movie, v bool) { m.Poster.ShouldCropPoster = v }, func(v bool) bool { return false }},
+	{"ShouldCropPoster", func(m *models.Movie) bool { return m.Poster.ShouldCropPoster }, func(m *models.Movie) bool { return m.Poster.ShouldCropPoster }, func(m *models.Movie, v bool) { m.Poster.ShouldCropPoster = v }, func(v bool) bool { return !v }},
 }
 
 // boolPtrMergeSpecs lists all *bool scalar fields to merge.

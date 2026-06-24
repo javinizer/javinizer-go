@@ -233,6 +233,17 @@ func interpretApplyResult(
 		if errors.Is(applyErr, context.DeadlineExceeded) {
 			errMsg = fmt.Sprintf("apply timed out after %v", applyTimeout)
 		}
+		// A mid-apply cancellation is not an organize failure: the file was
+		// scraped successfully, just not organized. Mirror scrape_phase.go and
+		// preserve the Cancelled status (old OrganizeTask returned the error to
+		// the pool without mutating the per-file FileResult, so cancelled-but-
+		// scraped files stayed Completed). Main's process_organize.go likewise
+		// did not relabel them Failed.
+		fileStatus := models.JobStatusFailed
+		if errors.Is(applyErr, context.Canceled) {
+			fileStatus = models.JobStatusCancelled
+			errMsg = "organization canceled"
+		}
 		now := time.Now()
 		// Preserve the prior scrape-phase Movie on the apply-failure path.
 		// Main's process_organize.go returned early on organizeErr WITHOUT
@@ -246,7 +257,7 @@ func interpretApplyResult(
 		inputs.Updater.UpdateFileResult(filePath, &MovieResult{
 			FileMatchInfo: afc.Match,
 			Movie:         movie,
-			Status:        models.JobStatusFailed,
+			Status:        fileStatus,
 			Error:         errMsg,
 			StartedAt:     startTime,
 			EndedAt:       &now,

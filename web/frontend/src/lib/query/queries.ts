@@ -24,6 +24,14 @@ export function createBatchJobsQuery() {
 		queryKey: ['batch-jobs'],
 		queryFn: () => apiClient.listBatchJobs(),
 		staleTime: 5_000,
+		// Keep the /jobs list live while any job is running. The old page-level
+		// $effect polled setInterval(invalidate ['batch-jobs']) gated on
+		// hasRunningJobs; this is its query-level replacement, so the list no
+		// longer freezes mid-run when started from elsewhere.
+		refetchInterval: (query) =>
+			query.state.data?.jobs?.some((j) => j.status?.toLowerCase() === 'running')
+				? 5_000
+				: false,
 	}));
 }
 
