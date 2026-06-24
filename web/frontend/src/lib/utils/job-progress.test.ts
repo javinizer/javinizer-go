@@ -64,6 +64,14 @@ describe('computeJobProgress', () => {
 			expect(result).toBe(100);
 		});
 
+		it('caps at 100 when finishedCount exceeds totalFiles (late-arriving results)', () => {
+			// Regression for cycle-1 MINOR #3: the !isRunning branch had no
+			// Math.min(...,100) cap, so late-arriving results after completion
+			// could yield >100%. The isRunning branch was already capped.
+			const result = computeJobProgress({}, 10, 0, false, 12);
+			expect(result).toBe(100);
+		});
+
 		it('returns restProgress when totalFiles is 0', () => {
 			expect(computeJobProgress({}, 0, 42, false, 0)).toBe(42);
 		});
@@ -110,6 +118,15 @@ describe('computeJobProgress', () => {
 		it('handles undefined messagesByFile', () => {
 			const result = computeJobProgress(undefined, 66, 0, true, 31);
 			expect(result).toBe(47);
+		});
+
+		it('caps at 100 when finishedCount exceeds totalFiles with no active messages', () => {
+			// Regression for cycle-3 F-A: the isRunning + no-active-messages branch
+			// (job-progress.ts:43) was uncapped, unlike the active-progress branch.
+			// Late-arriving results could yield >100%, rendered unclamped by
+			// ProgressModal. Now capped for parity with the other branches.
+			const result = computeJobProgress({}, 10, 0, true, 12);
+			expect(result).toBe(100);
 		});
 
 		it('clamps progress values to 0-100', () => {

@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -191,15 +192,20 @@ func (a *Aggregator) assignReleaseDate(movie *models.Movie, resultsBySource map[
 // assignRating assigns the rating score and votes, with out-of-range validation.
 func (a *Aggregator) assignRating(movie *models.Movie, resultsBySource map[string]*models.ScraperResult, priorityFunc func(string) []string, fieldSources map[string]string) {
 	priority := priorityFunc("Rating")
-	ratingScore, ratingVotes, ratingSource := a.getRatingByPriorityWithSource(resultsBySource, priority)
+	ratingScore, ratingVotes, ratingSource, ratingWarning := a.getRatingByPriorityWithSource(resultsBySource, priority)
 	movie.RatingScore = ratingScore
 	movie.RatingVotes = ratingVotes
 	if ratingSource != "" {
 		fieldSources["rating_score"] = ratingSource
 		fieldSources["rating_votes"] = ratingSource
 	}
-	if ratingScore > 0 && (ratingScore < ratingMinValid || ratingScore > ratingMaxValid) {
-		movie.RatingWarning = fmt.Sprintf("rating %.2f is outside valid range [%.1f, %.1f]", ratingScore, ratingMinValid, ratingMaxValid)
+	// ratingWarning names the source(s) whose out-of-range score was skipped.
+	// getRatingByPriorityWithSource skips corrupt scores before returning, so
+	// any stored rating is already in range; the warning is the surviving
+	// diagnostic for the skipped sources (restores the source name that the
+	// old single-rating warning lost — cycle-1 NIT-11).
+	if ratingWarning != "" {
+		movie.RatingWarning = ratingWarning
 	}
 }
 
@@ -266,7 +272,8 @@ func (a *Aggregator) assignSourceMetadata(movie *models.Movie, resultsBySource m
 func (a *Aggregator) getRatingByPriorityWithSource(
 	results map[string]*models.ScraperResult,
 	priority []string,
-) (float64, int, string) {
+) (float64, int, string, string) {
+	var skipped []string
 	for _, source := range priority {
 		if result, exists := results[source]; exists {
 			if result.Rating != nil && (result.Rating.Score > 0 || result.Rating.Votes > 0) {
@@ -278,13 +285,25 @@ func (a *Aggregator) getRatingByPriorityWithSource(
 				// garbage is persisted into movie/DB/NFO instead of being
 				// defensively discarded and replaced by the next source.
 				if score > 0 && (score < ratingMinValid || score > ratingMaxValid) {
+					skipped = append(skipped, fmt.Sprintf("%s(%.2f)", source, score))
 					continue
 				}
-				return score, result.Rating.Votes, source
+				return score, result.Rating.Votes, source, skippedWarning(skipped)
 			}
 		}
 	}
-	return 0, 0, ""
+	return 0, 0, "", skippedWarning(skipped)
+}
+
+// skippedWarning builds a diagnostic naming the sources whose out-of-range
+// rating was skipped. Empty when nothing was skipped. The source name is
+// included so users can see which scraper returned the corrupt score (the
+// pre-refactor warning named only the stored rating, not the source).
+func skippedWarning(skipped []string) string {
+	if len(skipped) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("skipped out-of-range rating(s): %s (valid range [%.1f, %.1f])", strings.Join(skipped, ", "), ratingMinValid, ratingMaxValid)
 }
 
 func isUnknownActress(info models.ActressInfo, nameKey string, unknownText string) bool {

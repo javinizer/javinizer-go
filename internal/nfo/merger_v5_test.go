@@ -490,7 +490,8 @@ func TestMergeMovieMetadataWithOptions_V5_BooleanField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("merge failed: %v", err)
 	}
-	// Boolean field: ShouldCropPoster is never "empty", so both-have-data case
+	// Boolean field: ShouldCropPoster's isEmpty predicate is !v, so NFO's
+	// false is empty and the scraper's true wins (both-have-data case here).
 	if !result.Merged.Poster.ShouldCropPoster {
 		t.Error("expected ShouldCropPoster=true from scraper")
 	}
@@ -532,7 +533,11 @@ func TestIsFieldEmpty_V5_AllFields(t *testing.T) {
 
 	for _, fieldName := range metadataFields {
 		if fieldName == "ShouldCropPoster" {
-			// ShouldCropPoster is never considered empty (boolean, default false)
+			// ShouldCropPoster's isEmpty predicate is !v: a false (default) value
+			// IS empty, so an empty movie's ShouldCropPoster is empty.
+			if !isFieldEmptySpec(fieldName, emptyMovie) {
+				t.Errorf("expected field %q to be empty for empty movie (false -> empty under !v)", fieldName)
+			}
 			continue
 		}
 		if !isFieldEmptySpec(fieldName, emptyMovie) {

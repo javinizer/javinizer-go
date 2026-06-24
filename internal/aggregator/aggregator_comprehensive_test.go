@@ -157,7 +157,7 @@ func TestGetRatingByPriority(t *testing.T) {
 		},
 	}
 
-	score, votes, _ := agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
+	score, votes, _, _ := agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
 	assert.Equal(t, 4.5, score)
 	assert.Equal(t, 100, votes)
 
@@ -166,7 +166,7 @@ func TestGetRatingByPriority(t *testing.T) {
 		Score: 5.0,
 		Votes: 200,
 	}
-	score, votes, _ = agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
+	score, votes, _, _ = agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
 	assert.Equal(t, 5.0, score)
 	assert.Equal(t, 200, votes)
 
@@ -175,7 +175,7 @@ func TestGetRatingByPriority(t *testing.T) {
 		Score: 0,
 		Votes: 0,
 	}
-	score, votes, _ = agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
+	score, votes, _, _ = agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
 	assert.Equal(t, 4.5, score)
 	assert.Equal(t, 100, votes)
 }
@@ -1511,14 +1511,14 @@ func TestGetRatingByPriorityWithSource_SkipsOutOfRange(t *testing.T) {
 		"r18dev": {Source: "r18dev", Rating: &models.Rating{Score: 85.0, Votes: 100}}, // out-of-range
 		"dmm":    {Source: "dmm", Rating: &models.Rating{Score: 7.5, Votes: 200}},     // valid
 	}
-	score, votes, source := agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
+	score, votes, source, _ := agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
 	assert.Equal(t, 7.5, score, "out-of-range priority-1 score should be skipped for valid priority-2")
 	assert.Equal(t, 200, votes)
 	assert.Equal(t, "dmm", source)
 
 	// When every source is out-of-range, nothing is stored (score 0, no source).
 	results["dmm"].Rating.Score = 50.0
-	score, votes, source = agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
+	score, votes, source, _ = agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
 	assert.Equal(t, 0.0, score, "all-out-of-range should yield no score")
 	assert.Equal(t, 0, votes)
 	assert.Equal(t, "", source)
@@ -1559,4 +1559,31 @@ func TestAggregate_GenresWordReplacementApplied(t *testing.T) {
 	assert.Contains(t, names, "FHD Video", "word replacement should normalize genre token HD->FHD")
 	assert.NotContains(t, names, "HD Video")
 	assert.Contains(t, names, "Drama")
+}
+
+// TestGetRatingByPriorityWithSource_SkippedWarningNamesSource is a regression
+// test for C2-AGG-1 + cycle-1 NIT-11. Post-MAJOR-4, out-of-range scores are
+// skipped before returning, which made the old assignRating warning block dead.
+// The warning now lives in the skip path and NAMES the skipped source (the old
+// warning named only the stored rating, never the source). Verify the 4th
+// return value carries the source name and is empty when nothing is skipped.
+func TestGetRatingByPriorityWithSource_SkippedWarningNamesSource(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{Priority: []string{"r18dev", "dmm"}},
+		Metadata: config.MetadataConfig{Priority: config.PriorityConfig{Priority: []string{"r18dev", "dmm"}}},
+	}
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
+
+	results := map[string]*models.ScraperResult{
+		"r18dev": {Source: "r18dev", Rating: &models.Rating{Score: 85.0, Votes: 100}}, // skipped OOR
+		"dmm":    {Source: "dmm", Rating: &models.Rating{Score: 7.5, Votes: 200}},     // valid
+	}
+	_, _, _, warning := agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
+	assert.Contains(t, warning, "r18dev", "skipped-source warning should name the source (NIT-11)")
+	assert.Contains(t, warning, "85.00", "warning should report the skipped score")
+
+	// No skips -> no warning.
+	results["r18dev"].Rating.Score = 6.0
+	_, _, _, warning = agg.getRatingByPriorityWithSource(results, []string{"r18dev", "dmm"})
+	assert.Empty(t, warning, "no out-of-range skip should yield no warning")
 }

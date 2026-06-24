@@ -32,11 +32,15 @@ export function computeJobProgress(
 	if (totalFiles === 0) return restProgress;
 
 	if (!isRunning) {
-		return Math.round((finishedCount / totalFiles) * 100);
+		// Cap at 100%: late-arriving results after completion can make
+		// finishedCount exceed totalFiles. The isRunning branch below is already
+		// capped; this restores parity so the internal invariant holds (the
+		// /jobs display additionally clamps, but callers shouldn't rely on that).
+		return Math.min(Math.round((finishedCount / totalFiles) * 100), 100);
 	}
 
 	if (!messagesByFile || Object.keys(messagesByFile).length === 0) {
-		return Math.round((finishedCount / totalFiles) * 100);
+		return Math.min(Math.round((finishedCount / totalFiles) * 100), 100);
 	}
 
 	let activeProgress = 0;
