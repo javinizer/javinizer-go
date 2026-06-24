@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"path/filepath"
 	"sync"
 
@@ -91,8 +93,11 @@ func (c *FSCaseCache) isCaseInsensitiveFS(path string) bool {
 		fs = afero.NewOsFs()
 	}
 
-	testFile1 := filepath.Join(path, ".javinizer_case_test_1")
-	testFile2 := filepath.Join(path, ".JAVINIZER_CASE_TEST_1")
+	// Randomized probe names avoid truncating pre-existing files that happen to
+	// share the old fixed names (.javinizer_case_test_1 / .JAVINIZER_CASE_TEST_1).
+	token := randomProbeToken()
+	testFile1 := filepath.Join(path, ".javinizer_case_test_"+token)
+	testFile2 := filepath.Join(path, ".JAVINIZER_CASE_TEST_"+token)
 
 	defer func() { _ = fs.Remove(testFile1) }()
 	defer func() { _ = fs.Remove(testFile2) }()
@@ -111,4 +116,15 @@ func (c *FSCaseCache) isCaseInsensitiveFS(path string) bool {
 	}
 
 	return string(content) == "test2"
+}
+
+// randomProbeToken returns a short hex token for unique probe filenames.
+// Uses crypto/rand so concurrent probes from different BatchJobs don't collide.
+func randomProbeToken() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback: extremely unlikely, but never panic on probe naming.
+		return "fallback"
+	}
+	return hex.EncodeToString(b)
 }

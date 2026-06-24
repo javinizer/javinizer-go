@@ -45,16 +45,25 @@ func ParseJobResultsJSON(raw []byte) (*ParsedJobResults, error) {
 			return parseEnvelopeFormat(raw)
 		}
 		// Formats 2 & 3 are both maps of file-path → object. Distinguish by
-		// checking whether any value object has a "data_type" key (legacy
+		// checking whether ANY value object has a "data_type" key (legacy
 		// FileResult format) versus "file_match_info"/"movie" (old MovieResult).
+		// Scan past nil/non-data_type entries rather than breaking on the first
+		// parsed value: Go map iteration order is randomized, and a null entry
+		// unmarshals to a nil map (no error, no data_type key), which would
+		// prematurely break and misroute a legacy payload to
+		// parseOldMovieResultFormat, losing legacy "data" decoding.
+		hasLegacyDataType := false
 		for _, v := range probe {
 			var valueProbe map[string]json.RawMessage
 			if json.Unmarshal(v, &valueProbe) == nil {
 				if _, ok := valueProbe["data_type"]; ok {
-					return parseLegacyFileResultFormat(raw)
+					hasLegacyDataType = true
+					break
 				}
-				break // first value determines the format
 			}
+		}
+		if hasLegacyDataType {
+			return parseLegacyFileResultFormat(raw)
 		}
 	}
 
@@ -107,6 +116,9 @@ func parseLegacyFileResultFormat(raw []byte) (*ParsedJobResults, error) {
 	provenance := make(map[string]*ProvenanceData, len(legacyResults))
 
 	for filePath, lfr := range legacyResults {
+		if lfr == nil {
+			continue
+		}
 		mr := &MovieResult{
 			FileMatchInfo: models.FileMatchInfo{
 				Path:        lfr.FilePath,

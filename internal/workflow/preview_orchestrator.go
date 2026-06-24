@@ -71,8 +71,12 @@ func newPreviewOrchestrator(
 }
 
 func (o *previewOrchImpl) Execute(ctx context.Context, cmd PreviewCmd) (*PreviewResult, error) {
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	// Normalize nil context — consistent with Apply, Compare, and Scrape orchestrators.
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if cmd.Movie == nil {
 		return nil, fmt.Errorf("movie is nil")
@@ -114,7 +118,7 @@ func (o *previewOrchImpl) Execute(ctx context.Context, cmd PreviewCmd) (*Preview
 		if operationMode == operationmode.OperationModeInPlaceNoRenameFolder ||
 			operationMode == operationmode.OperationModeInPlace ||
 			operationMode == operationmode.OperationModeMetadataArtwork {
-			return &PreviewResult{OperationMode: cmd.OperationMode}, nil
+			return &PreviewResult{OperationMode: operationMode}, nil
 		}
 	}
 

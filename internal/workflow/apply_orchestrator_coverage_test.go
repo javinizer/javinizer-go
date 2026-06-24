@@ -974,3 +974,34 @@ func TestNewApplyOrchestrator(t *testing.T) {
 	assert.NotNil(t, orch.nfoGen)
 	assert.NotNil(t, orch.nfo)
 }
+
+// TestApplyOrchImpl_Execute_PartialFailureReportsCompletedSteps verifies that
+// when download fails after organize+merge+displayTitle succeed, the partial
+// ApplyResult.Steps reflects the actual completed steps — not all-false.
+// This is the regression for the executeSteps bug where onStepFail received a
+// zero-value stepsSoFar instead of the real outer steps variable.
+func TestApplyOrchImpl_Execute_PartialFailureReportsCompletedSteps(t *testing.T) {
+	impl := &applyOrchImpl{
+		fs: afero.NewMemMapFs(),
+		downloader: &stubDownloader{
+			err: &downloader.DownloadPartialError{Attempted: 2, Succeeded: 0},
+		},
+		nfo:       &applyStubNFO{},
+		revertLog: noOpRevertLog{},
+	}
+	result, err := impl.Execute(context.Background(), ApplyCmd{
+		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
+		Match:    defaultMatch(),
+		DestPath: "/dest",
+		Organize: OrganizeOptions{Skip: true},
+		Download: true,
+	}, nil)
+	assert.Error(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "download", result.FailedStep)
+	// Merge and DisplayTitle steps ran before download failed. With the old
+	// bug, these would all be false because onStepFail got a zero-value copy.
+	assert.True(t, result.Steps.Merged, "Merged should reflect the completed merge step")
+	assert.True(t, result.Steps.DisplayTitle, "DisplayTitle should reflect the completed step")
+	assert.False(t, result.Steps.Downloaded, "Downloaded should be false — download failed")
+}

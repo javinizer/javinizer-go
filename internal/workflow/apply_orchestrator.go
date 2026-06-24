@@ -90,16 +90,15 @@ type onStepFailResult struct {
 func (o *applyOrchImpl) executeSteps(
 	steps []applyStep,
 	progress scrape.ProgressFunc,
+	completed *stepCompletion,
 	onStepFail func(stepName string, failMsg string, stepErr error, stepsSoFar stepCompletion) onStepFailResult,
 ) (*ApplyResult, error) {
-	var stepsSoFar stepCompletion
-
 	for _, s := range steps {
 		if s.progressMsg != "" && progress != nil {
 			progress(s.progressStep, s.progressPct, s.progressMsg)
 		}
 		if err := s.execute(); err != nil {
-			fail := onStepFail(s.name, s.failMsg, err, stepsSoFar)
+			fail := onStepFail(s.name, s.failMsg, err, *completed)
 			return fail.result, fail.err
 		}
 	}
@@ -222,7 +221,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd, progress scra
 		stepNFO,
 	}
 
-	failResult, failErr := o.executeSteps(pipelineSteps, progress, onStepFail)
+	failResult, failErr := o.executeSteps(pipelineSteps, progress, &steps, onStepFail)
 	if failResult != nil {
 		return failResult, failErr
 	}

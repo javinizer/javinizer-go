@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -71,8 +72,19 @@ func (c *TempDirCleaner) CleanupStaleTempDirs(ctx context.Context) (int, error) 
 
 		if c.jobRepo != nil {
 			job, err := c.jobRepo.FindByID(ctx, jobID)
-			if err != nil || job == nil {
-				// Orphaned directory — job no longer in database
+			if err != nil {
+				if errors.Is(err, database.ErrNotFound) {
+					// Job no longer in database — orphaned directory, safe to remove.
+					shouldRemove = true
+				} else {
+					// Transient DB error — do NOT delete; retry on next cycle.
+					logging.Warnf("CleanupStaleTempDirs: lookup failed for job %s: %v", jobID, err)
+					continue
+				}
+			} else if job == nil {
+				// Defensive: the canonical JobRepository (BaseRepository.FindByID)
+				// never returns (nil, nil), but guard against alternative
+				// JobRepositoryInterface implementations that might.
 				shouldRemove = true
 			} else if isPastActiveStatus(job.Status) {
 				// Past-active state — check if it's been inactive for >24h

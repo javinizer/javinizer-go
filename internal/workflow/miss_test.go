@@ -1029,3 +1029,77 @@ func mustBuildMatcher(t *testing.T) matcher.MatcherInterface {
 	require.NoError(t, err)
 	return m
 }
+
+// TestPreviewOrchImpl_Execute_NilContextDoesNotPanic verifies that a nil
+// context is normalized to context.Background() instead of panicking on
+// ctx.Err() — consistent with Apply, Compare, and Scrape orchestrators.
+func TestPreviewOrchImpl_Execute_NilContextDoesNotPanic(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	orch := newPreviewOrchestrator(
+		fs,
+		&mockMatcherForPreview{},
+		PreviewConfig{
+			PathCfg: PreviewPathConfig{
+				MediaFormatConfig: organizer.MediaFormatConfig{
+					PosterFormat: ".jpg",
+				},
+			},
+			ResolveStrategy: func(_ operationmode.OperationMode) organizer.OperationStrategy {
+				return &mockStrategyPlan{
+					plan: &organizer.OrganizePlan{
+						TargetDir:    "/output/TEST-001",
+						TargetPath:   "/output/TEST-001/TEST-001.mp4",
+						FolderName:   "TEST-001",
+						BaseFileName: "TEST-001",
+					},
+				}
+			},
+			OpMode: operationmode.OperationModeOrganize,
+		},
+		nfo.NFONameConfig{},
+		template.NewEngine(),
+		&mockNFOFieldMergerForPreview{},
+		nil,
+	).(*previewOrchImpl)
+
+	assert.NotPanics(t, func() {
+		_, err := orch.Execute(nil, PreviewCmd{
+			Movie: &models.Movie{ID: "TEST-001"},
+			FileResults: []models.FileMatchInfo{
+				{Path: "/input/TEST-001.mp4", Name: "TEST-001.mp4", Extension: ".mp4", MovieID: "TEST-001"},
+			},
+		})
+		assert.NoError(t, err)
+	})
+}
+
+// TestPreviewOrchImpl_Execute_FastPathReturnsResolvedOpMode verifies that the
+// in-place fast path (empty/dot source path) returns the resolved operation
+// mode, not the original (possibly empty) command value.
+func TestPreviewOrchImpl_Execute_FastPathReturnsResolvedOpMode(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	orch := newPreviewOrchestrator(
+		fs,
+		&mockMatcherForPreview{},
+		PreviewConfig{
+			OpMode: operationmode.OperationModeInPlace,
+		},
+		nfo.NFONameConfig{},
+		template.NewEngine(),
+		&mockNFOFieldMergerForPreview{},
+		nil,
+	).(*previewOrchImpl)
+
+	// cmd.OperationMode is empty → should resolve to config default (InPlace).
+	result, err := orch.Execute(context.Background(), PreviewCmd{
+		Movie: &models.Movie{ID: "TEST-001"},
+		// Empty source path + InPlace mode → fast-path early return.
+		FileResults: []models.FileMatchInfo{
+			{Path: "", Name: "TEST-001.mp4", Extension: ".mp4", MovieID: "TEST-001"},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, operationmode.OperationModeInPlace, result.OperationMode,
+		"fast path should return the resolved operation mode, not the empty command value")
+}

@@ -2,11 +2,13 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
@@ -364,3 +366,52 @@ func TestJobStore_PersistJobByID_NotFound_Miss(t *testing.T) {
 
 // Suppress os import
 var _ = os.ReadFile
+
+// TestJobStore_CleanupStaleTempDirs_TransientDBErrorDoesNotDelete verifies that
+// a transient DB error (not ErrNotFound) from FindByID does NOT cause the temp
+// dir to be deleted — the cleaner should skip and retry on the next cycle.
+func TestJobStore_CleanupStaleTempDirs_TransientDBErrorDoesNotDelete(t *testing.T) {
+	memFS := afero.NewMemMapFs()
+	tmpDir := t.TempDir()
+	postersDir := filepath.Join(tmpDir, "posters")
+	jobDir := filepath.Join(postersDir, "active-job")
+	require.NoError(t, memFS.MkdirAll(jobDir, 0755))
+
+	mockRepo := mocks.NewMockJobRepositoryInterface(t)
+	mockRepo.On("List", mock.Anything).Return([]models.Job{}, nil).Once()
+	// Return a generic DB error (NOT ErrNotFound) — transient failure.
+	mockRepo.On("FindByID", mock.Anything, "active-job").Return(nil, fmt.Errorf("connection refused")).Once()
+
+	jq := NewJobStore(mockRepo, nil, nil, tmpDir, nil, memFS)
+
+	removed, err := jq.CleanupStaleTempDirs(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 0, removed, "transient DB error must not cause deletion")
+
+	// Directory must still exist.
+	exists, _ := afero.Exists(memFS, jobDir)
+	assert.True(t, exists, "temp dir must survive a transient DB error")
+}
+
+// TestJobStore_CleanupStaleTempDirs_NotFoundStillRemovesOrphan verifies that
+// ErrNotFound is still treated as orphaned and removed.
+func TestJobStore_CleanupStaleTempDirs_NotFoundStillRemovesOrphan(t *testing.T) {
+	memFS := afero.NewMemMapFs()
+	tmpDir := t.TempDir()
+	postersDir := filepath.Join(tmpDir, "posters")
+	jobDir := filepath.Join(postersDir, "orphan-job")
+	require.NoError(t, memFS.MkdirAll(jobDir, 0755))
+
+	mockRepo := mocks.NewMockJobRepositoryInterface(t)
+	mockRepo.On("List", mock.Anything).Return([]models.Job{}, nil).Once()
+	mockRepo.On("FindByID", mock.Anything, "orphan-job").Return(nil, database.ErrNotFound).Once()
+
+	jq := NewJobStore(mockRepo, nil, nil, tmpDir, nil, memFS)
+
+	removed, err := jq.CleanupStaleTempDirs(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed, "ErrNotFound should still remove orphaned dir")
+
+	exists, _ := afero.Exists(memFS, jobDir)
+	assert.False(t, exists)
+}

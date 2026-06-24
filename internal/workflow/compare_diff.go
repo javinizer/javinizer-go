@@ -101,35 +101,40 @@ func actressKey(a models.Actress) string {
 }
 
 // actressSlicesEqual compares two actress slices by composite identity key, ignoring order.
+// Uses count maps so duplicate entries are compared correctly as multisets.
 func actressSlicesEqual(a, b []models.Actress) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	aKeys := make(map[string]struct{}, len(a))
+	aCounts := make(map[string]int, len(a))
 	for _, act := range a {
-		aKeys[actressKey(act)] = struct{}{}
+		aCounts[actressKey(act)]++
 	}
 	for _, act := range b {
-		if _, ok := aKeys[actressKey(act)]; !ok {
+		k := actressKey(act)
+		if aCounts[k] == 0 {
 			return false
 		}
+		aCounts[k]--
 	}
 	return true
 }
 
 // genreSlicesEqual compares two genre slices by name, ignoring order.
+// Uses count maps so duplicate entries are compared correctly as multisets.
 func genreSlicesEqual(a, b []models.Genre) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	aSet := make(map[string]struct{}, len(a))
+	aCounts := make(map[string]int, len(a))
 	for _, g := range a {
-		aSet[g.Name] = struct{}{}
+		aCounts[g.Name]++
 	}
 	for _, g := range b {
-		if _, ok := aSet[g.Name]; !ok {
+		if aCounts[g.Name] == 0 {
 			return false
 		}
+		aCounts[g.Name]--
 	}
 	return true
 }
