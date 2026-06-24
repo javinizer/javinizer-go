@@ -145,7 +145,11 @@ func updateBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 		}
 
-		applyOpts := resolveUpdateApplyConfig(rt, rt.GetBatchJobFactory(), job, req)
+		applyOpts, err := resolveUpdateApplyConfig(rt, rt.GetBatchJobFactory(), job, req)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			return
+		}
 
 		prepareAndLaunchApply(c, rt, job, applyOpts, "Update started")
 	}

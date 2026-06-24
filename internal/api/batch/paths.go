@@ -93,7 +93,7 @@ func discoverSiblingPartsWithMetadata(ctx context.Context, files []string, rt *c
 		for _, fmi := range scanResult.Files {
 			if seenPaths[fmi.Path] {
 				fileMatchInfo[fmi.Path] = fmi
-				if fmi.IsMultiPart {
+				if fmi.IsMultiPart && fmi.MovieID != "" {
 					movieIDsToProcess[fmi.MovieID] = true
 					logging.Debugf("Detected multi-part file: %s (movie ID: %s, part: %d)",
 						fmi.Name, fmi.MovieID, fmi.PartNumber)
@@ -114,7 +114,7 @@ func discoverSiblingPartsWithMetadata(ctx context.Context, files []string, rt *c
 	// Find siblings using the already-cached scan results — no re-scanning needed
 	for _, ds := range dirScans {
 		for _, fmi := range ds.files {
-			if movieIDsToProcess[fmi.MovieID] && fmi.IsMultiPart {
+			if fmi.MovieID != "" && movieIDsToProcess[fmi.MovieID] && fmi.IsMultiPart {
 				if !seenPaths[fmi.Path] {
 					// Sanity check: Ensure file is actually in the scanned directory
 					parent := filepath.Dir(fmi.Path)

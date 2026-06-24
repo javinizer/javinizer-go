@@ -24,6 +24,12 @@ type RuntimeState struct {
 	// posterManager is lazily initialized on first access and invalidated
 	// on config reload. Protected by mu.
 	posterManager poster.PosterManagerInterface
+
+	// posterMgrCreateMu serializes poster-manager construction so that only
+	// one goroutine calls createFn() on a cache miss; concurrent callers
+	// wait and receive the cached result. Separate from mu to avoid holding
+	// a write lock across the potentially slow createFn() call.
+	posterMgrCreateMu sync.Mutex
 }
 
 // NewRuntimeState creates an initialized runtime container.
@@ -110,9 +116,25 @@ func (r *RuntimeState) SetWebSocketUpgraderForTesting(upgrader websocket.Upgrade
 // GetPosterManager returns the cached PosterManager, constructing it on first access.
 // The createFn callback is invoked only when the manager is nil (first access or
 // after invalidation). Returns nil if createFn returns nil.
+//
+// A dedicated construction lock (posterMgrCreateMu) prevents multiple concurrent
+// goroutines from all calling createFn() on a cache miss — only the first
+// goroutine constructs the manager; others wait and receive the cached result.
 func (r *RuntimeState) GetPosterManager(createFn func() poster.PosterManagerInterface) poster.PosterManagerInterface {
 	r.mu.RLock()
 	pm := r.posterManager
+	r.mu.RUnlock()
+	if pm != nil {
+		return pm
+	}
+
+	r.posterMgrCreateMu.Lock()
+	defer r.posterMgrCreateMu.Unlock()
+
+	// Double-check after acquiring the create lock — another goroutine may
+	// have completed construction while we were waiting.
+	r.mu.RLock()
+	pm = r.posterManager
 	r.mu.RUnlock()
 	if pm != nil {
 		return pm
@@ -124,10 +146,6 @@ func (r *RuntimeState) GetPosterManager(createFn func() poster.PosterManagerInte
 	}
 
 	r.mu.Lock()
-	if r.posterManager != nil {
-		r.mu.Unlock()
-		return r.posterManager
-	}
 	r.posterManager = newPM
 	r.mu.Unlock()
 

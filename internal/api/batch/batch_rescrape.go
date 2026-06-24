@@ -135,7 +135,7 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		snap := job.GetStatus()
-		if snap.Status == models.JobStatusRunning || (snap.Status != models.JobStatusPending && snap.Status != models.JobStatusCompleted) {
+		if rescrapeNotAllowed(snap) {
 			if snap.IsDeleted {
 				writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
 			} else {

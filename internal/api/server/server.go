@@ -115,9 +115,14 @@ func acceptsHTML(c *gin.Context) bool {
 
 // NewServer creates and configures the Gin router with all API endpoints.
 func NewServer(deps *core.APIDeps) *gin.Engine {
-	// Initialize the narrow API config snapshot before any handler runs.
-	// Use APIRuntime for lifecycle operations (InitAPIConfig, EnsureRuntime).
-	rt := core.NewAPIRuntime(deps)
+	// Reuse the APIRuntime created during bootstrap (if available) so that the
+	// temp cleanup stop channel and other lifecycle state are preserved for
+	// graceful shutdown. Fall back to creating a new one for direct construction
+	// (e.g. tests that build APIDeps without calling BootstrapAPI).
+	rt := deps.GetRuntime()
+	if rt == nil {
+		rt = core.NewAPIRuntime(deps)
+	}
 	rt.InitAPIConfig()
 
 	runtime := rt.EnsureRuntime()

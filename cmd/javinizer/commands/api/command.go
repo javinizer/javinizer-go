@@ -105,7 +105,10 @@ func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) e
 		log.Fatalf("Failed to initialize API dependencies: %v", err)
 	}
 	defer func() {
-		rt := apicore.NewAPIRuntime(deps)
+		rt := deps.GetRuntime()
+		if rt == nil {
+			rt = apicore.NewAPIRuntime(deps)
+		}
 		rt.Shutdown()
 		_ = deps.CoreDeps.DB.Close()
 	}()

@@ -6,6 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -54,4 +56,13 @@ func writeErrorResponse(c *gin.Context, status int, isGone bool, errMsg string) 
 		return
 	}
 	c.JSON(status, contracts.ErrorResponse{Error: errMsg})
+}
+
+// rescrapeNotAllowed reports whether a job's current status prevents rescrape.
+// Rescrape is only allowed when the job is Pending (not yet run) or Completed
+// (finished, safe to re-run). All other states — Running, Cancelled, Failed,
+// etc. — are rejected. The former redundant `snap.Status == JobStatusRunning`
+// clause is subsumed since Running is neither Pending nor Completed.
+func rescrapeNotAllowed(snap *worker.BatchJobStatus) bool {
+	return snap.Status != models.JobStatusPending && snap.Status != models.JobStatusCompleted
 }

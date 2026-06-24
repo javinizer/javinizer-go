@@ -201,7 +201,9 @@ func TestIsUNCPath_Uncovered_ExtendedUNC(t *testing.T) {
 
 func TestExpandHomeDir_Uncovered_TildeAlone(t *testing.T) {
 	result := ExpandHomeDir("~")
-	assert.Equal(t, "~", result, "Bare tilde without slash should not be expanded")
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	assert.Equal(t, home, result, "Bare tilde should expand to user home directory")
 }
 
 func TestExpandHomeDir_Uncovered_NoTilde(t *testing.T) {

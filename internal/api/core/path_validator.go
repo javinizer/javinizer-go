@@ -282,8 +282,18 @@ func (v *PathValidator) IsDirAllowed(dir string) bool {
 		}
 	}
 
-	// Deny by default when no allow list
+	// Deny by default when no allow list or allow list contains only blank strings
 	if len(v.allow) == 0 {
+		return false
+	}
+	hasValidEntry := false
+	for _, dir := range v.allow {
+		if strings.TrimSpace(dir) != "" {
+			hasValidEntry = true
+			break
+		}
+	}
+	if !hasValidEntry {
 		return false
 	}
 
@@ -308,6 +318,14 @@ func (v *PathValidator) IsDirAllowed(dir string) bool {
 // canonicalizePath resolves symlinks and canonicalizes non-existent child paths by
 // resolving the nearest existing ancestor. This keeps path checks consistent across
 // platforms where temp paths may include symlinked segments (e.g., /var -> /private/var on macOS).
+//
+// Known limitation: filepath.EvalSymlinks operates on the host OS filesystem and
+// cannot be routed through the injected v.fs abstraction — afero does not provide
+// an equivalent symlink-resolution API. The Stat/Lstat calls in the parent-walk
+// loop below DO use v.fs (via the Lstater type assertion), so in-memory test
+// filesystems (MemMapFs, which has no symlink concept) are handled correctly.
+// The two EvalSymlinks calls below are intentional and only affect the real OS
+// filesystem path used in production.
 func (v *PathValidator) canonicalizePath(absPath string) (string, error) {
 	realPath, err := filepath.EvalSymlinks(absPath)
 	if err == nil {

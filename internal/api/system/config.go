@@ -144,7 +144,16 @@ func validateProxySaveConfig(deps *core.APIDeps, newCfg *config.Config, tokens m
 	}
 
 	// Check if global proxy settings changed
-	newGlobalHash, _ := core.HashProxyConfig(newCfg.Scrapers.Proxy)
+	// Normalize Profile → DefaultProfile to match the normalization applied by
+	// the proxy test endpoint (proxy.go). Without this, the hash computed here
+	// would differ from the hash embedded in the test verification token when the
+	// frontend sends the default profile name in the Profile field.
+	normalizedProxy := newCfg.Scrapers.Proxy
+	if normalizedProxy.DefaultProfile == "" && normalizedProxy.Profile != "" {
+		normalizedProxy.DefaultProfile = normalizedProxy.Profile
+		normalizedProxy.Profile = ""
+	}
+	newGlobalHash, _ := core.HashProxyConfig(normalizedProxy)
 
 	// Check if global proxy enabled status or URL changed (meaningful changes)
 	globalChanged := oldCfg.Scrapers.Proxy.Enabled != newCfg.Scrapers.Proxy.Enabled ||

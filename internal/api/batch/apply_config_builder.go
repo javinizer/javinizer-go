@@ -99,13 +99,16 @@ func resolveUpdateApplyConfig(
 	factory worker.BatchJobFactoryInterface,
 	job worker.BatchJobInterface,
 	req contracts.UpdateRequest,
-) worker.ApplyPhaseConfig {
+) (worker.ApplyPhaseConfig, error) {
 	deps := rt.Deps()
-	resolvedUpdate, _ := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
+	resolvedUpdate, seamErr := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
 		Preset:         req.Preset,
 		ScalarStrategy: req.ScalarStrategy,
 		ArrayStrategy:  req.ArrayStrategy,
 	})
+	if seamErr != nil {
+		return worker.ApplyPhaseConfig{}, seamErr
+	}
 
 	applyOpts := factory.NewApplyConfig(
 		workflow.OrganizeOptions{
@@ -129,7 +132,7 @@ func resolveUpdateApplyConfig(
 		}
 	}
 
-	return applyOpts
+	return applyOpts, nil
 }
 
 // makeOrganizeCompleteBroadcaster returns an OnPhaseComplete hook that emits

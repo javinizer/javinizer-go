@@ -1743,9 +1743,11 @@ func TestExpandHomeDir_EdgeCases(t *testing.T) {
 		assert.Equal(t, "/absolute/path", result)
 	})
 
-	t.Run("only tilde returns unchanged (function requires slash)", func(t *testing.T) {
+	t.Run("bare tilde expands to home dir", func(t *testing.T) {
 		result := ExpandHomeDir("~")
-		assert.Equal(t, "~", result, "ExpandHomeDir only handles ~/ format, not ~ alone")
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		assert.Equal(t, home, result, "ExpandHomeDir should expand bare ~ to the user home directory")
 	})
 
 	t.Run("empty string returns unchanged", func(t *testing.T) {

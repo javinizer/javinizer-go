@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -35,14 +34,28 @@ func ParseJobResultsJSON(raw []byte) (*ParsedJobResults, error) {
 		}, nil
 	}
 
-	// Format 1: New envelope format (has "domain" key)
-	if bytes.Contains(raw, []byte(`"domain"`)) {
-		return parseEnvelopeFormat(raw)
-	}
-
-	// Format 2: Legacy FileResult format (has "data_type" key)
-	if bytes.Contains(raw, []byte(`"data_type"`)) {
-		return parseLegacyFileResultFormat(raw)
+	// Probe top-level keys instead of substring matching. Substring matching
+	// with bytes.Contains can false-positive when "domain" or "data_type"
+	// appear as values inside nested fields (e.g. a movie title), causing
+	// silent data loss via incorrect format routing.
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err == nil {
+		// Format 1: envelope format has a top-level "domain" key.
+		if _, ok := probe["domain"]; ok {
+			return parseEnvelopeFormat(raw)
+		}
+		// Formats 2 & 3 are both maps of file-path → object. Distinguish by
+		// checking whether any value object has a "data_type" key (legacy
+		// FileResult format) versus "file_match_info"/"movie" (old MovieResult).
+		for _, v := range probe {
+			var valueProbe map[string]json.RawMessage
+			if json.Unmarshal(v, &valueProbe) == nil {
+				if _, ok := valueProbe["data_type"]; ok {
+					return parseLegacyFileResultFormat(raw)
+				}
+				break // first value determines the format
+			}
+		}
 	}
 
 	// Format 3: Old MovieResult format with nested "file_match_info"

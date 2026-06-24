@@ -64,6 +64,7 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	// on apiDeps. Must be done before SetConfig/InitAPIConfig since those now
 	// delegate to APIRuntime.
 	rt := NewAPIRuntime(apiDeps)
+	apiDeps.runtime = rt
 
 	rt.SetConfig(cfg)
 	rt.EnsureRuntime()

@@ -194,6 +194,13 @@ func buildScanner(fs afero.Fs, snCfg *scanner.Config) scanner.ScannerInterface {
 // bag, making the dependency surface explicit — callers see exactly which domains
 // the scraper needs.
 func buildScraper(scrapeCfg *scrape.Config, aggCfg *aggregator.Config, translator scrape.Translator, registry ScraperResolver, httpClient httpclientiface.HTTPClient, fs afero.Fs, content database.ContentRepos, replacement database.ReplacementRepos) (scrape.ScraperInterface, aggregator.AggregatorInterface, error) {
+	// MovieRepo is strictly required — it is accessed unconditionally during
+	// scraping and persistence. The other repos (ActressRepo, ActressAliasRepo,
+	// GenreReplacementRepo, WordReplacementRepo) are passed to the aggregator
+	// and scraper constructors, which tolerate nil values (they short-circuit
+	// the respective processing steps). This allows partial wiring in setups
+	// that only exercise input validation without a full DB (e.g. security
+	// tests).
 	if content.MovieRepo == nil {
 		return nil, nil, fmt.Errorf("buildScraper: movieRepo must not be nil")
 	}

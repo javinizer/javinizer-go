@@ -29,14 +29,23 @@ func movieIDsForResult(r *MovieResult) []string {
 	if r == nil {
 		return nil
 	}
+	// Deduplicate using normalized (lowercased) keys to match the actual
+	// movieIDIndex, which uses indexKey() (ToLower). Without normalization,
+	// case-only variants (e.g. "ABC" and "abc") would both be returned but
+	// map to the same index key, causing stale entries on removal.
 	seen := make(map[string]bool)
 	var ids []string
 	if r.Movie != nil && r.Movie.ID != "" {
+		key := indexKey(r.Movie.ID)
 		ids = append(ids, r.Movie.ID)
-		seen[r.Movie.ID] = true
+		seen[key] = true
 	}
-	if r.FileMatchInfo.MovieID != "" && !seen[r.FileMatchInfo.MovieID] {
-		ids = append(ids, r.FileMatchInfo.MovieID)
+	if r.FileMatchInfo.MovieID != "" {
+		fmiKey := indexKey(r.FileMatchInfo.MovieID)
+		if !seen[fmiKey] {
+			ids = append(ids, r.FileMatchInfo.MovieID)
+			seen[fmiKey] = true
+		}
 	}
 	return ids
 }

@@ -66,6 +66,20 @@ type APIDeps struct {
 	Auth         commandutil.AuthProvider
 	TokenStore   TokenStoreInterface
 	Fs           afero.Fs
+
+	// runtime holds the APIRuntime created during bootstrap so that NewServer
+	// can reuse it instead of creating a duplicate. This ensures the temp
+	// cleanup stop channel (set during bootstrap) is reachable for graceful
+	// shutdown via rt.Shutdown(). Nil when APIDeps is constructed directly
+	// (e.g. in tests), in which case NewServer creates a fresh runtime.
+	runtime *APIRuntime
+}
+
+// GetRuntime returns the APIRuntime associated with these deps, or nil if
+// none was set during bootstrap. Used by NewServer to reuse the bootstrap
+// runtime (and its temp cleanup stop channel) instead of creating a duplicate.
+func (d *APIDeps) GetRuntime() *APIRuntime {
+	return d.runtime
 }
 
 // GetFs returns the filesystem used by API dependencies.

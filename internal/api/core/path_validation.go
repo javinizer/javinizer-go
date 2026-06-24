@@ -129,8 +129,15 @@ func ValidateAndOpenPath(userPath string, cfg *SecurityNarrowConfig) (*os.File, 
 	return f, canonicalPath, nil
 }
 
-// ExpandHomeDir expands "~/" paths.
+// ExpandHomeDir expands "~/" and "~" paths.
 func ExpandHomeDir(path string) string {
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return home
+		}
+		return path
+	}
 	if len(path) >= 2 && path[0] == '~' && (path[1] == '/' || path[1] == filepath.Separator) {
 		home, err := os.UserHomeDir()
 		if err == nil {
