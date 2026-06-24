@@ -156,10 +156,10 @@ func resolveUpdateApplyConfig(
 // via newOrganizeBroadcastSink(rt).
 func makeOrganizeCompleteBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink) func(organized, failed int) {
 	return func(organized, failed int) {
-		status := websocket.ProgressStatus("organization_completed")
+		status := websocket.ProgressStatusOrganizeCompleted
 		action := "Organized"
 		if isUpdate {
-			status = websocket.ProgressStatus("update_completed")
+			status = websocket.ProgressStatusUpdateCompleted
 			action = "Updated"
 		}
 		sink(&websocket.ProgressMessage{

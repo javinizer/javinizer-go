@@ -15,6 +15,14 @@ const (
 	ProgressStatusError ProgressStatus = "error"
 	// ProgressStatusPending indicates the step is waiting to be processed.
 	ProgressStatusPending ProgressStatus = "pending"
+	// ProgressStatusOrganizeCompleted indicates the organize (apply) phase
+	// finished — the terminal frame the frontend's organize-controller
+	// finalizes on. Emitted by the OnPhaseComplete broadcaster.
+	ProgressStatusOrganizeCompleted ProgressStatus = "organization_completed"
+	// ProgressStatusUpdateCompleted indicates the update-mode apply phase
+	// finished — the update-mode terminal frame (mirrors
+	// ProgressStatusOrganizeCompleted with the update verb).
+	ProgressStatusUpdateCompleted ProgressStatus = "update_completed"
 )
 
 // String implements fmt.Stringer.

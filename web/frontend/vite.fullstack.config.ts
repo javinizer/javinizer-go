@@ -24,7 +24,14 @@ export default defineConfig({
 			'/ws': {
 				target: E2E_BACKEND_TARGET,
 				ws: true,
-				changeOrigin: true,
+				// changeOrigin:false preserves the browser's original Host (the Vite
+				// port) so the backend's isSameOrigin check (Origin vs request Host,
+				// port-sensitive) passes for a browser-context WS upgrade. With
+				// changeOrigin:true the Host is rewritten to :18080 while the browser
+				// Origin stays on the Vite port → 403. See vite.config.ts for the
+				// same rationale. This lets the fullstack e2e suite exercise the
+				// real browser→proxy→backend WS path the app uses.
+				changeOrigin: false,
 			},
 			'/health': {
 				target: E2E_BACKEND_TARGET,

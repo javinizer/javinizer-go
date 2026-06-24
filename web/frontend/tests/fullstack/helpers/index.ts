@@ -19,3 +19,4 @@ export * from './fixtures';
 export * from './api';
 export * from './jobs';
 export * from './navigation';
+export * from './ws';

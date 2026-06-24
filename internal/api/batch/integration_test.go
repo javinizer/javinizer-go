@@ -251,7 +251,7 @@ func TestMakeOrganizeCompleteBroadcaster_MessageContent(t *testing.T) {
 		bcast(7, 2)
 		require.NotNil(t, got)
 		assert.Equal(t, "stub-job", got.JobID)
-		assert.Equal(t, websocket.ProgressStatus("organization_completed"), got.Status)
+		assert.Equal(t, websocket.ProgressStatusOrganizeCompleted, got.Status)
 		assert.Equal(t, 100.0, got.Progress)
 		assert.Equal(t, "Organized 7 files, 2 failed", got.Message)
 	})
@@ -261,7 +261,7 @@ func TestMakeOrganizeCompleteBroadcaster_MessageContent(t *testing.T) {
 		bcast := makeOrganizeCompleteBroadcaster(&stubControlledJob{}, true, sink)
 		bcast(3, 0)
 		require.NotNil(t, got)
-		assert.Equal(t, websocket.ProgressStatus("update_completed"), got.Status)
+		assert.Equal(t, websocket.ProgressStatusUpdateCompleted, got.Status)
 		assert.Equal(t, "Updated 3 files, 0 failed", got.Message)
 	})
 }
@@ -308,4 +308,49 @@ func TestResolveOrganizeApplyConfig_OnFileProgressBroadcastsToHub(t *testing.T) 
 	assert.Equal(t, websocket.ProgressStatusPending, msg.Status, "intermediate progress is non-terminal pending")
 	assert.Equal(t, 60.0, msg.Progress, "progress must reach the hub on the 0-100 scale")
 	assert.Contains(t, msg.Message, "3 of 5", "message must carry the processed/total counts")
+}
+
+func TestResolveUpdateApplyConfig_OnFileProgressBroadcastsToHub(t *testing.T) {
+	// tests MINOR-2 closure: the update resolver (resolveUpdateApplyConfig)
+	// wires the SAME real broadcasting sink as the organize resolver, not a
+	// no-op. Mirrors TestResolveOrganizeApplyConfig_OnFileProgressBroadcastsToHub
+	// but drives resolveUpdateApplyConfig. A regression that wired the update
+	// branch's OnFileProgress to a no-op sink (or the wrong runtime) would leave
+	// the client receiving nothing and ReadMessage would time out here. The
+	// update path differs from organize only in the terminal status string
+	// (update_completed vs organization_completed), which is unit-tested
+	// separately in TestMakeOrganizeCompleteBroadcaster_MessageContent; this
+	// test pins the hub-forwarding seam for the update resolver specifically.
+	rt := core.NewAPIRuntime(nil) // nil deps: update resolution never dereferences deps for the hook
+	rt.Runtime = core.NewRuntimeState()
+	hub := rt.Runtime.ResetWebSocketHub() // starts a running hub
+	t.Cleanup(func() {
+		rt.Runtime.Shutdown()
+	})
+	serverConn, clientConn, srv := newTestWSConn(t)
+	t.Cleanup(func() {
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+		srv.Close()
+	})
+	registerClientOnHub(t, hub, serverConn, clientConn)
+
+	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
+	applyOpts, err := resolveUpdateApplyConfig(rt, factory, &stubControlledJob{}, contracts.UpdateRequest{})
+	require.NoError(t, err)
+	require.NotNil(t, applyOpts.OnFileProgress, "OnFileProgress must be wired on the update path")
+
+	// Drive the resolved hook: 2 of 5 files → 40% pending.
+	applyOpts.OnFileProgress(2, 5)
+
+	// The client must receive the broadcast progress message.
+	require.NoError(t, clientConn.SetReadDeadline(time.Now().Add(2*time.Second)))
+	_, data, err := clientConn.ReadMessage()
+	require.NoError(t, err, "client must receive the update-path OnFileProgress broadcast (a no-op sink would time out here)")
+	var msg websocket.ProgressMessage
+	require.NoError(t, json.Unmarshal(data, &msg))
+	assert.Equal(t, "stub-job", msg.JobID, "JobID must be the job's id, proving the update sink is wired to the right job/runtime")
+	assert.Equal(t, websocket.ProgressStatusPending, msg.Status, "intermediate progress is non-terminal pending")
+	assert.Equal(t, 40.0, msg.Progress, "progress must reach the hub on the 0-100 scale")
+	assert.Contains(t, msg.Message, "2 of 5", "message must carry the processed/total counts")
 }
