@@ -403,6 +403,11 @@ func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.settingsMgr.moveCursor(1)
 
 	case " ", "space":
+		// Guard: refuse to enable move mode while link mode is active (issue #36)
+		if m.settingsMgr.cursor == 3 && !m.settingsMgr.snapshot.MoveFiles && !m.canEnableMoveMode() {
+			m.AddLog("warn", "Move mode cannot be enabled while link mode is active")
+			return m, nil
+		}
 		desc := m.settingsMgr.toggle()
 		m.AddLog("info", desc)
 		// Persist Move Files setting to config when it's toggled (issue #36)

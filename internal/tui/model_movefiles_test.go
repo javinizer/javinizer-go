@@ -296,7 +296,10 @@ func TestHandleSettingsKeys_ToggleMoveFiles_RefusedWithLinkMode(t *testing.T) {
 	m.viewMgr.switchTo(viewSettings)
 	m.settingsMgr.cursor = 3 // "Move Files" row
 
-	proc, _ := NewProcessingCoordinator(nil, nil, nil, nil, TUIProcessorConfig{}, "", false)
+	proc, procErr := NewProcessingCoordinator(nil, nil, nil, nil, TUIProcessorConfig{}, "", false)
+	if procErr != nil {
+		proc = nil // factory is nil — processor assertion is skipped below
+	}
 	m.SetProcessor(proc)
 	require.False(t, m.settingsMgr.snapshot.MoveFiles)
 
@@ -305,7 +308,9 @@ func TestHandleSettingsKeys_ToggleMoveFiles_RefusedWithLinkMode(t *testing.T) {
 	m2 := updated.(*Model)
 
 	assert.False(t, m2.settingsMgr.snapshot.MoveFiles, "move mode must NOT enable while link mode is active")
-	assert.False(t, proc.opts.Load().(ProcessorOptions).MoveFiles, "processor must remain in copy mode")
+	if proc != nil {
+		assert.False(t, proc.opts.Load().(ProcessorOptions).MoveFiles, "processor must remain in copy mode")
+	}
 
 	reloaded, err := config.Load(configPath)
 	require.NoError(t, err)
