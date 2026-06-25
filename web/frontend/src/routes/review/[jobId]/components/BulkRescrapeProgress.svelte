@@ -2,6 +2,7 @@
 	import { fade, fly } from 'svelte/transition';
 	import { Check, LoaderCircle, X } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
+	import { isTerminalStatus } from '$lib/utils/job-progress';
 
 	interface Props {
 		progress: { movie_id: string; status: string; error?: string }[];
@@ -25,9 +26,9 @@
 
 	$effect(() => {
 		if (!active && progress.length > 0) {
-			const allDone = progress.every(p => p.status === 'success' || p.status === 'failed');
+			const allDone = progress.every((p) => isTerminalStatus(p.status));
 			if (allDone) {
-				const hasFailures = progress.some(p => p.status === 'failed');
+				const hasFailures = progress.some((p) => p.status !== 'success');
 				if (!hasFailures) {
 					const timer = setTimeout(() => {
 						dismissed = true;
@@ -39,9 +40,9 @@
 	});
 
 	const visible = $derived(active || (progress.length > 0 && !dismissed));
-	const allDone = $derived(progress.length > 0 && progress.every(p => p.status === 'success' || p.status === 'failed'));
-	const succeededCount = $derived(progress.filter(p => p.status === 'success').length);
-	const failedCount = $derived(progress.filter(p => p.status === 'failed').length);
+	const allDone = $derived(progress.length > 0 && progress.every((p) => isTerminalStatus(p.status)));
+	const succeededCount = $derived(progress.filter((p) => p.status === 'success').length);
+	const failedCount = $derived(progress.filter((p) => p.status !== 'success').length);
 </script>
 
 {#if visible}
