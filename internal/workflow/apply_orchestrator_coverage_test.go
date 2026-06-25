@@ -42,8 +42,9 @@ func (s *stubDownloader) Download(_ context.Context, _ downloader.DownloadCmd) (
 
 // stubNFOGen implements nfo.GeneratorInterface
 type stubNFOGen struct {
-	resolvedPath string
-	err          error
+	resolvedPath  string
+	err           error
+	lastVideoPath string
 }
 
 func (s *stubNFOGen) Generate(_ context.Context, _ *models.Movie, _, _, _ string, _ []string) error {
@@ -54,7 +55,8 @@ func (s *stubNFOGen) GenerateAtPath(_ context.Context, _ *models.Movie, _, _ str
 	return s.err
 }
 
-func (s *stubNFOGen) ResolveAndGenerate(_ context.Context, _ *models.Movie, _ string, _ nfo.NFONameConfig, _ string, _ []string) (string, error) {
+func (s *stubNFOGen) ResolveAndGenerate(_ context.Context, _ *models.Movie, _ string, _ nfo.NFONameConfig, videoPath string, _ []string) (string, error) {
+	s.lastVideoPath = videoPath
 	return s.resolvedPath, s.err
 }
 
@@ -338,6 +340,62 @@ func TestApplyOrchImpl_Execute_DownloadSuccess(t *testing.T) {
 	require.NotNil(t, result)
 	assert.True(t, result.Steps.Downloaded)
 	assert.Contains(t, result.DownloadPaths, "/dest/poster.jpg")
+}
+
+// ---------------------------------------------------------------------------
+// applyOrchImpl.Execute — NFO uses the post-organize video path when moved (WF-4)
+// ---------------------------------------------------------------------------
+
+func TestApplyOrchImpl_Execute_NFOUsesPostOrganizePathWhenMoved(t *testing.T) {
+	nfoGen := &stubNFOGen{resolvedPath: "/dest/TEST-001.nfo"}
+	impl := &applyOrchImpl{
+		fs: afero.NewMemMapFs(),
+		organizer: &stubOrganizer{
+			result: &organizer.OrganizeResult{
+				NewPath:    "/dest/TEST-001.mp4",
+				FolderPath: "/dest",
+			},
+		},
+		nfo:       &applyStubNFO{},
+		nfoGen:    nfoGen,
+		revertLog: noOpRevertLog{},
+	}
+	result, err := impl.Execute(context.Background(), ApplyCmd{
+		Movie:       &models.Movie{ID: "TEST-001", Title: "Test"},
+		Match:       defaultMatch(), // cmd.Match.Path is the original source path
+		DestPath:    "/dest",
+		Organize:    OrganizeOptions{MoveFiles: true},
+		GenerateNFO: true,
+	}, nil)
+	assert.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Steps.NFOGenerated, "NFO should be generated")
+	// stepNFO must pass the post-organize NewPath, not the original cmd.Match.Path,
+	// so MediaInfo stream details can be extracted from the relocated file.
+	assert.Equal(t, "/dest/TEST-001.mp4", nfoGen.lastVideoPath, "stepNFO must use organizeResult.NewPath when the file was moved")
+}
+
+// TestApplyOrchImpl_Execute_NFOUsesOriginalPathWhenOrganizeSkipped verifies the
+// WF-4 fallback: when organize is skipped, stepNFO uses cmd.Match.Path.
+func TestApplyOrchImpl_Execute_NFOUsesOriginalPathWhenOrganizeSkipped(t *testing.T) {
+	nfoGen := &stubNFOGen{resolvedPath: "/dest/TEST-001.nfo"}
+	impl := &applyOrchImpl{
+		fs:        afero.NewMemMapFs(),
+		nfo:       &applyStubNFO{},
+		nfoGen:    nfoGen,
+		revertLog: noOpRevertLog{},
+	}
+	result, err := impl.Execute(context.Background(), ApplyCmd{
+		Movie:       &models.Movie{ID: "TEST-001", Title: "Test"},
+		Match:       defaultMatch(),
+		DestPath:    "/dest",
+		Organize:    OrganizeOptions{Skip: true},
+		GenerateNFO: true,
+	}, nil)
+	assert.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Steps.NFOGenerated)
+	assert.Equal(t, defaultMatch().Path, nfoGen.lastVideoPath, "stepNFO must fall back to cmd.Match.Path when organize is skipped")
 }
 
 // ---------------------------------------------------------------------------

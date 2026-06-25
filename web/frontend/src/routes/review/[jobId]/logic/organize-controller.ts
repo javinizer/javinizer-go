@@ -316,7 +316,19 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			return;
 		}
 
-		if (msg.progress !== undefined && msg.progress !== null) {
+		// Drive the progress bar ONLY from progress-stream messages, not from
+		// per-file status messages. The 'pending' stream carries incremental
+		// progress (0->100 across files) and the terminal 'organization_completed'/
+		// 'update_completed' messages carry 100. Per-file 'organized'/'updated'/
+		// 'failed' messages are for fileStatuses display only — applying their
+		// progress would snap the bar to 100 then oscillate as the next 'pending'
+		// message arrives (regression vs main's smooth incremental bar).
+		if (
+			(msg.progress !== undefined && msg.progress !== null) &&
+			(msg.status === 'pending' ||
+				msg.status === 'organization_completed' ||
+				msg.status === 'update_completed')
+		) {
 			deps.setOrganizeProgress(msg.progress);
 		}
 

@@ -6,6 +6,13 @@ export const TERMINAL_STATUSES = new Set([
 	'cancelled',
 	'organized',
 	'reverted',
+	// Per-file scrape completion statuses. A finished scrape file (success or
+	// error) is terminal for that file: it is already counted in finishedCount,
+	// so it must NOT also contribute to activeProgress (would double-count and
+	// drive the bar to 100% at ~50% completion). Mirrors main, which rendered
+	// job.progress directly without summing per-file WS progress.
+	'success',
+	'error',
 ]);
 
 export function isTerminalStatus(status: string | null | undefined): boolean {

@@ -94,9 +94,14 @@
 	const wsState = $derived($websocketStore);
 	const messagesByFile = $derived(wsState.messagesByFile[jobId] || {});
 	const latestMessage = $derived.by(() => {
-		const msgs = Object.values(messagesByFile);
-		if (msgs.length === 0) return null;
-		return msgs.reduce((latest, m) => (m.file_index > latest.file_index ? m : latest), msgs[0]);
+		// Select the latest per-file message by arrival order (the WS store
+		// appends messages in order), filtered to this job. Mirrors main, which
+		// used progressMessages[progressMessages.length - 1]. Selecting by
+		// file_index would require the backend to set it; arrival order is the
+		// natural "latest" and is robust to per-file messages that omit file_index.
+		const jobMsgs = wsState.messages.filter((m) => m.job_id === jobId && m.file_path);
+		if (jobMsgs.length === 0) return null;
+		return jobMsgs[jobMsgs.length - 1];
 	});
 
 	const liveProgress = $derived.by(() => {

@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -336,6 +337,44 @@ func TestDBRevertLog_Complete_SuccessResult_WithOrganizeResult(t *testing.T) {
 	}
 	err = rl.Complete(context.Background(), opID, result)
 	assert.NoError(t, err)
+}
+
+// TestDBRevertLog_CompleteFailed_PreservesNewPathAndMarksFailed verifies that
+// CompleteFailed persists the partial OrganizeResult.NewPath (keeping the record
+// revertable after a downstream step failure) AND marks the record
+// RevertStatusFailed. This is the WF-1 regression guard: a later-step failure
+// after a successful organize must not blank NewPath.
+func TestDBRevertLog_CompleteFailed_PreservesNewPathAndMarksFailed(t *testing.T) {
+	rl, db := newTestDBRevertLog(t)
+
+	cmd := ApplyCmd{
+		Movie:    &models.Movie{ID: "FAILKEEP-001", Title: "Test"},
+		Match:    models.FileMatchInfo{Path: "/src/FAILKEEP-001.mp4", MovieID: "FAILKEEP-001"},
+		Organize: OrganizeOptions{MoveFiles: true},
+	}
+	opID, err := rl.Begin(context.Background(), cmd)
+	require.NoError(t, err)
+	require.NotEmpty(t, opID)
+
+	// A later step failed AFTER organize succeeded and moved the file.
+	partial := &ApplyResult{
+		Movie: &models.Movie{ID: "FAILKEEP-001"},
+		OrganizeResult: &organizer.OrganizeResult{
+			NewPath:          "/dest/FAILKEEP-001.mp4",
+			FolderPath:       "/dest/FAILKEEP-001",
+			OldDirectoryPath: "/src",
+		},
+		NFOPath: "/dest/FAILKEEP-001.nfo",
+	}
+	err = rl.CompleteFailed(context.Background(), opID, partial)
+	assert.NoError(t, err)
+
+	// Assert the persisted record kept NewPath and is marked failed (revertable).
+	recordID, _ := strconv.ParseUint(opID, 10, 64)
+	var record models.BatchFileOperation
+	require.NoError(t, db.Where("id = ?", uint(recordID)).First(&record).Error)
+	assert.Equal(t, "/dest/FAILKEEP-001.mp4", record.NewPath, "CompleteFailed must preserve NewPath so revert can locate the moved file")
+	assert.Equal(t, models.RevertStatusFailed, record.RevertStatus, "CompleteFailed must mark the record as failed")
 }
 
 func TestDBRevertLog_Complete_NonExistentRecord(t *testing.T) {
