@@ -293,7 +293,7 @@ func TestUpsertMovieCore(t *testing.T) {
 		assert.Equal(t, "Chinese Title", found.Translations[1].Title)
 	})
 
-	t.Run("removes stale translations when incoming list has partial overlap", func(t *testing.T) {
+	t.Run("accumulates translations across languages on partial-overlap update", func(t *testing.T) {
 		db := newDatabaseTestDB(t)
 		repo := NewMovieRepository(db)
 
@@ -330,9 +330,16 @@ func TestUpsertMovieCore(t *testing.T) {
 
 		found, err := repo.FindByID(context.TODO(), "IPX-TRANS-STALE-001")
 		require.NoError(t, err)
-		assert.Len(t, found.Translations, 1, "stale translations should be removed")
-		assert.Equal(t, "en", found.Translations[0].Language)
-		assert.Equal(t, "Updated English", found.Translations[0].Title)
+		// Translations accumulate: the incoming "en" is upserted while "ja" and
+		// "zh" are preserved (main's upsertMovieCore never deleted).
+		assert.Len(t, found.Translations, 3, "all languages should accumulate, none deleted")
+		byLang := make(map[string]string, len(found.Translations))
+		for _, tr := range found.Translations {
+			byLang[tr.Language] = tr.Title
+		}
+		assert.Equal(t, "Updated English", byLang["en"], "en should be upserted to the updated title")
+		assert.Equal(t, "Japanese Title", byLang["ja"], "ja should be preserved (accumulate)")
+		assert.Equal(t, "Chinese Title", byLang["zh"], "zh should be preserved (accumulate)")
 	})
 
 	t.Run("no-op when incoming translations match existing exactly", func(t *testing.T) {

@@ -270,6 +270,12 @@ func interpretApplyResult(
 			Message:   fmt.Sprintf("Apply failed: %v", applyErr),
 			Timestamp: time.Now(),
 		})
+		// Broadcast per-file failure over WebSocket so the frontend's fileStatuses
+		// map records the failure and OrganizeStatusCard can offer a Retry path.
+		// Mirrors main's process_organize.go per-file 'failed' WS message.
+		if cfg.OnFileFailed != nil {
+			cfg.OnFileFailed(filePath, errMsg)
+		}
 		outcome.Failed = true
 		outcome.ErrorMsg = errMsg
 		return outcome
@@ -294,6 +300,12 @@ func interpretApplyResult(
 		Message:   fmt.Sprintf("Applied %s successfully", movie.ID),
 		Timestamp: time.Now(),
 	})
+	// Broadcast per-file success over WebSocket so the frontend's fileStatuses
+	// map populates per file and OrganizeStatusCard renders live per-file rows.
+	// Mirrors main's process_organize.go per-file 'organized' WS message.
+	if cfg.OnFileOrganized != nil {
+		cfg.OnFileOrganized(filePath)
+	}
 	outcome.Success = true
 	return outcome
 }

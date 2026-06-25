@@ -141,9 +141,13 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd, progress scra
 	}
 
 	// onStepFail produces the partial ApplyResult and wraps the error,
-	// completing the revert log on failure.
+	// completing the revert log on failure with the partial state so any
+	// filesystem mutations already performed (e.g. an organize that moved
+	// the file) are recorded for revert. Passing nil here would blank
+	// NewPath and leave a moved file non-revertable (regression vs main,
+	// which persisted NewPath inline within OrganizeTask.Execute).
 	onStepFail := func(stepName string, failMsg string, stepErr error, stepsSoFar stepCompletion) onStepFailResult {
-		o.completeRevertLog(ctx, opID)
+		o.completeRevertLogWithState(ctx, opID, state)
 		return onStepFailResult{
 			result: &ApplyResult{
 				OrganizeResult: state.organizeResult,
@@ -337,10 +341,15 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, state *a
 		Multipart:           multipart,
 		DownloadExtrafanart: cmd.DownloadExtrafanart,
 	})
-	// DownloadPartialError: all critical media (cover+poster) failed.
-	// Abort before NFO generation — no artwork means the result is unusable.
+	// Download failures (including DownloadPartialError, where all critical
+	// media failed) are non-fatal: log and continue so NFO generation still
+	// runs. This mirrors main's ProcessFileTask.Execute, which logged the
+	// download error and still generated the NFO — the project guarantee is
+	// that a correct NFO is produced regardless of artwork availability.
 	if dlErr != nil {
-		return dlErr
+		resolveLogger(o.logger).Warnf("[workflow] Download failed for %s: %v (continuing to NFO generation)", state.movie.ID, dlErr)
+		steps.Downloaded = false
+		return nil
 	}
 	state.downloadPaths = outcome.DownloadedPaths
 	steps.Downloaded = true
@@ -371,7 +380,16 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 	nameCfg.IsMultiPart = cmd.Match.IsMultiPart
 	nameCfg.PartSuffix = partSuffix
 
-	resolvedPath, genErr := o.nfoGen.ResolveAndGenerate(ctx, state.movie, state.finalDir, nameCfg, cmd.Match.Path, movieTags)
+	// Use the post-organize video path when the file was moved, so that
+	// stream details (runtime/codec/resolution) can still be extracted.
+	// Falling back to cmd.Match.Path preserves the original behavior when
+	// organize is skipped or copy/in-place (file remains at source).
+	videoPath := cmd.Match.Path
+	if state.organizeResult != nil && state.organizeResult.NewPath != "" {
+		videoPath = state.organizeResult.NewPath
+	}
+
+	resolvedPath, genErr := o.nfoGen.ResolveAndGenerate(ctx, state.movie, state.finalDir, nameCfg, videoPath, movieTags)
 	if genErr != nil {
 		return genErr
 	}
@@ -395,12 +413,26 @@ type applyPipelineState struct {
 	nfoPath        string
 }
 
-// completeRevertLog marks an in-progress revert operation as failed (result nil).
-// Per CONTEXT.md: called on error paths to prevent orphaned RevertStatusApplied records.
-func (o *applyOrchImpl) completeRevertLog(ctx context.Context, opID OperationID) {
+// completeRevertLogWithState marks an in-progress revert operation as failed,
+// passing the partial pipeline state so filesystem mutations already performed
+// (e.g. an organize that moved the file) are recorded for revert. The record is
+// marked RevertStatusFailed but retains NewPath, allowing revert to locate the
+// moved file. Per CONTEXT.md: called on error paths to prevent orphaned
+// RevertStatusApplied records while keeping revert actionable.
+func (o *applyOrchImpl) completeRevertLogWithState(ctx context.Context, opID OperationID, state *applyPipelineState) {
 	if o.revertLog != nil && opID != "" {
-		if completeErr := o.revertLog.Complete(ctx, opID, nil); completeErr != nil {
-			resolveLogger(o.logger).Warnf("[workflow] RevertLog.Complete(fail) error for %s: %v", opID, completeErr)
+		partial := &ApplyResult{
+			OrganizeResult: state.organizeResult,
+			Movie:          state.movie,
+			DownloadPaths:  state.downloadPaths,
+			NFOPath:        state.nfoPath,
+			FoundNFOPath:   state.foundNFOPath,
+			Merged:         state.merged,
+			OperationID:    opID,
+			Steps:          stepCompletion{},
+		}
+		if completeErr := o.revertLog.CompleteFailed(ctx, opID, partial); completeErr != nil {
+			resolveLogger(o.logger).Warnf("[workflow] RevertLog.CompleteFailed error for %s: %v", opID, completeErr)
 		}
 	}
 }

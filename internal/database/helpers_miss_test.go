@@ -142,15 +142,18 @@ func TestUpsertMovieCore_ActressTranslationSkippedWhenActressIDZero(t *testing.T
 	require.NoError(t, err)
 }
 
-// TestUpsertMovieCore_TranslationStaleDeletion tests the "delete stale translation" path
-// when updating translations and some existing translations are no longer in the incoming list.
+// TestUpsertMovieCore_TranslationStaleDeletion tests that translations accumulate
+// across languages: updating with a single language upserts it while preserving
+// previously-persisted translations for other languages. This mirrors main's
+// upsertMovieCore, which only upserted incoming translations and never deleted
+// (re-scraping after switching target_language must not lose prior languages).
 func TestUpsertMovieCore_TranslationStaleDeletion(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewMovieRepository(db)
 
 	movie := createTestMovie("IPX-STALE-DEL-001")
 	movie.Actresses = []models.Actress{{DMMID: 88901, JapaneseName: "Stale Actress"}}
-	// First: create with two translations
+	// First: create with three translations
 	movie.Translations = []models.MovieTranslation{
 		{Language: "en", Title: "English"},
 		{Language: "fr", Title: "French"},
@@ -167,7 +170,8 @@ func TestUpsertMovieCore_TranslationStaleDeletion(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Now update with only "en" — "fr" and "de" should be deleted as stale
+	// Now update with only "en" — "fr" and "de" must be preserved (accumulate),
+	// and "en" upserted to the updated title.
 	existing, err := repo.FindByID(context.TODO(), "IPX-STALE-DEL-001")
 	require.NoError(t, err)
 	movie.CreatedAt = existing.CreatedAt
@@ -186,9 +190,15 @@ func TestUpsertMovieCore_TranslationStaleDeletion(t *testing.T) {
 
 	found, err := repo.FindByID(context.TODO(), "IPX-STALE-DEL-001")
 	require.NoError(t, err)
-	assert.Len(t, found.Translations, 1)
-	assert.Equal(t, "en", found.Translations[0].Language)
-	assert.Equal(t, "English Updated", found.Translations[0].Title)
+	// All three languages persist; none are deleted as "stale".
+	assert.Len(t, found.Translations, 3)
+	byLang := make(map[string]string, len(found.Translations))
+	for _, tr := range found.Translations {
+		byLang[tr.Language] = tr.Title
+	}
+	assert.Equal(t, "English Updated", byLang["en"], "en should be upserted to the updated title")
+	assert.Equal(t, "French", byLang["fr"], "fr should be preserved (accumulate, not delete)")
+	assert.Equal(t, "German", byLang["de"], "de should be preserved (accumulate, not delete)")
 }
 
 // TestRaceRetryCreate_NonDuplicateKeyError tests the path where Create fails

@@ -1431,7 +1431,8 @@ func TestMiss3_PersistTranslations_StaleDeletion(t *testing.T) {
 	_, err := repo.Upsert(context.TODO(), movie)
 	require.NoError(t, err)
 
-	// Now update with fewer translations — stale ones should be deleted
+	// Now update with fewer translations — prior languages are preserved
+	// (accumulate), mirroring main's upsertMovieCore which never deleted.
 	movie2 := &models.Movie{
 		ContentID:    "stale-trans-test",
 		ID:           "STALE-TRANS-001",
@@ -1445,8 +1446,14 @@ func TestMiss3_PersistTranslations_StaleDeletion(t *testing.T) {
 
 	found, err := repo.FindByContentID(context.TODO(), "stale-trans-test")
 	require.NoError(t, err)
-	assert.Len(t, found.Translations, 1)
-	assert.Equal(t, "en", found.Translations[0].Language)
+	assert.Len(t, found.Translations, 3, "all languages should accumulate, none deleted")
+	byLang := make(map[string]string, len(found.Translations))
+	for _, tr := range found.Translations {
+		byLang[tr.Language] = tr.Title
+	}
+	assert.Equal(t, "English Updated", byLang["en"], "en should be upserted to the updated title")
+	assert.Equal(t, "日本語", byLang["ja"], "ja should be preserved (accumulate)")
+	assert.Equal(t, "中文", byLang["zh"], "zh should be preserved (accumulate)")
 }
 
 // =====================================================================

@@ -78,6 +78,8 @@ func resolveOrganizeApplyConfig(
 	sink := newOrganizeBroadcastSink(rt)
 	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, false /* isUpdate */, sink)
 	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, false /* isUpdate */, sink)
+	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, false /* isUpdate */, sink)
+	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, false /* isUpdate */, sink)
 	applyOpts.PostApplyFunc = func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
 		emitter := deps.GetEventEmitter()
 		if afr.Err != nil && emitter != nil {
@@ -130,6 +132,8 @@ func resolveUpdateApplyConfig(
 	sink := newOrganizeBroadcastSink(rt)
 	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, true /* isUpdate */, sink)
+	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, true /* isUpdate */, sink)
+	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.PostApplyFunc = func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
 		emitter := deps.GetEventEmitter()
 		if afr.Err != nil && emitter != nil {
@@ -167,6 +171,79 @@ func makeOrganizeCompleteBroadcaster(job worker.BatchJobInterface, isUpdate bool
 			Status:   status,
 			Progress: 100,
 			Message:  fmt.Sprintf("%s %d files, %d failed", action, organized, failed),
+		})
+	}
+}
+
+// makeOrganizeFileOrganizedBroadcaster returns an OnFileOrganized hook that
+// emits a per-file WebSocket ProgressMessage with Status "organized" (or
+// "updated" in update mode) and FilePath set, so the frontend's fileStatuses
+// map populates per file and OrganizeStatusCard renders live per-file rows.
+// Mirrors main's process_organize.go per-file success WS message. Takes an
+// injected sink so the closure is unit-testable with a recording sink.
+func makeOrganizeFileOrganizedBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink) func(filePath string) {
+	status := websocket.ProgressStatus("organized")
+	if isUpdate {
+		status = websocket.ProgressStatus("updated")
+	}
+	return func(filePath string) {
+		sink(&websocket.ProgressMessage{
+			JobID:    job.GetID(),
+			FilePath: filePath,
+			Status:   status,
+			Progress: 100,
+		})
+	}
+}
+
+// makeOrganizeFileFailedBroadcaster returns an OnFileFailed hook that emits a
+// per-file WebSocket ProgressMessage with Status "failed", FilePath set, and
+// Error populated, so the frontend's fileStatuses map records the failure and
+// OrganizeStatusCard can offer a "Retry Failed" path. Mirrors main's
+// process_organize.go per-file failure WS message. Takes an injected sink so
+// the closure is unit-testable with a recording sink.
+func makeOrganizeFileFailedBroadcaster(job worker.BatchJobInterface, _ bool, sink progressSink) func(filePath, errMsg string) {
+	return func(filePath, errMsg string) {
+		sink(&websocket.ProgressMessage{
+			JobID:    job.GetID(),
+			FilePath: filePath,
+			Status:   websocket.ProgressStatus("failed"),
+			Progress: 100,
+			Error:    errMsg,
+		})
+	}
+}
+
+// makeScrapeFileScrapedBroadcaster returns an OnFileScraped hook that emits a
+// per-file WebSocket ProgressMessage with FilePath set and a success status,
+// so the frontend's messagesByFile populates during scrape and ProgressModal
+// shows live per-file status. Mirrors main's realtime.ProgressAdapter success
+// forwarding. Takes an injected sink so the closure is unit-testable.
+func makeScrapeFileScrapedBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, message string) {
+	return func(filePath, message string) {
+		sink(&websocket.ProgressMessage{
+			JobID:    job.GetID(),
+			FilePath: filePath,
+			Status:   websocket.ProgressStatusSuccess,
+			Progress: 100,
+			Message:  message,
+		})
+	}
+}
+
+// makeScrapeFileFailedBroadcaster returns an OnFileScrapeFailed hook that
+// emits a per-file WebSocket ProgressMessage with FilePath + Error set and a
+// failure status, so the frontend's messagesByFile records scrape failures.
+// Mirrors main's realtime.ProgressAdapter failure forwarding. Takes an injected
+// sink so the closure is unit-testable.
+func makeScrapeFileFailedBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, errMsg string) {
+	return func(filePath, errMsg string) {
+		sink(&websocket.ProgressMessage{
+			JobID:    job.GetID(),
+			FilePath: filePath,
+			Status:   websocket.ProgressStatusError,
+			Progress: 100,
+			Error:    errMsg,
 		})
 	}
 }

@@ -62,6 +62,14 @@ type RevertLog interface {
 	// When result is nil (failure path), the pre-record is marked as failed to prevent
 	// orphaned records with RevertStatusApplied that are indistinguishable from successful applies.
 	Complete(ctx context.Context, opID OperationID, result *ApplyResult) error
+
+	// CompleteFailed records a failed apply while preserving any filesystem
+	// mutations already performed (e.g. an organize that moved the file). Unlike
+	// Complete with a nil result, the partial result's NewPath/generated files
+	// are persisted so the record remains revertable. The record is marked
+	// RevertStatusFailed. Use this when a later pipeline step fails after an
+	// earlier step has already mutated the filesystem.
+	CompleteFailed(ctx context.Context, opID OperationID, result *ApplyResult) error
 }
 
 // RevertLogConfig holds the subset of configuration needed by dbRevertLog.
@@ -109,6 +117,10 @@ func (noOpRevertLog) CaptureSnapshot(_ context.Context, _ OperationID, _ ApplyCm
 }
 
 func (noOpRevertLog) Complete(_ context.Context, _ OperationID, _ *ApplyResult) error {
+	return nil
+}
+
+func (noOpRevertLog) CompleteFailed(_ context.Context, _ OperationID, _ *ApplyResult) error {
 	return nil
 }
 
@@ -388,6 +400,71 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	if err := l.repo.Update(ctx, preRecord); err != nil {
 		return fmt.Errorf("revert log Complete: update post-apply record for %s: %w", opID, err)
 	}
+	return nil
+}
+
+// CompleteFailed records a failed apply while preserving any filesystem
+// mutations already performed. It reuses the success-path persistence logic
+// so NewPath and generated files are retained (keeping the record revertable),
+// then marks the record RevertStatusFailed.
+func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, result *ApplyResult) error {
+	if opID == "" {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		//nolint:nilerr // non-parseable opID is not an error (e.g. noOpRevertLog returns "")
+		return nil
+	}
+	recordID := uint(recordID64)
+
+	preRecord, err := l.repo.FindByID(ctx, recordID)
+	if err != nil {
+		return fmt.Errorf("revert log CompleteFailed: find record %s: %w", opID, err)
+	}
+	if preRecord == nil {
+		return nil // genuinely not found — no error
+	}
+	// Fall back to a nil-result failure when there is no partial state to preserve.
+	if result == nil {
+		updatePostOrganize(preRecord, "", false, preRecord.OriginalDirPath, "")
+		preRecord.RevertStatus = models.RevertStatusFailed
+		if updateErr := l.repo.Update(ctx, preRecord); updateErr != nil {
+			return fmt.Errorf("revert log CompleteFailed: mark record %s as failed: %w", opID, updateErr)
+		}
+		resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s — pre-record marked as incomplete", opID)
+		return nil
+	}
+
+	sourceDir := preRecord.OriginalDirPath
+	var newPath string
+	var inPlaceRenamed bool
+	var subtitles []models.SubtitleMove
+	if result.OrganizeResult != nil {
+		newPath = result.OrganizeResult.NewPath
+		inPlaceRenamed = result.OrganizeResult.InPlaceRenamed
+		for _, sr := range result.OrganizeResult.Subtitles {
+			if sr.Moved {
+				subtitles = append(subtitles, sr.SubtitleMove)
+			}
+		}
+		if result.OrganizeResult.FolderPath != "" && sourceDir == "" {
+			sourceDir = result.OrganizeResult.OldDirectoryPath
+		}
+	}
+	generatedFilesJSON := buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths)
+	if result.FoundNFOPath != "" {
+		preRecord.NFOPath = result.FoundNFOPath
+	}
+	if result.NFOPath != "" && preRecord.NFOPath == "" {
+		preRecord.NFOPath = result.NFOPath
+	}
+	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, generatedFilesJSON)
+	preRecord.RevertStatus = models.RevertStatusFailed
+	if err := l.repo.Update(ctx, preRecord); err != nil {
+		return fmt.Errorf("revert log CompleteFailed: update failed record for %s: %w", opID, err)
+	}
+	resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s after filesystem mutation — record kept revertable (NewPath=%q)", opID, newPath)
 	return nil
 }
 

@@ -179,6 +179,13 @@ func StartScrapeUseCase(
 	})
 
 	scrapeOpts := factory.NewScrapeConfig(input.SelectedScrapers, input.Strict, input.Force)
+	// Wire per-file scrape progress hooks so the frontend's messagesByFile
+	// populates during scrape and ProgressModal shows live per-file status.
+	// Restores main's realtime.ProgressAdapter behavior (deleted in this
+	// refactor) via the ScrapePhaseConfig hook seam.
+	scrapeSink := newOrganizeBroadcastSink(rt)
+	scrapeOpts.OnFileScraped = makeScrapeFileScrapedBroadcaster(job, scrapeSink)
+	scrapeOpts.OnFileScrapeFailed = makeScrapeFileFailedBroadcaster(job, scrapeSink)
 	go func() {
 		if err := job.StartScrape(rt.ServerCtx(), allFiles, scrapeOpts); err != nil {
 			logging.Errorf("BatchJob.StartScrape failed: %v", err)

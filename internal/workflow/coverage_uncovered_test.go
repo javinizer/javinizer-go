@@ -815,6 +815,10 @@ func (e errorRevertLog) Complete(_ context.Context, _ OperationID, _ *ApplyResul
 	return e.completeErr
 }
 
+func (e errorRevertLog) CompleteFailed(_ context.Context, _ OperationID, _ *ApplyResult) error {
+	return e.completeErr
+}
+
 func TestCompleteRevertLog_CompleteError(t *testing.T) {
 	impl := &applyOrchImpl{
 		revertLog: errorRevertLog{completeErr: errors.New("complete failed")},
@@ -822,7 +826,7 @@ func TestCompleteRevertLog_CompleteError(t *testing.T) {
 
 	// Should not panic even when Complete returns an error
 	assert.NotPanics(t, func() {
-		impl.completeRevertLog(context.Background(), "op-1")
+		impl.completeRevertLogWithState(context.Background(), "op-1", &applyPipelineState{})
 	})
 }
 
@@ -833,7 +837,7 @@ func TestCompleteRevertLog_NilRevertLog(t *testing.T) {
 
 	// Should not panic with nil revertLog
 	assert.NotPanics(t, func() {
-		impl.completeRevertLog(context.Background(), "op-1")
+		impl.completeRevertLogWithState(context.Background(), "op-1", &applyPipelineState{})
 	})
 }
 
@@ -844,7 +848,7 @@ func TestCompleteRevertLog_EmptyOpID(t *testing.T) {
 
 	// Should not panic with empty opID
 	assert.NotPanics(t, func() {
-		impl.completeRevertLog(context.Background(), "")
+		impl.completeRevertLogWithState(context.Background(), "", &applyPipelineState{})
 	})
 }
 

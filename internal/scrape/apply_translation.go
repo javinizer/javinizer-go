@@ -49,6 +49,11 @@ func newTranslationService(provider string, sourceLanguage string, targetLanguag
 
 // translateWithContext performs the translation using the provided context.
 // This is the context-accepting variant used by the Translator interface.
+// The configured Metadata.Translation.TimeoutSeconds (populated from
+// METADATA_TRANSLATION_TIMEOUT_SECONDS) bounds the whole translation as a
+// context deadline, mirroring main's ApplyConfiguredTranslation which wrapped
+// TranslateMovie in context.WithTimeout(TimeoutSeconds||60). A value <= 0
+// defaults to 60s; the caller's ctx is always respected as the parent.
 func (ts *translationService) translateWithContext(ctx context.Context, scraped *models.Movie) (string, *translation.TranslationOutput) {
 	if scraped == nil {
 		return "", nil
@@ -56,7 +61,14 @@ func (ts *translationService) translateWithContext(ctx context.Context, scraped 
 
 	logging.Debugf("Translation: starting (provider=%s, source=%s, target=%s, hash=%s)", ts.provider, ts.sourceLanguage, ts.targetLanguage, ts.settingsHash)
 
-	output, warning, err := ts.service.TranslateMovie(ctx, scraped, ts.settingsHash)
+	timeout := ts.timeoutSeconds
+	if timeout <= 0 {
+		timeout = 60
+	}
+	transCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	output, warning, err := ts.service.TranslateMovie(transCtx, scraped, ts.settingsHash)
 	if err != nil {
 		id := scraped.ID
 		if id == "" {

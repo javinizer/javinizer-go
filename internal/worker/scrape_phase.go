@@ -72,7 +72,18 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 			// (root cause of the 5→1 worker degradation).
 			cmd := buildScrapeCmd(filePath, inputs, cfg)
 			fmi := inputs.FileMatchInfo[filePath]
-			return scrapeFile(egCtx, filePath, fmi, cmd, inputs)
+			outcome := scrapeFile(egCtx, filePath, fmi, cmd, inputs)
+			// Broadcast per-file scrape progress over WebSocket so the frontend's
+			// messagesByFile populates and ProgressModal shows live per-file status.
+			// Mirrors main's realtime.ProgressAdapter which forwarded per-task
+			// scrape updates to the WS hub (deleted in this refactor with no
+			// replacement — restored here via the hook seam).
+			if outcome.Success && cfg.OnFileScraped != nil {
+				cfg.OnFileScraped(filePath, fmt.Sprintf("Scraped %s successfully", outcome.MovieID))
+			} else if outcome.Failed && cfg.OnFileScrapeFailed != nil {
+				cfg.OnFileScrapeFailed(filePath, outcome.ErrorMsg)
+			}
+			return outcome
 		},
 	)
 

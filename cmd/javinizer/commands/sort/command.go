@@ -102,12 +102,17 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 		MoveFiles:           moveFiles,
 		GenerateNFO:         generateNFO,
 		ForceUpdate:         forceUpdate,
-		ScraperPriority:     scraperPriority,
-		ForceRefresh:        forceRefresh,
-		Resolved:            resolved,
-		CommandLabel:        "Javinizer Sort",
-		OperationLabel:      operationLabel,
-		ActionVerb:          "Processing files",
-		CompletionMessage:   "Sort complete!",
+		// Non-update sort must refresh metadata: overwrite any existing NFO with
+		// the fresh scrape rather than merging and preferring the stale NFO.
+		// Mirrors the TUI's ForceOverwrite: !opts.UpdateMode wiring. Update mode
+		// (-f/--force-update) instead merges with the existing NFO.
+		ForceOverwrite:    !forceUpdate,
+		ScraperPriority:   scraperPriority,
+		ForceRefresh:      forceRefresh,
+		Resolved:          resolved,
+		CommandLabel:      "Javinizer Sort",
+		OperationLabel:    operationLabel,
+		ActionVerb:        "Processing files",
+		CompletionMessage: "Sort complete!",
 	})
 }

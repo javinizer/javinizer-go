@@ -133,28 +133,17 @@ func persistTranslations(tx *gorm.DB, db *DB, pm *preparedMovie, translations []
 	movie := pm.movie
 
 	translationRepo := newMovieTranslationRepository(db)
-	incomingLangs := make(map[string]bool, len(translations))
 	for i := range translations {
 		translations[i].MovieID = movie.ContentID
-		incomingLangs[translations[i].Language] = true
 		if err := translationRepo.UpsertTx(tx, &translations[i]); err != nil {
 			return err
 		}
 	}
-
-	if len(translations) > 0 {
-		var existingTranslations []models.MovieTranslation
-		if err := tx.Where("movie_id = ?", movie.ContentID).Find(&existingTranslations).Error; err != nil {
-			return wrapDBErr("find stale translations", movie.ContentID, err)
-		}
-		for _, et := range existingTranslations {
-			if !incomingLangs[et.Language] {
-				if err := tx.Delete(&et).Error; err != nil {
-					return wrapDBErr("delete stale translation", translationEntityID(movie.ContentID, et.Language), err)
-				}
-			}
-		}
-	}
+	// Translations accumulate across languages: re-scraping after switching
+	// metadata.translation.target_language upserts the new language alongside
+	// any previously-persisted ones rather than deleting them. This mirrors
+	// main's upsertMovieCore, which only upserted incoming translations and
+	// never deleted, preserving a multilingual translation history.
 
 	movie.Translations = translations
 

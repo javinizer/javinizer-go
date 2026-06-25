@@ -138,6 +138,12 @@ func (r *recordingRevertLog) Complete(_ context.Context, _ OperationID, result *
 	return nil
 }
 
+func (r *recordingRevertLog) CompleteFailed(_ context.Context, _ OperationID, result *ApplyResult) error {
+	r.completeCalls++
+	r.lastResult = result
+	return nil
+}
+
 // completeErrorRevertLog returns an error from Complete
 type completeErrorRevertLog struct {
 	noOpRevertLog
@@ -145,6 +151,10 @@ type completeErrorRevertLog struct {
 }
 
 func (c completeErrorRevertLog) Complete(_ context.Context, _ OperationID, _ *ApplyResult) error {
+	return c.completeErr
+}
+
+func (c completeErrorRevertLog) CompleteFailed(_ context.Context, _ OperationID, _ *ApplyResult) error {
 	return c.completeErr
 }
 
@@ -250,6 +260,9 @@ func TestApplyOrchImpl_Execute_OrganizeError(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // applyOrchImpl.Execute — download error (regular)
+// Download failures are non-fatal: the pipeline logs the error and continues to
+// NFO generation, mirroring main's ProcessFileTask.Execute (the project
+// guarantee is that a correct NFO is produced regardless of artwork availability).
 // ---------------------------------------------------------------------------
 
 func TestApplyOrchImpl_Execute_DownloadError(t *testing.T) {
@@ -268,10 +281,10 @@ func TestApplyOrchImpl_Execute_DownloadError(t *testing.T) {
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
 	}, nil)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "download failed")
+	assert.NoError(t, err, "download failure must not abort the apply pipeline")
 	require.NotNil(t, result)
-	assert.Equal(t, "download", result.FailedStep)
+	assert.False(t, result.Steps.Downloaded, "download step should not be marked complete on failure")
+	assert.Empty(t, result.FailedStep, "no step should fail when download error is tolerated")
 }
 
 // ---------------------------------------------------------------------------
@@ -294,10 +307,10 @@ func TestApplyOrchImpl_Execute_DownloadPartialError(t *testing.T) {
 		Organize: OrganizeOptions{Skip: true},
 		Download: true,
 	}, nil)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "download failed")
+	assert.NoError(t, err, "download partial failure must not abort the apply pipeline")
 	require.NotNil(t, result)
-	assert.Equal(t, "download", result.FailedStep)
+	assert.False(t, result.Steps.Downloaded, "download step should not be marked complete on partial failure")
+	assert.Empty(t, result.FailedStep, "no step should fail when download partial error is tolerated")
 }
 
 // ---------------------------------------------------------------------------
@@ -976,32 +989,38 @@ func TestNewApplyOrchestrator(t *testing.T) {
 }
 
 // TestApplyOrchImpl_Execute_PartialFailureReportsCompletedSteps verifies that
-// when download fails after organize+merge+displayTitle succeed, the partial
-// ApplyResult.Steps reflects the actual completed steps — not all-false.
-// This is the regression for the executeSteps bug where onStepFail received a
-// zero-value stepsSoFar instead of the real outer steps variable.
+// when a late step fails after organize+merge+displayTitle+download succeed,
+// the partial ApplyResult.Steps reflects the actual completed steps — not
+// all-false. This is the regression for the executeSteps bug where onStepFail
+// received a zero-value stepsSoFar instead of the real outer steps variable.
+// (Download failure is non-fatal, so NFO generation is the failing step here.)
 func TestApplyOrchImpl_Execute_PartialFailureReportsCompletedSteps(t *testing.T) {
 	impl := &applyOrchImpl{
 		fs: afero.NewMemMapFs(),
 		downloader: &stubDownloader{
-			err: &downloader.DownloadPartialError{Attempted: 2, Succeeded: 0},
+			outcome: &downloader.DownloadOutcome{
+				DownloadedPaths: []string{"/dest/poster.jpg"},
+			},
 		},
 		nfo:       &applyStubNFO{},
+		nfoGen:    &stubNFOGen{err: errors.New("nfo generation failed")},
 		revertLog: noOpRevertLog{},
 	}
 	result, err := impl.Execute(context.Background(), ApplyCmd{
-		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
-		Match:    defaultMatch(),
-		DestPath: "/dest",
-		Organize: OrganizeOptions{Skip: true},
-		Download: true,
+		Movie:       &models.Movie{ID: "TEST-001", Title: "Test"},
+		Match:       defaultMatch(),
+		DestPath:    "/dest",
+		Organize:    OrganizeOptions{Skip: true},
+		Download:    true,
+		GenerateNFO: true,
 	}, nil)
 	assert.Error(t, err)
 	require.NotNil(t, result)
-	assert.Equal(t, "download", result.FailedStep)
-	// Merge and DisplayTitle steps ran before download failed. With the old
-	// bug, these would all be false because onStepFail got a zero-value copy.
+	assert.Equal(t, "nfo_generation", result.FailedStep)
+	// Merge, DisplayTitle, and Download steps ran before NFO failed. With the
+	// old bug, these would all be false because onStepFail got a zero-value copy.
 	assert.True(t, result.Steps.Merged, "Merged should reflect the completed merge step")
 	assert.True(t, result.Steps.DisplayTitle, "DisplayTitle should reflect the completed step")
-	assert.False(t, result.Steps.Downloaded, "Downloaded should be false — download failed")
+	assert.True(t, result.Steps.Downloaded, "Downloaded should be true — download succeeded before NFO failed")
+	assert.False(t, result.Steps.NFOGenerated, "NFOGenerated should be false — NFO generation failed")
 }

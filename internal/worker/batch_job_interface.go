@@ -510,6 +510,22 @@ type ScrapePhaseConfig struct {
 
 	// Job-level config applied before scrape starts
 	FileMatchInfo map[string]models.FileMatchInfo // Match metadata per file
+
+	// OnFileScraped is invoked after each file is successfully scraped,
+	// carrying the source file path and a short status message. The API layer
+	// wires this to broadcast a per-file WebSocket ProgressMessage with FilePath
+	// set so the frontend's messagesByFile populates and ProgressModal shows
+	// live per-file scrape status. Mirrors main's realtime.ProgressAdapter
+	// which forwarded per-task scrape updates to the WS hub. Called concurrently
+	// from worker goroutines. Nil = no per-file success reporting.
+	OnFileScraped func(filePath, message string)
+
+	// OnFileScrapeFailed is invoked after each file's scrape fails, carrying the
+	// source file path and the error message. The API layer wires this to
+	// broadcast a per-file WebSocket ProgressMessage with FilePath + Error set.
+	// Mirrors main's realtime.ProgressAdapter failure forwarding. Called
+	// concurrently from worker goroutines. Nil = no per-file failure reporting.
+	OnFileScrapeFailed func(filePath, errMsg string)
 }
 
 // ApplyPhaseConfig carries only what the apply phase needs.
@@ -555,4 +571,22 @@ type ApplyPhaseConfig struct {
 	// concurrently from worker goroutines; the broadcaster must be goroutine-
 	// safe (the WS hub's Broadcast is). Nil = no per-file progress reporting.
 	OnFileProgress func(processed, total int)
+
+	// OnFileOrganized is invoked after each file is successfully organized/updated,
+	// carrying the source file path. The API layer wires this to broadcast a
+	// per-file WebSocket ProgressMessage with Status "organized"/"updated" and
+	// FilePath set, so the frontend's fileStatuses map populates per file and
+	// OrganizeStatusCard can render live per-file rows. Mirrors main's
+	// process_organize.go which sent per-file success over WS. Called concurrently
+	// from worker goroutines. Nil = no per-file success reporting.
+	OnFileOrganized func(filePath string)
+
+	// OnFileFailed is invoked after each file's apply fails, carrying the source
+	// file path and the error message. The API layer wires this to broadcast a
+	// per-file WebSocket ProgressMessage with Status "failed", FilePath set, and
+	// Error populated, so the frontend's fileStatuses map records the failure and
+	// OrganizeStatusCard can offer a "Retry Failed" path. Mirrors main's
+	// process_organize.go which sent per-file failure over WS. Called concurrently
+	// from worker goroutines. Nil = no per-file failure reporting.
+	OnFileFailed func(filePath, errMsg string)
 }

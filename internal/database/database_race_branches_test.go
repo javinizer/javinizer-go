@@ -328,7 +328,7 @@ func TestMovieRepositoryUpsert_OrphanedTranslationsOnExistingMovieUpdate(t *test
 	assert.Len(t, result.Actresses, 1)
 	assert.Equal(t, "New Actress", result.Actresses[0].JapaneseName)
 	assert.Len(t, result.Genres, 1)
-	assert.Len(t, result.Translations, 2)
+	assert.Len(t, result.Translations, 3)
 
 	langTitles := make(map[string]string)
 	for _, tr := range result.Translations {
@@ -336,7 +336,9 @@ func TestMovieRepositoryUpsert_OrphanedTranslationsOnExistingMovieUpdate(t *test
 	}
 	assert.Equal(t, "Replaced English Title", langTitles["en"], "orphaned translation should be upserted-over")
 	assert.Equal(t, "New Chinese Title", langTitles["zh"])
-	assert.NotContains(t, langTitles, "ja", "stale translation should be deleted")
+	// Translations accumulate across languages: the pre-existing "ja" translation
+	// is preserved rather than deleted, mirroring main's upsertMovieCore.
+	assert.Equal(t, "Orphaned Japanese Title", langTitles["ja"], "prior-language translation should be preserved (accumulate)")
 
 	found, err := repo.FindByContentID(context.TODO(), contentID)
 	require.NoError(t, err)
@@ -345,7 +347,7 @@ func TestMovieRepositoryUpsert_OrphanedTranslationsOnExistingMovieUpdate(t *test
 
 	var transCount int64
 	require.NoError(t, db.DB.Model(&models.MovieTranslation{}).Where("movie_id = ?", contentID).Count(&transCount).Error)
-	assert.Equal(t, int64(2), transCount)
+	assert.Equal(t, int64(3), transCount)
 }
 
 func TestMovieRepositoryUpsert_DuplicateCreateRaceFallbackUpdatePath(t *testing.T) {

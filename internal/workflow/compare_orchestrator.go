@@ -77,12 +77,18 @@ func (o *compareOrchImpl) Execute(ctx context.Context, cmd CompareCmd) (*Compare
 	}
 
 	// Step 2: Scrape fresh data.
+	// Compare's purpose is to diff the existing NFO against freshly scraped
+	// source data, so the DB cache must always be bypassed (ForceRefresh=true).
+	// main's compareNFO handler scraped live sources directly with no cache;
+	// without this, the default compare path returns the cached movie and the
+	// diff shows no differences even when sources have changed.
 	if o.scraper == nil {
 		return nil, fmt.Errorf("workflow scraper not configured (scraper was nil at construction)")
 	}
 	scrapeResult, scrapeErr := o.scraper.Scrape(ctx, scrape.ScrapeCmd{
 		MovieID:          cmd.MovieID,
 		SelectedScrapers: cmd.SelectedScrapers,
+		ForceRefresh:     true,
 	}, nil)
 	if scrapeErr != nil {
 		return nil, fmt.Errorf("%w for %s: %s", ErrScrapeFailed, cmd.MovieID, scrapeErr.Error())
