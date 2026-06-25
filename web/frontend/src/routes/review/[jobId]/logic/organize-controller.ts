@@ -316,15 +316,20 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			return;
 		}
 
-		// Drive the progress bar ONLY from progress-stream messages, not from
-		// per-file status messages. The 'pending' stream carries incremental
-		// progress (0->100 across files) and the terminal 'organization_completed'/
-		// 'update_completed' messages carry 100. Per-file 'organized'/'updated'/
-		// 'failed' messages are for fileStatuses display only — applying their
-		// progress would snap the bar to 100 then oscillate as the next 'pending'
-		// message arrives (regression vs main's smooth incremental bar).
+		// Drive the progress bar ONLY from the aggregate progress-stream messages,
+		// not from per-file messages. The aggregate 'pending' stream (no file_path,
+		// emitted by makeOrganizeProgressBroadcaster with a high-water mutex) carries
+		// incremental monotonic progress (0->100 across files); the terminal
+		// 'organization_completed'/'update_completed' messages carry 100. Per-file
+		// messages — 'organized'/'updated'/'failed' (terminal, for fileStatuses) AND
+		// the in-flight 'Organizing <file>' start message ('pending', Progress:0,
+		// WITH file_path, emitted by makeOrganizeFileStartBroadcaster) — must NOT
+		// drive the bar: the start message's Progress:0 would flicker the bar back
+		// to 0% at each file start (the iter-9 F-1 regression). Gate on !file_path
+		// so only the aggregate (no FilePath) drives the bar.
 		if (
 			(msg.progress !== undefined && msg.progress !== null) &&
+			!msg.file_path &&
 			(msg.status === 'pending' ||
 				msg.status === 'organization_completed' ||
 				msg.status === 'update_completed')

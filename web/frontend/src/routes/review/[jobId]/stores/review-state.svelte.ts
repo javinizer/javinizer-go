@@ -709,7 +709,15 @@ export function createReviewState(pageStore: Page) {
 			organizing = nextOrganizing;
 		},
 		setOrganizeProgress: (nextProgress) => {
-			organizeProgress = nextProgress;
+			// Monotonic high-water guard: the organize bar must never move backward
+			// during a run. Aggregate progress-stream messages are already monotonic
+			// (backend high-water mutex); this guards against any per-file message
+			// that slips through the controller's bar-drive filter and out-of-order
+			// delivery. An explicit 0 resets the bar for a fresh run
+			// (prepareOrganizeRun -> setOrganizeProgress(0)); allow it through.
+			if (nextProgress === 0 || nextProgress > organizeProgress) {
+				organizeProgress = nextProgress;
+			}
 		},
 		getFileStatuses: () => fileStatuses,
 		getExpectedOrganizeFilePaths: () => expectedOrganizeFilePaths,

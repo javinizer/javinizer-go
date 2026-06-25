@@ -147,27 +147,64 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 	});
 });
 
-describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', () => {
+	describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', () => {
 	// Regression for NEW-1: per-file 'organized'/'updated'/'failed' messages
 	// carry progress:100 but must NOT drive the progress bar (they are for
-	// fileStatuses display). Only 'pending' (incremental) and terminal
-	// 'organization_completed'/'update_completed' drive the bar. Before the
-	// fix, every message with a progress field snapped the bar to 100 then
-	// oscillated as the next 'pending' arrived.
-	it('applies progress for a pending message', () => {
+	// fileStatuses display). Only the AGGREGATE 'pending' (incremental, no
+	// file_path, emitted by makeOrganizeProgressBroadcaster with a high-water
+	// mutex) and terminal 'organization_completed'/'update_completed' drive the
+	// bar. Before the fix, every message with a progress field snapped the bar
+	// to 100 then oscillated as the next 'pending' arrived.
+	it('applies progress for an aggregate pending message (no file_path)', () => {
 		const { deps, calls } = makeDeps();
 		const controller = createOrganizeController(deps);
 
 		controller.handleWebSocketMessage({
 			job_id: 'job-1',
 			file_index: 0,
-			file_path: '/src/a.mp4',
+			file_path: '',
 			status: 'pending',
 			progress: 42,
 			message: 'Organizing 1 of 4 files',
 		} satisfies ProgressMessage);
 
 		expect(calls.setOrganizeProgress).toContain(42);
+		controller.cleanup();
+	});
+
+	// Regression for F-1 (iter-9): the verbose per-file 'Organizing <file>'
+	// start message is 'pending' with Progress:0 AND a file_path (emitted by
+		// makeOrganizeFileStartBroadcaster). It must NOT drive the bar — doing so
+	// flickers the bar back to 0% at the start of every file (defeating NEW-1 and
+	// the aggregate high-water broadcaster). The bar-drive filter gates on
+	// !file_path so only the aggregate (no FilePath) drives the bar.
+	it('does NOT apply progress for a per-file Organizing-start pending/0 (F-1)', () => {
+		const { deps, calls } = makeDeps();
+		const controller = createOrganizeController(deps);
+
+		// First, advance the bar via an aggregate pending (no file_path).
+		controller.handleWebSocketMessage({
+			job_id: 'job-1',
+			file_index: 0,
+			file_path: '',
+			status: 'pending',
+			progress: 25,
+			message: 'Organizing 1 of 4 files',
+		} satisfies ProgressMessage);
+		expect(calls.setOrganizeProgress).toContain(25);
+
+		// Then a per-file start message (pending/Progress:0 WITH file_path) arrives.
+		// It must NOT drive the bar (would flicker back to 0%).
+		controller.handleWebSocketMessage({
+			job_id: 'job-1',
+			file_index: 0,
+			file_path: '/src/b.mp4',
+			status: 'pending',
+			progress: 0,
+			message: 'Organizing b.mp4',
+		} satisfies ProgressMessage);
+
+		expect(calls.setOrganizeProgress).not.toContain(0);
 		controller.cleanup();
 	});
 
