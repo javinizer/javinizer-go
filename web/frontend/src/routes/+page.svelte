@@ -24,7 +24,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
-	import { isTerminalStatus } from '$lib/utils/job-progress';
+	import { isTerminalStatus, computeJobProgress } from '$lib/utils/job-progress';
 	import type { HealthResponse, HistoryRecord, HistoryStats } from '$lib/api/types';
 
 	const STORAGE_KEY_INPUT = 'javinizer_input_path';
@@ -149,6 +149,67 @@
 	const latestActivity = $derived.by(() => {
 		if (wsState.messages.length === 0) return null;
 		return wsState.messages[wsState.messages.length - 1];
+	});
+
+	// Overall (monotonic) progress for the latest activity's job, so the Home
+	// "Current Activity" bar advances 0→100 for BOTH scrape and organize/update
+	// instead of oscillating per file or pegging at 100%.
+	//
+	// This re-applies the reverted iter-5 fix (revert 30e6e53f) SAFELY: the
+	// MAJOR regression there was using msgs.length / Object.values(files).length
+	// as the total — for organize, messagesByFile holds only terminal per-file
+	// 'organized'/'updated' messages (Progress:100), so finished/total pegged at
+	// 100% after the first file. The backend now stamps AUTHORITATIVE
+	// total_files/completed/failed on every ProgressMessage (see
+	// batch.stampJobCounts), so we read totals from the newest WS message that
+	// carries them — never from message counts. With authoritative totals,
+	// completed+failed ≤ totalFiles always, so the bar is ≤100 and only reaches
+	// 100 at completion (NOT pegged after file 1).
+	const latestActivityProgress = $derived.by(() => {
+		const latest = latestActivity;
+		if (!latest) return 0;
+		const jobId = latest.job_id;
+
+		// Derive authoritative job-level totals from the newest WS message that
+		// carries them (scan backwards). Invariant #1: NEVER use
+		// Object.values(files).length / msgs.length as total — that is the
+		// iter-6 MAJOR. The only exception is the early-window fallback below.
+		let totalFiles = 0;
+		let completed = 0;
+		let failed = 0;
+		for (let i = wsState.messages.length - 1; i >= 0; i--) {
+			const m = wsState.messages[i];
+			if (m.job_id === jobId && typeof m.total_files === 'number' && m.total_files > 0) {
+				totalFiles = m.total_files;
+				completed = m.completed ?? 0;
+				failed = m.failed ?? 0;
+				break;
+			}
+		}
+
+		// Early-scrape fallback ONLY: before any total-bearing message arrives,
+		// the only signal is how many per-file rows have appeared. Acceptable as a
+		// transient pre-total window; organize's first message is job-level and
+		// carries total, so this path is effectively scrape-only. Once totals
+		// arrive the loop above wins and this is bypassed.
+		const filesForJob = wsState.messagesByFile[jobId];
+		if (totalFiles === 0) {
+			totalFiles = filesForJob ? Object.keys(filesForJob).length : 0;
+			completed = 0;
+			failed = 0;
+		}
+
+		// isRunning: the job has any non-terminal in-flight file, OR the latest
+		// status is pending/running (job-level message before per-file rows exist).
+		let isRunning = false;
+		if (filesForJob) {
+			isRunning = Object.values(filesForJob).some((m) => !isTerminalStatus(m.status));
+		}
+		if (!isRunning && (latest.status === 'pending' || latest.status === 'running')) {
+			isRunning = true;
+		}
+
+		return computeJobProgress(filesForJob, totalFiles, latest.progress, isRunning, completed + failed);
 	});
 
 	const activeJobCount = $derived.by(() => {
@@ -313,11 +374,11 @@
 							</div>
 							<p class="text-sm text-muted-foreground line-clamp-2">{latestActivity.message}</p>
 							<div class="h-2 rounded-full bg-muted overflow-hidden">
-								<div class="h-full bg-primary transition-all duration-300" style="width: {Math.max(0, Math.min(100, latestActivity.progress))}%"></div>
+								<div class="h-full bg-primary transition-all duration-300" style="width: {Math.max(0, Math.min(100, latestActivityProgress))}%"></div>
 							</div>
 							<div class="flex items-center justify-between text-xs text-muted-foreground">
 								<span>Status: {latestActivity.status}</span>
-								<span>{latestActivity.progress.toFixed(0)}%</span>
+								<span>{latestActivityProgress.toFixed(0)}%</span>
 							</div>
 							<div class="flex gap-2 pt-1">
 <Button size="sm" variant="outline" onclick={() => goto('/jobs')}>

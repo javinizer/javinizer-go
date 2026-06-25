@@ -3,6 +3,7 @@ package batch
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
@@ -78,6 +79,7 @@ func resolveOrganizeApplyConfig(
 	sink := newOrganizeBroadcastSink(rt)
 	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, false /* isUpdate */, sink)
 	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, false /* isUpdate */, sink)
+	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, false /* isUpdate */, sink)
 	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, false /* isUpdate */, sink)
 	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, false /* isUpdate */, sink)
 	applyOpts.PostApplyFunc = func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
@@ -132,6 +134,7 @@ func resolveUpdateApplyConfig(
 	sink := newOrganizeBroadcastSink(rt)
 	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, true /* isUpdate */, sink)
+	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.PostApplyFunc = func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
@@ -142,6 +145,35 @@ func resolveUpdateApplyConfig(
 	}
 
 	return applyOpts, nil
+}
+
+// stampJobCounts enriches a WebSocket ProgressMessage with AUTHORITATIVE
+// job-level TotalFiles/Completed/Failed read from job.GetStatus() (a lock-
+// protected snapshot — see BatchJob.GetStatus → snapshotFull). It is stamped on
+// every emitted message so any latest-message read carries totals.
+//
+// Frontend consumers (Home "Current Activity" bar, BackgroundJobIndicator,
+// ProgressModal) use these instead of inferring totals from message counts —
+// that proxy was the iter-6 MAJOR regression (revert 30e6e53f): for organize,
+// messagesByFile holds only terminal per-file 'organized'/'updated' messages
+// (Progress:100), so finished/total pegged at 100% after the first file. With
+// authoritative totals, completed+failed ≤ totalFiles always, so the bar is
+// ≤100 and only reaches 100 at completion.
+//
+// Returns msg (mutated in place) for chaining; nil-safe on both msg and job.
+// A nil job (or nil status snapshot) leaves the fields zero (omitted on the
+// wire via omitempty), so older/tests paths that pass a stub returning nil are
+// unaffected.
+func stampJobCounts(msg *websocket.ProgressMessage, job worker.BatchJobInterface) *websocket.ProgressMessage {
+	if msg == nil || job == nil {
+		return msg
+	}
+	if status := job.GetStatus(); status != nil {
+		msg.TotalFiles = status.TotalFiles
+		msg.Completed = status.Completed
+		msg.Failed = status.Failed
+	}
+	return msg
 }
 
 // makeOrganizeCompleteBroadcaster returns an OnPhaseComplete hook that emits
@@ -166,12 +198,12 @@ func makeOrganizeCompleteBroadcaster(job worker.BatchJobInterface, isUpdate bool
 			status = websocket.ProgressStatusUpdateCompleted
 			action = "Updated"
 		}
-		sink(&websocket.ProgressMessage{
+		sink(stampJobCounts(&websocket.ProgressMessage{
 			JobID:    job.GetID(),
 			Status:   status,
 			Progress: 100,
 			Message:  fmt.Sprintf("%s %d files, %d failed", action, organized, failed),
-		})
+		}, job))
 	}
 }
 
@@ -187,12 +219,48 @@ func makeOrganizeFileOrganizedBroadcaster(job worker.BatchJobInterface, isUpdate
 		status = websocket.ProgressStatus("updated")
 	}
 	return func(filePath string) {
-		sink(&websocket.ProgressMessage{
+		sink(stampJobCounts(&websocket.ProgressMessage{
 			JobID:    job.GetID(),
 			FilePath: filePath,
 			Status:   status,
 			Progress: 100,
-		})
+		}, job))
+	}
+}
+
+// makeOrganizeFileStartBroadcaster returns an OnFileOrganizeStart hook that
+// emits a per-file WebSocket ProgressMessage at the TOP of applyFile, BEFORE
+// any work begins on the file, so the Home "Current Activity" card and
+// OrganizeStatusCard show which file is currently being organized (verbose
+// organize progress) — not just the aggregate "Organized N of M files" count.
+//
+// Safety (the certified double-count-safe pattern scrape already uses): the
+// message is non-terminal (pending) with Progress 0, so it enters the
+// frontend's messagesByFile and counts in computeJobProgress's activeProgress
+// (contributing 0) — keeping the bar = finished/total (monotonic). When the
+// file completes, the terminal OnFileOrganized/OnFileFailed message
+// (Progress:100, status organized/updated/failed) OVERWRITES it in
+// messagesByFile (dedup-latest by file_path — see websocket.ts). NEVER set
+// Progress:100 here (would falsely peg the bar / break the overwrite contract).
+//
+// isUpdate selects the action verb ("Updating" vs "Organizing") so the live
+// text matches the job mode; the basename is always included. Also stamps
+// authoritative job-level counts via stampJobCounts. Takes an injected sink so
+// the closure is unit-testable with a recording sink (mirrors the sibling
+// per-file broadcasters).
+func makeOrganizeFileStartBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink) func(filePath string) {
+	action := "Organizing"
+	if isUpdate {
+		action = "Updating"
+	}
+	return func(filePath string) {
+		sink(stampJobCounts(&websocket.ProgressMessage{
+			JobID:    job.GetID(),
+			FilePath: filePath,
+			Status:   websocket.ProgressStatusPending,
+			Progress: 0,
+			Message:  fmt.Sprintf("%s %s", action, filepath.Base(filePath)),
+		}, job))
 	}
 }
 
@@ -204,13 +272,13 @@ func makeOrganizeFileOrganizedBroadcaster(job worker.BatchJobInterface, isUpdate
 // the closure is unit-testable with a recording sink.
 func makeOrganizeFileFailedBroadcaster(job worker.BatchJobInterface, _ bool, sink progressSink) func(filePath, errMsg string) {
 	return func(filePath, errMsg string) {
-		sink(&websocket.ProgressMessage{
+		sink(stampJobCounts(&websocket.ProgressMessage{
 			JobID:    job.GetID(),
 			FilePath: filePath,
 			Status:   websocket.ProgressStatus("failed"),
 			Progress: 100,
 			Error:    errMsg,
-		})
+		}, job))
 	}
 }
 
@@ -221,13 +289,13 @@ func makeOrganizeFileFailedBroadcaster(job worker.BatchJobInterface, _ bool, sin
 // forwarding. Takes an injected sink so the closure is unit-testable.
 func makeScrapeFileScrapedBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, message string) {
 	return func(filePath, message string) {
-		sink(&websocket.ProgressMessage{
+		sink(stampJobCounts(&websocket.ProgressMessage{
 			JobID:    job.GetID(),
 			FilePath: filePath,
 			Status:   websocket.ProgressStatusSuccess,
 			Progress: 100,
 			Message:  message,
-		})
+		}, job))
 	}
 }
 
@@ -238,13 +306,13 @@ func makeScrapeFileScrapedBroadcaster(job worker.BatchJobInterface, sink progres
 // sink so the closure is unit-testable.
 func makeScrapeFileFailedBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, errMsg string) {
 	return func(filePath, errMsg string) {
-		sink(&websocket.ProgressMessage{
+		sink(stampJobCounts(&websocket.ProgressMessage{
 			JobID:    job.GetID(),
 			FilePath: filePath,
 			Status:   websocket.ProgressStatusError,
 			Progress: 100,
 			Error:    errMsg,
-		})
+		}, job))
 	}
 }
 
@@ -265,13 +333,13 @@ func makeScrapeFileFailedBroadcaster(job worker.BatchJobInterface, sink progress
 // "Current Activity" card, instead of ~1/100th.
 func makeScrapeStepProgressBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, step string, pct float64, msg string) {
 	return func(filePath, step string, pct float64, msg string) {
-		sink(&websocket.ProgressMessage{
+		sink(stampJobCounts(&websocket.ProgressMessage{
 			JobID:    job.GetID(),
 			FilePath: filePath,
 			Status:   websocket.ProgressStatusPending,
 			Progress: pct * 100,
 			Message:  msg,
-		})
+		}, job))
 	}
 }
 
@@ -366,7 +434,7 @@ func makeOrganizeProgressBroadcaster(job worker.BatchJobInterface, isUpdate bool
 			return
 		}
 		maxSent = processed
-		sink(msg)
+		sink(stampJobCounts(msg, job))
 		mu.Unlock()
 	}
 }

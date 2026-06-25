@@ -131,14 +131,14 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 
 	progressFn := func(movieID string, result *contracts.BulkRescrapeMovieResult, progress float64) {
 		if o.broadcast != nil {
-			o.broadcast.BroadcastProgress(&ws.ProgressMessage{
+			o.broadcast.BroadcastProgress(stampJobCounts(&ws.ProgressMessage{
 				JobID:    jobID,
 				FilePath: movieID,
 				Status:   ws.ProgressStatus(result.Status.String()),
 				Message:  fmt.Sprintf("Rescrape %s: %s", movieID, result.Status),
 				Error:    result.Error,
 				Progress: progress,
-			})
+			}, job))
 		}
 	}
 

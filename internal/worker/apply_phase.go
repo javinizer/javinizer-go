@@ -323,6 +323,14 @@ func applyFile(
 ) applyFileOutcome {
 	startTime := time.Now()
 
+	// Fire the per-file organize-start hook BEFORE any work begins on this file,
+	// so the frontend's "Current Activity" card shows which file is being
+	// organized (verbose organize progress). Nil-guarded; safe to call
+	// concurrently from worker goroutines (the WS broadcaster is goroutine-safe).
+	if cfg.OnFileOrganizeStart != nil {
+		cfg.OnFileOrganizeStart(filePath)
+	}
+
 	outcome := applyFileOutcome{
 		FilePath: filePath,
 		MovieID:  movie.ID,

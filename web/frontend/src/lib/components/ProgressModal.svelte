@@ -93,6 +93,22 @@
 
 	const wsState = $derived($websocketStore);
 	const messagesByFile = $derived(wsState.messagesByFile[jobId] || {});
+
+	// Authoritative job-level counts: prefer the latest WS message carrying them
+	// (WS-driven); fall back to the REST-polled job. Used for the header counts so
+	// they don't contradict the WS-driven bar (liveProgress) before the REST poll
+	// resolves. See batch.stampJobCounts.
+	const wsCounts = $derived.by(() => {
+		for (let i = wsState.messages.length - 1; i >= 0; i--) {
+			const m = wsState.messages[i];
+			if (m.job_id === jobId && typeof m.total_files === 'number' && m.total_files > 0) {
+				return { totalFiles: m.total_files, completed: m.completed ?? 0, failed: m.failed ?? 0 };
+			}
+		}
+		return null;
+	});
+	const displayTotal = $derived(wsCounts?.totalFiles ?? job?.total_files ?? 0);
+	const displayFinished = $derived((wsCounts?.completed ?? job?.completed ?? 0) + (wsCounts?.failed ?? job?.failed ?? 0));
 	const latestMessage = $derived.by(() => {
 		// Select the latest per-file message by arrival order (the WS store
 		// appends messages in order), filtered to this job. Mirrors main, which
@@ -105,10 +121,23 @@
 	});
 
 	const liveProgress = $derived.by(() => {
-		const finishedCount = (job?.completed ?? 0) + (job?.failed ?? 0);
+		// Prefer authoritative WS-carried total_files/completed/failed when available
+		// (stamped by batch.stampJobCounts) so the bar is WS-driven even before the
+		// REST poll resolves; fall back to job?.total_files from REST. NEVER infer
+		// totals from message counts (iter-6 MAJOR, revert 30e6e53f).
+		let totalFiles = job?.total_files ?? 0;
+		let finishedCount = (job?.completed ?? 0) + (job?.failed ?? 0);
+		for (let i = wsState.messages.length - 1; i >= 0; i--) {
+			const m = wsState.messages[i];
+			if (m.job_id === jobId && typeof m.total_files === 'number' && m.total_files > 0) {
+				totalFiles = m.total_files;
+				finishedCount = (m.completed ?? 0) + (m.failed ?? 0);
+				break;
+			}
+		}
 		return computeJobProgress(
 			wsState.messagesByFile[jobId],
-			job?.total_files ?? 0,
+			totalFiles,
 			job?.progress ?? 0,
 			job?.status?.toLowerCase() === 'running',
 			finishedCount,
@@ -196,7 +225,7 @@
 					<div class="flex items-center justify-between text-sm">
 						<span class="font-medium">Overall Progress</span>
 						<span class="text-muted-foreground">
-							{job.completed + job.failed} / {job.total_files} files
+							{displayFinished} / {displayTotal} files
 						</span>
 					</div>
 					<div class="h-3 bg-secondary rounded-full overflow-hidden">

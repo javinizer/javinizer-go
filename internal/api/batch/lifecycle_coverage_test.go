@@ -238,11 +238,12 @@ func TestProcessBulkRescrapeMovie_SuccessStatus(t *testing.T) {
 type stubControlledJob struct {
 	rescrapeResult *worker.RescrapeResult
 	rescrapeErr    error
+	status         *worker.BatchJobStatus // optional; nil by default preserves prior behavior
 }
 
 func (s *stubControlledJob) GetID() string                                      { return "stub-job" }
 func (s *stubControlledJob) GetJobStatus() models.JobStatus                     { return models.JobStatusCompleted }
-func (s *stubControlledJob) GetStatus() *worker.BatchJobStatus                  { return nil }
+func (s *stubControlledJob) GetStatus() *worker.BatchJobStatus                  { return s.status }
 func (s *stubControlledJob) GetMovieResult(string) (*worker.MovieResult, error) { return nil, nil }
 func (s *stubControlledJob) Subscribe() worker.JobEventSubscriber               { return nil }
 func (s *stubControlledJob) FindFilePathsForMovieID(string) []string            { return nil }

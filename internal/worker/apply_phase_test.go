@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -568,6 +569,70 @@ func TestApplyPhase_Run_MultipleFiles(t *testing.T) {
 // FileResult must be JobStatusCancelled (mirroring scrape_phase.go), NOT
 // JobStatusFailed. Old OrganizeTask returned the error to the pool without
 // relabelling the row, so cancelled-but-scraped files stayed Completed.
+func TestApplyPhase_Run_OnFileOrganizeStartFiresPerFile(t *testing.T) {
+	// Part B guard: OnFileOrganizeStart fires at the TOP of applyFile, before
+	// any work, so the frontend "Current Activity" card can show which file is
+	// being organized (verbose organize progress: "Organizing <file>"). Asserts
+	// the hook fires once per eligible file and carries the source file path.
+	// The nil-guard is pinned separately in TestApplyPhase_Run_OnFileOrganizeStartNilIsNoOp.
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}}}
+	inputs := makeApplyInputs(wf)
+	for i := 0; i < 3; i++ {
+		path := fmt.Sprintf("/source/IPX-777-%d.mp4", i)
+		inputs.Results[path] = &MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: "IPX-777"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "IPX-777"},
+		}
+	}
+
+	var mu sync.Mutex
+	var starts []string
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+		OnFileOrganizeStart: func(filePath string) {
+			mu.Lock()
+			starts = append(starts, filePath)
+			mu.Unlock()
+		},
+	})
+
+	require.Len(t, starts, 3, "OnFileOrganizeStart must fire once per eligible file")
+	seen := make(map[string]bool, 3)
+	for _, p := range starts {
+		assert.True(t, strings.HasPrefix(p, "/source/IPX-777-"), "start must carry the source file path, got %q", p)
+		assert.True(t, strings.HasSuffix(p, ".mp4"), "start must carry the file extension")
+		seen[p] = true
+	}
+	assert.Len(t, seen, 3, "each file must produce a distinct start event")
+}
+
+func TestApplyPhase_Run_OnFileOrganizeStartNilIsNoOp(t *testing.T) {
+	// nil-guard: OnFileOrganizeStart is optional; Run must not panic when the
+	// hook is nil. applyFile guards `cfg.OnFileOrganizeStart != nil` before
+	// invoking it. Pins the nil-safety so a future change that drops the guard
+	// fails here.
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}}}
+	inputs := makeApplyInputs(wf)
+	inputs.Results["/source/IPX-777.mp4"] = &MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-777.mp4", MovieID: "IPX-777"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-777"},
+	}
+	assert.NotPanics(t, func() {
+		NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+			OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+			MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+			Destination:     "/output",
+			// OnFileOrganizeStart intentionally nil
+		})
+	})
+	lc := inputs.Lifecycle.(*stubLifecycle)
+	assert.True(t, lc.organized, "run still succeeds with nil OnFileOrganizeStart")
+}
+
 func TestApplyPhase_Run_CancellationMarksCancelled(t *testing.T) {
 	wf := &stubApplyWorkflow{applyErr: context.Canceled}
 	inputs := makeApplyInputs(wf)

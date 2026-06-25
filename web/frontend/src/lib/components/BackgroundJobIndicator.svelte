@@ -2,8 +2,9 @@
 	import { cubicOut } from 'svelte/easing';
 	import { fly, slide } from 'svelte/transition';
 	import { createBatchJobPollingQuery } from '$lib/query/queries';
+	import { websocketStore } from '$lib/stores/websocket';
 	import { getBackgroundJobState } from '$lib/stores/background-job.svelte';
-	import { isTerminalStatus } from '$lib/utils/job-progress';
+	import { isTerminalStatus, computeJobProgress } from '$lib/utils/job-progress';
 	import { LoaderCircle, X, ChevronUp, ChevronDown, Check, XCircle, Ban, FolderInput } from 'lucide-svelte';
 
 	const iconMap = {
@@ -26,6 +27,52 @@
 	let jobQuery = $derived(createBatchJobPollingQuery(jobId));
 	let job = $derived(jobQuery.data ?? null);
 	let expanded = $state(false);
+
+	// WS-driven live progress. The bar is driven from the enriched WS messages
+	// (real-time, same source as Home/ProgressModal) via computeJobProgress; the
+	// REST polling query (createBatchJobPollingQuery) is kept as hydration for
+	// the initial render (before any WS message) and to recover on WS reconnect
+	// (WS is ephemeral, last 1000 msgs). The displayed bar = WS-derived when WS
+	// has data for the job, else REST job.progress. This makes the live display
+	// WS-driven (consistent) without losing initial/reconnect state. Authoritative
+	// totals come from the latest WS message carrying total_files (stamped by
+	// batch.stampJobCounts) — NEVER inferred from message counts (iter-6 MAJOR,
+	// revert 30e6e53f).
+	const wsState = $derived($websocketStore);
+	const messagesByFile = $derived(wsState.messagesByFile[jobId] || {});
+
+	const wsCounts = $derived.by(() => {
+		for (let i = wsState.messages.length - 1; i >= 0; i--) {
+			const m = wsState.messages[i];
+			if (m.job_id === jobId && typeof m.total_files === 'number' && m.total_files > 0) {
+				return { totalFiles: m.total_files, completed: m.completed ?? 0, failed: m.failed ?? 0 };
+			}
+		}
+		return null;
+	});
+
+	const hasWSData = $derived(Object.keys(messagesByFile).length > 0 || wsCounts !== null);
+
+	// Prefer WS counts when available; fall back to REST for hydration/reconnect.
+	const displayTotal = $derived(wsCounts?.totalFiles ?? job?.total_files ?? 0);
+	const displayCompleted = $derived(wsCounts?.completed ?? job?.completed ?? 0);
+	const displayFailed = $derived(wsCounts?.failed ?? job?.failed ?? 0);
+
+	const liveProgress = $derived.by(() => {
+		if (!hasWSData) {
+			// No WS data for this job yet (initial render / WS reconnect): REST hydrates.
+			return job?.progress ?? 0;
+		}
+		let isRunning = Object.values(messagesByFile).some((m) => !isTerminalStatus(m.status));
+		if (!isRunning && (job?.status === 'running' || job?.status === 'pending')) isRunning = true;
+		return computeJobProgress(
+			messagesByFile,
+			displayTotal,
+			job?.progress ?? 0,
+			isRunning,
+			displayCompleted + displayFailed,
+		);
+	});
 
 	$effect(() => {
 		const status = jobQuery.data?.status;
@@ -83,7 +130,7 @@
 					{statusConfig.label}
 				</div>
 				<div class="text-xs text-muted-foreground mt-0.5">
-					{job.completed + job.failed} / {job.total_files} files &middot; {job.progress.toFixed(0)}%
+					{displayCompleted + displayFailed} / {displayTotal} files &middot; {liveProgress.toFixed(0)}%
 				</div>
 			</div>
 		</button>
@@ -121,18 +168,18 @@
 				<div class="space-y-2.5">
 					<div class="flex items-center justify-between text-xs">
 						<span class="text-muted-foreground">Progress</span>
-						<span class="font-medium tabular-nums">{job.progress.toFixed(1)}%</span>
+						<span class="font-medium tabular-nums">{liveProgress.toFixed(1)}%</span>
 					</div>
 					<div class="h-1.5 bg-muted rounded-full overflow-hidden">
 						<div
 							class="h-full {statusConfig.bar} rounded-full transition-all duration-300"
-							style="width: {job.progress}%"
+							style="width: {liveProgress}%"
 						></div>
 					</div>
 					<div class="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-						<span>{job.completed} completed</span>
-						<span class="text-center">{job.failed} failed</span>
-						<span class="text-right">{Math.max(0, job.total_files - job.completed - job.failed)} remaining</span>
+						<span>{displayCompleted} completed</span>
+						<span class="text-center">{displayFailed} failed</span>
+						<span class="text-right">{Math.max(0, displayTotal - displayCompleted - displayFailed)} remaining</span>
 					</div>
 				</div>
 			</div>

@@ -583,6 +583,26 @@ type ApplyPhaseConfig struct {
 	// safe (the WS hub's Broadcast is). Nil = no per-file progress reporting.
 	OnFileProgress func(processed, total int)
 
+	// OnFileOrganizeStart is invoked at the TOP of applyFile, BEFORE any work
+	// begins on the file, carrying the source file path. The API layer wires this
+	// to broadcast a per-file WebSocket ProgressMessage with Status "pending",
+	// Progress 0, and an "Organizing <basename>" message, so the Home "Current
+	// Activity" card and OrganizeStatusCard show which file is currently being
+	// organized (verbose organize progress) instead of only the aggregate
+	// "Organized N of M files" count.
+	//
+	// Double-count safety (the certified pattern scrape already uses): the
+	// non-terminal pending message (Progress 0) enters the frontend's
+	// messagesByFile and counts in computeJobProgress's activeProgress
+	// (contributing 0), keeping the bar = finished/total (monotonic). When the
+	// file completes, the terminal OnFileOrganized/OnFileFailed message
+	// (Progress:100, status organized/updated/failed) OVERWRITES it in
+	// messagesByFile (dedup-latest by file_path). Emitters MUST keep Progress <
+	// 100 (never 100) so the in-flight row stays non-terminal. Called
+	// concurrently from worker goroutines; the broadcaster must be goroutine-
+	// safe. Nil = no per-file start reporting.
+	OnFileOrganizeStart func(filePath string)
+
 	// OnFileOrganized is invoked after each file is successfully organized/updated,
 	// carrying the source file path. The API layer wires this to broadcast a
 	// per-file WebSocket ProgressMessage with Status "organized"/"updated" and

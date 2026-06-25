@@ -9,15 +9,30 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
-// ProgressMessage represents a progress update message
+// ProgressMessage represents a progress update message.
+//
+// TotalFiles/Completed/Failed carry AUTHORITATIVE job-level counts (read from
+// job.GetStatus() under the status lock by the broadcast layer — see
+// batch.stampJobCounts). They are stamped on every emitted message so any
+// latest-message read has them. Frontend consumers (Home "Current Activity"
+// bar, BackgroundJobIndicator, ProgressModal) MUST use these instead of
+// inferring totals from message counts (msgs.length / Object.values(files).
+// length) — that proxy was the iter-6 MAJOR regression (revert 30e6e53f): for
+// organize, messagesByFile holds only terminal per-file 'organized'/'updated'
+// messages (Progress:100), so finished/total pegged at 100% after the first
+// file. The omitempty keeps the wire compact for older/tests paths that don't
+// stamp them.
 type ProgressMessage struct {
-	JobID     string         `json:"job_id"`
-	FileIndex int            `json:"file_index"`
-	FilePath  string         `json:"file_path"`
-	Status    ProgressStatus `json:"status"`
-	Progress  float64        `json:"progress"`
-	Message   string         `json:"message"`
-	Error     string         `json:"error,omitempty"`
+	JobID      string         `json:"job_id"`
+	FileIndex  int            `json:"file_index"`
+	FilePath   string         `json:"file_path"`
+	Status     ProgressStatus `json:"status"`
+	Progress   float64        `json:"progress"`
+	Message    string         `json:"message"`
+	Error      string         `json:"error,omitempty"`
+	TotalFiles int            `json:"total_files,omitempty"`
+	Completed  int            `json:"completed,omitempty"`
+	Failed     int            `json:"failed,omitempty"`
 }
 
 // Client represents a websocket client

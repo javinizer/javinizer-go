@@ -177,6 +177,73 @@ describe('computeJobProgress', () => {
 		});
 	});
 
+	describe('organize monotonic bar (iter-6 MAJOR regression guard)', () => {
+		// The reverted iter-6 fix (30e6e53f) derived the Home organize bar via
+		// computeJobProgress using msgs.length / Object.values(files).length as the
+		// total. For organize, messagesByFile holds only terminal per-file
+		// 'organized'/'updated' messages (Progress:100), so after the first file:
+		// finishedCount=1, total=1 -> bar pegged at 100% for the ENTIRE remaining
+		// job. The fix enriches the WS protocol with AUTHORITATIVE total_files
+		// (batch.stampJobCounts), so computeJobProgress receives the real total.
+		// These tests pin that the bar advances 10->20->...->100 (NOT pegged) and
+		// is monotonic non-decreasing, using authoritative totalFiles/finishedCount.
+		const organizeFiles = Array.from({ length: 10 }, (_, i) => `f${i + 1}.mp4`);
+
+		function organizeMessages(done: number): Record<string, ProgressMessage> {
+			// 'done' terminal files at Progress:100 (organized) + one in-flight
+			// 'Organizing <file>' pending file at Progress:0 (the verbose per-file
+		// start message from OnFileOrganizeStart). Mirrors the live messagesByFile.
+			const msgs: Record<string, ProgressMessage> = {};
+			for (let i = 0; i < done; i++) {
+				msgs[organizeFiles[i]] = makeMessage({
+					file_path: organizeFiles[i],
+					status: 'organized',
+					progress: 100,
+				});
+			}
+			if (done < 10) {
+				msgs[organizeFiles[done]] = makeMessage({
+					file_path: organizeFiles[done],
+					status: 'pending',
+					progress: 0,
+				});
+			}
+			return msgs;
+		}
+
+		it('1 of 10 files done -> 10%, NOT 100% (the iter-6 MAJOR)', () => {
+			const messages = organizeMessages(1);
+			const result = computeJobProgress(messages, 10, 0, true, 1);
+			expect(result).toBe(10);
+		});
+
+		it('does not peg at 100% mid-job (5 of 10 done -> 50%)', () => {
+			const messages = organizeMessages(5);
+			const result = computeJobProgress(messages, 10, 0, true, 5);
+			expect(result).toBe(50);
+		});
+
+		it('organize bar is monotonic non-decreasing 0->100 across 10 files', () => {
+			let prev = 0;
+			for (let done = 1; done <= 10; done++) {
+				const isRunning = done < 10;
+			const result = computeJobProgress(organizeMessages(done), 10, 0, isRunning, done);
+			expect(result).toBeGreaterThanOrEqual(prev);
+			prev = result;
+			}
+			expect(prev).toBe(100);
+		});
+
+		it('reaches 100% only at completion (all 10 terminal, not running)', () => {
+			const messages: Record<string, ProgressMessage> = {};
+			for (const f of organizeFiles) {
+				messages[f] = makeMessage({ file_path: f, status: 'organized', progress: 100 });
+			}
+			const result = computeJobProgress(messages, 10, 100, false, 10);
+			expect(result).toBe(100);
+		});
+	});
+
 	describe('regression: matches completed items count', () => {
 		it('31 finished out of 66 files with 5 active at 100% should be ~55%', () => {
 			const messages = {

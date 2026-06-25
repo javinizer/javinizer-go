@@ -250,6 +250,14 @@ export interface ProgressMessage {
 	progress: number;
 	message: string;
 	error?: string;
+	// Authoritative job-level counts stamped by the backend (see
+	// batch.stampJobCounts) on every emitted message, so frontend consumers can
+	// compute monotonic progress WITHOUT inferring totals from message counts
+	// (the iter-6 MAJOR regression, revert 30e6e53f). Optional/omitted on the
+	// wire before the job snapshot is available; consumers fall back to REST.
+	total_files?: number;
+	completed?: number;
+	failed?: number;
 }
 
 export interface Genre {
