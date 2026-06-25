@@ -21,11 +21,10 @@ CREATE TABLE jobs_backup (
     started_at DATETIME NOT NULL,
     completed_at DATETIME,
     organized_at DATETIME,
-    reverted_at DATETIME,
-    operation_mode_override TEXT NOT NULL DEFAULT ''
+    reverted_at DATETIME
 );
 
-INSERT INTO jobs_backup SELECT id, status, total_files, completed, failed, progress, destination, temp_dir, files, results, excluded, file_match_info, started_at, completed_at, organized_at, reverted_at, operation_mode_override FROM jobs;
+INSERT INTO jobs_backup SELECT id, status, total_files, completed, failed, progress, destination, temp_dir, files, results, excluded, file_match_info, started_at, completed_at, organized_at, reverted_at FROM jobs;
 
 DROP TABLE jobs;
 
