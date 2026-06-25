@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/spf13/afero"
@@ -64,14 +65,31 @@ func copyFileDataFs(fs afero.Fs, src, dst string) error {
 	}
 	defer func() { _ = srcFile.Close() }()
 
-	dstFile, err := fs.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, config.FilePerm)
+	// Write to a temp file in the same directory as dst so the final rename
+	// is same-filesystem and atomic. On any failure the temp file is removed
+	// and dst is never left in a partial or truncated state.
+	tmp := filepath.Join(filepath.Dir(dst),
+		fmt.Sprintf(".%s.tmp-%d-%d", filepath.Base(dst), time.Now().UnixNano(), os.Getpid()))
+
+	dstFile, err := fs.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, config.FilePerm)
 	if err != nil {
 		return fmt.Errorf("failed to create destination: %w", err)
 	}
-	defer func() { _ = dstFile.Close() }()
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		_ = dstFile.Close()
+		_ = fs.Remove(tmp)
 		return fmt.Errorf("failed to copy data: %w", err)
+	}
+
+	if err := dstFile.Close(); err != nil {
+		_ = fs.Remove(tmp)
+		return fmt.Errorf("failed to close destination: %w", err)
+	}
+
+	if err := fs.Rename(tmp, dst); err != nil {
+		_ = fs.Remove(tmp)
+		return fmt.Errorf("failed to rename temp file to destination: %w", err)
 	}
 
 	return nil
