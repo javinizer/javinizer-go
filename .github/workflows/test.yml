@@ -330,3 +330,55 @@ jobs:
           echo "Docker image label version mismatch: $image_version"
           exit 1
         fi
+
+  # Job: Fullstack E2E — real browser → real SvelteKit frontend → real HTTP
+  # transport → real Go API server (cmd/javinizer-e2e with the deterministic
+  # e2emock scraper substituted at the scraper seam) → real worker pipeline →
+  # real :memory: SQLite. Hermetic + deterministic: no real network scraping.
+  # Playwright's webServer spawns both `go run ./cmd/javinizer-e2e` (on :18080)
+  # and the Vite dev server (on :5175), killing both on teardown.
+  # Gate merge: set this job as a required status check in branch protection.
+  fullstack-e2e:
+    name: Fullstack E2E Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: ${{ env.GO_VERSION_FILE }}
+        cache: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: web/frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      run: npm ci --prefix web/frontend
+
+    - name: Download Go dependencies
+      run: go mod download
+
+    - name: Install Playwright browsers
+      working-directory: web/frontend
+      run: npx playwright install --with-deps chromium
+
+    - name: Run fullstack E2E suite
+      run: make test-e2e-fullstack
+
+    - name: Upload Playwright artifacts
+      if: failure()
+      uses: actions/upload-artifact@v6
+      with:
+        name: fullstack-e2e-artifacts
+        path: |
+          web/frontend/test-results/
+          web/frontend/playwright-report/
+        if-no-files-found: ignore
+        retention-days: 30
