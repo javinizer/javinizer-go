@@ -316,6 +316,41 @@ func TestApplyOrchImpl_Execute_DownloadPartialError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// applyOrchImpl.Execute — download partial error preserves non-critical paths
+// ---------------------------------------------------------------------------
+
+func TestApplyOrchImpl_Execute_DownloadPartialErrorPreservesPaths(t *testing.T) {
+	// A DownloadPartialError means all CRITICAL media (cover/poster) failed, but
+	// non-critical media (extrafanart/actress) may have succeeded first. The
+	// downloader returns those partial paths alongside the error; stepDownload
+	// must preserve them on state.downloadPaths so Complete/CompleteFailed can
+	// record the artifacts for revert cleanup (instead of dropping them).
+	impl := &applyOrchImpl{
+		fs: afero.NewMemMapFs(),
+		downloader: &stubDownloader{
+			outcome: &downloader.DownloadOutcome{
+				DownloadedPaths: []string{"/dest/extrafanart/s1.jpg"},
+			},
+			err: &downloader.DownloadPartialError{Attempted: 2, Succeeded: 0},
+		},
+		nfo:       &applyStubNFO{},
+		revertLog: noOpRevertLog{},
+	}
+	result, err := impl.Execute(context.Background(), ApplyCmd{
+		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
+		Match:    defaultMatch(),
+		DestPath: "/dest",
+		Organize: OrganizeOptions{Skip: true},
+		Download: true,
+	}, nil)
+	assert.NoError(t, err, "download partial failure must not abort the apply pipeline")
+	require.NotNil(t, result)
+	assert.False(t, result.Steps.Downloaded, "download step should not be marked complete on partial failure")
+	assert.Contains(t, result.DownloadPaths, "/dest/extrafanart/s1.jpg",
+		"non-critical artifacts produced before the partial error must be preserved for revert cleanup")
+}
+
+// ---------------------------------------------------------------------------
 // applyOrchImpl.Execute — download success
 // ---------------------------------------------------------------------------
 

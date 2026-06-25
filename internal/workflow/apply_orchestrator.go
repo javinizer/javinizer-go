@@ -348,6 +348,14 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, state *a
 	// that a correct NFO is produced regardless of artwork availability.
 	if dlErr != nil {
 		resolveLogger(o.logger).Warnf("[workflow] Download failed for %s: %v (continuing to NFO generation)", state.movie.ID, dlErr)
+		// Preserve any artifacts the downloader produced before the error (e.g.
+		// non-critical media that succeeded in a DownloadPartialError) so later
+		// Complete/CompleteFailed can record them for revert cleanup. The
+		// downloader returns a non-nil outcome alongside a partial error; guard
+		// for nil on total failures so this never panics.
+		if outcome != nil {
+			state.downloadPaths = outcome.DownloadedPaths
+		}
 		steps.Downloaded = false
 		return nil
 	}

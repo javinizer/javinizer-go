@@ -166,6 +166,24 @@ func (d *Downloader) Download(ctx context.Context, cmd DownloadCmd) (*DownloadOu
 
 	results, err := d.downloadAllWithExtrafanart(ctx, cmd.Movie, cmd.DestDir, cmd.Multipart, extrafanartEnabled)
 	if err != nil {
+		// On a DownloadPartialError sentinel, some non-critical media (actress
+		// images, extrafanart) may have succeeded even though all critical media
+		// (cover/poster) failed. Return the outcome with those partial paths
+		// ALONGSIDE the error so callers can record the artifacts for revert
+		// cleanup instead of discarding them. Total (non-partial) failures still
+		// return a nil outcome. (Callers must nil-check the outcome on error.)
+		if _, partial := err.(*DownloadPartialError); partial {
+			downloadedPaths := make([]string, 0, len(results))
+			for _, r := range results {
+				if r.Downloaded && r.LocalPath != "" {
+					downloadedPaths = append(downloadedPaths, r.LocalPath)
+				}
+			}
+			return &DownloadOutcome{
+				Results:         results,
+				DownloadedPaths: downloadedPaths,
+			}, err
+		}
 		return nil, err
 	}
 

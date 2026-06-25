@@ -106,7 +106,13 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 	// Must complete before MarkCompleted so job-state persistence (deferred at
 	// the top of Run) captures Persisted=true and any surfacable persist errors.
 	if inputs.MovieRepo != nil {
-		persistScrapeOutcomePool(ctx, outcomes, inputs)
+		// Pass cfg.OnFileScrapeFailed so a persist failure can correct the
+		// per-file WS status: the scrape worker already emitted a terminal
+		// "success" ProgressMessage for this file (OnFileScraped), but persist
+		// runs later in a separate pool and can fail. Re-firing the per-file
+		// failure hook overwrites messagesByFile[filePath] so the frontend
+		// never shows a stale "success" for a file whose persist failed.
+		persistScrapeOutcomePool(ctx, outcomes, inputs, cfg.OnFileScrapeFailed)
 	}
 
 	trackScrapeResults(outcomes)
@@ -384,7 +390,7 @@ func trackScrapeResults(outcomes []scrapeFileOutcome) {
 //
 // Only successful scrapes with a movie are persisted; the failed/no-result/panic
 // paths are already reflected on the in-memory result and have nothing to write.
-func persistScrapeOutcomePool(ctx context.Context, outcomes []scrapeFileOutcome, inputs scrapePhaseInputs) {
+func persistScrapeOutcomePool(ctx context.Context, outcomes []scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, errMsg string)) {
 	// Seed a buffered channel (closed up-front) so persist workers can drain it
 	// concurrently without coordination. Buffer == outcome count guarantees the
 	// sends never block.
@@ -400,7 +406,7 @@ func persistScrapeOutcomePool(ctx context.Context, outcomes []scrapeFileOutcome,
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			persistScrapeOutcomes(ctx, work, inputs)
+			persistScrapeOutcomes(ctx, work, inputs, onFileFailed)
 		}()
 	}
 	wg.Wait()
@@ -409,12 +415,12 @@ func persistScrapeOutcomePool(ctx context.Context, outcomes []scrapeFileOutcome,
 // persistScrapeOutcomes drains a channel of scrape outcomes and persists each
 // successful one. Used by persistScrapeOutcomePool to fan persist work across
 // the pool goroutines.
-func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inputs scrapePhaseInputs) {
+func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, errMsg string)) {
 	for o := range ch {
 		if !o.Success || o.Result == nil || o.Result.Movie == nil || inputs.MovieRepo == nil {
 			continue
 		}
-		persistScrapeOutcome(ctx, o, inputs)
+		persistScrapeOutcome(ctx, o, inputs, onFileFailed)
 	}
 }
 
@@ -425,7 +431,7 @@ func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inp
 // AtomicUpdateFileResult so API/UI readers observe a consistent snapshot.
 // Persist failures surface on the MovieResult, preserving the original
 // error semantics (persist error → Status=Failed).
-func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrapePhaseInputs) {
+func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrapePhaseInputs, onFileFailed func(filePath, errMsg string)) {
 	// Clone before persisting: UpsertWithTranslations mutates its input movie in
 	// place (resets association slices to reapply associations). The in-memory
 	// MovieResult.Movie shares the result.Movie pointer, so mutating it here
@@ -453,6 +459,15 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 			Message:   fmt.Sprintf("Scrape persist failed: %v", err),
 			Timestamp: time.Now(),
 		})
+		// Correct the per-file WS status: the scrape worker already emitted a
+		// terminal "success" ProgressMessage (OnFileScraped) for this file before
+		// persist ran. The JobEvent broadcast above is job-level (no FilePath),
+		// so it never reaches the frontend's messagesByFile — re-fire the
+		// per-file failure hook so messagesByFile[filePath] flips from success
+		// to error instead of leaving a stale "success".
+		if onFileFailed != nil {
+			onFileFailed(o.FilePath, fmt.Sprintf("persist failed: %v", err))
+		}
 		return
 	}
 	// Refresh the in-memory movie with the DB-saved version (DB-assigned IDs,

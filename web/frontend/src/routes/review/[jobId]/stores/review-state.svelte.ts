@@ -347,12 +347,21 @@ export function createReviewState(pageStore: Page) {
 		return needsDestination ? destinationPath.trim() !== '' : true;
 	});
 
-	const previewQuery = createQuery(() => ({
+	const previewQuery = createQuery(() => {
+		// Resolve the effective operation mode ONCE in this reactive callback so it
+		// participates in the queryKey. getEffectiveOperationMode reads reactive
+		// state not otherwise covered by the key (job.operation_mode_override,
+		// config.output.operation_mode, folder/subfolder format); without it here a
+		// config/override mode change with the other key parts unchanged would
+		// reuse a stale preview. queryFn captures the same value as the key.
+		const operationMode = getEffectiveOperationMode();
+		return {
 		queryKey: [
 			'organize-preview',
 			jobId,
 			currentResult?.result_id,
 			currentMovie?.id,
+			operationMode,
 			destinationPath,
 			organizeOperation,
 			skipNfo,
@@ -360,7 +369,6 @@ export function createReviewState(pageStore: Page) {
 			editedMovieKey,
 		],
 		queryFn: () => {
-			const operationMode = getEffectiveOperationMode();
 			const copyOnly = organizeOperation !== 'move';
 			const linkMode =
 				organizeOperation === 'hardlink'
@@ -397,7 +405,8 @@ export function createReviewState(pageStore: Page) {
 		},
 		enabled: previewEnabled,
 		staleTime: 300,
-	}));
+	};
+	});
 
 	let preview = $derived(previewQuery.data ?? null);
 	let previewNeedsDestination = $derived(
@@ -440,7 +449,9 @@ export function createReviewState(pageStore: Page) {
 		updateBatchMoviePosterCrop: (mutationJobId, resultId, crop, maxPosterHeight) =>
 			apiClient.updateBatchMoviePosterCrop(mutationJobId, resultId, {
 				...crop,
-				...(maxPosterHeight !== undefined ? { max_poster_height: maxPosterHeight } : {}),
+				// Omit max_poster_height when null OR undefined so a nullable crop
+				// height is never serialized as `max_poster_height: null`.
+				...(maxPosterHeight != null ? { max_poster_height: maxPosterHeight } : {}),
 			}),
 		batchExcludeMovies: (mutationJobId, request) =>
 			apiClient.batchExcludeMovies(mutationJobId, request),
@@ -975,6 +986,19 @@ export function createReviewState(pageStore: Page) {
 	 */
 	$effect(() => {
 		if (!browser) return;
+		// Clear job-scoped state before restoring so edits/overrides from a
+		// PREVIOUS jobId cannot leak into the new job. This effect's only reactive
+		// dependencies are the jobId-derived storage keys, so it re-runs exactly
+		// on mount (maps already empty — clear is a no-op) and on jobId change
+		// (clears the prior job's in-memory entries before merging the new job's
+		// saved ones). Untracked so the clear does not trip the persistence
+		// effects' removeItem-when-empty branch mid-restore. Prior-job edits are
+		// already safe in sessionStorage under the prior job's key (the
+		// persistence effects wrote them on every edit).
+		untrack(() => {
+			editedMovies.clear();
+			posterPreviewOverrides.clear();
+		});
 		const savedEditedMovies = sessionStorage.getItem(editedMoviesStorageKey);
 		if (savedEditedMovies) {
 			try {

@@ -42,7 +42,9 @@
 	const visible = $derived(active || (progress.length > 0 && !dismissed));
 	const allDone = $derived(progress.length > 0 && progress.every((p) => isTerminalStatus(p.status)));
 	const succeededCount = $derived(progress.filter((p) => p.status === 'success').length);
-	const failedCount = $derived(progress.filter((p) => p.status !== 'success').length);
+	const failedCount = $derived(
+		progress.filter((p) => isTerminalStatus(p.status) && p.status !== 'success').length,
+	);
 </script>
 
 {#if visible}

@@ -491,6 +491,60 @@ func TestDownload_ExtrafanartOverride(t *testing.T) {
 	assert.NotEmpty(t, outcome.Results)
 }
 
+// TestDownload_PartialErrorPreservesNonCriticalPaths verifies the public
+// Download seam returns a non-nil outcome carrying non-critical artifacts
+// (extrafanart) ALONGSIDE a DownloadPartialError, so the apply orchestrator
+// can record them for revert cleanup. Previously Download returned nil on any
+// error, discarding partial results.
+func TestDownload_PartialErrorPreservesNonCriticalPaths(t *testing.T) {
+	// failSrv 404s cover+poster (critical media) → DownloadPartialError.
+	failSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer failSrv.Close()
+	// okSrv serves a valid jpeg for the extrafanart screenshot (non-critical).
+	okSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		img := image.NewRGBA(image.Rect(0, 0, 200, 300))
+		w.Header().Set("Content-Type", "image/jpeg")
+		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 90})
+	}))
+	defer okSrv.Close()
+
+	memFS := afero.NewMemMapFs()
+	cfg := &Config{
+		DownloadCover:       true,
+		DownloadPoster:      true,
+		DownloadExtrafanart: true,
+		MediaFormatConfig: organizer.MediaFormatConfig{
+			FanartFormat:     "<ID>-fanart.jpg",
+			PosterFormat:     "<ID>-poster.jpg",
+			ScreenshotFolder: "extrafanart",
+			ScreenshotFormat: "<ID>-fanart<INDEX>.jpg",
+		},
+	}
+	dl := NewDownloader(okSrv.Client(), memFS, cfg, nil)
+
+	movie := &models.Movie{
+		ID: "TEST-PARTIAL",
+		Poster: models.PosterState{
+			CoverURL:         failSrv.URL + "/cover.jpg",
+			PosterURL:        failSrv.URL + "/poster.jpg",
+			ShouldCropPoster: false,
+		},
+		Screenshots: []string{okSrv.URL + "/s1.jpg"},
+	}
+
+	outcome, err := dl.Download(context.Background(), DownloadCmd{
+		Movie:   movie,
+		DestDir: "/output",
+	})
+	var partial *DownloadPartialError
+	require.ErrorAs(t, err, &partial, "expected DownloadPartialError when all critical media fails")
+	require.NotNil(t, outcome, "partial error must return a non-nil outcome with non-critical paths")
+	assert.NotEmpty(t, outcome.DownloadedPaths,
+		"non-critical media that succeeded before the partial error must be preserved in DownloadedPaths")
+}
+
 func TestDownload_UsesConfigExtrafanartWhenNil(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		img := image.NewRGBA(image.Rect(0, 0, 200, 300))

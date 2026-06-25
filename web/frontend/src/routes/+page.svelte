@@ -25,7 +25,7 @@
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
 	import { isTerminalStatus, computeJobProgress } from '$lib/utils/job-progress';
-	import type { HealthResponse, HistoryRecord, HistoryStats } from '$lib/api/types';
+	import type { HealthResponse, HistoryRecord, HistoryStats, ProgressMessage } from '$lib/api/types';
 
 	const STORAGE_KEY_INPUT = 'javinizer_input_path';
 	const STORAGE_KEY_OUTPUT = 'javinizer_output_path';
@@ -218,12 +218,30 @@
 		// NOT perpetually counted as active. A hand-maintained local set that
 		// omitted 'success'/'error' left finished failed scrape jobs stuck in
 		// "Active jobs: N" until WS reconnect.
-		let active = 0;
+		//
+		// Fold in the latest message per job across ALL messages (aggregate +
+		// per-file): a job that has emitted only aggregate 'pending'/'running'
+		// frames carries no file_path, so it is absent from messagesByFile and
+		// would otherwise be missed (it shows in Current Activity but is not
+		// counted). messages are in arrival order, so the last entry per job_id
+		// is the newest.
+		const latestByJob = new Map<string, ProgressMessage>();
+		for (const m of wsState.messages) {
+			latestByJob.set(m.job_id, m);
+		}
 
-		for (const [, files] of Object.entries(wsState.messagesByFile)) {
-			const statuses = Object.values(files).map((msg) => msg.status);
-			if (statuses.length === 0) continue;
-			const hasActive = statuses.some((status) => !isTerminalStatus(status));
+		let active = 0;
+		for (const [jobId, latest] of latestByJob) {
+			// Active if the latest message is non-terminal, OR any per-file row is
+			// still in flight (defensive: a per-file 'pending' can coexist with a
+			// recent non-terminal aggregate before the terminal frame lands).
+			let hasActive = !isTerminalStatus(latest.status);
+			if (!hasActive) {
+				const files = wsState.messagesByFile[jobId];
+				if (files) {
+					hasActive = Object.values(files).some((status) => !isTerminalStatus(status.status));
+				}
+			}
 			if (hasActive) active += 1;
 		}
 
