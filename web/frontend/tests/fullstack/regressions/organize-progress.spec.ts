@@ -219,7 +219,15 @@ test.describe('Organize WebSocket progress: bar advances per file (no 0→100 ju
 			// pair to compare) and the assertion degrades to "at least one pending
 			// frame" — robust. In the common multi-frame case the loop actively
 			// catches a racy atomic-only filter regression (out-of-order delivery).
-			const pending = frames.filter((f) => f.status === 'pending');
+			//
+			// Filter to the AGGREGATE pending stream only (no file_path): the
+			// high-water mutex invariant applies to makeOrganizeProgressBroadcaster's
+			// job-level frames. The per-file 'Organizing <file>' start frames
+			// (makeOrganizeFileStartBroadcaster) are also status 'pending' but carry
+			// a file_path + Progress:0; they are a separate display-only stream and
+			// are not part of the monotonic-delivery invariant (matching the
+			// organize-controller bar-drive gate on !msg.file_path).
+			const pending = frames.filter((f) => f.status === 'pending' && !f.file_path);
 			expect(
 				pending.length,
 				'a multi-file organize must emit at least one pending frame',
