@@ -197,6 +197,24 @@ func TestApplyEnvironmentOverrides_MetadataTranslationSettings(t *testing.T) {
 		cfg := DefaultConfig(nil, nil)
 		ApplyEnvironmentOverrides(cfg)
 
+		assert.Equal(t, 120, cfg.Metadata.Translation.TimeoutSeconds)
+	})
+
+	t.Run("METADATA_TRANSLATION_TIMEOUT_SECONDS invalid keeps default", func(t *testing.T) {
+		t.Setenv("METADATA_TRANSLATION_TIMEOUT_SECONDS", "abc")
+
+		cfg := DefaultConfig(nil, nil)
+		ApplyEnvironmentOverrides(cfg)
+
+		assert.Equal(t, 60, cfg.Metadata.Translation.TimeoutSeconds)
+	})
+
+	t.Run("METADATA_TRANSLATION_TIMEOUT_SECONDS empty keeps default", func(t *testing.T) {
+		t.Setenv("METADATA_TRANSLATION_TIMEOUT_SECONDS", "")
+
+		cfg := DefaultConfig(nil, nil)
+		ApplyEnvironmentOverrides(cfg)
+
 		assert.Equal(t, 60, cfg.Metadata.Translation.TimeoutSeconds)
 	})
 

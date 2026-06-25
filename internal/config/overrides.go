@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -96,7 +97,9 @@ func ApplyEnvironmentOverrides(cfg *Config, envLookup ...func(key string) string
 		cfg.Metadata.Translation.TargetLanguage = strings.TrimSpace(targetLang)
 	}
 	if timeout := lookup("METADATA_TRANSLATION_TIMEOUT_SECONDS"); timeout != "" {
-		cfg.Metadata.Translation.TimeoutSeconds = 60
+		if n, err := strconv.Atoi(strings.TrimSpace(timeout)); err == nil && n > 0 {
+			cfg.Metadata.Translation.TimeoutSeconds = n
+		}
 	}
 	if applyPrimary := lookup("METADATA_TRANSLATION_APPLY_TO_PRIMARY"); applyPrimary != "" {
 		cfg.Metadata.Translation.ApplyToPrimary = applyPrimary == "true"
