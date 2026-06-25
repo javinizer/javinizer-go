@@ -27,6 +27,9 @@ describe('isTerminalStatus', () => {
 	it('returns true for organized', () => {
 		expect(isTerminalStatus('organized')).toBe(true);
 	});
+	it('returns true for updated (update-mode per-file completion)', () => {
+		expect(isTerminalStatus('updated')).toBe(true);
+	});
 	it('returns true for reverted', () => {
 		expect(isTerminalStatus('reverted')).toBe(true);
 	});

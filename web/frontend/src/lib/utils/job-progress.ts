@@ -5,6 +5,13 @@ export const TERMINAL_STATUSES = new Set([
 	'failed',
 	'cancelled',
 	'organized',
+	// 'updated' is the update-mode per-file completion status (symmetric with
+	// 'organized' for organize mode; apply_config_builder.go emits it WITH
+	// FilePath + Progress:100). Without it here, completed update jobs are
+	// perpetually counted in Home 'Active jobs: N' (activeJobCount) until WS
+	// reconnect. Excluded from computeJobProgress activeProgress like other
+	// terminal per-file statuses (already counted in finishedCount).
+	'updated',
 	'reverted',
 	// Per-file scrape completion statuses. A finished scrape file (success or
 	// error) is terminal for that file: it is already counted in finishedCount,
