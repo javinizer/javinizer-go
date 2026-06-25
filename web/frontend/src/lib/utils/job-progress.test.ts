@@ -36,6 +36,12 @@ describe('isTerminalStatus', () => {
 	it('returns true for error (per-file scrape failure)', () => {
 		expect(isTerminalStatus('error')).toBe(true);
 	});
+	it('returns true for gone (per-movie rescrape terminal outcome)', () => {
+		expect(isTerminalStatus('gone')).toBe(true);
+	});
+	it('returns true for conflict (per-movie rescrape terminal outcome)', () => {
+		expect(isTerminalStatus('conflict')).toBe(true);
+	});
 	it('is case insensitive', () => {
 		expect(isTerminalStatus('COMPLETED')).toBe(true);
 	});

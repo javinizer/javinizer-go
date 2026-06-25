@@ -24,7 +24,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
-	import { isTerminalStatus } from '$lib/utils/job-progress';
+	import { isTerminalStatus, computeJobProgress } from '$lib/utils/job-progress';
 	import type { HealthResponse, HistoryRecord, HistoryStats } from '$lib/api/types';
 
 	const STORAGE_KEY_INPUT = 'javinizer_input_path';
@@ -149,6 +149,27 @@
 	const latestActivity = $derived.by(() => {
 		if (wsState.messages.length === 0) return null;
 		return wsState.messages[wsState.messages.length - 1];
+	});
+
+	// Overall (monotonic) progress for the latest activity's job, so the Home
+	// "Current Activity" bar advances 0->100 instead of oscillating per file.
+	// main forwarded the overall job progress on every WS message; this PR's
+	// per-file step messages carry per-file progress, so rendering the raw last
+	// message's progress jumps 100->20->70->100 across files. computeJobProgress
+	// sums in-flight partials and counts finished files (terminal-excluded),
+	// yielding monotonic overall progress. Falls back to the raw value when the
+	// job has no per-file messages.
+	const latestActivityProgress = $derived.by(() => {
+		const latest = latestActivity;
+		if (!latest) return 0;
+		const files = wsState.messagesByFile[latest.job_id];
+		if (!files || Object.keys(files).length === 0) {
+			return Math.max(0, Math.min(100, latest.progress));
+		}
+		const msgs = Object.values(files);
+		const total = msgs.length;
+		const finished = msgs.filter((m) => isTerminalStatus(m.status)).length;
+		return computeJobProgress(files, total, latest.progress, true, finished);
 	});
 
 	const activeJobCount = $derived.by(() => {
@@ -313,11 +334,11 @@
 							</div>
 							<p class="text-sm text-muted-foreground line-clamp-2">{latestActivity.message}</p>
 							<div class="h-2 rounded-full bg-muted overflow-hidden">
-								<div class="h-full bg-primary transition-all duration-300" style="width: {Math.max(0, Math.min(100, latestActivity.progress))}%"></div>
+								<div class="h-full bg-primary transition-all duration-300" style="width: {Math.max(0, Math.min(100, latestActivityProgress))}%"></div>
 							</div>
 							<div class="flex items-center justify-between text-xs text-muted-foreground">
 								<span>Status: {latestActivity.status}</span>
-								<span>{latestActivity.progress.toFixed(0)}%</span>
+								<span>{latestActivityProgress.toFixed(0)}%</span>
 							</div>
 							<div class="flex gap-2 pt-1">
 <Button size="sm" variant="outline" onclick={() => goto('/jobs')}>

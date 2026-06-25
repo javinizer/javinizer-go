@@ -74,7 +74,7 @@
 					<div class="flex items-center gap-2 py-1.5 text-sm">
 						{#if item.status === 'success'}
 							<Check class="h-4 w-4 text-green-500 shrink-0" />
-						{:else if item.status === 'failed'}
+						{:else if item.status === 'failed' || item.status === 'gone' || item.status === 'conflict'}
 							<X class="h-4 w-4 text-red-500 shrink-0" />
 						{:else}
 							<LoaderCircle class="h-4 w-4 animate-spin text-muted-foreground shrink-0" />

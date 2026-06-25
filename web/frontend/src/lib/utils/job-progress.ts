@@ -13,6 +13,14 @@ export const TERMINAL_STATUSES = new Set([
 	// job.progress directly without summing per-file WS progress.
 	'success',
 	'error',
+	// Per-movie bulk-rescrape terminal outcomes. 'gone' (movie deleted/reached
+	// terminal mid-rescrape) and 'conflict' (revision conflict / concurrent
+	// modification) are final rescrape results, not in-progress states. Without
+	// these here, BulkRescrapeProgress's allDone predicate never becomes true for
+	// a rescrape containing gone/conflict movies (stuck undismissable modal) and
+	// activeJobCount perpetually counts the finished job as active.
+	'gone',
+	'conflict',
 ]);
 
 export function isTerminalStatus(status: string | null | undefined): boolean {
