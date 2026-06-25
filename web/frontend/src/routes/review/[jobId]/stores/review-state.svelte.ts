@@ -41,6 +41,7 @@ import {
 } from '../review-utils';
 import equal from 'fast-deep-equal';
 import { calculateCompleteness, type CompletenessTier } from '$lib/utils/completeness';
+import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
 
 interface MovieGroup {
@@ -726,8 +727,9 @@ export function createReviewState(pageStore: Page) {
 			// that slips through the controller's bar-drive filter and out-of-order
 			// delivery. An explicit 0 resets the bar for a fresh run
 			// (prepareOrganizeRun -> setOrganizeProgress(0)); allow it through.
-			if (nextProgress === 0 || nextProgress > organizeProgress) {
-				organizeProgress = nextProgress;
+			const next = nextOrganizeProgress(organizeProgress, nextProgress);
+			if (next !== null) {
+				organizeProgress = next;
 			}
 		},
 		getFileStatuses: () => fileStatuses,
@@ -1198,9 +1200,6 @@ export function createReviewState(pageStore: Page) {
 		},
 		get organizeProgress() {
 			return organizeProgress;
-		},
-		set organizeProgress(v) {
-			organizeProgress = v;
 		},
 		get organizeStatus() {
 			return organizeStatus;

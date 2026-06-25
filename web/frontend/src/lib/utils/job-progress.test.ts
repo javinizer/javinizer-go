@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeJobProgress, isTerminalStatus } from './job-progress';
+import { computeJobProgress, isTerminalStatus, nextOrganizeProgress } from './job-progress';
 import type { ProgressMessage } from '$lib/api/types';
 
 function makeMessage(overrides: Partial<ProgressMessage> = {}): ProgressMessage {
@@ -273,5 +273,54 @@ describe('computeJobProgress', () => {
 			const result = computeJobProgress({}, 66, 0, true, 31);
 			expect(result).toBe(47);
 		});
+	});
+});
+
+describe('nextOrganizeProgress', () => {
+	it('allows an explicit 0 as a reset regardless of current value', () => {
+		// prepareOrganizeRun resets the bar to 0 between runs; the guard must not
+		// block the reset even when current is already high (e.g. 100 from a prior run).
+		expect(nextOrganizeProgress(100, 0)).toBe(0);
+		expect(nextOrganizeProgress(50, 0)).toBe(0);
+		expect(nextOrganizeProgress(0, 0)).toBe(0);
+	});
+
+	it('applies strictly increasing values so the bar advances monotonically', () => {
+		expect(nextOrganizeProgress(0, 25)).toBe(25);
+		expect(nextOrganizeProgress(25, 50)).toBe(50);
+		expect(nextOrganizeProgress(50, 75)).toBe(75);
+		expect(nextOrganizeProgress(75, 100)).toBe(100);
+	});
+
+	it('ignores values that would move the bar backward', () => {
+		expect(nextOrganizeProgress(50, 25)).toBeNull();
+		expect(nextOrganizeProgress(100, 1)).toBeNull();
+	});
+
+	it('ignores equal values (only strictly greater advances the bar)', () => {
+		// Duplicate/out-of-order delivery of the same aggregate value must not
+		// re-fire; the backend high-water mutex already prevents this, the guard
+		// is defense-in-depth.
+		expect(nextOrganizeProgress(50, 50)).toBeNull();
+		expect(nextOrganizeProgress(100, 100)).toBeNull();
+	});
+
+	it('ignores negative values (defensive; never produced by the backend)', () => {
+		expect(nextOrganizeProgress(50, -10)).toBeNull();
+		expect(nextOrganizeProgress(0, -1)).toBeNull();
+	});
+
+	it('models a full two-run organize sequence: 100 -> 0 (reset) -> 25 -> 50 -> 75 -> 100', () => {
+		// Simulate the store applying the guard over a WS message stream: run 1
+		// completes at 100, prepareOrganizeRun resets to 0, run 2 advances to 100.
+		const sequence = [100, 0, 25, 50, 75, 100];
+		const observed: number[] = [];
+		let bar = 0;
+		for (const next of sequence) {
+			const applied = nextOrganizeProgress(bar, next);
+			if (applied !== null) bar = applied;
+			observed.push(bar);
+		}
+		expect(observed).toEqual([100, 0, 25, 50, 75, 100]);
 	});
 });

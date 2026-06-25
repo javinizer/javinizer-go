@@ -75,3 +75,24 @@ export function computeJobProgress(
 	const total = Math.max(totalFiles, 1);
 	return Math.min(Math.round(((finishedCount + activeProgress / 100) / total) * 100), 100);
 }
+
+/**
+ * Apply the organize-bar monotonic high-water guard.
+ *
+ * The review-page OrganizeStatusCard bar must never move backward during a
+ * run. Aggregate progress-stream messages are already monotonic (backend
+ * high-water mutex), but this is the store-level defense-in-depth against any
+ * per-file message that slips through the controller's `!msg.file_path` bar-drive
+ * filter and out-of-order delivery.
+ *
+ * @param current - The bar's current progress (0–100).
+ * @param next - The candidate progress value from an incoming WS message.
+ * @returns `next` when it should be applied, or `null` when it must be ignored.
+ *   An explicit `0` is always returned (it is the reset signal emitted by
+ *   `prepareOrganizeRun` between runs); any other value is returned only when
+ *   strictly greater than `current`, so the bar never moves backward mid-run.
+ */
+export function nextOrganizeProgress(current: number, next: number): number | null {
+	if (next === 0 || next > current) return next;
+	return null;
+}
