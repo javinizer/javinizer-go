@@ -255,13 +255,21 @@ func makeScrapeFileFailedBroadcaster(job worker.BatchJobInterface, sink progress
 // show step text during scraping (e.g. "Querying scrapers..."). Mirrors main's
 // realtime.ProgressAdapter which forwarded every step update to the WS hub.
 // Takes an injected sink so the closure is unit-testable.
+//
+// Scale note: the scrape ProgressFunc reports pct on a 0-1 fraction
+// (internal/scrape/scrape.go: 0.2 "Querying scrapers...", 0.7 "Aggregating...",
+// 1.0 "Completed"), whereas the WS ProgressMessage.progress and the frontend's
+// computeJobProgress both expect a 0-100 percentage (matching main, which
+// forwarded overall job progress 0-100). Scale pct*100 here so in-flight
+// partials contribute their intended weight to the progress bar and the Home
+// "Current Activity" card, instead of ~1/100th.
 func makeScrapeStepProgressBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, step string, pct float64, msg string) {
 	return func(filePath, step string, pct float64, msg string) {
 		sink(&websocket.ProgressMessage{
 			JobID:    job.GetID(),
 			FilePath: filePath,
 			Status:   websocket.ProgressStatusPending,
-			Progress: pct,
+			Progress: pct * 100,
 			Message:  msg,
 		})
 	}
