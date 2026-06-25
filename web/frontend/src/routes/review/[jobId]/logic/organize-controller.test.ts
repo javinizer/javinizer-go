@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createOrganizeController } from './organize-controller';
-import type { BatchJobResponse, Movie, UpdateRequest } from '$lib/api/types';
+import type { BatchJobResponse, Movie, ProgressMessage, UpdateRequest } from '$lib/api/types';
 
 /**
  * Regression coverage for the infinite-poll bug fixed in commit cec74d43:
@@ -143,6 +143,66 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 		expect(calls.setOrganizeStatus).not.toContain('completed');
 		expect(calls.toastSuccess).toHaveLength(0);
 
+		controller.cleanup();
+	});
+});
+
+describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', () => {
+	// Regression for NEW-1: per-file 'organized'/'updated'/'failed' messages
+	// carry progress:100 but must NOT drive the progress bar (they are for
+	// fileStatuses display). Only 'pending' (incremental) and terminal
+	// 'organization_completed'/'update_completed' drive the bar. Before the
+	// fix, every message with a progress field snapped the bar to 100 then
+	// oscillated as the next 'pending' arrived.
+	it('applies progress for a pending message', () => {
+		const { deps, calls } = makeDeps();
+		const controller = createOrganizeController(deps);
+
+		controller.handleWebSocketMessage({
+			job_id: 'job-1',
+			file_index: 0,
+			file_path: '/src/a.mp4',
+			status: 'pending',
+			progress: 42,
+			message: 'Organizing 1 of 4 files',
+		} satisfies ProgressMessage);
+
+		expect(calls.setOrganizeProgress).toContain(42);
+		controller.cleanup();
+	});
+
+	it('does NOT apply progress for a per-file organized message (progress:100)', () => {
+		const { deps, calls } = makeDeps();
+		const controller = createOrganizeController(deps);
+
+		controller.handleWebSocketMessage({
+			job_id: 'job-1',
+			file_index: 0,
+			file_path: '/src/a.mp4',
+			status: 'organized',
+			progress: 100,
+			message: 'Organized /src/a.mp4',
+		} satisfies ProgressMessage);
+
+		expect(calls.setOrganizeProgress).not.toContain(100);
+		expect(calls.setOrganizeProgress).toHaveLength(0);
+		controller.cleanup();
+	});
+
+	it('applies progress for the terminal organization_completed message', () => {
+		const { deps, calls } = makeDeps();
+		const controller = createOrganizeController(deps);
+
+		controller.handleWebSocketMessage({
+			job_id: 'job-1',
+			file_index: 0,
+			file_path: '',
+			status: 'organization_completed',
+			progress: 100,
+			message: 'Organized 4 files, 0 failed',
+		} satisfies ProgressMessage);
+
+		expect(calls.setOrganizeProgress).toContain(100);
 		controller.cleanup();
 	});
 });

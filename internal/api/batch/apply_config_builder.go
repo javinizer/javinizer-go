@@ -248,6 +248,25 @@ func makeScrapeFileFailedBroadcaster(job worker.BatchJobInterface, sink progress
 	}
 }
 
+// makeScrapeStepProgressBroadcaster returns an OnScrapeStepProgress hook that
+// emits an incremental per-file WebSocket ProgressMessage with FilePath, a
+// non-terminal 'pending' status, partial progress, and the step message, so the
+// frontend's messagesByFile updates live per step and ProgressModal active rows
+// show step text during scraping (e.g. "Querying scrapers..."). Mirrors main's
+// realtime.ProgressAdapter which forwarded every step update to the WS hub.
+// Takes an injected sink so the closure is unit-testable.
+func makeScrapeStepProgressBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, step string, pct float64, msg string) {
+	return func(filePath, step string, pct float64, msg string) {
+		sink(&websocket.ProgressMessage{
+			JobID:    job.GetID(),
+			FilePath: filePath,
+			Status:   websocket.ProgressStatusPending,
+			Progress: pct,
+			Message:  msg,
+		})
+	}
+}
+
 // newOrganizeBroadcastSink is the production progressSink used by both
 // makeOrganizeProgressBroadcaster and makeOrganizeCompleteBroadcaster: it
 // forwards a message to the WebSocket hub via broadcastProgress. Extracted to a

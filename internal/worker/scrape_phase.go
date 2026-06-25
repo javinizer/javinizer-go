@@ -72,7 +72,7 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 			// (root cause of the 5→1 worker degradation).
 			cmd := buildScrapeCmd(filePath, inputs, cfg)
 			fmi := inputs.FileMatchInfo[filePath]
-			outcome := scrapeFile(egCtx, filePath, fmi, cmd, inputs)
+			outcome := scrapeFile(egCtx, filePath, fmi, cmd, inputs, cfg)
 			// Broadcast per-file scrape progress over WebSocket so the frontend's
 			// messagesByFile populates and ProgressModal shows live per-file status.
 			// Mirrors main's realtime.ProgressAdapter which forwarded per-task
@@ -278,6 +278,7 @@ func scrapeFile(
 	fmi models.FileMatchInfo,
 	cmd scrape.ScrapeCmd,
 	inputs scrapePhaseInputs,
+	cfg ScrapePhaseConfig,
 ) scrapeFileOutcome {
 	outcome := scrapeFileOutcome{
 		FilePath: filePath,
@@ -347,6 +348,18 @@ func scrapeFile(
 
 	// Step 2: Execute the scrape.
 	progressFn := makeProgressFn(inputs.Broadcaster, inputs.JobID, cmd.MovieID, JobEventPhaseScrape)
+	// Wrap the in-process progress fn so each step update also reaches the WS
+	// hub (with FilePath), restoring main's realtime.ProgressAdapter live
+	// per-file step text in ProgressModal. The base fn still drives the
+	// in-process Broadcaster (TUI/CLI).
+	if cfg.OnScrapeStepProgress != nil {
+		wsHook := cfg.OnScrapeStepProgress
+		baseFn := progressFn
+		progressFn = func(step scrape.ProgressStep, pct float64, msg string) {
+			baseFn(step, pct, msg)
+			wsHook(filePath, string(step), pct, msg)
+		}
+	}
 
 	result, meta, err := inputs.WF.Scrape(taskCtx, cmd, progressFn)
 

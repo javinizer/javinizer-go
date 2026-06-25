@@ -186,6 +186,7 @@ func StartScrapeUseCase(
 	scrapeSink := newOrganizeBroadcastSink(rt)
 	scrapeOpts.OnFileScraped = makeScrapeFileScrapedBroadcaster(job, scrapeSink)
 	scrapeOpts.OnFileScrapeFailed = makeScrapeFileFailedBroadcaster(job, scrapeSink)
+	scrapeOpts.OnScrapeStepProgress = makeScrapeStepProgressBroadcaster(job, scrapeSink)
 	go func() {
 		if err := job.StartScrape(rt.ServerCtx(), allFiles, scrapeOpts); err != nil {
 			logging.Errorf("BatchJob.StartScrape failed: %v", err)

@@ -526,6 +526,17 @@ type ScrapePhaseConfig struct {
 	// Mirrors main's realtime.ProgressAdapter failure forwarding. Called
 	// concurrently from worker goroutines. Nil = no per-file failure reporting.
 	OnFileScrapeFailed func(filePath, errMsg string)
+
+	// OnScrapeStepProgress is invoked for each in-flight scrape step update
+	// (e.g. "Querying scrapers...", "Aggregating metadata..."), carrying the
+	// source file path, step name, progress percentage, and message. The API
+	// layer wires this to broadcast an incremental WebSocket ProgressMessage
+	// with FilePath set so the frontend's messagesByFile updates live per step
+	// and ProgressModal active rows show step text during scraping. Mirrors
+	// main's realtime.ProgressAdapter which forwarded every step update to the
+	// WS hub. Called concurrently from worker goroutines. Nil = no incremental
+	// step-progress reporting (only terminal per-file success/error).
+	OnScrapeStepProgress func(filePath, step string, pct float64, msg string)
 }
 
 // ApplyPhaseConfig carries only what the apply phase needs.

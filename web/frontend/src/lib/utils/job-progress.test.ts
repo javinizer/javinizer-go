@@ -30,6 +30,12 @@ describe('isTerminalStatus', () => {
 	it('returns true for reverted', () => {
 		expect(isTerminalStatus('reverted')).toBe(true);
 	});
+	it('returns true for success (per-file scrape completion)', () => {
+		expect(isTerminalStatus('success')).toBe(true);
+	});
+	it('returns true for error (per-file scrape failure)', () => {
+		expect(isTerminalStatus('error')).toBe(true);
+	});
 	it('is case insensitive', () => {
 		expect(isTerminalStatus('COMPLETED')).toBe(true);
 	});
@@ -136,6 +142,25 @@ describe('computeJobProgress', () => {
 			};
 			const result = computeJobProgress(messages, 66, 0, true, 30);
 			expect(result).toBe(47);
+		});
+
+		it('does NOT double-count finished scrape files (success/error are terminal)', () => {
+			// Regression for NEW-2: per-file scrape success/error messages carry
+			// progress 100 but are terminal, so they must be excluded from
+			// activeProgress (they're already in finishedCount). Before the fix,
+			// 5 finished files + 5 success msgs at 100 -> (5 + 5)/10 = 100% at
+			// 50% completion. After: (5 + 0)/10 = 50%.
+			const messages = {
+				a: makeMessage({ file_path: 'a', status: 'success', progress: 100 }),
+				b: makeMessage({ file_path: 'b', status: 'success', progress: 100 }),
+				c: makeMessage({ file_path: 'c', status: 'success', progress: 100 }),
+				d: makeMessage({ file_path: 'd', status: 'success', progress: 100 }),
+				e: makeMessage({ file_path: 'e', status: 'error', progress: 100 }),
+			};
+			const result = computeJobProgress(messages, 10, 0, true, 5);
+			// 5 finished files / 10 total = 50%. Before the fix, success/error
+			// were non-terminal so each added 1.0 to activeProgress -> (5+5)/10 = 100%.
+			expect(result).toBe(50);
 		});
 
 		it('returns restProgress when totalFiles is 0', () => {
