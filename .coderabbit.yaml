@@ -1,6 +1,6 @@
 # CodeRabbit configuration — CHUNKED FULL REVIEW (temporary per-pass scope).
 #
-# PASS 4 scope — data+processing (internal/{database,organizer,downloader,nfo,template,translation,history,aggregator,matcher,scanner,eventlog,fsutil,imageutil,poster,mediainfo,formatter}) (122 files)
+# PASS 5 scope — frontend+tui+utils (web/frontend + internal/{tui,models,commandutil,update,configutil,testutil,version,panicutil,operationmode,logging,enumutil,coverage}) (132 files)
 # One pass of a 5-pass chunked full review (PR #35 = 607 reviewable files; limit 150).
 # In-scope = everything NOT excluded below. After all 5 passes, restored to full scope.
 #
@@ -30,40 +30,43 @@ reviews:
     - "!**/package.json"
     - "!**/package-lock.json"
 
-    # --- Exclude everything NOT in this pass's scope (data+processing (internal/{database,organizer,downloader,nfo,template,translation,history,aggregator,matcher,scanner,eventlog,fsutil,imageutil,poster,mediainfo,formatter}) (122 files)) ---
+    # --- Exclude everything NOT in this pass's scope (frontend+tui+utils (web/frontend + internal/{tui,models,commandutil,update,configutil,testutil,version,panicutil,operationmode,logging,enumutil,coverage}) (132 files)) ---
     - "!.github/**"
     - "!cmd/**"
     - "!configs/**"
     - "!docs/**"
+    - "!internal/aggregator/**"
     - "!internal/api/**"
     - "!internal/challengedetect/**"
-    - "!internal/commandutil/**"
     - "!internal/config/**"
-    - "!internal/configutil/**"
-    - "!internal/coverage/**"
+    - "!internal/database/**"
+    - "!internal/downloader/**"
     - "!internal/e2e_test.go/**"
-    - "!internal/enumutil/**"
+    - "!internal/eventlog/**"
+    - "!internal/formatter/**"
+    - "!internal/fsutil/**"
+    - "!internal/history/**"
     - "!internal/httpclient/**"
-    - "!internal/logging/**"
+    - "!internal/imageutil/**"
+    - "!internal/matcher/**"
+    - "!internal/mediainfo/**"
     - "!internal/mocks/**"
-    - "!internal/models/**"
-    - "!internal/operationmode/**"
-    - "!internal/panicutil/**"
+    - "!internal/nfo/**"
+    - "!internal/organizer/**"
+    - "!internal/poster/**"
     - "!internal/ratelimit/**"
+    - "!internal/scanner/**"
     - "!internal/scrape/**"
     - "!internal/scraper/**"
     - "!internal/scraperconfig/**"
     - "!internal/scraperutil/**"
     - "!internal/ssrf/**"
-    - "!internal/testutil/**"
-    - "!internal/tui/**"
-    - "!internal/update/**"
-    - "!internal/version/**"
+    - "!internal/template/**"
+    - "!internal/translation/**"
     - "!internal/websocket/**"
     - "!internal/worker/**"
     - "!internal/workflow/**"
     - "!scripts/**"
-    - "!web/frontend/**"
     - "!.coderabbit.yaml"
     - "!.gitignore"
     - "!.golangci.yml"
@@ -73,54 +76,60 @@ reviews:
     - "!go.sum"
 
   path_instructions:
-    - path: "internal/database/**"
+    - path: "web/frontend/src/lib/api/**"
       instructions: >
-        Focus: GORM repository correctness (transactions, scope of auto-migrate, nil-safe dereferences), SQL injection / raw-query safety, transaction rollback on error, repository interface contracts vs implementations. Flag any error that is swallowed or not wrapped with %w.
-    - path: "internal/organizer/**"
+        Focus: API client correctness (request/response typing, error handling, no silent fetch failures), query key stability across operation modes, no leaked API tokens in client code. Flag unhandled non-2xx responses or untyped any casts.
+    - path: "web/frontend/src/lib/stores/**"
       instructions: >
-        Focus: afero filesystem operations (atomic moves, temp-dir cleanup, path traversal outside the library root), template-method strategy correctness, no silent data loss on rename/move failures. Flag missing error checks on fs operations.
-    - path: "internal/downloader/**"
+        Focus: Svelte store correctness (no cross-session/jobId state leak, reactive invariants, cleanup on unmount). Flag stores that retain stale state across navigations or fail to reset on jobId change.
+    - path: "web/frontend/src/routes/review/[jobId]/**"
       instructions: >
-        Focus: media download integrity (cover/trailer/art), SSRF on download URLs constrained to allowed media hosts, file-handle/HTTP-body Close on all paths, context cancellation honored, no partial-file left on failure.
-    - path: "internal/nfo/**"
+        Focus: review flow correctness (jobId-scoped state, monotonic progress bars driven by WS events, no race between WS updates and REST polling, preview/query keys include operation mode). Flag progress-bar regressions and session-state leaks.
+    - path: "web/frontend/src/lib/components/**"
       instructions: >
-        Focus: NFO XML generation correctness (escaping, encoding, well-formed output), no metadata truncation, Kodi/Plex schema conformance. Flag any unescaped user/metadata value written to XML.
-    - path: "internal/template/**"
+        Focus: component prop correctness (no unbounded reactivity loops, accessible labels, deterministic rendering from props). Flag components that mutate parent state without events.
+    - path: "web/frontend/src/**"
       instructions: >
-        Focus: template engine correctness (binding injection, missing-key handling, no panic on nil fields), output determinism. Flag unbounded recursion or unescaped path separators in rendered filenames.
-    - path: "internal/translation/**"
+        Focus: SvelteKit SPA correctness (no SSR leakage in adapter-static, import ordering, no unused exports), TypeScript type-safety (no any in public APIs). Flag unhandled promise rejections or missing loading/error states.
+    - path: "web/frontend/*.config.*"
       instructions: >
-        Focus: translation service correctness (DeepL/Google/OpenAI adapters), API key handling redacted in logs/errors, context cancellation honored, rate limiting respected. Flag leaked credentials or raw HTTP error leakage.
-    - path: "internal/history/**"
+        Focus: build/test config correctness (vite, vitest, playwright, tailwind, svelte config) — no broken aliases, no disabled type-checking, E2E config targets real endpoints. Flag configs that silently skip tests or widen CSP unsafely.
+    - path: "internal/tui/**"
       instructions: >
-        Focus: operation history persistence (idempotency, no overwrite of prior history), timestamp/timezone correctness. Flag swallowed errors on history writes.
-    - path: "internal/aggregator/**"
+        Focus: Bubble Tea model/view/handlers correctness (no goroutine leaks in event loop, clean program teardown, Update returns consistent model+cmd, no unbounded message buffer). Flag panics in view rendering or missing quit handling.
+    - path: "internal/models/**"
       instructions: >
-        Focus: priority-based multi-source merge correctness (no silent field overwrite by lower-priority source), deterministic merge order, nil-safe handling of partial scraper results. Flag any field dropped without logging.
-    - path: "internal/matcher/**"
+        Focus: domain model correctness (GORM tags match schema, no nil-deref on optional pointer fields, JSON (de)serialization stable across versions). Flag models with unexported fields relied on by JSON or missing omitempty on optionals.
+    - path: "internal/commandutil/**"
       instructions: >
-        Focus: JAV ID extraction regex correctness (no catastrophic backtracking, no panic on malformed input), case/prefix handling determinism. Flag regex compile-in-hot-path or unbounded input consumption.
-    - path: "internal/scanner/**"
+        Focus: Dependencies struct / DI wiring correctness (no nil dependencies reaching commands, interface contracts honored, options overrides applied). Flag commands that bypass DependenciesInterface or construct real deps in tests.
+    - path: "internal/update/**"
       instructions: >
-        Focus: filesystem video discovery (afero, no symlink/permission silent skips), extension allow-list, no traversal outside input root. Flag ignored errors on directory reads.
-    - path: "internal/eventlog/**"
+        Focus: self-update correctness (download over HTTPS only, checksum/signature verification, atomic binary replace, no partial binary left on failure). Flag unverified downloads or insecure replace paths.
+    - path: "internal/configutil/**"
       instructions: >
-        Focus: structured event persistence (no schema drift, no swallowed write errors), event ordering. Flag nil-event writes.
-    - path: "internal/fsutil/**"
+        Focus: config helper correctness (env override precedence, no silent config drops, validation errors surfaced). Flag swallowed config-load errors or insecure default values.
+    - path: "internal/testutil/**"
       instructions: >
-        Focus: filesystem helpers (path normalization, atomic writes, temp-dir hygiene, no path traversal). Flag TOCTOU or missing Close on copied files.
-    - path: "internal/imageutil/**"
+        Focus: test helper correctness (no production logic in helpers, helpers do not mask real failures, golden data loaded deterministically). Flag helpers that depend on filesystem state outside the test.
+    - path: "internal/logging/**"
       instructions: >
-        Focus: image processing (decode/resize/normalize) correctness, no panic on malformed images, bounded memory (large-image guard), host allow-lists for DMM/CDN URLs. Flag unbounded image.Image allocation.
-    - path: "internal/poster/**"
+        Focus: logger correctness (atomic config reload, no cached logger references that miss reloads, no credential leakage in formatted output, rotation handles closed cleanly). Flag logger state races or unclosed file handles.
+    - path: "internal/operationmode/**"
       instructions: >
-        Focus: poster generation/assembly correctness, file-handle Close on all paths, temp-file cleanup, no silent overwrite of existing posters without intent. Flag missing error checks.
-    - path: "internal/mediainfo/**"
+        Focus: operation mode enum correctness (no stringly-typed comparisons outside the package, all modes covered in switches). Flag missing default cases or modes referenced as raw strings.
+    - path: "internal/version/**"
       instructions: >
-        Focus: MP4 metadata parsing correctness (mp4ff), no panic on truncated/invalid MP4, bounded reads, context cancellation. Flag swallowed parse errors or unbounded box reads.
-    - path: "internal/formatter/**"
+        Focus: version metadata correctness (ldflags-injectable vars, no hardcoded dev values in release paths). Flag vars that cannot be overridden at build time.
+    - path: "internal/panicutil/**"
       instructions: >
-        Focus: output formatting determinism, no silent truncation, encoding safety. Flag unescaped control characters in formatted output.
+        Focus: panic recovery helper correctness (recovered value captured, stack not leaked to end users, re-panic semantics documented). Flag recover handlers that swallow panics silently.
+    - path: "internal/enumutil/**"
+      instructions: >
+        Focus: enum helper correctness (deterministic ordering, no panics on unknown values). Flag reflection-based lookups without bounded input.
+    - path: "internal/coverage/**"
+      instructions: >
+        Focus: coverage enforcement tool correctness (threshold computation, no false pass on missing packages). Flag coverage checks that ignore test build failures.
 
 review_status:
   fail_commit_in_status: false
