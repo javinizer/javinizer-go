@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+
+	"github.com/spf13/afero"
 )
 
 const credentialFileMode = 0600
 
-func enforceCredentialFilePermissions(path string) error {
-	info, err := os.Lstat(path)
+func enforceCredentialFilePermissions(fs afero.Fs, path string) error {
+	info, err := lstatOrStat(fs, path)
 	if err != nil {
 		return err
 	}
@@ -30,7 +32,7 @@ func enforceCredentialFilePermissions(path string) error {
 		return nil
 	}
 
-	if err := os.Chmod(path, credentialFileMode); err != nil {
+	if err := fs.Chmod(path, credentialFileMode); err != nil {
 		if isUnsupportedPermissionMutation(err) {
 			return fmt.Errorf(
 				"credential file mode is %o and filesystem does not support chmod to %o: %w",
@@ -42,7 +44,7 @@ func enforceCredentialFilePermissions(path string) error {
 		return err
 	}
 
-	info, err = os.Lstat(path)
+	info, err = lstatOrStat(fs, path)
 	if err != nil {
 		return err
 	}
@@ -53,6 +55,21 @@ func enforceCredentialFilePermissions(path string) error {
 		return fmt.Errorf("credential file mode is %o, expected %o", info.Mode().Perm(), credentialFileMode)
 	}
 	return nil
+}
+
+// lstatOrStat returns file info for path, preferring Lstat (via the optional
+// afero.Lstater interface) so symlinks are detected rather than followed.
+// OsFs.LstatIfPossible delegates to os.Lstat, preserving the prior behavior
+// exactly; filesystems that don't model symlinks fall back to Stat. Routing
+// stat/chmod through the injected filesystem keeps AuthManager compatible with
+// non-Os Afero filesystems instead of bypassing the abstraction with raw
+// os.Lstat/os.Chmod calls.
+func lstatOrStat(fs afero.Fs, path string) (os.FileInfo, error) {
+	if ls, ok := fs.(afero.Lstater); ok {
+		info, _, err := ls.LstatIfPossible(path)
+		return info, err
+	}
+	return fs.Stat(path)
 }
 
 func isUnsupportedPermissionMutation(err error) bool {

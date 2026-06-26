@@ -272,8 +272,7 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Search query",
                         "name": "q",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2421,6 +2420,7 @@ const docTemplate = `{
                         "description": "Comparison options",
                         "name": "request",
                         "in": "body",
+                        "required": true,
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.NFOComparisonRequest"
                         }
@@ -4027,7 +4027,7 @@ const docTemplate = `{
                     "example": "merge"
                 },
                 "nfo_path": {
-                    "description": "Optional: explicit NFO path",
+                    "description": "Required: explicit NFO path",
                     "type": "string",
                     "example": "/path/to/movie.nfo"
                 },
@@ -4422,7 +4422,8 @@ const docTemplate = `{
                 },
                 "max_poster_height": {
                     "description": "MaxPosterHeight optional override for the max poster height (px). 0 = no cap.\nWhen omitted, the configured output.max_poster_height is used.",
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                 },
                 "width": {
                     "type": "integer",
@@ -4880,7 +4881,6 @@ const docTemplate = `{
                     "enum": [
                         "prefer-scraper",
                         "prefer-nfo",
-                        "merge-arrays",
                         "preserve-existing",
                         "fill-missing-only"
                     ]

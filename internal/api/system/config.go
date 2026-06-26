@@ -153,15 +153,24 @@ func validateProxySaveConfig(deps *core.APIDeps, newCfg *config.Config, tokens m
 	// would differ from the hash embedded in the test verification token when the
 	// frontend sends the default profile name in the Profile field.
 	normalizedProxy := newCfg.Scrapers.Proxy
-	if normalizedProxy.DefaultProfile == "" && normalizedProxy.Profile != "" {
-		normalizedProxy.DefaultProfile = normalizedProxy.Profile
-		normalizedProxy.Profile = ""
+	oldProxy := oldCfg.Scrapers.Proxy
+	normalizeDefaultProfile := func(proxy *models.ProxyConfig) {
+		if proxy.DefaultProfile == "" && proxy.Profile != "" {
+			proxy.DefaultProfile = proxy.Profile
+			proxy.Profile = ""
+		}
 	}
+	normalizeDefaultProfile(&normalizedProxy)
+	normalizeDefaultProfile(&oldProxy)
 
-	// Check if global proxy enabled status or URL changed (meaningful changes)
-	globalChanged := oldCfg.Scrapers.Proxy.Enabled != newCfg.Scrapers.Proxy.Enabled ||
-		oldCfg.Scrapers.Proxy.DefaultProfile != newCfg.Scrapers.Proxy.DefaultProfile ||
-		!proxyProfilesEqual(oldCfg.Scrapers.Proxy.Profiles, newCfg.Scrapers.Proxy.Profiles)
+	// Check if global proxy enabled status or URL changed (meaningful changes).
+	// Compare normalized-to-normalized so a save that only shifts the effective
+	// default via Profile (normalized to DefaultProfile) is still detected as a
+	// change and triggers token re-validation — otherwise the change could skip
+	// verification entirely.
+	globalChanged := oldProxy.Enabled != normalizedProxy.Enabled ||
+		oldProxy.DefaultProfile != normalizedProxy.DefaultProfile ||
+		!proxyProfilesEqual(oldProxy.Profiles, normalizedProxy.Profiles)
 
 	if globalChanged {
 		// Hash the proxy config only when a change is detected. A hashing

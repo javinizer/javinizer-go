@@ -89,8 +89,11 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		authHeader := c.GetHeader("Authorization")
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			rawToken := strings.TrimPrefix(authHeader, "Bearer ")
+		// Auth schemes are case-insensitive (RFC 7235); accept "bearer"/"BEARER" etc.,
+		// not just "Bearer ", so valid variants don't fall through to session auth.
+		const bearerPrefix = "Bearer "
+		if len(authHeader) >= len(bearerPrefix) && strings.EqualFold(authHeader[:len(bearerPrefix)], bearerPrefix) {
+			rawToken := authHeader[len(bearerPrefix):]
 			if !strings.HasPrefix(rawToken, token.TokenPrefix) {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 					Error: "invalid or revoked token",

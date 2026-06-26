@@ -34,6 +34,10 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		}
 
 		req.ID = strings.TrimSpace(req.ID)
+		if req.ID == "" {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "id is required"})
+			return
+		}
 
 		// Check if request was cancelled before starting expensive operations
 		select {

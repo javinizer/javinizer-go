@@ -58,7 +58,7 @@ type PosterCropRequest struct {
 	Height int `json:"height" binding:"min=1"`
 	// MaxPosterHeight optional override for the max poster height (px). 0 = no cap.
 	// When omitted, the configured output.max_poster_height is used.
-	MaxPosterHeight *int `json:"max_poster_height,omitempty"`
+	MaxPosterHeight *int `json:"max_poster_height,omitempty" binding:"omitempty,min=0"`
 }
 
 // PosterCropResponse returns the updated temp cropped poster URL.
@@ -79,7 +79,7 @@ type PosterFromURLResponse struct {
 
 // NFOComparisonRequest represents a request to compare NFO with scraped data
 type NFOComparisonRequest struct {
-	NFOPath          string   `json:"nfo_path,omitempty" example:"/path/to/movie.nfo"`  // Optional: explicit NFO path
+	NFOPath          string   `json:"nfo_path,omitempty" example:"/path/to/movie.nfo"`  // Required: explicit NFO path
 	Preset           string   `json:"preset,omitempty" example:"conservative"`          // Merge strategy preset: conservative, gap-fill, or aggressive (overrides scalar/array strategies)
 	ScalarStrategy   string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"`   // Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing, or fill-missing-only
 	ArrayStrategy    string   `json:"array_strategy,omitempty" example:"merge"`         // Array field merge strategy: merge or replace

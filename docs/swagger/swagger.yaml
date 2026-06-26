@@ -640,7 +640,7 @@ definitions:
         example: merge
         type: string
       nfo_path:
-        description: 'Optional: explicit NFO path'
+        description: 'Required: explicit NFO path'
         example: /path/to/movie.nfo
         type: string
       preset:
@@ -915,6 +915,7 @@ definitions:
         description: |-
           MaxPosterHeight optional override for the max poster height (px). 0 = no cap.
           When omitted, the configured output.max_poster_height is used.
+        minimum: 0
         type: integer
       width:
         minimum: 1
@@ -1226,7 +1227,6 @@ definitions:
         enum:
         - prefer-scraper
         - prefer-nfo
-        - merge-arrays
         - preserve-existing
         - fill-missing-only
         type: string
@@ -2861,7 +2861,6 @@ paths:
       - description: Search query
         in: query
         name: q
-        required: true
         type: string
       produces:
       - application/json
@@ -4203,6 +4202,7 @@ paths:
       - description: Comparison options
         in: body
         name: request
+        required: true
         schema:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.NFOComparisonRequest'
       produces:

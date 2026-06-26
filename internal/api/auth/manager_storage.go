@@ -23,7 +23,7 @@ func (m *AuthManager) loadCredentialsFromDisk() error {
 		return fmt.Errorf("failed to stat auth credential file: %w", err)
 	}
 
-	if err := enforceCredentialFilePermissions(m.credentialPath); err != nil {
+	if err := enforceCredentialFilePermissions(m.fs, m.credentialPath); err != nil {
 		return fmt.Errorf("failed to enforce auth credential permissions: %w", err)
 	}
 
@@ -113,7 +113,7 @@ func (m *AuthManager) writeCredentialsToDisk(creds *storedCredentials) error {
 		return fmt.Errorf("failed to close temp auth credential file: %w", err)
 	}
 
-	if err := enforceCredentialFilePermissions(tmpPath); err != nil {
+	if err := enforceCredentialFilePermissions(m.fs, tmpPath); err != nil {
 		return fmt.Errorf("failed to enforce temp auth credential permissions: %w", err)
 	}
 
@@ -121,7 +121,7 @@ func (m *AuthManager) writeCredentialsToDisk(creds *storedCredentials) error {
 		return fmt.Errorf("failed to persist auth credential file: %w", err)
 	}
 
-	if err := enforceCredentialFilePermissions(m.credentialPath); err != nil {
+	if err := enforceCredentialFilePermissions(m.fs, m.credentialPath); err != nil {
 		return fmt.Errorf("failed to enforce auth credential permissions: %w", err)
 	}
 
@@ -137,7 +137,7 @@ func (m *AuthManager) loadSessionsFromDisk() {
 		return
 	}
 
-	if err := enforceCredentialFilePermissions(m.sessionPath); err != nil {
+	if err := enforceCredentialFilePermissions(m.fs, m.sessionPath); err != nil {
 		return
 	}
 
@@ -240,7 +240,7 @@ func (m *AuthManager) writePersistentSessionsLocked() error {
 		return fmt.Errorf("failed to close temp auth session file: %w", err)
 	}
 
-	if err := enforceCredentialFilePermissions(tmpPath); err != nil {
+	if err := enforceCredentialFilePermissions(m.fs, tmpPath); err != nil {
 		return fmt.Errorf("failed to enforce temp auth session permissions: %w", err)
 	}
 
@@ -248,7 +248,7 @@ func (m *AuthManager) writePersistentSessionsLocked() error {
 		return fmt.Errorf("failed to persist auth session file: %w", err)
 	}
 
-	if err := enforceCredentialFilePermissions(m.sessionPath); err != nil {
+	if err := enforceCredentialFilePermissions(m.fs, m.sessionPath); err != nil {
 		return fmt.Errorf("failed to enforce auth session permissions: %w", err)
 	}
 

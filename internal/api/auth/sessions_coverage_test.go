@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/spf13/afero"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -350,7 +351,7 @@ func TestEnforceCredentialFilePermissions_RegularFilePasses(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "test.credentials")
 	require.NoError(t, os.WriteFile(path, []byte("test"), 0o600))
-	err := enforceCredentialFilePermissions(path)
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), path)
 	require.NoError(t, err)
 }
 
@@ -360,7 +361,7 @@ func TestEnforceCredentialFilePermissions_DirectoryFails(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	err := enforceCredentialFilePermissions(dir)
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), dir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is a directory")
 }
@@ -370,7 +371,7 @@ func TestEnforceCredentialFilePermissions_NonexistentFails(t *testing.T) {
 		t.Skip("windows uses ACLs, not POSIX permissions")
 	}
 
-	err := enforceCredentialFilePermissions("/nonexistent/path/file")
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), "/nonexistent/path/file")
 	require.Error(t, err)
 	assert.True(t, os.IsNotExist(err))
 }
@@ -554,7 +555,7 @@ func TestEnforceCredentialFilePermissions_RepairsWrongPermissions(t *testing.T) 
 	path := filepath.Join(t.TempDir(), "test.credentials")
 	require.NoError(t, os.WriteFile(path, []byte("test"), 0o644))
 
-	err := enforceCredentialFilePermissions(path)
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), path)
 	require.NoError(t, err)
 
 	info, err := os.Stat(path)
@@ -576,7 +577,7 @@ func TestEnforceCredentialFilePermissions_SymlinkRejected(t *testing.T) {
 	symlinkPath := filepath.Join(tmpDir, "symlink")
 	require.NoError(t, os.Symlink(targetPath, symlinkPath))
 
-	err := enforceCredentialFilePermissions(symlinkPath)
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), symlinkPath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must not be a symlink")
 }

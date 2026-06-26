@@ -4,6 +4,7 @@ package auth
 
 import (
 	"errors"
+	"github.com/spf13/afero"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,7 +28,7 @@ func TestEnforceCredentialFilePermissions(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "test.credentials")
 		require.NoError(t, os.WriteFile(path, []byte("test"), 0o600))
 
-		err := enforceCredentialFilePermissions(path)
+		err := enforceCredentialFilePermissions(afero.NewOsFs(), path)
 		require.NoError(t, err)
 	})
 
@@ -37,7 +38,7 @@ func TestEnforceCredentialFilePermissions(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "test.credentials")
 		require.NoError(t, os.WriteFile(path, []byte("test"), 0o644))
 
-		err := enforceCredentialFilePermissions(path)
+		err := enforceCredentialFilePermissions(afero.NewOsFs(), path)
 		require.NoError(t, err)
 
 		info, err := os.Stat(path)
@@ -50,7 +51,7 @@ func TestEnforceCredentialFilePermissions(t *testing.T) {
 
 		dir := t.TempDir()
 
-		err := enforceCredentialFilePermissions(dir)
+		err := enforceCredentialFilePermissions(afero.NewOsFs(), dir)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "is a directory")
 	})
@@ -65,7 +66,7 @@ func TestEnforceCredentialFilePermissions(t *testing.T) {
 		symlinkPath := filepath.Join(tmpDir, "symlink")
 		require.NoError(t, os.Symlink(targetPath, symlinkPath))
 
-		err := enforceCredentialFilePermissions(symlinkPath)
+		err := enforceCredentialFilePermissions(afero.NewOsFs(), symlinkPath)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "must not be a symlink")
 	})
@@ -79,7 +80,7 @@ func TestEnforceCredentialFilePermissions(t *testing.T) {
 		err := syscall.Mkfifo(pipePath, 0o600)
 		require.NoError(t, err)
 
-		err = enforceCredentialFilePermissions(pipePath)
+		err = enforceCredentialFilePermissions(afero.NewOsFs(), pipePath)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "is not a regular file")
 	})
@@ -87,7 +88,7 @@ func TestEnforceCredentialFilePermissions(t *testing.T) {
 	t.Run("returns_error_for_nonexistent_path", func(t *testing.T) {
 		t.Parallel()
 
-		err := enforceCredentialFilePermissions("/nonexistent/path/file")
+		err := enforceCredentialFilePermissions(afero.NewOsFs(), "/nonexistent/path/file")
 		require.Error(t, err)
 		assert.True(t, os.IsNotExist(err))
 	})

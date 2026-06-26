@@ -68,14 +68,16 @@ func browseDirectory(rt *core.APIRuntime) gin.HandlerFunc {
 			})
 		}
 
-		// Get parent path
-		parentPath := filepath.Dir(req.Path)
-		if parentPath == req.Path {
+		// Get parent path. Derive it from validPath (the directory actually
+		// opened) rather than the raw req.Path so current/parent/item paths in
+		// the response are all consistent and never mix resolved with stale inputs.
+		parentPath := filepath.Dir(validPath)
+		if parentPath == validPath {
 			parentPath = "" // Root directory
 		}
 
 		c.JSON(http.StatusOK, contracts.BrowseResponse{
-			CurrentPath: req.Path,
+			CurrentPath: validPath,
 			ParentPath:  parentPath,
 			Items:       items,
 		})

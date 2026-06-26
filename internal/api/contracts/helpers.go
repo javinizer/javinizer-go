@@ -6,6 +6,9 @@ const iso8601Format = "2006-01-02T15:04:05Z07:00"
 
 // FormatTime formats a time.Time as an ISO 8601 string.
 func FormatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
 	return t.Format(iso8601Format)
 }
 

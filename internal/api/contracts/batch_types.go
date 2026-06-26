@@ -176,7 +176,7 @@ type UpdateRequest struct {
 	ForceOverwrite bool   `json:"force_overwrite"`
 	PreserveNFO    bool   `json:"preserve_nfo"`
 	Preset         string `json:"preset,omitempty" binding:"omitempty,oneof=conservative gap-fill aggressive"`
-	ScalarStrategy string `json:"scalar_strategy,omitempty" binding:"omitempty,oneof=prefer-scraper prefer-nfo merge-arrays preserve-existing fill-missing-only"`
+	ScalarStrategy string `json:"scalar_strategy,omitempty" binding:"omitempty,oneof=prefer-scraper prefer-nfo preserve-existing fill-missing-only"`
 	ArrayStrategy  string `json:"array_strategy,omitempty" binding:"omitempty,oneof=merge replace"`
 	SkipNFO        bool   `json:"skip_nfo"`
 	SkipDownload   bool   `json:"skip_download"`

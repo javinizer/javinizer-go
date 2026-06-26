@@ -1,8 +1,8 @@
 package genre
 
 import (
-	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -154,8 +154,8 @@ func deleteWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 		original := strings.TrimSpace(c.Query("original"))
 
 		if idStr != "" {
-			var id uint64
-			if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+			id, err := strconv.ParseUint(idStr, 10, 64)
+			if err != nil {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "id must be a number"})
 				return
 			}

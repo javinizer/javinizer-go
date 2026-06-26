@@ -20,7 +20,7 @@ type actressSearchResponse = models.Actress
 // @Description Search for actresses by name (first, last, or Japanese)
 // @Tags actress
 // @Produce json
-// @Param q query string true "Search query"
+// @Param q query string false "Search query"
 // @Success 200 {array} actressSearchResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse

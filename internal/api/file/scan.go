@@ -77,11 +77,15 @@ func scanDirectory(rt *core.APIRuntime) gin.HandlerFunc {
 				ModTime: fmi.ModTime.Format("2006-01-02T15:04:05Z07:00"),
 				Matched: fmi.MovieID != "",
 			}
+			// Multipart metadata describes the file itself, not whether it matched
+			// a movie — preserve IsMultiPart/PartNumber/PartSuffix for unmatched
+			// files too, so scan-result metadata stays accurate. MovieID is gated
+			// since it only applies when a match exists.
+			apiFileInfo.IsMultiPart = fmi.IsMultiPart
+			apiFileInfo.PartNumber = fmi.PartNumber
+			apiFileInfo.PartSuffix = fmi.PartSuffix
 			if fmi.MovieID != "" {
 				apiFileInfo.MovieID = fmi.MovieID
-				apiFileInfo.IsMultiPart = fmi.IsMultiPart
-				apiFileInfo.PartNumber = fmi.PartNumber
-				apiFileInfo.PartSuffix = fmi.PartSuffix
 			}
 			files = append(files, apiFileInfo)
 		}

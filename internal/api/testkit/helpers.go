@@ -181,7 +181,16 @@ func GetTestRuntime(deps *core.APIDeps) *core.APIRuntime {
 	}
 
 	// Auto-create and register a runtime for manually-constructed deps.
+	// Initialize it the same way CreateTestDeps does (EnsureRuntime + SetConfig)
+	// so handlers using rt.GetAPIConfig()/rt.GetRuntime() see populated state
+	// rather than zero-value security/scanner settings. SetConfig is only safe
+	// to call when the deps actually carries a config (HasConfig), since
+	// CoreDeps.GetConfig panics on nil config by design.
 	rt := core.NewAPIRuntime(deps)
+	rt.EnsureRuntime()
+	if deps.CoreDeps != nil && deps.CoreDeps.HasConfig() {
+		rt.SetConfig(deps.CoreDeps.GetConfig())
+	}
 	runtimeMap.Store(deps, rt)
 	return rt
 }

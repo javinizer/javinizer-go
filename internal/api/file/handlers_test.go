@@ -562,9 +562,15 @@ func TestBrowseDirectory_ParentPathCalculation(t *testing.T) {
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
-	// Parent path should be correctly calculated
-	assert.Equal(t, subDir, response.CurrentPath)
-	assert.Equal(t, tempDir, response.ParentPath)
+	// Parent path should be correctly calculated. The handler reports the
+	// validated (symlink-resolved) path consistently for both current and
+	// parent, matching the directory actually opened rather than the raw input.
+	resolvedSubDir, err := filepath.EvalSymlinks(subDir)
+	require.NoError(t, err)
+	resolvedTempDir, err := filepath.EvalSymlinks(tempDir)
+	require.NoError(t, err)
+	assert.Equal(t, resolvedSubDir, response.CurrentPath)
+	assert.Equal(t, resolvedTempDir, response.ParentPath)
 }
 
 func TestAutocompletePath(t *testing.T) {

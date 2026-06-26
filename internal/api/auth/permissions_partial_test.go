@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"github.com/spf13/afero"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,7 +22,7 @@ func TestEnforceCredentialFilePermissions_Symlink_Partial(t *testing.T) {
 	linkPath := filepath.Join(tmpDir, "link")
 	require.NoError(t, os.Symlink(targetFile, linkPath))
 
-	err := enforceCredentialFilePermissions(linkPath)
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), linkPath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must not be a symlink")
 }
@@ -33,7 +34,7 @@ func TestEnforceCredentialFilePermissions_Directory_Partial(t *testing.T) {
 	dirPath := filepath.Join(tmpDir, "adir")
 	require.NoError(t, os.Mkdir(dirPath, 0700))
 
-	err := enforceCredentialFilePermissions(dirPath)
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), dirPath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is a directory")
 }
@@ -48,7 +49,7 @@ func TestEnforceCredentialFilePermissions_NotRegular_Partial(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "regular")
 	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0644))
 
-	err := enforceCredentialFilePermissions(filePath)
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), filePath)
 	require.NoError(t, err)
 }
 
@@ -59,7 +60,7 @@ func TestEnforceCredentialFilePermissions_ChmodNeeded_Partial(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "file")
 	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0644))
 
-	err := enforceCredentialFilePermissions(filePath)
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), filePath)
 	require.NoError(t, err)
 
 	// Verify permissions were fixed
@@ -75,14 +76,14 @@ func TestEnforceCredentialFilePermissions_AlreadyCorrect_Partial(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "file")
 	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0600))
 
-	err := enforceCredentialFilePermissions(filePath)
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), filePath)
 	require.NoError(t, err)
 }
 
 // --- enforceCredentialFilePermissions: stat error after chmod (line 49+) ---
 
 func TestEnforceCredentialFilePermissions_NonExistent_Partial(t *testing.T) {
-	err := enforceCredentialFilePermissions("/nonexistent/path/file")
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), "/nonexistent/path/file")
 	require.Error(t, err)
 }
 
@@ -94,7 +95,7 @@ func TestEnforceCredentialFilePermissions_SymlinkAfterChmod_Partial(t *testing.T
 	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0644))
 
 	// chmod should succeed and the post-chmod check should pass
-	err := enforceCredentialFilePermissions(filePath)
+	err := enforceCredentialFilePermissions(afero.NewOsFs(), filePath)
 	require.NoError(t, err)
 }
 

@@ -36,9 +36,11 @@ func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 		jobID := c.Param("jobId")
 		filename := c.Param("filename")
 
-		// Validate both jobID and filename to prevent path traversal attacks
-		// Only allow values without path separators
-		if jobID != filepath.Base(jobID) || filename != filepath.Base(filename) {
+		// Validate both jobID and filename to prevent path traversal attacks.
+		// Reject "."/".." and any path separators — filepath.Base("..") == "..",
+		// so the prior base-name check alone let jobID=".." resolve posters/..
+		// to the temp root and serve sibling files.
+		if !isSafePathSegment(jobID) || !isSafePathSegment(filename) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
 			return
 		}
@@ -96,9 +98,9 @@ func serveCroppedPoster() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		filename := c.Param("filename")
 
-		// Validate filename to prevent path traversal attacks
-		// Only allow filenames without path separators and with .jpg extension
-		if filename != filepath.Base(filename) || !strings.HasSuffix(strings.ToLower(filename), ".jpg") {
+		// Validate filename to prevent path traversal attacks.
+		// Reject "."/".." and path separators in addition to requiring .jpg.
+		if !isSafePathSegment(filename) || !strings.HasSuffix(strings.ToLower(filename), ".jpg") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
 			return
 		}
@@ -210,4 +212,18 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 // resolveTempImageReferer selects a compatible Referer for preview image proxy requests.
 func resolveTempImageReferer(downloadURL, configuredReferer string) string {
 	return httpclient.ResolveMediaReferer(downloadURL, configuredReferer)
+}
+
+// isSafePathSegment reports whether s is a single safe path segment: non-empty,
+// not "." or "..", and containing no path separators (os.PathSeparator or '/').
+// filepath.Base alone is insufficient because filepath.Base("..") == "..",
+// which would let a jobID/filename of ".." escape its intended directory.
+func isSafePathSegment(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	if strings.ContainsAny(s, "/"+string(os.PathSeparator)+"\\") {
+		return false
+	}
+	return s == filepath.Base(s)
 }

@@ -2,8 +2,9 @@ package movie
 
 import (
 	"errors"
-	"fmt"
+	"io"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,7 @@ import (
 // @Accept json
 // @Produce json
 // @Param id path string true "Movie ID" example:"IPX-535"
-// @Param request body contracts.NFOComparisonRequest false "Comparison options"
+// @Param request body contracts.NFOComparisonRequest true "Comparison options"
 // @Success 200 {object} contracts.NFOComparisonResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
@@ -31,7 +32,14 @@ func compareNFO(deps MovieDeps) gin.HandlerFunc {
 
 		var req contracts.NFOComparisonRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			// Allow empty body - use defaults
+			// Only a truly empty body (io.EOF) may fall back to defaults. Any other
+			// bind error (malformed JSON, type mismatch) is a real client error and
+			// must not be silently turned into the later "nfo_path is required"
+			// response, which would hide the actual cause from the caller.
+			if !errors.Is(err, io.EOF) {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid request body: " + err.Error()})
+				return
+			}
 			req = contracts.NFOComparisonRequest{}
 		}
 
@@ -160,9 +168,9 @@ func compareNFO(deps MovieDeps) gin.HandlerFunc {
 func deriveProvenanceSource(d workflow.FieldDifference) contracts.DataSource {
 	source := "merged"
 	switch {
-	case fmt.Sprintf("%v", d.MergedValue) == fmt.Sprintf("%v", d.NFOValue):
+	case reflect.DeepEqual(d.MergedValue, d.NFOValue):
 		source = "nfo"
-	case fmt.Sprintf("%v", d.MergedValue) == fmt.Sprintf("%v", d.ScrapedValue):
+	case reflect.DeepEqual(d.MergedValue, d.ScrapedValue):
 		source = "scraper"
 	}
 	return contracts.DataSource{
