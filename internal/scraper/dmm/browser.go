@@ -44,19 +44,14 @@ func validateBrowserURL(rawURL string) error {
 }
 
 // isRunningInContainer detects if we're running inside a Docker container
-// using the provided filesystem and environment lookup dependencies.
-func isRunningInContainer(fs afero.Fs, envLookup func(string) string) bool {
+// using the provided filesystem dependency.
+func isRunningInContainer(fs afero.Fs) bool {
 	// Check for /.dockerenv file (Docker specific)
 	if _, err := fs.Stat("/.dockerenv"); err == nil {
 		return true
 	}
 
-	// Check for container environment variable (set in Dockerfile)
-	if envLookup("CHROME_BIN") != "" || envLookup("CHROME_PATH") != "" {
-		return true
-	}
-
-	// Check /proc/1/cgroup for docker/containerd
+	// Check /proc/1/cgroup for docker/containerd.
 	if data, err := afero.ReadFile(fs, "/proc/1/cgroup"); err == nil {
 		content := string(data)
 		if strings.Contains(content, "docker") || strings.Contains(content, "containerd") {
@@ -92,7 +87,7 @@ func fetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyP
 	// Check if running in Docker container
 	// Chrome's sandbox doesn't work in containers due to namespace restrictions
 	// Trade-off: We run as non-root user, and the container itself provides isolation
-	if isRunningInContainer(fs, envLookup) {
+	if isRunningInContainer(fs) {
 		logging.Debug("DMM Browser: Detected container environment, disabling Chrome sandbox and crashpad")
 		opts = append(opts,
 			chromedp.Flag("no-sandbox", true),

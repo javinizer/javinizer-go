@@ -167,6 +167,14 @@ func New(
 	if translator == nil {
 		translator = noOpTranslator{}
 	}
+	// Default a nil config to a zero-value Config. Several downstream paths
+	// (resolveScrapeInput, postProcessScraped) dereference cfg unconditionally,
+	// so a nil here would panic on RawInput resolution / translation gating.
+	// A zero-value Config is safe (all fields are zeroable) and matches the
+	// "nothing configured" behavior.
+	if cfg == nil {
+		cfg = &Config{}
+	}
 	return &Scraper{
 		registry:    registry,
 		aggregator:  aggregator,
@@ -287,7 +295,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd, progress ProgressFu
 
 	// Phase 2: Query + aggregate
 	scraperNames := resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, s.cfg)
-	resolvedID := s.resolveContentID(cmd.MovieID, scraperNames)
+	resolvedID := s.resolveContentID(ctx, cmd.MovieID, scraperNames)
 	scrapers := s.registry.GetInstancesByPriorityForInput(scraperNames, resolvedID)
 
 	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, scrapers, startTime)

@@ -40,7 +40,10 @@ func Register(reg scraperutil.ScraperRegistrar) {
 				Label:       "Rate Limit",
 				Description: "Delay between requests in milliseconds",
 				Type:        "number",
-				Default:     "1000",
+				Default:     1000,
+				Min:         scraperutil.IntPtr(0),
+				Max:         scraperutil.IntPtr(60000),
+				Unit:        "ms",
 			},
 		},
 		Defaults: models.ScraperSettings{

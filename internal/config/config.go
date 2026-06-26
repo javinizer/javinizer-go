@@ -64,6 +64,34 @@ func ValidateHTTPBaseURL(path, raw string) error {
 	return nil
 }
 
+// ValidateScraperBaseURL validates a configurable scraper base URL and enforces
+// that its host is on the source's allow-list. A generic HTTP base-URL check is
+// not enough for scraper egress: this setting steers outbound requests, so a
+// user-set base_url pointing at an arbitrary host (or a loopback/private host)
+// must be rejected before use. allowedHosts is the set of hosts the scraper is
+// permitted to talk to (e.g. dmm.co.jp, www.dmm.co.jp, video.dmm.co.jp). Host
+// comparison is case-insensitive. An empty raw value is allowed (the scraper
+// falls back to its compiled-in default).
+func ValidateScraperBaseURL(path, raw string, allowedHosts []string) error {
+	if err := ValidateHTTPBaseURL(path, raw); err != nil {
+		return err
+	}
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("%s must be a valid URL: %w", path, err)
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, allowed := range allowedHosts {
+		if host == strings.ToLower(strings.TrimSpace(allowed)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s host %q is not in the allowed list for this scraper: %s", path, u.Hostname(), strings.Join(allowedHosts, ", "))
+}
+
 type webUIConfig struct {
 	DefaultReviewView string `yaml:"default_review_view" json:"default_review_view"`
 }

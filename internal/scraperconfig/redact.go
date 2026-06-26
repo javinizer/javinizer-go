@@ -34,7 +34,12 @@ func redactURLCredentials(rawURL string) string {
 		return ""
 	}
 	u, err := url.Parse(rawURL)
-	if err != nil {
+	// Treat unparseable URLs AND URLs without a scheme/authority as unsafe:
+	// url.Parse happily parses bare strings like "user:pass@host" into
+	// u.User without populating Scheme/Host, so without this guard such a
+	// value would round-trip with its credentials intact instead of being
+	// redacted. Redact the whole string whenever there is no real authority.
+	if err != nil || u.Scheme == "" || u.Host == "" {
 		return redactString(rawURL)
 	}
 	if u.User != nil {

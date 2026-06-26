@@ -202,6 +202,16 @@ type ContentIDResolver interface {
 	ResolveContentID(id string) (string, error)
 }
 
+// ContentIDResolverCtx is the context-aware variant of ContentIDResolver.
+// Scrapers that can honor cancellation/timeouts during content-ID resolution
+// (e.g. when the lookup issues HTTP) should implement this in addition to
+// ContentIDResolver. Callers should type-assert this first and fall back to
+// ContentIDResolver.ResolveContentID for scrapers that only implement the
+// non-context interface.
+type ContentIDResolverCtx interface {
+	ResolveContentIDCtx(ctx context.Context, id string) (string, error)
+}
+
 // HTMLParser is an optional interface for scrapers that can parse a pre-fetched
 // HTML document into a ScraperResult. Scrapers implement this so their parsing
 // logic can be tested with a static HTML fixture (goquery.Document) without

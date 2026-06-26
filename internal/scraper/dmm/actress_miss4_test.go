@@ -264,16 +264,22 @@ func TestMiss4_CleanActressName_ParenRemoval(t *testing.T) {
 func TestMiss4_NormalizeActressThumbURL_Cases(t *testing.T) {
 	// Empty
 	assert.Equal(t, "", normalizeActressThumbURL(""))
-	// Absolute URL
-	assert.Equal(t, "https://example.com/img.jpg", normalizeActressThumbURL("https://example.com/img.jpg"))
-	// Comma-separated srcset
-	assert.Equal(t, "https://example.com/img.jpg", normalizeActressThumbURL("https://example.com/img.jpg, https://example.com/img2x.jpg 2x"))
-	// Whitespace in URL
-	assert.Equal(t, "https://example.com/img.jpg", normalizeActressThumbURL("https://example.com/img.jpg\t"))
-	// Root-relative path
+	// Absolute DMM URL passes through
+	assert.Equal(t, "https://pics.dmm.co.jp/img.jpg", normalizeActressThumbURL("https://pics.dmm.co.jp/img.jpg"))
+	// Non-DMM host is rejected (SSRF/allowed-host guard): returns empty
+	assert.Equal(t, "", normalizeActressThumbURL("https://example.com/img.jpg"))
+	// Comma-separated srcset (DMM host)
+	assert.Equal(t, "https://pics.dmm.co.jp/img.jpg", normalizeActressThumbURL("https://pics.dmm.co.jp/img.jpg, https://pics.dmm.co.jp/img2x.jpg 2x"))
+	// Whitespace in URL (DMM host)
+	assert.Equal(t, "https://pics.dmm.co.jp/img.jpg", normalizeActressThumbURL("https://pics.dmm.co.jp/img.jpg\t"))
+	// Root-relative path resolves to a DMM host
 	assert.Equal(t, "https://video.dmm.co.jp/path/img.jpg", normalizeActressThumbURL("/path/img.jpg"))
-	// Protocol-relative gets normalized to https by imageutil
-	assert.Contains(t, normalizeActressThumbURL("//example.com/img.jpg"), "example.com/img.jpg")
+	// Protocol-relative non-DMM host is rejected by the allowed-host guard
+	assert.Equal(t, "", normalizeActressThumbURL("//example.com/img.jpg"))
+	// Protocol-relative DMM host is upgraded to https and kept
+	assert.Equal(t, "https://pics.dmm.co.jp/img.jpg", normalizeActressThumbURL("//pics.dmm.co.jp/img.jpg"))
+	// file:// scheme is rejected
+	assert.Equal(t, "", normalizeActressThumbURL("file:///etc/passwd"))
 }
 
 // --- findNearestActressContainer: nil input ---

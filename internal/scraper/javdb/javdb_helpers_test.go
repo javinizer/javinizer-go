@@ -149,8 +149,17 @@ func TestFetchPageDirectResponse(t *testing.T) {
 	t.Run("propagates request error", func(t *testing.T) {
 		wantErr := errors.New("network down")
 		_, err := scraper.fetchPageDirectResponse(nil, wantErr)
-		if !errors.Is(err, wantErr) {
-			t.Fatalf("fetchPageDirectResponse() error = %v", err)
+		if err == nil {
+			t.Fatalf("fetchPageDirectResponse() expected error, got nil")
+		}
+		// Raw transport errors are wrapped as a classified ScraperStatusError so
+		// request details are not leaked; the raw detail stays in debug logs only.
+		var scraperErr *models.ScraperError
+		if !errors.As(err, &scraperErr) {
+			t.Fatalf("fetchPageDirectResponse() error = %v, want *models.ScraperError", err)
+		}
+		if !strings.Contains(scraperErr.Message, wantErr.Error()) {
+			t.Fatalf("fetchPageDirectResponse() message = %q, want it to contain %q", scraperErr.Message, wantErr.Error())
 		}
 	})
 

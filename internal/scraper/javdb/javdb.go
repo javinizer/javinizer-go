@@ -19,6 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"golang.org/x/net/html"
 )
 
@@ -413,7 +414,50 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	return "", models.NewScraperNotFoundError("JavDB", fmt.Sprintf("movie %s not found on JavDB", id))
 }
 
+// validateFetchURL enforces the SSRF/allowed-host contract at the fetch
+// boundary. targetURL can originate from parsed page links rather than the
+// configured base URL, so every outbound fetch (direct Resty and FlareSolverr
+// resolution) must re-validate it. The allow-list is the JavDB-owned hosts
+// (javdb.com, *.javdb.com) plus the operator-configured base URL's host; a
+// host on that list is trusted and allowed through. Any other host — e.g. a
+// parsed link pointing at a private/loopback/link-local IP or a metadata
+// endpoint — is rejected via ssrf.CheckURL and the host-allow check. This is
+// the per-fetch defense-in-depth for the path instruction that
+// internal/scraper/** outbound URLs be constrained to the source's allowed
+// hosts.
+func (s *scraper) validateFetchURL(targetURL string) error {
+	parsed, err := url.Parse(targetURL)
+	if err != nil {
+		return models.NewScraperStatusError("JavDB", 0, "invalid URL: "+err.Error())
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return models.NewScraperStatusError("JavDB", 0, "non-http(s) scheme rejected: "+parsed.Scheme)
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "" {
+		return models.NewScraperStatusError("JavDB", 0, "empty hostname")
+	}
+	// Allow JavDB-owned hosts and the operator-configured base URL host.
+	if host == "javdb.com" || strings.HasSuffix(host, ".javdb.com") {
+		return nil
+	}
+	if s.baseURL != "" {
+		if base, perr := url.Parse(s.baseURL); perr == nil && strings.ToLower(base.Hostname()) == host {
+			return nil
+		}
+	}
+	// Arbitrary page-link host: reject private/loopback/link-local IPs and
+	// non-allowed hosts.
+	if err := ssrf.CheckURL(targetURL); err != nil {
+		return models.NewScraperStatusError("JavDB", 0, err.Error())
+	}
+	return models.NewScraperStatusError("JavDB", 0, "non-JavDB host rejected: "+host)
+}
+
 func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, error) {
+	if err := s.validateFetchURL(targetURL); err != nil {
+		return "", err
+	}
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
@@ -453,6 +497,9 @@ func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, e
 }
 
 func (s *scraper) fetchPageDirectCtx(ctx context.Context, targetURL string) (string, error) {
+	if err := s.validateFetchURL(targetURL); err != nil {
+		return "", err
+	}
 	if err := s.rateLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
@@ -463,7 +510,11 @@ func (s *scraper) fetchPageDirectCtx(ctx context.Context, targetURL string) (str
 
 func (s *scraper) fetchPageDirectResponse(resp *resty.Response, err error) (string, error) {
 	if err != nil {
-		return "", err
+		// Wrap raw transport errors as a classified ScraperStatusError so request
+		// details (URL/headers) are not leaked through API/job errors; keep the
+		// raw detail only in debug logs.
+		logging.Debugf("JavDB: request failed: %v", err)
+		return "", models.NewScraperStatusError("JavDB", 0, "request failed: "+err.Error())
 	}
 	if resp.StatusCode() != 200 {
 		return "", models.NewScraperStatusError(

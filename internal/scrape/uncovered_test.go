@@ -251,7 +251,7 @@ func TestQueryAll_SingleScraperUncovered(t *testing.T) {
 
 func TestResolveContentID_NoScraperNamesUncovered(t *testing.T) {
 	s := New(nil, nil, nil, nil, nil, &Config{}, nil, nil)
-	assert.Equal(t, "MOV-001", s.resolveContentID("MOV-001", nil))
+	assert.Equal(t, "MOV-001", s.resolveContentID(context.Background(), "MOV-001", nil))
 }
 
 // --- Helper types for tests ---

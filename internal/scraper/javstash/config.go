@@ -17,7 +17,9 @@ func validateScraperSettings(ss *models.ScraperSettings) error {
 	if apiKey == "" {
 		return fmt.Errorf("javstash: api_key is required (set in config)")
 	}
-	if err := config.ValidateHTTPBaseURL("javstash.base_url", ss.BaseURL); err != nil {
+	if err := config.ValidateScraperBaseURL("javstash.base_url", ss.BaseURL, []string{
+		"javstash.org", "www.javstash.org",
+	}); err != nil {
 		return err
 	}
 	return nil

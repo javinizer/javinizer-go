@@ -44,13 +44,39 @@ func (c *registrationCatalog) GetAll() map[string]ScraperRegistration {
 	defer c.mu.RUnlock()
 	result := make(map[string]ScraperRegistration, len(c.scrapers))
 	for k, v := range c.scrapers {
-		if v.Options != nil {
-			v.Options = append([]models.ScraperOption{}, v.Options...)
-		}
+		v.Options = cloneScraperOptions(v.Options)
 		v.Defaults = v.Defaults.Clone()
 		result[k] = v
 	}
 	return result
+}
+
+// cloneScraperOptions returns a deep copy of a scraper-options slice. A plain
+// append([]ScraperOption{}, opts...) copies only the top-level slice header:
+// nested Choices slices and the Min/Max pointers are shared with the source,
+// so a caller mutating a returned choice or a *int would corrupt the
+// registered defaults. This copies Choices element-wise and clones the
+// Min/Max pointers so the returned options are fully independent.
+func cloneScraperOptions(options []models.ScraperOption) []models.ScraperOption {
+	if options == nil {
+		return nil
+	}
+	cloned := make([]models.ScraperOption, len(options))
+	for i := range options {
+		cloned[i] = options[i]
+		if options[i].Min != nil {
+			min := *options[i].Min
+			cloned[i].Min = &min
+		}
+		if options[i].Max != nil {
+			max := *options[i].Max
+			cloned[i].Max = &max
+		}
+		if options[i].Choices != nil {
+			cloned[i].Choices = append([]models.ScraperChoice(nil), options[i].Choices...)
+		}
+	}
+	return cloned
 }
 
 // Names returns all registered scraper names in arbitrary order.

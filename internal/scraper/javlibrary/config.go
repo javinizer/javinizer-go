@@ -17,7 +17,10 @@ func validateScraperSettings(ss *models.ScraperSettings) error {
 	default:
 		return fmt.Errorf("javlibrary: language must be 'en', 'ja', 'cn', or 'tw', got %q", ss.Language)
 	}
-	if err := config.ValidateHTTPBaseURL("javlibrary.base_url", ss.BaseURL); err != nil {
+	if err := config.ValidateScraperBaseURL("javlibrary.base_url", ss.BaseURL, []string{
+		"www.javlibrary.com", "javlibrary.com", "www.javlibrary.org", "javlibrary.org",
+		"www.javlibrary.jp", "javlibrary.jp",
+	}); err != nil {
 		return err
 	}
 	return nil

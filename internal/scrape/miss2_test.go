@@ -18,7 +18,7 @@ import (
 func TestScrapeMiss2_ResolveContentID_NoScrapers(t *testing.T) {
 	registry := scraperutil.NewScraperRegistry()
 	s := &Scraper{registry: registry}
-	result := s.resolveContentID("ABC-123", nil)
+	result := s.resolveContentID(context.Background(), "ABC-123", nil)
 	assert.Equal(t, "ABC-123", result)
 }
 
@@ -28,7 +28,7 @@ func TestScrapeMiss2_ResolveContentID_NoScrapers(t *testing.T) {
 func TestScrapeMiss2_ResolveContentID_ScraperNotInRegistry(t *testing.T) {
 	registry := scraperutil.NewScraperRegistry()
 	s := &Scraper{registry: registry}
-	result := s.resolveContentID("ABC-123", []string{"nonexistent"})
+	result := s.resolveContentID(context.Background(), "ABC-123", []string{"nonexistent"})
 	assert.Equal(t, "ABC-123", result)
 }
 
@@ -40,7 +40,7 @@ func TestScrapeMiss2_ResolveContentID_NoResolverInterface(t *testing.T) {
 	mock := &mockScraper{name: "mock-no-resolve", enabled: true}
 	registry.RegisterInstance(mock)
 	s := &Scraper{registry: registry}
-	result := s.resolveContentID("ABC-123", []string{"mock-no-resolve"})
+	result := s.resolveContentID(context.Background(), "ABC-123", []string{"mock-no-resolve"})
 	assert.Equal(t, "ABC-123", result)
 }
 
@@ -52,7 +52,7 @@ func TestScrapeMiss2_ResolveContentID_ResolverError(t *testing.T) {
 	mock := &cidResolverScraper{name: "mock-resolver", err: errors.New("resolution failed")}
 	registry.RegisterInstance(mock)
 	s := &Scraper{registry: registry}
-	result := s.resolveContentID("ABC-123", []string{"mock-resolver"})
+	result := s.resolveContentID(context.Background(), "ABC-123", []string{"mock-resolver"})
 	assert.Equal(t, "ABC-123", result, "should fall back to original ID on error")
 }
 
@@ -63,7 +63,7 @@ func TestScrapeMiss2_ResolveContentID_ResolverSuccess(t *testing.T) {
 	mock := &cidResolverScraper{name: "mock-resolver", resolvedID: "abc123"}
 	registry.RegisterInstance(mock)
 	s := &Scraper{registry: registry}
-	result := s.resolveContentID("ABC-123", []string{"mock-resolver"})
+	result := s.resolveContentID(context.Background(), "ABC-123", []string{"mock-resolver"})
 	assert.Equal(t, "abc123", result)
 }
 

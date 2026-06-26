@@ -58,7 +58,12 @@ func TestValidateBrowserURL_IPv4WithPort(t *testing.T) {
 
 // --- isRunningInContainer: env var combinations ---
 
-func TestIsRunningInContainer_BothChromeEnvs(t *testing.T) {
+func TestIsRunningInContainer_ChromeEnvsAreNotAContainerSignal(t *testing.T) {
+	// CHROME_BIN/CHROME_PATH point at the Chrome binary location and are set
+	// by users on normal hosts too; they must NOT be treated as a container
+	// signal, otherwise a host with CHROME_BIN set would be misdetected as a
+	// container and have Chrome's sandbox disabled. Container detection must
+	// rely on /.dockerenv or /proc/1/cgroup instead.
 	origChromeBin := os.Getenv("CHROME_BIN")
 	origChromePath := os.Getenv("CHROME_PATH")
 	os.Setenv("CHROME_BIN", "/usr/bin/chromium")
@@ -76,8 +81,8 @@ func TestIsRunningInContainer_BothChromeEnvs(t *testing.T) {
 		}
 	}()
 
-	result := isRunningInContainer(afero.NewOsFs(), os.Getenv)
-	assert.True(t, result)
+	result := isRunningInContainer(afero.NewMemMapFs())
+	assert.False(t, result, "CHROME_BIN/CHROME_PATH must not imply a container")
 }
 
 // --- fetchWithBrowser: proxy profile code paths ---

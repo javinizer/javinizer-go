@@ -26,8 +26,8 @@ func TestIsRunningInContainer(t *testing.T) {
 			cleanup: func() {
 				_ = os.Unsetenv("CHROME_BIN")
 			},
-			expected:    true,
-			description: "Should detect container when CHROME_BIN is set",
+			expected:    false,
+			description: "CHROME_BIN points at the Chrome binary, not a container signal; must not detect a container",
 		},
 		{
 			name: "CHROME_PATH environment variable set",
@@ -37,8 +37,8 @@ func TestIsRunningInContainer(t *testing.T) {
 			cleanup: func() {
 				_ = os.Unsetenv("CHROME_PATH")
 			},
-			expected:    true,
-			description: "Should detect container when CHROME_PATH is set",
+			expected:    false,
+			description: "CHROME_PATH points at the Chrome binary, not a container signal; must not detect a container",
 		},
 		{
 			name: "No container indicators",
@@ -58,7 +58,7 @@ func TestIsRunningInContainer(t *testing.T) {
 			tt.setup()
 			defer tt.cleanup()
 
-			result := isRunningInContainer(afero.NewOsFs(), os.Getenv)
+			result := isRunningInContainer(afero.NewOsFs())
 			assert.Equal(t, tt.expected, result, tt.description)
 		})
 	}

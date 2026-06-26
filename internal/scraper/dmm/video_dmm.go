@@ -48,8 +48,12 @@ func (s *scraper) extractCoverURLNewSite(doc *goquery.Document, contentID string
 	coverURL, exists := doc.Find(`meta[property="og:image"]`).Attr("content")
 	logging.Debugf("DMM Streaming: og:image exists=%v, value=%s", exists, coverURL)
 	if exists && coverURL != "" {
-		// Convert to regular pics.dmm.co.jp URL if needed
-		coverURL = strings.Replace(coverURL, "awsimgsrc.dmm.co.jp/pics_dig", "pics.dmm.co.jp", 1)
+		// Normalize consistently with the background-image path: fix
+		// protocol-relative "//pics.dmm.co.jp/..." URLs (og:image and <img>
+		// fallbacks can return these without a scheme), remap the CDN host, and
+		// strip the query. Using the shared helper keeps all cover-URL sources
+		// normalized the same way instead of only the background-image path.
+		coverURL = imageutil.NormalizeDMMScreenshotURL(coverURL)
 		// Replace 'ps.jpg' with 'pl.jpg' for larger image
 		coverURL = strings.Replace(coverURL, "ps.jpg", "pl.jpg", 1)
 		// Remove query parameters

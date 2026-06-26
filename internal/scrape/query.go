@@ -31,7 +31,7 @@ func resolveScraperNames(selectedScrapers, priorityOverride []string, cfg *Confi
 	return nil
 }
 
-func (s *Scraper) resolveContentID(movieID string, scraperNames []string) string {
+func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperNames []string) string {
 	if len(scraperNames) == 0 {
 		return movieID
 	}
@@ -39,6 +39,18 @@ func (s *Scraper) resolveContentID(movieID string, scraperNames []string) string
 	resolver, exists := s.registry.GetInstance(resolverName)
 	if !exists || resolver == nil {
 		return movieID
+	}
+	// Prefer the context-aware resolver so cancellation/timeouts reach the
+	// lookup (DMM's ResolveContentID can issue HTTP). Fall back to the
+	// non-context ContentIDResolver for scrapers that only implement that.
+	if r, ok := resolver.(models.ContentIDResolverCtx); ok && r != nil {
+		contentID, err := r.ResolveContentIDCtx(ctx, movieID)
+		if err != nil {
+			logging.Debugf("[scrape] %s content-ID resolution failed: %v, using original ID", resolverName, err)
+			return movieID
+		}
+		logging.Debugf("[scrape] Resolved content-ID: %s → %s", movieID, contentID)
+		return contentID
 	}
 	if r, ok := resolver.(models.ContentIDResolver); ok && r != nil {
 		contentID, err := r.ResolveContentID(movieID)

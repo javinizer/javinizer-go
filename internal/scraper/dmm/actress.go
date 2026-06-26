@@ -3,6 +3,7 @@ package dmm
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
@@ -264,33 +266,42 @@ func extractActressThumbURL(sel *goquery.Selection) string {
 	return normalizeActressThumbURL(extractFrom(sel.Parent()))
 }
 
-func normalizeActressThumbURL(url string) string {
-	url = strings.TrimSpace(url)
-	if url == "" {
+func normalizeActressThumbURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
 		return ""
 	}
 
-	url = strings.ReplaceAll(url, "&amp;", "&")
-	if commaIdx := strings.Index(url, ","); commaIdx != -1 {
-		url = strings.TrimSpace(url[:commaIdx])
+	rawURL = strings.ReplaceAll(rawURL, "&amp;", "&")
+	if commaIdx := strings.Index(rawURL, ","); commaIdx != -1 {
+		rawURL = strings.TrimSpace(rawURL[:commaIdx])
 	}
-	if whitespaceIdx := strings.IndexAny(url, " \t\r\n"); whitespaceIdx != -1 {
-		url = url[:whitespaceIdx]
-	}
-
-	if strings.HasPrefix(url, "//") {
-		url = "https:" + url
-	}
-	if strings.HasPrefix(url, "/") {
-		url = "https://video.dmm.co.jp" + url
-	}
-	url = strings.Replace(url, "awsimgsrc.dmm.co.jp/pics_dig", "pics.dmm.co.jp", 1)
-
-	if queryIdx := strings.Index(url, "?"); queryIdx != -1 {
-		url = url[:queryIdx]
+	if whitespaceIdx := strings.IndexAny(rawURL, " \t\r\n"); whitespaceIdx != -1 {
+		rawURL = rawURL[:whitespaceIdx]
 	}
 
-	return strings.TrimSpace(url)
+	if strings.HasPrefix(rawURL, "//") {
+		rawURL = "https:" + rawURL
+	}
+	if strings.HasPrefix(rawURL, "/") {
+		rawURL = "https://video.dmm.co.jp" + rawURL
+	}
+	rawURL = strings.Replace(rawURL, "awsimgsrc.dmm.co.jp/pics_dig", "pics.dmm.co.jp", 1)
+
+	if queryIdx := strings.Index(rawURL, "?"); queryIdx != -1 {
+		rawURL = rawURL[:queryIdx]
+	}
+
+	rawURL = strings.TrimSpace(rawURL)
+	// Validate scheme/host after prefix handling and query stripping: scraped
+	// HTML can carry file://, loopback, or metadata-host URLs that must not be
+	// passed downstream as actress thumbnails. Reject anything that is not an
+	// HTTP(S) URL on a DMM/FANZA host (parity with imageutil.IsDMMHost).
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || !imageutil.IsDMMHost(parsed.Hostname()) {
+		return ""
+	}
+	return rawURL
 }
 
 func upsertActressInfo(actresses *[]models.ActressInfo, indexByID map[int]int, actress models.ActressInfo) bool {
@@ -344,7 +355,10 @@ func (s *scraper) tryActressThumbURLs(ctx context.Context, firstName, lastName s
 
 	testClient, err := httpclient.NewRestyClient(s.proxyProfile, 5*time.Second, 0)
 	if err != nil {
-		logging.Debugf("DMM: Failed to create thumbnail probe client with scraper proxy: %v, using explicit no-proxy fallback", err)
+		// Warn (not Debug): falling back to an explicit no-proxy client can
+		// expose the caller's direct IP when the configured proxy is unreachable,
+		// so this must be visible at the default log level, not debug-only.
+		logging.Warnf("DMM: Failed to create thumbnail probe client with scraper proxy: %v, using explicit no-proxy fallback", err)
 		testClient = httpclient.NewRestyClientNoProxy(5*time.Second, 0)
 	}
 	testClient.SetRedirectPolicy(resty.NoRedirectPolicy())
