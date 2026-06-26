@@ -1,6 +1,6 @@
 # CodeRabbit configuration — CHUNKED FULL REVIEW (temporary per-pass scope).
 #
-# PASS 2 scope — orchestration+config (worker/workflow/websocket/config/cmd/.github/docs/root) (115 files)
+# PASS 3 scope — scrapers + scrape-infra (internal/scraper,scraperconfig,scraperutil,scrape,ssrf,httpclient,ratelimit,challengedetect) (91 files)
 # One pass of a 5-pass chunked full review (PR #35 = 607 reviewable files; limit 150).
 # In-scope = everything NOT excluded below. After all 5 passes, restored to full scope.
 #
@@ -30,12 +30,15 @@ reviews:
     - "!**/package.json"
     - "!**/package-lock.json"
 
-    # --- Exclude everything NOT in this pass's scope (orchestration+config (worker/workflow/websocket/config/cmd/.github/docs/root) (115 files)) ---
+    # --- Exclude everything NOT in this pass's scope (scrapers + scrape-infra (internal/scraper,scraperconfig,scraperutil,scrape,ssrf,httpclient,ratelimit,challengedetect) (91 files)) ---
+    - "!.github/**"
+    - "!cmd/**"
     - "!configs/**"
+    - "!docs/**"
     - "!internal/aggregator/**"
     - "!internal/api/**"
-    - "!internal/challengedetect/**"
     - "!internal/commandutil/**"
+    - "!internal/config/**"
     - "!internal/configutil/**"
     - "!internal/coverage/**"
     - "!internal/database/**"
@@ -46,7 +49,6 @@ reviews:
     - "!internal/formatter/**"
     - "!internal/fsutil/**"
     - "!internal/history/**"
-    - "!internal/httpclient/**"
     - "!internal/imageutil/**"
     - "!internal/logging/**"
     - "!internal/matcher/**"
@@ -58,40 +60,39 @@ reviews:
     - "!internal/organizer/**"
     - "!internal/panicutil/**"
     - "!internal/poster/**"
-    - "!internal/ratelimit/**"
     - "!internal/scanner/**"
-    - "!internal/scrape/**"
-    - "!internal/scraper/**"
-    - "!internal/scraperconfig/**"
-    - "!internal/scraperutil/**"
-    - "!internal/ssrf/**"
     - "!internal/template/**"
     - "!internal/testutil/**"
     - "!internal/translation/**"
     - "!internal/tui/**"
     - "!internal/update/**"
     - "!internal/version/**"
+    - "!internal/websocket/**"
+    - "!internal/worker/**"
+    - "!internal/workflow/**"
     - "!scripts/**"
     - "!web/frontend/**"
     - "!.coderabbit.yaml"
     - "!.gitignore"
     - "!.golangci.yml"
     - "!.mockery.yaml"
+    - "!Makefile"
+    - "!go.mod"
     - "!go.sum"
 
   path_instructions:
-    - path: "internal/workflow/**"
+    - path: "internal/scraper/**"
       instructions: >
-        This package implements the unified Workflow seam that replaced ad-hoc task types. Review for: (a) no reintroduction of old TaskType-specific dispatch branches, (b) orchestrator error propagation — errors must not be swallowed or silently downgraded, (c) context cancellation honored through every phase, (d) no data loss between scrape/aggregate/organize phases regardless of which interface (CLI/TUI/API) initiated the operation.
-    - path: "internal/worker/**"
+        Per-source metadata scrapers. Review for: (a) SafeSearch/panic recovery — a panicking scraper must never crash the worker pool, (b) HTTP errors classified via scraperErrorKind (no raw error leakage), (c) no SSRF — outbound URLs constrained to the source's allowed hosts (internal/ssrf), (d) no unbounded memory on large pages (bound DOM parsing), (e) scraper module init() registration is side-effect-free and thread-safe.
+    - path: "internal/scrape/**"
       instructions: >
-        Worker pool executes Tasks concurrently under a semaphore. Review for: panic recovery in executeTask (no goroutine crash leaks), bounded concurrency (no unbounded goroutine spawning), ProgressTracker broadcast thread-safety under concurrent updates, and job lifecycle consistency (no progress events after completion).
-    - path: "internal/config/**"
+        Scrape orchestration infrastructure (ScrapeCmd, per-file dispatch). Review for: context cancellation honored through every HTTP call, rate limiting applied per source, and no data loss when a scraper returns partial results.
+    - path: "internal/ssrf/**"
       instructions: >
-        Config loading, env overrides, validation, proxy/download profile normalization. Review for: env var overrides applied with the documented precedence (CLI flag > env > config file), validation fails closed on invalid combinations (returns error, never silently coerces), and proxy Profile/DefaultProfile normalization applied consistently (mirror the api/system/config.go normalize-before-compare fix).
-    - path: "cmd/javinizer/**"
+        SSRF protection. Review for: private/loopback/link-local address rejection, DNS rebinding (resolve then re-check the resolved IP), and that no scraper can reach file:// or metadata endpoints.
+    - path: "internal/httpclient/**"
       instructions: >
-        CLI command wiring via cobra. Review for: Dependencies/DependenciesInterface injection for testability, context propagation from root command into all subcommands, and no direct global-state mutation bypassing the config layer.
+        Shared HTTP client (resty wrapper). Review for: timeout enforcement on both dial and read, redirect policy (no cross-host redirect following without SSRF re-check), and referer/UA resolution consistency.
 
 review_status:
   fail_commit_in_status: false
