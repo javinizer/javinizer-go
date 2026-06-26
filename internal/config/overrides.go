@@ -107,7 +107,9 @@ func ApplyEnvironmentOverrides(cfg *Config, envLookup ...func(key string) string
 	if overwrite := lookup("METADATA_TRANSLATION_OVERWRITE_EXISTING_TARGET"); overwrite != "" {
 		cfg.Metadata.Translation.OverwriteExistingTarget = overwrite == "true"
 	}
-	if provider := lookup("TRANSLATION_PROVIDER"); provider != "" {
-		cfg.Metadata.Translation.Provider = strings.ToLower(strings.TrimSpace(provider))
-	}
+	// Note: TRANSLATION_PROVIDER is intentionally NOT re-read here. It is
+	// already applied as a legacy alias at the top of this function (before the
+	// METADATA_TRANSLATION_* block), so the canonical METADATA_TRANSLATION_PROVIDER
+	// above takes precedence. Re-reading TRANSLATION_PROVIDER here would silently
+	// override METADATA_TRANSLATION_PROVIDER, inverting the documented precedence.
 }

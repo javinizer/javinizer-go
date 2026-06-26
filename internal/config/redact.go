@@ -28,10 +28,12 @@ func (c *Config) Redact() *Config {
 			continue
 		}
 		if s.Proxy != nil {
-			s.Proxy.Profiles = redactProxyProfiles(s.Proxy.Profiles)
+			redacted := s.Proxy.Redact()
+			s.Proxy = &redacted
 		}
 		if s.DownloadProxy != nil {
-			s.DownloadProxy.Profiles = redactProxyProfiles(s.DownloadProxy.Profiles)
+			redacted := s.DownloadProxy.Redact()
+			s.DownloadProxy = &redacted
 		}
 		if s.APIKey != "" {
 			s.APIKey = models.RedactedValue
@@ -46,17 +48,6 @@ func redactString(s string) string {
 		return ""
 	}
 	return models.RedactedValue
-}
-
-func redactProxyProfiles(profiles map[string]models.ProxyProfile) map[string]models.ProxyProfile {
-	if profiles == nil {
-		return nil
-	}
-	result := make(map[string]models.ProxyProfile, len(profiles))
-	for k, v := range profiles {
-		result[k] = v.Redact()
-	}
-	return result
 }
 
 func deepCopyFieldsMap(m map[string][]string) map[string][]string {

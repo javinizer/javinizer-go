@@ -364,7 +364,14 @@ func (je *jobEditorImpl) ExcludeFile(filePath string) {
 	status := je.lifecycle.Status
 	je.lifecycle.mu.RUnlock()
 
-	if je.accessor.IsAllExcluded() && !isJobTransitioned(status) {
+	// Only cancel a job still in flight (Pending/Running). A job that already
+	// reached a terminal success state (Completed/Organized) must not be
+	// clobbered by Cancel when its last file is excluded. This mirrors the
+	// explicit Pending/Running guard in BatchJob.ExcludeFile (batch_job.go) —
+	// do NOT reuse isJobTransitioned here, whose gone-check semantics exclude
+	// Organized and would let an Organized job be cancelled.
+	if je.accessor.IsAllExcluded() &&
+		(status == models.JobStatusPending || status == models.JobStatusRunning) {
 		je.lifecycle.Cancel()
 		return
 	}

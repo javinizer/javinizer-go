@@ -1017,8 +1017,10 @@ func TestResultTracker_recalculateProgress_SkipsExcluded(t *testing.T) {
 		rt.recalculateProgress()
 		assert.Equal(t, 2, rt.Completed, "Completed should exclude excluded files")
 		assert.Equal(t, 1, rt.Failed, "Failed should exclude excluded files")
-		// (2 completed + 1 failed) / 5 total * 100 = 60%
-		assert.InDelta(t, 60.0, rt.Progress, 0.1)
+		// Excluded files are removed from the denominator too: 3 active files
+		// (f1,f3,f4) all resolved → (2 completed + 1 failed) / 3 active * 100 = 100%.
+		// Using TotalFiles (5) here would falsely report 60% with everything done.
+		assert.InDelta(t, 100.0, rt.Progress, 0.1)
 	})
 }
 
@@ -1514,7 +1516,8 @@ func TestMarkExcluded_RecalculateProgress_NoInconsistency(t *testing.T) {
 	job.results.recalculateProgress()
 	assert.Equal(t, 2, job.results.Completed, "stateRecalculateProgress must NOT re-count excluded files")
 	assert.Equal(t, 0, job.results.Failed, "stateRecalculateProgress must NOT count excluded files as failed")
-	expectedProgress := float64(2+0) / float64(3) * 100
+	// Excluded files drop out of the denominator: 2 active files, both completed → 100%.
+	expectedProgress := float64(2+0) / float64(3-1) * 100
 	assert.InDelta(t, expectedProgress, job.results.Progress, 0.01, "Progress must reflect only non-excluded results")
 
 	// CommitResult on another file triggers stateRecalculateProgress internally

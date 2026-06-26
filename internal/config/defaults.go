@@ -2,10 +2,16 @@ package config
 
 import "github.com/javinizer/javinizer-go/internal/models"
 
+// defaultScraperPriority mirrors the priority order documented in
+// configs/config.yaml.example so DefaultConfig(nil, nil) and the embedded
+// example agree on scraper ordering (and thus on rating_source). Previously
+// this started with "dmm" while the example started with "r18dev", causing
+// getFirstScraperPriorityStatic() and DefaultConfig to set rating_source to
+// "dmm" despite the example documenting "r18dev".
 var defaultScraperPriority = []string{
-	"dmm", "r18dev", "libredmm", "mgstage", "javlibrary",
-	"javdb", "javbus", "jav321", "tokyohot", "aventertainment",
-	"dlgetchu", "caribbeancom", "fc2", "javstash",
+	"r18dev", "libredmm", "dmm", "javlibrary",
+	"javdb", "javbus", "jav321", "mgstage", "tokyohot", "aventertainment",
+	"caribbeancom", "dlgetchu", "fc2", "javstash",
 }
 
 // getFirstScraperPriorityStatic returns the first element of the hardcoded

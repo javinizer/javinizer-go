@@ -276,6 +276,13 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		}
 		movieResult, prov = scrapeResultToMovieResult(fallbackFMI, scrapeResult, meta)
 
+		// Honor cancellation before any poster generation/commit work: ScrapeSingle
+		// checks ctx, but once it returns this path would otherwise still generate
+		// posters and CommitResult even if cancellation fired mid-scrape.
+		if err := ctx.Err(); err != nil {
+			return nil, movieResult, err
+		}
+
 		// Poster generation
 		if inputs.PosterGen != nil && movieResult.Movie != nil {
 			if posterErr := inputs.PosterGen.GeneratePoster(ctx, inputs.JobID.String(), movieResult.Movie); posterErr != nil {
@@ -283,6 +290,11 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 				movieResult.PosterError = &s
 			}
 			movieResult.PosterGenerated = true
+		}
+
+		// Re-check after poster generation before committing.
+		if err := ctx.Err(); err != nil {
+			return nil, movieResult, err
 		}
 
 		newMovieID := movieResult.FileMatchInfo.MovieID

@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"fmt"
-	"log"
+	"net/http"
 	"os"
+	"time"
 
 	apiauth "github.com/javinizer/javinizer-go/internal/api/auth"
 	apicore "github.com/javinizer/javinizer-go/internal/api/core"
@@ -102,7 +104,9 @@ func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (
 func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) error {
 	deps, rt, err := Run(cmd, configFile, hostFlag, portFlag)
 	if err != nil {
-		log.Fatalf("Failed to initialize API dependencies: %v", err)
+		// Return the error rather than log.Fatalf, which would os.Exit before
+		// the deferred cleanup below can run.
+		return fmt.Errorf("failed to initialize API dependencies: %w", err)
 	}
 	defer func() {
 		rt.Shutdown()
@@ -115,8 +119,34 @@ func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) e
 
 	currentCfg := deps.CoreDeps.GetConfig()
 	addr := fmt.Sprintf("%s:%d", currentCfg.Server.Host, currentCfg.Server.Port)
-	if err := router.Run(addr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+
+	// Bind the server lifetime to the root command's context so a cancellation
+	// (e.g. SIGINT handled by cobra) triggers a graceful Shutdown instead of
+	// relying on router.Run to return on its own. http.Server.Shutdown lets
+	// in-flight requests drain before the deferred rt.Shutdown/DB close run.
+	ctx := cmd.Context()
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("failed to shut down server: %w", err)
+		}
+	case err := <-errCh:
+		return fmt.Errorf("failed to start server: %w", err)
 	}
 
 	return nil

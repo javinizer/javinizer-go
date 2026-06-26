@@ -126,6 +126,16 @@ func stateUpdateProgressFromCounters(s *resultTrackerState) {
 func stateRecalculateProgress(s *resultTrackerState) {
 	completed := 0
 	failed := 0
+	// Excluded files are intentionally removed from BOTH the numerator (the
+	// per-file loop below skips them) and the denominator. Previously the
+	// denominator still used s.TotalFiles, so after exclusions progress stayed
+	// artificially low even when every non-excluded file had resolved.
+	excluded := 0
+	for _, isExcluded := range s.Excluded {
+		if isExcluded {
+			excluded++
+		}
+	}
 	for filePath, r := range s.Results {
 		if r == nil || s.Excluded[filePath] {
 			continue
@@ -139,10 +149,11 @@ func stateRecalculateProgress(s *resultTrackerState) {
 	}
 	s.Completed = completed
 	s.Failed = failed
-	if s.TotalFiles == 0 {
+	activeTotal := s.TotalFiles - excluded
+	if activeTotal <= 0 {
 		s.Progress = 100
 	} else {
-		s.Progress = float64(completed+failed) / float64(s.TotalFiles) * 100
+		s.Progress = float64(completed+failed) / float64(activeTotal) * 100
 	}
 }
 

@@ -28,7 +28,11 @@ func NewCommand() *cobra.Command {
 	updateCmd.Flags().Bool("force-refresh", false, "Force refresh metadata from scrapers (clear cache)")
 	updateCmd.Flags().Bool("force-overwrite", false, "Ignore existing NFO, use only scraper data (destructive)")
 	updateCmd.Flags().Bool("preserve-nfo", false, "Never overwrite NFO fields, only add missing data (conservative)")
+	// --show-merge-stats is registered for backward compatibility with existing
+	// scripts/aliases but is a no-op (merge stats are not collected per-file).
+	// Mark it hidden so help does not advertise a flag that does nothing.
 	updateCmd.Flags().Bool("show-merge-stats", false, "Display detailed merge statistics for each file")
+	_ = updateCmd.Flags().MarkHidden("show-merge-stats")
 	updateCmd.Flags().String("preset", "", "Merge strategy preset: conservative, gap-fill, or aggressive (overrides scalar/array strategies)")
 	updateCmd.Flags().String("scalar-strategy", "prefer-nfo", "Scalar field merge strategy: prefer-nfo, prefer-scraper, preserve-existing, or fill-missing-only")
 	updateCmd.Flags().String("array-strategy", "merge", "Array field merge strategy: merge or replace")
@@ -49,7 +53,6 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	forceRefresh, _ := cmd.Flags().GetBool("force-refresh")
 	forceOverwrite, _ := cmd.Flags().GetBool("force-overwrite")
 	preserveNFO, _ := cmd.Flags().GetBool("preserve-nfo")
-	_ = cmd.Flags().Lookup("show-merge-stats") // Available for future use
 	preset, _ := cmd.Flags().GetString("preset")
 	scalarStrategyStr, _ := cmd.Flags().GetString("scalar-strategy")
 	arrayStrategyStr, _ := cmd.Flags().GetString("array-strategy")
@@ -66,6 +69,16 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	// Report the EFFECTIVE strategies after preset expansion (not the raw flag
+	// values), so the summary reflects what was actually applied. A preset
+	// overrides the individual strategy flags, and printing the raw flags would
+	// misrepresent the merge behavior the run used.
+	resolvedScalarStr := string(resolved.ScalarStrategy)
+	resolvedArrayStr := "replace"
+	if resolved.ArrayStrategy {
+		resolvedArrayStr = "merge"
 	}
 
 	// In update mode: always generate NFO, never move files
@@ -95,7 +108,7 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 		CompletionMessage:   "Update complete!",
 		ModeLine:            "Update (metadata & artwork, files remain in place)",
 		EventHandler:        commandutil.UpdateEventHandler,
-		SummaryPrinter:      updateSummaryPrinter(scalarStrategyStr, arrayStrategyStr),
+		SummaryPrinter:      updateSummaryPrinter(resolvedScalarStr, resolvedArrayStr),
 	})
 }
 

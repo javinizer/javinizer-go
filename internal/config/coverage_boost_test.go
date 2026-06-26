@@ -35,7 +35,7 @@ func init() {
 func TestGetFirstScraperPriorityStatic(t *testing.T) {
 	t.Run("returns first element from default list", func(t *testing.T) {
 		result := getFirstScraperPriorityStatic()
-		assert.Equal(t, "dmm", result, "should return first element of defaultScraperPriority")
+		assert.Equal(t, "r18dev", result, "should return first element of defaultScraperPriority")
 	})
 }
 

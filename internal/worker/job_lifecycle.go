@@ -41,7 +41,14 @@ func (lc *JobLifecycle) IsJobActive() bool {
 	if lc.deleted {
 		return false
 	}
-	return !isJobTransitioned(lc.Status)
+	// "Active" here is the narrow rescrape-management sense preserved by
+	// TestBatchJob_IsJobActive: Pending (not yet started) and Completed (done,
+	// still eligible for further action) are active; every in-flight or
+	// terminal state (Running/Organized/Failed/Cancelled/Reverted) is not.
+	// This is intentionally NOT `!isJobTransitioned`: isJobTransitioned serves
+	// the gone-check (which excludes Organized so Organized jobs stay rescrapeable)
+	// and would wrongly mark Organized active here. Spell the contract out.
+	return lc.Status == models.JobStatusPending || lc.Status == models.JobStatusCompleted
 }
 
 func (lc *JobLifecycle) IsDeleted() bool {

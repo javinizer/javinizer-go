@@ -27,14 +27,15 @@ func NewApplyPhase() ApplyPhase {
 // applyFileOutcome captures the result of applying a single file.
 // Collected by the errgroup goroutine, then aggregated by trackApplyResults.
 type applyFileOutcome struct {
-	FilePath string
-	MovieID  string
-	Success  bool
-	Failed   bool // true if apply failed (not panic, not skip)
-	Panic    bool // true if goroutine panicked
-	PanicMsg string
-	ErrorMsg string
-	Movie    *models.Movie // updated movie after apply (nil if failed)
+	FilePath  string
+	MovieID   string
+	Success   bool
+	Failed    bool // true if apply failed (not panic, not skip, not cancel)
+	Cancelled bool // true if apply was interrupted by context cancellation
+	Panic     bool // true if goroutine panicked
+	PanicMsg  string
+	ErrorMsg  string
+	Movie     *models.Movie // updated movie after apply (nil if failed)
 }
 
 // Run executes the apply phase: setup errgroup → iterate files → dispatch
@@ -240,7 +241,8 @@ func interpretApplyResult(
 		// scraped files stayed Completed). Main's process_organize.go likewise
 		// did not relabel them Failed.
 		fileStatus := models.JobStatusFailed
-		if errors.Is(applyErr, context.Canceled) {
+		isCancelled := errors.Is(applyErr, context.Canceled)
+		if isCancelled {
 			fileStatus = models.JobStatusCancelled
 			errMsg = "organization canceled"
 		}
@@ -262,6 +264,23 @@ func interpretApplyResult(
 			StartedAt:     startTime,
 			EndedAt:       &now,
 		})
+		if isCancelled {
+			// Cancellation is not a failure: broadcast a non-failure apply event
+			// and do NOT invoke OnFileFailed, otherwise the review page records
+			// the file as failed and offers a Retry path despite the persisted
+			// result being Cancelled.
+			inputs.Broadcaster.Send(JobEvent{
+				JobID:     inputs.JobID,
+				MovieID:   movie.ID,
+				Phase:     jobEventPhaseApply,
+				Step:      StepApply,
+				Message:   errMsg,
+				Timestamp: time.Now(),
+			})
+			outcome.Cancelled = true
+			outcome.ErrorMsg = errMsg
+			return outcome
+		}
 		inputs.Broadcaster.Send(JobEvent{
 			JobID:     inputs.JobID,
 			MovieID:   movie.ID,

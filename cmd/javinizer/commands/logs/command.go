@@ -47,6 +47,10 @@ func NewCommand() *cobra.Command {
 }
 
 func runLogsList(cmd *cobra.Command, args []string, configFile string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -89,7 +93,7 @@ func runLogsList(cmd *cobra.Command, args []string, configFile string) error {
 		Source:    source,
 	}
 
-	events, err := eventRepo.FindFiltered(context.Background(), filter, limit, 0)
+	events, err := eventRepo.FindFiltered(ctx, filter, limit, 0)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve events: %w", err)
 	}
@@ -146,6 +150,10 @@ func runLogsList(cmd *cobra.Command, args []string, configFile string) error {
 }
 
 func runLogsStats(cmd *cobra.Command, args []string, configFile string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -159,7 +167,7 @@ func runLogsStats(cmd *cobra.Command, args []string, configFile string) error {
 
 	eventRepo := database.NewEventRepository(deps.DB)
 
-	total, err := eventRepo.Count(context.Background())
+	total, err := eventRepo.Count(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to count events: %w", err)
 	}
@@ -178,7 +186,7 @@ func runLogsStats(cmd *cobra.Command, args []string, configFile string) error {
 		{"System", models.EventCategorySystem, "⚙️"},
 	}
 	for _, tc := range typeCounts {
-		count, _ := eventRepo.CountFiltered(context.Background(), database.EventFilter{EventType: tc.category})
+		count, _ := eventRepo.CountFiltered(ctx, database.EventFilter{EventType: tc.category})
 		pct := percentage(count, total)
 		fmt.Printf("  %s %-10s %d (%.1f%%)\n", tc.emoji, tc.name+":", count, pct)
 	}
@@ -195,12 +203,12 @@ func runLogsStats(cmd *cobra.Command, args []string, configFile string) error {
 		{"Debug", models.SeverityDebug, "🐛"},
 	}
 	for _, sc := range sevCounts {
-		count, _ := eventRepo.CountFiltered(context.Background(), database.EventFilter{Severity: sc.severity})
+		count, _ := eventRepo.CountFiltered(ctx, database.EventFilter{Severity: sc.severity})
 		pct := percentage(count, total)
 		fmt.Printf("  %s %-8s %d (%.1f%%)\n", sc.emoji, sc.name+":", count, pct)
 	}
 
-	sourceCounts, err := eventRepo.CountGroupBySource(context.Background())
+	sourceCounts, err := eventRepo.CountGroupBySource(ctx)
 	if err == nil && len(sourceCounts) > 0 {
 		fmt.Println("\nBy Source:")
 		for src, count := range sourceCounts {

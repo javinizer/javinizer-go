@@ -258,9 +258,13 @@ func (cs *ConfigStorage) atomicReplace(path string, data []byte, perm os.FileMod
 		}
 	}
 
-	if syncer, ok := cs.fs.(interface{ Sync(name string) error }); ok {
-		_ = syncer.Sync(dir)
-	}
+	// fsync the directory after the atomic rename so the rename itself is
+	// durable. The interface{ Sync(name string) error } assertion never matched
+	// afero.NewOsFs() (Sync is a File method, not an Fs method), so this fsync
+	// was silently skipped for normal writes. syncDir performs the real OS
+	// directory sync; ignore the error since a failed dir sync does not
+	// invalidate the already-durable file rename.
+	_ = syncDir(dir)
 
 	cleanup = false
 	return nil

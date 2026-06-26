@@ -190,7 +190,10 @@ func isJobTransitioned(status models.JobStatus) bool {
 	// valid rescrape source (its results are still authoritative). The
 	// excludeFile cancellation guard below uses a separate terminal-success
 	// check so it does not rely on this predicate's semantics.
-	return status == models.JobStatusRunning || status == models.JobStatusOrganized || status == models.JobStatusFailed || status == models.JobStatusCancelled || status == models.JobStatusReverted
+	return status == models.JobStatusRunning ||
+		status == models.JobStatusFailed ||
+		status == models.JobStatusCancelled ||
+		status == models.JobStatusReverted
 }
 
 // ExcludeFile is owned by jobEditorImpl (via the JobEditor interface).

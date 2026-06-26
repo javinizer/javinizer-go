@@ -115,6 +115,14 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 		persistScrapeOutcomePool(ctx, outcomes, inputs, cfg.OnFileScrapeFailed)
 	}
 
+	// ctx can be canceled while the persist pool is draining. After it returns,
+	// re-check cancellation before MarkCompleted so a canceled job finishes as
+	// Cancelled rather than being marked Completed with a partially-persisted set.
+	if err := ctx.Err(); err != nil {
+		inputs.Lifecycle.MarkCancelled()
+		return
+	}
+
 	trackScrapeResults(outcomes)
 
 	inputs.Lifecycle.MarkCompleted()
@@ -406,6 +414,16 @@ func persistScrapeOutcomePool(ctx context.Context, outcomes []scrapeFileOutcome,
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// Recover panics inside the persist worker. The top-level Run defer
+			// cannot catch panics from these goroutines; an unrecovered panic from
+			// repository persistence would crash the process and bypass lifecycle
+			// accounting. Log and swallow so the pool drains and the job resolves
+			// through its normal failure path instead of taking down the binary.
+			defer func() {
+				if r := recover(); r != nil {
+					logging.Errorf("persist worker panic recovered: %v", r)
+				}
+			}()
 			persistScrapeOutcomes(ctx, work, inputs, onFileFailed)
 		}()
 	}

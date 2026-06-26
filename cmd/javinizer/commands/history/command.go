@@ -96,8 +96,11 @@ func runHistoryList(cmd *cobra.Command, args []string, configFile string) error 
 
 	var records []models.History
 
-	// Apply filters
-	ctx := context.Background()
+	// Apply filters. Derive ctx from the command so cancellation propagates.
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	if operation != "" {
 		records, err = logger.GetByOperation(ctx, models.HistoryOperation(operation), limit)
@@ -167,6 +170,10 @@ func runHistoryList(cmd *cobra.Command, args []string, configFile string) error 
 }
 
 func runHistoryStats(cmd *cobra.Command, args []string, configFile string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -180,7 +187,7 @@ func runHistoryStats(cmd *cobra.Command, args []string, configFile string) error
 
 	logger := history.NewLogger(database.NewHistoryRepository(deps.DB))
 
-	stats, err := logger.GetStats(context.Background())
+	stats, err := logger.GetStats(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve stats: %w", err)
 	}
@@ -203,6 +210,10 @@ func runHistoryStats(cmd *cobra.Command, args []string, configFile string) error
 }
 
 func runHistoryMovie(cmd *cobra.Command, args []string, configFile string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	movieID := args[0]
 
 	cfg, err := config.LoadOrCreate(configFile)
@@ -218,7 +229,7 @@ func runHistoryMovie(cmd *cobra.Command, args []string, configFile string) error
 
 	logger := history.NewLogger(database.NewHistoryRepository(deps.DB))
 
-	records, err := logger.GetByMovieID(context.Background(), movieID)
+	records, err := logger.GetByMovieID(ctx, movieID)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve history: %w", err)
 	}
@@ -270,6 +281,10 @@ func runHistoryMovie(cmd *cobra.Command, args []string, configFile string) error
 }
 
 func runHistoryClean(cmd *cobra.Command, args []string, configFile string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -286,18 +301,18 @@ func runHistoryClean(cmd *cobra.Command, args []string, configFile string) error
 	days, _ := cmd.Flags().GetInt("days")
 
 	// Get count before deletion
-	countBefore, err := logger.Count(context.Background())
+	countBefore, err := logger.Count(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to count records: %w", err)
 	}
 
 	// Perform cleanup
-	if err := logger.CleanupOldRecords(context.Background(), time.Duration(days)*24*time.Hour); err != nil {
+	if err := logger.CleanupOldRecords(ctx, time.Duration(days)*24*time.Hour); err != nil {
 		return fmt.Errorf("failed to clean up history: %w", err)
 	}
 
 	// Get count after deletion
-	countAfter, err := logger.Count(context.Background())
+	countAfter, err := logger.Count(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to count records: %w", err)
 	}
@@ -316,6 +331,10 @@ func runHistoryClean(cmd *cobra.Command, args []string, configFile string) error
 
 // runHistoryListBatch shows batch-centric view when --batch flag is provided (D-06, HIST-01, HIST-02).
 func runHistoryListBatch(cmd *cobra.Command, batchID string, configFile string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -331,21 +350,28 @@ func runHistoryListBatch(cmd *cobra.Command, batchID string, configFile string) 
 	batchFileOpRepo := database.NewBatchFileOperationRepository(deps.DB)
 
 	// Load job
-	job, err := jobRepo.FindByID(context.Background(), batchID)
+	job, err := jobRepo.FindByID(ctx, batchID)
 	if err != nil {
 		return fmt.Errorf("batch job not found: %s", batchID)
 	}
 
 	// Load operations
-	ops, err := batchFileOpRepo.FindByBatchJobID(context.Background(), batchID)
+	ops, err := batchFileOpRepo.FindByBatchJobID(ctx, batchID)
 	if err != nil {
 		return fmt.Errorf("failed to load operations: %w", err)
 	}
 
-	// Compute counts
+	// Compute counts. Count failures must not be silently discarded — otherwise
+	// the CLI prints stale/zero revert stats for a batch whose counts failed to load.
 	opCount := int64(len(ops))
-	revertedCount, _ := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(context.Background(), batchID, models.RevertStatusReverted)
-	pendingCount, _ := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(context.Background(), batchID, models.RevertStatusApplied)
+	revertedCount, err := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(ctx, batchID, models.RevertStatusReverted)
+	if err != nil {
+		return fmt.Errorf("failed to count reverted operations: %w", err)
+	}
+	pendingCount, err := batchFileOpRepo.CountByBatchJobIDAndRevertStatus(ctx, batchID, models.RevertStatusApplied)
+	if err != nil {
+		return fmt.Errorf("failed to count pending operations: %w", err)
+	}
 
 	// Print batch header
 	fmt.Printf("=== Batch Job: %s ===\n", batchID)

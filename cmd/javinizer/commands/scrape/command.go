@@ -137,7 +137,10 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 		wf = bs.Workflow
 		ownDeps = true
 	} else {
-		fc, fcErr := workflow.NewFactoryConfigFromRepos(deps.GetConfig(), deps.ScraperRegistry, deps.DB.Repositories())
+		// Build the factory from the effective config (cfg), which has env/CLI
+		// overrides applied above — not deps.GetConfig(), which may hold a stale
+		// snapshot and would drop the overrides for injected-dependency callers.
+		fc, fcErr := workflow.NewFactoryConfigFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
 		if fcErr != nil {
 			return nil, nil, fmt.Errorf("failed to create factory config: %w", fcErr)
 		}

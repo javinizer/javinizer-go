@@ -405,27 +405,22 @@ func TestRedactString(t *testing.T) {
 }
 
 func TestRedactProxyProfiles(t *testing.T) {
-	t.Run("nil profiles returns nil", func(t *testing.T) {
-		assert.Nil(t, redactProxyProfiles(nil))
-	})
-
-	t.Run("redacts username and password", func(t *testing.T) {
-		profiles := map[string]models.ProxyProfile{
-			"main": {URL: "http://proxy:8080", Username: "admin", Password: "s3cret"},
+	// redactProxyProfiles helper was removed in favor of ProxyConfig.Redact()
+	// (which redacts profiles via ProxyProfile.Redact internally). Verify the
+	// same per-profile redaction behavior is preserved through Redact().
+	t.Run("Redact redacts username and password across profiles", func(t *testing.T) {
+		pc := models.ProxyConfig{
+			Profiles: map[string]models.ProxyProfile{
+				"main":   {URL: "http://proxy:8080", Username: "admin", Password: "s3cret"},
+				"noauth": {URL: "http://proxy:8080", Username: "", Password: ""},
+			},
 		}
-		result := redactProxyProfiles(profiles)
-		assert.Equal(t, models.RedactedValue, result["main"].Username)
-		assert.Equal(t, models.RedactedValue, result["main"].Password)
-		assert.Equal(t, "http://proxy:8080", result["main"].URL)
-	})
-
-	t.Run("empty username and password not redacted", func(t *testing.T) {
-		profiles := map[string]models.ProxyProfile{
-			"noauth": {URL: "http://proxy:8080", Username: "", Password: ""},
-		}
-		result := redactProxyProfiles(profiles)
-		assert.Equal(t, "", result["noauth"].Username)
-		assert.Equal(t, "", result["noauth"].Password)
+		result := pc.Redact()
+		assert.Equal(t, models.RedactedValue, result.Profiles["main"].Username)
+		assert.Equal(t, models.RedactedValue, result.Profiles["main"].Password)
+		assert.Equal(t, "http://proxy:8080", result.Profiles["main"].URL)
+		assert.Equal(t, "", result.Profiles["noauth"].Username)
+		assert.Equal(t, "", result.Profiles["noauth"].Password)
 	})
 }
 

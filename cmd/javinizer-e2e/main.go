@@ -242,12 +242,16 @@ func loadConfig() (*config.Config, error) {
 	if inputDir == "" {
 		inputDir = "/tmp/javinizer-e2e-input"
 	}
-	_ = os.MkdirAll(inputDir, 0o750)
+	if err := os.MkdirAll(inputDir, 0o750); err != nil {
+		return nil, fmt.Errorf("create e2e input dir %q: %w", inputDir, err)
+	}
 	outputDir := os.Getenv("JAVINIZER_E2E_OUTPUT_DIR")
 	if outputDir == "" {
 		outputDir = "/tmp/javinizer-e2e-output"
 	}
-	_ = os.MkdirAll(outputDir, 0o750)
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
+		return nil, fmt.Errorf("create e2e output dir %q: %w", outputDir, err)
+	}
 	cfg.API.Security.AllowedDirectories = []string{inputDir, outputDir}
 	cfg.API.Security.DeniedDirectories = nil
 	// Disable the IPRateLimiter middleware entirely (RPM=0 skips

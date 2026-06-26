@@ -17,9 +17,10 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestGetFirstScraperPriorityStatic_Default(t *testing.T) {
-	// With the default priority list populated, it should return "dmm".
+	// With the default priority list populated, it should return "r18dev"
+	// (aligned with configs/config.yaml.example, which lists r18dev first).
 	result := getFirstScraperPriorityStatic()
-	assert.Equal(t, "dmm", result, "should return first element of defaultScraperPriority")
+	assert.Equal(t, "r18dev", result, "should return first element of defaultScraperPriority")
 }
 
 func TestGetFirstScraperPriorityStatic_EmptyList(t *testing.T) {

@@ -52,9 +52,14 @@ func ValidateHTTPBaseURL(path, raw string) error {
 	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
 		return fmt.Errorf("%s must be a valid HTTP or HTTPS URL", path)
 	}
-	_, err := url.Parse(raw)
+	u, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("%s must be a valid URL: %w", path, err)
+	}
+	// url.Parse accepts "http://" (no host) and "http:///path". Require a host
+	// so a base URL with no authority is rejected rather than silently accepted.
+	if u.Host == "" {
+		return fmt.Errorf("%s must be a valid HTTP or HTTPS URL with a host", path)
 	}
 	return nil
 }
@@ -291,6 +296,12 @@ func (c *Config) Validate() error {
 // Extracted from Config.Validate so that pure validation can be tested
 // independently of the Normalize side-effect.
 func ValidateConfig(cfg *Config) error {
+	// Validate a clone so the delegated validators (which call
+	// Scrapers.Normalize to populate/repair state) cannot mutate the caller's
+	// Config. ValidateConfig is documented as pure/non-mutating; without this
+	// clone, direct callers would observe normalization side-effects.
+	cfg = cfg.Clone()
+
 	// --- Structural / field-level checks ---
 
 	// Validate database settings
@@ -369,6 +380,15 @@ func ValidateConfig(cfg *Config) error {
 		case "detail", "grid-poster", "grid-cover":
 		default:
 			return fmt.Errorf("webui.default_review_view must be one of: detail, grid-poster, grid-cover")
+		}
+	}
+
+	// Operation mode feeds workflow construction; a config typo must fail closed
+	// instead of silently defaulting to organize (which would run the wrong
+	// file-operation mode). Empty is allowed (defaults to organize elsewhere).
+	if rawMode := strings.TrimSpace(string(cfg.Output.Operation.OperationMode)); rawMode != "" {
+		if _, err := operationmode.ParseOperationMode(rawMode); err != nil {
+			return fmt.Errorf("output.operation_mode is invalid: %w", err)
 		}
 	}
 

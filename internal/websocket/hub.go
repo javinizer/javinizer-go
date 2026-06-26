@@ -30,9 +30,9 @@ type ProgressMessage struct {
 	Progress   float64        `json:"progress"`
 	Message    string         `json:"message"`
 	Error      string         `json:"error,omitempty"`
-	TotalFiles int            `json:"total_files,omitempty"`
-	Completed  int            `json:"completed,omitempty"`
-	Failed     int            `json:"failed,omitempty"`
+	TotalFiles int            `json:"total_files"`
+	Completed  int            `json:"completed"`
+	Failed     int            `json:"failed"`
 }
 
 // Client represents a websocket client
