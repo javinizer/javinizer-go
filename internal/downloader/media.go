@@ -211,10 +211,11 @@ func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Mo
 func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, extrafanartEnabled bool) ([]DownloadResult, error) {
 	results := make([]DownloadResult, 0)
 
-	// Track critical media (cover + poster) to detect total-download-failure.
-	// If both cover and poster are attempted but neither succeeds, the apply
-	// orchestrator should abort before NFO generation rather than silently
-	// proceeding with no artwork.
+	// Track critical media (cover + poster) to detect partial-download-failure.
+	// If both cover and poster are attempted but neither succeeds, return a
+	// DownloadPartialError sentinel; the apply orchestrator treats it as
+	// non-fatal (logs the failure, preserves non-critical artifacts for revert
+	// cleanup, and proceeds to NFO generation per the project's NFO guarantee).
 	criticalAttempted := 0
 	criticalSucceeded := 0
 
@@ -301,8 +302,10 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 	}
 
 	// Return partial-error sentinel when all critical media (cover+poster) failed.
-	// This lets the apply orchestrator detect total-download-failure and abort
-	// before NFO generation rather than silently proceeding with no artwork.
+	// The apply orchestrator treats this as non-fatal: it logs the failure,
+	// preserves any non-critical artifacts that did download (for revert
+	// cleanup), and proceeds to NFO generation — the project guarantee is that
+	// a correct NFO is produced regardless of artwork availability.
 	if criticalAttempted > 0 && criticalSucceeded == 0 {
 		return results, &DownloadPartialError{
 			Attempted: criticalAttempted,
