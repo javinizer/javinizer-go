@@ -70,7 +70,9 @@ func (r *ContentIDMappingRepository) GetAllPaginated(ctx context.Context, limit,
 // drop-in replacement that loads in configurable chunk sizes.
 func (r *ContentIDMappingRepository) GetAll(ctx context.Context) ([]models.ContentIDMapping, error) {
 	var mappings []models.ContentIDMapping
-	err := r.db.WithContext(ctx).Find(&mappings).Error
+	// Order by search_id ASC to match GetAllPaginated/GetAllChunked so the
+	// deprecated path and its replacements produce the same row sequence.
+	err := r.db.WithContext(ctx).Order("search_id ASC").Find(&mappings).Error
 	if err != nil {
 		return nil, wrapDBErr("find", "content ID mappings", err)
 	}

@@ -44,7 +44,8 @@ func TestInPlaceStrategy_isDedicatedFolder(t *testing.T) {
 	_ = afero.WriteFile(fs, "/source/ABC-123/ABC-123.mp4", []byte("video1"), 0644)
 	_ = afero.WriteFile(fs, "/source/ABC-123/ABC-123-pt2.mp4", []byte("video2"), 0644)
 
-	dedicated := strategy.isDedicatedFolder("/source/ABC-123", "ABC-123", m)
+	dedicated, err := strategy.isDedicatedFolder("/source/ABC-123", "ABC-123", m)
+	require.NoError(t, err)
 	assert.True(t, dedicated, "Folder with all files matching ID should be dedicated")
 }
 
@@ -59,7 +60,8 @@ func TestInPlaceStrategy_isDedicatedFolder_MixedIDs(t *testing.T) {
 	_ = afero.WriteFile(fs, "/source/mixed/ABC-123.mp4", []byte("video1"), 0644)
 	_ = afero.WriteFile(fs, "/source/mixed/DEF-456.mp4", []byte("video2"), 0644)
 
-	dedicated := strategy.isDedicatedFolder("/source/mixed", "ABC-123", m)
+	dedicated, err := strategy.isDedicatedFolder("/source/mixed", "ABC-123", m)
+	require.NoError(t, err)
 	assert.False(t, dedicated, "Folder with mixed IDs should not be dedicated")
 }
 
@@ -75,7 +77,8 @@ func TestInPlaceStrategy_isDedicatedFolder_PrefixedID(t *testing.T) {
 	_ = fs.MkdirAll("/source/200GANA-2850", 0777)
 	_ = afero.WriteFile(fs, "/source/200GANA-2850/200GANA-2850.mp4", []byte("video1"), 0644)
 
-	dedicated := strategy.isDedicatedFolder("/source/200GANA-2850", "200GANA-2850", m)
+	dedicated, err := strategy.isDedicatedFolder("/source/200GANA-2850", "200GANA-2850", m)
+	require.NoError(t, err)
 	assert.True(t, dedicated, "Folder with prefixed ID like 200GANA-2850 should be dedicated even when matcher strips prefix to GANA-2850")
 }
 
@@ -89,7 +92,8 @@ func TestInPlaceStrategy_isDedicatedFolder_NoVideos(t *testing.T) {
 	_ = fs.MkdirAll("/source/empty", 0777)
 	_ = afero.WriteFile(fs, "/source/empty/readme.txt", []byte("text"), 0644)
 
-	dedicated := strategy.isDedicatedFolder("/source/empty", "ABC-123", m)
+	dedicated, err := strategy.isDedicatedFolder("/source/empty", "ABC-123", m)
+	require.NoError(t, err)
 	assert.False(t, dedicated, "Folder with no videos should not be dedicated")
 }
 

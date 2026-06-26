@@ -263,8 +263,16 @@ func MergeMovieMetadataWithOptions(scraped, nfo *models.Movie, scalarStrategy Me
 		spec.setM(merged, fm.mergeString(spec.name, spec.getS(scraped), spec.getN(nfo), scalarStrategy))
 	}
 
-	// CroppedPosterURL: Always use scraped value (not stored in NFO, runtime-generated temp URL)
+	// CroppedPosterURL: Always use scraped value (not stored in NFO, runtime-generated temp URL).
+	// Record provenance inline so it stays consistent with the final value
+	// (this field is intentionally excluded from stringMergeSpecs to avoid the
+	// merged NFO value recording stale provenance before being overwritten).
 	merged.Poster.CroppedPosterURL = scraped.Poster.CroppedPosterURL
+	if strings.TrimSpace(scraped.Poster.CroppedPosterURL) == "" {
+		fm.recordEmpty("CroppedPosterURL")
+	} else {
+		fm.recordScraper("CroppedPosterURL")
+	}
 
 	// Merge int scalar fields using spec-driven loop via fieldMerger
 	for _, spec := range intMergeSpecs {

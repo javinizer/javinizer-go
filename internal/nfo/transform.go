@@ -205,18 +205,24 @@ func (g *Generator) buildActors(movieActresses []models.Actress) []actor {
 
 	for _, a := range movieActresses {
 		actorName := g.formatActressName(a)
+		nameKey := normalizeActressNameForDedup(actorName)
 
 		if a.DMMID > 0 {
 			if _, exists := seenDMMID[a.DMMID]; exists {
 				continue
 			}
+			// Also dedupe by normalized name so the same actress isn't emitted twice
+			// when one entry has a DMMID and another does not.
+			if nameKey != "" {
+				if _, exists := seenNames[nameKey]; exists {
+					continue
+				}
+			}
 			seenDMMID[a.DMMID] = struct{}{}
-			nameKey := normalizeActressNameForDedup(actorName)
 			if nameKey != "" {
 				seenNames[nameKey] = struct{}{}
 			}
 		} else {
-			nameKey := normalizeActressNameForDedup(actorName)
 			if _, exists := seenNames[nameKey]; exists {
 				continue
 			}

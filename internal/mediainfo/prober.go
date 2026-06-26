@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
 // FileReader combines io.Reader, io.ReaderAt and io.Seeker to abstract file access
@@ -101,13 +103,19 @@ func (r *proberRegistry) probeWithFallback(ctx context.Context, f FileReader) (*
 
 	// Try native prober
 	prober := r.findProber(header)
+	var nativeErr error
 	if prober != nil {
 		info, err := prober.Probe(ctx, f)
 		if err == nil {
 			return info, nil
 		}
+		// Preserve the native parser failure so it can be returned when there is
+		// no CLI fallback; otherwise truncated/invalid MP4/MKV parse failures would
+		// be masked as "unsupported container format".
+		nativeErr = fmt.Errorf("%s parser failed: %w", prober.Name(), err)
 		// Log native parser failure, but continue to CLI fallback
 		// Errors are expected for some edge cases
+		logging.Debugf("mediainfo: %s native parser failed: %v", prober.Name(), err)
 	}
 
 	// Fallback to CLI if enabled
@@ -115,6 +123,10 @@ func (r *proberRegistry) probeWithFallback(ctx context.Context, f FileReader) (*
 		// Reset file pointer again for CLI
 		_, _ = f.Seek(0, io.SeekStart)
 		return r.cliProber.Probe(ctx, f)
+	}
+
+	if nativeErr != nil {
+		return nil, nativeErr
 	}
 
 	// No prober found and no CLI fallback

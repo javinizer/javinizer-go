@@ -88,7 +88,9 @@ func analyzeMKV(f FileReader) (*VideoInfo, error) {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
 			}
-			break
+			// Propagate unexpected EBML parse errors instead of swallowing them,
+			// so truncated/corrupt MKVs don't return partial metadata as success.
+			return nil, fmt.Errorf("failed to parse MKV element: %w", err)
 		}
 
 		switch elem.id {

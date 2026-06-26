@@ -107,9 +107,14 @@ func resolveNFOMedia(nfo *Movie) (coverURL string, screenshots []string) {
 			break
 		}
 	}
-	// Fallback to first thumb if no poster aspect found
-	if coverURL == "" && len(nfo.Thumb) > 0 {
-		coverURL = nfo.Thumb[0].Value
+	// Fallback to first non-empty thumb if no poster aspect found
+	if coverURL == "" {
+		for _, thumb := range nfo.Thumb {
+			if thumb.Value != "" {
+				coverURL = thumb.Value
+				break
+			}
+		}
 	}
 
 	// Extract screenshot URLs from fanart

@@ -122,6 +122,11 @@ func analyzeAVI(f FileReader) (*VideoInfo, error) {
 
 		switch fourCC {
 		case "LIST":
+			// Validate the LIST chunk size before subtracting the 4-byte list type;
+			// a malformed size < 4 would underflow chunk.Size-4 and desync parsing.
+			if chunk.Size < 4 {
+				return nil, fmt.Errorf("invalid LIST chunk size %d", chunk.Size)
+			}
 			var listType [4]byte
 			if err := binary.Read(f, binary.LittleEndian, &listType); err != nil {
 				return nil, fmt.Errorf("failed to read list type: %w", err)
@@ -258,6 +263,11 @@ func parseHdrlList(f io.ReadSeeker, info *VideoInfo, startPos int64, size uint32
 			}
 
 		case "LIST":
+			// Validate the LIST chunk size before subtracting the 4-byte list type;
+			// a malformed size < 4 would underflow chunk.Size-4 and desync parsing.
+			if chunk.Size < 4 {
+				return fmt.Errorf("invalid LIST chunk size %d", chunk.Size)
+			}
 			var listType [4]byte
 			if err := binary.Read(f, binary.LittleEndian, &listType); err != nil {
 				return fmt.Errorf("failed to read strl list type: %w", err)
@@ -398,7 +408,9 @@ func parseStrlList(f io.ReadSeeker, startPos int64, size uint32) (*streamInfo, e
 			}
 
 			// Seek to end of chunk
-			_, _ = f.Seek(chunkDataPos+int64(chunk.Size), io.SeekStart)
+			if _, err := f.Seek(chunkDataPos+int64(chunk.Size), io.SeekStart); err != nil {
+				return nil, fmt.Errorf("failed to seek to end of strl chunk: %w", err)
+			}
 
 		default:
 			// Skip unknown chunks

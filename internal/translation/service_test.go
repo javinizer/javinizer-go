@@ -397,12 +397,15 @@ func TestTranslateTexts_ConnectionFailure(t *testing.T) {
 		_, err := s.translateTexts(context.Background(), "ja", "en", []string{"test"})
 
 		require.Error(t, err)
-		// Verify it's a connection-related error
+		// Verify it's a connection-related (provider) error. Raw transport errors are
+		// now wrapped as a typed translationError so request URLs/credentials are
+		// not leaked; the connection detail stays in debug logs only.
 		errMsg := err.Error()
 		assert.True(t, strings.Contains(errMsg, "connection refused") ||
 			strings.Contains(errMsg, "dial tcp") ||
-			strings.Contains(errMsg, "connection reset"),
-			"expected connection error, got: %v", errMsg)
+			strings.Contains(errMsg, "connection reset") ||
+			strings.Contains(errMsg, "translation request failed"),
+			"expected connection/provider error, got: %v", errMsg)
 	})
 }
 
@@ -1363,7 +1366,9 @@ func TestTranslateWithGoogleFree(t *testing.T) {
 		_, err := s.translateTexts(context.Background(), "ja", "en", []string{"test"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "google free translation failed")
-		assert.Contains(t, err.Error(), "Internal Server Error")
+		// Raw provider response body is no longer embedded in the error (redaction);
+		// only the status is conveyed.
+		assert.NotContains(t, err.Error(), "Internal Server Error")
 	})
 
 	t.Run("multiple texts translated sequentially", func(t *testing.T) {
@@ -3965,7 +3970,11 @@ func TestProviderAcceptsHTTPClientInterface(t *testing.T) {
 		_, err := provider.Translate(context.Background(), "ja", "en", []string{"test"})
 		require.Error(t, err)
 		assert.True(t, mock.called, "mock HTTPClient should have been called")
-		assert.Contains(t, err.Error(), "injected mock called")
+		// Raw transport error is wrapped as a typed translationError (Kind=provider);
+		// the mock's message is kept in debug logs only, so assert the kind instead.
+		var te *translationError
+		assert.True(t, errors.As(err, &te) && te.Kind == TranslationErrorProvider,
+			"expected provider translationError, got: %v", err)
 	})
 
 	t.Run("GoogleProvider accepts HTTPClient interface", func(t *testing.T) {
@@ -3985,7 +3994,9 @@ func TestProviderAcceptsHTTPClientInterface(t *testing.T) {
 		_, err := provider.Translate(context.Background(), "ja", "en", []string{"test"})
 		require.Error(t, err)
 		assert.True(t, mock.called, "mock HTTPClient should have been called")
-		assert.Contains(t, err.Error(), "injected mock called")
+		var te2 *translationError
+		assert.True(t, errors.As(err, &te2) && te2.Kind == TranslationErrorProvider,
+			"expected provider translationError, got: %v", err)
 	})
 
 	t.Run("AnthropicProvider accepts HTTPClient interface", func(t *testing.T) {

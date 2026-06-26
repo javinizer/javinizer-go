@@ -56,8 +56,8 @@ func MetadataConfigFromApp(mc *config.MetadataConfig) *MetadataConfig {
 	}
 	return &MetadataConfig{
 		Priority:       mc.Priority,
-		RequiredFields: mc.RequiredFields,
-		IgnoreGenres:   mc.IgnoreGenres,
+		RequiredFields: append([]string(nil), mc.RequiredFields...),
+		IgnoreGenres:   append([]string(nil), mc.IgnoreGenres...),
 		NFO: nfoConfigView{
 			UnknownActressMode: mc.NFO.Format.UnknownActressMode,
 			UnknownActressText: mc.NFO.Format.UnknownActressText,

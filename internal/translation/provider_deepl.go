@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -69,37 +70,46 @@ func (p *DeepLProvider) Translate(ctx context.Context, sourceLang, targetLang st
 		Text:       texts,
 		TargetLang: strings.ToUpper(targetLang),
 	}
-	if sourceLang != "" && sourceLang != "auto" {
-		reqBody.SourceLang = strings.ToUpper(sourceLang)
+	// Normalize before comparing the auto sentinel so "AUTO" / " auto " / padded
+	// variants are treated as auto-detect and not sent as source_lang.
+	normalizedSourceLang := strings.ToLower(strings.TrimSpace(sourceLang))
+	if normalizedSourceLang != "" && normalizedSourceLang != sourceLangAuto {
+		reqBody.SourceLang = strings.ToUpper(normalizedSourceLang)
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, err
+		return nil, &translationError{Kind: TranslationErrorProvider, Message: "deepl translation: failed to marshal request"}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v2/translate", bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, err
+		return nil, &translationError{Kind: TranslationErrorProvider, Message: "deepl translation: failed to build request"}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "DeepL-Auth-Key "+apiKey)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		// Wrap raw transport errors so the request URL/headers (which carry the
+		// API key) are not leaked through logs/errors.
+		logging.Debugf("deepl translation request failed: %v", err)
+		return nil, &translationError{Kind: TranslationErrorProvider, Message: "deepl translation request failed"}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationResponseSize))
 	if err != nil {
-		return nil, err
+		logging.Debugf("deepl translation response read failed: %v", err)
+		return nil, &translationError{Kind: TranslationErrorProvider, Message: "deepl translation response read failed"}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Status-only message: do not embed the provider response body, which can
+		// contain diagnostics.
 		return nil, &translationError{
 			Kind:       TranslationErrorHTTPStatus,
 			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("deepl translation failed with status %d: %s", resp.StatusCode, string(respBody)),
+			Message:    fmt.Sprintf("deepl translation failed with status %d", resp.StatusCode),
 		}
 	}
 

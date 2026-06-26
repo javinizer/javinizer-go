@@ -38,6 +38,16 @@ func Analyze(ctx context.Context, filePath string) (*VideoInfo, error) {
 
 // analyzeWithConfig extracts metadata using custom configuration
 func analyzeWithConfig(ctx context.Context, filePath string, cfg *mediaInfoConfig) (*VideoInfo, error) {
+	// Honor cancellation before opening the media file so all callers get
+	// consistent behavior (Analyze now accepts a context but previously opened
+	// the file before checking it).
+	if ctx == nil {
+		return nil, fmt.Errorf("context cannot be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("media analysis canceled before opening file: %w", err)
+	}
+
 	// Open file
 	f, err := os.Open(filePath)
 	if err != nil {

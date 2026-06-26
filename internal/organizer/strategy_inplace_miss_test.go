@@ -23,8 +23,10 @@ func TestInPlaceStrategy_isDedicatedFolder_ReadError(t *testing.T) {
 	m, _ := matcher.NewMatcher(&matcher.Config{})
 	strategy := newInPlaceStrategy(fs, cfg, m, nil)
 
-	// Directory doesn't exist → ReadDir will fail
-	dedicated := strategy.isDedicatedFolder("/nonexistent/path", "ABC-123", m)
+	// Directory doesn't exist → ReadDir will fail; isDedicatedFolder now
+	// propagates the error instead of silently returning false.
+	dedicated, err := strategy.isDedicatedFolder("/nonexistent/path", "ABC-123", m)
+	assert.Error(t, err, "Should return an error when ReadDir fails")
 	assert.False(t, dedicated, "Should return false when ReadDir fails")
 }
 
@@ -38,7 +40,8 @@ func TestInPlaceStrategy_isDedicatedFolder_SubdirectoriesIgnored(t *testing.T) {
 	_ = fs.MkdirAll("/source/subdir/nested", 0777) // Subdirectory should be ignored
 	_ = afero.WriteFile(fs, "/source/subdir/ABC-123.mp4", []byte("video"), 0644)
 
-	dedicated := strategy.isDedicatedFolder("/source/subdir", "ABC-123", m)
+	dedicated, err := strategy.isDedicatedFolder("/source/subdir", "ABC-123", m)
+	require.NoError(t, err)
 	assert.True(t, dedicated, "Should ignore subdirectories and count only video files")
 }
 
@@ -52,7 +55,8 @@ func TestInPlaceStrategy_isDedicatedFolder_CaseInsensitiveMatch(t *testing.T) {
 	// Write file with different case in name — should still match via Contains
 	_ = afero.WriteFile(fs, "/source/ABC-123/abc-123.mp4", []byte("video"), 0644)
 
-	dedicated := strategy.isDedicatedFolder("/source/ABC-123", "ABC-123", m)
+	dedicated, err := strategy.isDedicatedFolder("/source/ABC-123", "ABC-123", m)
+	require.NoError(t, err)
 	assert.True(t, dedicated, "Should match case-insensitively via Contains")
 }
 
@@ -434,6 +438,7 @@ func TestInPlaceStrategy_isDedicatedFolder_NonVideoExtensions(t *testing.T) {
 	_ = afero.WriteFile(fs, "/source/folder/ABC-123.txt", []byte("text"), 0644) // Not a video extension
 	_ = afero.WriteFile(fs, "/source/folder/ABC-123.nfo", []byte("nfo"), 0644)  // Not a video extension
 
-	dedicated := strategy.isDedicatedFolder("/source/folder", "ABC-123", m)
+	dedicated, err := strategy.isDedicatedFolder("/source/folder", "ABC-123", m)
+	require.NoError(t, err)
 	assert.False(t, dedicated, "Should return false when no video files exist")
 }

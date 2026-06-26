@@ -476,9 +476,6 @@ func TestAnalyzeMKV_BitrateCalculation(t *testing.T) {
 	segmentData := buildMKVSegmentData()
 	buf = appendEBMLMasterElement(buf, elemSegment, segmentData)
 
-	// Add some padding to increase file size
-	buf = append(buf, make([]byte, 1024)...)
-
 	_, err = f.Write(buf)
 	require.NoError(t, err)
 	require.NoError(t, f.Close())

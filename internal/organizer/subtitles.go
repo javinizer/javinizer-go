@@ -90,6 +90,11 @@ func (sh *subtitleHandler) FindSubtitles(videoFile models.FileMatchInfo) []subti
 	// Search for subtitle files in the same directory
 	files, err := afero.ReadDir(sh.fs, videoDir)
 	if err != nil {
+		// Surface the failure rather than collapsing it into "no subtitles found",
+		// which would hide permission or missing-directory errors from the organize
+		// flow. We still return the empty set (no subtitles to attach) but log the
+		// cause so it is diagnosable.
+		logging.Errorf("Failed to read subtitle directory %s: %v", videoDir, err)
 		return matches
 	}
 

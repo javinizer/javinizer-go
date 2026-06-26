@@ -191,6 +191,8 @@ func (gp *genreProcessor) compileRegexes() {
 				compiled, err := regexp.Compile(pattern)
 				if err == nil {
 					regexes = append(regexes, compiled)
+				} else {
+					logging.Warnf("invalid ignore_genres regex %q: %v", pattern, err)
 				}
 			}
 		}

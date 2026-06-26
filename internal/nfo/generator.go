@@ -3,11 +3,13 @@ package nfo
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
@@ -308,6 +310,12 @@ func (g *Generator) extractStreamDetails(ctx context.Context, videoFilePath stri
 
 	details, err := g.mediaAnalyzer.Analyze(ctx, videoFilePath)
 	if err != nil {
+		// Surface extraction failures so they are distinguishable from "no stream
+		// details configured". Skip logging for context cancellation, which is
+		// expected during shutdown.
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			logging.Warnf("failed to extract stream details for %q: %v", filepath.Base(videoFilePath), err)
+		}
 		return nil
 	}
 	return details

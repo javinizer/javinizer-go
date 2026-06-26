@@ -37,10 +37,13 @@ func newInPlaceStrategy(fs afero.Fs, cfg *Config, m matcher.MatcherInterface, en
 	}
 }
 
-func (s *inPlaceStrategy) isDedicatedFolder(dir string, id string, m matcher.MatcherInterface) bool {
+func (s *inPlaceStrategy) isDedicatedFolder(dir string, id string, m matcher.MatcherInterface) (bool, error) {
 	entries, err := afero.ReadDir(s.fs, dir)
 	if err != nil {
-		return false
+		// Propagate the directory-read error instead of treating an unreadable
+		// source folder as "not dedicated" (which could misclassify it and allow
+		// an invalid move plan).
+		return false, fmt.Errorf("failed to read source directory %q: %w", dir, err)
 	}
 
 	videoCount := 0
@@ -65,7 +68,7 @@ func (s *inPlaceStrategy) isDedicatedFolder(dir string, id string, m matcher.Mat
 		}
 	}
 
-	return videoCount > 0 && videoCount == matchingCount
+	return videoCount > 0 && videoCount == matchingCount, nil
 }
 
 func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, destDir string, forceUpdate bool) (*OrganizePlan, error) {
@@ -112,7 +115,11 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 	skipInPlaceReason := ""
 
 	if s.matcher != nil {
-		isDedicated = s.isDedicatedFolder(sourceDir, match.MovieID, s.matcher)
+		var err error
+		isDedicated, err = s.isDedicatedFolder(sourceDir, match.MovieID, s.matcher)
+		if err != nil {
+			return nil, err
+		}
 
 		if isDedicated {
 			currentFolderName := filepath.Base(sourceDir)

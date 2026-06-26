@@ -172,6 +172,9 @@ func TestBuildPlanContext_FolderNameFallsBackToID(t *testing.T) {
 
 func TestResolveStrategy_ReturnsCorrectStrategy(t *testing.T) {
 	fs := afero.NewMemMapFs()
+	// in-place strategy inspects the source directory; create it so
+	// isDedicatedFolder's ReadDir succeeds (it now propagates read errors).
+	require.NoError(t, fs.MkdirAll("/source", 0777))
 	fileMatcher, err := matcher.NewMatcher(&matcher.Config{})
 	require.NoError(t, err)
 
