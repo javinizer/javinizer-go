@@ -32,7 +32,7 @@ func TestExportGenreReplacements_RepoError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "db down")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- updateWordReplacement: FindByOriginal non-NotFound error ---
@@ -53,7 +53,7 @@ func TestUpdateWordReplacement_FindByOriginalError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "conn refused")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- updateWordReplacement: Upsert error ---
@@ -76,7 +76,7 @@ func TestUpdateWordReplacement_UpsertError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "write fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- exportWordReplacements: repo.List error branch ---
@@ -96,5 +96,5 @@ func TestExportWordReplacements_RepoError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "db error")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }

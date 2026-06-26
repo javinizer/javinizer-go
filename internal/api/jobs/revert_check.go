@@ -94,7 +94,11 @@ func revertCheck(deps JobDeps) gin.HandlerFunc {
 
 			laterOps, err := deps.BatchFileOpRepo.FindByBatchJobID(c.Request.Context(), laterJob.ID)
 			if err != nil {
-				continue
+				// Fail closed: this check protects destructive revert work, so a
+				// read failure must not produce an incomplete overlapping-batches
+				// list that could falsely mark the revert safe.
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to evaluate overlapping batches"})
+				return
 			}
 
 			overlapCount := 0

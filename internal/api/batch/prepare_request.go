@@ -1,7 +1,9 @@
 package batch
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -29,8 +31,14 @@ func prepareBatchRequest(deps *core.APIDeps, rt *core.APIRuntime, c *gin.Context
 	var body map[string]any
 	if c.Request.Body != nil && c.Request.ContentLength != 0 {
 		if err := c.ShouldBindJSON(&body); err != nil {
-			// Body might have already been consumed by a prior ShouldBindJSON call.
-			// This is a best-effort parse for seam resolution fields.
+			// Only an empty/already-consumed body is benign (seam resolution then
+			// falls back to defaults). A genuinely malformed payload must NOT be
+			// treated as an empty body — return 400 so defaults are not silently
+			// applied to an invalid request.
+			if !errors.Is(err, io.EOF) {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid request body"})
+				return nil, fmt.Errorf("invalid request body: %w", err)
+			}
 			body = nil
 		}
 	}

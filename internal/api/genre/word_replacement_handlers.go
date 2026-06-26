@@ -39,7 +39,7 @@ func listWordReplacements(deps GenreDeps) gin.HandlerFunc {
 
 		replacements, err := deps.WordReplacementRepo.List(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			core.RespondInternalError(c, err)
 			return
 		}
 
@@ -83,7 +83,7 @@ func createWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 
 		existing, err := deps.WordReplacementRepo.FindByOriginal(c.Request.Context(), req.Original)
 		if err != nil && !database.IsNotFound(err) {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			core.RespondInternalError(c, err)
 			return
 		}
 		if existing != nil {
@@ -97,7 +97,7 @@ func createWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 		}
 
 		if err := deps.WordReplacementRepo.Create(c.Request.Context(), replacement); err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			core.RespondInternalError(c, err)
 			return
 		}
 
@@ -126,7 +126,7 @@ func updateWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 		existing, err := deps.WordReplacementRepo.FindByOriginal(c.Request.Context(), req.Original)
 		if err != nil {
 			if !database.IsNotFound(err) {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+				core.RespondInternalError(c, err)
 				return
 			}
 		}
@@ -138,7 +138,7 @@ func updateWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 		existing.Replacement = req.Replacement
 
 		if err := deps.WordReplacementRepo.Upsert(c.Request.Context(), existing); err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			core.RespondInternalError(c, err)
 			return
 		}
 
@@ -166,12 +166,12 @@ func deleteWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 					c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "word replacement not found"})
 					return
 				}
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+				core.RespondInternalError(c, err)
 				return
 			}
 
 			if err := deps.WordReplacementRepo.DeleteByID(c.Request.Context(), uint(id)); err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+				core.RespondInternalError(c, err)
 				return
 			}
 
@@ -188,12 +188,12 @@ func deleteWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 					c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "word replacement not found"})
 					return
 				}
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+				core.RespondInternalError(c, err)
 				return
 			}
 
 			if err := deps.WordReplacementRepo.Delete(c.Request.Context(), original); err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+				core.RespondInternalError(c, err)
 				return
 			}
 
@@ -216,7 +216,7 @@ func exportWordReplacements(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		replacements, err := deps.WordReplacementRepo.List(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			core.RespondInternalError(c, err)
 			return
 		}
 

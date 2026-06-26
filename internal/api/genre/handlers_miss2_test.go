@@ -39,7 +39,7 @@ func TestListGenres_Miss2_RepoListError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "db offline")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- listGenres: with translations ---

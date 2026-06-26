@@ -292,7 +292,7 @@ func TestRevertBatch(t *testing.T) {
 			},
 		},
 		{
-			name: "already reverted returns 400",
+			name: "already reverted returns 409",
 			setupFn: func(t *testing.T, deps *core.APIDeps, fs afero.Fs) string {
 				jobID := seedRevertableJob(t, deps, fs, []string{"DEF-001", "DEF-002"})
 
@@ -306,11 +306,11 @@ func TestRevertBatch(t *testing.T) {
 
 				return jobID
 			},
-			expectedStatus: http.StatusBadRequest,
+			expectedStatus: http.StatusConflict,
 			validateFn: func(t *testing.T, body []byte, _ *core.APIDeps) {
 				var errResp contracts.ErrorResponse
 				require.NoError(t, json.Unmarshal(body, &errResp))
-				assert.Equal(t, "Job is not in organized status", errResp.Error)
+				assert.Equal(t, "Batch already reverted", errResp.Error)
 			},
 		},
 	}

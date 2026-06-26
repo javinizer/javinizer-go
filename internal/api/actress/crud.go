@@ -7,9 +7,12 @@ import (
 	"strconv"
 	"strings"
 
+	"encoding/json"
+
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
@@ -367,26 +370,50 @@ type importSummaryResponse struct {
 
 func exportActresses(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Load actresses in chunks to avoid loading the entire table into memory.
-		// For a library with 100k+ actresses, loading all at once would allocate
-		// hundreds of megabytes and risk OOM.
+		// Stream the actress table to the response in chunks instead of
+		// materializing the entire table in memory. For a library with 100k+
+		// actresses, buffering every record would allocate hundreds of
+		// megabytes and risk OOM.
 		const chunkSize = 1000
-		var all []models.Actress
+		c.Header("Content-Type", "application/json")
+		enc := json.NewEncoder(c.Writer)
+		first := true
+		if _, err := c.Writer.Write([]byte("[")); err != nil {
+			return
+		}
 		offset := 0
 		for {
 			chunk, err := deps.ActressRepo.List(c.Request.Context(), chunkSize, offset)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+				// Once the header/body has started we can no longer swap to a
+				// 500; log and stop writing so the client sees a truncated
+				// stream rather than a corrupt buffer.
+				if first {
+					core.RespondInternalError(c, err)
+					return
+				}
+				logging.Errorf("exportActresses: streaming aborted: %v", err)
 				return
 			}
 			if len(chunk) == 0 {
 				break
 			}
-			all = append(all, chunk...)
-			offset += chunkSize
+			for _, actress := range chunk {
+				if !first {
+					if _, err := c.Writer.Write([]byte(",")); err != nil {
+						return
+					}
+				}
+				if err := enc.Encode(actress); err != nil {
+					return
+				}
+				first = false
+			}
+			offset += len(chunk)
 		}
-
-		c.JSON(http.StatusOK, all)
+		if _, err := c.Writer.Write([]byte("]")); err != nil {
+			return
+		}
 	}
 }
 

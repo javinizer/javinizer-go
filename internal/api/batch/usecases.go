@@ -45,9 +45,11 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 	if input.Offset > total {
 		input.Offset = total
 	}
-	end := input.Offset + input.Limit
-	if end > total {
+	end := input.Offset
+	if input.Limit > total-input.Offset {
 		end = total
+	} else {
+		end += input.Limit
 	}
 	pagedJobs := jobs[input.Offset:end]
 

@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 )
 
 func writeActressMergeError(c *gin.Context, err error) {
@@ -22,7 +23,7 @@ func writeActressMergeError(c *gin.Context, err error) {
 	case errors.Is(err, database.ErrActressMergeUniqueConstraint):
 		c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+		core.RespondInternalError(c, err)
 	}
 }
 

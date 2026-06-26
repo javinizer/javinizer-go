@@ -34,7 +34,7 @@ func TestListGenreReplacements_Miss_RepoListError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "db offline")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- createGenreReplacement: FindByOriginal non-NotFound error ---
@@ -55,7 +55,7 @@ func TestCreateGenreReplacement_Miss_FindByOriginalError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "conn refused")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- createGenreReplacement: Create error ---
@@ -77,7 +77,7 @@ func TestCreateGenreReplacement_Miss_CreateError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "write fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- updateGenreReplacement: FindByOriginal non-NotFound error ---
@@ -98,7 +98,7 @@ func TestUpdateGenreReplacement_Miss_FindByOriginalError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "conn refused")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- updateGenreReplacement: Upsert error ---
@@ -121,7 +121,7 @@ func TestUpdateGenreReplacement_Miss_UpsertError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "write fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteGenreReplacement: by ID, FindByID non-NotFound error ---
@@ -140,7 +140,7 @@ func TestDeleteGenreReplacement_Miss_FindByIDError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "conn refused")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteGenreReplacement: by ID, DeleteByID error ---
@@ -161,7 +161,7 @@ func TestDeleteGenreReplacement_Miss_DeleteByIDError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "delete fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteGenreReplacement: by original, FindByOriginal non-NotFound error ---
@@ -180,7 +180,7 @@ func TestDeleteGenreReplacement_Miss_FindByOriginalError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "conn refused")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteGenreReplacement: by original, Delete error ---
@@ -201,7 +201,7 @@ func TestDeleteGenreReplacement_Miss_DeleteError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "delete fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteGenreReplacement: invalid id format ---

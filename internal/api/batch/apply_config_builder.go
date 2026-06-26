@@ -54,7 +54,7 @@ func resolveOrganizeApplyConfig(
 		if req.Destination == "" {
 			return worker.ApplyPhaseConfig{}, fmt.Errorf("destination is required for organize mode")
 		}
-		if !isDirAllowed(deps.GetFs(), req.Destination, secCfg.AllowedDirectories, secCfg.DeniedDirectories) {
+		if !isDirAllowed(deps.GetFs(), req.Destination, secCfg) {
 			return worker.ApplyPhaseConfig{}, fmt.Errorf("Access denied to requested directory") //nolint:staticcheck // intentional: matches existing test expectations
 		}
 	}

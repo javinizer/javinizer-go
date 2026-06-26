@@ -140,16 +140,16 @@ func TestRevertBatch_AlreadyReverted(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// Second revert: job is now "reverted" status, so handler returns 400
+	// Second revert: job is now "reverted" status, so handler returns 409
 	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+"/revert", nil)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 
-	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assert.Equal(t, http.StatusConflict, w2.Code)
 
 	var resp contracts.ErrorResponse
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
-	assert.Contains(t, resp.Error, "not in organized status")
+	assert.Contains(t, resp.Error, "already reverted")
 }
 
 func TestRevertBatch_NoOperationsFound(t *testing.T) {

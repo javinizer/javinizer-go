@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -34,9 +35,8 @@ func searchActresses(deps ActressDeps) gin.HandlerFunc {
 		// This searches in first_name, last_name, and japanese_name
 		actresses, err := deps.ActressRepo.Search(c.Request.Context(), query)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{
-				Error: err.Error(),
-			})
+			logging.Errorf("actress search failed: %v", err)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "internal server error"})
 			return
 		}
 

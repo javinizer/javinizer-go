@@ -19,10 +19,14 @@ const (
 )
 
 // isDirAllowed checks if a directory is allowed based on API security settings.
-// It delegates to core.PathValidator.IsDirAllowed which enforces both denied (blocklist)
-// and allowed (allowlist) directory rules, including the built-in denylist.
-func isDirAllowed(fs afero.Fs, dir string, allow, deny []string) bool {
-	v := core.NewPathValidator(fs, allow, deny)
+// It delegates to core.PathValidator (constructed with the full security config,
+// including Windows UNC policy) which enforces both denied (blocklist) and allowed
+// (allowlist) directory rules, the built-in denylist, and the UNC gate.
+func isDirAllowed(fs afero.Fs, dir string, secCfg *core.SecurityNarrowConfig) bool {
+	v := core.NewPathValidatorWithUNC(fs, secCfg.AllowedDirectories, secCfg.DeniedDirectories, secCfg.AllowUNC, secCfg.AllowedUNCServers)
+	if !v.IsUNCAllowed(dir) {
+		return false
+	}
 	return v.IsDirAllowed(dir)
 }
 
@@ -66,7 +70,7 @@ func discoverSiblingPartsWithMetadata(ctx context.Context, files []string, rt *c
 	var dirScans []dirScan
 
 	for dir := range dirsToScan {
-		if !isDirAllowed(fs, dir, secCfg.AllowedDirectories, secCfg.DeniedDirectories) {
+		if !isDirAllowed(fs, dir, secCfg) {
 			logging.Debugf("Skipping sibling discovery in disallowed directory: %s", dir)
 			continue
 		}

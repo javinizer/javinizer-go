@@ -64,5 +64,7 @@ func writeErrorResponse(c *gin.Context, status int, isGone bool, errMsg string) 
 // etc. — are rejected. The former redundant `snap.Status == JobStatusRunning`
 // clause is subsumed since Running is neither Pending nor Completed.
 func rescrapeNotAllowed(snap *worker.BatchJobStatus) bool {
-	return snap.Status != models.JobStatusPending && snap.Status != models.JobStatusCompleted
+	// Logically deleted jobs are never rescrapeable, even if their status is
+	// still Pending or Completed — rescrape must return the 410 deleted path.
+	return snap.IsDeleted || (snap.Status != models.JobStatusPending && snap.Status != models.JobStatusCompleted)
 }

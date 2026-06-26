@@ -392,7 +392,7 @@ func TestSearchActresses_RepoError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "search fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 func TestSearchActresses_EmptyQuery(t *testing.T) {

@@ -34,7 +34,7 @@ func TestListWordReplacements_Miss_RepoListError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "db offline")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- createWordReplacement: FindByOriginal non-NotFound error ---
@@ -55,7 +55,7 @@ func TestCreateWordReplacement_Miss_FindByOriginalError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "conn refused")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- createWordReplacement: Create error ---
@@ -77,7 +77,7 @@ func TestCreateWordReplacement_Miss_CreateError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "write fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteWordReplacement: by ID, FindByID non-NotFound error ---
@@ -96,7 +96,7 @@ func TestDeleteWordReplacement_Miss_FindByIDError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "conn refused")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteWordReplacement: by ID, DeleteByID error ---
@@ -117,7 +117,7 @@ func TestDeleteWordReplacement_Miss_DeleteByIDError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "delete fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteWordReplacement: by original, FindByOriginal non-NotFound error ---
@@ -136,7 +136,7 @@ func TestDeleteWordReplacement_Miss_FindByOriginalError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "conn refused")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteWordReplacement: by original, Delete error ---
@@ -157,7 +157,7 @@ func TestDeleteWordReplacement_Miss_DeleteError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "delete fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteWordReplacement: invalid id format ---

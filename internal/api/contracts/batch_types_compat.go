@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -30,23 +31,29 @@ func (r *BatchFileResult) UnmarshalJSON(data []byte) error {
 	// If "movie" was present in JSON, unmarshal via *models.Movie (which
 	// handles the persistence format: content_id + flat poster fields via
 	// custom UnmarshalJSON), then project to *MovieView.
-	if len(aux.Movie) > 0 && string(aux.Movie) != "null" {
+	if rawJSONPresent(aux.Movie) {
 		var m models.Movie
-		if err := json.Unmarshal(aux.Movie, &m); err == nil {
-			r.Movie = MovieViewFromModel(&m)
+		if err := json.Unmarshal(aux.Movie, &m); err != nil {
+			return fmt.Errorf("movie field: %w", err)
 		}
+		r.Movie = MovieViewFromModel(&m)
 		return nil
 	}
 	// Otherwise, try to convert legacy "data" field.
-	if len(aux.Data) > 0 {
-		reencoded, err := json.Marshal(aux.Data)
-		if err != nil {
+	if rawJSONPresent(aux.Data) {
+		var m models.Movie
+		if err := json.Unmarshal(aux.Data, &m); err != nil {
 			return fmt.Errorf("legacy data field: %w", err)
 		}
-		var m models.Movie
-		if err := json.Unmarshal(reencoded, &m); err == nil {
-			r.Movie = MovieViewFromModel(&m)
-		}
+		r.Movie = MovieViewFromModel(&m)
 	}
 	return nil
+}
+
+// rawJSONPresent reports whether a JSON RawMessage is present and non-null.
+// It is used to skip both absent fields and explicit `null` values so a legacy
+// `data: null` does not unmarshal into a phantom non-nil MovieView.
+func rawJSONPresent(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
 }

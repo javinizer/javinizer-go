@@ -204,7 +204,7 @@ func previewOrganize(rt *core.APIRuntime) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "destination is required for organize and preview modes"})
 				return
 			}
-			if !isDirAllowed(deps.GetFs(), req.Destination, secCfg.AllowedDirectories, secCfg.DeniedDirectories) {
+			if !isDirAllowed(deps.GetFs(), req.Destination, secCfg) {
 				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: "Access denied to requested directory"})
 				return
 			}

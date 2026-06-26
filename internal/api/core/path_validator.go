@@ -329,6 +329,23 @@ func (v *PathValidator) IsDirAllowed(dir string) bool {
 	return false
 }
 
+// IsUNCAllowed reports whether dir is permitted under the validator's Windows
+// UNC policy. Non-UNC paths are always allowed; UNC paths require allowUNC and
+// a matching allowedUNCServers entry (mirroring the UNC gate in ValidateDir so
+// callers that only use IsDirAllowed still enforce the UNC restriction).
+func (v *PathValidator) IsUNCAllowed(dir string) bool {
+	if !isUNCPath(dir) {
+		return true
+	}
+	if !v.allowUNC {
+		return false
+	}
+	if _, err := normalizeUNCPath(dir, v.allowUNC, v.allowedUNCServers); err != nil {
+		return false
+	}
+	return true
+}
+
 // canonicalizePath resolves symlinks and canonicalizes non-existent child paths by
 // resolving the nearest existing ancestor. This keeps path checks consistent across
 // platforms where temp paths may include symlinked segments (e.g., /var -> /private/var on macOS).

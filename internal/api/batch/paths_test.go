@@ -42,12 +42,12 @@ func TestIsDirAllowed_OsFs(t *testing.T) {
 	require.NoError(t, fs.MkdirAll(filepath.Join(dir, "videos"), 0o755))
 
 	t.Run("allowed directory", func(t *testing.T) {
-		result := isDirAllowed(fs, dir, []string{dir}, nil)
+		result := isDirAllowed(fs, dir, &core.SecurityNarrowConfig{AllowedDirectories: []string{dir}})
 		assert.True(t, result)
 	})
 
 	t.Run("no allow list denies all", func(t *testing.T) {
-		result := isDirAllowed(fs, dir, nil, nil)
+		result := isDirAllowed(fs, dir, &core.SecurityNarrowConfig{})
 		assert.False(t, result)
 	})
 }

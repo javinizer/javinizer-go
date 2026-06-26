@@ -127,10 +127,24 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 	logging.Infof("Bulk rescrape request for job %s: %d movies, scrapers=%v, force=%v",
 		jobID, len(movieIDs), req.SelectedScrapers, req.Force)
 
-	// Use o.serverCtx directly so cancellation from server shutdown propagates
-	// to bulk rescrape work. (Previously context.WithoutCancel detached the
-	// work from shutdown, letting rescrapes continue after the server stopped.)
-	workCtx := o.serverCtx
+	// Derive workCtx from both o.serverCtx (so server shutdown cancels bulk
+	// work) and the caller's ctx (so a canceled HTTP request stops expensive
+	// rescrapes instead of running until shutdown).
+	baseCtx := o.serverCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	workCtx, cancelWork := context.WithCancel(baseCtx)
+	defer cancelWork()
+	if ctx != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				cancelWork()
+			case <-workCtx.Done():
+			}
+		}()
+	}
 
 	progressFn := func(movieID string, result *contracts.BulkRescrapeMovieResult, progress float64) {
 		if o.broadcast != nil {

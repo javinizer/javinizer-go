@@ -97,6 +97,10 @@ func revertBatch(deps JobDeps) gin.HandlerFunc {
 			return
 		}
 
+		if job.Status == models.JobStatusReverted {
+			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "Batch already reverted"})
+			return
+		}
 		if job.Status != models.JobStatusOrganized {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Job is not in organized status"})
 			return

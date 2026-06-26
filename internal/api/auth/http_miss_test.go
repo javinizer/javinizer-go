@@ -174,15 +174,11 @@ func TestGetAuthStatus_Miss_NilDeps(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var resp contracts.AuthStatusResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.True(t, resp.Initialized)
-	assert.True(t, resp.Authenticated)
+	// Fail closed: a missing runtime must not be reported as a logged-in session.
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
-// --- getAuthStatus: nil auth returns initialized+authenticated ---
+// --- getAuthStatus: nil auth fails closed (503) ---
 
 func TestGetAuthStatus_Miss_NilAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -194,12 +190,8 @@ func TestGetAuthStatus_Miss_NilAuth(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var resp contracts.AuthStatusResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.True(t, resp.Initialized)
-	assert.True(t, resp.Authenticated)
+	// Fail closed: missing auth deps must not be reported as a logged-in session.
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
 // --- getAuthStatus: not initialized returns initialized=false ---

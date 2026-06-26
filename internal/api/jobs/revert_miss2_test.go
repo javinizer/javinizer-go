@@ -118,7 +118,7 @@ func TestRevertBatch_Miss2_AlreadyReverted(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+"/revert", nil)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
-	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assert.Equal(t, http.StatusConflict, w2.Code)
 }
 
 // --- revertOperation: job not found returns 404 ---

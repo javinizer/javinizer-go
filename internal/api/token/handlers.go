@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 )
 
 type createTokenRequest struct {
@@ -56,7 +57,7 @@ func createToken(svc *TokenService) gin.HandlerFunc {
 
 		token, fullToken, err := svc.Create(c.Request.Context(), req.Name)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			core.RespondInternalError(c, err)
 			return
 		}
 
@@ -83,7 +84,7 @@ func listTokens(svc *TokenService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokens, err := svc.List(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			core.RespondInternalError(c, err)
 			return
 		}
 
@@ -124,7 +125,7 @@ func revokeToken(svc *TokenService) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "token not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			core.RespondInternalError(c, err)
 			return
 		}
 
@@ -152,7 +153,7 @@ func regenerateToken(svc *TokenService) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "token not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			core.RespondInternalError(c, err)
 			return
 		}
 

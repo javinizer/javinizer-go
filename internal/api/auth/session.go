@@ -24,18 +24,12 @@ import (
 func getAuthStatus(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if rt == nil {
-			c.JSON(http.StatusOK, contracts.AuthStatusResponse{
-				Initialized:   true,
-				Authenticated: true,
-			})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "authentication is unavailable"})
 			return
 		}
 		deps := rt.Deps()
 		if deps == nil || deps.Auth == nil {
-			c.JSON(http.StatusOK, contracts.AuthStatusResponse{
-				Initialized:   true,
-				Authenticated: true,
-			})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "authentication is unavailable"})
 			return
 		}
 
