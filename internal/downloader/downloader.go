@@ -49,11 +49,17 @@ type DownloaderInterface interface {
 	Download(ctx context.Context, cmd DownloadCmd) (*DownloadOutcome, error)
 }
 
-// DownloadPartialError indicates that download was attempted but no critical
-// media (cover/poster) was successfully downloaded. Per-item errors are
-// captured in individual DownloadResult.Error fields. This sentinel error
-// lets the apply orchestrator detect total-download-failure and abort before
-// NFO generation rather than silently proceeding with no artwork.
+// DownloadPartialError is surfaced when all critical media (cover/poster)
+// failed to download while non-critical media (actress images, extrafanart)
+// may have succeeded. It carries the count of critical media types attempted
+// and succeeded (Succeeded is 0 when this sentinel is returned). Per-item
+// errors are captured in individual DownloadResult.Error fields. The apply
+// orchestrator treats this sentinel as non-fatal: it logs the failure,
+// preserves any non-critical artifacts that did download (for revert
+// cleanup), and proceeds to NFO generation — the project guarantee is that a
+// correct NFO is produced regardless of artwork availability. Total download
+// failure (a non-partial error) returns a nil outcome alongside the error;
+// callers must nil-check the outcome.
 type DownloadPartialError struct {
 	Attempted int // number of critical media types attempted (cover + poster)
 	Succeeded int // number of critical media types that downloaded successfully

@@ -62,6 +62,42 @@ describe('isTerminalStatus', () => {
 	});
 });
 
+describe('isTerminalStatus: organize/update phase-complete aggregates', () => {
+	// F-FE-CONS-1: apply_phase.go OnPhaseComplete emits the FINAL aggregate WS
+	// frame for a completed organize/update job as status
+	// 'organization_completed'/'update_completed' (Progress:100, no file_path),
+	// after all per-file 'organized'/'updated' frames and before
+	// MarkOrganized/MarkCompleted (which emit no further ProgressMessage). The
+	// last WS frame per job is one of these, so they must be terminal — otherwise
+	// Home activeJobCount (which folds latestByJob and tests
+	// !isTerminalStatus(latest.status)) perpetually counts a completed
+	// organize/update job as active until WS reconnect/reload.
+	it('returns true for organization_completed', () => {
+		expect(isTerminalStatus('organization_completed')).toBe(true);
+	});
+	it('returns true for update_completed', () => {
+		expect(isTerminalStatus('update_completed')).toBe(true);
+	});
+	it('is case insensitive for the aggregate statuses', () => {
+		expect(isTerminalStatus('ORGANIZATION_COMPLETED')).toBe(true);
+		expect(isTerminalStatus('UPDATE_COMPLETED')).toBe(true);
+	});
+	it('models the activeJobCount fix: a latestByJob entry whose latest message has status organization_completed (Progress:100, no file_path) is NOT active', () => {
+		// +page.svelte activeJobCount derives `hasActive = !isTerminalStatus(latest.status)`.
+		// The final aggregate frame for a completed organize job carries no
+		// file_path and Progress:100, so it lives only in latestByJob (not
+		// messagesByFile). With this status now terminal, hasActive is false → the
+		// job is no longer counted as active. (apply_phase.go OnPhaseComplete.)
+		const latest: ProgressMessage = makeMessage({
+			status: 'organization_completed',
+			progress: 100,
+			file_path: '',
+		});
+		expect(isTerminalStatus(latest.status)).toBe(true);
+		expect(!isTerminalStatus(latest.status)).toBe(false);
+	});
+});
+
 describe('computeJobProgress', () => {
 	describe('non-running jobs', () => {
 		it('uses finishedCount / totalFiles when not running', () => {

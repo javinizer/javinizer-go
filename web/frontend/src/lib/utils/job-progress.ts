@@ -12,6 +12,16 @@ export const TERMINAL_STATUSES = new Set([
 	// reconnect. Excluded from computeJobProgress activeProgress like other
 	// terminal per-file statuses (already counted in finishedCount).
 	'updated',
+	// Aggregate phase-complete statuses emitted by apply_phase.go
+	// OnPhaseComplete as the FINAL WS frame for a completed organize/update job
+	// (Progress:100, no file_path), after all per-file 'organized'/'updated'
+	// frames and before MarkOrganized/MarkCompleted (which emit NO further
+	// ProgressMessage). The last WS frame per job is one of these, so they MUST
+	// be terminal — otherwise Home activeJobCount (which folds latestByJob and
+	// tests !isTerminalStatus(latest.status)) perpetually counts a completed
+	// organize/update job as active until WS reconnect/reload (F-FE-CONS-1).
+	'organization_completed',
+	'update_completed',
 	'reverted',
 	// Per-file scrape completion statuses. A finished scrape file (success or
 	// error) is terminal for that file: it is already counted in finishedCount,
