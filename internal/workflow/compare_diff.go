@@ -42,9 +42,12 @@ var diffSpecs = []diffSpec{
 	{field: "rating", getNFO: func(m *models.Movie) any { return m.RatingScore }, getScraped: func(m *models.Movie) any { return m.RatingScore }, getMerged: func(m *models.Movie) any { return m.RatingScore }, diff: func(n, s *models.Movie) bool {
 		return n.RatingScore != s.RatingScore && (n.RatingScore != 0 || s.RatingScore != 0)
 	}},
-	// Release date — custom time comparison
+	// Release date — compare the date-only FORMATTED values so that
+	// timezone/time-of-day differences do not trigger false mismatches. The NFO
+	// renders only YYYY-MM-DD (formatTimePtr), so the diff must compare the same
+	// date-only representation rather than full time.Time equality.
 	{field: "release_date", getNFO: func(m *models.Movie) any { return formatTimePtr(m.ReleaseDate) }, getScraped: func(m *models.Movie) any { return formatTimePtr(m.ReleaseDate) }, getMerged: func(m *models.Movie) any { return formatTimePtr(m.ReleaseDate) }, diff: func(n, s *models.Movie) bool {
-		return !timePtrEqual(n.ReleaseDate, s.ReleaseDate)
+		return formatTimePtr(n.ReleaseDate) != formatTimePtr(s.ReleaseDate)
 	}},
 	// Media URLs — with non-empty guard
 	{field: "cover_url", getNFO: func(m *models.Movie) any { return m.Poster.CoverURL }, getScraped: func(m *models.Movie) any { return m.Poster.CoverURL }, getMerged: func(m *models.Movie) any { return m.Poster.CoverURL }, diff: func(n, s *models.Movie) bool {
@@ -145,17 +148,6 @@ func formatTimePtr(t *time.Time) string {
 		return "<nil>"
 	}
 	return t.Format("2006-01-02")
-}
-
-// timePtrEqual compares two *time.Time values. nil == nil, nil != non-nil.
-func timePtrEqual(a, b *time.Time) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return a.Equal(*b)
 }
 
 // formatList formats a slice as "N <itemType>: name1, name2, ..." truncated to

@@ -114,6 +114,8 @@
 //	cfg.Output.Download.DownloadPoster               → downloader, organizer
 //	cfg.Output.Download.DownloadTimeout              → downloader, workflow
 //	cfg.Output.Download.DownloadTrailer              → downloader, organizer
+//	cfg.Output.Download                            → api/core
+//	cfg.Output.Download.DownloadProxy              → api/core
 //	cfg.Output.MediaFormat.FanartFormat                 → downloader, organizer
 //	cfg.Output.Template.FileFormat                   → organizer
 //	cfg.Output.Template.FolderFormat                 → organizer

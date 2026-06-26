@@ -574,7 +574,7 @@ export function createReviewState(pageStore: Page) {
 		mutations.bulkExcludeMutation.mutate({
 			resultIds: filteredMovieGroups
 				.filter((g) => selectedMovieIds.has(g.movieId))
-				.map((g) => g.primaryResult.result_id),
+				.flatMap((g) => g.results.map((r) => r.result_id)),
 		});
 	}
 
@@ -891,7 +891,12 @@ export function createReviewState(pageStore: Page) {
 	async function openRescrapeModal(movieId: string) {
 		bulkRescrapeMovieIds = [];
 		rescrapeTargetResult = null;
-		await rescrapeController.openRescrapeModal(movieId);
+		const group = movieGroups.find((g) => g.movieId === movieId);
+		if (!group) {
+			toastStore.error('Unable to open rescrape: movie not found');
+			return;
+		}
+		await rescrapeController.openRescrapeModal(group.primaryResult.result_id);
 	}
 
 	async function openRescrapeModalForFailed(result: FileResult) {
@@ -1070,7 +1075,8 @@ export function createReviewState(pageStore: Page) {
 			if (
 				savedViewMode === 'grid-cover' ||
 				savedViewMode === 'grid-poster' ||
-				savedViewMode === 'grid'
+				savedViewMode === 'grid' ||
+				savedViewMode === 'detail'
 			) {
 				viewMode = savedViewMode === 'grid' ? 'grid-poster' : savedViewMode;
 			} else {

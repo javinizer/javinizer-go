@@ -320,7 +320,7 @@ func applyFile(
 	movie *models.Movie,
 	inputs applyPhaseInputs,
 	cfg ApplyPhaseConfig,
-) applyFileOutcome {
+) (outcome applyFileOutcome) {
 	startTime := time.Now()
 
 	// Fire the per-file organize-start hook BEFORE any work begins on this file,
@@ -331,7 +331,14 @@ func applyFile(
 		cfg.OnFileOrganizeStart(filePath)
 	}
 
-	outcome := applyFileOutcome{
+	// outcome is a NAMED return so the deferred withFileRecovery(rc, &outcome)
+	// mutates the value the caller actually receives. With an unnamed return,
+	// a recovered panic would leave the caller with the zero-value outcome
+	// (Failed/Panic both false), so a panicking file would be counted as
+	// neither organized nor failed by trackApplyResults — and the job would
+	// wrongly MarkOrganized. Naming the return closes that hole: setPanic now
+	// writes Failed/Panic onto the returned value.
+	outcome = applyFileOutcome{
 		FilePath: filePath,
 		MovieID:  movie.ID,
 	}

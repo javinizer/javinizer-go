@@ -73,7 +73,7 @@
 			destinationPath = savedOutputPath || initialPath;
 		}
 	});
-	type ScalarStrategy = 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only' | 'merge-arrays';
+	type ScalarStrategy = 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only';
 	type ArrayStrategy = 'merge' | 'replace';
 
 	let selectedPreset: string | undefined = $state(undefined);  // Merge strategy preset: conservative, gap-fill, aggressive

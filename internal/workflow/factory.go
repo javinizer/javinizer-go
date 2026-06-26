@@ -134,13 +134,12 @@ type domainConfigs struct {
 // each bridge.
 func extractDomainConfigs(cfg *config.Config) domainConfigs {
 	// Construct NFONameConfig first — shared across nfo, organizer, downloader bridges.
-	nfoNameCfg := nfo.NFONameConfig{
-		FilenameTemplate: cfg.Metadata.NFO.Format.FilenameTemplate,
-		GroupActress:     cfg.Output.Operation.GroupActress,
-		GroupActressName: cfg.Output.Operation.GroupActressName,
-		PerFile:          cfg.Metadata.NFO.Feature.PerFile,
-		FirstNameOrder:   cfg.Metadata.NFO.Format.FirstNameOrder,
-	}
+	// Use the canonical constructor so the full actress-rendering subset
+	// (GroupActress, GroupActressName, GroupUnknownActressName, ActressLanguageJA,
+	// ActressDelimiter) stays in sync with NFO/path generation. Previously this
+	// hand-built only the GroupActress subset, leaving display-title rendering
+	// (ApplyDisplayTitleFromSource) reading zero values for the remaining fields.
+	nfoNameCfg := nfo.NFONameConfigFromAppConfig(cfg)
 	return domainConfigs{
 		nfoNameCfg:  nfoNameCfg,
 		snCfg:       scanner.ConfigFromAppConfig(cfg),

@@ -309,6 +309,7 @@ export function createActressStore() {
 		if (
 			!(await confirmDialog('Delete Actress', `Delete actress "${name}"?`, {
 				confirmLabel: 'Delete',
+				variant: 'danger',
 			}))
 		)
 			return;

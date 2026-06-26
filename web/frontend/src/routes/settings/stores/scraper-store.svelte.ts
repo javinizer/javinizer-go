@@ -476,7 +476,9 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 		const fieldsUsing: string[] = [];
 
 		metadataFields.forEach((field) => {
-			const fieldPriority = config?.metadata?.priority?.[field.key];
+			const fieldPriority =
+				config?.metadata?.priority?.[field.key] ??
+				(field.key === 'code' ? config?.metadata?.priority?.['content_id'] : undefined);
 			const priority = fieldPriority && fieldPriority.length > 0 ? fieldPriority : globalPriority;
 
 			if (priority.includes(scraperName)) {

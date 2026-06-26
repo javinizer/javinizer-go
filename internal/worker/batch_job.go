@@ -182,6 +182,14 @@ func newBatchJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 }
 
 func isJobTransitioned(status models.JobStatus) bool {
+	// "Transitioned" for the gone-check means the job has left the rescrapeable
+	// active set. This intentionally includes Running (a job that already moved
+	// past Pending is not rescrapeable mid-flight and reads as gone to
+	// CompleteRescrape) and the terminal failure/cancel/revert states, but
+	// EXCLUDES Completed and Organized — a Completed/Organized job remains a
+	// valid rescrape source (its results are still authoritative). The
+	// excludeFile cancellation guard below uses a separate terminal-success
+	// check so it does not rely on this predicate's semantics.
 	return status == models.JobStatusRunning || status == models.JobStatusOrganized || status == models.JobStatusFailed || status == models.JobStatusCancelled || status == models.JobStatusReverted
 }
 
@@ -453,7 +461,15 @@ func excludeFile(job *BatchJob, filePath string) {
 	status := job.lifecycle.Status
 	job.lifecycle.mu.RUnlock()
 
-	if job.results.IsAllExcluded() && !isJobTransitioned(status) {
-		job.lifecycle.Cancel()
+	if job.results.IsAllExcluded() {
+		// Only cancel a job that is still in flight (Pending/Running). A job that
+		// already reached a terminal success state (Completed/Organized) must not
+		// be clobbered by Cancel when its last file is excluded — that was the
+		// real bug the isJobTransitioned predicate was previously (mis)used to
+		// guard. Check terminal-success explicitly here so the gone-check
+		// predicate above can keep its intended Running-is-transitioned shape.
+		if status == models.JobStatusPending || status == models.JobStatusRunning {
+			job.lifecycle.Cancel()
+		}
 	}
 }

@@ -40,7 +40,7 @@ type recoveryContext struct {
 //
 //	outcome := &myOutcome{}
 //	rc := recoveryContext{...}
-//	defer withFileRecovery(rc, outcome)
+//	defer withFileRecovery(rc, outcome)()
 //	// ... business logic ...
 func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 	return func() {

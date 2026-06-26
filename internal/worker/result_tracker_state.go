@@ -103,7 +103,10 @@ func stateRebuildMovieIDIndexLocked(s *resultTrackerState) {
 			continue
 		}
 		if result.ResultID == "" {
-			result.ResultID = uuid.New().String()
+			// Derive a deterministic ResultID from filePath so rebuilt state is
+			// stable across runs. uuid.New() gave legacy records a fresh random
+			// ID on every rebuild, destabilizing resultIDIndex.
+			result.ResultID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(filePath)).String()
 		}
 		for _, id := range movieIDsForResult(result) {
 			stateAddToMovieIDIndexLocked(s, id, filePath)
@@ -143,6 +146,11 @@ func stateRecalculateProgress(s *resultTrackerState) {
 	}
 }
 
+// stateLookupFilePathsForMovieIDLocked resolves a movie ID to the file paths
+// that reference it. Normalization (lowercase) is applied HERE via indexKey()
+// so every caller — FindFileForMovieID, OtherResultUsesMovieID, and all other
+// public lookups — uses one consistent path without needing to pre-normalize.
+// The index is built with the same indexKey() in stateAdd/RemoveFromMovieIDIndexLocked.
 func stateLookupFilePathsForMovieIDLocked(s *resultTrackerState, movieID string) []string {
 	key := indexKey(movieID)
 	return s.movieIDIndex[key]

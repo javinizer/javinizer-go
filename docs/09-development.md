@@ -100,7 +100,7 @@ type Scraper struct {
 
 func New(cfg *config.Config) *Scraper {
     return &Scraper{
-        config: &cfg.Scrapers.NewScraper,
+        config: cfg.Scrapers.Overrides["newscraper"],
         client: &http.Client{Timeout: 30 * time.Second},
     }
 }
@@ -110,7 +110,7 @@ func (s *Scraper) Name() string {
 }
 
 func (s *Scraper) IsEnabled() bool {
-    return s.config.Enabled
+    return s.config != nil && s.config.Enabled
 }
 
 func (s *Scraper) Search(id string) (*models.ScraperResult, error) {

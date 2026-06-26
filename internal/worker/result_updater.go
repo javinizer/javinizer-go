@@ -51,7 +51,16 @@ func (ru *resultUpdater) UpdateFileResult(filePath string, result *MovieResult) 
 			ru.Failed++
 		}
 	}
-	stateUpdateProgressFromCounters(ru.resultTrackerState)
+	// For excluded files the Completed/Failed counters are deliberately not
+	// touched above, so the counter-based helper would compute progress from
+	// stale counters and could regress after a late terminal update. Trigger a
+	// full recalculation instead, which iterates actual results and skips
+	// excluded paths. Non-excluded updates keep the fast counter path.
+	if ru.Excluded[filePath] {
+		stateRecalculateProgress(ru.resultTrackerState)
+	} else {
+		stateUpdateProgressFromCounters(ru.resultTrackerState)
+	}
 }
 
 // SetProvenance records provenance metadata for a file path.

@@ -110,7 +110,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 	function handlePosterCropImageError() {
 		const currentMovie = deps.getCurrentMovie();
 		if (currentMovie && deps.getCropSourceURL().includes('-full.jpg')) {
-			const posterMovieId = currentMovie.id;
+			const posterMovieId = deps.getCurrentResult()?.movie_id ?? currentMovie.id;
 			const fallbackURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}.jpg`;
 			deps.setCropSourceURL(`${fallbackURL}?v=${now()}`);
 			return;

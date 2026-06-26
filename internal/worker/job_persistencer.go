@@ -70,8 +70,12 @@ func (p *dbJobPersistence) PersistJob(job *BatchJob) {
 }
 
 func (p *dbJobPersistence) PersistJobByID(id string) {
-	// Cannot resolve by ID without the store map — this is a store-level operation.
-	// The store wraps this with its own map lookup.
+	// dbJobPersistence only holds the job repo, not the store's id→*BatchJob
+	// map, so it cannot resolve a job by ID. ID→job resolution lives in
+	// JobStore.PersistJobByID (which looks up s.jobs then calls PersistJob).
+	// Rather than silently dropping the update, report the inability to persist
+	// so callers using the JobPersistencer contract get a signal.
+	logging.Warnf("dbJobPersistence.PersistJobByID(%s) cannot resolve job by ID without the store map; update not persisted", id)
 }
 
 func (p *dbJobPersistence) DeleteJobFromDB(id string) error {

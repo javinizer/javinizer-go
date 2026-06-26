@@ -6,7 +6,7 @@ import (
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
 
-func scraperDisplayTitleAndOptions(deps *core.APIDeps, name string, profileChoices []contracts.ScraperChoice) (string, []contracts.ScraperOption) {
+func scraperDisplayTitleAndOptions(deps *core.APIDeps, name string, profileChoices, downloadProfileChoices []contracts.ScraperChoice) (string, []contracts.ScraperOption) {
 	if deps != nil {
 		if result, exists := deps.GetScraperOptions(name); exists {
 			options := make([]contracts.ScraperOption, 0, len(result.Options)+10)
@@ -14,7 +14,7 @@ func scraperDisplayTitleAndOptions(deps *core.APIDeps, name string, profileChoic
 
 			options = append(options, scraperUserAgentOptions()...)
 			options = append(options, scraperProxyOptions(profileChoices)...)
-			options = append(options, scraperDownloadProxyOptions(profileChoices)...)
+			options = append(options, scraperDownloadProxyOptions(downloadProfileChoices)...)
 
 			return result.DisplayTitle, options
 		}
@@ -22,7 +22,7 @@ func scraperDisplayTitleAndOptions(deps *core.APIDeps, name string, profileChoic
 
 	options := scraperUserAgentOptions()
 	options = append(options, scraperProxyOptions(profileChoices)...)
-	options = append(options, scraperDownloadProxyOptions(profileChoices)...)
+	options = append(options, scraperDownloadProxyOptions(downloadProfileChoices)...)
 
 	return name, options
 }

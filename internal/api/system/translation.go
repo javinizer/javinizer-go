@@ -248,6 +248,12 @@ func getDeepLUsage(deps *core.APIDeps) gin.HandlerFunc {
 			} else {
 				baseURL = "https://api-free.deepl.com"
 			}
+		} else if !isValidHTTPURL(baseURL) {
+			// Validate user-supplied base_url before forwarding it upstream to
+			// prevent SSRF and avoid masking bad input as a 502. Mirrors the
+			// validation used by getTranslationModels.
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "base_url must be a valid http(s) URL"})
+			return
 		}
 
 		apiKey := strings.TrimSpace(req.APIKey)

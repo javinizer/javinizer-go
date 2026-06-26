@@ -198,7 +198,8 @@
 										if (!movie) return undefined;
 										return s.resolvePosterUrl(movie, group.primaryResult.file_path);
 									})()}
-									displayCoverUrl={s.getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie)?.cover_url}									displayImageType={s.viewMode === 'grid-cover' ? 'cover' : 'poster'}
+									displayCoverUrl={s.getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie)?.cover_url}
+									displayImageType={s.viewMode === 'grid-cover' ? 'cover' : 'poster'}
 									previewImageURL={s.reviewPageController.previewImageURL}
 									onclick={(e) => {
 										if (s.selectionMode) {

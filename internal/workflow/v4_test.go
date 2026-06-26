@@ -32,10 +32,6 @@ func TestFormatTimePtrV4(t *testing.T) {
 	assert.Equal(t, "<nil>", formatTimePtr(nil))
 }
 
-func TestTimePtrEqualV4(t *testing.T) {
-	assert.True(t, timePtrEqual(nil, nil))
-}
-
 func TestResolveOperationModeV4(t *testing.T) {
 	_, err := ResolveOperationMode("organize")
 	assert.NoError(t, err)

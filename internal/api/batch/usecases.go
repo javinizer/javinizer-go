@@ -34,7 +34,14 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 
 	total := len(jobs)
 
-	// Apply pagination
+	// Apply pagination — normalize Offset/Limit to non-negative values before
+	// indexing to avoid panics on bad input, then clamp the upper bound to total.
+	if input.Offset < 0 {
+		input.Offset = 0
+	}
+	if input.Limit < 0 {
+		input.Limit = 0
+	}
 	if input.Offset > total {
 		input.Offset = total
 	}
@@ -179,6 +186,11 @@ func StartScrapeUseCase(
 	})
 
 	scrapeOpts := factory.NewScrapeConfig(input.SelectedScrapers, input.Strict, input.Force)
+	// Propagate the discovered file match metadata into the scrape phase so it
+	// is available during scraping (mirrors BatchJobOptions.FileMatchInfo above);
+	// otherwise metadata collected earlier in the usecase never reaches the
+	// scrape config.
+	scrapeOpts.FileMatchInfo = matchInfo
 	// Wire per-file scrape progress hooks so the frontend's messagesByFile
 	// populates during scrape and ProgressModal shows live per-file status.
 	// Restores main's realtime.ProgressAdapter behavior (deleted in this

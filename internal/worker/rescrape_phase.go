@@ -85,20 +85,34 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 		return nil, commitErr
 	}
 
-	// Detect orphaned movie IDs
+	// Detect orphaned movie IDs. A movie ID is orphaned when this file no
+	// longer references it (the file now uses movieID) and no other file does
+	// either. currentMovieIDBeforeUpdate (read from the result map) and
+	// oldMovieID (passed by the caller) both describe prior IDs and may be
+	// equal — when they are, both branches would append the SAME id, so
+	// de-duplicate via orphanSeen before appending.
 	var orphanedIDs []string
+	orphanSeen := make(map[string]struct{})
+	addOrphan := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := orphanSeen[id]; ok {
+			return
+		}
+		orphanSeen[id] = struct{}{}
+		if !inputs.ResultMap.OtherResultUsesMovieID(filePath, id) {
+			orphanedIDs = append(orphanedIDs, id)
+		}
+	}
 
 	if currentMovieIDBeforeUpdate != "" && currentMovieIDBeforeUpdate != movieID {
-		if !inputs.ResultMap.OtherResultUsesMovieID(filePath, currentMovieIDBeforeUpdate) {
-			orphanedIDs = append(orphanedIDs, currentMovieIDBeforeUpdate)
-		}
+		addOrphan(currentMovieIDBeforeUpdate)
 	}
 
 	if movieID != "" && oldMovieID != "" && movieID != oldMovieID {
 		if currentMovieIDBeforeUpdate == oldMovieID {
-			if !inputs.ResultMap.OtherResultUsesMovieID(filePath, oldMovieID) {
-				orphanedIDs = append(orphanedIDs, oldMovieID)
-			}
+			addOrphan(oldMovieID)
 		}
 	}
 

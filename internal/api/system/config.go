@@ -157,7 +157,6 @@ func validateProxySaveConfig(deps *core.APIDeps, newCfg *config.Config, tokens m
 		normalizedProxy.DefaultProfile = normalizedProxy.Profile
 		normalizedProxy.Profile = ""
 	}
-	newGlobalHash, _ := core.HashProxyConfig(normalizedProxy)
 
 	// Check if global proxy enabled status or URL changed (meaningful changes)
 	globalChanged := oldCfg.Scrapers.Proxy.Enabled != newCfg.Scrapers.Proxy.Enabled ||
@@ -165,6 +164,15 @@ func validateProxySaveConfig(deps *core.APIDeps, newCfg *config.Config, tokens m
 		!proxyProfilesEqual(oldCfg.Scrapers.Proxy.Profiles, newCfg.Scrapers.Proxy.Profiles)
 
 	if globalChanged {
+		// Hash the proxy config only when a change is detected. A hashing
+		// failure means we cannot safely verify the token against the new
+		// settings, so fail closed immediately instead of risking validation
+		// against an empty/incorrect hash.
+		newGlobalHash, err := core.HashProxyConfig(normalizedProxy)
+		if err != nil {
+			return fmt.Errorf("failed to hash proxy settings: %w", err)
+		}
+
 		// If no token provided for global scope, reject
 		token, ok := tokens["global"]
 		if !ok || token == "" {
@@ -178,13 +186,19 @@ func validateProxySaveConfig(deps *core.APIDeps, newCfg *config.Config, tokens m
 	}
 
 	// Check if FlareSolverr settings changed
-	newFlareSolverrHash, _ := core.HashProxyConfig(newCfg.Scrapers.FlareSolverr)
-
 	flareSolverrChanged := oldCfg.Scrapers.FlareSolverr.Enabled != newCfg.Scrapers.FlareSolverr.Enabled ||
 		oldCfg.Scrapers.FlareSolverr.URL != newCfg.Scrapers.FlareSolverr.URL ||
 		oldCfg.Scrapers.FlareSolverr.Timeout != newCfg.Scrapers.FlareSolverr.Timeout
 
 	if flareSolverrChanged {
+		// Hash the FlareSolverr config only when a change is detected; fail
+		// closed on hashing errors so no token is validated against an
+		// incorrect hash.
+		newFlareSolverrHash, err := core.HashProxyConfig(newCfg.Scrapers.FlareSolverr)
+		if err != nil {
+			return fmt.Errorf("failed to hash flaresolverr settings: %w", err)
+		}
+
 		// If no token provided for flaresolverr scope, reject
 		token, ok := tokens["flaresolverr"]
 		if !ok || token == "" {

@@ -967,13 +967,13 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 
 func TestScraperDisplayTitleAndOptions(t *testing.T) {
 	t.Run("returns fallback for unknown scraper", func(t *testing.T) {
-		title, options := scraperDisplayTitleAndOptions(nil, "nonexistent_scraper", nil)
+		title, options := scraperDisplayTitleAndOptions(nil, "nonexistent_scraper", nil, nil)
 		assert.Equal(t, "nonexistent_scraper", title)
 		assert.NotEmpty(t, options)
 	})
 
 	t.Run("returns registered options for known scraper", func(t *testing.T) {
-		title, options := scraperDisplayTitleAndOptions(nil, "r18dev", nil)
+		title, options := scraperDisplayTitleAndOptions(nil, "r18dev", nil, nil)
 		assert.NotEmpty(t, title)
 		assert.NotEmpty(t, options)
 	})

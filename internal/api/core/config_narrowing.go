@@ -29,11 +29,12 @@ type APIConfig struct {
 	Port int    // cfg.Server.Port
 
 	// Scrapers
-	ScraperPriority    []string                  // cfg.Scrapers.Priority
-	ScraperUserAgent   string                    // cfg.Scrapers.UserAgent
-	ScraperReferer     string                    // cfg.Scrapers.Referer
-	ProxyConfig        models.ProxyConfig        // cfg.Scrapers.Proxy — whole struct for proxy test/validation
-	FlareSolverrConfig models.FlareSolverrConfig // cfg.Scrapers.FlareSolverr — whole struct for proxy test/validation
+	ScraperPriority     []string                  // cfg.Scrapers.Priority
+	ScraperUserAgent    string                    // cfg.Scrapers.UserAgent
+	ScraperReferer      string                    // cfg.Scrapers.Referer
+	ProxyConfig         models.ProxyConfig        // cfg.Scrapers.Proxy — whole struct for proxy test/validation
+	FlareSolverrConfig  models.FlareSolverrConfig // cfg.Scrapers.FlareSolverr — whole struct for proxy test/validation
+	DownloadProxyConfig models.ProxyConfig        // cfg.Output.Download.DownloadProxy — download-proxy profiles surfaced as download_proxy.profile choices
 
 	// Metadata
 	NFOEnabled          bool                     // cfg.Metadata.NFO.Feature.Enabled
@@ -193,6 +194,7 @@ func (c APIConfig) MatcherConfig() *MatcherNarrowConfig {
 // cfg.Metadata.Translation,
 // cfg.Output.GetOperationMode(), cfg.Output.Operation.AllowRevert,
 // cfg.Output.MediaFormat.MaxPosterHeight,
+// cfg.Output.Download, cfg.Output.Download.DownloadProxy,
 // cfg.Performance.MaxWorkers, cfg.Performance.WorkerTimeout,
 // cfg.Matching.RegexEnabled, cfg.Matching.RegexPattern,
 // cfg.System.TempDir, cfg.System.VersionCheckEnabled,
@@ -219,6 +221,7 @@ func ConfigFromAppConfig(cfg *config.Config) APIConfig {
 		ScraperReferer:      cfg.Scrapers.Referer,
 		ProxyConfig:         cfg.Scrapers.Proxy,
 		FlareSolverrConfig:  cfg.Scrapers.FlareSolverr,
+		DownloadProxyConfig: cfg.Output.Download.DownloadProxy,
 		NFOEnabled:          cfg.Metadata.NFO.Feature.Enabled,
 		NFOFilenameTemplate: cfg.Metadata.NFO.Format.FilenameTemplate,
 		NFOPerFile:          cfg.Metadata.NFO.Feature.PerFile,

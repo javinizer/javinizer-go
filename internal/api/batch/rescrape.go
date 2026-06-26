@@ -23,7 +23,9 @@ import (
 // @Success 200 {object} contracts.BatchRescrapeResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
+// @Failure 409 {object} contracts.ErrorResponse
 // @Failure 410 {object} contracts.ErrorResponse
+// @Failure 422 {object} contracts.ErrorResponse
 // @Failure 500 {object} contracts.ErrorResponse
 // @Router /api/v1/batch/{id}/results/{resultId}/rescrape [post]
 func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
@@ -56,7 +58,15 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		// Use the current authoritative movie ID from the typed Movie result
+		// (matching result_read_store.GetCurrentMovieID), falling back to the
+		// original match ID only when the result movie is absent. This ensures
+		// edits/prior rescrapes that selected a different movie use the current
+		// selection rather than the stale match ID.
 		movieID := result.FileMatchInfo.MovieID
+		if result.Movie != nil && result.Movie.ID != "" {
+			movieID = result.Movie.ID
+		}
 
 		// Additional status check for rescrape-specific allowed states.
 		snap := job.GetStatus()

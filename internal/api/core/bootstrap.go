@@ -47,9 +47,15 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	repos := coreDeps.DB.Repositories()
 
 	sharedEngine := template.NewEngine()
-	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, sharedEngine, nil)
+	// Initialize ONE filesystem and thread it through the DI seam (JobStore,
+	// Reverter, APIDeps.Fs) so there is a single afero.Fs default instead of
+	// three split ones (previously JobStore got nil, Reverter built its own
+	// OsFs, and APIDeps.Fs was left unset). GetFs() falls back to OsFs when
+	// nil, so this is behavior-preserving for existing callers.
+	fs := afero.NewOsFs()
+	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, sharedEngine, fs)
 	eventEmitter := eventlog.NewEmitter(repos.EventRepo)
-	reverter := history.NewReverter(afero.NewOsFs(), repos.BatchFileOpRepo)
+	reverter := history.NewReverter(fs, repos.BatchFileOpRepo)
 
 	apiDeps := &APIDeps{
 		CoreDeps:     coreDeps,
@@ -60,6 +66,7 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 		JobStore:     jobStore,
 		Auth:         auth,
 		TokenStore:   NewTokenStore(),
+		Fs:           fs,
 	}
 
 	// Create APIRuntime which owns the mutable state and sets the back-reference

@@ -3,7 +3,6 @@ package worker
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -172,10 +171,13 @@ func (rr *resultReadStore) allFilesExcludedLocked() bool {
 // and result are read atomically, closing the TOCTOU gap that existed when
 // two separate RLock acquisitions allowed the index to change between reads.
 func (rr *resultReadStore) FindFileForMovieID(movieID string) (*FileLookupResult, error) {
-	normalizedMovieID := strings.ToLower(movieID)
+	// movieID normalization (lowercase) is centralized inside
+	// stateLookupFilePathsForMovieIDLocked via indexKey(), so every public
+	// lookup — FindFileForMovieID, OtherResultUsesMovieID, and the rest —
+	// shares one consistent normalized path. Do not pre-normalize here.
 	rr.mu.RLock()
 	defer rr.mu.RUnlock()
-	filePaths := stateLookupFilePathsForMovieIDLocked(rr.resultTrackerState, normalizedMovieID)
+	filePaths := stateLookupFilePathsForMovieIDLocked(rr.resultTrackerState, movieID)
 	if len(filePaths) == 0 {
 		return nil, fmt.Errorf("movie ID %q not found in results", movieID)
 	}

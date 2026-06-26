@@ -346,18 +346,6 @@ func TestFormatTimePtr(t *testing.T) {
 	assert.Equal(t, "2024-03-15", formatTimePtr(&date))
 }
 
-func TestTimePtrEqual(t *testing.T) {
-	date1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	date2 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC) // same instant, different pointer
-	date3 := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
-
-	assert.True(t, timePtrEqual(nil, nil))
-	assert.False(t, timePtrEqual(nil, &date1))
-	assert.False(t, timePtrEqual(&date1, nil))
-	assert.True(t, timePtrEqual(&date1, &date2), "same instant different pointer should be equal")
-	assert.False(t, timePtrEqual(&date1, &date3))
-}
-
 func TestFormatActressList(t *testing.T) {
 	tests := []struct {
 		name string

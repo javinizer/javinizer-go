@@ -83,6 +83,13 @@ func resolveOrganizeApplyConfig(
 	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, false /* isUpdate */, sink)
 	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, false /* isUpdate */, sink)
 	applyOpts.PostApplyFunc = func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
+		// Guard: never dereference a nil payload. If the apply context or
+		// result is missing required fields, skip emitting this secondary
+		// event so the original apply error is preserved instead of being
+		// masked by a nil-panic here.
+		if afc == nil || afc.Movie == nil || afr == nil {
+			return
+		}
 		emitter := deps.GetEventEmitter()
 		if afr.Err != nil && emitter != nil {
 			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error()})
@@ -138,6 +145,11 @@ func resolveUpdateApplyConfig(
 	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.PostApplyFunc = func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
+		// Guard: never dereference a nil payload; skip the secondary event so
+		// the original apply error is preserved.
+		if afc == nil || afc.Movie == nil || afr == nil {
+			return
+		}
 		emitter := deps.GetEventEmitter()
 		if afr.Err != nil && emitter != nil {
 			_ = emitter.EmitOrganizeEvent(ctx, "nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error()})

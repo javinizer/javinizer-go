@@ -127,7 +127,10 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 	logging.Infof("Bulk rescrape request for job %s: %d movies, scrapers=%v, force=%v",
 		jobID, len(movieIDs), req.SelectedScrapers, req.Force)
 
-	workCtx := context.WithoutCancel(o.serverCtx)
+	// Use o.serverCtx directly so cancellation from server shutdown propagates
+	// to bulk rescrape work. (Previously context.WithoutCancel detached the
+	// work from shutdown, letting rescrapes continue after the server stopped.)
+	workCtx := o.serverCtx
 
 	progressFn := func(movieID string, result *contracts.BulkRescrapeMovieResult, progress float64) {
 		if o.broadcast != nil {

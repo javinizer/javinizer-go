@@ -183,8 +183,10 @@ func (h *Hub) Broadcast(message any) error {
 	case h.broadcast <- data:
 		return nil
 	default:
-		// Hub is busy or shutting down, drop the message to avoid blocking
-		logging.Warnf("WebSocket hub: broadcast message dropped (channel full)")
+		// Hub is busy or shutting down, drop the message to avoid blocking.
+		// Logged at debug (not warn) because a saturated hub can drop frames at a
+		// high rate under load; warning per-drop would flood the logs.
+		logging.Debugf("WebSocket hub: broadcast message dropped (channel full)")
 		return nil
 	}
 }

@@ -9,6 +9,7 @@ let resolved: 'light' | 'dark' = $state<'light' | 'dark'>(
 		: 'light',
 );
 let mediaQueryHandler: (() => void) | null = null;
+let mediaQueryList: MediaQueryList | null = null;
 
 function getSystemPreference(): 'light' | 'dark' {
 	if (typeof window === 'undefined') return 'light';
@@ -56,10 +57,9 @@ function initTheme(): void {
 	applyTheme(current);
 
 	if (typeof window !== 'undefined') {
+		mediaQueryList ??= window.matchMedia('(prefers-color-scheme: dark)');
 		if (mediaQueryHandler) {
-			window
-				.matchMedia('(prefers-color-scheme: dark)')
-				.removeEventListener('change', mediaQueryHandler);
+			mediaQueryList.removeEventListener('change', mediaQueryHandler);
 		}
 		const handler = () => {
 			if (current === 'system') {
@@ -67,15 +67,13 @@ function initTheme(): void {
 			}
 		};
 		mediaQueryHandler = handler;
-		window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', handler);
+		mediaQueryList.addEventListener('change', handler);
 	}
 }
 
 function destroyTheme(): void {
-	if (typeof window !== 'undefined' && mediaQueryHandler) {
-		window
-			.matchMedia('(prefers-color-scheme: dark)')
-			.removeEventListener('change', mediaQueryHandler);
+	if (typeof window !== 'undefined' && mediaQueryHandler && mediaQueryList) {
+		mediaQueryList.removeEventListener('change', mediaQueryHandler);
 		mediaQueryHandler = null;
 	}
 }

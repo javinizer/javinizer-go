@@ -27,6 +27,7 @@ func getAvailableScrapers(rt *core.APIRuntime) gin.HandlerFunc {
 		apiCfg := rt.GetAPIConfig()
 		batchCfg := apiCfg.BatchConfig()
 		profileChoices := proxyProfileChoices(apiCfg)
+		downloadProfileChoices := downloadProxyProfileChoices(apiCfg)
 
 		// Use getter to get current registry (respects config reloads)
 		registry := deps.GetScraperLister()
@@ -61,7 +62,7 @@ func getAvailableScrapers(rt *core.APIRuntime) gin.HandlerFunc {
 
 		for _, name := range orderedNames {
 			scraper := scraperByName[name]
-			displayName, options := scraperDisplayTitleAndOptions(deps, name, profileChoices)
+			displayName, options := scraperDisplayTitleAndOptions(deps, name, profileChoices, downloadProfileChoices)
 
 			scrapers = append(scrapers, contracts.ScraperInfo{
 				Name:         name,
@@ -125,10 +126,24 @@ func scraperDownloadProxyOptions(profileChoices []contracts.ScraperChoice) []con
 }
 
 func proxyProfileChoices(apiCfg core.APIConfig) []contracts.ScraperChoice {
+	return proxyProfileChoicesFrom(apiCfg.ProxyConfig)
+}
+
+// downloadProxyProfileChoices returns the selectable profile names for the
+// download proxy (cfg.Output.Download.DownloadProxy). Surfacing these lets the
+// scrapers response assemble download_proxy.profile choices from the
+// download-proxy profiles rather than reusing the scrape-proxy profiles.
+func downloadProxyProfileChoices(apiCfg core.APIConfig) []contracts.ScraperChoice {
+	return proxyProfileChoicesFrom(apiCfg.DownloadProxyConfig)
+}
+
+// proxyProfileChoicesFrom builds the choice list (Inherit Default + sorted
+// profile names) for a single ProxyConfig. Shared by the scrape- and
+// download-proxy choice builders to avoid duplicating the assembly logic.
+func proxyProfileChoicesFrom(sysCfg models.ProxyConfig) []contracts.ScraperChoice {
 	choices := []contracts.ScraperChoice{
 		{Value: "", Label: "Inherit Default"},
 	}
-	sysCfg := apiCfg.ProxyConfig
 	if len(sysCfg.Profiles) == 0 {
 		return choices
 	}

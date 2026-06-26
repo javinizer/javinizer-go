@@ -132,7 +132,11 @@ func (lc *JobLifecycle) MarkCancelled() {
 func (lc *JobLifecycle) MarkOrganized() {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
-	if lc.Status == models.JobStatusOrganized || lc.Status == models.JobStatusReverted {
+	// Guard terminal non-success states: a Cancelled/Failed job must not be
+	// clobbered by a later Organized. (Organized/Reverted already short-circuit
+	// here.) Completed→Organized remains a valid success upgrade.
+	if lc.Status == models.JobStatusOrganized || lc.Status == models.JobStatusReverted ||
+		lc.Status == models.JobStatusCancelled || lc.Status == models.JobStatusFailed {
 		return
 	}
 	lc.Status = models.JobStatusOrganized
@@ -170,7 +174,11 @@ func (lc *JobLifecycle) SetDeleted(deleted bool) {
 func (lc *JobLifecycle) MarkCompleted() {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
-	if lc.Status == models.JobStatusOrganized || lc.Status == models.JobStatusReverted {
+	// Guard terminal non-success states: a Cancelled/Failed job must not be
+	// clobbered by a later Completed. (Organized/Reverted already short-circuit
+	// here.) Re-Completed on an already-Completed job stays idempotent.
+	if lc.Status == models.JobStatusOrganized || lc.Status == models.JobStatusReverted ||
+		lc.Status == models.JobStatusCancelled || lc.Status == models.JobStatusFailed {
 		return
 	}
 	lc.Status = models.JobStatusCompleted

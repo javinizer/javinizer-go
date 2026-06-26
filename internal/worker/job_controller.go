@@ -89,7 +89,20 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	persistFn := c.job.deps.PersistFn
 	c.job.mu.RUnlock()
 
-	// Store apply-phase config values internally for GetStatus() reporting.
+	ctx, cancel := context.WithCancel(ctx)
+	// Same ordering as StartScrape: setCancelFunc before markStarted.
+	c.job.lifecycle.setCancelFunc(cancel)
+	if err := c.markStarted(models.JobStatusCompleted); err != nil {
+		cancel()
+		return err
+	}
+
+	// Commit apply-phase config values ONLY after markStarted succeeds, so a
+	// losing concurrent StartApply cannot clobber the winner's values. Both
+	// calls previously wrote cfg before racing on markStarted; the loser then
+	// returned an error but left its destination/operationMode/update/tempDir
+	// in c.job.cfg for the winner to read. Now only the winner writes, under
+	// c.job.mu, so GetStatus()/buildApplyInputs read committed apply config.
 	// Fields are unexported so external callers cannot mutate them.
 	c.job.mu.Lock()
 	if cfg.Destination != "" {
@@ -106,13 +119,6 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	}
 	c.job.mu.Unlock()
 
-	ctx, cancel := context.WithCancel(ctx)
-	// Same ordering as StartScrape: setCancelFunc before markStarted.
-	c.job.lifecycle.setCancelFunc(cancel)
-	if err := c.markStarted(models.JobStatusCompleted); err != nil {
-		cancel()
-		return err
-	}
 	if persistFn != nil {
 		persistFn()
 	}
