@@ -11,14 +11,12 @@
 #   This config is toggled per-pass. Each pass commits + pushes the scope
 #   change, then invokes `@coderabbitai full review` (bypasses incremental
 #   cache, unlike `@coderabbitai review`).
-#     PASS 1 (current): backend only (~117 files)
-#       - internal/worker/, internal/workflow/, internal/websocket/,
-#         internal/api/{batch,core,system}/
-#       - excludes web/frontend/** + .github/ + Makefile + configs/ + docs/
-#         + scripts/ + go.mod + go.sum + .coderabbit.yaml
-#     PASS 2 (next): frontend source + config/docs (~70 files)
-#       - flip the web/frontend/** exclusion below + exclude internal/**
-#         backend packages, re-push, re-`full review`.
+#     PASS 1 (done): backend only (~117 files) — internal/worker,
+#       internal/workflow, internal/websocket, internal/api/{batch,core,system}.
+#     PASS 2 (current): frontend source + config/docs (~70 files)
+#       - web/frontend/ source (excl. tests) + .github/ + Makefile +
+#         configs/ + docs/ + scripts/ + go.mod + go.sum
+#       - excludes ALL internal/** backend (Pass 1 already reviewed).
 # A single full review of the 1590-file diff is not feasible.
 #
 # Reviewed (kept in scope):
@@ -58,22 +56,15 @@ reviews:
 
     # --- Frontend source is IN scope (WS-driven progress-bar feature) ---
 
-    # === PASS 1 (backend only): exclude frontend source + non-backend files ===
-    #     (PASS 2 will flip this: keep web/frontend/** IN, exclude backend)
-    - "!web/frontend/**"
-    - "!.github/**"
-    - "!Makefile"
-    - "!configs/**"
-    - "!docs/**"
-    - "!scripts/**"
-    - "!go.mod"
-    - "!go.sum"
-    - "!.coderabbit.yaml"
-    - "!.gitignore"
-    - "!.golangci.yml"
-    - "!.mockery.yaml"
+    # === PASS 2 (frontend + config/docs): exclude ALL backend (internal/**) ===
+    #     Pass 1 already full-reviewed internal/worker, internal/workflow,
+    #     internal/websocket, internal/api/*. Keep web/frontend source +
+    #     .github/Makefile/configs/docs/scripts IN scope here.
+    - "!internal/**"
+    - "!cmd/**"
 
-    # --- Exclude non-critical packages (focus on worker/api/workflow) ---
+    # --- non-Go config files stay IN scope for Pass 2 (were excluded in Pass 1) ---
+
     - "!cmd/**"
     - "!internal/tui/**"
     - "!internal/scraper/**"
