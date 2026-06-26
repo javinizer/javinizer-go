@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
@@ -366,8 +367,12 @@ func TestTranslateMovie_CountMismatch_MissTest(t *testing.T) {
 
 func TestGooglePaid_ContextCancelled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Slow response
-		select {}
+		// Simulate a slow response that outlasts the client timeout. Use a
+		// FINITE sleep (not a bare select{}): a select{} handler would never
+		// return, deadlocking httptest.Server.Close() (which waits for
+		// in-flight handlers). The client cancels well before this sleep
+		// finishes, so Close() only waits out the remainder.
+		time.Sleep(500 * time.Millisecond)
 	}))
 	defer server.Close()
 
@@ -380,7 +385,7 @@ func TestGooglePaid_ContextCancelled(t *testing.T) {
 	}
 	p := NewGoogleProvider(cfg, server.Client())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	_, err := p.Translate(ctx, "ja", "en", []string{"test"})

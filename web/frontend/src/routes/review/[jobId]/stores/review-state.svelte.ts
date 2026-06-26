@@ -1075,11 +1075,18 @@ export function createReviewState(pageStore: Page) {
 			if (
 				savedViewMode === 'grid-cover' ||
 				savedViewMode === 'grid-poster' ||
-				savedViewMode === 'grid' ||
-				savedViewMode === 'detail'
+				savedViewMode === 'grid'
 			) {
 				viewMode = savedViewMode === 'grid' ? 'grid-poster' : savedViewMode;
 			} else {
+				// 'detail' is intentionally NOT restored from storage here, even
+				// though it is a valid view mode. 'detail' is a transient drill-in
+				// state reached by clicking a grid card (+page.svelte), not a list-
+				// view preference. Restoring it would make the review list open in
+				// detail view after a user drilled into one movie and navigated
+				// away — the configured default (cfgDefault below) should govern
+				// the initial list view instead. Only the grid variants persist as
+				// genuine view-mode preferences.
 				const cfgDefault = config?.webui?.default_review_view ?? 'grid-poster';
 				if (
 					cfgDefault === 'grid-cover' ||
