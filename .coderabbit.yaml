@@ -5,10 +5,21 @@
 # These path_filters exclude test files, generated code, mocks, and
 # non-critical packages so the review focuses on the architecturally
 # significant production code. After filtering, ~187 in-scope files remain
-# (117 backend + 55 frontend source + 15 config/docs), so review MUST run in
-# 2 incremental `@coderabbitai review` passes (each reviews only unreviewed
-# files): pass 1 = backend (worker/workflow/websocket/api), pass 2 = frontend
-# source + config/docs. A single full review of the 1590-file diff is not feasible.
+# (117 backend + 55 frontend source + 15 config/docs), over the 150-file limit.
+#
+# CHUNKED FULL REVIEW PLAN (force a complete re-review per chunk):
+#   This config is toggled per-pass. Each pass commits + pushes the scope
+#   change, then invokes `@coderabbitai full review` (bypasses incremental
+#   cache, unlike `@coderabbitai review`).
+#     PASS 1 (current): backend only (~117 files)
+#       - internal/worker/, internal/workflow/, internal/websocket/,
+#         internal/api/{batch,core,system}/
+#       - excludes web/frontend/** + .github/ + Makefile + configs/ + docs/
+#         + scripts/ + go.mod + go.sum + .coderabbit.yaml
+#     PASS 2 (next): frontend source + config/docs (~70 files)
+#       - flip the web/frontend/** exclusion below + exclude internal/**
+#         backend packages, re-push, re-`full review`.
+# A single full review of the 1590-file diff is not feasible.
 #
 # Reviewed (kept in scope):
 #   - internal/worker/      — job store, batch job, controller (Findings 2 & 3)
@@ -46,6 +57,21 @@ reviews:
     - "!web/frontend/tests/**"
 
     # --- Frontend source is IN scope (WS-driven progress-bar feature) ---
+
+    # === PASS 1 (backend only): exclude frontend source + non-backend files ===
+    #     (PASS 2 will flip this: keep web/frontend/** IN, exclude backend)
+    - "!web/frontend/**"
+    - "!.github/**"
+    - "!Makefile"
+    - "!configs/**"
+    - "!docs/**"
+    - "!scripts/**"
+    - "!go.mod"
+    - "!go.sum"
+    - "!.coderabbit.yaml"
+    - "!.gitignore"
+    - "!.golangci.yml"
+    - "!.mockery.yaml"
 
     # --- Exclude non-critical packages (focus on worker/api/workflow) ---
     - "!cmd/**"
