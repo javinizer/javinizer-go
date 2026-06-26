@@ -98,67 +98,101 @@ func (am *actressMergeModal) close() {
 const actressMergeOpTimeout = 30 * time.Second
 
 // actressPreviewResultMsg carries the outcome of an async PreviewMerge lookup.
+// token ties the result to the request that produced it so stale replies can
+// be ignored.
 type actressPreviewResultMsg struct {
 	preview *database.ActressMergePreview
 	err     error
+	token   uint64
 }
 
 // actressMergeResultMsg carries the outcome of an async Merge operation.
+// token ties the result to the request that produced it so stale replies can
+// be ignored.
 type actressMergeResultMsg struct {
 	result *database.ActressMergeResult
 	err    error
+	token  uint64
 }
 
 func (am *actressMergeModal) loadPreviewCmd() tea.Cmd {
+	// Snapshot the live modal inputs BEFORE returning the cmd so a later edit
+	// (or a second Enter press) cannot race with the background read. The token
+	// lets handlePreviewResult ignore stale/out-of-order replies.
+	targetVal := am.targetInput.Value()
+	sourceVal := am.sourceInput.Value()
+	token := am.nextMergeToken()
 	return func() tea.Msg {
 		repo := am.deps.ActressRepo()
 		if repo == nil {
-			return actressPreviewResultMsg{err: fmt.Errorf("actress repository not initialized")}
+			return actressPreviewResultMsg{err: fmt.Errorf("actress repository not initialized"), token: token}
 		}
-		targetID, err := parseActressMergeID(am.targetInput.Value())
+		targetID, err := parseActressMergeID(targetVal)
 		if err != nil {
-			return actressPreviewResultMsg{err: fmt.Errorf("target ID: %w", err)}
+			return actressPreviewResultMsg{err: fmt.Errorf("target ID: %w", err), token: token}
 		}
-		sourceID, err := parseActressMergeID(am.sourceInput.Value())
+		sourceID, err := parseActressMergeID(sourceVal)
 		if err != nil {
-			return actressPreviewResultMsg{err: fmt.Errorf("source ID: %w", err)}
+			return actressPreviewResultMsg{err: fmt.Errorf("source ID: %w", err), token: token}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), actressMergeOpTimeout)
 		defer cancel()
 		preview, err := repo.PreviewMerge(ctx, targetID, sourceID)
 		if err != nil {
-			return actressPreviewResultMsg{err: err}
+			return actressPreviewResultMsg{err: err, token: token}
 		}
-		return actressPreviewResultMsg{preview: preview}
+		return actressPreviewResultMsg{preview: preview, token: token}
 	}
 }
 
 func (am *actressMergeModal) applyCmd() tea.Cmd {
+	// Snapshot the live modal inputs and clone resolutions BEFORE returning the
+	// cmd so later edits cannot race with the background write. The token lets
+	// handleMergeResult ignore stale/out-of-order replies.
+	targetVal := am.targetInput.Value()
+	sourceVal := am.sourceInput.Value()
+	resolutionsCopy := make(map[string]string, len(am.resolutions))
+	for k, v := range am.resolutions {
+		resolutionsCopy[k] = v
+	}
+	token := am.nextMergeToken()
 	return func() tea.Msg {
 		repo := am.deps.ActressRepo()
 		if repo == nil {
-			return actressMergeResultMsg{err: fmt.Errorf("actress repository not initialized")}
+			return actressMergeResultMsg{err: fmt.Errorf("actress repository not initialized"), token: token}
 		}
-		targetID, err := parseActressMergeID(am.targetInput.Value())
+		targetID, err := parseActressMergeID(targetVal)
 		if err != nil {
-			return actressMergeResultMsg{err: fmt.Errorf("target ID: %w", err)}
+			return actressMergeResultMsg{err: fmt.Errorf("target ID: %w", err), token: token}
 		}
-		sourceID, err := parseActressMergeID(am.sourceInput.Value())
+		sourceID, err := parseActressMergeID(sourceVal)
 		if err != nil {
-			return actressMergeResultMsg{err: fmt.Errorf("source ID: %w", err)}
+			return actressMergeResultMsg{err: fmt.Errorf("source ID: %w", err), token: token}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), actressMergeOpTimeout)
 		defer cancel()
-		result, err := repo.Merge(ctx, targetID, sourceID, am.resolutions)
+		result, err := repo.Merge(ctx, targetID, sourceID, resolutionsCopy)
 		if err != nil {
-			return actressMergeResultMsg{err: err}
+			return actressMergeResultMsg{err: err, token: token}
 		}
-		return actressMergeResultMsg{result: result}
+		return actressMergeResultMsg{result: result, token: token}
 	}
 }
 
+// nextMergeToken returns the next in-flight request token and records it as the
+// current one, so only the most-recently-launched request's reply is applied.
+func (am *actressMergeModal) nextMergeToken() uint64 {
+	am.mergeReqToken++
+	return am.mergeReqToken
+}
+
 // handlePreviewResult applies the async PreviewMerge outcome to modal state.
+// Stale/out-of-order replies (token mismatch) are ignored.
 func (am *actressMergeModal) handlePreviewResult(m actressPreviewResultMsg) (tea.Model, tea.Cmd) {
+	if m.token != am.mergeReqToken {
+		return am, nil
+	}
+	am.mergeReqToken = 0
 	if m.err != nil {
 		am.err = normalizeActressMergeError(m.err)
 		am.deps.AddLog("warn", "Actress merge preview failed: "+m.err.Error())
@@ -182,7 +216,12 @@ func (am *actressMergeModal) handlePreviewResult(m actressPreviewResultMsg) (tea
 }
 
 // handleMergeResult applies the async Merge outcome to modal state.
+// Stale/out-of-order replies (token mismatch) are ignored.
 func (am *actressMergeModal) handleMergeResult(m actressMergeResultMsg) (tea.Model, tea.Cmd) {
+	if m.token != am.mergeReqToken {
+		return am, nil
+	}
+	am.mergeReqToken = 0
 	if m.err != nil {
 		am.err = normalizeActressMergeError(m.err)
 		am.deps.AddLog("warn", "Actress merge failed: "+m.err.Error())

@@ -101,7 +101,11 @@ type actressMergeModal struct {
 	conflictCursor int
 	result         *database.ActressMergeResult
 	err            string
-	deps           actressMergeDeps //nolint:all
+	// mergeReqToken identifies the in-flight async merge/preview request so
+	// out-of-order or stale responses (e.g. from a second Enter press) can be
+	// ignored. Zero means no request in flight.
+	mergeReqToken uint64
+	deps          actressMergeDeps //nolint:all
 }
 
 // folderPickerDeps holds the narrow interface the folder picker modal needs
