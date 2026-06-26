@@ -46,13 +46,14 @@ func prepareBatchRequest(deps *core.APIDeps, rt *core.APIRuntime, c *gin.Context
 	apiCfg := rt.GetAPIConfig()
 	batchCfg := apiCfg.BatchConfig()
 
-	// Extract seam string fields from the generic body map.
-	seamInput := workflow.SeamStringsInput{
-		OperationMode:  stringField(body, "operation_mode"),
-		LinkMode:       stringField(body, "link_mode"),
-		Preset:         stringField(body, "preset"),
-		ScalarStrategy: stringField(body, "scalar_strategy"),
-		ArrayStrategy:  stringField(body, "array_strategy"),
+	// Extract seam string fields from the generic body map. A present but
+	// non-string seam field (e.g. {"operation_mode": 42}) is a client error —
+	// reject it with 400 instead of collapsing it to "" and silently falling
+	// back to defaults. A genuinely missing field is still allowed to default.
+	seamInput, fieldErr := seamStringsFromBody(body)
+	if fieldErr != nil {
+		c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fieldErr.Error()})
+		return nil, fieldErr
 	}
 	// Fall back to API config defaults when not specified in request.
 	if seamInput.OperationMode == "" {
@@ -125,19 +126,42 @@ func withRequireCompleted(msg ...string) prepareOption {
 	}
 }
 
-// stringField extracts a string value from a generic map by key.
-// Returns "" if the map is nil or the key is missing/not a string.
-func stringField(m map[string]any, key string) string {
-	if m == nil {
-		return ""
+// seamStringsFromBody extracts the batch seam string fields from a generic
+// request body. Missing fields are left as "" so callers can fall back to
+// config defaults. A field that is present but not a string is rejected as a
+// 400-level client error so a wrong-typed payload (e.g. {"operation_mode": 42})
+// cannot silently fall back to defaults.
+func seamStringsFromBody(body map[string]any) (workflow.SeamStringsInput, error) {
+	stringOrErr := func(key string) (string, error) {
+		if body == nil {
+			return "", nil
+		}
+		v, ok := body[key]
+		if !ok {
+			return "", nil
+		}
+		s, ok := v.(string)
+		if !ok {
+			return "", fmt.Errorf("field %q must be a string", key)
+		}
+		return s, nil
 	}
-	v, ok := m[key]
-	if !ok {
-		return ""
+	var input workflow.SeamStringsInput
+	var err error
+	if input.OperationMode, err = stringOrErr("operation_mode"); err != nil {
+		return input, err
 	}
-	s, ok := v.(string)
-	if !ok {
-		return ""
+	if input.LinkMode, err = stringOrErr("link_mode"); err != nil {
+		return input, err
 	}
-	return s
+	if input.Preset, err = stringOrErr("preset"); err != nil {
+		return input, err
+	}
+	if input.ScalarStrategy, err = stringOrErr("scalar_strategy"); err != nil {
+		return input, err
+	}
+	if input.ArrayStrategy, err = stringOrErr("array_strategy"); err != nil {
+		return input, err
+	}
+	return input, nil
 }
