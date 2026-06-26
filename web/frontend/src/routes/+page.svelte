@@ -212,6 +212,13 @@
 		return computeJobProgress(filesForJob, totalFiles, latest.progress, isRunning, completed + failed);
 	});
 
+	// Clamped view of latestActivityProgress so the bar width and the label
+	// can never disagree (an out-of-range frame must not render 125% while the
+	// bar is capped at 100%).
+	const latestActivityProgressPercent = $derived(
+		Math.max(0, Math.min(100, latestActivityProgress))
+	);
+
 	const activeJobCount = $derived.by(() => {
 		// Reuse the shared terminal-status set (includes per-file scrape
 		// 'success'/'error'), so a fully-failed scrape job (per-file 'error') is
@@ -392,11 +399,11 @@
 							</div>
 							<p class="text-sm text-muted-foreground line-clamp-2">{latestActivity.message}</p>
 							<div class="h-2 rounded-full bg-muted overflow-hidden">
-								<div class="h-full bg-primary transition-all duration-300" style="width: {Math.max(0, Math.min(100, latestActivityProgress))}%"></div>
+								<div class="h-full bg-primary transition-all duration-300" style="width: {latestActivityProgressPercent}%"></div>
 							</div>
 							<div class="flex items-center justify-between text-xs text-muted-foreground">
 								<span>Status: {latestActivity.status}</span>
-								<span>{latestActivityProgress.toFixed(0)}%</span>
+								<span>{latestActivityProgressPercent.toFixed(0)}%</span>
 							</div>
 							<div class="flex gap-2 pt-1">
 <Button size="sm" variant="outline" onclick={() => goto('/jobs')}>

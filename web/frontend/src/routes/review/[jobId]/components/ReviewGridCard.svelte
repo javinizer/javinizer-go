@@ -41,7 +41,8 @@
 		completenessConfig
 	}: Props = $props();
 
-	const movie = $derived(effectiveMovie ?? movieGroup.primaryResult.movie as Movie | undefined);	const imageSrc = $derived(
+	const movie = $derived(effectiveMovie ?? movieGroup.primaryResult.movie as Movie | undefined);
+	const imageSrc = $derived(
 		displayImageType === 'cover'
 			? (displayCoverUrl ? previewImageURL(displayCoverUrl) : undefined)
 			: (displayPosterUrl ? previewImageURL(displayPosterUrl) : undefined)

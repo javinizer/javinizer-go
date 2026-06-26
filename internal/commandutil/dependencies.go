@@ -86,6 +86,7 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 	deps.config.Store(cfg)
 
 	// Use injected DB or create real one
+	ownsDB := false
 	if opts != nil && opts.DB != nil {
 		deps.DB = opts.DB
 	} else {
@@ -122,6 +123,7 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 		database.SeedDefaultWordReplacements(ctx, database.NewWordReplacementRepository(db))
 
 		deps.DB = db
+		ownsDB = true
 	}
 
 	// Use injected registry or create real one
@@ -134,12 +136,20 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 		// Set up config resolver for scraper normalization.
 		// This populates cfg.Scrapers.Overrides from the registered scraper defaults.
 		if err := cfg.Scrapers.Finalize(reg); err != nil {
+			// Only close a DB we created here; never close an injected one.
+			if ownsDB {
+				_ = deps.DB.Close()
+			}
 			return nil, fmt.Errorf("failed to finalize scraper config: %w", err)
 		}
 
 		registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg), database.NewContentIDMappingRepository(deps.DB))
 		if err != nil {
-			_ = deps.DB.Close()
+			// Only close a DB we created here; never close an injected one
+			// (avoids leaking or double-closing injected handles).
+			if ownsDB {
+				_ = deps.DB.Close()
+			}
 			return nil, fmt.Errorf("failed to initialize scraper registry: %w", err)
 		}
 		deps.ScraperRegistry = registry
@@ -215,6 +225,9 @@ func (d *CoreDeps) GetRegistry() *scraperutil.ScraperRegistry {
 func (d *CoreDeps) ReplaceReloadable(cfg *config.Config, registry *scraperutil.ScraperRegistry) {
 	if cfg == nil {
 		panic("commandutil: ReplaceReloadable() called with nil config — this is a programming error")
+	}
+	if registry == nil {
+		panic("commandutil: ReplaceReloadable() called with nil registry — this is a programming error")
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()

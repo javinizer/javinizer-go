@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -92,6 +93,108 @@ func (am *actressMergeModal) close() {
 	am.sourceInput.Blur()
 }
 
+// actressMergeOpTimeout bounds the blocking DB work performed by the merge
+// modal so a slow/hung repository cannot stall the TUI indefinitely.
+const actressMergeOpTimeout = 30 * time.Second
+
+// actressPreviewResultMsg carries the outcome of an async PreviewMerge lookup.
+type actressPreviewResultMsg struct {
+	preview *database.ActressMergePreview
+	err     error
+}
+
+// actressMergeResultMsg carries the outcome of an async Merge operation.
+type actressMergeResultMsg struct {
+	result *database.ActressMergeResult
+	err    error
+}
+
+func (am *actressMergeModal) loadPreviewCmd() tea.Cmd {
+	return func() tea.Msg {
+		repo := am.deps.ActressRepo()
+		if repo == nil {
+			return actressPreviewResultMsg{err: fmt.Errorf("actress repository not initialized")}
+		}
+		targetID, err := parseActressMergeID(am.targetInput.Value())
+		if err != nil {
+			return actressPreviewResultMsg{err: fmt.Errorf("target ID: %w", err)}
+		}
+		sourceID, err := parseActressMergeID(am.sourceInput.Value())
+		if err != nil {
+			return actressPreviewResultMsg{err: fmt.Errorf("source ID: %w", err)}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), actressMergeOpTimeout)
+		defer cancel()
+		preview, err := repo.PreviewMerge(ctx, targetID, sourceID)
+		if err != nil {
+			return actressPreviewResultMsg{err: err}
+		}
+		return actressPreviewResultMsg{preview: preview}
+	}
+}
+
+func (am *actressMergeModal) applyCmd() tea.Cmd {
+	return func() tea.Msg {
+		repo := am.deps.ActressRepo()
+		if repo == nil {
+			return actressMergeResultMsg{err: fmt.Errorf("actress repository not initialized")}
+		}
+		targetID, err := parseActressMergeID(am.targetInput.Value())
+		if err != nil {
+			return actressMergeResultMsg{err: fmt.Errorf("target ID: %w", err)}
+		}
+		sourceID, err := parseActressMergeID(am.sourceInput.Value())
+		if err != nil {
+			return actressMergeResultMsg{err: fmt.Errorf("source ID: %w", err)}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), actressMergeOpTimeout)
+		defer cancel()
+		result, err := repo.Merge(ctx, targetID, sourceID, am.resolutions)
+		if err != nil {
+			return actressMergeResultMsg{err: err}
+		}
+		return actressMergeResultMsg{result: result}
+	}
+}
+
+// handlePreviewResult applies the async PreviewMerge outcome to modal state.
+func (am *actressMergeModal) handlePreviewResult(m actressPreviewResultMsg) (tea.Model, tea.Cmd) {
+	if m.err != nil {
+		am.err = normalizeActressMergeError(m.err)
+		am.deps.AddLog("warn", "Actress merge preview failed: "+m.err.Error())
+		return am, nil
+	}
+	am.preview = m.preview
+	am.result = nil
+	am.err = ""
+	am.conflictCursor = 0
+	am.resolutions = make(map[string]string, len(m.preview.DefaultResolutions))
+	for field, decision := range m.preview.DefaultResolutions {
+		am.resolutions[field] = decision
+	}
+	for _, conflict := range m.preview.Conflicts {
+		if _, ok := am.resolutions[conflict.Field]; !ok {
+			am.resolutions[conflict.Field] = conflict.DefaultResolution
+		}
+	}
+	am.step = actressMergeStepConflict
+	return am, nil
+}
+
+// handleMergeResult applies the async Merge outcome to modal state.
+func (am *actressMergeModal) handleMergeResult(m actressMergeResultMsg) (tea.Model, tea.Cmd) {
+	if m.err != nil {
+		am.err = normalizeActressMergeError(m.err)
+		am.deps.AddLog("warn", "Actress merge failed: "+m.err.Error())
+		return am, nil
+	}
+	am.result = m.result
+	am.err = ""
+	am.step = actressMergeStepResult
+	am.deps.AddLog("info", fmt.Sprintf("Merged actress #%d into #%d", m.result.MergedFromID, m.result.MergedActress.ID))
+	return am, nil
+}
+
 func (am *actressMergeModal) loadPreview() error {
 	repo := am.deps.ActressRepo()
 	if repo == nil {
@@ -126,30 +229,6 @@ func (am *actressMergeModal) loadPreview() error {
 	return nil
 }
 
-func (am *actressMergeModal) apply() error {
-	repo := am.deps.ActressRepo()
-	if repo == nil {
-		return fmt.Errorf("actress repository not initialized")
-	}
-	targetID, err := parseActressMergeID(am.targetInput.Value())
-	if err != nil {
-		return fmt.Errorf("target ID: %w", err)
-	}
-	sourceID, err := parseActressMergeID(am.sourceInput.Value())
-	if err != nil {
-		return fmt.Errorf("source ID: %w", err)
-	}
-	result, err := repo.Merge(context.Background(), targetID, sourceID, am.resolutions)
-	if err != nil {
-		return err
-	}
-	am.result = result
-	am.err = ""
-	am.step = actressMergeStepResult
-	am.deps.AddLog("info", fmt.Sprintf("Merged actress #%d into #%d", result.MergedFromID, result.MergedActress.ID))
-	return nil
-}
-
 func (am *actressMergeModal) currentConflict() *database.ActressMergeConflict {
 	if am.preview == nil || len(am.preview.Conflicts) == 0 {
 		return nil
@@ -168,6 +247,12 @@ func (am *actressMergeModal) Init() tea.Cmd { return nil }
 
 // Update processes Bubble Tea messages for the actress merge modal.
 func (am *actressMergeModal) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch m := msg.(type) {
+	case actressPreviewResultMsg:
+		return am.handlePreviewResult(m)
+	case actressMergeResultMsg:
+		return am.handleMergeResult(m)
+	}
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return am, nil
@@ -202,11 +287,10 @@ func (am *actressMergeModal) updateInputStep(msg tea.KeyMsg) (tea.Model, tea.Cmd
 			am.setFocus(1)
 			return am, nil
 		}
-		if err := am.loadPreview(); err != nil {
-			am.err = normalizeActressMergeError(err)
-			am.deps.AddLog("warn", "Actress merge preview failed: "+err.Error())
-		}
-		return am, nil
+		// Run the blocking preview lookup off the event loop via tea.Cmd with a
+		// bounded context, so the TUI stays responsive while the DB I/O runs.
+		am.err = ""
+		return am, am.loadPreviewCmd()
 	}
 	var cmd tea.Cmd
 	if am.focus == 0 {
@@ -260,11 +344,10 @@ func (am *actressMergeModal) updateConflictStep(msg tea.KeyMsg) (tea.Model, tea.
 		}
 		return am, nil
 	case "enter":
-		if err := am.apply(); err != nil {
-			am.err = normalizeActressMergeError(err)
-			am.deps.AddLog("warn", "Actress merge failed: "+err.Error())
-		}
-		return am, nil
+		// Run the blocking merge off the event loop via tea.Cmd with a bounded
+		// context, so the TUI stays responsive while the DB I/O runs.
+		am.err = ""
+		return am, am.applyCmd()
 	}
 	return am, nil
 }

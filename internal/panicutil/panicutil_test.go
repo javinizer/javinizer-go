@@ -89,7 +89,7 @@ func TestHandleRecoverWithStack_NilInput(t *testing.T) {
 	}
 }
 
-func TestHandleRecoverWithStack_IncludesStack(t *testing.T) {
+func TestHandleRecoverWithStack_SanitizedError(t *testing.T) {
 	err := HandleRecoverWithStack("boom")
 	if err == nil {
 		t.Fatal("expected error for non-nil input")
@@ -98,7 +98,9 @@ func TestHandleRecoverWithStack_IncludesStack(t *testing.T) {
 	if !strings.Contains(msg, "panic: boom") {
 		t.Errorf("error should contain 'panic: boom', got %q", msg)
 	}
-	if !strings.Contains(msg, "goroutine") {
-		t.Errorf("error should contain stack trace (goroutine), got %q", msg)
+	// The returned error is sanitized: the stack trace is logged for debugging
+	// but must NOT be leaked through the error to CLI/API users.
+	if strings.Contains(msg, "goroutine") {
+		t.Errorf("error should not leak stack trace (goroutine), got %q", msg)
 	}
 }

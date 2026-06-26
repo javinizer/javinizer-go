@@ -159,7 +159,7 @@ func (sm *settingsManager) toggle() string {
 func (sm *settingsManager) setDryRun(dryRun bool) {
 	sm.snapshot.DryRun = dryRun
 	sm.apply()
-	if dryRun {
+	if dryRun && sm.deps.log != nil {
 		sm.deps.log("info", "DRY RUN mode enabled - no changes will be made")
 	}
 }

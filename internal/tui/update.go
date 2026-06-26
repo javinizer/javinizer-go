@@ -57,6 +57,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.SetSourcePath(msg.Path)
 		m.Rescan(msg.Path)
 		return m, nil
+
+	case actressPreviewResultMsg, actressMergeResultMsg:
+		// Route async actress-merge results to the modal when it is open.
+		if m.actressMergeCtl.Showing() {
+			updated, cmd := m.actressMergeCtl.Update(msg)
+			if am, ok := updated.(*actressMergeModal); ok {
+				m.actressMergeCtl.modal = *am
+			}
+			return m, cmd
+		}
+		return m, nil
 	}
 
 	// Update active view component

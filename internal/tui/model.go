@@ -26,6 +26,9 @@ const (
 	viewLogs
 	viewSettings
 	viewHelp
+
+	// viewModeCount is the total number of view modes (including help).
+	viewModeCount = iota
 )
 
 // TUIModelConfig carries the narrow set of config fields the TUI Model reads.

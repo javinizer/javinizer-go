@@ -17,8 +17,8 @@ import (
 // concrete dependencies.
 type SortService interface {
 	// ProcessFiles starts asynchronous processing of matched files.
-	// The caller receives progress events through the SortEventSubscriber
-	// set via SetEventSubscriber.
+	// The caller receives progress events through the forward channel returned
+	// by NewSortService (consumed via a SortEventSubscriber wired in eventSubscriber).
 	ProcessFiles(ctx context.Context, files []fileItem, matches map[string]models.FileMatchInfo) error
 
 	// Wait blocks until all submitted tasks have completed.
@@ -26,9 +26,6 @@ type SortService interface {
 
 	// Stop cancels all running tasks and waits for them to finish.
 	Stop()
-
-	// SetEventSubscriber registers the channel that receives SortEvents.
-	SetEventSubscriber(sub SortEventSubscriber)
 
 	// --- Processing options ---
 

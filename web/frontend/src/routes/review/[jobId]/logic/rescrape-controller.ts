@@ -163,8 +163,8 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 					...newResults[filePath],
 					status: 'completed',
 					movie: updatedMovie,
-					field_sources: response.field_sources ?? newResults[filePath].field_sources,
-					actress_sources: response.actress_sources ?? newResults[filePath].actress_sources,
+					field_sources: response.field_sources ?? newResults[filePath]?.field_sources,
+					actress_sources: response.actress_sources ?? newResults[filePath]?.actress_sources,
 				};
 				deps.setJob({ ...currentJob, results: newResults });
 			}

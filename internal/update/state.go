@@ -128,6 +128,15 @@ func (s *stateStore) SaveState(state *updateState) error {
 	}
 
 	s.state = state
+	if state == nil {
+		s.state = nil
+		return nil
+	}
+	// Cache a defensive copy so caller-owned *updateState values cannot mutate
+	// store state outside the lock (matches LoadState/GetState/SetState copy
+	// semantics).
+	cached := *state
+	s.state = &cached
 	return nil
 }
 

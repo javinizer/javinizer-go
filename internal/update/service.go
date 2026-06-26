@@ -64,7 +64,11 @@ func (s *service) GetStatus(ctx context.Context) (*updateState, error) {
 		}, nil
 	}
 
-	// If no state exists, return empty
+	// If no state exists, return empty. (A background refresh is intentionally
+	// NOT triggered here: NewService hardcodes the real GitHub checker with no
+	// injection seam, so firing a check on this read path would make hermetic
+	// CI tests hit the network and write a shared on-disk cache. The stale-state
+	// path below still triggers a refresh for non-empty caches.)
 	if state == nil {
 		return &updateState{
 			Source: UpdateSourceNone,
@@ -172,6 +176,13 @@ func (s *service) BackgroundCheck(ctx context.Context) {
 func (s *service) StartBackgroundCheck(ctx context.Context, interval time.Duration) {
 	if !s.enabled {
 		return
+	}
+
+	// Normalize non-positive intervals before creating the ticker, otherwise
+	// time.NewTicker panics and the goroutine dies (the recover only logs after
+	// the goroutine is already lost).
+	if interval <= 0 {
+		interval = defaultCheckInterval
 	}
 
 	go func() {

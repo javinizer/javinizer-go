@@ -38,7 +38,7 @@ func (vm *viewManager) switchTo(view viewMode) {
 // cycle advances to the next view in sequence (browser → dashboard → logs → settings → browser),
 // skipping the Help view (accessed via toggleHelp only).
 func (vm *viewManager) cycle() {
-	next := (vm.current + 1) % 5
+	next := (vm.current + 1) % viewModeCount
 	if next == viewHelp {
 		next = viewBrowser
 	}

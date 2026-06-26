@@ -101,8 +101,15 @@ func TestTUI_ActressMergeConflictSelectionAndApply(t *testing.T) {
 	model = updated.(*Model)
 	assert.Equal(t, "source", model.actressMergeCtl.modal.resolutions["first_name"])
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(*Model)
+	// Merge is now async (tea.Cmd): execute the returned cmd and feed the
+	// result message back through Update so the modal applies it.
+	if cmd != nil {
+		mergeMsg := cmd()
+		updated, _ = model.Update(mergeMsg)
+		model = updated.(*Model)
+	}
 	assert.Equal(t, actressMergeStepResult, model.actressMergeCtl.modal.step)
 	require.NotNil(t, model.actressMergeCtl.modal.result)
 

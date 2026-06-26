@@ -173,8 +173,9 @@ func (b *browser) View() string {
 			// For folders, check if all children are selected
 			allChildrenSelected := true
 			hasChildren := false
+			normPath := filepath.Clean(item.Path)
 			for j := range b.items {
-				if !b.items[j].IsDir && filepath.Dir(b.items[j].Path) == item.Path {
+				if !b.items[j].IsDir && filepath.Dir(b.items[j].Path) == normPath {
 					hasChildren = true
 					if !b.selected[b.items[j].Path] {
 						allChildrenSelected = false

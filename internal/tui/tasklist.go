@@ -87,6 +87,9 @@ func renderProgressBar(progress float64, width int) string {
 	if filled > width {
 		filled = width
 	}
+	if filled < 0 {
+		filled = 0
+	}
 	empty := width - filled
 
 	bar := progressBarStyle.Render(strings.Repeat("█", filled))

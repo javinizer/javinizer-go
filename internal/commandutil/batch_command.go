@@ -229,6 +229,12 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	)
 	job := factory.CreateStandaloneJob(filePaths, worker.BatchJobOptions{})
 
+	// Validate the resolved seam strings before dereferencing them below; a
+	// missing resolution step would otherwise panic when building applyOpts.
+	if opts.Resolved == nil {
+		return fmt.Errorf("batch command requires resolved seam strings: opts.Resolved is nil")
+	}
+
 	// Set run options using the shared CLIApplyOptions helper
 	applyOpts := CLIApplyOptions{
 		DryRun:       opts.DryRun,
@@ -290,6 +296,13 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 			successCount++
 		}
 	}
+	// Compute failures from the number of processed file results (not unique
+	// IDs): duplicate files sharing a MovieID would otherwise make the count
+	// inaccurate since SuccessCount is per-file.
+	failedCount := len(results) - successCount
+	if failedCount < 0 {
+		failedCount = 0
+	}
 
 	batchResult := BatchCommandResult{
 		ScanResult:   scanResult,
@@ -298,7 +311,7 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		UniqueIDs:    uniqueIDs,
 		Movies:       movies,
 		SuccessCount: successCount,
-		FailedCount:  len(uniqueIDs) - successCount,
+		FailedCount:  failedCount,
 	}
 
 	// Print summary — backward-compatible: if SummaryPrinter is set, use it;

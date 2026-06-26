@@ -291,13 +291,20 @@ func checkForUpdateWithChecker(ctx context.Context, currentVersion string, check
 	// If not checking prereleases and latest is prerelease, skip it
 	if !checkPrerelease && IsPrerelease(latest.Version) {
 		// Try to get the latest non-prerelease
+		foundStable := false
 		if versions, err := chk.getRecentReleases(ctx, 10); err == nil {
 			for _, v := range versions {
 				if !IsPrerelease(v) {
 					latest = &versionInfo{Version: v, Prerelease: false}
+					foundStable = true
 					break
 				}
 			}
+		}
+		// If no stable release was found (or the lookup failed), report no
+		// update instead of falling through with the prerelease candidate.
+		if !foundStable {
+			return latest, false, nil
 		}
 	}
 

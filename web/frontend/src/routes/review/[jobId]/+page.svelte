@@ -186,19 +186,19 @@
 					{#if s.viewMode === 'grid-poster' || s.viewMode === 'grid-cover'}
 						<div class="grid {s.viewMode === 'grid-cover' ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'} {s.viewMode === 'grid-cover' ? 'gap-2' : 'gap-4'}">
 							{#each s.filteredMovieGroups as group}
+								{@const effMovie = s.getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie)}
 								<ReviewGridCard
 									movieGroup={group}
 									isSelected={group.primaryResult.result_id === s.currentResult?.result_id}
 									isEdited={s.editedMovies.has(group.primaryResult.file_path)}
 									isBulkSelected={s.selectedMovieIds.has(group.movieId)}
 									selectionMode={s.selectionMode}
-									effectiveMovie={s.getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie) ?? undefined}
+									effectiveMovie={effMovie ?? undefined}
 									displayPosterUrl={(() => {
-										const movie = s.getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie);
-										if (!movie) return undefined;
-										return s.resolvePosterUrl(movie, group.primaryResult.file_path);
+										if (!effMovie) return undefined;
+										return s.resolvePosterUrl(effMovie, group.primaryResult.file_path);
 									})()}
-									displayCoverUrl={s.getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie)?.cover_url}
+									displayCoverUrl={effMovie?.cover_url}
 									displayImageType={s.viewMode === 'grid-cover' ? 'cover' : 'poster'}
 									previewImageURL={s.reviewPageController.previewImageURL}
 									onclick={(e) => {

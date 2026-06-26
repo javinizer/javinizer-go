@@ -20,6 +20,18 @@ func (m *Model) View() string {
 
 	var content string
 
+	// Active modal overlays short-circuit rendering before any sub-view access,
+	// so a nil sub-view cannot panic while a modal is showing.
+	if m.manualSearch.showing {
+		return m.manualSearch.View()
+	}
+	if m.actressMergeCtl.Showing() {
+		return m.actressMergeCtl.View()
+	}
+	if m.folderPickCtl.Showing() {
+		return m.folderPickCtl.View()
+	}
+
 	// Render current view
 	switch m.viewMgr.currentView() {
 	case viewBrowser:
@@ -44,21 +56,6 @@ func (m *Model) View() string {
 		content,
 		footer,
 	)
-
-	// Show manual search modal overlay if active (takes priority)
-	if m.manualSearch.showing {
-		return m.manualSearch.View()
-	}
-
-	// Show actress merge modal overlay if active
-	if m.actressMergeCtl.Showing() {
-		return m.actressMergeCtl.View()
-	}
-
-	// Show folder picker overlay if active
-	if m.folderPickCtl.Showing() {
-		return m.folderPickCtl.View()
-	}
 
 	return mainView
 }
@@ -196,14 +193,10 @@ func (m *Model) renderFooter() string {
 
 // renderBrowserView renders the file browser view
 func (m *Model) renderBrowserView() string {
-	if m.browser == nil {
-		panic("tui: browser component is nil — this is a programmer error; check Model construction")
-	}
-	if m.taskList == nil {
-		panic("tui: taskList component is nil — this is a programmer error; check Model construction")
-	}
-	if m.console == nil {
-		panic("tui: console component is nil — this is a programmer error; check Model construction")
+	if m.browser == nil || m.taskList == nil || m.console == nil {
+		// Return a safe diagnostic instead of panicking from the render path;
+		// this indicates incomplete Model construction but must not crash the TUI.
+		return "tui: browser view is unavailable (component not initialized)"
 	}
 
 	// Calculate available content height (total height - header - tabs - footer)
@@ -243,7 +236,7 @@ func (m *Model) renderBrowserView() string {
 // renderDashboardView renders the dashboard view
 func (m *Model) renderDashboardView() string {
 	if m.dashboard == nil {
-		panic("tui: dashboard component is nil — this is a programmer error; check Model construction")
+		return "tui: dashboard view is unavailable (component not initialized)"
 	}
 
 	content := m.dashboard.View()
@@ -260,7 +253,7 @@ func (m *Model) renderDashboardView() string {
 // renderLogsView renders the logs view
 func (m *Model) renderLogsView() string {
 	if m.logViewer == nil {
-		panic("tui: logViewer component is nil — this is a programmer error; check Model construction")
+		return "tui: logs view is unavailable (component not initialized)"
 	}
 	// Push current log state to the renderer before rendering
 	m.logViewer.SetLogs(m.logState.logs, m.logState.logScroll, m.logState.autoScroll)
@@ -270,7 +263,7 @@ func (m *Model) renderLogsView() string {
 // renderSettingsView renders the settings view
 func (m *Model) renderSettingsView() string {
 	if m.settingsView == nil {
-		panic("tui: settingsView component is nil — this is a programmer error; check Model construction")
+		return "tui: settings view is unavailable (component not initialized)"
 	}
 
 	// Update settings state before rendering
@@ -281,7 +274,7 @@ func (m *Model) renderSettingsView() string {
 // renderHelpView renders the help view
 func (m *Model) renderHelpView() string {
 	if m.helpView == nil {
-		panic("tui: helpView component is nil — this is a programmer error; check Model construction")
+		return "tui: help view is unavailable (component not initialized)"
 	}
 	return m.helpView.View()
 }

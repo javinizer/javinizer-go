@@ -17,9 +17,9 @@ import (
 // This is the ONLY file in the tui package that imports worker and workflow.
 // All other TUI files depend on the SortService interface only.
 type sortService struct {
-	processor *processingCoordinator
-	eventSub  SortEventSubscriber
-	forwardCh chan SortEvent
+	processor     *processingCoordinator
+	forwardCh     chan SortEvent
+	workerEventCh chan worker.JobEvent
 }
 
 // NewSortService creates a SortService backed by the given processing infrastructure.
@@ -61,8 +61,9 @@ func NewSortService(
 	go translateEvents(workerEventCh, forwardCh)
 
 	return &sortService{
-		processor: processor,
-		forwardCh: forwardCh,
+		processor:     processor,
+		forwardCh:     forwardCh,
+		workerEventCh: workerEventCh,
 	}, forwardCh, nil
 }
 
@@ -102,14 +103,14 @@ func (s *sortService) Wait() error {
 	return s.processor.Wait()
 }
 
-// Stop cancels all running tasks and waits for them to finish.
+// Stop cancels all running tasks and waits for them to finish, then closes the
+// worker event channel so the translateEvents goroutine can drain and close the
+// SortEvent forward channel (avoids leaking the forwarding goroutine).
 func (s *sortService) Stop() {
 	s.processor.Stop()
-}
-
-// SetEventSubscriber registers the channel that receives SortEvents.
-func (s *sortService) SetEventSubscriber(sub SortEventSubscriber) {
-	s.eventSub = sub
+	if s.workerEventCh != nil {
+		close(s.workerEventCh)
+	}
 }
 
 func (s *sortService) SetOptions(opts ProcessorOptions)         { s.processor.SetOptions(opts) }

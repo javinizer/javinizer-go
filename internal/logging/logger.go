@@ -101,10 +101,26 @@ func resolveLogWriters(cfg *Config) ([]io.Writer, []io.Closer, error) {
 			if cfg.MaxSizeMB > 0 {
 				// Lumberjack defaults to 0600 permissions. Pre-create the file
 				// with umask-aware permissions (config.FilePerm) to match non-rotation behavior.
-				if _, err := os.Stat(output); os.IsNotExist(err) {
-					if file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY, config.FilePerm); err == nil {
-						_ = file.Close()
+				if info, err := os.Stat(output); err != nil {
+					if !os.IsNotExist(err) {
+						// Stat failed for a reason other than "not exists" (e.g. permission);
+						// surface it instead of letting logger setup silently succeed with
+						// an unusable output file.
+						for _, c := range closers {
+							_ = c.Close()
+						}
+						return nil, nil, fmt.Errorf("failed to stat log file %q: %w", output, err)
 					}
+					// File does not exist — create it with the intended permissions.
+					file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY, config.FilePerm)
+					if err != nil {
+						for _, c := range closers {
+							_ = c.Close()
+						}
+						return nil, nil, fmt.Errorf("failed to create log file %q: %w", output, err)
+					}
+					_ = file.Close()
+					_ = info
 				}
 
 				lj := &lumberjack.Logger{
@@ -299,7 +315,10 @@ func getLogger() *logrus.Logger {
 
 // L returns the current Logger instance, initializing with defaults if needed.
 func (li *loggerInit) L() Logger {
-	return &logrusLoggerAdapter{logger: li.getLogrus()}
+	// Return an adapter that resolves the active logger on every call so that
+	// callers which store logging.L() keep writing to the current logger after
+	// InitLogger reloads (rather than holding onto a stale *logrus.Logger).
+	return &logrusLoggerAdapter{init: li}
 }
 
 // getLogrus returns the current logrus.Logger, initializing with defaults if needed.
@@ -322,19 +341,23 @@ func (li *loggerInit) getLogrus() *logrus.Logger {
 	return state.logger
 }
 
-// logrusLoggerAdapter adapts a *logrus.Logger to the Logger interface.
+// logrusLoggerAdapter adapts a *logrus.Logger to the Logger interface. It holds
+// a reference to the initializer (not a logger pointer) so it stays reload-aware:
+// each call resolves the current logger, picking up InitLogger reinitialization.
 type logrusLoggerAdapter struct {
-	logger *logrus.Logger
+	init *loggerInit
 }
 
-func (a *logrusLoggerAdapter) Debug(args ...any)                 { a.logger.Debug(args...) }
-func (a *logrusLoggerAdapter) Debugf(format string, args ...any) { a.logger.Debugf(format, args...) }
-func (a *logrusLoggerAdapter) Info(args ...any)                  { a.logger.Info(args...) }
-func (a *logrusLoggerAdapter) Infof(format string, args ...any)  { a.logger.Infof(format, args...) }
-func (a *logrusLoggerAdapter) Warn(args ...any)                  { a.logger.Warn(args...) }
-func (a *logrusLoggerAdapter) Warnf(format string, args ...any)  { a.logger.Warnf(format, args...) }
-func (a *logrusLoggerAdapter) Error(args ...any)                 { a.logger.Error(args...) }
-func (a *logrusLoggerAdapter) Errorf(format string, args ...any) { a.logger.Errorf(format, args...) }
+func (a *logrusLoggerAdapter) logger() *logrus.Logger { return a.init.getLogrus() }
+
+func (a *logrusLoggerAdapter) Debug(args ...any)                 { a.logger().Debug(args...) }
+func (a *logrusLoggerAdapter) Debugf(format string, args ...any) { a.logger().Debugf(format, args...) }
+func (a *logrusLoggerAdapter) Info(args ...any)                  { a.logger().Info(args...) }
+func (a *logrusLoggerAdapter) Infof(format string, args ...any)  { a.logger().Infof(format, args...) }
+func (a *logrusLoggerAdapter) Warn(args ...any)                  { a.logger().Warn(args...) }
+func (a *logrusLoggerAdapter) Warnf(format string, args ...any)  { a.logger().Warnf(format, args...) }
+func (a *logrusLoggerAdapter) Error(args ...any)                 { a.logger().Error(args...) }
+func (a *logrusLoggerAdapter) Errorf(format string, args ...any) { a.logger().Errorf(format, args...) }
 
 // closeLogger closes current logger's file handles and clears the logger.
 // Call during shutdown to release file descriptors. Safe to call multiple times.

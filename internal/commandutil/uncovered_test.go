@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -62,10 +63,12 @@ func TestCoreDeps_ReplaceReloadable_SetsBoth_Uncovered(t *testing.T) {
 	deps.config.Store(&config.Config{})
 
 	newCfg := &config.Config{}
+	newReg := scraperutil.NewScraperRegistry()
 	deps.ScraperRegistry = nil
-	deps.ReplaceReloadable(newCfg, nil)
+	deps.ReplaceReloadable(newCfg, newReg)
 
 	// GetConfig should now return newCfg from atomic pointer
 	got := deps.GetConfig()
 	assert.Equal(t, newCfg, got)
+	assert.Equal(t, newReg, deps.ScraperRegistry)
 }

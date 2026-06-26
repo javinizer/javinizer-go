@@ -384,7 +384,7 @@ func TestCheckForUpdateWithChecker_PrereleaseFallback(t *testing.T) {
 		assert.False(t, latest.Prerelease)
 	})
 
-	t.Run("keeps prerelease when no stable release exists", func(t *testing.T) {
+	t.Run("reports no update when no stable release exists", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/repos/javinizer/Javinizer/releases/latest":
@@ -409,8 +409,10 @@ func TestCheckForUpdateWithChecker_PrereleaseFallback(t *testing.T) {
 		checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
 		latest, available, err := checkForUpdateWithChecker(context.Background(), "v1.9.0", false, checker)
 		require.NoError(t, err)
+		// checkPrerelease=false and no stable fallback found → report no update
+		// rather than surfacing the prerelease as available.
 		require.NotNil(t, latest)
-		assert.True(t, available)
+		assert.False(t, available)
 		assert.Equal(t, "v2.0.0-rc1", latest.Version)
 		assert.True(t, latest.Prerelease)
 	})
@@ -436,8 +438,10 @@ func TestCheckForUpdateWithChecker_PrereleaseFallback(t *testing.T) {
 		checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
 		latest, available, err := checkForUpdateWithChecker(context.Background(), "v2.9.0", false, checker)
 		require.NoError(t, err)
+		// checkPrerelease=false and fallback lookup failed → report no update
+		// rather than surfacing the prerelease as available.
 		require.NotNil(t, latest)
-		assert.True(t, available)
+		assert.False(t, available)
 		assert.Equal(t, "v3.0.0-rc1", latest.Version)
 		assert.True(t, latest.Prerelease)
 	})

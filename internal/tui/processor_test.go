@@ -256,11 +256,11 @@ func TestSetOptionsFromConfig_ZeroValue(t *testing.T) {
 	_ = posterGen
 
 	pc, err := NewProcessingCoordinator(
-		nil,                  // runner
-		nil,                  // eventSub
-		factory,              // batch job factory
-		registry,             // registry
-		TUIProcessorConfig{}, // zero-value processor config
+		NewSimpleRunner(context.Background()), // runner
+		nil,                                   // eventSub
+		factory,                               // batch job factory
+		registry,                              // registry
+		TUIProcessorConfig{},                  // zero-value processor config
 		"/dest", true,
 	)
 	require.NoError(t, err)
@@ -620,11 +620,11 @@ func TestNewProcessingCoordinator(t *testing.T) {
 	_ = posterGen
 
 	pc, err := NewProcessingCoordinator(
-		nil,                  // runner
-		nil,                  // eventSub
-		factory,              // batch job factory
-		registry,             // registry
-		TUIProcessorConfig{}, // zero-value processor config
+		NewSimpleRunner(context.Background()), // runner
+		nil,                                   // eventSub
+		factory,                               // batch job factory
+		registry,                              // registry
+		TUIProcessorConfig{},                  // zero-value processor config
 		"/dest/path",
 		true, // moveFiles
 	)
@@ -660,11 +660,11 @@ func TestNewProcessingCoordinator_NilRepos(t *testing.T) {
 
 	assert.NotPanics(t, func() {
 		NewProcessingCoordinator(
-			nil,                  // runner
-			nil,                  // eventSub
-			factory,              // batch job factory
-			registry,             // registry
-			TUIProcessorConfig{}, // zero-value processor config
+			NewSimpleRunner(context.Background()), // runner
+			nil,                                   // eventSub
+			factory,                               // batch job factory
+			registry,                              // registry
+			TUIProcessorConfig{},                  // zero-value processor config
 			"/dest/path",
 			true,
 		)
@@ -699,6 +699,10 @@ func (m *mockRunner) Wait() error {
 
 func (m *mockRunner) Stop() {
 	m.stopCalled++
+}
+
+func (m *mockRunner) Context() context.Context {
+	return context.Background()
 }
 
 // ============================================================================

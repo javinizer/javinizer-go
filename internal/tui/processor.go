@@ -73,6 +73,12 @@ func (r *simpleRunner) Stop() {
 	r.wg.Wait()
 }
 
+// Context returns the runner's cancellable context, so callers can derive child
+// contexts whose cancellation propagates when Stop() is called.
+func (r *simpleRunner) Context() context.Context {
+	return r.ctx
+}
+
 // TUIProcessorConfig carries the narrow set of config fields the processingCoordinator
 // reads from the application config. Swapped atomically on hot-reload via atomic.Value.
 // Embeds worker.BatchJobConfig for the shared 4-field mapping
@@ -136,6 +142,12 @@ func NewProcessingCoordinator(
 	if factory == nil {
 		return nil, fmt.Errorf("batch job factory must not be nil")
 	}
+	if runner == nil {
+		return nil, fmt.Errorf("runner must not be nil")
+	}
+	if registry == nil {
+		return nil, fmt.Errorf("scraper registry must not be nil")
+	}
 
 	pc := &processingCoordinator{
 		runner:    runner,
@@ -143,6 +155,10 @@ func NewProcessingCoordinator(
 		factory:   factory,
 		registry:  registry,
 	}
+
+	// Deep-copy slice fields so the stored snapshot owns its backing arrays and
+	// cannot race with caller mutations (e.g. in-place config updates).
+	scraperPriorityCopy := append([]string(nil), processorCfg.ScraperPriority...)
 
 	pc.opts.Store(ProcessorOptions{
 		DestPath:        destPath,
@@ -156,7 +172,7 @@ func NewProcessingCoordinator(
 		ArrayStrategy:   "merge",
 		MaxWorkers:      processorCfg.MaxWorkers,
 		WorkerTimeout:   processorCfg.WorkerTimeout,
-		ScraperPriority: processorCfg.ScraperPriority,
+		ScraperPriority: scraperPriorityCopy,
 	})
 
 	return pc, nil
@@ -185,6 +201,10 @@ func (pc *processingCoordinator) Registry() scrape.ScraperInstanceResolver {
 // SetOptions atomically replaces all processing options with the given snapshot.
 // For partial updates, use LoadOptions → mutate → SetOptions.
 func (pc *processingCoordinator) SetOptions(opts ProcessorOptions) {
+	// Deep-copy slice fields so the stored snapshot owns its backing arrays and
+	// cannot be mutated by the caller after the swap.
+	opts.ScraperPriority = append([]string(nil), opts.ScraperPriority...)
+	opts.CustomScraperPriority = append([]string(nil), opts.CustomScraperPriority...)
 	pc.opts.Store(opts)
 }
 
@@ -201,7 +221,9 @@ func (pc *processingCoordinator) SetConfig(cfg TUIProcessorConfig) {
 		o.DownloadExtrafanartOverride = cfg.DownloadExtrafanart
 		o.MaxWorkers = cfg.MaxWorkers
 		o.WorkerTimeout = cfg.WorkerTimeout
-		o.ScraperPriority = cfg.ScraperPriority
+		// Defensive copy so later mutations of cfg.ScraperPriority cannot race
+		// with readers of the stored snapshot.
+		o.ScraperPriority = append([]string(nil), cfg.ScraperPriority...)
 	})
 }
 
@@ -292,6 +314,21 @@ func (pc *processingCoordinator) runBatchJob(ctx context.Context, filePaths []st
 	// Load a single consistent snapshot of all options.
 	opts := pc.loadOptions()
 
+	// Derive the job context from the runner's cancellable context so that
+	// Stop() (which cancels the runner) propagates into job execution and the
+	// event-forwarding goroutine, rather than only the caller's ctx. The
+	// caller's ctx is still honored: if it is canceled the derived ctx cancels too.
+	runnerCtx := pc.runner.Context()
+	jobCtx, cancel := context.WithCancel(runnerCtx)
+	defer cancel()
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancel()
+		case <-jobCtx.Done():
+		}
+	}()
+
 	factory := pc.factory
 	job := factory.CreateStandaloneJob(filePaths, worker.BatchJobOptions{})
 
@@ -299,6 +336,11 @@ func (pc *processingCoordinator) runBatchJob(ctx context.Context, filePaths []st
 	if opts.CustomScraperPriority != nil {
 		scrapersCopy = make([]string, len(opts.CustomScraperPriority))
 		copy(scrapersCopy, opts.CustomScraperPriority)
+	} else if opts.ScraperPriority != nil {
+		// Honor the configured scraper priority as the default when no custom
+		// override is set, so normal runs preserve the configured ordering.
+		scrapersCopy = make([]string, len(opts.ScraperPriority))
+		copy(scrapersCopy, opts.ScraperPriority)
 	}
 
 	// Resolve all seam strings through the shared function.
@@ -353,5 +395,5 @@ func (pc *processingCoordinator) runBatchJob(ctx context.Context, filePaths []st
 		}()
 	}
 
-	return job.Run(ctx)
+	return job.Run(jobCtx)
 }
