@@ -218,17 +218,23 @@ func (m *Model) renderBrowserView() string {
 	browserView := m.browser.View()
 	taskView := m.taskList.View()
 	consoleView := m.console.View()
+	// Clamp derived widths so a very narrow terminal cannot produce
+	// non-positive panel widths that break rendering during resize.
+	panelWidth := m.width/2 - 2
+	if panelWidth < 1 {
+		panelWidth = 1
+	}
 
 	// Stack tasks and console vertically on the right with fixed heights
 	rightPanel := lipgloss.JoinVertical(
 		lipgloss.Left,
-		borderStyle.Width(m.width/2-2).Height(taskHeight).Render(taskView),
-		borderStyle.Width(m.width/2-2).Height(consoleHeight).Render(consoleView),
+		borderStyle.Width(panelWidth).Height(taskHeight).Render(taskView),
+		borderStyle.Width(panelWidth).Height(consoleHeight).Render(consoleView),
 	)
 
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		borderStyle.Width(m.width/2-2).Render(browserView),
+		borderStyle.Width(panelWidth).Render(browserView),
 		rightPanel,
 	)
 }
@@ -309,11 +315,15 @@ func (m *Model) renderCompletionBanner() string {
 	hints := dimmed("  •  Press '1' or 'b' to return to browser  •  Press '3' for logs  •  Press 'd' to dismiss")
 
 	// Style the banner
+	bannerWidth := m.width - 4
+	if bannerWidth < 1 {
+		bannerWidth = 1
+	}
 	bannerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("42")).
 		Padding(0, 1).
-		Width(m.width - 4)
+		Width(bannerWidth)
 
 	content := summary.String() + "\n" + hints
 	return bannerStyle.Render(content)

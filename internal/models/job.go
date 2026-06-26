@@ -44,9 +44,9 @@ type Job struct {
 	Excluded              string                      `json:"excluded" gorm:"type:text"`
 	FileMatchInfo         string                      `json:"file_match_info" gorm:"type:text"`
 	StartedAt             time.Time                   `json:"started_at" gorm:"index"`
-	CompletedAt           *time.Time                  `json:"completed_at"`
-	OrganizedAt           *time.Time                  `json:"organized_at"`
-	RevertedAt            *time.Time                  `json:"reverted_at"`
+	CompletedAt           *time.Time                  `json:"completed_at,omitempty"`
+	OrganizedAt           *time.Time                  `json:"organized_at,omitempty"`
+	RevertedAt            *time.Time                  `json:"reverted_at,omitempty"`
 	Update                bool                        `json:"update" gorm:"column:update;default:false"`
 }
 

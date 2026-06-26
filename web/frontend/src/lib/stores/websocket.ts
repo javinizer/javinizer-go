@@ -98,7 +98,7 @@ function createWebSocketStore() {
 						}
 						return {
 							...state,
-							messages: [...state.messages.slice(-999), message],
+							messages: [...state.messages, message].slice(-999),
 							messagesByFile: newMessagesByFile,
 						};
 					});

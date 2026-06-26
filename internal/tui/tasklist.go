@@ -59,6 +59,12 @@ func (t *taskList) View() string {
 	for i := start; i < len(t.order); i++ {
 		taskID := t.order[i]
 		task := t.tasks[taskID]
+		// Guard against order/tasks skew (stale order entry, concurrent
+		// reorder) so a missing task skips rendering instead of nil-deref
+		// panicking the whole TUI render loop.
+		if task == nil {
+			continue
+		}
 
 		status := ""
 		switch task.Step {
