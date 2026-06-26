@@ -1,10 +1,8 @@
 # CodeRabbit configuration — CHUNKED FULL REVIEW (temporary per-pass scope).
 #
 # PASS 1 scope — internal/api only (137 files).
-# This is one pass of a 5-pass chunked full review (PR #35 touches 607 reviewable
-# files; CodeRabbit's per-review limit is 150). Each pass toggles this config to
-# a disjoint slice, pushes, and invokes `@coderabbitai full review` to bypass the
-# incremental cache. After all 5 passes land, this file is restored to full scope.
+# One pass of a 5-pass chunked full review (PR #35 = 607 reviewable files; limit 150).
+# In-scope = everything NOT excluded below. After all 5 passes, restored to full scope.
 #
 # Passes (disjoint, union = all 607 reviewable files):
 #   1. internal/api (137)
@@ -15,9 +13,6 @@
 
 reviews:
   path_filters:
-    # --- In-scope for THIS pass (positive includes) ---
-    - "internal/api/**"
-
     # --- Permanent excludes (tests, generated, lockfiles) ---
     - "!**/*_test.go"
     - "!internal/mocks/**"
@@ -35,34 +30,79 @@ reviews:
     - "!**/package.json"
     - "!**/package-lock.json"
 
+    # --- Exclude everything NOT in this pass's scope (internal/api only (137 files).) ---
+    - "!.github/**"
+    - "!cmd/**"
+    - "!configs/**"
+    - "!docs/**"
+    - "!internal/aggregator/**"
+    - "!internal/challengedetect/**"
+    - "!internal/commandutil/**"
+    - "!internal/config/**"
+    - "!internal/configutil/**"
+    - "!internal/coverage/**"
+    - "!internal/database/**"
+    - "!internal/downloader/**"
+    - "!internal/e2e_test.go/**"
+    - "!internal/enumutil/**"
+    - "!internal/eventlog/**"
+    - "!internal/formatter/**"
+    - "!internal/fsutil/**"
+    - "!internal/history/**"
+    - "!internal/httpclient/**"
+    - "!internal/imageutil/**"
+    - "!internal/logging/**"
+    - "!internal/matcher/**"
+    - "!internal/mediainfo/**"
+    - "!internal/mocks/**"
+    - "!internal/models/**"
+    - "!internal/nfo/**"
+    - "!internal/operationmode/**"
+    - "!internal/organizer/**"
+    - "!internal/panicutil/**"
+    - "!internal/poster/**"
+    - "!internal/ratelimit/**"
+    - "!internal/scanner/**"
+    - "!internal/scrape/**"
+    - "!internal/scraper/**"
+    - "!internal/scraperconfig/**"
+    - "!internal/scraperutil/**"
+    - "!internal/ssrf/**"
+    - "!internal/template/**"
+    - "!internal/testutil/**"
+    - "!internal/translation/**"
+    - "!internal/tui/**"
+    - "!internal/update/**"
+    - "!internal/version/**"
+    - "!internal/websocket/**"
+    - "!internal/worker/**"
+    - "!internal/workflow/**"
+    - "!scripts/**"
+    - "!web/frontend/**"
+    - "!.coderabbit.yaml"
+    - "!.gitignore"
+    - "!.golangci.yml"
+    - "!.mockery.yaml"
+    - "!Makefile"
+    - "!go.mod"
+    - "!go.sum"
+
   path_instructions:
-    - path: "internal/worker/job_store_persist.go"
-      instructions: >
-        Focus on wireJobDeps and reconstructBatchJob — job reconstruction paths
-        after server restart. Verify MovieRepo/BatchCfg/PosterGen/Matcher are restored
-        so post-restart apply/rescrape and movie-edit persistence work correctly.
-    - path: "internal/worker/apply_phase.go"
-      instructions: >
-        applyFile uses a named return + withFileRecovery(rc, &outcome) deferred
-        recovery — a recovered panic must propagate Failed/Panic to the caller,
-        never silently mark a file organized.
-    - path: "internal/worker/batch_job.go"
-      instructions: >
-        isJobTransitioned excludes Completed/Organized (valid rescrape sources).
-        excludeFile only cancels Pending/Running jobs — never clobber a terminal-
-        success job when its last file is excluded.
     - path: "internal/api/system/config.go"
       instructions: >
-        HashProxyConfig errors must fail closed (return error) at both the validation
-        path and the ConfigUpdateMu save flow — never discard a hash failure.
+        HashProxyConfig errors must fail closed (return error) at both the validation path and the ConfigUpdateMu save flow — never discard a hash failure.
     - path: "internal/api/system/translation.go"
       instructions: >
-        DeepL base_url must be validated (valid http(s) URL) before forwarding to
-        fetchDeepLUsage, mirroring getTranslationModels — reject with 400.
+        DeepL base_url must be validated (valid http(s) URL) before forwarding to fetchDeepLUsage, mirroring getTranslationModels — reject with 400.
     - path: "internal/api/core/config_narrowing.go"
       instructions: >
-        APIConfig surfaces download-proxy profiles. Keep the Config-bridge reads
-        comment + bridges_doc.go reverse index in sync.
+        APIConfig surfaces download-proxy profiles. Keep the Config-bridge reads comment + bridges_doc.go reverse index in sync.
+    - path: "internal/api/batch/rescrape.go"
+      instructions: >
+        rescrape uses result.Movie.ID (authoritative) over stale FileMatchInfo ID. Swagger annotations include 409/422.
+    - path: "internal/api/batch/usecases.go"
+      instructions: >
+        pagination normalizes Offset/Limit non-negative before slicing. FileMatchInfo propagated into ScrapePhaseConfig.
 
 review_status:
   fail_commit_in_status: false
