@@ -1,15 +1,18 @@
-# CodeRabbit configuration — CHUNKED FULL REVIEW (temporary per-pass scope).
+# CodeRabbit configuration for the architecture-overhaul PR.
 #
-# PASS 5 scope — frontend+tui+utils (web/frontend + internal/{tui,models,commandutil,update,configutil,testutil,version,panicutil,operationmode,logging,enumutil,coverage}) (132 files)
-# One pass of a 5-pass chunked full review (PR #35 = 607 reviewable files; limit 150).
-# In-scope = everything NOT excluded below. After all 5 passes, restored to full scope.
+# FULL SCOPE restored after the 5-pass chunked full review (all 607 reviewable
+# files reviewed across passes 1–5, all findings resolved). Test files,
+# generated code, mocks, and bulky non-source files remain excluded to keep
+# production source in scope within the 150-file-per-review limit.
 #
-# Passes (disjoint, union = all 607 reviewable files):
+# Chunked review history (all passes complete, findings fixed):
 #   1. internal/api (137)
 #   2. orchestration+config: worker/workflow/websocket/config + cmd/.github/docs/root (121)
 #   3. scrapers+scrape-infra (111)
 #   4. data+processing (128)
-#   5. frontend+tui+utils (110)
+#   5. frontend+tui+utils (132)
+#
+# path_instructions consolidated from all 5 passes + the pre-chunked config.
 
 reviews:
   path_filters:
@@ -30,52 +33,61 @@ reviews:
     - "!**/package.json"
     - "!**/package-lock.json"
 
-    # --- Exclude everything NOT in this pass's scope (frontend+tui+utils (web/frontend + internal/{tui,models,commandutil,update,configutil,testutil,version,panicutil,operationmode,logging,enumutil,coverage}) (132 files)) ---
-    - "!.github/**"
-    - "!cmd/**"
-    - "!configs/**"
-    - "!docs/**"
-    - "!internal/aggregator/**"
-    - "!internal/api/**"
-    - "!internal/challengedetect/**"
-    - "!internal/config/**"
-    - "!internal/database/**"
-    - "!internal/downloader/**"
-    - "!internal/e2e_test.go/**"
-    - "!internal/eventlog/**"
-    - "!internal/formatter/**"
-    - "!internal/fsutil/**"
-    - "!internal/history/**"
-    - "!internal/httpclient/**"
-    - "!internal/imageutil/**"
-    - "!internal/matcher/**"
-    - "!internal/mediainfo/**"
-    - "!internal/mocks/**"
-    - "!internal/nfo/**"
-    - "!internal/organizer/**"
-    - "!internal/poster/**"
-    - "!internal/ratelimit/**"
-    - "!internal/scanner/**"
-    - "!internal/scrape/**"
-    - "!internal/scraper/**"
-    - "!internal/scraperconfig/**"
-    - "!internal/scraperutil/**"
-    - "!internal/ssrf/**"
-    - "!internal/template/**"
-    - "!internal/translation/**"
-    - "!internal/websocket/**"
-    - "!internal/worker/**"
-    - "!internal/workflow/**"
-    - "!scripts/**"
-    - "!.coderabbit.yaml"
-    - "!.gitignore"
-    - "!.golangci.yml"
-    - "!.mockery.yaml"
-    - "!Makefile"
-    - "!go.mod"
-    - "!go.sum"
-
   path_instructions:
+    # --- Worker / orchestration (from pre-chunked config) ---
+    - path: "internal/worker/job_store_persist.go"
+      instructions: >
+        Focus on wireJobDeps and reconstructBatchJob — these are the job
+        reconstruction paths after server restart. Verify that MovieRepo,
+        BatchCfg, PosterGen, and Matcher are properly restored so that
+        post-restart apply/rescrape and movie-edit persistence work correctly.
+    - path: "internal/worker/job_store.go"
+      instructions: >
+        Focus on SetReconstructionDeps — this re-hydrates infrastructure
+        dependencies on jobs loaded from the database at startup, after
+        the BatchJobFactory is built. Verify thread-safety of the
+        re-hydration loop.
+    - path: "internal/worker/apply_phase.go"
+      instructions: >
+        Focus on applyFile's named return + withFileRecovery(rc, &outcome)
+        deferred recovery — a recovered panic must propagate Failed/Panic to
+        the caller (trackApplyResults), never silently mark a file organized.
+    - path: "internal/worker/batch_job.go"
+      instructions: >
+        isJobTransitioned excludes Completed/Organized (valid rescrape sources).
+        excludeFile only cancels Pending/Running jobs — never clobber a
+        terminal-success (Completed/Organized) job when its last file is excluded.
+    - path: "internal/api/system/config.go"
+      instructions: >
+        HashProxyConfig errors must fail closed (return error) at both the
+        validation path and the ConfigUpdateMu save flow — never discard a
+        hash failure, or a token can be validated against the wrong proxy hash.
+    - path: "internal/api/system/translation.go"
+      instructions: >
+        DeepL base_url must be validated (valid http(s) URL) before forwarding to
+        fetchDeepLUsage, mirroring getTranslationModels — reject with 400 to avoid
+        502 misclassification and SSRF.
+    - path: "internal/api/system/proxy.go"
+      instructions: >
+        Focus on the verification token scope — direct proxy tests should
+        issue tokens with scope "global" (not "direct") so they can be
+        validated by config-save validation.
+    - path: "internal/api/core/runtime_manager.go"
+      instructions: >
+        Focus on buildBatchJobFactory — verify that SetReconstructionDeps
+        is called after the factory dependencies are available, ensuring
+        reconstructed jobs get the correct BatchCfg/PosterGen/Matcher.
+    - path: "internal/api/core/config_narrowing.go"
+      instructions: >
+        APIConfig must surface download-proxy profiles (cfg.Output.Download.
+        DownloadProxy) so scrapers.go can offer download_proxy.profile choices.
+        Keep the Config-bridge reads comment + bridges_doc.go reverse index in sync.
+    - path: "internal/workflow/compare_diff.go"
+      instructions: >
+        release_date must compare date-only formatted values (formatTimePtr),
+        not raw time.Time, to avoid timezone/time-of-day false mismatches.
+
+    # --- Frontend (from pass 5) ---
     - path: "web/frontend/src/lib/api/**"
       instructions: >
         Focus: API client correctness (request/response typing, error handling, no silent fetch failures), query key stability across operation modes, no leaked API tokens in client code. Flag unhandled non-2xx responses or untyped any casts.
@@ -94,6 +106,8 @@ reviews:
     - path: "web/frontend/*.config.*"
       instructions: >
         Focus: build/test config correctness (vite, vitest, playwright, tailwind, svelte config) — no broken aliases, no disabled type-checking, E2E config targets real endpoints. Flag configs that silently skip tests or widen CSP unsafely.
+
+    # --- TUI + utils (from pass 5) ---
     - path: "internal/tui/**"
       instructions: >
         Focus: Bubble Tea model/view/handlers correctness (no goroutine leaks in event loop, clean program teardown, Update returns consistent model+cmd, no unbounded message buffer). Flag panics in view rendering or missing quit handling.
