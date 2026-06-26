@@ -1,6 +1,6 @@
 # CodeRabbit configuration — CHUNKED FULL REVIEW (temporary per-pass scope).
 #
-# PASS 3 scope — scrapers + scrape-infra (internal/scraper,scraperconfig,scraperutil,scrape,ssrf,httpclient,ratelimit,challengedetect) (91 files)
+# PASS 4 scope — data+processing (internal/{database,organizer,downloader,nfo,template,translation,history,aggregator,matcher,scanner,eventlog,fsutil,imageutil,poster,mediainfo,formatter}) (122 files)
 # One pass of a 5-pass chunked full review (PR #35 = 607 reviewable files; limit 150).
 # In-scope = everything NOT excluded below. After all 5 passes, restored to full scope.
 #
@@ -30,40 +30,32 @@ reviews:
     - "!**/package.json"
     - "!**/package-lock.json"
 
-    # --- Exclude everything NOT in this pass's scope (scrapers + scrape-infra (internal/scraper,scraperconfig,scraperutil,scrape,ssrf,httpclient,ratelimit,challengedetect) (91 files)) ---
+    # --- Exclude everything NOT in this pass's scope (data+processing (internal/{database,organizer,downloader,nfo,template,translation,history,aggregator,matcher,scanner,eventlog,fsutil,imageutil,poster,mediainfo,formatter}) (122 files)) ---
     - "!.github/**"
     - "!cmd/**"
     - "!configs/**"
     - "!docs/**"
-    - "!internal/aggregator/**"
     - "!internal/api/**"
+    - "!internal/challengedetect/**"
     - "!internal/commandutil/**"
     - "!internal/config/**"
     - "!internal/configutil/**"
     - "!internal/coverage/**"
-    - "!internal/database/**"
-    - "!internal/downloader/**"
     - "!internal/e2e_test.go/**"
     - "!internal/enumutil/**"
-    - "!internal/eventlog/**"
-    - "!internal/formatter/**"
-    - "!internal/fsutil/**"
-    - "!internal/history/**"
-    - "!internal/imageutil/**"
+    - "!internal/httpclient/**"
     - "!internal/logging/**"
-    - "!internal/matcher/**"
-    - "!internal/mediainfo/**"
     - "!internal/mocks/**"
     - "!internal/models/**"
-    - "!internal/nfo/**"
     - "!internal/operationmode/**"
-    - "!internal/organizer/**"
     - "!internal/panicutil/**"
-    - "!internal/poster/**"
-    - "!internal/scanner/**"
-    - "!internal/template/**"
+    - "!internal/ratelimit/**"
+    - "!internal/scrape/**"
+    - "!internal/scraper/**"
+    - "!internal/scraperconfig/**"
+    - "!internal/scraperutil/**"
+    - "!internal/ssrf/**"
     - "!internal/testutil/**"
-    - "!internal/translation/**"
     - "!internal/tui/**"
     - "!internal/update/**"
     - "!internal/version/**"
@@ -81,18 +73,54 @@ reviews:
     - "!go.sum"
 
   path_instructions:
-    - path: "internal/scraper/**"
+    - path: "internal/database/**"
       instructions: >
-        Per-source metadata scrapers. Review for: (a) SafeSearch/panic recovery — a panicking scraper must never crash the worker pool, (b) HTTP errors classified via scraperErrorKind (no raw error leakage), (c) no SSRF — outbound URLs constrained to the source's allowed hosts (internal/ssrf), (d) no unbounded memory on large pages (bound DOM parsing), (e) scraper module init() registration is side-effect-free and thread-safe.
-    - path: "internal/scrape/**"
+        Focus: GORM repository correctness (transactions, scope of auto-migrate, nil-safe dereferences), SQL injection / raw-query safety, transaction rollback on error, repository interface contracts vs implementations. Flag any error that is swallowed or not wrapped with %w.
+    - path: "internal/organizer/**"
       instructions: >
-        Scrape orchestration infrastructure (ScrapeCmd, per-file dispatch). Review for: context cancellation honored through every HTTP call, rate limiting applied per source, and no data loss when a scraper returns partial results.
-    - path: "internal/ssrf/**"
+        Focus: afero filesystem operations (atomic moves, temp-dir cleanup, path traversal outside the library root), template-method strategy correctness, no silent data loss on rename/move failures. Flag missing error checks on fs operations.
+    - path: "internal/downloader/**"
       instructions: >
-        SSRF protection. Review for: private/loopback/link-local address rejection, DNS rebinding (resolve then re-check the resolved IP), and that no scraper can reach file:// or metadata endpoints.
-    - path: "internal/httpclient/**"
+        Focus: media download integrity (cover/trailer/art), SSRF on download URLs constrained to allowed media hosts, file-handle/HTTP-body Close on all paths, context cancellation honored, no partial-file left on failure.
+    - path: "internal/nfo/**"
       instructions: >
-        Shared HTTP client (resty wrapper). Review for: timeout enforcement on both dial and read, redirect policy (no cross-host redirect following without SSRF re-check), and referer/UA resolution consistency.
+        Focus: NFO XML generation correctness (escaping, encoding, well-formed output), no metadata truncation, Kodi/Plex schema conformance. Flag any unescaped user/metadata value written to XML.
+    - path: "internal/template/**"
+      instructions: >
+        Focus: template engine correctness (binding injection, missing-key handling, no panic on nil fields), output determinism. Flag unbounded recursion or unescaped path separators in rendered filenames.
+    - path: "internal/translation/**"
+      instructions: >
+        Focus: translation service correctness (DeepL/Google/OpenAI adapters), API key handling redacted in logs/errors, context cancellation honored, rate limiting respected. Flag leaked credentials or raw HTTP error leakage.
+    - path: "internal/history/**"
+      instructions: >
+        Focus: operation history persistence (idempotency, no overwrite of prior history), timestamp/timezone correctness. Flag swallowed errors on history writes.
+    - path: "internal/aggregator/**"
+      instructions: >
+        Focus: priority-based multi-source merge correctness (no silent field overwrite by lower-priority source), deterministic merge order, nil-safe handling of partial scraper results. Flag any field dropped without logging.
+    - path: "internal/matcher/**"
+      instructions: >
+        Focus: JAV ID extraction regex correctness (no catastrophic backtracking, no panic on malformed input), case/prefix handling determinism. Flag regex compile-in-hot-path or unbounded input consumption.
+    - path: "internal/scanner/**"
+      instructions: >
+        Focus: filesystem video discovery (afero, no symlink/permission silent skips), extension allow-list, no traversal outside input root. Flag ignored errors on directory reads.
+    - path: "internal/eventlog/**"
+      instructions: >
+        Focus: structured event persistence (no schema drift, no swallowed write errors), event ordering. Flag nil-event writes.
+    - path: "internal/fsutil/**"
+      instructions: >
+        Focus: filesystem helpers (path normalization, atomic writes, temp-dir hygiene, no path traversal). Flag TOCTOU or missing Close on copied files.
+    - path: "internal/imageutil/**"
+      instructions: >
+        Focus: image processing (decode/resize/normalize) correctness, no panic on malformed images, bounded memory (large-image guard), host allow-lists for DMM/CDN URLs. Flag unbounded image.Image allocation.
+    - path: "internal/poster/**"
+      instructions: >
+        Focus: poster generation/assembly correctness, file-handle Close on all paths, temp-file cleanup, no silent overwrite of existing posters without intent. Flag missing error checks.
+    - path: "internal/mediainfo/**"
+      instructions: >
+        Focus: MP4 metadata parsing correctness (mp4ff), no panic on truncated/invalid MP4, bounded reads, context cancellation. Flag swallowed parse errors or unbounded box reads.
+    - path: "internal/formatter/**"
+      instructions: >
+        Focus: output formatting determinism, no silent truncation, encoding safety. Flag unescaped control characters in formatted output.
 
 review_status:
   fail_commit_in_status: false
