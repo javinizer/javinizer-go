@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/afero"
@@ -150,12 +151,18 @@ func TestBatchJobFactory_NewApplyConfig(t *testing.T) {
 func TestBatchJobFactory_NewRescrapeCmd(t *testing.T) {
 	factory := NewBatchJobFactory(nil, nil, nil, nil, BatchJobConfig{}, nil)
 
-	cmd := factory.NewRescrapeCmd("ABC-001", "/path/file.mp4", "search input", []string{"r18dev"}, true)
+	mergeOpts := workflow.MergeOptions{ScalarStrategy: nfo.PreferNFO, ArrayStrategy: true}
+	cmd := factory.NewRescrapeCmd("ABC-001", "/path/file.mp4", "search input", []string{"r18dev"}, true, mergeOpts)
 	assert.Equal(t, "ABC-001", cmd.MovieID)
 	assert.Equal(t, "/path/file.mp4", cmd.FilePath)
 	assert.Equal(t, "search input", cmd.ManualSearchInput)
 	assert.Equal(t, []string{"r18dev"}, cmd.SelectedScrapers)
 	assert.True(t, cmd.Force)
+	assert.Equal(t, mergeOpts.ScalarStrategy, cmd.Merge.ScalarStrategy)
+	assert.True(t, cmd.Merge.ArrayStrategy)
+	// MergeEnabled is the caller's responsibility (set after building); the
+	// factory does not infer it from a zero/non-zero MergeOptions.
+	assert.False(t, cmd.MergeEnabled)
 }
 
 func TestBatchJobFactory_BuildJobConfig_DefaultWF(t *testing.T) {

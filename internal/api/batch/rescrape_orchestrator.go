@@ -91,13 +91,25 @@ func (o *RescrapeOrchestrator) Rescrape(ctx context.Context, jobID, movieID, fil
 	// Per DEEP-6: set WF on the job's deps before calling Rescrape.
 	job.SetWorkflow(wf)
 
-	result, err := job.Rescrape(ctx, o.factory.NewRescrapeCmd(
+	// Per ADR-0030 + CodeRabbit review: propagate the client's merge strategy
+	// (preset/scalar_strategy/array_strategy) into the rescrape command instead
+	// of dropping it. resolveRescrapeMergeOptions resolves the seam strings at
+	// this boundary; MergeEnabled gates whether CompleteRescrape applies the
+	// merge (false preserves the historical wholesale-replace default).
+	mergeOpts, mergeEnabled, mergeErr := resolveRescrapeMergeOptions(req)
+	if mergeErr != nil {
+		return nil, fmt.Errorf("invalid merge options: %w", mergeErr)
+	}
+	cmd := o.factory.NewRescrapeCmd(
 		movieID,
 		filePath,
 		req.ManualSearchInput,
 		req.SelectedScrapers,
 		req.Force,
-	))
+		mergeOpts,
+	)
+	cmd.MergeEnabled = mergeEnabled
+	result, err := job.Rescrape(ctx, cmd)
 	if err != nil {
 		return nil, err
 	}

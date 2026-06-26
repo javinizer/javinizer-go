@@ -93,6 +93,21 @@ type RescrapeCmd struct {
 	// instead of calling FindFileForMovieID internally. When empty, falls back
 	// to FindFileForMovieID for backward compatibility.
 	FilePath string
+
+	// Merge controls how the freshly scraped metadata is merged into the
+	// existing MovieResult before commit. Per ADR-0030: Preset/ScalarStrategy/
+	// ArrayStrategy are resolved at the factory boundary (via
+	// workflow.ResolveSeamStrings) before being placed here.
+	//
+	// MergeEnabled gates whether merging is applied at all. When false (the
+	// default for callers that don't supply merge options), CompleteRescrape
+	// preserves the historical wholesale-replace behavior so existing
+	// rescrape callers are unchanged. When true, the new scraped Movie is
+	// merged into the existing one via nfo.MergeMovieMetadataWithOptions
+	// before CommitResult — honoring the caller's requested merge policy
+	// instead of silently dropping it.
+	Merge        workflow.MergeOptions
+	MergeEnabled bool
 }
 
 // RescrapeResult is everything the caller gets back from the rescrape seam.

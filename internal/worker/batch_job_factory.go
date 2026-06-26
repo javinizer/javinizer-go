@@ -83,7 +83,11 @@ type BatchJobFactoryInterface interface {
 	// NewRescrapeCmd builds a RescrapeCmd with the factory's defaults.
 	// Per DEEP-6: WF/PosterGen/BatchCfg overrides removed. API handlers must call
 	// SetWorkflow on the job before calling Rescrape if deps.WF is nil.
-	NewRescrapeCmd(movieID string, filePath string, manualSearchInput string, selectedScrapers []string, force bool) RescrapeCmd
+	// mergeOpts carries the resolved NFO merge policy (per ADR-0030); callers
+	// that accept preset/scalar_strategy/array_strategy should resolve them via
+	// workflow.ResolveSeamStrings and pass the resulting MergeOptions here so
+	// CompleteRescrape honors the requested merge behavior.
+	NewRescrapeCmd(movieID string, filePath string, manualSearchInput string, selectedScrapers []string, force bool, mergeOpts workflow.MergeOptions) RescrapeCmd
 }
 
 // batchJobFactory is the concrete implementation of BatchJobFactoryInterface.
@@ -162,13 +166,17 @@ func (f *batchJobFactory) NewApplyConfig(organizeOpts workflow.OrganizeOptions, 
 // NewRescrapeCmd builds a RescrapeCmd with the factory's defaults.
 // Per DEEP-6: WF/PosterGen/BatchCfg overrides removed from RescrapeCmd.
 // API handlers set deps.WF via SetWorkflow before calling Rescrape.
-func (f *batchJobFactory) NewRescrapeCmd(movieID string, filePath string, manualSearchInput string, selectedScrapers []string, force bool) RescrapeCmd {
+// mergeOpts carries the resolved NFO merge policy; callers that don't supply
+// merge options should pass a zero workflow.MergeOptions (CompleteRescrape only
+// merges when MergeEnabled is set, which the caller controls after building).
+func (f *batchJobFactory) NewRescrapeCmd(movieID string, filePath string, manualSearchInput string, selectedScrapers []string, force bool, mergeOpts workflow.MergeOptions) RescrapeCmd {
 	return RescrapeCmd{
 		MovieID:           movieID,
 		FilePath:          filePath,
 		ManualSearchInput: manualSearchInput,
 		SelectedScrapers:  selectedScrapers,
 		Force:             force,
+		Merge:             mergeOpts,
 	}
 }
 

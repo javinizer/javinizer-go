@@ -8,6 +8,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -302,6 +303,20 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			newMovieID = movieResult.Movie.ID
 		}
 
+		// Honor the caller's merge policy (preset/scalar_strategy/array_strategy).
+		// When MergeEnabled is set and an existing result is present, merge the
+		// freshly scraped Movie into the existing one via the same NFO merge
+		// engine the apply path uses, instead of wholesale-replacing it. This
+		// closes the gap where the API accepted + validated merge options but
+		// RescrapeCmd silently dropped them. When MergeEnabled is false (the
+		// default for callers that supply no merge options), behavior is
+		// unchanged: the scraped Movie replaces the existing one on commit.
+		if cmd.MergeEnabled && movieResult.Movie != nil {
+			if existing, getErr := inputs.ResultMap.GetMovieResult(lookup.FilePath); getErr == nil && existing != nil && existing.Movie != nil {
+				movieResult.Movie = mergeRescrapeMovie(existing.Movie, movieResult.Movie, cmd.Merge, lookup.FilePath)
+			}
+		}
+
 		// Commit result
 		outcome, commitErr := p.CompleteRescrape(inputs, lookup.FilePath, movieResult, lookup.CapturedRevision, newMovieID, lookup.OldMovieID)
 		if commitErr != nil {
@@ -321,4 +336,24 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 	}
 
 	return outcome, nil
+}
+
+// mergeRescrapeMovie merges a freshly scraped Movie into the existing one for
+// a rescrape, using the same NFO merge engine as the apply path. The scraped
+// movie's ID is preserved (a rescrape may resolve a new/corrected ID); all
+// other fields are merged per the resolved scalar/array strategy, with the
+// existing movie treated as the "nfo"/preserved side. On merge failure the
+// scraped movie is returned unchanged (wholesale-replace fallback) so a bad
+// merge never blocks the rescrape; the failure is logged.
+func mergeRescrapeMovie(existing, scraped *models.Movie, opts workflow.MergeOptions, filePath string) *models.Movie {
+	merged, err := nfo.MergeMovieMetadataWithOptions(scraped, existing, opts.ScalarStrategy, opts.ArrayStrategy)
+	if err != nil {
+		logging.Errorf("rescrape merge failed for %s, falling back to replace: %v", filePath, err)
+		return scraped
+	}
+	if merged == nil || merged.Merged == nil {
+		return scraped
+	}
+	merged.Merged.ID = scraped.ID
+	return merged.Merged
 }

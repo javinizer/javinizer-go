@@ -47,6 +47,37 @@ func validateRescrapeRequest(req *contracts.BatchRescrapeRequest) (int, string) 
 	return 0, ""
 }
 
+// resolveRescrapeMergeOptions resolves the merge-strategy seam strings from a
+// BatchRescrapeRequest into a workflow.MergeOptions (per ADR-0030: preset is
+// resolved at this boundary and overrides scalar/array). Returns the resolved
+// MergeOptions and a bool indicating whether the caller actually supplied any
+// merge options (preset/scalar/array non-empty), so RescrapeCmd.MergeEnabled
+// can be set accurately. When the caller supplied nothing, the returned
+// MergeOptions is zero and the bool is false — preserving the historical
+// wholesale-replace rescrape behavior.
+//
+// Assumes the request was already validated by validateRescrapeRequest (which
+// rejects invalid preset/scalar/array values); a defensive error return is
+// kept for direct callers that skip validation.
+func resolveRescrapeMergeOptions(req *contracts.BatchRescrapeRequest) (workflow.MergeOptions, bool, error) {
+	supplied := req.Preset != "" || req.ScalarStrategy != "" || req.ArrayStrategy != ""
+	if !supplied {
+		return workflow.MergeOptions{}, false, nil
+	}
+	resolved, err := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
+		Preset:         req.Preset,
+		ScalarStrategy: req.ScalarStrategy,
+		ArrayStrategy:  req.ArrayStrategy,
+	})
+	if err != nil {
+		return workflow.MergeOptions{}, false, err
+	}
+	return workflow.MergeOptions{
+		ScalarStrategy: resolved.ScalarStrategy,
+		ArrayStrategy:  resolved.ArrayStrategy,
+	}, true, nil
+}
+
 func writeErrorResponse(c *gin.Context, status int, isGone bool, errMsg string) {
 	if isGone {
 		c.JSON(status, gin.H{

@@ -172,13 +172,24 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 }
 
 func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.BatchJobInterface, req *contracts.BatchRescrapeRequest, factory worker.BatchJobFactoryInterface) *contracts.BulkRescrapeMovieResult {
-	result, err := job.Rescrape(ctx, factory.NewRescrapeCmd(
+	mergeOpts, mergeEnabled, mergeErr := resolveRescrapeMergeOptions(req)
+	if mergeErr != nil {
+		return &contracts.BulkRescrapeMovieResult{
+			MovieID: movieID,
+			Status:  models.RescrapeStatusFailed,
+			Error:   fmt.Sprintf("invalid merge options: %v", mergeErr),
+		}
+	}
+	cmd := factory.NewRescrapeCmd(
 		movieID,
 		"", // filePath resolved by job
 		req.ManualSearchInput,
 		req.SelectedScrapers,
 		req.Force,
-	))
+		mergeOpts,
+	)
+	cmd.MergeEnabled = mergeEnabled
+	result, err := job.Rescrape(ctx, cmd)
 	if err != nil {
 		return &contracts.BulkRescrapeMovieResult{
 			MovieID: movieID,
