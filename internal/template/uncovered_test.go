@@ -145,9 +145,17 @@ func TestEngine_ResolveTag_MultiPart_Uncovered(t *testing.T) {
 func TestEngine_ResolveTag_Filename_Uncovered(t *testing.T) {
 	e := NewEngine()
 
-	result, err := e.Execute("<FILENAME>", &Context{OriginalFilename: "video.mp4"})
-	require.NoError(t, err)
-	assert.Equal(t, "video.mp4", result)
+	t.Run("FILENAME strips extension", func(t *testing.T) {
+		result, err := e.Execute("<FILENAME>", &Context{OriginalFilename: "video.mp4"})
+		require.NoError(t, err)
+		assert.Equal(t, "video", result)
+	})
+
+	t.Run("FILENAME_EXT keeps extension", func(t *testing.T) {
+		result, err := e.Execute("<FILENAME_EXT>", &Context{OriginalFilename: "video.mp4"})
+		require.NoError(t, err)
+		assert.Equal(t, "video.mp4", result)
+	})
 }
 
 func TestEngine_ResolveTag_UnknownTag_Uncovered(t *testing.T) {
