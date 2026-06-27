@@ -15,6 +15,9 @@ reviews:
 
   high_level_summary: true
   poem: false
+  # Post review-completion status to the PR (informational; does not fail
+  # the commit — failing on status is a separate pre-merge-checks feature).
+  review_status: true
 
   path_filters:
     # --- Excludes (tests, generated code, lockfiles, config noise) ---
