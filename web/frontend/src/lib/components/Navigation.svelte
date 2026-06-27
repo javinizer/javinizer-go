@@ -5,6 +5,7 @@
 	import { FolderOpen, Settings, Film, Users, LogOut, Activity, FileText, ChevronDown, Sun, Moon, Monitor, Tags, Type } from 'lucide-svelte';
 	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import type { Theme } from '$lib/stores/theme.svelte';
+	import UpdateIndicator from '$lib/components/UpdateIndicator.svelte';
 
 	interface Props {
 		authenticated?: boolean;
@@ -94,6 +95,9 @@
 						<span class="hidden md:inline">{item.label}</span>
 					</a>
 				{/each}
+
+				<!-- Update available indicator (hidden when up-to-date / disabled) -->
+				<UpdateIndicator />
 
 				<!-- Settings & Logs dropdown -->
 				<div class="relative" data-submenu>

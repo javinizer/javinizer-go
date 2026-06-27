@@ -2,6 +2,7 @@ package update
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -13,18 +14,25 @@ import (
 
 // service handles update checking with caching and background refresh.
 type service struct {
-	checker   checker
-	store     *stateStore
-	statePath string
-	interval  time.Duration
-	enabled   bool
-	checkMu   sync.Mutex // prevents concurrent background checks
+	checker    checker
+	store      *stateStore
+	statePath  string
+	interval   time.Duration
+	enabled    bool
+	stableOnly bool       // honor system.version_check_stable_only: when true, never surface a prerelease as an available update
+	checkMu    sync.Mutex // prevents concurrent background checks
 }
 
 // UpdateConfig carries the narrow set of config fields the update service reads.
 type UpdateConfig struct {
 	Enabled                   bool
 	VersionCheckIntervalHours int
+	// StableOnly, when true, restricts update notifications to stable releases
+	// only (prereleases are still fetched and cached for transparency but never
+	// reported as available). Defaults to false: the Go repo currently ships
+	// only prereleases, so suppressing them by default would mean the checker
+	// never notifies any user until a stable release exists.
+	StableOnly bool
 }
 
 // NewService creates a new update service with production defaults (the real
@@ -65,15 +73,16 @@ func NewServiceWithOptions(cfg UpdateConfig, opts ServiceOptions) *service {
 
 	chk := opts.Checker
 	if chk == nil {
-		chk = newGitHubChecker("javinizer/Javinizer")
+		chk = newGitHubChecker(defaultRepo)
 	}
 
 	return &service{
-		checker:   chk,
-		store:     store,
-		statePath: statePath,
-		interval:  interval,
-		enabled:   cfg.Enabled,
+		checker:    chk,
+		store:      store,
+		statePath:  statePath,
+		interval:   interval,
+		enabled:    cfg.Enabled,
+		stableOnly: cfg.StableOnly,
 	}
 }
 
@@ -134,8 +143,43 @@ func (s *service) ForceCheck(ctx context.Context) (*updateState, error) {
 
 	logging.Info("Checking for updates...")
 
+	// Thread the cached ETag + "no-stable-latest" flag into the checker so this
+	// check is rate-limit-friendly: the ETag becomes If-None-Match (GitHub 304s
+	// don't count against quota) and skipLatest avoids the 404-throwing
+	// /releases/latest call for prerelease-only repos. Stub checkers don't
+	// implement ConditionalChecker — the assert fails silently and a full fetch
+	// runs, which is correct for hermetic tests.
+	if cached, _ := s.store.LoadState(); cached != nil {
+		if cc, ok := s.checker.(ConditionalChecker); ok {
+			cc.SetIfNoneMatch(cached.ETag)
+			cc.SetSkipLatest(cached.NoStableLatest)
+		}
+	}
+
 	latest, err := s.checker.CheckLatestVersion(ctx)
 	if err != nil {
+		// 304 Not Modified: releases unchanged since the last check. Keep the
+		// cached state (version/availability intact), just refresh CheckedAt so
+		// the UI's "last checked" stays current. This path burns no rate-limit
+		// quota, so it's the steady-state for a long-running or frequently
+		// restarted instance.
+		if errors.Is(err, ErrNotModified) {
+			cached, _ := s.store.LoadState()
+			if cached != nil && cached.Version != "" {
+				cached.CheckedAt = nowISO8601()
+				cached.Source = UpdateSourceCached
+				cached.Error = ""
+				_ = s.store.SaveState(cached)
+				logging.Debugf("Update check: not modified (304), keeping cached state")
+				return cached, nil
+			}
+			// No cached state to reuse — fall through to the error path below.
+			return &updateState{
+				Source: UpdateSourceError,
+				Error:  "not modified but no cached state available",
+			}, nil
+		}
+
 		logging.Debugf("Update check failed: %v", err)
 
 		// Try to load existing state
@@ -162,12 +206,23 @@ func (s *service) ForceCheck(ctx context.Context) (*updateState, error) {
 	isAvailable := CompareVersions(currentVersion, latest.Version) < 0
 	isPrerelease := IsPrerelease(latest.Version)
 
+	// Honor the user's stable-only preference: when restricting to stable
+	// releases, never surface a prerelease as an available update (the Go repo
+	// currently ships only prereleases, so this means "no update" until a
+	// stable release lands — by design, not a bug). The version is still cached
+	// so the UI can show what was found; only the Available flag is suppressed.
+	if isAvailable && isPrerelease && s.stableOnly {
+		isAvailable = false
+	}
+
 	state := &updateState{
-		Version:    latest.Version,
-		CheckedAt:  nowISO8601(),
-		Available:  isAvailable,
-		Prerelease: isPrerelease,
-		Source:     UpdateSourceFresh,
+		Version:        latest.Version,
+		CheckedAt:      nowISO8601(),
+		Available:      isAvailable,
+		Prerelease:     isPrerelease,
+		Source:         UpdateSourceFresh,
+		ETag:           latest.ETag,
+		NoStableLatest: latest.NoStableLatest,
 	}
 
 	// Only save if we have a valid state

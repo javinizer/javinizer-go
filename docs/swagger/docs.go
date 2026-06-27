@@ -5610,6 +5610,10 @@ const docTemplate = `{
                 "version_check_interval_hours": {
                     "description": "VersionCheckIntervalHours is the interval between version checks in hours",
                     "type": "integer"
+                },
+                "version_check_stable_only": {
+                    "description": "VersionCheckStableOnly, when true, restricts update notifications to\nstable releases only (prereleases are still fetched and cached for\ntransparency but never reported as available). Defaults to false: the\nGo rewrite currently ships only prereleases (v0.x-alpha), so suppressing\nthem by default would mean no user is ever notified until a stable\nrelease exists. Set to true to be notified only about stable releases.\nModeled as an opt-in restriction (not an opt-out) so the zero value is\nthe correct default for existing configs — no migration needed.",
+                    "type": "boolean"
                 }
             }
         },

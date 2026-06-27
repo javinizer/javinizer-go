@@ -38,6 +38,7 @@ func versionStatus(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 		service := update.NewService(update.UpdateConfig{
 			Enabled:                   cfg.System.VersionCheckEnabled,
 			VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+			StableOnly:                cfg.System.VersionCheckStableOnly,
 		})
 
 		// Get current version info
@@ -110,6 +111,7 @@ func versionCheck(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 		service := update.NewService(update.UpdateConfig{
 			Enabled:                   cfg.System.VersionCheckEnabled,
 			VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+			StableOnly:                cfg.System.VersionCheckStableOnly,
 		})
 
 		// Perform the check (sync)

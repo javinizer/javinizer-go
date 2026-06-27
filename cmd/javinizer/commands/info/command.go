@@ -113,6 +113,7 @@ func printUpdateStatus(cmd *cobra.Command, cfg *config.Config) error {
 	service := update.NewService(update.UpdateConfig{
 		Enabled:                   cfg.System.VersionCheckEnabled,
 		VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+		StableOnly:                cfg.System.VersionCheckStableOnly,
 	})
 	ctx := cmd.Context()
 	state, err := service.GetStatus(ctx)

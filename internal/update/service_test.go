@@ -15,6 +15,10 @@ import (
 type mockChecker struct {
 	version *versionInfo
 	err     error
+
+	// ConditionalChecker probes — record what the service threaded in.
+	gotIfNoneMatch string
+	gotSkipLatest  bool
 }
 
 func (m *mockChecker) CheckLatestVersion(_ context.Context) (*versionInfo, error) {
@@ -23,6 +27,12 @@ func (m *mockChecker) CheckLatestVersion(_ context.Context) (*versionInfo, error
 	}
 	return m.version, nil
 }
+
+// SetIfNoneMatch implements ConditionalChecker.
+func (m *mockChecker) SetIfNoneMatch(etag string) { m.gotIfNoneMatch = etag }
+
+// SetSkipLatest implements ConditionalChecker.
+func (m *mockChecker) SetSkipLatest(skip bool) { m.gotSkipLatest = skip }
 
 func TestNewService(t *testing.T) {
 	service := NewService(UpdateConfig{
@@ -317,4 +327,143 @@ func TestService_ForceCheck_PrereleaseToStableIsAvailable(t *testing.T) {
 	assert.Equal(t, "v1.6.0", status.Version)
 	assert.True(t, status.Available)
 	assert.False(t, status.Prerelease)
+}
+
+// TestService_ForceCheck_StableOnlyConfig verifies the service honors the
+// config-driven stableOnly flag when the latest release is a prerelease:
+// with stableOnly=false (the default) the prerelease is surfaced as an
+// available update; with stableOnly=true the version is still cached (for
+// transparency) but Available is suppressed so the user isn't notified about a
+// prerelease.
+func TestService_ForceCheck_StableOnlyConfig(t *testing.T) {
+	origVersion := appversion.Version
+	defer func() { appversion.Version = origVersion }()
+	appversion.Version = "v0.3.14-alpha"
+
+	mkService := func(stableOnly bool) *service {
+		tmpDir := t.TempDir()
+		statePath := filepath.Join(tmpDir, "update_cache.json")
+		return &service{
+			checker: &mockChecker{
+				version: &versionInfo{
+					Version:    "v0.3.15-alpha",
+					TagName:    "v0.3.15-alpha",
+					Prerelease: true,
+				},
+			},
+			store:      newStateStore(statePath, defaultCheckInterval),
+			statePath:  statePath,
+			interval:   24 * time.Hour,
+			enabled:    true,
+			stableOnly: stableOnly,
+		}
+	}
+
+	t.Run("stableOnly=false surfaces prerelease update", func(t *testing.T) {
+		svc := mkService(false)
+		status, err := svc.ForceCheck(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		assert.Equal(t, "v0.3.15-alpha", status.Version)
+		assert.True(t, status.Available, "prerelease should be offered when stableOnly=false")
+		assert.True(t, status.Prerelease)
+	})
+
+	t.Run("stableOnly=true suppresses prerelease update", func(t *testing.T) {
+		svc := mkService(true)
+		status, err := svc.ForceCheck(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		assert.Equal(t, "v0.3.15-alpha", status.Version, "version still cached for transparency")
+		assert.False(t, status.Available, "prerelease must NOT be offered when stableOnly=true")
+		assert.True(t, status.Prerelease)
+	})
+}
+
+// TestService_ForceCheck_NotModifiedKeepsCachedState verifies the 304 path:
+// when the checker reports ErrNotModified (GitHub returned 304 for our
+// If-None-Match), the service keeps the cached version/availability and only
+// refreshes CheckedAt. This is the rate-limit-free steady state for a
+// frequently-restarted instance.
+func TestService_ForceCheck_NotModifiedKeepsCachedState(t *testing.T) {
+	origVersion := appversion.Version
+	defer func() { appversion.Version = origVersion }()
+	appversion.Version = "v0.3.14-alpha"
+
+	tmpDir := t.TempDir()
+	statePath := filepath.Join(tmpDir, "update_cache.json")
+	store := newStateStore(statePath, defaultCheckInterval)
+
+	// Prime the cache with a prior successful check (including the ETag +
+	// no-stable-latest flag a real check would have persisted).
+	prior := &updateState{
+		Version:        "v0.3.15-alpha",
+		CheckedAt:      "2026-01-01T00:00:00Z",
+		Available:      true,
+		Prerelease:     true,
+		Source:         UpdateSourceFresh,
+		ETag:           `W/"deadbeef"`,
+		NoStableLatest: true,
+	}
+	require.NoError(t, store.SaveState(prior))
+
+	chk := &mockChecker{err: ErrNotModified}
+	svc := &service{
+		checker:    chk,
+		store:      store,
+		statePath:  statePath,
+		interval:   24 * time.Hour,
+		enabled:    true,
+		stableOnly: false,
+	}
+
+	status, err := svc.ForceCheck(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, status)
+
+	// Cached version + availability are preserved verbatim.
+	assert.Equal(t, "v0.3.15-alpha", status.Version)
+	assert.True(t, status.Available, "availability carried over from cache")
+	assert.True(t, status.Prerelease)
+	// CheckedAt is refreshed; the stale timestamp must be gone.
+	assert.NotEqual(t, "2026-01-01T00:00:00Z", status.CheckedAt)
+	assert.NotEmpty(t, status.CheckedAt)
+	// Source flips to cached (not fresh) since we served from the 304 path.
+	assert.Equal(t, UpdateSourceCached, status.Source)
+	assert.Empty(t, status.Error)
+
+	// The service threaded the cached ETag + no-stable-latest flag into the
+	// checker so the real request would have been rate-limit-friendly.
+	assert.Equal(t, `W/"deadbeef"`, chk.gotIfNoneMatch)
+	assert.True(t, chk.gotSkipLatest, "skipLatest threaded from cached NoStableLatest")
+
+	// The persisted state carries the ETag + flag forward for the next check.
+	reloaded, err := store.LoadState()
+	require.NoError(t, err)
+	assert.Equal(t, `W/"deadbeef"`, reloaded.ETag)
+	assert.True(t, reloaded.NoStableLatest)
+}
+
+// TestService_ForceCheck_NotModifiedWithoutCache verifies the edge case where
+// a 304 arrives but there is no prior cached state to reuse: the service
+// reports an error state rather than fabricating version data.
+func TestService_ForceCheck_NotModifiedWithoutCache(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath := filepath.Join(tmpDir, "update_cache.json")
+	store := newStateStore(statePath, defaultCheckInterval) // empty cache
+
+	chk := &mockChecker{err: ErrNotModified}
+	svc := &service{
+		checker:   chk,
+		store:     store,
+		statePath: statePath,
+		interval:  24 * time.Hour,
+		enabled:   true,
+	}
+
+	status, err := svc.ForceCheck(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	assert.Equal(t, UpdateSourceError, status.Source)
+	assert.Empty(t, status.Version, "no version fabricated from a 304 with no cache")
 }

@@ -333,6 +333,10 @@ func DefaultConfig(priorities []string, defaults map[string]*models.ScraperSetti
 			VersionCheckIntervalHours: 24,
 			TempDir:                   DefaultTempDir,
 		},
+		// VersionCheckStableOnly is intentionally omitted: its zero value (false)
+		// is the correct default (prereleases allowed). Existing configs that
+		// lack the field inherit false via decodeConfig's load-into-DefaultConfig,
+		// so no migration is required.
 		WebUI: webUIConfig{
 			DefaultReviewView: "grid-poster",
 		},

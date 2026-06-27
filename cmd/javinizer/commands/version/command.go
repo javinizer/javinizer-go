@@ -32,6 +32,7 @@ func NewCommand() *cobra.Command {
 				service := update.NewService(update.UpdateConfig{
 					Enabled:                   cfg.System.VersionCheckEnabled,
 					VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+					StableOnly:                cfg.System.VersionCheckStableOnly,
 				})
 				state, err := service.ForceCheck(ctx)
 

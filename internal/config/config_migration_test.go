@@ -117,3 +117,47 @@ server:
 	require.NoError(t, err)
 	assert.Equal(t, string(before), string(after))
 }
+
+// TestDefaultConfig_VersionCheckStableOnlyFalse verifies the new field defaults
+// to false (prereleases allowed — the Go rewrite ships only prereleases, so
+// the default keeps notifications on). Because the zero value is the correct
+// default, no config_version bump or migration is required: existing configs
+// that lack the field inherit false via decodeConfig's load-into-DefaultConfig.
+func TestDefaultConfig_VersionCheckStableOnlyFalse(t *testing.T) {
+	cfg := DefaultConfig(nil, nil)
+	assert.False(t, cfg.System.VersionCheckStableOnly, "default should allow prerelease notifications (stable_only=false)")
+	assert.Equal(t, CurrentConfigVersion, cfg.ConfigVersion)
+}
+
+// TestVersionCheckStableOnly_InheritedFromDefaultForV3Config verifies the
+// load-into-DefaultConfig mechanism backfills the new field correctly for an
+// existing v3 config that never had it: the field stays false (the DefaultConfig
+// value), NOT the Go zero value trick — confirming no migration is needed.
+// Other fields are preserved (not a legacy wipe).
+func TestVersionCheckStableOnly_InheritedFromDefaultForV3Config(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	v3 := `config_version: 3
+server:
+  port: 9090
+scrapers:
+  priority:
+    - dmm
+system:
+  version_check_enabled: false
+`
+	err := os.WriteFile(cfgPath, []byte(v3), 0o644)
+	require.NoError(t, err)
+
+	cfg, err := LoadOrCreate(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, CurrentConfigVersion, cfg.ConfigVersion)
+	// No migration: v3 config stays v3 (CurrentConfigVersion is still 3) and the
+	// new field inherits false from DefaultConfig, not from a migration step.
+	assert.False(t, cfg.System.VersionCheckStableOnly, "field inherits the default (false); no migration needed")
+	// Other fields preserved (not a legacy wipe).
+	assert.Equal(t, 9090, cfg.Server.Port)
+	assert.Equal(t, []string{"dmm"}, cfg.Scrapers.Priority)
+	assert.False(t, cfg.System.VersionCheckEnabled, "explicit v3 setting preserved")
+}
