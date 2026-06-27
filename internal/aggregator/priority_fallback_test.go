@@ -361,3 +361,28 @@ func TestIsUnknownActress(t *testing.T) {
 		})
 	}
 }
+
+// TestResolvePrioritiesNilMetadataNoPanic verifies that a config with no
+// Metadata block (MetadataConfigFromApp returns nil) does not panic during
+// resolvePriorities, and that field priorities fall back to ScrapersPriority.
+// Regression guard for the CodeRabbit finding on PR #51: resolvePriorities
+// dereferenced a.cfg.Metadata without a nil check, which would panic for
+// configs that rely only on ScrapersPriority.
+func TestResolvePrioritiesNilMetadataNoPanic(t *testing.T) {
+	cfg := &Config{
+		Metadata:         nil, // no metadata block — MetadataConfigFromApp returns nil
+		ScrapersPriority: []string{"dmm", "r18dev"},
+	}
+
+	// Before the fix, this panicked: a.cfg != nil was true but a.cfg.Metadata
+	// was nil, so a.cfg.Metadata.Priority.GetFieldPriority(...) dereferenced nil.
+	assert.NotPanics(t, func() {
+		_ = newAggregatorNoDB(cfg) // New() calls resolvePriorities()
+	})
+
+	agg := newAggregatorNoDB(cfg)
+	// Fields without a per-field override fall back to the global ScrapersPriority.
+	assert.Equal(t, []string{"dmm", "r18dev"}, agg.resolvedPriorities["ID"])
+	assert.Equal(t, []string{"dmm", "r18dev"}, agg.resolvedPriorities["Series"])
+	assert.Equal(t, []string{"dmm", "r18dev"}, agg.resolvedPriorities["Actress"])
+}

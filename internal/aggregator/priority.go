@@ -60,7 +60,12 @@ func (a *Aggregator) resolvePriorities() {
 		// without a per-field override).
 		fieldPriority := copySlice(globalPriority)
 
-		if a.cfg != nil {
+		// Guard a.cfg.Metadata == nil: MetadataConfigFromApp returns nil when the
+		// app config has no metadata block, and getFieldPriorityFromConfig (below)
+		// already treats cfg.Metadata as optional. Without this guard, dereferencing
+		// a.cfg.Metadata.Priority here would panic for configs that rely only on
+		// ScrapersPriority (CodeRabbit, PR #51).
+		if a.cfg != nil && a.cfg.Metadata != nil {
 			if fp := a.cfg.Metadata.Priority.GetFieldPriority(toSnakeCase(field)); len(fp) > 0 {
 				// A per-field override is EXCLUSIVE: only the scrapers listed in the
 				// override are consulted for that field — there is NO fallback to
