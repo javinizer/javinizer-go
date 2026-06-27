@@ -271,10 +271,11 @@ mocks:
 	@go run github.com/vektra/mockery/v3@v3.7.1 --config .mockery.yaml
 	@echo "Post-processing: Unifying package names to 'mocks'..."
 	@for file in internal/mocks/*.go; do \
-		sed -i '' 's/^package models$$/package mocks/' "$$file"; \
-		sed -i '' 's/^package database$$/package mocks/' "$$file"; \
-		sed -i '' 's/^package httpclient$$/package mocks/' "$$file"; \
-		sed -i '' 's/^package aggregator$$/package mocks/' "$$file"; \
+		sed -i.bak 's/^package models$$/package mocks/' "$$file"; \
+		sed -i.bak 's/^package database$$/package mocks/' "$$file"; \
+		sed -i.bak 's/^package httpclient$$/package mocks/' "$$file"; \
+		sed -i.bak 's/^package aggregator$$/package mocks/' "$$file"; \
+		rm -f "$$file.bak"; \
 	done
 	@echo "Mock generation complete! Generated mocks in internal/mocks/"
 
@@ -283,10 +284,11 @@ check-mocks:
 	@echo "Checking mocks are up to date..."
 	@go run github.com/vektra/mockery/v3@v3.7.1 --config .mockery.yaml >/dev/null
 	@for file in internal/mocks/*.go; do \
-		sed -i '' 's/^package models$$/package mocks/' "$$file"; \
-		sed -i '' 's/^package database$$/package mocks/' "$$file"; \
-		sed -i '' 's/^package httpclient$$/package mocks/' "$$file"; \
-		sed -i '' 's/^package aggregator$$/package mocks/' "$$file"; \
+		sed -i.bak 's/^package models$$/package mocks/' "$$file"; \
+		sed -i.bak 's/^package database$$/package mocks/' "$$file"; \
+		sed -i.bak 's/^package httpclient$$/package mocks/' "$$file"; \
+		sed -i.bak 's/^package aggregator$$/package mocks/' "$$file"; \
+		rm -f "$$file.bak"; \
 	done
 	@if ! git diff --quiet -- internal/mocks/; then \
 		echo "❌ Mocks are out of date"; \
