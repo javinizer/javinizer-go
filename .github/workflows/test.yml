@@ -69,7 +69,8 @@ jobs:
         files: ./coverage.out
         flags: unittests
         name: codecov-javinizer
-        fail_ci_if_error: false
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
         verbose: true
 
     - name: Archive coverage report
