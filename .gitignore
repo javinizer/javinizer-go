@@ -11,6 +11,7 @@
 # Output of the go build
 /bin/
 /dist/
+/tmp/
 javinizer-go
 /javinizer
 /javinizer-e2e
@@ -21,6 +22,9 @@ javinizer-go
 /web/frontend/build/
 /web/frontend/test-results/
 /web/frontend/tests/e2e/auth-state.json
+/web/frontend/playwright-report/
+/web/frontend/blob-report/
+/web/frontend/playwright/.cache/
 /web/dist/*
 !/web/dist/robots.txt
 !/web/dist/index.html
@@ -45,8 +49,11 @@ Thumbs.db
 
 # Application
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
+*.log
 *.migration.lock
 /data/
 /downloads/
