@@ -394,7 +394,7 @@
 				role="tooltip"
 				id={priorityModeHelpTooltipId}
 				bind:this={infoPopoverEl}
-				class="absolute top-full right-0 mt-2 w-72 bg-gray-900/95 text-white rounded-lg px-3 py-2 shadow-lg z-20"
+				class="absolute top-full right-0 mt-2 w-72 bg-popover text-popover-foreground border rounded-lg px-3 py-2 shadow-lg z-20"
 				class:pointer-events-none={!showInfo}
 				class:invisible={!showInfo}
 			>
@@ -409,7 +409,7 @@
 							<span class="font-medium">Advanced</span> — set a custom scraper order for
 							individual fields.
 						</p>
-						<p class="text-gray-400">
+						<p class="text-muted-foreground">
 							Per-field lists are exclusive: only the listed scrapers are consulted
 							— there is no fallback to the global list.
 						</p>
