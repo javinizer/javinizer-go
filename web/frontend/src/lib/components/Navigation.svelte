@@ -37,7 +37,7 @@
 		subMenuItems.some((item) => currentPath === item.href || currentPath.startsWith(item.href + '/'))
 	);
 
-	const themeIcon = $derived(
+	const ThemeIcon = $derived(
 		themeStore.current === 'dark' ? Moon : themeStore.current === 'light' ? Sun : Monitor
 	);
 
@@ -122,7 +122,7 @@
 								onclick={() => themeStore.cycleTheme()}
 								class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all duration-150 hover:bg-accent hover:translate-x-0.5 w-full"
 							>
-								<themeIcon class="h-4 w-4"></themeIcon>
+								<ThemeIcon class="h-4 w-4" />
 								<span>{themeLabel}</span>
 							</button>
 
