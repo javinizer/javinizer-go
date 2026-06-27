@@ -27,22 +27,62 @@ type UpdateConfig struct {
 	VersionCheckIntervalHours int
 }
 
-// NewService creates a new update service.
+// NewService creates a new update service with production defaults (the real
+// GitHub checker and the default cache path). Existing callers are unaffected.
 func NewService(cfg UpdateConfig) *service {
+	return NewServiceWithOptions(cfg, ServiceOptions{})
+}
+
+// ServiceOptions carries optional overrides for the update service, enabling
+// hermetic tests (a stub Checker and a temp-dir cache path). Zero-value fields
+// fall back to production defaults, so NewService(cfg) and
+// NewServiceWithOptions(cfg, ServiceOptions{}) are equivalent.
+type ServiceOptions struct {
+	// Checker, if non-nil, replaces the default GitHub release checker. Inject
+	// a stub to avoid real network calls in tests.
+	Checker Checker
+	// StatePath overrides the on-disk update cache location. Use t.TempDir() in
+	// tests to avoid writing to the real data directory.
+	StatePath string
+}
+
+// NewServiceWithOptions creates an update service with the given options. A
+// zero-value opts reproduces NewService behavior exactly, so production callers
+// can keep using NewService while tests inject a stub Checker and a temp-dir
+// StatePath for hermetic, network-free coverage.
+func NewServiceWithOptions(cfg UpdateConfig, opts ServiceOptions) *service {
 	interval := time.Duration(cfg.VersionCheckIntervalHours) * time.Hour
 	if interval <= 0 {
 		interval = defaultCheckInterval
 	}
 
-	store := newStateStore(updateStatePath(), interval)
+	statePath := opts.StatePath
+	if statePath == "" {
+		statePath = updateStatePath()
+	}
+
+	store := newStateStore(statePath, interval)
+
+	chk := opts.Checker
+	if chk == nil {
+		chk = newGitHubChecker("javinizer/Javinizer")
+	}
 
 	return &service{
-		checker:   newGitHubChecker("javinizer/Javinizer"),
+		checker:   chk,
 		store:     store,
-		statePath: updateStatePath(),
+		statePath: statePath,
 		interval:  interval,
 		enabled:   cfg.Enabled,
 	}
+}
+
+// Interval returns the normalized interval between background update checks.
+// Exposed so callers (e.g. the API bootstrap) can start the background ticker
+// with the same interval the service uses for staleness checks, rather than
+// re-deriving (and possibly diverging from) the default-interval logic.
+func (s *service) Interval() time.Duration {
+	return s.interval
 }
 
 // GetStatus returns the current update status.
