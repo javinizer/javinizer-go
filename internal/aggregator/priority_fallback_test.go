@@ -53,11 +53,16 @@ func TestAggregateWithPerFieldOverrideExcludingSource(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
-	assert.Equal(t, "200GANA-3215", movie.ID, "ID should fall back to mgstage when per-field sources have no data")
-	assert.Equal(t, "200GANA-3215", movie.ContentID)
-	assert.Equal(t, "マジ軟派、初撮。 2172", movie.Title)
-	assert.Equal(t, "ナンパTV", movie.Maker)
-	assert.Equal(t, 1, len(movie.Actresses), "Actresses should fall back to mgstage")
+	// With exclusive per-field overrides, the per-field sources (dmm, r18dev,
+	// libredmm) are the ONLY sources consulted for these fields. None of them
+	// produced a result (only mgstage did, and mgstage is excluded from every
+	// override), so these fields stay empty — they do NOT fall back to mgstage
+	// via the global priority list. This is the restored v1 exclusive behavior (#50).
+	assert.Empty(t, movie.ID, "ID must stay empty — per-field override excludes mgstage and no other source has data")
+	assert.Empty(t, movie.ContentID, "ContentID must stay empty — per-field override is exclusive")
+	assert.Empty(t, movie.Title, "Title must stay empty — per-field override is exclusive")
+	assert.Empty(t, movie.Maker, "Maker must stay empty — per-field override is exclusive")
+	assert.Empty(t, movie.Actresses, "Actresses must stay empty — per-field override is exclusive")
 }
 
 func TestAggregatePerFieldPreference(t *testing.T) {
@@ -94,6 +99,73 @@ func TestAggregatePerFieldPreference(t *testing.T) {
 	require.NotNil(t, movie)
 
 	assert.Equal(t, "MGStage Title", movie.Title, "Per-field override should set mgstage as preferred for title")
+}
+
+// TestPerFieldPriorityOverrideIsExclusive verifies that a per-field metadata.priority
+// override is EXCLUSIVE: only the scrapers listed in the override are consulted
+// for that field, with NO fallback to the global priority list. This restores
+// v1 (PowerShell Javinizer) semantics — see issue #50.
+//
+// Scenario from #50: metadata.priority.series: [tokyohot]. tokyohot does not
+// provide Series, while r18dev/dmm do. With exclusive semantics, Series must
+// stay empty (tokyohot is the only allowed source and it has none) rather than
+// being populated by r18dev/dmm via global fallback.
+func TestPerFieldPriorityOverrideIsExclusive(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"r18dev", "dmm", "tokyohot"},
+		},
+		Metadata: config.MetadataConfig{
+			Priority: config.PriorityConfig{
+				Priority: []string{"r18dev", "dmm", "tokyohot"},
+				Fields: map[string][]string{
+					"series": {"tokyohot"},
+				},
+			},
+		},
+	}
+
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
+
+	// The Series override must NOT be merged with the global priority list.
+	assert.Equal(t, []string{"tokyohot"}, agg.resolvedPriorities["Series"],
+		"per-field Series override must be exclusive — not merged with the global priority list")
+
+	releaseDate := time.Date(2021, 1, 8, 0, 0, 0, 0, time.UTC)
+
+	results := []*models.ScraperResult{
+		{
+			Source:      "tokyohot",
+			Language:    "ja",
+			ID:          "TH-001",
+			Title:       "Tokyohot Title",
+			Maker:       "Tokyohot Maker",
+			Series:      "", // tokyohot does not provide Series
+			ReleaseDate: &releaseDate,
+		},
+		{
+			Source: "r18dev",
+			ID:     "TH-001",
+			Title:  "R18Dev Title",
+			Series: "R18Dev Series", // r18dev HAS Series — must NOT leak in via fallback
+		},
+		{
+			Source: "dmm",
+			ID:     "TH-001",
+			Title:  "DMM Title",
+			Series: "DMM Series", // dmm HAS Series — must NOT leak in via fallback
+		},
+	}
+
+	movie, _, err := agg.Aggregate(results)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+
+	// The bug: Series was populated by r18dev/dmm via global fallback.
+	// The fix: Series stays empty because the exclusive override [tokyohot]
+	// is the only allowed source and tokyohot has no Series.
+	assert.Empty(t, movie.Series,
+		"Series must be empty — per-field override [tokyohot] is exclusive and tokyohot has no Series")
 }
 
 func TestUnknownActressFilteredFromScraperResults(t *testing.T) {
@@ -286,34 +358,6 @@ func TestIsUnknownActress(t *testing.T) {
 			nameKey := resolveNameKey(tc.info.JapaneseName, tc.info.FirstName, tc.info.LastName)
 			got := isUnknownActress(tc.info, nameKey, tc.unknownText)
 			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestMergePriorityLists(t *testing.T) {
-	tests := []struct {
-		name     string
-		perField []string
-		global   []string
-		expected []string
-	}{
-		{"empty both", nil, nil, []string{}},
-		{"empty per-field", nil, []string{"a", "b"}, []string{"a", "b"}},
-		{"empty global", []string{"a", "b"}, nil, []string{"a", "b"}},
-		{"no overlap", []string{"a"}, []string{"b"}, []string{"a", "b"}},
-		{"full overlap", []string{"a", "b"}, []string{"a", "b"}, []string{"a", "b"}},
-		{"partial overlap", []string{"a", "b"}, []string{"b", "c"}, []string{"a", "b", "c"}},
-		{"per-field excludes source", []string{"dmm", "r18dev", "libredmm"}, []string{"dmm", "r18dev", "mgstage", "libredmm"}, []string{"dmm", "r18dev", "libredmm", "mgstage"}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := mergePriorityLists(tc.perField, tc.global)
-			if tc.expected == nil {
-				assert.Nil(t, got)
-			} else {
-				assert.Equal(t, tc.expected, got)
-			}
 		})
 	}
 }

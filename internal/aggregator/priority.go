@@ -56,11 +56,29 @@ func (a *Aggregator) resolvePriorities() {
 	}
 
 	for _, field := range fields {
+		// Default: use the global priority list (unchanged behavior for fields
+		// without a per-field override).
 		fieldPriority := copySlice(globalPriority)
 
 		if a.cfg != nil {
 			if fp := a.cfg.Metadata.Priority.GetFieldPriority(toSnakeCase(field)); len(fp) > 0 {
-				fieldPriority = mergePriorityLists(fp, globalPriority)
+				// A per-field override is EXCLUSIVE: only the scrapers listed in the
+				// override are consulted for that field — there is NO fallback to
+				// the global priority list. This restores v1 (PowerShell
+				// Javinizer) semantics, where a per-field priority list suppressed
+				// fallback scrapers: e.g. `series: [tokyohot]` leaves Series empty
+				// when tokyohot has no Series, instead of filling it from
+				// r18dev/dmm via global fallback (#50).
+				//
+				// The no-override path is unchanged: when GetFieldPriority returns an
+				// empty list (no per-field override — including the case where the
+				// global list is derived from cfg.ScrapersPriority rather than
+				// Metadata.Priority), the len(fp) > 0 guard keeps the globalPriority
+				// default assigned above. globalPriority itself already incorporates
+				// both Metadata.Priority and the ScrapersPriority fallback (see
+				// getFieldPriorityFromConfig), so no behavior changes for fields
+				// without an explicit override.
+				fieldPriority = copySlice(fp)
 			}
 		}
 
@@ -73,26 +91,6 @@ func (a *Aggregator) resolvePriorities() {
 //nolint:unused // used by same-package tests
 func (a *Aggregator) getResolvedPriorities() map[string][]string {
 	return a.resolvedPriorities
-}
-
-// mergePriorityLists appends globalFallback to perFieldOverride, skipping duplicates.
-// Per-field entries keep their relative order; global entries fill in after.
-func mergePriorityLists(perFieldOverride, globalFallback []string) []string {
-	seen := make(map[string]struct{}, len(perFieldOverride)+len(globalFallback))
-	merged := make([]string, 0, len(perFieldOverride)+len(globalFallback))
-	for _, s := range perFieldOverride {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
-			merged = append(merged, s)
-		}
-	}
-	for _, s := range globalFallback {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
-			merged = append(merged, s)
-		}
-	}
-	return merged
 }
 
 // getFieldPriorityFromConfig returns the scraper priority list.
