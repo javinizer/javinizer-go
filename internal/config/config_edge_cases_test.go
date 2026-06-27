@@ -674,8 +674,11 @@ func TestGetFieldPriority(t *testing.T) {
 	// Field with override uses the override
 	assert.Equal(t, []string{"dmm", "r18dev"}, p.GetFieldPriority("title"))
 
-	// Field with empty override falls back to global
-	assert.Equal(t, []string{"r18dev", "dmm"}, p.GetFieldPriority("actress"))
+	// A PRESENT empty override ([]string{}) means "consult no scrapers" — it is
+	// a deliberate empty field, NOT a fallback to global. This is the pure-
+	// exclusivity contract (#50/#51): [] must be distinguishable from an absent
+	// key so that "Remove all" + Save persists an empty field.
+	assert.Equal(t, []string{}, p.GetFieldPriority("actress"))
 
 	// Field without override falls back to global
 	assert.Equal(t, []string{"r18dev", "dmm"}, p.GetFieldPriority("genre"))

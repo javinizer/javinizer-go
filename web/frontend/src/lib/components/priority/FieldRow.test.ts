@@ -14,7 +14,7 @@ function makeProps(overrides: Partial<FieldRowProps> = {}): FieldRowProps {
 		status: 'inherited',
 		onEdit: () => {},
 		onReset: () => {},
-		...overrides
+		...overrides,
 	};
 }
 
@@ -31,10 +31,9 @@ describe('FieldRow', () => {
 	});
 
 	it('shows the custom (orange) state with a reset button', () => {
-		const { container } = render(
-			FieldRow,
-			{ props: makeProps({ status: 'custom', priority: ['tokyohot'] }) }
-		);
+		const { container } = render(FieldRow, {
+			props: makeProps({ status: 'custom', priority: ['tokyohot'] }),
+		});
 
 		expect(container.textContent).toContain('Custom');
 		const dot = container.querySelector('[role="img"]');
@@ -52,10 +51,27 @@ describe('FieldRow', () => {
 		expect(inherited.container.textContent).toContain('R18.dev');
 		expect(inherited.container.textContent).toContain('→');
 
-		const custom = render(
-			FieldRow,
-			{ props: makeProps({ status: 'custom', priority: ['tokyohot'] }) }
-		);
+		const custom = render(FieldRow, {
+			props: makeProps({ status: 'custom', priority: ['tokyohot'] }),
+		});
 		expect(custom.container.textContent).toContain('Tokyo-Hot');
+	});
+
+	it('shows an empty-state note (not a scraper chain) for a custom + empty field', () => {
+		// A PRESENT [] override means "consult no scrapers" — the field is left
+		// empty. The row must reflect that suppression intent (custom/orange,
+		// reset button) and show an empty-state note instead of the scraper → chain.
+		const { container } = render(FieldRow, {
+			props: makeProps({ status: 'custom', priority: [] }),
+		});
+
+		expect(container.textContent).toContain('Custom');
+		expect(container.textContent).toContain('No scrapers — this field will be left empty');
+		// No scraper chain / arrow for an empty custom field.
+		expect(container.textContent).not.toContain('→');
+		expect(container.textContent).not.toContain('R18.dev');
+
+		// Still offers a reset action (custom state).
+		expect(container.querySelector('[aria-label="Reset to global priority"]')).toBeTruthy();
 	});
 });

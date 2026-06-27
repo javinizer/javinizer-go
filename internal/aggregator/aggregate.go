@@ -39,8 +39,12 @@ func (a *Aggregator) AggregateWithPriority(results []*models.ScraperResult, cust
 		// when scraping with `--scrapers r18dev`, and `series: [tokyohot]` still
 		// leaves Series empty (tokyohot didn't run / lacks it). There is no skip
 		// sentinel; suppression is emergent from exclusivity.
+		// empty slice (`series: []`) still wins here as a deliberate empty field
+		// ("consult no scrapers"): PerFieldOverride returns a non-nil empty slice
+		// for a present `[]`, so `fp != nil` honors it; an absent key returns nil
+		// and falls through to customPriority below.
 		if a.cfg != nil && a.cfg.Metadata != nil {
-			if fp := a.cfg.Metadata.Priority.PerFieldOverride(toSnakeCase(field)); len(fp) > 0 {
+			if fp := a.cfg.Metadata.Priority.PerFieldOverride(toSnakeCase(field)); fp != nil {
 				return fp
 			}
 		}

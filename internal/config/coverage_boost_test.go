@@ -605,7 +605,11 @@ func TestPriorityConfig_GetFieldPriority_EmptyOverride(t *testing.T) {
 		Fields:   map[string][]string{"title": {}},
 	}
 	result := p.GetFieldPriority("title")
-	assert.Equal(t, []string{"dmm", "r18dev"}, result)
+	// A PRESENT empty override ([]string{}) is a deliberate empty field — it must
+	// NOT fall back to global. This is the pure-exclusivity contract: a present []
+	// means "consult no scrapers", distinct from an absent key (inherit global).
+	assert.Equal(t, []string{}, result)
+	assert.NotNil(t, result, "present [] must be a non-nil empty slice, not nil (nil ⇒ inherit)")
 }
 
 func TestPriorityConfig_GetFieldPriority_NilOverride(t *testing.T) {

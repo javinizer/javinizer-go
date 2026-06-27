@@ -11,42 +11,48 @@ export function getGlobalPriority(config: SettingsConfig | undefined | null): st
 /**
  * Resolve a field's effective scraper priority.
  *
- * Empty/undefined override → inherit the global priority list (the unchanged
- * "inherit" path — `[]` and `undefined` are treated identically, matching the
- * backend's `GetFieldPriority` which falls back to global for empty slices).
+ * Pure-exclusivity contract (no skip sentinel) — the three field states:
+ *   - key ABSENT (or null/undefined) → inherit the global priority list
+ *   - key present = []                → consult NO scrapers (field left empty)
+ *   - key present = [a,b]             → consult a then b exclusively, no fallback
  *
- * A non-empty override is returned as-is — under the backend's exclusive
- * semantics (#50), ONLY the listed scrapers are consulted for that field, with
- * NO fallback to the global list. There is no skip sentinel: a field is left
- * empty by pointing it at a scraper that didn't run or lacks the field
- * (e.g. `series: [tokyohot]`), which is the original (v1) Javinizer behavior.
+ * A PRESENT empty array is a deliberate empty field, NOT an inherit signal —
+ * this is what makes "Remove all" + Save persist an empty field. Only an ABSENT
+ * (or null) key inherits the global list. `[]` and `undefined` are distinct.
  */
 export function getFieldPriority(
 	config: SettingsConfig | undefined | null,
-	fieldKey: string
+	fieldKey: string,
 ): string[] {
-	const fieldConfig = config?.metadata?.priority?.[fieldKey];
-	if (!fieldConfig || fieldConfig.length === 0) {
-		return getGlobalPriority(config);
+	const fields = config?.metadata?.priority;
+	if (fields) {
+		const v = fields[fieldKey];
+		if (v !== undefined && v !== null) {
+			return v; // present (incl. []) — [] means "no scrapers"
+		}
 	}
-	return fieldConfig;
+	return getGlobalPriority(config);
 }
 
 /**
  * Whether a field has a custom (non-inherited) override.
  *
- * `[]`/undefined → false (inherit global). Any non-empty override that differs
- * from the global list → true.
+ * A PRESENT value (including `[]`) that differs from the global list is an
+ * override → true. A present `[]` differs from a non-empty global, so it counts
+ * as overridden (custom). An ABSENT key (or null) → false (inherit global).
+ * When the global list itself is empty, a present `[]` equals it and is NOT an
+ * override (an empty field with an empty global is indistinguishable from
+ * inherited, which is correct).
  */
 export function isFieldOverridden(
 	config: SettingsConfig | undefined | null,
-	fieldKey: string
+	fieldKey: string,
 ): boolean {
-	const fieldConfig = config?.metadata?.priority?.[fieldKey];
-	if (!fieldConfig || fieldConfig.length === 0) {
-		return false;
-	}
-	return JSON.stringify(fieldConfig) !== JSON.stringify(getGlobalPriority(config));
+	const fields = config?.metadata?.priority;
+	if (!fields) return false;
+	const v = fields[fieldKey];
+	if (v === undefined || v === null) return false; // absent/null → inherit
+	return JSON.stringify(v) !== JSON.stringify(getGlobalPriority(config));
 }
 
 /**
@@ -57,7 +63,7 @@ export function isFieldOverridden(
  */
 export function getFieldStatus(
 	config: SettingsConfig | undefined | null,
-	fieldKey: string
+	fieldKey: string,
 ): FieldStatus {
 	return isFieldOverridden(config, fieldKey) ? 'custom' : 'inherited';
 }
@@ -65,22 +71,24 @@ export function getFieldStatus(
 /**
  * Build a config mutation that sets a field's per-field priority override.
  *
- * Returns a new `metadata.priority` record (does not mutate the input). When
- * the resolved priority equals the global list, an empty array is stored instead
- * so the field reads as "inherited" (matching the backend's `[]` ⇒ global
- * semantics and keeping the config free of redundant overrides).
+ * Returns a new `metadata.priority` record (does not mutate the input). The
+ * config shape encodes the three field states directly (no skip sentinel):
+ *   - priority deep-equals global → DELETE the key (inherit = key ABSENT).
+ *     Do NOT write `[]` — a present `[]` means "empty field", not "inherit".
+ *   - priority differs from global (incl. `[]` when global is non-empty) →
+ *     store it verbatim. A deliberate empty list stores `[]` (present-empty).
  */
 export function buildFieldPriorityOverride(
 	config: SettingsConfig | undefined | null,
 	fieldKey: string,
-	priority: string[]
+	priority: string[],
 ): Record<string, string[]> {
 	const base = { ...(config?.metadata?.priority ?? {}) };
 	const global = getGlobalPriority(config);
 	if (JSON.stringify(priority) === JSON.stringify(global)) {
-		base[fieldKey] = [];
+		delete base[fieldKey]; // inherit = key absent (NOT [])
 	} else {
-		base[fieldKey] = [...priority];
+		base[fieldKey] = [...priority]; // differs — incl. deliberate-empty []
 	}
 	return base;
 }
@@ -118,7 +126,7 @@ export function buildFieldPriorityOverride(
 // cannot leak into the persisted override (CodeRabbit, PR #51).
 export function applyEnabledReorderToFull(
 	fullPriority: string[],
-	newEnabledOrder: string[]
+	newEnabledOrder: string[],
 ): string[] {
 	const allowed = new Set(fullPriority);
 	const reorderedEnabled = newEnabledOrder.filter((name) => allowed.has(name));

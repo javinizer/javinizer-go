@@ -5,7 +5,7 @@ import {
 	isFieldOverridden,
 	getFieldStatus,
 	buildFieldPriorityOverride,
-	applyEnabledReorderToFull
+	applyEnabledReorderToFull,
 } from './priority';
 import type { SettingsConfig, ScraperSettings } from '$lib/api/types';
 
@@ -15,11 +15,11 @@ import type { SettingsConfig, ScraperSettings } from '$lib/api/types';
  * (fully-required) SettingsConfig type without constructing every section.
  */
 function makeConfig(
-	opts: { global?: string[]; fields?: Record<string, string[]> } = {}
+	opts: { global?: string[]; fields?: Record<string, string[]> } = {},
 ): SettingsConfig {
 	return {
 		scrapers: { priority: opts.global ?? [] },
-		metadata: { priority: opts.fields ?? {} }
+		metadata: { priority: opts.fields ?? {} },
 	} as unknown as SettingsConfig;
 }
 
@@ -33,7 +33,7 @@ function makeConfig(
  * mirroring makeConfig above).
  */
 function makeConfigWithScrapers(
-	opts: { global?: string[]; fields?: Record<string, string[]>; disabled?: string[] } = {}
+	opts: { global?: string[]; fields?: Record<string, string[]>; disabled?: string[] } = {},
 ): SettingsConfig {
 	const scrapers: Record<string, { enabled: boolean }> = {};
 	for (const name of opts.disabled ?? []) {
@@ -41,16 +41,13 @@ function makeConfigWithScrapers(
 	}
 	return {
 		scrapers: { priority: opts.global ?? [], ...scrapers },
-		metadata: { priority: opts.fields ?? {} }
+		metadata: { priority: opts.fields ?? {} },
 	} as unknown as SettingsConfig;
 }
 
 describe('priority: getGlobalPriority', () => {
 	it('returns the global scraper priority list', () => {
-		expect(getGlobalPriority(makeConfig({ global: ['r18dev', 'dmm'] }))).toEqual([
-			'r18dev',
-			'dmm'
-		]);
+		expect(getGlobalPriority(makeConfig({ global: ['r18dev', 'dmm'] }))).toEqual(['r18dev', 'dmm']);
 	});
 
 	it('returns [] when unset or when config is nil', () => {
@@ -66,8 +63,18 @@ describe('priority: getFieldPriority', () => {
 		expect(getFieldPriority(config, 'series')).toEqual(['r18dev', 'dmm']);
 	});
 
-	it('returns global for an empty-array override ([] means inherit)', () => {
+	it('returns [] for a present-empty override (deliberate empty, NOT global)', () => {
+		// A PRESENT [] means "consult no scrapers" — it must NOT fall back to
+		// global. This is the core regression for "Remove all" + Save.
 		const config = makeConfig({ global: ['r18dev', 'dmm'], fields: { series: [] } });
+		expect(getFieldPriority(config, 'series')).toEqual([]);
+	});
+
+	it('returns global for a present-null override (null ⇒ inherit)', () => {
+		const config = makeConfig({
+			global: ['r18dev', 'dmm'],
+			fields: { series: null as unknown as string[] },
+		});
 		expect(getFieldPriority(config, 'series')).toEqual(['r18dev', 'dmm']);
 	});
 
@@ -78,11 +85,31 @@ describe('priority: getFieldPriority', () => {
 });
 
 describe('priority: isFieldOverridden', () => {
-	it('returns false for [] and undefined', () => {
+	it('returns false for undefined (absent ⇒ inherit)', () => {
 		expect(isFieldOverridden(makeConfig({ global: ['r18dev'] }), 'series')).toBe(false);
+	});
+
+	it('returns false for a present-null override (null ⇒ inherit)', () => {
 		expect(
-			isFieldOverridden(makeConfig({ global: ['r18dev'], fields: { series: [] } }), 'series')
+			isFieldOverridden(
+				makeConfig({ global: ['r18dev'], fields: { series: null as unknown as string[] } }),
+				'series',
+			),
 		).toBe(false);
+	});
+
+	it('returns true for a present-empty override when global is non-empty (differs ⇒ custom)', () => {
+		// [] differs from a non-empty global, so it IS an override (deliberate empty).
+		expect(
+			isFieldOverridden(makeConfig({ global: ['r18dev'], fields: { series: [] } }), 'series'),
+		).toBe(true);
+	});
+
+	it('returns false for a present-empty override when global is also empty (equals global)', () => {
+		// An empty field with an empty global is indistinguishable from inherited.
+		expect(isFieldOverridden(makeConfig({ global: [], fields: { series: [] } }), 'series')).toBe(
+			false,
+		);
 	});
 
 	it('returns true for a non-empty override that differs from global', () => {
@@ -93,7 +120,7 @@ describe('priority: isFieldOverridden', () => {
 	it('returns false when the override equals global (redundant ⇒ treated as inherited)', () => {
 		const config = makeConfig({
 			global: ['r18dev', 'dmm'],
-			fields: { series: ['r18dev', 'dmm'] }
+			fields: { series: ['r18dev', 'dmm'] },
 		});
 		expect(isFieldOverridden(config, 'series')).toBe(false);
 	});
@@ -104,9 +131,18 @@ describe('priority: getFieldStatus', () => {
 		expect(getFieldStatus(makeConfig({ global: ['r18dev'] }), 'series')).toBe('inherited');
 	});
 
-	it('is "inherited" for []', () => {
+	it('is "custom" for a present-empty override (deliberate empty)', () => {
 		expect(
-			getFieldStatus(makeConfig({ global: ['r18dev'], fields: { series: [] } }), 'series')
+			getFieldStatus(makeConfig({ global: ['r18dev'], fields: { series: [] } }), 'series'),
+		).toBe('custom');
+	});
+
+	it('is "inherited" for a present-null override (null ⇒ inherit)', () => {
+		expect(
+			getFieldStatus(
+				makeConfig({ global: ['r18dev'], fields: { series: null as unknown as string[] } }),
+				'series',
+			),
 		).toBe('inherited');
 	});
 
@@ -130,10 +166,22 @@ describe('priority: buildFieldPriorityOverride (config shape)', () => {
 		expect(next.series).toEqual(['tokyohot']);
 	});
 
-	it('collapses a global-equal override to [] (inherit)', () => {
+	it('deletes the key for a global-equal override (inherit = key absent, NOT [])', () => {
+		// Global-equal ⇒ inherit. The config must encode inherit as an ABSENT key,
+		// not [] — a present [] means "empty field". So the key is deleted.
 		const config = makeConfig({ global: ['r18dev', 'dmm'] });
 		const next = buildFieldPriorityOverride(config, 'series', ['r18dev', 'dmm']);
+		expect('series' in next).toBe(false);
+		expect(next.series).toBeUndefined();
+	});
+
+	it('stores [] for a deliberate-empty override when it differs from global', () => {
+		// Remove all + Save: priority [] differs from a non-empty global, so it is
+		// stored as a PRESENT [] (deliberate empty field), not deleted.
+		const config = makeConfig({ global: ['r18dev', 'dmm'] });
+		const next = buildFieldPriorityOverride(config, 'series', []);
 		expect(next.series).toEqual([]);
+		expect('series' in next).toBe(true);
 	});
 
 	it('does not mutate the original config', () => {
@@ -150,11 +198,7 @@ describe('priority: applyEnabledReorderToFull (disabled-scraper preservation)', 
 		const full = ['r18dev', 'dmm', 'javbus'];
 		// DraggableList shows only enabled; user reorders [r18dev, dmm] -> [dmm, r18dev]
 		const newEnabledOrder = ['dmm', 'r18dev'];
-		expect(applyEnabledReorderToFull(full, newEnabledOrder)).toEqual([
-			'dmm',
-			'r18dev',
-			'javbus'
-		]);
+		expect(applyEnabledReorderToFull(full, newEnabledOrder)).toEqual(['dmm', 'r18dev', 'javbus']);
 	});
 
 	it('preserves the relative order of multiple disabled scrapers', () => {
@@ -165,7 +209,7 @@ describe('priority: applyEnabledReorderToFull (disabled-scraper preservation)', 
 			'dmm',
 			'r18dev',
 			'javbus',
-			'javdb'
+			'javdb',
 		]);
 	});
 
@@ -192,11 +236,7 @@ describe('priority: applyEnabledReorderToFull (disabled-scraper preservation)', 
 		// fullPriority is the source of truth; only ids present in it are kept.
 		const full = ['r18dev', 'dmm', 'javbus'];
 		const newEnabledOrder = ['dmm', 'GHOST_STALE_ID', 'r18dev'];
-		expect(applyEnabledReorderToFull(full, newEnabledOrder)).toEqual([
-			'dmm',
-			'r18dev',
-			'javbus'
-		]);
+		expect(applyEnabledReorderToFull(full, newEnabledOrder)).toEqual(['dmm', 'r18dev', 'javbus']);
 	});
 });
 
@@ -205,8 +245,7 @@ describe('priority: editor data flow preserves disabled scrapers through reorder
 	// the DraggableList shows only scrapers whose config entry isn't disabled.
 	function enabledView(config: SettingsConfig, priority: string[]): string[] {
 		return priority.filter(
-			(name) =>
-				(config.scrapers?.[name] as ScraperSettings | undefined)?.enabled !== false
+			(name) => (config.scrapers?.[name] as ScraperSettings | undefined)?.enabled !== false,
 		);
 	}
 
@@ -215,7 +254,7 @@ describe('priority: editor data flow preserves disabled scrapers through reorder
 		const config = makeConfigWithScrapers({
 			global: ['r18dev', 'dmm', 'javbus'],
 			disabled: ['javbus'],
-			fields: { series: ['tokyohot'] }
+			fields: { series: ['tokyohot'] },
 		});
 
 		// 1) User opens the editor: editingPriority loads the field's stored list.
@@ -237,26 +276,29 @@ describe('priority: editor data flow preserves disabled scrapers through reorder
 		expect(saved.series).toContain('javbus'); // disabled scraper preserved
 	});
 
-	it('edit an inherited field + save (unchanged) restores "inherited" ([])', () => {
+	it('edit an inherited field + save (unchanged) restores "inherited" (key deleted)', () => {
 		const config = makeConfigWithScrapers({
 			global: ['r18dev', 'dmm', 'javbus'],
-			disabled: ['javbus']
+			disabled: ['javbus'],
 		});
 
 		// openFieldEditor loads the full stored list (== global for inherited).
 		const editingPriority = [...getFieldPriority(config, 'series')];
 
 		// Save unchanged: editingPriority === global => buildFieldPriorityOverride
-		// collapses to [] (inherited), even though 'javbus' is disabled.
+		// DELETES the key (inherit = key absent), even though 'javbus' is
+		// disabled. A present [] would mean "empty field", so inherit is encoded
+		// as an absent key instead.
 		const saved = buildFieldPriorityOverride(config, 'series', editingPriority);
-		expect(saved.series).toEqual([]);
+		expect('series' in saved).toBe(false);
+		expect(saved.series).toBeUndefined();
 	});
 
 	it('reorder an inherited field + save keeps disabled scrapers in the override', () => {
 		// An inherited field (no override) edited + reordered + saved.
 		const config = makeConfigWithScrapers({
 			global: ['r18dev', 'dmm', 'javbus'],
-			disabled: ['javbus']
+			disabled: ['javbus'],
 			// no fields override => 'series' inherits global
 		});
 

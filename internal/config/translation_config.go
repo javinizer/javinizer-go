@@ -114,18 +114,34 @@ type PriorityConfig struct {
 	Priority []string `yaml:"priority" json:"priority"`
 	// Fields holds per-metadata-field scraper priority overrides.
 	// Keys are snake_case field names matching the API (e.g. "title", "actress", "cover_url").
-	// An empty or nil slice for a field means "use global priority".
+	// A PRESENT key (even an empty []string{}) is an override: [] means "consult
+	// NO scrapers for this field" (the field is left empty); [a,b] means "consult
+	// a then b exclusively". An ABSENT key (or a nil slice) inherits the global
+	// Priority list. There is no skip sentinel — suppression is pure exclusivity.
 	Fields map[string][]string `yaml:"-" json:"-"`
 }
 
-// GetFieldPriority returns the priority list for a specific metadata field.
-// If the field has no override (or the override is empty), it falls back to
-// the global Priority list. Returns nil if neither is set.
+// GetFieldPriority returns the EFFECTIVE priority list for a metadata field:
+// the per-field override when one is present (including an explicit empty
+// slice, which means "consult no scrapers — leave this field empty"), else the
+// global Priority list. Returns nil when neither is set.
+//
+// The three field states map cleanly (no skip sentinel):
+//
+//	key ABSENT (or nil) → inherit the global Priority list
+//	key present = []   → consult NO scrapers → field left empty
+//	key present = [a,b]→ consult a then b exclusively, no global fallback
+//
+// A nil slice stored under a present key is treated as "inherit global" (the
+// null/undefined state), matching the JSON/YAML round-trip where a null value
+// decodes to an absent key. Only a non-nil empty slice ([]string{}) is a
+// deliberate empty override. Callers that need to distinguish "present" from
+// "absent" should use PerFieldOverride.
 func (p *PriorityConfig) GetFieldPriority(fieldKey string) []string {
 	if p == nil {
 		return nil
 	}
-	if override, ok := p.Fields[fieldKey]; ok && len(override) > 0 {
+	if override := p.PerFieldOverride(fieldKey); override != nil {
 		return override
 	}
 	if len(p.Priority) > 0 {
@@ -134,9 +150,17 @@ func (p *PriorityConfig) GetFieldPriority(fieldKey string) []string {
 	return nil
 }
 
-// PerFieldOverride returns the explicit per-field override stored under fieldKey
-// (the Fields map), WITHOUT falling back to the global Priority list. Returns
-// nil when the field has no per-field override.
+// PerFieldOverride returns the raw per-field override stored under fieldKey,
+// WITHOUT falling back to the global Priority list. This is the clean "is there
+// an override?" accessor: it returns the raw value for a PRESENT key (including
+// an explicit empty slice []string{}, which means "consult no scrapers for
+// this field" — deliberate suppression via pure exclusivity), and nil only for
+// an ABSENT key.
+//
+// A nil slice stored under a present key is returned as nil, so callers using
+// `fp != nil` treat present-nil identically to absent (both inherit global) —
+// matching the null/undefined = inherit contract. Only a non-nil empty slice
+// is a deliberate empty override.
 //
 // This is the per-field-only counterpart of GetFieldPriority: GetFieldPriority
 // returns Fields[fieldKey] OR the global Priority (useful for the default
@@ -149,7 +173,7 @@ func (p *PriorityConfig) PerFieldOverride(fieldKey string) []string {
 	if p == nil {
 		return nil
 	}
-	if override, ok := p.Fields[fieldKey]; ok && len(override) > 0 {
+	if override, ok := p.Fields[fieldKey]; ok {
 		return override
 	}
 	return nil

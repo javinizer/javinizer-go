@@ -116,11 +116,13 @@
 		// Mark this field as touched
 		touchedFields.add(editingField);
 
-		// Delegate to the canonical, unit-tested helper: it collapses a
-		// global-equal priority to [] (restoring "inherited") and otherwise stores
-		// the full list verbatim — including disabled scrapers preserved through
-		// onReorder. Removing all scrapers stores [] (inherited); pointing a field
-		// at a scraper that lacks it leaves it empty under exclusive semantics.
+		// Delegate to the canonical, unit-tested helper: when the resolved
+		// priority equals the global list it DELETES the key (restoring
+		// "inherited" = key absent); otherwise it stores the full list verbatim
+		// — including disabled scrapers preserved through onReorder, AND a
+		// deliberate empty list (Remove all + Save), which stores [] so the
+		// field is left empty under exclusive semantics. There is no skip
+		// sentinel: [] means "consult no scrapers", distinct from a deleted key.
 		config.metadata.priority = buildFieldPriorityOverride(
 			config,
 			editingField,
@@ -132,18 +134,22 @@
 		editingField = null;
 	}
 
-	// Reset field to global (clears any override)
+	// Reset field to global (clears any override). Inherit = key ABSENT, so we
+	// DELETE the key rather than storing []. A present [] means "consult no
+	// scrapers" (deliberate empty field) — distinct from inherit — so writing []
+	// here would leave the field empty instead of restoring inheritance.
 	function resetFieldToGlobal(fieldKey: string) {
 		if (!config.metadata?.priority) return;
 
 		// Mark as touched (user explicitly reset it)
 		touchedFields.add(fieldKey);
 
-		// Set to empty array (signals "use global")
-		config.metadata.priority[fieldKey] = [];
+		if (fieldKey in config.metadata.priority) {
+			delete config.metadata.priority[fieldKey];
 
-		// Create a deep clone to trigger reactivity
-		onUpdate(JSON.parse(JSON.stringify(config)));
+			// Create a deep clone to trigger reactivity
+			onUpdate(JSON.parse(JSON.stringify(config)));
+		}
 	}
 
 	// Remove a scraper from the field being edited (the per-item X button).
@@ -168,9 +174,10 @@
 		editingPriority = [...editingPriority, ...global.filter((s) => !present.has(s))];
 	}
 
-	// Shortcut: remove every scraper from the field's list. An empty list means
-	// "inherit global" (the documented [] ⇒ inherited semantics), so saving an
-	// emptied list restores the inherited state.
+	// Shortcut: remove every scraper from the field's list. Saving the emptied
+	// list stores [] (a PRESENT empty override) — under exclusive semantics the
+	// field is then left empty (no scraper consulted). To inherit the global list
+	// instead, use Reset to global (which deletes the key).
 	function removeAllScrapers() {
 		editingPriority = [];
 	}
@@ -401,8 +408,8 @@
 						</DraggableList>
 					{:else}
 						<p class="text-sm text-muted-foreground italic py-4 text-center">
-							No scrapers in this field's list. Add some below, or save to
-							inherit the global priority.
+							No scrapers in this field's list. Save to leave this field empty
+							(no scraper consulted), or add some below.
 						</p>
 					{/if}
 				</div>
@@ -450,8 +457,11 @@
 						one back from the chips above.
 					</p>
 					<p>
-						To leave a field empty, point it at a scraper that doesn't provide it (e.g.
-						<code class="bg-muted px-1 rounded">series: [tokyohot]</code>) — there is no skip button.
+						To leave a field empty, remove all scrapers and Save (stores
+						<code class="bg-muted px-1 rounded">series: []</code> — no scraper is
+						consulted), or point it at a scraper that doesn't provide it (e.g.
+						<code class="bg-muted px-1 rounded">series: [tokyohot]</code>). There is no
+						skip button — suppression is just an empty (or non-matching) scraper list.
 					</p>
 				</div>
 

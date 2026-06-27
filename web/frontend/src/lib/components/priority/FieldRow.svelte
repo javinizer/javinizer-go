@@ -72,14 +72,21 @@
 			{fieldLabel}
 		</div>
 		<div class="text-xs text-muted-foreground truncate">
-			{#each priority as scraper, index}
-				<span class="inline-flex items-center">
-					{formatScraperName(scraper)}
-					{#if index < priority.length - 1}
-						<span class="mx-1 text-muted-foreground/50">→</span>
-					{/if}
-				</span>
-			{/each}
+			{#if status === 'custom' && priority.length === 0}
+				<!-- Deliberate empty override ([] = "consult no scrapers"): the field is
+				     left empty. Distinguished from "inherited" by the custom status, so
+				     the user sees their suppression intent reflected, not a scraper chain. -->
+				<span class="italic">No scrapers — this field will be left empty</span>
+			{:else}
+				{#each priority as scraper, index}
+					<span class="inline-flex items-center">
+						{formatScraperName(scraper)}
+						{#if index < priority.length - 1}
+							<span class="mx-1 text-muted-foreground/50">→</span>
+						{/if}
+					</span>
+				{/each}
+			{/if}
 		</div>
 	</div>
 

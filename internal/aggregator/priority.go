@@ -68,7 +68,7 @@ func (a *Aggregator) resolvePriorities() {
 		// a.cfg.Metadata.Priority here would panic for configs that rely only on
 		// ScrapersPriority (CodeRabbit, PR #51).
 		if a.cfg != nil && a.cfg.Metadata != nil {
-			if fp := a.cfg.Metadata.Priority.GetFieldPriority(fieldSnake); len(fp) > 0 {
+			if fp := a.cfg.Metadata.Priority.PerFieldOverride(fieldSnake); fp != nil {
 				// A per-field override is EXCLUSIVE: only the scrapers listed in the
 				// override are consulted for that field — there is NO fallback to
 				// the global priority list. This restores v1 (PowerShell Javinizer)
@@ -76,7 +76,11 @@ func (a *Aggregator) resolvePriorities() {
 				// tokyohot has no Series, instead of filling it from r18dev/dmm via
 				// global fallback. There is no skip sentinel — suppression is the
 				// emergent result of pointing a field at a scraper (or a never-
-				// registered name) that doesn't provide it.
+				// registered name) that doesn't provide it, OR of storing an explicit
+				// empty slice (`series: []`), which means "consult no scrapers" and
+				// leaves the field empty. PerFieldOverride returns a non-nil empty
+				// slice for a present `[]`, so `fp != nil` honors it here (an absent
+				// key returns nil and falls through to the global default above).
 				fieldPriority = copySlice(fp)
 			}
 		}
@@ -95,14 +99,23 @@ func (a *Aggregator) getResolvedPriorities() map[string][]string {
 // getFieldPriorityFromConfig returns the scraper priority list.
 // Checks per-field override first, then global metadata priority, then scrapers priority.
 // Returns nil when no config is available.
+//
+// A PRESENT per-field override wins exclusively — including an explicit empty
+// slice (`series: []`), which yields an empty list ("consult no scrapers")
+// rather than falling back to global. An ABSENT key (or nil slice) inherits the
+// global metadata priority, then ScrapersPriority. This matches the default
+// Aggregate path's resolvePriorities and keeps both scrape paths consistent.
 func getFieldPriorityFromConfig(cfg *Config, fieldKey string) []string {
 	if cfg == nil {
 		return nil
 	}
 
 	if cfg.Metadata != nil {
-		if fp := cfg.Metadata.Priority.GetFieldPriority(fieldKey); len(fp) > 0 {
+		if fp := cfg.Metadata.Priority.PerFieldOverride(fieldKey); fp != nil {
 			return fp
+		}
+		if len(cfg.Metadata.Priority.Priority) > 0 {
+			return cfg.Metadata.Priority.Priority
 		}
 	}
 
