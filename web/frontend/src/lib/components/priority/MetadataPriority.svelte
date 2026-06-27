@@ -394,7 +394,7 @@
 				role="tooltip"
 				id={priorityModeHelpTooltipId}
 				bind:this={infoPopoverEl}
-				class="absolute top-full right-0 mt-2 w-72 bg-popover text-popover-foreground border rounded-lg px-3 py-2 shadow-lg z-20"
+				class="absolute top-full right-0 mt-2 w-72 bg-background text-foreground border rounded-lg px-3 py-2 shadow-lg z-20"
 				class:pointer-events-none={!showInfo}
 				class:invisible={!showInfo}
 			>
