@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/javinizer/javinizer-go/internal/update"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/spf13/afero"
 )
@@ -76,6 +77,10 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 
 	rt.SetConfig(cfg)
 	rt.EnsureRuntime()
+
+	// Start the background update checker, gated on cfg.System.VersionCheckEnabled.
+	// Bound to rt.ServerCtx() so it stops cleanly on rt.Shutdown().
+	startUpdateChecker(rt, cfg, update.ServiceOptions{})
 
 	// Temp poster cleanup is intentionally NOT started automatically.
 	// Running CleanupStaleTempDirs on startup (or on a periodic ticker) wipes

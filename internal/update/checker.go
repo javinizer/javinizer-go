@@ -26,10 +26,20 @@ type versionInfo struct {
 	PublishedAt string `json:"published_at"` // ISO8601 timestamp
 }
 
-// checker is the interface for checking version information.
-type checker interface {
-	CheckLatestVersion(ctx context.Context) (*versionInfo, error)
+// VersionInfo is the exported alias for versionInfo, enabling external callers
+// (and tests in other packages) to construct values returned by a stub
+// Checker. It is identical to versionInfo — no copy is made.
+type VersionInfo = versionInfo
+
+// Checker is the interface for checking the latest released version.
+// It is exported so callers can inject a stub via NewServiceWithOptions,
+// avoiding real network calls in hermetic tests.
+type Checker interface {
+	CheckLatestVersion(ctx context.Context) (*VersionInfo, error)
 }
+
+// checker is an alias retaining the original unexported name used internally.
+type checker = Checker
 
 // githubChecker checks versions from GitHub releases.
 type githubChecker struct {
