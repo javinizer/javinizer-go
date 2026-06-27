@@ -227,6 +227,19 @@ describe('priority: applyEnabledReorderToFull (disabled-scraper preservation)', 
 		}
 		expect(result).toHaveLength(full.length);
 	});
+
+	it('filters stale/unknown scraper ids from newEnabledOrder (source of truth = fullPriority)', () => {
+		// CodeRabbit (PR #51): newEnabledOrder is trusted verbatim, so a stale or
+		// unknown id coming back from the UI would leak into the persisted override.
+		// fullPriority is the source of truth; only ids present in it are kept.
+		const full = ['r18dev', 'dmm', 'javbus'];
+		const newEnabledOrder = ['dmm', 'GHOST_STALE_ID', 'r18dev'];
+		expect(applyEnabledReorderToFull(full, newEnabledOrder)).toEqual([
+			'dmm',
+			'r18dev',
+			'javbus'
+		]);
+	});
 });
 
 describe('priority: editor data flow preserves disabled scrapers through reorder + save', () => {

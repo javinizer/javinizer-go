@@ -140,11 +140,18 @@ export function buildFieldPriorityOverride(
  * @returns The reconstructed full list: enabled scrapers in their new order,
  *         followed by the disabled scrapers in their original relative order.
  */
+// applyEnabledReorderToFull applies a user's reorder of the enabled scrapers back
+// onto the full stored priority list, preserving disabled scrapers (in relative
+// order) at the end. `fullPriority` is the source of truth: `newEnabledOrder` is
+// filtered against it so stale/unknown scraper ids coming back from the UI
+// cannot leak into the persisted override (CodeRabbit, PR #51).
 export function applyEnabledReorderToFull(
 	fullPriority: string[],
 	newEnabledOrder: string[]
 ): string[] {
-	const enabledSet = new Set(newEnabledOrder);
+	const allowed = new Set(fullPriority);
+	const reorderedEnabled = newEnabledOrder.filter((name) => allowed.has(name));
+	const enabledSet = new Set(reorderedEnabled);
 	const disabled = fullPriority.filter((name) => !enabledSet.has(name));
-	return [...newEnabledOrder, ...disabled];
+	return [...reorderedEnabled, ...disabled];
 }
