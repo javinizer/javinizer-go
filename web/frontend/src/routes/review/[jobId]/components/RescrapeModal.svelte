@@ -66,7 +66,7 @@
 					{#if bulkMovieCount}
 						Rescrape {bulkMovieCount} movie{bulkMovieCount !== 1 ? 's' : ''}
 					{:else}
-						{manualSearchMode ? 'Manual Search' : `Rescrape ${rescrapeMovieName || rescrapeMovieId}`}}
+						{manualSearchMode ? 'Manual Search' : `Rescrape ${rescrapeMovieName || rescrapeMovieId}`}
 					{/if}
 				</h2>
 					<Button variant="ghost" size="icon" onclick={close} disabled={rescraping}>
