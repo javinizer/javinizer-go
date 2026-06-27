@@ -35,6 +35,74 @@
 	// Track which fields have been explicitly modified by the user
 	let touchedFields = $state<Set<string>>(new Set());
 
+	// --- Priority mode help popover (the "(i)" icon in the header) ---
+	// Follows the CompletenessBreakdownTooltip pattern (ReviewGridCard): hover
+	// shows after a short delay, click toggles, Escape + click-outside close.
+	// The popover stays in the DOM so `aria-describedby` always resolves, but
+	// is invisible + pointer-events-none while hidden.
+	const priorityModeHelpTooltipId = 'priority-mode-help-tooltip';
+	let showInfo = $state(false);
+	let hoverTimeout: ReturnType<typeof setTimeout> | null = null;
+	let infoButtonEl: HTMLButtonElement | null = $state(null);
+	let infoPopoverEl: HTMLDivElement | null = $state(null);
+
+	function onInfoEnter() {
+		hoverTimeout = setTimeout(() => {
+			showInfo = true;
+		}, 175);
+	}
+
+	function onInfoLeave() {
+		if (hoverTimeout) {
+			clearTimeout(hoverTimeout);
+			hoverTimeout = null;
+		}
+		showInfo = false;
+	}
+
+	function toggleInfo() {
+		// Cancel any pending hover-show so a delayed timeout can't reopen the
+		// popover right after the user clicked it closed.
+		if (hoverTimeout) {
+			clearTimeout(hoverTimeout);
+			hoverTimeout = null;
+		}
+		showInfo = !showInfo;
+	}
+
+	// Close on Escape (returning focus to the trigger) and on click-outside.
+	// Attached only while open.
+	$effect(() => {
+		if (!showInfo) return;
+		function onDocClick(event: MouseEvent) {
+			const target = event.target as Node | null;
+			if (target && (infoButtonEl?.contains(target) || infoPopoverEl?.contains(target))) {
+				return;
+			}
+			showInfo = false;
+		}
+		function onDocKey(event: KeyboardEvent) {
+			if (event.key === 'Escape') {
+				event.stopPropagation();
+				showInfo = false;
+				infoButtonEl?.focus();
+			}
+		}
+		document.addEventListener('click', onDocClick, true);
+		document.addEventListener('keydown', onDocKey);
+		return () => {
+			document.removeEventListener('click', onDocClick, true);
+			document.removeEventListener('keydown', onDocKey);
+		};
+	});
+
+	// Clear any pending hover timer on teardown.
+	$effect(() => {
+		return () => {
+			if (hoverTimeout) clearTimeout(hoverTimeout);
+		};
+	});
+
 	// Metadata field definitions with descriptions (using snake_case keys to match API)
 	const metadataFields = [
 		{ key: 'id', label: 'Movie ID', category: 'Primary', description: 'Primary movie identifier (e.g., IPX-123)' },
@@ -293,7 +361,50 @@
 					{/if}
 				</p>
 			</div>
-			<Info class="h-5 w-5 text-muted-foreground shrink-0 mt-1" />
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="relative shrink-0 mt-1"
+			onmouseenter={onInfoEnter}
+			onmouseleave={onInfoLeave}
+		>
+			<button
+				type="button"
+				bind:this={infoButtonEl}
+				aria-label="Priority mode help"
+				aria-describedby={priorityModeHelpTooltipId}
+				aria-expanded={showInfo}
+				onclick={toggleInfo}
+				class="inline-flex items-center justify-center rounded-md p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background transition-colors"
+			>
+				<Info class="h-5 w-5" />
+			</button>
+			<div
+				role="tooltip"
+				id={priorityModeHelpTooltipId}
+				bind:this={infoPopoverEl}
+				class="absolute top-full right-0 mt-2 w-72 bg-gray-900/95 text-white rounded-lg px-3 py-2 shadow-lg z-20"
+				class:pointer-events-none={!showInfo}
+				class:invisible={!showInfo}
+			>
+				{#if showInfo}
+					<div transition:fade={{ duration: 150 }} class="space-y-1.5 text-xs">
+						<p class="font-semibold">Metadata priority modes</p>
+						<p>
+							<span class="font-medium">Simple</span> — one priority list applies to every
+							metadata field.
+						</p>
+						<p>
+							<span class="font-medium">Advanced</span> — set a custom scraper order for
+							individual fields.
+						</p>
+						<p class="text-gray-400">
+							Per-field lists are exclusive: only the listed scrapers are consulted
+							— there is no fallback to the global list.
+						</p>
+					</div>
+				{/if}
+			</div>
+		</div>
 		</div>
 
 		<!-- Global Priority -->
