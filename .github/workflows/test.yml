@@ -275,6 +275,10 @@ jobs:
         fi
       shell: bash
 
+    - name: Verify mockery mocks are up to date
+      run: make check-mocks
+      shell: bash
+
     - name: Verify binary
       run: |
         if [ ! -f bin/javinizer ]; then
