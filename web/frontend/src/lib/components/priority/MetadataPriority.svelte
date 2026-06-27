@@ -42,11 +42,19 @@
 	// is invisible + pointer-events-none while hidden.
 	const priorityModeHelpTooltipId = 'priority-mode-help-tooltip';
 	let showInfo = $state(false);
+	// Whether the popover is pinned open by a click. A pinned popover stays open
+	// when the pointer leaves the trigger (so the user can move into it to read
+	// the help text) — only Esc or click-outside closes it. Without this, the
+	// `mt-2` gap between icon and popover means leaving the icon fires mouseleave
+	// and snaps a click-opened popover shut, defeating click-to-pin.
+	let pinned = $state(false);
 	let hoverTimeout: ReturnType<typeof setTimeout> | null = null;
 	let infoButtonEl: HTMLButtonElement | null = $state(null);
 	let infoPopoverEl: HTMLDivElement | null = $state(null);
 
 	function onInfoEnter() {
+		// Don't re-trigger hover-show once the user has pinned it open.
+		if (pinned) return;
 		hoverTimeout = setTimeout(() => {
 			showInfo = true;
 		}, 175);
@@ -57,7 +65,8 @@
 			clearTimeout(hoverTimeout);
 			hoverTimeout = null;
 		}
-		showInfo = false;
+		// A pinned popover survives the pointer leaving the trigger.
+		if (!pinned) showInfo = false;
 	}
 
 	function toggleInfo() {
@@ -67,7 +76,8 @@
 			clearTimeout(hoverTimeout);
 			hoverTimeout = null;
 		}
-		showInfo = !showInfo;
+		pinned = !pinned;
+		showInfo = pinned;
 	}
 
 	// Close on Escape (returning focus to the trigger) and on click-outside.
@@ -79,11 +89,13 @@
 			if (target && (infoButtonEl?.contains(target) || infoPopoverEl?.contains(target))) {
 				return;
 			}
+			pinned = false;
 			showInfo = false;
 		}
 		function onDocKey(event: KeyboardEvent) {
 			if (event.key === 'Escape') {
 				event.stopPropagation();
+				pinned = false;
 				showInfo = false;
 				infoButtonEl?.focus();
 			}
