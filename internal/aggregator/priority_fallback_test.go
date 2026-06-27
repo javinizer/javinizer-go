@@ -168,6 +168,67 @@ func TestPerFieldPriorityOverrideIsExclusive(t *testing.T) {
 		"Series must be empty — per-field override [tokyohot] is exclusive and tokyohot has no Series")
 }
 
+// TestAggregateWithPriorityRespectsPerFieldSkip verifies that AggregateWithPriority
+// (the selected-scrapers scrape path, scrape.go:311) honors a per-field __skip__
+// override instead of applying customPriority to every field.
+//
+// Regression for the BMD-284 bug: batch-scraping with DMM selected while
+// metadata.priority.series: ["__skip__"] still populated Series from DMM,
+// because AggregateWithPriority used cmd.SelectedScrapers as a flat priority for
+// every field and ignored the per-field Fields override. The per-field override
+// must be exclusive and win over customPriority (same semantics as
+// resolvePriorities, PR #51/#50); customPriority is only the fallback for fields
+// without an override.
+func TestAggregateWithPriorityRespectsPerFieldSkip(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{
+			Priority: []string{"dmm", "r18dev"},
+		},
+		Metadata: config.MetadataConfig{
+			Priority: config.PriorityConfig{
+				Priority: []string{"dmm", "r18dev"},
+				Fields: map[string][]string{
+					"series": {"__skip__"},
+				},
+			},
+		},
+	}
+
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
+
+	releaseDate := time.Date(2004, 3, 12, 0, 0, 0, 0, time.UTC)
+
+	dmmResult := &models.ScraperResult{
+		Source:      "dmm",
+		Language:    "ja",
+		ID:          "BMD-284",
+		Title:       "DMM Title",
+		Maker:       "ビッグモーカル",
+		Series:      "淫楽口ワイヤル", // DMM HAS Series — must be suppressed by __skip__
+		ReleaseDate: &releaseDate,
+	}
+
+	results := []*models.ScraperResult{dmmResult}
+
+	// Simulate the batch scrape path: selected scrapers = [dmm].
+	movie, _, err := agg.AggregateWithPriority(results, []string{"dmm"})
+	require.NoError(t, err)
+	require.NotNil(t, movie)
+
+	// The bug: Series was populated by DMM because customPriority [dmm] was
+	// applied to every field, ignoring the series: [__skip__] override.
+	// The fix: the per-field __skip__ override wins, so Series stays empty.
+	assert.Empty(t, movie.Series,
+		"Series must be empty — per-field __skip__ override must win over customPriority")
+
+	// A field WITHOUT an override must still use customPriority (DMM), proving
+	// the fallback path is intact and the fix is scoped to per-field overrides.
+	assert.Equal(t, "DMM Title", movie.Title,
+		"Title (no per-field override) must use customPriority [dmm]")
+	assert.Equal(t, "ビッグモーカル", movie.Maker,
+		"Maker (no per-field override) must use customPriority [dmm]")
+}
+
 func TestUnknownActressFilteredFromScraperResults(t *testing.T) {
 	cfg := &config.Config{
 		Scrapers: config.ScrapersConfig{

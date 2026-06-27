@@ -134,6 +134,27 @@ func (p *PriorityConfig) GetFieldPriority(fieldKey string) []string {
 	return nil
 }
 
+// PerFieldOverride returns the explicit per-field override stored under fieldKey
+// (the Fields map), WITHOUT falling back to the global Priority list. Returns
+// nil when the field has no per-field override.
+//
+// This is the per-field-only counterpart of GetFieldPriority: GetFieldPriority
+// returns Fields[fieldKey] OR the global Priority (useful for the default
+// aggregation path); PerFieldOverride returns Fields[fieldKey] only (useful
+// when a caller supplies its own priority list and wants per-field overrides
+// to still win — e.g. AggregateWithPriority, where customPriority replaces the
+// global order but an explicit `series: ["__skip__"]` must still suppress the
+// field).
+func (p *PriorityConfig) PerFieldOverride(fieldKey string) []string {
+	if p == nil {
+		return nil
+	}
+	if override, ok := p.Fields[fieldKey]; ok && len(override) > 0 {
+		return override
+	}
+	return nil
+}
+
 // MarshalJSON serializes PriorityConfig as a flat JSON object.
 // The "priority" key holds the global list; per-field keys hold overrides.
 func (p PriorityConfig) MarshalJSON() ([]byte, error) {

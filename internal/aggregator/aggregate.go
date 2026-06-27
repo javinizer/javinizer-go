@@ -24,6 +24,25 @@ func (a *Aggregator) AggregateWithPriority(results []*models.ScraperResult, cust
 		return nil, nil, fmt.Errorf("AggregateWithPriority called on nil Aggregator")
 	}
 	return a.aggregateWithPriority(results, func(field string) []string {
+		// Per-field Fields overrides are EXCLUSIVE and take precedence over the
+		// customPriority — but ONLY the explicit per-field override, not the
+		// global Metadata.Priority (customPriority legitimately replaces the
+		// global order for this scrape). This mirrors resolvePriorities'
+		// exclusive semantics for Fields (PR #51/#50).
+		//
+		// This matters for the selected-scrapers scrape path (scrape.go calls
+		// AggregateWithPriority(results, cmd.SelectedScrapers)): without this
+		// guard, a per-field `series: ["__skip__"]` override is silently
+		// ignored whenever the user scrapes with specific scrapers selected,
+		// and the field gets populated from the first selected scraper that has
+		// it (BMD-284 bug). customPriority remains the fallback for fields
+		// without an explicit override, preserving the "custom priority
+		// overrides global order" behavior (TestAggregateWithPriority_CustomPriority).
+		if a.cfg != nil && a.cfg.Metadata != nil {
+			if fp := a.cfg.Metadata.Priority.PerFieldOverride(toSnakeCase(field)); len(fp) > 0 {
+				return fp
+			}
+		}
 		return customPriority
 	})
 }
