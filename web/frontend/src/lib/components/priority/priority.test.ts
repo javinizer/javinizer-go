@@ -6,9 +6,10 @@ import {
 	isSkipField,
 	isFieldOverridden,
 	getFieldStatus,
-	buildFieldPriorityOverride
+	buildFieldPriorityOverride,
+	applyEnabledReorderToFull
 } from './priority';
-import type { SettingsConfig } from '$lib/api/types';
+import type { SettingsConfig, ScraperSettings } from '$lib/api/types';
 
 /**
  * Minimal config builder. The priority helpers only read `scrapers.priority`
@@ -20,6 +21,28 @@ function makeConfig(
 ): SettingsConfig {
 	return {
 		scrapers: { priority: opts.global ?? [] },
+		metadata: { priority: opts.fields ?? {} }
+	} as unknown as SettingsConfig;
+}
+
+/**
+ * Config builder that can mark specific scrapers as disabled.
+ *
+ * `config.scrapers.priority` lists every scraper (enabled + disabled); a scraper
+ * is disabled by `config.scrapers[name].enabled = false`. Only `enabled` is read
+ * by the code under test, so the rest of the ScraperSettings shape is omitted
+ * (the whole object is cast to satisfy the fully-required SettingsConfig type,
+ * mirroring makeConfig above).
+ */
+function makeConfigWithScrapers(
+	opts: { global?: string[]; fields?: Record<string, string[]>; disabled?: string[] } = {}
+): SettingsConfig {
+	const scrapers: Record<string, { enabled: boolean }> = {};
+	for (const name of opts.disabled ?? []) {
+		scrapers[name] = { enabled: false };
+	}
+	return {
+		scrapers: { priority: opts.global ?? [], ...scrapers },
 		metadata: { priority: opts.fields ?? {} }
 	} as unknown as SettingsConfig;
 }
@@ -160,5 +183,122 @@ describe('priority: buildFieldPriorityOverride (skip-action config shape)', () =
 		const snapshot = JSON.parse(JSON.stringify(config.metadata.priority));
 		buildFieldPriorityOverride(config, 'series', [SKIP_FIELD_SENTINEL]);
 		expect(JSON.parse(JSON.stringify(config.metadata.priority))).toEqual(snapshot);
+	});
+});
+
+describe('priority: applyEnabledReorderToFull (disabled-scraper preservation)', () => {
+	it('appends disabled scrapers after the reordered enabled ones (none dropped)', () => {
+		// full stored list has 'javbus' disabled (hidden by the DraggableList)
+		const full = ['r18dev', 'dmm', 'javbus'];
+		// DraggableList shows only enabled; user reorders [r18dev, dmm] -> [dmm, r18dev]
+		const newEnabledOrder = ['dmm', 'r18dev'];
+		expect(applyEnabledReorderToFull(full, newEnabledOrder)).toEqual([
+			'dmm',
+			'r18dev',
+			'javbus'
+		]);
+	});
+
+	it('preserves the relative order of multiple disabled scrapers', () => {
+		const full = ['r18dev', 'dmm', 'javbus', 'javdb'];
+		// enabled = [r18dev, dmm]; disabled = [javbus, javdb] (kept in original order)
+		const newEnabledOrder = ['dmm', 'r18dev'];
+		expect(applyEnabledReorderToFull(full, newEnabledOrder)).toEqual([
+			'dmm',
+			'r18dev',
+			'javbus',
+			'javdb'
+		]);
+	});
+
+	it('is a plain reorder when there are no disabled scrapers', () => {
+		const full = ['r18dev', 'dmm'];
+		const newEnabledOrder = ['dmm', 'r18dev'];
+		expect(applyEnabledReorderToFull(full, newEnabledOrder)).toEqual(['dmm', 'r18dev']);
+	});
+
+	it('never drops a scraper present in the full list (invariant)', () => {
+		const full = ['r18dev', 'dmm', 'javbus', 'javdb', 'jav321'];
+		const newEnabledOrder = ['dmm', 'r18dev'];
+		const result = applyEnabledReorderToFull(full, newEnabledOrder);
+		// every scraper from the full list survives the reorder
+		for (const name of full) {
+			expect(result).toContain(name);
+		}
+		expect(result).toHaveLength(full.length);
+	});
+});
+
+describe('priority: editor data flow preserves disabled scrapers through reorder + save', () => {
+	// Mirrors MetadataPriority.svelte's component-local filterEnabledScrapers:
+	// the DraggableList shows only scrapers whose config entry isn't disabled.
+	function enabledView(config: SettingsConfig, priority: string[]): string[] {
+		return priority.filter(
+			(name) =>
+				(config.scrapers?.[name] as ScraperSettings | undefined)?.enabled !== false
+		);
+	}
+
+	it('re-enable a skipped field + reorder + save keeps disabled scrapers in the override', () => {
+		// Global priority lists 3 scrapers; 'javbus' is disabled.
+		const config = makeConfigWithScrapers({
+			global: ['r18dev', 'dmm', 'javbus'],
+			disabled: ['javbus'],
+			// field 'series' was previously skipped
+			fields: { series: [SKIP_FIELD_SENTINEL] }
+		});
+
+		// 1) User re-enables the skipped field: enableField() now stages the FULL
+		//    global list (enabled + disabled), NOT the enabled-only view.
+		let editingPriority = [...getGlobalPriority(config)];
+		expect(editingPriority).toEqual(['r18dev', 'dmm', 'javbus']);
+
+		// 2) DraggableList shows only enabled scrapers; user reorders them.
+		const view = enabledView(config, editingPriority); // ['r18dev', 'dmm']
+		const newEnabledOrder = [...view].reverse(); // ['dmm', 'r18dev']
+		editingPriority = applyEnabledReorderToFull(editingPriority, newEnabledOrder);
+
+		// 3) Save: buildFieldPriorityOverride persists editingPriority (differs
+		//    from global, so it is NOT collapsed to []). The disabled 'javbus'
+		//    MUST survive — this is the CodeRabbit Finding 2 regression.
+		const saved = buildFieldPriorityOverride(config, 'series', editingPriority);
+		expect(saved.series).toEqual(['dmm', 'r18dev', 'javbus']);
+		expect(saved.series).toContain('javbus'); // disabled scraper preserved
+		expect(saved.series).not.toEqual(['dmm', 'r18dev']); // not narrowed to enabled-only
+	});
+
+	it('re-enable a skipped field + save (unchanged) restores "inherited" ([])', () => {
+		const config = makeConfigWithScrapers({
+			global: ['r18dev', 'dmm', 'javbus'],
+			disabled: ['javbus'],
+			fields: { series: [SKIP_FIELD_SENTINEL] }
+		});
+
+		// enableField stages the full global list (incl. disabled 'javbus').
+		const editingPriority = [...getGlobalPriority(config)];
+
+		// Save unchanged: editingPriority === global => buildFieldPriorityOverride
+		// collapses to [] (inherited), even though 'javbus' is disabled.
+		const saved = buildFieldPriorityOverride(config, 'series', editingPriority);
+		expect(saved.series).toEqual([]);
+	});
+
+	it('reorder an inherited field + save keeps disabled scrapers in the override', () => {
+		// An inherited field (no override) edited + reordered + saved.
+		const config = makeConfigWithScrapers({
+			global: ['r18dev', 'dmm', 'javbus'],
+			disabled: ['javbus']
+			// no fields override => 'series' inherits global
+		});
+
+		// openFieldEditor loads the full stored list (== global for inherited).
+		let editingPriority = [...getFieldPriority(config, 'series')];
+		const view = enabledView(config, editingPriority); // ['r18dev', 'dmm']
+		const newEnabledOrder = [...view].reverse(); // ['dmm', 'r18dev']
+		editingPriority = applyEnabledReorderToFull(editingPriority, newEnabledOrder);
+
+		const saved = buildFieldPriorityOverride(config, 'series', editingPriority);
+		expect(saved.series).toEqual(['dmm', 'r18dev', 'javbus']);
+		expect(saved.series).toContain('javbus'); // disabled scraper preserved
 	});
 });

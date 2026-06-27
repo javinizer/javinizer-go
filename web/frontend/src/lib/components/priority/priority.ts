@@ -113,3 +113,38 @@ export function buildFieldPriorityOverride(
 	}
 	return base;
 }
+
+/**
+ * Apply an enabled-only reordering back onto the full stored priority list,
+ * preserving any disabled scrapers that the DraggableList hid from display.
+ *
+ * The editor's DraggableList shows only enabled scrapers (it filters disabled
+ * ones out of its `items` prop), so when the user reorders, `onReorder` yields
+ * the new order of JUST the enabled scrapers. Writing that enabled-only list
+ * directly back into the stored per-field priority would silently drop every
+ * disabled scraper — and saving the narrowed override would persist the loss, so
+ * re-enabling a disabled scraper later would not restore it for this field.
+ *
+ * To preserve them, the disabled scrapers (everything in `fullPriority` that
+ * is not in `newEnabledOrder`) are kept in the list, appended after the enabled
+ * ones in their original relative order. Disabled scrapers aren't draggable, so
+ * their position relative to the enabled ones isn't user-meaningful; appending
+ * them preserves both their presence and relative order without distorting the
+ * enabled order the user just chose.
+ *
+ * Invariant: the returned list contains every scraper present in `fullPriority`
+ * (none are dropped), with the enabled ones reordered to `newEnabledOrder`.
+ *
+ * @param fullPriority The full stored priority (enabled + disabled) — source of truth.
+ * @param newEnabledOrder The reordered enabled-only list emitted by the DraggableList.
+ * @returns The reconstructed full list: enabled scrapers in their new order,
+ *         followed by the disabled scrapers in their original relative order.
+ */
+export function applyEnabledReorderToFull(
+	fullPriority: string[],
+	newEnabledOrder: string[]
+): string[] {
+	const enabledSet = new Set(newEnabledOrder);
+	const disabled = fullPriority.filter((name) => !enabledSet.has(name));
+	return [...newEnabledOrder, ...disabled];
+}

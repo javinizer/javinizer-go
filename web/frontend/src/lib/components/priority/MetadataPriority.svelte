@@ -15,7 +15,9 @@
 		getFieldPriority,
 		isFieldOverridden,
 		getFieldStatus,
-		isSkipField
+		isSkipField,
+		applyEnabledReorderToFull,
+		buildFieldPriorityOverride
 	} from './priority';
 
 	interface Props {
@@ -112,23 +114,20 @@
 		if (!editingField) return;
 
 		if (!config.metadata) config.metadata = {};
-		if (!config.metadata.priority) config.metadata.priority = {};
 
 		// Mark this field as touched
 		touchedFields.add(editingField);
 
-		const global = getGlobalPriority(config);
-		const isSameAsGlobal = JSON.stringify(editingPriority) === JSON.stringify(global);
-
-		if (isSameAsGlobal) {
-			// If it matches global, set to empty array (signals "use global")
-			config.metadata.priority[editingField] = [];
-		} else {
-			// Otherwise save the custom priority. This includes the __skip__
-			// sentinel, which is an exclusive override that leaves the field
-			// empty (no scraper named "__skip__" is ever consulted).
-			config.metadata.priority[editingField] = editingPriority;
-		}
+		// Delegate to the canonical, unit-tested helper: it collapses a
+		// global-equal priority to [] (restoring "inherited") and otherwise stores
+		// the full list verbatim — including disabled scrapers preserved through
+		// onReorder and the __skip__ sentinel (an exclusive override that leaves the
+		// field empty, since no scraper named "__skip__" is ever consulted).
+		config.metadata.priority = buildFieldPriorityOverride(
+			config,
+			editingField,
+			editingPriority
+		);
 
 		// Create a deep clone to trigger reactivity
 		onUpdate(JSON.parse(JSON.stringify(config)));
@@ -165,8 +164,13 @@
 
 	// Re-enable a skipped field: restore the inherited (global) scraper list so
 	// the user can reorder and save. Saving it unchanged restores "inherited".
+	// Stage the FULL global list (enabled + disabled) — not the enabled-only
+	// filtered view — so a later Save doesn't persist a narrowed override that
+	// drops disabled scrapers. The DraggableList hides disabled scrapers for
+	// display (via filterEnabledScrapers), so they aren't visible or draggable;
+	// they're only preserved in state until save.
 	function enableField() {
-		editingPriority = [...filterEnabledScrapers(getGlobalPriority(config))];
+		editingPriority = [...getGlobalPriority(config)];
 	}
 
 	// Whether the field being edited is currently staged as skipped
@@ -391,7 +395,15 @@
 					<div class="max-h-[50vh] overflow-y-scroll pr-1">
 						<DraggableList
 							items={filterEnabledScrapers(editingPriority)}
-							onReorder={(newPriority) => { editingPriority = newPriority; }}
+							onReorder={(newEnabledOrder) => {
+								// Reorder within the FULL list: re-apply the enabled-only
+								// reordering back onto editingPriority, preserving any
+								// disabled scrapers the DraggableList hid from display
+								// (appended after the enabled ones, in their original
+								// relative order). Writing newEnabledOrder straight back
+								// would silently drop disabled scrapers on the first drag.
+								editingPriority = applyEnabledReorderToFull(editingPriority, newEnabledOrder);
+							}}
 						>
 							{#snippet children({ item })}
 								<span class="font-medium">
