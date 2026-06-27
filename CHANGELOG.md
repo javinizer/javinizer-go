@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Workflow seam**: replaced ad-hoc task types (ScrapeTask/DownloadTask/OrganizeTask/NFOTask) with a unified `Workflow` abstraction. Jobs execute via phase-based `BatchJobInterface` (scrape / apply / rescrape), consolidating the worker pool onto a single seam.
+- **API projection layer**: movie/actress/genre views lifted into `internal/api/contracts`, decoupling the wire format from persistence models (content_id → code rename, PosterState fields lifted to top-level).
+- **Scraper registry**: replaced the `init()`-based plugin system with a centralized registry (`internal/scraper/registry.go` + `scraperutil` registration catalog).
+- **Job reconstruction**: `SetReconstructionDeps` re-hydrates infrastructure dependencies on jobs loaded from the database at startup, so post-restart apply/rescrape and movie-edit persistence work.
+
+### Removed
+
+- **Dead code**: ~138 intentional deletions consolidated during the refactor — `version.txt` → `version.go` (VCS-embedded via `debug.ReadBuildInfo`), `internal/api/*/aliases.go` re-exports folded in, worker pool refactored onto the Workflow seam. 5 empty/comment-only files removed (zero declarations, zero references).
+
+### Added
+
+- **Web frontend (SvelteKit SPA)**: review flow with jobId-scoped state and monotonic WebSocket-driven progress bars; fullstack E2E suite + vitest unit tests.
+- **Mockery freshness gate**: pinned mockery v3.7.1; added a `make check-mocks` target + `test.yml` step that fails CI if mocks drift from their interfaces (caught a real portability bug — `sed -i` macOS-only — on its first run).
+- **`.gitignore` hardening**: `tmp/`, `web/frontend/playwright-report/`, `blob-report/`, `playwright/.cache/`, `*.db-shm`, `*.db-wal`, `*.log`.
+
+### Fixed
+
+- **Rescrape merge strategies**: the API previously accepted + validated `preset` / `scalar_strategy` / `array_strategy` then silently dropped them; `RescrapeCmd` now carries `MergeOptions` and `CompleteRescrape` applies the merge (reusing the apply-path logic).
+- **Theme toggle**: rendered as a component, fixing an unknown-element regression in the web UI.
+- **Test coverage** raised to meet the 75% CI threshold; race-clean.
+
+### Tooling
+
+- **`.coderabbit.yaml`** rewritten as a durable repo-level review policy (dropped the transient review-history header and invalid `review_status` sub-keys; added `auto_review`, `high_level_summary`, `poem`, `review_status: true`).
+
 ## [v0.3.15-alpha] - 2026-06-23
 
 ### Fixed
