@@ -218,28 +218,46 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 		if (!translation.anthropic.api_key) translation.anthropic.api_key = '';
 	}
 
+	// Rehydrate local state from a config payload. Shared by the initial-load
+	// $effect below and reloadConfig so the rehydrate steps live in one place.
+	// Callers own configInitialized: the effect sets it on first hydration; reload
+	// leaves it true (it only ever means "config is populated", and `reloading`
+	// signals the in-flight reload to the UI instead).
+	function applyConfigData(data: Config): void {
+		config = JSON.parse(JSON.stringify(data));
+		ensureProxyProfilesInitialized();
+		ensureTranslationConfig();
+		deps.onConfigInitialized();
+		updateProxyConfigBaseline();
+	}
+
 	$effect(() => {
 		const data = configQuery.data;
 		if (data && !configInitialized) {
 			untrack(() => {
 				configInitialized = true;
-				config = JSON.parse(JSON.stringify(data));
-				ensureProxyProfilesInitialized();
-				ensureTranslationConfig();
-				deps.onConfigInitialized();
-				updateProxyConfigBaseline();
+				applyConfigData(data);
 			});
 		}
 	});
 
 	async function reloadConfig() {
 		reloading = true;
-		configInitialized = false;
 		try {
 			// throwOnError makes refetchQueries reject on a failed fetch instead of
 			// silently swallowing the error (its default `.catch(noop)`), so the
 			// catch below can surface a failure toast to the user.
 			await queryClient.refetchQueries({ queryKey: ['config'] }, { throwOnError: true });
+			// Rehydrate from the awaited refetch result directly. We deliberately do
+			// NOT reset configInitialized to false before the await: that would let
+			// the rehydrating $effect above re-run against the still-cached (stale)
+			// configQuery.data and mark us initialized again before this fresh
+			// payload lands, so the new values would never get applied. On error we
+			// leave config as the last-known-good (configInitialized stays true).
+			const data = configQuery.data;
+			if (data) {
+				applyConfigData(data);
+			}
 			toastStore.success('Configuration reloaded successfully', 4000);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : 'Failed to reload configuration';
