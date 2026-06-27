@@ -72,7 +72,7 @@ type MockActressRepositoryInterface_Count_Call struct {
 
 // Count is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockActressRepositoryInterface_Expecter) Count(ctx interface{}) *MockActressRepositoryInterface_Count_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Count(ctx any) *MockActressRepositoryInterface_Count_Call {
 	return &MockActressRepositoryInterface_Count_Call{Call: _e.mock.On("Count", ctx)}
 }
 
@@ -133,7 +133,7 @@ type MockActressRepositoryInterface_CountSearch_Call struct {
 // CountSearch is a helper method to define mock.On call
 //   - ctx context.Context
 //   - query string
-func (_e *MockActressRepositoryInterface_Expecter) CountSearch(ctx interface{}, query interface{}) *MockActressRepositoryInterface_CountSearch_Call {
+func (_e *MockActressRepositoryInterface_Expecter) CountSearch(ctx any, query any) *MockActressRepositoryInterface_CountSearch_Call {
 	return &MockActressRepositoryInterface_CountSearch_Call{Call: _e.mock.On("CountSearch", ctx, query)}
 }
 
@@ -190,7 +190,7 @@ type MockActressRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actress *models.Actress
-func (_e *MockActressRepositoryInterface_Expecter) Create(ctx interface{}, actress interface{}) *MockActressRepositoryInterface_Create_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Create(ctx any, actress any) *MockActressRepositoryInterface_Create_Call {
 	return &MockActressRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, actress)}
 }
 
@@ -247,7 +247,7 @@ type MockActressRepositoryInterface_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockActressRepositoryInterface_Expecter) Delete(ctx interface{}, id interface{}) *MockActressRepositoryInterface_Delete_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Delete(ctx any, id any) *MockActressRepositoryInterface_Delete_Call {
 	return &MockActressRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, id)}
 }
 
@@ -315,7 +315,7 @@ type MockActressRepositoryInterface_FindByDMMID_Call struct {
 // FindByDMMID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - dmmID int
-func (_e *MockActressRepositoryInterface_Expecter) FindByDMMID(ctx interface{}, dmmID interface{}) *MockActressRepositoryInterface_FindByDMMID_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindByDMMID(ctx any, dmmID any) *MockActressRepositoryInterface_FindByDMMID_Call {
 	return &MockActressRepositoryInterface_FindByDMMID_Call{Call: _e.mock.On("FindByDMMID", ctx, dmmID)}
 }
 
@@ -384,7 +384,7 @@ type MockActressRepositoryInterface_FindByFirstNameLastName_Call struct {
 //   - ctx context.Context
 //   - firstName string
 //   - lastName string
-func (_e *MockActressRepositoryInterface_Expecter) FindByFirstNameLastName(ctx interface{}, firstName interface{}, lastName interface{}) *MockActressRepositoryInterface_FindByFirstNameLastName_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindByFirstNameLastName(ctx any, firstName any, lastName any) *MockActressRepositoryInterface_FindByFirstNameLastName_Call {
 	return &MockActressRepositoryInterface_FindByFirstNameLastName_Call{Call: _e.mock.On("FindByFirstNameLastName", ctx, firstName, lastName)}
 }
 
@@ -457,7 +457,7 @@ type MockActressRepositoryInterface_FindByID_Call struct {
 // FindByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockActressRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockActressRepositoryInterface_FindByID_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockActressRepositoryInterface_FindByID_Call {
 	return &MockActressRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
@@ -525,7 +525,7 @@ type MockActressRepositoryInterface_FindByJapaneseName_Call struct {
 // FindByJapaneseName is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
-func (_e *MockActressRepositoryInterface_Expecter) FindByJapaneseName(ctx interface{}, name interface{}) *MockActressRepositoryInterface_FindByJapaneseName_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindByJapaneseName(ctx any, name any) *MockActressRepositoryInterface_FindByJapaneseName_Call {
 	return &MockActressRepositoryInterface_FindByJapaneseName_Call{Call: _e.mock.On("FindByJapaneseName", ctx, name)}
 }
 
@@ -594,7 +594,7 @@ type MockActressRepositoryInterface_FindByJapaneseNameAndDMMID_Call struct {
 //   - ctx context.Context
 //   - name string
 //   - dmmID int
-func (_e *MockActressRepositoryInterface_Expecter) FindByJapaneseNameAndDMMID(ctx interface{}, name interface{}, dmmID interface{}) *MockActressRepositoryInterface_FindByJapaneseNameAndDMMID_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindByJapaneseNameAndDMMID(ctx any, name any, dmmID any) *MockActressRepositoryInterface_FindByJapaneseNameAndDMMID_Call {
 	return &MockActressRepositoryInterface_FindByJapaneseNameAndDMMID_Call{Call: _e.mock.On("FindByJapaneseNameAndDMMID", ctx, name, dmmID)}
 }
 
@@ -656,7 +656,7 @@ type MockActressRepositoryInterface_FindOrCreate_Call struct {
 // FindOrCreate is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actress *models.Actress
-func (_e *MockActressRepositoryInterface_Expecter) FindOrCreate(ctx interface{}, actress interface{}) *MockActressRepositoryInterface_FindOrCreate_Call {
+func (_e *MockActressRepositoryInterface_Expecter) FindOrCreate(ctx any, actress any) *MockActressRepositoryInterface_FindOrCreate_Call {
 	return &MockActressRepositoryInterface_FindOrCreate_Call{Call: _e.mock.On("FindOrCreate", ctx, actress)}
 }
 
@@ -725,7 +725,7 @@ type MockActressRepositoryInterface_List_Call struct {
 //   - ctx context.Context
 //   - limit int
 //   - offset int
-func (_e *MockActressRepositoryInterface_Expecter) List(ctx interface{}, limit interface{}, offset interface{}) *MockActressRepositoryInterface_List_Call {
+func (_e *MockActressRepositoryInterface_Expecter) List(ctx any, limit any, offset any) *MockActressRepositoryInterface_List_Call {
 	return &MockActressRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx, limit, offset)}
 }
 
@@ -797,7 +797,7 @@ type MockActressRepositoryInterface_ListAll_Call struct {
 
 // ListAll is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockActressRepositoryInterface_Expecter) ListAll(ctx interface{}) *MockActressRepositoryInterface_ListAll_Call {
+func (_e *MockActressRepositoryInterface_Expecter) ListAll(ctx any) *MockActressRepositoryInterface_ListAll_Call {
 	return &MockActressRepositoryInterface_ListAll_Call{Call: _e.mock.On("ListAll", ctx)}
 }
 
@@ -863,7 +863,7 @@ type MockActressRepositoryInterface_ListSorted_Call struct {
 //   - offset int
 //   - sortBy string
 //   - sortOrder string
-func (_e *MockActressRepositoryInterface_Expecter) ListSorted(ctx interface{}, limit interface{}, offset interface{}, sortBy interface{}, sortOrder interface{}) *MockActressRepositoryInterface_ListSorted_Call {
+func (_e *MockActressRepositoryInterface_Expecter) ListSorted(ctx any, limit any, offset any, sortBy any, sortOrder any) *MockActressRepositoryInterface_ListSorted_Call {
 	return &MockActressRepositoryInterface_ListSorted_Call{Call: _e.mock.On("ListSorted", ctx, limit, offset, sortBy, sortOrder)}
 }
 
@@ -948,7 +948,7 @@ type MockActressRepositoryInterface_Merge_Call struct {
 //   - targetID uint
 //   - sourceID uint
 //   - resolutions map[string]string
-func (_e *MockActressRepositoryInterface_Expecter) Merge(ctx interface{}, targetID interface{}, sourceID interface{}, resolutions interface{}) *MockActressRepositoryInterface_Merge_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Merge(ctx any, targetID any, sourceID any, resolutions any) *MockActressRepositoryInterface_Merge_Call {
 	return &MockActressRepositoryInterface_Merge_Call{Call: _e.mock.On("Merge", ctx, targetID, sourceID, resolutions)}
 }
 
@@ -1027,7 +1027,7 @@ type MockActressRepositoryInterface_PreviewMerge_Call struct {
 //   - ctx context.Context
 //   - targetID uint
 //   - sourceID uint
-func (_e *MockActressRepositoryInterface_Expecter) PreviewMerge(ctx interface{}, targetID interface{}, sourceID interface{}) *MockActressRepositoryInterface_PreviewMerge_Call {
+func (_e *MockActressRepositoryInterface_Expecter) PreviewMerge(ctx any, targetID any, sourceID any) *MockActressRepositoryInterface_PreviewMerge_Call {
 	return &MockActressRepositoryInterface_PreviewMerge_Call{Call: _e.mock.On("PreviewMerge", ctx, targetID, sourceID)}
 }
 
@@ -1100,7 +1100,7 @@ type MockActressRepositoryInterface_Search_Call struct {
 // Search is a helper method to define mock.On call
 //   - ctx context.Context
 //   - query string
-func (_e *MockActressRepositoryInterface_Expecter) Search(ctx interface{}, query interface{}) *MockActressRepositoryInterface_Search_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Search(ctx any, query any) *MockActressRepositoryInterface_Search_Call {
 	return &MockActressRepositoryInterface_Search_Call{Call: _e.mock.On("Search", ctx, query)}
 }
 
@@ -1172,7 +1172,7 @@ type MockActressRepositoryInterface_SearchPagedSorted_Call struct {
 //   - offset int
 //   - sortBy string
 //   - sortOrder string
-func (_e *MockActressRepositoryInterface_Expecter) SearchPagedSorted(ctx interface{}, query interface{}, limit interface{}, offset interface{}, sortBy interface{}, sortOrder interface{}) *MockActressRepositoryInterface_SearchPagedSorted_Call {
+func (_e *MockActressRepositoryInterface_Expecter) SearchPagedSorted(ctx any, query any, limit any, offset any, sortBy any, sortOrder any) *MockActressRepositoryInterface_SearchPagedSorted_Call {
 	return &MockActressRepositoryInterface_SearchPagedSorted_Call{Call: _e.mock.On("SearchPagedSorted", ctx, query, limit, offset, sortBy, sortOrder)}
 }
 
@@ -1249,7 +1249,7 @@ type MockActressRepositoryInterface_Update_Call struct {
 // Update is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actress *models.Actress
-func (_e *MockActressRepositoryInterface_Expecter) Update(ctx interface{}, actress interface{}) *MockActressRepositoryInterface_Update_Call {
+func (_e *MockActressRepositoryInterface_Expecter) Update(ctx any, actress any) *MockActressRepositoryInterface_Update_Call {
 	return &MockActressRepositoryInterface_Update_Call{Call: _e.mock.On("Update", ctx, actress)}
 }
 

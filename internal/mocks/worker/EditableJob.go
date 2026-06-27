@@ -52,7 +52,7 @@ type MockEditableJob_ExcludeFile_Call struct {
 
 // ExcludeFile is a helper method to define mock.On call
 //   - filePath string
-func (_e *MockEditableJob_Expecter) ExcludeFile(filePath interface{}) *MockEditableJob_ExcludeFile_Call {
+func (_e *MockEditableJob_Expecter) ExcludeFile(filePath any) *MockEditableJob_ExcludeFile_Call {
 	return &MockEditableJob_ExcludeFile_Call{Call: _e.mock.On("ExcludeFile", filePath)}
 }
 
@@ -105,7 +105,7 @@ type MockEditableJob_FindFilePathsForMovieID_Call struct {
 
 // FindFilePathsForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockEditableJob_Expecter) FindFilePathsForMovieID(movieID interface{}) *MockEditableJob_FindFilePathsForMovieID_Call {
+func (_e *MockEditableJob_Expecter) FindFilePathsForMovieID(movieID any) *MockEditableJob_FindFilePathsForMovieID_Call {
 	return &MockEditableJob_FindFilePathsForMovieID_Call{Call: _e.mock.On("FindFilePathsForMovieID", movieID)}
 }
 
@@ -167,7 +167,7 @@ type MockEditableJob_FindMovieResultForMovieID_Call struct {
 
 // FindMovieResultForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockEditableJob_Expecter) FindMovieResultForMovieID(movieID interface{}) *MockEditableJob_FindMovieResultForMovieID_Call {
+func (_e *MockEditableJob_Expecter) FindMovieResultForMovieID(movieID any) *MockEditableJob_FindMovieResultForMovieID_Call {
 	return &MockEditableJob_FindMovieResultForMovieID_Call{Call: _e.mock.On("FindMovieResultForMovieID", movieID)}
 }
 
@@ -220,7 +220,7 @@ type MockEditableJob_GetFileMatchInfosForMovieID_Call struct {
 
 // GetFileMatchInfosForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockEditableJob_Expecter) GetFileMatchInfosForMovieID(movieID interface{}) *MockEditableJob_GetFileMatchInfosForMovieID_Call {
+func (_e *MockEditableJob_Expecter) GetFileMatchInfosForMovieID(movieID any) *MockEditableJob_GetFileMatchInfosForMovieID_Call {
 	return &MockEditableJob_GetFileMatchInfosForMovieID_Call{Call: _e.mock.On("GetFileMatchInfosForMovieID", movieID)}
 }
 
@@ -288,7 +288,7 @@ type MockEditableJob_GetFileResultByResultID_Call struct {
 
 // GetFileResultByResultID is a helper method to define mock.On call
 //   - resultID string
-func (_e *MockEditableJob_Expecter) GetFileResultByResultID(resultID interface{}) *MockEditableJob_GetFileResultByResultID_Call {
+func (_e *MockEditableJob_Expecter) GetFileResultByResultID(resultID any) *MockEditableJob_GetFileResultByResultID_Call {
 	return &MockEditableJob_GetFileResultByResultID_Call{Call: _e.mock.On("GetFileResultByResultID", resultID)}
 }
 
@@ -438,7 +438,7 @@ type MockEditableJob_GetMovieResult_Call struct {
 
 // GetMovieResult is a helper method to define mock.On call
 //   - filePath string
-func (_e *MockEditableJob_Expecter) GetMovieResult(filePath interface{}) *MockEditableJob_GetMovieResult_Call {
+func (_e *MockEditableJob_Expecter) GetMovieResult(filePath any) *MockEditableJob_GetMovieResult_Call {
 	return &MockEditableJob_GetMovieResult_Call{Call: _e.mock.On("GetMovieResult", filePath)}
 }
 
@@ -491,7 +491,7 @@ type MockEditableJob_GetMovieResultsForMovieID_Call struct {
 
 // GetMovieResultsForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockEditableJob_Expecter) GetMovieResultsForMovieID(movieID interface{}) *MockEditableJob_GetMovieResultsForMovieID_Call {
+func (_e *MockEditableJob_Expecter) GetMovieResultsForMovieID(movieID any) *MockEditableJob_GetMovieResultsForMovieID_Call {
 	return &MockEditableJob_GetMovieResultsForMovieID_Call{Call: _e.mock.On("GetMovieResultsForMovieID", movieID)}
 }
 
@@ -682,7 +682,7 @@ type MockEditableJob_UpdateMovie_Call struct {
 //   - ctx context.Context
 //   - filePath string
 //   - movie *models.Movie
-func (_e *MockEditableJob_Expecter) UpdateMovie(ctx interface{}, filePath interface{}, movie interface{}) *MockEditableJob_UpdateMovie_Call {
+func (_e *MockEditableJob_Expecter) UpdateMovie(ctx any, filePath any, movie any) *MockEditableJob_UpdateMovie_Call {
 	return &MockEditableJob_UpdateMovie_Call{Call: _e.mock.On("UpdateMovie", ctx, filePath, movie)}
 }
 
@@ -744,7 +744,7 @@ type MockEditableJob_UpdatePosterCrop_Call struct {
 // UpdatePosterCrop is a helper method to define mock.On call
 //   - movieID string
 //   - croppedURL string
-func (_e *MockEditableJob_Expecter) UpdatePosterCrop(movieID interface{}, croppedURL interface{}) *MockEditableJob_UpdatePosterCrop_Call {
+func (_e *MockEditableJob_Expecter) UpdatePosterCrop(movieID any, croppedURL any) *MockEditableJob_UpdatePosterCrop_Call {
 	return &MockEditableJob_UpdatePosterCrop_Call{Call: _e.mock.On("UpdatePosterCrop", movieID, croppedURL)}
 }
 
@@ -803,7 +803,7 @@ type MockEditableJob_UpdatePosterFromURL_Call struct {
 //   - movieID string
 //   - posterURL string
 //   - croppedURL string
-func (_e *MockEditableJob_Expecter) UpdatePosterFromURL(ctx interface{}, movieID interface{}, posterURL interface{}, croppedURL interface{}) *MockEditableJob_UpdatePosterFromURL_Call {
+func (_e *MockEditableJob_Expecter) UpdatePosterFromURL(ctx any, movieID any, posterURL any, croppedURL any) *MockEditableJob_UpdatePosterFromURL_Call {
 	return &MockEditableJob_UpdatePosterFromURL_Call{Call: _e.mock.On("UpdatePosterFromURL", ctx, movieID, posterURL, croppedURL)}
 }
 

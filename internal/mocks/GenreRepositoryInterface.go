@@ -74,7 +74,7 @@ type MockGenreRepositoryInterface_FindOrCreate_Call struct {
 // FindOrCreate is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
-func (_e *MockGenreRepositoryInterface_Expecter) FindOrCreate(ctx interface{}, name interface{}) *MockGenreRepositoryInterface_FindOrCreate_Call {
+func (_e *MockGenreRepositoryInterface_Expecter) FindOrCreate(ctx any, name any) *MockGenreRepositoryInterface_FindOrCreate_Call {
 	return &MockGenreRepositoryInterface_FindOrCreate_Call{Call: _e.mock.On("FindOrCreate", ctx, name)}
 }
 
@@ -141,7 +141,7 @@ type MockGenreRepositoryInterface_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockGenreRepositoryInterface_Expecter) List(ctx interface{}) *MockGenreRepositoryInterface_List_Call {
+func (_e *MockGenreRepositoryInterface_Expecter) List(ctx any) *MockGenreRepositoryInterface_List_Call {
 	return &MockGenreRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx)}
 }
 

@@ -66,7 +66,7 @@ type MockEventEmitter_EmitOrganizeEvent_Call struct {
 //   - message string
 //   - severity models.EventSeverity
 //   - eventCtx map[string]any
-func (_e *MockEventEmitter_Expecter) EmitOrganizeEvent(ctx interface{}, source interface{}, message interface{}, severity interface{}, eventCtx interface{}) *MockEventEmitter_EmitOrganizeEvent_Call {
+func (_e *MockEventEmitter_Expecter) EmitOrganizeEvent(ctx any, source any, message any, severity any, eventCtx any) *MockEventEmitter_EmitOrganizeEvent_Call {
 	return &MockEventEmitter_EmitOrganizeEvent_Call{Call: _e.mock.On("EmitOrganizeEvent", ctx, source, message, severity, eventCtx)}
 }
 
@@ -141,7 +141,7 @@ type MockEventEmitter_EmitScraperEvent_Call struct {
 //   - message string
 //   - severity models.EventSeverity
 //   - eventCtx map[string]any
-func (_e *MockEventEmitter_Expecter) EmitScraperEvent(ctx interface{}, source interface{}, message interface{}, severity interface{}, eventCtx interface{}) *MockEventEmitter_EmitScraperEvent_Call {
+func (_e *MockEventEmitter_Expecter) EmitScraperEvent(ctx any, source any, message any, severity any, eventCtx any) *MockEventEmitter_EmitScraperEvent_Call {
 	return &MockEventEmitter_EmitScraperEvent_Call{Call: _e.mock.On("EmitScraperEvent", ctx, source, message, severity, eventCtx)}
 }
 
@@ -216,7 +216,7 @@ type MockEventEmitter_EmitSystemEvent_Call struct {
 //   - message string
 //   - severity models.EventSeverity
 //   - eventCtx map[string]any
-func (_e *MockEventEmitter_Expecter) EmitSystemEvent(ctx interface{}, source interface{}, message interface{}, severity interface{}, eventCtx interface{}) *MockEventEmitter_EmitSystemEvent_Call {
+func (_e *MockEventEmitter_Expecter) EmitSystemEvent(ctx any, source any, message any, severity any, eventCtx any) *MockEventEmitter_EmitSystemEvent_Call {
 	return &MockEventEmitter_EmitSystemEvent_Call{Call: _e.mock.On("EmitSystemEvent", ctx, source, message, severity, eventCtx)}
 }
 

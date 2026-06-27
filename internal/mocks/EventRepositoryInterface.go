@@ -73,7 +73,7 @@ type MockEventRepositoryInterface_Count_Call struct {
 
 // Count is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockEventRepositoryInterface_Expecter) Count(ctx interface{}) *MockEventRepositoryInterface_Count_Call {
+func (_e *MockEventRepositoryInterface_Expecter) Count(ctx any) *MockEventRepositoryInterface_Count_Call {
 	return &MockEventRepositoryInterface_Count_Call{Call: _e.mock.On("Count", ctx)}
 }
 
@@ -134,7 +134,7 @@ type MockEventRepositoryInterface_CountFiltered_Call struct {
 // CountFiltered is a helper method to define mock.On call
 //   - ctx context.Context
 //   - filter database.EventFilter
-func (_e *MockEventRepositoryInterface_Expecter) CountFiltered(ctx interface{}, filter interface{}) *MockEventRepositoryInterface_CountFiltered_Call {
+func (_e *MockEventRepositoryInterface_Expecter) CountFiltered(ctx any, filter any) *MockEventRepositoryInterface_CountFiltered_Call {
 	return &MockEventRepositoryInterface_CountFiltered_Call{Call: _e.mock.On("CountFiltered", ctx, filter)}
 }
 
@@ -201,7 +201,7 @@ type MockEventRepositoryInterface_CountGroupBySource_Call struct {
 
 // CountGroupBySource is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockEventRepositoryInterface_Expecter) CountGroupBySource(ctx interface{}) *MockEventRepositoryInterface_CountGroupBySource_Call {
+func (_e *MockEventRepositoryInterface_Expecter) CountGroupBySource(ctx any) *MockEventRepositoryInterface_CountGroupBySource_Call {
 	return &MockEventRepositoryInterface_CountGroupBySource_Call{Call: _e.mock.On("CountGroupBySource", ctx)}
 }
 
@@ -253,7 +253,7 @@ type MockEventRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - event *models.Event
-func (_e *MockEventRepositoryInterface_Expecter) Create(ctx interface{}, event interface{}) *MockEventRepositoryInterface_Create_Call {
+func (_e *MockEventRepositoryInterface_Expecter) Create(ctx any, event any) *MockEventRepositoryInterface_Create_Call {
 	return &MockEventRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, event)}
 }
 
@@ -319,7 +319,7 @@ type MockEventRepositoryInterface_DeleteOlderThan_Call struct {
 // DeleteOlderThan is a helper method to define mock.On call
 //   - ctx context.Context
 //   - date time.Time
-func (_e *MockEventRepositoryInterface_Expecter) DeleteOlderThan(ctx interface{}, date interface{}) *MockEventRepositoryInterface_DeleteOlderThan_Call {
+func (_e *MockEventRepositoryInterface_Expecter) DeleteOlderThan(ctx any, date any) *MockEventRepositoryInterface_DeleteOlderThan_Call {
 	return &MockEventRepositoryInterface_DeleteOlderThan_Call{Call: _e.mock.On("DeleteOlderThan", ctx, date)}
 }
 
@@ -387,7 +387,7 @@ type MockEventRepositoryInterface_FindByID_Call struct {
 // FindByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockEventRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockEventRepositoryInterface_FindByID_Call {
+func (_e *MockEventRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockEventRepositoryInterface_FindByID_Call {
 	return &MockEventRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
@@ -457,7 +457,7 @@ type MockEventRepositoryInterface_FindFiltered_Call struct {
 //   - filter database.EventFilter
 //   - limit int
 //   - offset int
-func (_e *MockEventRepositoryInterface_Expecter) FindFiltered(ctx interface{}, filter interface{}, limit interface{}, offset interface{}) *MockEventRepositoryInterface_FindFiltered_Call {
+func (_e *MockEventRepositoryInterface_Expecter) FindFiltered(ctx any, filter any, limit any, offset any) *MockEventRepositoryInterface_FindFiltered_Call {
 	return &MockEventRepositoryInterface_FindFiltered_Call{Call: _e.mock.On("FindFiltered", ctx, filter, limit, offset)}
 }
 
@@ -536,7 +536,7 @@ type MockEventRepositoryInterface_List_Call struct {
 //   - ctx context.Context
 //   - limit int
 //   - offset int
-func (_e *MockEventRepositoryInterface_Expecter) List(ctx interface{}, limit interface{}, offset interface{}) *MockEventRepositoryInterface_List_Call {
+func (_e *MockEventRepositoryInterface_Expecter) List(ctx any, limit any, offset any) *MockEventRepositoryInterface_List_Call {
 	return &MockEventRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx, limit, offset)}
 }
 

@@ -8,7 +8,9 @@ import (
 	"context"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/workflow"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -72,6 +74,52 @@ func (_c *MockControlledJob_Cancel_Call) RunAndReturn(run func()) *MockControlle
 	return _c
 }
 
+// Done provides a mock function for the type MockControlledJob
+func (_mock *MockControlledJob) Done() <-chan struct{} {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Done")
+	}
+
+	var r0 <-chan struct{}
+	if returnFunc, ok := ret.Get(0).(func() <-chan struct{}); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(<-chan struct{})
+		}
+	}
+	return r0
+}
+
+// MockControlledJob_Done_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Done'
+type MockControlledJob_Done_Call struct {
+	*mock.Call
+}
+
+// Done is a helper method to define mock.On call
+func (_e *MockControlledJob_Expecter) Done() *MockControlledJob_Done_Call {
+	return &MockControlledJob_Done_Call{Call: _e.mock.On("Done")}
+}
+
+func (_c *MockControlledJob_Done_Call) Run(run func()) *MockControlledJob_Done_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockControlledJob_Done_Call) Return(valCh <-chan struct{}) *MockControlledJob_Done_Call {
+	_c.Call.Return(valCh)
+	return _c
+}
+
+func (_c *MockControlledJob_Done_Call) RunAndReturn(run func() <-chan struct{}) *MockControlledJob_Done_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FindFilePathsForMovieID provides a mock function for the type MockControlledJob
 func (_mock *MockControlledJob) FindFilePathsForMovieID(movieID string) []string {
 	ret := _mock.Called(movieID)
@@ -98,7 +146,7 @@ type MockControlledJob_FindFilePathsForMovieID_Call struct {
 
 // FindFilePathsForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockControlledJob_Expecter) FindFilePathsForMovieID(movieID interface{}) *MockControlledJob_FindFilePathsForMovieID_Call {
+func (_e *MockControlledJob_Expecter) FindFilePathsForMovieID(movieID any) *MockControlledJob_FindFilePathsForMovieID_Call {
 	return &MockControlledJob_FindFilePathsForMovieID_Call{Call: _e.mock.On("FindFilePathsForMovieID", movieID)}
 }
 
@@ -160,7 +208,7 @@ type MockControlledJob_FindMovieResultForMovieID_Call struct {
 
 // FindMovieResultForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockControlledJob_Expecter) FindMovieResultForMovieID(movieID interface{}) *MockControlledJob_FindMovieResultForMovieID_Call {
+func (_e *MockControlledJob_Expecter) FindMovieResultForMovieID(movieID any) *MockControlledJob_FindMovieResultForMovieID_Call {
 	return &MockControlledJob_FindMovieResultForMovieID_Call{Call: _e.mock.On("FindMovieResultForMovieID", movieID)}
 }
 
@@ -213,7 +261,7 @@ type MockControlledJob_GetFileMatchInfosForMovieID_Call struct {
 
 // GetFileMatchInfosForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockControlledJob_Expecter) GetFileMatchInfosForMovieID(movieID interface{}) *MockControlledJob_GetFileMatchInfosForMovieID_Call {
+func (_e *MockControlledJob_Expecter) GetFileMatchInfosForMovieID(movieID any) *MockControlledJob_GetFileMatchInfosForMovieID_Call {
 	return &MockControlledJob_GetFileMatchInfosForMovieID_Call{Call: _e.mock.On("GetFileMatchInfosForMovieID", movieID)}
 }
 
@@ -281,7 +329,7 @@ type MockControlledJob_GetFileResultByResultID_Call struct {
 
 // GetFileResultByResultID is a helper method to define mock.On call
 //   - resultID string
-func (_e *MockControlledJob_Expecter) GetFileResultByResultID(resultID interface{}) *MockControlledJob_GetFileResultByResultID_Call {
+func (_e *MockControlledJob_Expecter) GetFileResultByResultID(resultID any) *MockControlledJob_GetFileResultByResultID_Call {
 	return &MockControlledJob_GetFileResultByResultID_Call{Call: _e.mock.On("GetFileResultByResultID", resultID)}
 }
 
@@ -431,7 +479,7 @@ type MockControlledJob_GetMovieResult_Call struct {
 
 // GetMovieResult is a helper method to define mock.On call
 //   - filePath string
-func (_e *MockControlledJob_Expecter) GetMovieResult(filePath interface{}) *MockControlledJob_GetMovieResult_Call {
+func (_e *MockControlledJob_Expecter) GetMovieResult(filePath any) *MockControlledJob_GetMovieResult_Call {
 	return &MockControlledJob_GetMovieResult_Call{Call: _e.mock.On("GetMovieResult", filePath)}
 }
 
@@ -484,7 +532,7 @@ type MockControlledJob_GetMovieResultsForMovieID_Call struct {
 
 // GetMovieResultsForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockControlledJob_Expecter) GetMovieResultsForMovieID(movieID interface{}) *MockControlledJob_GetMovieResultsForMovieID_Call {
+func (_e *MockControlledJob_Expecter) GetMovieResultsForMovieID(movieID any) *MockControlledJob_GetMovieResultsForMovieID_Call {
 	return &MockControlledJob_GetMovieResultsForMovieID_Call{Call: _e.mock.On("GetMovieResultsForMovieID", movieID)}
 }
 
@@ -672,7 +720,7 @@ type MockControlledJob_Rescrape_Call struct {
 // Rescrape is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cmd worker.RescrapeCmd
-func (_e *MockControlledJob_Expecter) Rescrape(ctx interface{}, cmd interface{}) *MockControlledJob_Rescrape_Call {
+func (_e *MockControlledJob_Expecter) Rescrape(ctx any, cmd any) *MockControlledJob_Rescrape_Call {
 	return &MockControlledJob_Rescrape_Call{Call: _e.mock.On("Rescrape", ctx, cmd)}
 }
 
@@ -704,6 +752,217 @@ func (_c *MockControlledJob_Rescrape_Call) RunAndReturn(run func(ctx context.Con
 	return _c
 }
 
+// SetBatchCfg provides a mock function for the type MockControlledJob
+func (_mock *MockControlledJob) SetBatchCfg(cfg worker.BatchJobConfig) {
+	_mock.Called(cfg)
+	return
+}
+
+// MockControlledJob_SetBatchCfg_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetBatchCfg'
+type MockControlledJob_SetBatchCfg_Call struct {
+	*mock.Call
+}
+
+// SetBatchCfg is a helper method to define mock.On call
+//   - cfg worker.BatchJobConfig
+func (_e *MockControlledJob_Expecter) SetBatchCfg(cfg any) *MockControlledJob_SetBatchCfg_Call {
+	return &MockControlledJob_SetBatchCfg_Call{Call: _e.mock.On("SetBatchCfg", cfg)}
+}
+
+func (_c *MockControlledJob_SetBatchCfg_Call) Run(run func(cfg worker.BatchJobConfig)) *MockControlledJob_SetBatchCfg_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 worker.BatchJobConfig
+		if args[0] != nil {
+			arg0 = args[0].(worker.BatchJobConfig)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockControlledJob_SetBatchCfg_Call) Return() *MockControlledJob_SetBatchCfg_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockControlledJob_SetBatchCfg_Call) RunAndReturn(run func(cfg worker.BatchJobConfig)) *MockControlledJob_SetBatchCfg_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetJobStatus provides a mock function for the type MockControlledJob
+func (_mock *MockControlledJob) SetJobStatus(status models.JobStatus) {
+	_mock.Called(status)
+	return
+}
+
+// MockControlledJob_SetJobStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetJobStatus'
+type MockControlledJob_SetJobStatus_Call struct {
+	*mock.Call
+}
+
+// SetJobStatus is a helper method to define mock.On call
+//   - status models.JobStatus
+func (_e *MockControlledJob_Expecter) SetJobStatus(status any) *MockControlledJob_SetJobStatus_Call {
+	return &MockControlledJob_SetJobStatus_Call{Call: _e.mock.On("SetJobStatus", status)}
+}
+
+func (_c *MockControlledJob_SetJobStatus_Call) Run(run func(status models.JobStatus)) *MockControlledJob_SetJobStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 models.JobStatus
+		if args[0] != nil {
+			arg0 = args[0].(models.JobStatus)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockControlledJob_SetJobStatus_Call) Return() *MockControlledJob_SetJobStatus_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockControlledJob_SetJobStatus_Call) RunAndReturn(run func(status models.JobStatus)) *MockControlledJob_SetJobStatus_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetOperationModeOverride provides a mock function for the type MockControlledJob
+func (_mock *MockControlledJob) SetOperationModeOverride(mode operationmode.OperationMode) error {
+	ret := _mock.Called(mode)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetOperationModeOverride")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(operationmode.OperationMode) error); ok {
+		r0 = returnFunc(mode)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockControlledJob_SetOperationModeOverride_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetOperationModeOverride'
+type MockControlledJob_SetOperationModeOverride_Call struct {
+	*mock.Call
+}
+
+// SetOperationModeOverride is a helper method to define mock.On call
+//   - mode operationmode.OperationMode
+func (_e *MockControlledJob_Expecter) SetOperationModeOverride(mode any) *MockControlledJob_SetOperationModeOverride_Call {
+	return &MockControlledJob_SetOperationModeOverride_Call{Call: _e.mock.On("SetOperationModeOverride", mode)}
+}
+
+func (_c *MockControlledJob_SetOperationModeOverride_Call) Run(run func(mode operationmode.OperationMode)) *MockControlledJob_SetOperationModeOverride_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 operationmode.OperationMode
+		if args[0] != nil {
+			arg0 = args[0].(operationmode.OperationMode)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockControlledJob_SetOperationModeOverride_Call) Return(err error) *MockControlledJob_SetOperationModeOverride_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockControlledJob_SetOperationModeOverride_Call) RunAndReturn(run func(mode operationmode.OperationMode) error) *MockControlledJob_SetOperationModeOverride_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetPersistError provides a mock function for the type MockControlledJob
+func (_mock *MockControlledJob) SetPersistError(msg string) {
+	_mock.Called(msg)
+	return
+}
+
+// MockControlledJob_SetPersistError_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetPersistError'
+type MockControlledJob_SetPersistError_Call struct {
+	*mock.Call
+}
+
+// SetPersistError is a helper method to define mock.On call
+//   - msg string
+func (_e *MockControlledJob_Expecter) SetPersistError(msg any) *MockControlledJob_SetPersistError_Call {
+	return &MockControlledJob_SetPersistError_Call{Call: _e.mock.On("SetPersistError", msg)}
+}
+
+func (_c *MockControlledJob_SetPersistError_Call) Run(run func(msg string)) *MockControlledJob_SetPersistError_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockControlledJob_SetPersistError_Call) Return() *MockControlledJob_SetPersistError_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockControlledJob_SetPersistError_Call) RunAndReturn(run func(msg string)) *MockControlledJob_SetPersistError_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetWorkflow provides a mock function for the type MockControlledJob
+func (_mock *MockControlledJob) SetWorkflow(wf workflow.WorkflowInterface) {
+	_mock.Called(wf)
+	return
+}
+
+// MockControlledJob_SetWorkflow_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetWorkflow'
+type MockControlledJob_SetWorkflow_Call struct {
+	*mock.Call
+}
+
+// SetWorkflow is a helper method to define mock.On call
+//   - wf workflow.WorkflowInterface
+func (_e *MockControlledJob_Expecter) SetWorkflow(wf any) *MockControlledJob_SetWorkflow_Call {
+	return &MockControlledJob_SetWorkflow_Call{Call: _e.mock.On("SetWorkflow", wf)}
+}
+
+func (_c *MockControlledJob_SetWorkflow_Call) Run(run func(wf workflow.WorkflowInterface)) *MockControlledJob_SetWorkflow_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 workflow.WorkflowInterface
+		if args[0] != nil {
+			arg0 = args[0].(workflow.WorkflowInterface)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockControlledJob_SetWorkflow_Call) Return() *MockControlledJob_SetWorkflow_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockControlledJob_SetWorkflow_Call) RunAndReturn(run func(wf workflow.WorkflowInterface)) *MockControlledJob_SetWorkflow_Call {
+	_c.Run(run)
+	return _c
+}
+
 // StartApply provides a mock function for the type MockControlledJob
 func (_mock *MockControlledJob) StartApply(ctx context.Context, cfg worker.ApplyPhaseConfig) error {
 	ret := _mock.Called(ctx, cfg)
@@ -729,7 +988,7 @@ type MockControlledJob_StartApply_Call struct {
 // StartApply is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cfg worker.ApplyPhaseConfig
-func (_e *MockControlledJob_Expecter) StartApply(ctx interface{}, cfg interface{}) *MockControlledJob_StartApply_Call {
+func (_e *MockControlledJob_Expecter) StartApply(ctx any, cfg any) *MockControlledJob_StartApply_Call {
 	return &MockControlledJob_StartApply_Call{Call: _e.mock.On("StartApply", ctx, cfg)}
 }
 
@@ -787,7 +1046,7 @@ type MockControlledJob_StartScrape_Call struct {
 //   - ctx context.Context
 //   - files []string
 //   - cfg worker.ScrapePhaseConfig
-func (_e *MockControlledJob_Expecter) StartScrape(ctx interface{}, files interface{}, cfg interface{}) *MockControlledJob_StartScrape_Call {
+func (_e *MockControlledJob_Expecter) StartScrape(ctx any, files any, cfg any) *MockControlledJob_StartScrape_Call {
 	return &MockControlledJob_StartScrape_Call{Call: _e.mock.On("StartScrape", ctx, files, cfg)}
 }
 

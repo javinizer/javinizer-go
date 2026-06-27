@@ -63,7 +63,7 @@ type MockApiTokenRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - token *models.ApiToken
-func (_e *MockApiTokenRepositoryInterface_Expecter) Create(ctx interface{}, token interface{}) *MockApiTokenRepositoryInterface_Create_Call {
+func (_e *MockApiTokenRepositoryInterface_Expecter) Create(ctx any, token any) *MockApiTokenRepositoryInterface_Create_Call {
 	return &MockApiTokenRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, token)}
 }
 
@@ -131,7 +131,7 @@ type MockApiTokenRepositoryInterface_FindByID_Call struct {
 // FindByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-func (_e *MockApiTokenRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockApiTokenRepositoryInterface_FindByID_Call {
+func (_e *MockApiTokenRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockApiTokenRepositoryInterface_FindByID_Call {
 	return &MockApiTokenRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
@@ -199,7 +199,7 @@ type MockApiTokenRepositoryInterface_FindByPrefix_Call struct {
 // FindByPrefix is a helper method to define mock.On call
 //   - ctx context.Context
 //   - prefix string
-func (_e *MockApiTokenRepositoryInterface_Expecter) FindByPrefix(ctx interface{}, prefix interface{}) *MockApiTokenRepositoryInterface_FindByPrefix_Call {
+func (_e *MockApiTokenRepositoryInterface_Expecter) FindByPrefix(ctx any, prefix any) *MockApiTokenRepositoryInterface_FindByPrefix_Call {
 	return &MockApiTokenRepositoryInterface_FindByPrefix_Call{Call: _e.mock.On("FindByPrefix", ctx, prefix)}
 }
 
@@ -267,7 +267,7 @@ type MockApiTokenRepositoryInterface_FindByTokenHash_Call struct {
 // FindByTokenHash is a helper method to define mock.On call
 //   - ctx context.Context
 //   - hash string
-func (_e *MockApiTokenRepositoryInterface_Expecter) FindByTokenHash(ctx interface{}, hash interface{}) *MockApiTokenRepositoryInterface_FindByTokenHash_Call {
+func (_e *MockApiTokenRepositoryInterface_Expecter) FindByTokenHash(ctx any, hash any) *MockApiTokenRepositoryInterface_FindByTokenHash_Call {
 	return &MockApiTokenRepositoryInterface_FindByTokenHash_Call{Call: _e.mock.On("FindByTokenHash", ctx, hash)}
 }
 
@@ -334,7 +334,7 @@ type MockApiTokenRepositoryInterface_ListActive_Call struct {
 
 // ListActive is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockApiTokenRepositoryInterface_Expecter) ListActive(ctx interface{}) *MockApiTokenRepositoryInterface_ListActive_Call {
+func (_e *MockApiTokenRepositoryInterface_Expecter) ListActive(ctx any) *MockApiTokenRepositoryInterface_ListActive_Call {
 	return &MockApiTokenRepositoryInterface_ListActive_Call{Call: _e.mock.On("ListActive", ctx)}
 }
 
@@ -399,7 +399,7 @@ type MockApiTokenRepositoryInterface_Regenerate_Call struct {
 //   - id string
 //   - newHash string
 //   - newPrefix string
-func (_e *MockApiTokenRepositoryInterface_Expecter) Regenerate(ctx interface{}, id interface{}, newHash interface{}, newPrefix interface{}) *MockApiTokenRepositoryInterface_Regenerate_Call {
+func (_e *MockApiTokenRepositoryInterface_Expecter) Regenerate(ctx any, id any, newHash any, newPrefix any) *MockApiTokenRepositoryInterface_Regenerate_Call {
 	return &MockApiTokenRepositoryInterface_Regenerate_Call{Call: _e.mock.On("Regenerate", ctx, id, newHash, newPrefix)}
 }
 
@@ -466,7 +466,7 @@ type MockApiTokenRepositoryInterface_Revoke_Call struct {
 // Revoke is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-func (_e *MockApiTokenRepositoryInterface_Expecter) Revoke(ctx interface{}, id interface{}) *MockApiTokenRepositoryInterface_Revoke_Call {
+func (_e *MockApiTokenRepositoryInterface_Expecter) Revoke(ctx any, id any) *MockApiTokenRepositoryInterface_Revoke_Call {
 	return &MockApiTokenRepositoryInterface_Revoke_Call{Call: _e.mock.On("Revoke", ctx, id)}
 }
 
@@ -523,7 +523,7 @@ type MockApiTokenRepositoryInterface_UpdateLastUsed_Call struct {
 // UpdateLastUsed is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-func (_e *MockApiTokenRepositoryInterface_Expecter) UpdateLastUsed(ctx interface{}, id interface{}) *MockApiTokenRepositoryInterface_UpdateLastUsed_Call {
+func (_e *MockApiTokenRepositoryInterface_Expecter) UpdateLastUsed(ctx any, id any) *MockApiTokenRepositoryInterface_UpdateLastUsed_Call {
 	return &MockApiTokenRepositoryInterface_UpdateLastUsed_Call{Call: _e.mock.On("UpdateLastUsed", ctx, id)}
 }
 

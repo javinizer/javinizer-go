@@ -1,5 +1,5 @@
 .PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder web-test
-.PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci ci-full config-drift check-import-guard simulate-ci
+.PHONY: coverage coverage-fast coverage-html coverage-check coverage-func ci ci-full config-drift check-import-guard check-mocks simulate-ci
 .PHONY: fmt lint vet vuln swagger docs mocks test-e2e-fullstack test-e2e-field-drop test-coverage
 .PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
@@ -40,6 +40,7 @@ help:
 	@echo "  make vuln               - Run govulncheck vulnerability scan"
 	@echo "  make swagger            - Generate Swagger API documentation"
 	@echo "  make check-swagger      - Check if Swagger docs are up to date"
+	@echo "  make check-mocks        - Check if mockery mocks are up to date"
 	@echo "  make mocks              - Generate mocks from interfaces (mockery v3)"
 	@echo ""
 	@echo "CI/CD:"
@@ -184,7 +185,7 @@ check-import-guard:
 	@./scripts/check_import_guard.sh
 
 # Run full CI test suite
-ci: vet lint vuln coverage-check test-race config-drift check-import-guard
+ci: vet lint vuln coverage-check test-race config-drift check-import-guard check-mocks
 	@echo "All CI checks passed!"
 
 # Run full CI suite including frontend tests
@@ -261,12 +262,13 @@ docs: swagger
 	@echo "View at: http://localhost:8080/docs"
 
 # Generate mocks from interfaces using mockery v3
-# Requires: mockery v3.5+ (install: go install github.com/vektra/mockery/v3@latest)
+# Pinned to v3.7.1 for reproducible output (regen drift otherwise).
+# Requires: mockery v3.7.1 (install: go install github.com/vektra/mockery/v3@v3.7.1)
 # Config: .mockery.yaml
 # Output: internal/mocks/
 mocks:
 	@echo "Generating mocks with mockery..."
-	@go run github.com/vektra/mockery/v3@latest --config .mockery.yaml
+	@go run github.com/vektra/mockery/v3@v3.7.1 --config .mockery.yaml
 	@echo "Post-processing: Unifying package names to 'mocks'..."
 	@for file in internal/mocks/*.go; do \
 		sed -i '' 's/^package models$$/package mocks/' "$$file"; \
@@ -275,6 +277,23 @@ mocks:
 		sed -i '' 's/^package aggregator$$/package mocks/' "$$file"; \
 	done
 	@echo "Mock generation complete! Generated mocks in internal/mocks/"
+
+# Check if mocks are up to date (mirrors check-swagger)
+check-mocks:
+	@echo "Checking mocks are up to date..."
+	@go run github.com/vektra/mockery/v3@v3.7.1 --config .mockery.yaml >/dev/null
+	@for file in internal/mocks/*.go; do \
+		sed -i '' 's/^package models$$/package mocks/' "$$file"; \
+		sed -i '' 's/^package database$$/package mocks/' "$$file"; \
+		sed -i '' 's/^package httpclient$$/package mocks/' "$$file"; \
+		sed -i '' 's/^package aggregator$$/package mocks/' "$$file"; \
+	done
+	@if ! git diff --quiet -- internal/mocks/; then \
+		echo "❌ Mocks are out of date"; \
+		echo "Run 'make mocks' and commit the changes"; \
+		exit 1; \
+	fi
+	@echo "✅ Mocks are up to date"
 
 # Web frontend targets
 web-dev:

@@ -63,7 +63,7 @@ type MockWordReplacementRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - replacement *models.WordReplacement
-func (_e *MockWordReplacementRepositoryInterface_Expecter) Create(ctx interface{}, replacement interface{}) *MockWordReplacementRepositoryInterface_Create_Call {
+func (_e *MockWordReplacementRepositoryInterface_Expecter) Create(ctx any, replacement any) *MockWordReplacementRepositoryInterface_Create_Call {
 	return &MockWordReplacementRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, replacement)}
 }
 
@@ -120,7 +120,7 @@ type MockWordReplacementRepositoryInterface_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
 //   - original string
-func (_e *MockWordReplacementRepositoryInterface_Expecter) Delete(ctx interface{}, original interface{}) *MockWordReplacementRepositoryInterface_Delete_Call {
+func (_e *MockWordReplacementRepositoryInterface_Expecter) Delete(ctx any, original any) *MockWordReplacementRepositoryInterface_Delete_Call {
 	return &MockWordReplacementRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, original)}
 }
 
@@ -177,7 +177,7 @@ type MockWordReplacementRepositoryInterface_DeleteByID_Call struct {
 // DeleteByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockWordReplacementRepositoryInterface_Expecter) DeleteByID(ctx interface{}, id interface{}) *MockWordReplacementRepositoryInterface_DeleteByID_Call {
+func (_e *MockWordReplacementRepositoryInterface_Expecter) DeleteByID(ctx any, id any) *MockWordReplacementRepositoryInterface_DeleteByID_Call {
 	return &MockWordReplacementRepositoryInterface_DeleteByID_Call{Call: _e.mock.On("DeleteByID", ctx, id)}
 }
 
@@ -245,7 +245,7 @@ type MockWordReplacementRepositoryInterface_FindByID_Call struct {
 // FindByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockWordReplacementRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockWordReplacementRepositoryInterface_FindByID_Call {
+func (_e *MockWordReplacementRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockWordReplacementRepositoryInterface_FindByID_Call {
 	return &MockWordReplacementRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
@@ -313,7 +313,7 @@ type MockWordReplacementRepositoryInterface_FindByOriginal_Call struct {
 // FindByOriginal is a helper method to define mock.On call
 //   - ctx context.Context
 //   - original string
-func (_e *MockWordReplacementRepositoryInterface_Expecter) FindByOriginal(ctx interface{}, original interface{}) *MockWordReplacementRepositoryInterface_FindByOriginal_Call {
+func (_e *MockWordReplacementRepositoryInterface_Expecter) FindByOriginal(ctx any, original any) *MockWordReplacementRepositoryInterface_FindByOriginal_Call {
 	return &MockWordReplacementRepositoryInterface_FindByOriginal_Call{Call: _e.mock.On("FindByOriginal", ctx, original)}
 }
 
@@ -380,7 +380,7 @@ type MockWordReplacementRepositoryInterface_GetReplacementMap_Call struct {
 
 // GetReplacementMap is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockWordReplacementRepositoryInterface_Expecter) GetReplacementMap(ctx interface{}) *MockWordReplacementRepositoryInterface_GetReplacementMap_Call {
+func (_e *MockWordReplacementRepositoryInterface_Expecter) GetReplacementMap(ctx any) *MockWordReplacementRepositoryInterface_GetReplacementMap_Call {
 	return &MockWordReplacementRepositoryInterface_GetReplacementMap_Call{Call: _e.mock.On("GetReplacementMap", ctx)}
 }
 
@@ -442,7 +442,7 @@ type MockWordReplacementRepositoryInterface_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockWordReplacementRepositoryInterface_Expecter) List(ctx interface{}) *MockWordReplacementRepositoryInterface_List_Call {
+func (_e *MockWordReplacementRepositoryInterface_Expecter) List(ctx any) *MockWordReplacementRepositoryInterface_List_Call {
 	return &MockWordReplacementRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx)}
 }
 
@@ -494,7 +494,7 @@ type MockWordReplacementRepositoryInterface_Upsert_Call struct {
 // Upsert is a helper method to define mock.On call
 //   - ctx context.Context
 //   - replacement *models.WordReplacement
-func (_e *MockWordReplacementRepositoryInterface_Expecter) Upsert(ctx interface{}, replacement interface{}) *MockWordReplacementRepositoryInterface_Upsert_Call {
+func (_e *MockWordReplacementRepositoryInterface_Expecter) Upsert(ctx any, replacement any) *MockWordReplacementRepositoryInterface_Upsert_Call {
 	return &MockWordReplacementRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, replacement)}
 }
 

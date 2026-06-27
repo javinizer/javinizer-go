@@ -64,7 +64,7 @@ type MockActressTranslationRepositoryInterface_Delete_Call struct {
 //   - ctx context.Context
 //   - actressID uint
 //   - language string
-func (_e *MockActressTranslationRepositoryInterface_Expecter) Delete(ctx interface{}, actressID interface{}, language interface{}) *MockActressTranslationRepositoryInterface_Delete_Call {
+func (_e *MockActressTranslationRepositoryInterface_Expecter) Delete(ctx any, actressID any, language any) *MockActressTranslationRepositoryInterface_Delete_Call {
 	return &MockActressTranslationRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, actressID, language)}
 }
 
@@ -137,7 +137,7 @@ type MockActressTranslationRepositoryInterface_FindAllByActress_Call struct {
 // FindAllByActress is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actressID uint
-func (_e *MockActressTranslationRepositoryInterface_Expecter) FindAllByActress(ctx interface{}, actressID interface{}) *MockActressTranslationRepositoryInterface_FindAllByActress_Call {
+func (_e *MockActressTranslationRepositoryInterface_Expecter) FindAllByActress(ctx any, actressID any) *MockActressTranslationRepositoryInterface_FindAllByActress_Call {
 	return &MockActressTranslationRepositoryInterface_FindAllByActress_Call{Call: _e.mock.On("FindAllByActress", ctx, actressID)}
 }
 
@@ -206,7 +206,7 @@ type MockActressTranslationRepositoryInterface_FindByActressAndLanguage_Call str
 //   - ctx context.Context
 //   - actressID uint
 //   - language string
-func (_e *MockActressTranslationRepositoryInterface_Expecter) FindByActressAndLanguage(ctx interface{}, actressID interface{}, language interface{}) *MockActressTranslationRepositoryInterface_FindByActressAndLanguage_Call {
+func (_e *MockActressTranslationRepositoryInterface_Expecter) FindByActressAndLanguage(ctx any, actressID any, language any) *MockActressTranslationRepositoryInterface_FindByActressAndLanguage_Call {
 	return &MockActressTranslationRepositoryInterface_FindByActressAndLanguage_Call{Call: _e.mock.On("FindByActressAndLanguage", ctx, actressID, language)}
 }
 
@@ -280,7 +280,7 @@ type MockActressTranslationRepositoryInterface_FindByActressIDsAndLanguage_Call 
 //   - ctx context.Context
 //   - actressIDs []uint
 //   - language string
-func (_e *MockActressTranslationRepositoryInterface_Expecter) FindByActressIDsAndLanguage(ctx interface{}, actressIDs interface{}, language interface{}) *MockActressTranslationRepositoryInterface_FindByActressIDsAndLanguage_Call {
+func (_e *MockActressTranslationRepositoryInterface_Expecter) FindByActressIDsAndLanguage(ctx any, actressIDs any, language any) *MockActressTranslationRepositoryInterface_FindByActressIDsAndLanguage_Call {
 	return &MockActressTranslationRepositoryInterface_FindByActressIDsAndLanguage_Call{Call: _e.mock.On("FindByActressIDsAndLanguage", ctx, actressIDs, language)}
 }
 
@@ -342,7 +342,7 @@ type MockActressTranslationRepositoryInterface_Upsert_Call struct {
 // Upsert is a helper method to define mock.On call
 //   - ctx context.Context
 //   - translation *models.ActressTranslation
-func (_e *MockActressTranslationRepositoryInterface_Expecter) Upsert(ctx interface{}, translation interface{}) *MockActressTranslationRepositoryInterface_Upsert_Call {
+func (_e *MockActressTranslationRepositoryInterface_Expecter) Upsert(ctx any, translation any) *MockActressTranslationRepositoryInterface_Upsert_Call {
 	return &MockActressTranslationRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, translation)}
 }
 

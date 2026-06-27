@@ -8,7 +8,9 @@ import (
 	"context"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/workflow"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -72,6 +74,52 @@ func (_c *MockBatchJobInterface_Cancel_Call) RunAndReturn(run func()) *MockBatch
 	return _c
 }
 
+// Done provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) Done() <-chan struct{} {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Done")
+	}
+
+	var r0 <-chan struct{}
+	if returnFunc, ok := ret.Get(0).(func() <-chan struct{}); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(<-chan struct{})
+		}
+	}
+	return r0
+}
+
+// MockBatchJobInterface_Done_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Done'
+type MockBatchJobInterface_Done_Call struct {
+	*mock.Call
+}
+
+// Done is a helper method to define mock.On call
+func (_e *MockBatchJobInterface_Expecter) Done() *MockBatchJobInterface_Done_Call {
+	return &MockBatchJobInterface_Done_Call{Call: _e.mock.On("Done")}
+}
+
+func (_c *MockBatchJobInterface_Done_Call) Run(run func()) *MockBatchJobInterface_Done_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_Done_Call) Return(valCh <-chan struct{}) *MockBatchJobInterface_Done_Call {
+	_c.Call.Return(valCh)
+	return _c
+}
+
+func (_c *MockBatchJobInterface_Done_Call) RunAndReturn(run func() <-chan struct{}) *MockBatchJobInterface_Done_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ExcludeFile provides a mock function for the type MockBatchJobInterface
 func (_mock *MockBatchJobInterface) ExcludeFile(filePath string) {
 	_mock.Called(filePath)
@@ -85,7 +133,7 @@ type MockBatchJobInterface_ExcludeFile_Call struct {
 
 // ExcludeFile is a helper method to define mock.On call
 //   - filePath string
-func (_e *MockBatchJobInterface_Expecter) ExcludeFile(filePath interface{}) *MockBatchJobInterface_ExcludeFile_Call {
+func (_e *MockBatchJobInterface_Expecter) ExcludeFile(filePath any) *MockBatchJobInterface_ExcludeFile_Call {
 	return &MockBatchJobInterface_ExcludeFile_Call{Call: _e.mock.On("ExcludeFile", filePath)}
 }
 
@@ -138,7 +186,7 @@ type MockBatchJobInterface_FindFilePathsForMovieID_Call struct {
 
 // FindFilePathsForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockBatchJobInterface_Expecter) FindFilePathsForMovieID(movieID interface{}) *MockBatchJobInterface_FindFilePathsForMovieID_Call {
+func (_e *MockBatchJobInterface_Expecter) FindFilePathsForMovieID(movieID any) *MockBatchJobInterface_FindFilePathsForMovieID_Call {
 	return &MockBatchJobInterface_FindFilePathsForMovieID_Call{Call: _e.mock.On("FindFilePathsForMovieID", movieID)}
 }
 
@@ -200,7 +248,7 @@ type MockBatchJobInterface_FindMovieResultForMovieID_Call struct {
 
 // FindMovieResultForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockBatchJobInterface_Expecter) FindMovieResultForMovieID(movieID interface{}) *MockBatchJobInterface_FindMovieResultForMovieID_Call {
+func (_e *MockBatchJobInterface_Expecter) FindMovieResultForMovieID(movieID any) *MockBatchJobInterface_FindMovieResultForMovieID_Call {
 	return &MockBatchJobInterface_FindMovieResultForMovieID_Call{Call: _e.mock.On("FindMovieResultForMovieID", movieID)}
 }
 
@@ -253,7 +301,7 @@ type MockBatchJobInterface_GetFileMatchInfosForMovieID_Call struct {
 
 // GetFileMatchInfosForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockBatchJobInterface_Expecter) GetFileMatchInfosForMovieID(movieID interface{}) *MockBatchJobInterface_GetFileMatchInfosForMovieID_Call {
+func (_e *MockBatchJobInterface_Expecter) GetFileMatchInfosForMovieID(movieID any) *MockBatchJobInterface_GetFileMatchInfosForMovieID_Call {
 	return &MockBatchJobInterface_GetFileMatchInfosForMovieID_Call{Call: _e.mock.On("GetFileMatchInfosForMovieID", movieID)}
 }
 
@@ -321,7 +369,7 @@ type MockBatchJobInterface_GetFileResultByResultID_Call struct {
 
 // GetFileResultByResultID is a helper method to define mock.On call
 //   - resultID string
-func (_e *MockBatchJobInterface_Expecter) GetFileResultByResultID(resultID interface{}) *MockBatchJobInterface_GetFileResultByResultID_Call {
+func (_e *MockBatchJobInterface_Expecter) GetFileResultByResultID(resultID any) *MockBatchJobInterface_GetFileResultByResultID_Call {
 	return &MockBatchJobInterface_GetFileResultByResultID_Call{Call: _e.mock.On("GetFileResultByResultID", resultID)}
 }
 
@@ -471,7 +519,7 @@ type MockBatchJobInterface_GetMovieResult_Call struct {
 
 // GetMovieResult is a helper method to define mock.On call
 //   - filePath string
-func (_e *MockBatchJobInterface_Expecter) GetMovieResult(filePath interface{}) *MockBatchJobInterface_GetMovieResult_Call {
+func (_e *MockBatchJobInterface_Expecter) GetMovieResult(filePath any) *MockBatchJobInterface_GetMovieResult_Call {
 	return &MockBatchJobInterface_GetMovieResult_Call{Call: _e.mock.On("GetMovieResult", filePath)}
 }
 
@@ -524,7 +572,7 @@ type MockBatchJobInterface_GetMovieResultsForMovieID_Call struct {
 
 // GetMovieResultsForMovieID is a helper method to define mock.On call
 //   - movieID string
-func (_e *MockBatchJobInterface_Expecter) GetMovieResultsForMovieID(movieID interface{}) *MockBatchJobInterface_GetMovieResultsForMovieID_Call {
+func (_e *MockBatchJobInterface_Expecter) GetMovieResultsForMovieID(movieID any) *MockBatchJobInterface_GetMovieResultsForMovieID_Call {
 	return &MockBatchJobInterface_GetMovieResultsForMovieID_Call{Call: _e.mock.On("GetMovieResultsForMovieID", movieID)}
 }
 
@@ -712,7 +760,7 @@ type MockBatchJobInterface_Rescrape_Call struct {
 // Rescrape is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cmd worker.RescrapeCmd
-func (_e *MockBatchJobInterface_Expecter) Rescrape(ctx interface{}, cmd interface{}) *MockBatchJobInterface_Rescrape_Call {
+func (_e *MockBatchJobInterface_Expecter) Rescrape(ctx any, cmd any) *MockBatchJobInterface_Rescrape_Call {
 	return &MockBatchJobInterface_Rescrape_Call{Call: _e.mock.On("Rescrape", ctx, cmd)}
 }
 
@@ -744,6 +792,217 @@ func (_c *MockBatchJobInterface_Rescrape_Call) RunAndReturn(run func(ctx context
 	return _c
 }
 
+// SetBatchCfg provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) SetBatchCfg(cfg worker.BatchJobConfig) {
+	_mock.Called(cfg)
+	return
+}
+
+// MockBatchJobInterface_SetBatchCfg_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetBatchCfg'
+type MockBatchJobInterface_SetBatchCfg_Call struct {
+	*mock.Call
+}
+
+// SetBatchCfg is a helper method to define mock.On call
+//   - cfg worker.BatchJobConfig
+func (_e *MockBatchJobInterface_Expecter) SetBatchCfg(cfg any) *MockBatchJobInterface_SetBatchCfg_Call {
+	return &MockBatchJobInterface_SetBatchCfg_Call{Call: _e.mock.On("SetBatchCfg", cfg)}
+}
+
+func (_c *MockBatchJobInterface_SetBatchCfg_Call) Run(run func(cfg worker.BatchJobConfig)) *MockBatchJobInterface_SetBatchCfg_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 worker.BatchJobConfig
+		if args[0] != nil {
+			arg0 = args[0].(worker.BatchJobConfig)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_SetBatchCfg_Call) Return() *MockBatchJobInterface_SetBatchCfg_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockBatchJobInterface_SetBatchCfg_Call) RunAndReturn(run func(cfg worker.BatchJobConfig)) *MockBatchJobInterface_SetBatchCfg_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetJobStatus provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) SetJobStatus(status models.JobStatus) {
+	_mock.Called(status)
+	return
+}
+
+// MockBatchJobInterface_SetJobStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetJobStatus'
+type MockBatchJobInterface_SetJobStatus_Call struct {
+	*mock.Call
+}
+
+// SetJobStatus is a helper method to define mock.On call
+//   - status models.JobStatus
+func (_e *MockBatchJobInterface_Expecter) SetJobStatus(status any) *MockBatchJobInterface_SetJobStatus_Call {
+	return &MockBatchJobInterface_SetJobStatus_Call{Call: _e.mock.On("SetJobStatus", status)}
+}
+
+func (_c *MockBatchJobInterface_SetJobStatus_Call) Run(run func(status models.JobStatus)) *MockBatchJobInterface_SetJobStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 models.JobStatus
+		if args[0] != nil {
+			arg0 = args[0].(models.JobStatus)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_SetJobStatus_Call) Return() *MockBatchJobInterface_SetJobStatus_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockBatchJobInterface_SetJobStatus_Call) RunAndReturn(run func(status models.JobStatus)) *MockBatchJobInterface_SetJobStatus_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetOperationModeOverride provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) SetOperationModeOverride(mode operationmode.OperationMode) error {
+	ret := _mock.Called(mode)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetOperationModeOverride")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(operationmode.OperationMode) error); ok {
+		r0 = returnFunc(mode)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockBatchJobInterface_SetOperationModeOverride_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetOperationModeOverride'
+type MockBatchJobInterface_SetOperationModeOverride_Call struct {
+	*mock.Call
+}
+
+// SetOperationModeOverride is a helper method to define mock.On call
+//   - mode operationmode.OperationMode
+func (_e *MockBatchJobInterface_Expecter) SetOperationModeOverride(mode any) *MockBatchJobInterface_SetOperationModeOverride_Call {
+	return &MockBatchJobInterface_SetOperationModeOverride_Call{Call: _e.mock.On("SetOperationModeOverride", mode)}
+}
+
+func (_c *MockBatchJobInterface_SetOperationModeOverride_Call) Run(run func(mode operationmode.OperationMode)) *MockBatchJobInterface_SetOperationModeOverride_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 operationmode.OperationMode
+		if args[0] != nil {
+			arg0 = args[0].(operationmode.OperationMode)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_SetOperationModeOverride_Call) Return(err error) *MockBatchJobInterface_SetOperationModeOverride_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockBatchJobInterface_SetOperationModeOverride_Call) RunAndReturn(run func(mode operationmode.OperationMode) error) *MockBatchJobInterface_SetOperationModeOverride_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetPersistError provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) SetPersistError(msg string) {
+	_mock.Called(msg)
+	return
+}
+
+// MockBatchJobInterface_SetPersistError_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetPersistError'
+type MockBatchJobInterface_SetPersistError_Call struct {
+	*mock.Call
+}
+
+// SetPersistError is a helper method to define mock.On call
+//   - msg string
+func (_e *MockBatchJobInterface_Expecter) SetPersistError(msg any) *MockBatchJobInterface_SetPersistError_Call {
+	return &MockBatchJobInterface_SetPersistError_Call{Call: _e.mock.On("SetPersistError", msg)}
+}
+
+func (_c *MockBatchJobInterface_SetPersistError_Call) Run(run func(msg string)) *MockBatchJobInterface_SetPersistError_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_SetPersistError_Call) Return() *MockBatchJobInterface_SetPersistError_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockBatchJobInterface_SetPersistError_Call) RunAndReturn(run func(msg string)) *MockBatchJobInterface_SetPersistError_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetWorkflow provides a mock function for the type MockBatchJobInterface
+func (_mock *MockBatchJobInterface) SetWorkflow(wf workflow.WorkflowInterface) {
+	_mock.Called(wf)
+	return
+}
+
+// MockBatchJobInterface_SetWorkflow_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetWorkflow'
+type MockBatchJobInterface_SetWorkflow_Call struct {
+	*mock.Call
+}
+
+// SetWorkflow is a helper method to define mock.On call
+//   - wf workflow.WorkflowInterface
+func (_e *MockBatchJobInterface_Expecter) SetWorkflow(wf any) *MockBatchJobInterface_SetWorkflow_Call {
+	return &MockBatchJobInterface_SetWorkflow_Call{Call: _e.mock.On("SetWorkflow", wf)}
+}
+
+func (_c *MockBatchJobInterface_SetWorkflow_Call) Run(run func(wf workflow.WorkflowInterface)) *MockBatchJobInterface_SetWorkflow_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 workflow.WorkflowInterface
+		if args[0] != nil {
+			arg0 = args[0].(workflow.WorkflowInterface)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchJobInterface_SetWorkflow_Call) Return() *MockBatchJobInterface_SetWorkflow_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockBatchJobInterface_SetWorkflow_Call) RunAndReturn(run func(wf workflow.WorkflowInterface)) *MockBatchJobInterface_SetWorkflow_Call {
+	_c.Run(run)
+	return _c
+}
+
 // StartApply provides a mock function for the type MockBatchJobInterface
 func (_mock *MockBatchJobInterface) StartApply(ctx context.Context, cfg worker.ApplyPhaseConfig) error {
 	ret := _mock.Called(ctx, cfg)
@@ -769,7 +1028,7 @@ type MockBatchJobInterface_StartApply_Call struct {
 // StartApply is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cfg worker.ApplyPhaseConfig
-func (_e *MockBatchJobInterface_Expecter) StartApply(ctx interface{}, cfg interface{}) *MockBatchJobInterface_StartApply_Call {
+func (_e *MockBatchJobInterface_Expecter) StartApply(ctx any, cfg any) *MockBatchJobInterface_StartApply_Call {
 	return &MockBatchJobInterface_StartApply_Call{Call: _e.mock.On("StartApply", ctx, cfg)}
 }
 
@@ -827,7 +1086,7 @@ type MockBatchJobInterface_StartScrape_Call struct {
 //   - ctx context.Context
 //   - files []string
 //   - cfg worker.ScrapePhaseConfig
-func (_e *MockBatchJobInterface_Expecter) StartScrape(ctx interface{}, files interface{}, cfg interface{}) *MockBatchJobInterface_StartScrape_Call {
+func (_e *MockBatchJobInterface_Expecter) StartScrape(ctx any, files any, cfg any) *MockBatchJobInterface_StartScrape_Call {
 	return &MockBatchJobInterface_StartScrape_Call{Call: _e.mock.On("StartScrape", ctx, files, cfg)}
 }
 
@@ -936,7 +1195,7 @@ type MockBatchJobInterface_UpdateMovie_Call struct {
 //   - ctx context.Context
 //   - filePath string
 //   - movie *models.Movie
-func (_e *MockBatchJobInterface_Expecter) UpdateMovie(ctx interface{}, filePath interface{}, movie interface{}) *MockBatchJobInterface_UpdateMovie_Call {
+func (_e *MockBatchJobInterface_Expecter) UpdateMovie(ctx any, filePath any, movie any) *MockBatchJobInterface_UpdateMovie_Call {
 	return &MockBatchJobInterface_UpdateMovie_Call{Call: _e.mock.On("UpdateMovie", ctx, filePath, movie)}
 }
 
@@ -998,7 +1257,7 @@ type MockBatchJobInterface_UpdatePosterCrop_Call struct {
 // UpdatePosterCrop is a helper method to define mock.On call
 //   - movieID string
 //   - croppedURL string
-func (_e *MockBatchJobInterface_Expecter) UpdatePosterCrop(movieID interface{}, croppedURL interface{}) *MockBatchJobInterface_UpdatePosterCrop_Call {
+func (_e *MockBatchJobInterface_Expecter) UpdatePosterCrop(movieID any, croppedURL any) *MockBatchJobInterface_UpdatePosterCrop_Call {
 	return &MockBatchJobInterface_UpdatePosterCrop_Call{Call: _e.mock.On("UpdatePosterCrop", movieID, croppedURL)}
 }
 
@@ -1057,7 +1316,7 @@ type MockBatchJobInterface_UpdatePosterFromURL_Call struct {
 //   - movieID string
 //   - posterURL string
 //   - croppedURL string
-func (_e *MockBatchJobInterface_Expecter) UpdatePosterFromURL(ctx interface{}, movieID interface{}, posterURL interface{}, croppedURL interface{}) *MockBatchJobInterface_UpdatePosterFromURL_Call {
+func (_e *MockBatchJobInterface_Expecter) UpdatePosterFromURL(ctx any, movieID any, posterURL any, croppedURL any) *MockBatchJobInterface_UpdatePosterFromURL_Call {
 	return &MockBatchJobInterface_UpdatePosterFromURL_Call{Call: _e.mock.On("UpdatePosterFromURL", ctx, movieID, posterURL, croppedURL)}
 }
 

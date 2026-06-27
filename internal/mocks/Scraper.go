@@ -162,7 +162,7 @@ type MockScraper_GetURL_Call struct {
 // GetURL is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-func (_e *MockScraper_Expecter) GetURL(ctx interface{}, id interface{}) *MockScraper_GetURL_Call {
+func (_e *MockScraper_Expecter) GetURL(ctx any, id any) *MockScraper_GetURL_Call {
 	return &MockScraper_GetURL_Call{Call: _e.mock.On("GetURL", ctx, id)}
 }
 
@@ -318,7 +318,7 @@ type MockScraper_Search_Call struct {
 // Search is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-func (_e *MockScraper_Expecter) Search(ctx interface{}, id interface{}) *MockScraper_Search_Call {
+func (_e *MockScraper_Expecter) Search(ctx any, id any) *MockScraper_Search_Call {
 	return &MockScraper_Search_Call{Call: _e.mock.On("Search", ctx, id)}
 }
 

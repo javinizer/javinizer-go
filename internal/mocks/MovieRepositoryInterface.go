@@ -63,7 +63,7 @@ type MockMovieRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - movie *models.Movie
-func (_e *MockMovieRepositoryInterface_Expecter) Create(ctx interface{}, movie interface{}) *MockMovieRepositoryInterface_Create_Call {
+func (_e *MockMovieRepositoryInterface_Expecter) Create(ctx any, movie any) *MockMovieRepositoryInterface_Create_Call {
 	return &MockMovieRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, movie)}
 }
 
@@ -120,7 +120,7 @@ type MockMovieRepositoryInterface_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-func (_e *MockMovieRepositoryInterface_Expecter) Delete(ctx interface{}, id interface{}) *MockMovieRepositoryInterface_Delete_Call {
+func (_e *MockMovieRepositoryInterface_Expecter) Delete(ctx any, id any) *MockMovieRepositoryInterface_Delete_Call {
 	return &MockMovieRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, id)}
 }
 
@@ -188,7 +188,7 @@ type MockMovieRepositoryInterface_FindByContentID_Call struct {
 // FindByContentID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - contentID string
-func (_e *MockMovieRepositoryInterface_Expecter) FindByContentID(ctx interface{}, contentID interface{}) *MockMovieRepositoryInterface_FindByContentID_Call {
+func (_e *MockMovieRepositoryInterface_Expecter) FindByContentID(ctx any, contentID any) *MockMovieRepositoryInterface_FindByContentID_Call {
 	return &MockMovieRepositoryInterface_FindByContentID_Call{Call: _e.mock.On("FindByContentID", ctx, contentID)}
 }
 
@@ -256,7 +256,7 @@ type MockMovieRepositoryInterface_FindByID_Call struct {
 // FindByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-func (_e *MockMovieRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockMovieRepositoryInterface_FindByID_Call {
+func (_e *MockMovieRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockMovieRepositoryInterface_FindByID_Call {
 	return &MockMovieRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
@@ -325,7 +325,7 @@ type MockMovieRepositoryInterface_List_Call struct {
 //   - ctx context.Context
 //   - limit int
 //   - offset int
-func (_e *MockMovieRepositoryInterface_Expecter) List(ctx interface{}, limit interface{}, offset interface{}) *MockMovieRepositoryInterface_List_Call {
+func (_e *MockMovieRepositoryInterface_Expecter) List(ctx any, limit any, offset any) *MockMovieRepositoryInterface_List_Call {
 	return &MockMovieRepositoryInterface_List_Call{Call: _e.mock.On("List", ctx, limit, offset)}
 }
 
@@ -387,7 +387,7 @@ type MockMovieRepositoryInterface_Update_Call struct {
 // Update is a helper method to define mock.On call
 //   - ctx context.Context
 //   - movie *models.Movie
-func (_e *MockMovieRepositoryInterface_Expecter) Update(ctx interface{}, movie interface{}) *MockMovieRepositoryInterface_Update_Call {
+func (_e *MockMovieRepositoryInterface_Expecter) Update(ctx any, movie any) *MockMovieRepositoryInterface_Update_Call {
 	return &MockMovieRepositoryInterface_Update_Call{Call: _e.mock.On("Update", ctx, movie)}
 }
 
@@ -455,7 +455,7 @@ type MockMovieRepositoryInterface_Upsert_Call struct {
 // Upsert is a helper method to define mock.On call
 //   - ctx context.Context
 //   - movie *models.Movie
-func (_e *MockMovieRepositoryInterface_Expecter) Upsert(ctx interface{}, movie interface{}) *MockMovieRepositoryInterface_Upsert_Call {
+func (_e *MockMovieRepositoryInterface_Expecter) Upsert(ctx any, movie any) *MockMovieRepositoryInterface_Upsert_Call {
 	return &MockMovieRepositoryInterface_Upsert_Call{Call: _e.mock.On("Upsert", ctx, movie)}
 }
 
@@ -525,7 +525,7 @@ type MockMovieRepositoryInterface_UpsertWithTranslations_Call struct {
 //   - movie *models.Movie
 //   - genreTranslations []models.GenreTranslationData
 //   - actressTranslations []models.ActressTranslationData
-func (_e *MockMovieRepositoryInterface_Expecter) UpsertWithTranslations(ctx interface{}, movie interface{}, genreTranslations interface{}, actressTranslations interface{}) *MockMovieRepositoryInterface_UpsertWithTranslations_Call {
+func (_e *MockMovieRepositoryInterface_Expecter) UpsertWithTranslations(ctx any, movie any, genreTranslations any, actressTranslations any) *MockMovieRepositoryInterface_UpsertWithTranslations_Call {
 	return &MockMovieRepositoryInterface_UpsertWithTranslations_Call{Call: _e.mock.On("UpsertWithTranslations", ctx, movie, genreTranslations, actressTranslations)}
 }
 

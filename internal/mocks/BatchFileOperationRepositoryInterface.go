@@ -72,7 +72,7 @@ type MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call struct {
 // CountByBatchJobID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - batchJobID string
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobID(ctx interface{}, batchJobID interface{}) *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobID(ctx any, batchJobID any) *MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call {
 	return &MockBatchFileOperationRepositoryInterface_CountByBatchJobID_Call{Call: _e.mock.On("CountByBatchJobID", ctx, batchJobID)}
 }
 
@@ -139,7 +139,7 @@ type MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_
 //   - ctx context.Context
 //   - batchJobID string
 //   - status models.RevertStatusEnum
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobIDAndRevertStatus(ctx interface{}, batchJobID interface{}, status interface{}) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobIDAndRevertStatus(ctx any, batchJobID any, status any) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call {
 	return &MockBatchFileOperationRepositoryInterface_CountByBatchJobIDAndRevertStatus_Call{Call: _e.mock.On("CountByBatchJobIDAndRevertStatus", ctx, batchJobID, status)}
 }
 
@@ -212,7 +212,7 @@ type MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call struct {
 // CountByBatchJobIDs is a helper method to define mock.On call
 //   - ctx context.Context
 //   - jobIDs []string
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobIDs(ctx interface{}, jobIDs interface{}) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountByBatchJobIDs(ctx any, jobIDs any) *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call {
 	return &MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call{Call: _e.mock.On("CountByBatchJobIDs", ctx, jobIDs)}
 }
 
@@ -280,7 +280,7 @@ type MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call s
 // CountRevertedByBatchJobIDs is a helper method to define mock.On call
 //   - ctx context.Context
 //   - jobIDs []string
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountRevertedByBatchJobIDs(ctx interface{}, jobIDs interface{}) *MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountRevertedByBatchJobIDs(ctx any, jobIDs any) *MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call {
 	return &MockBatchFileOperationRepositoryInterface_CountRevertedByBatchJobIDs_Call{Call: _e.mock.On("CountRevertedByBatchJobIDs", ctx, jobIDs)}
 }
 
@@ -337,7 +337,7 @@ type MockBatchFileOperationRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - op *models.BatchFileOperation
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) Create(ctx interface{}, op interface{}) *MockBatchFileOperationRepositoryInterface_Create_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) Create(ctx any, op any) *MockBatchFileOperationRepositoryInterface_Create_Call {
 	return &MockBatchFileOperationRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, op)}
 }
 
@@ -394,7 +394,7 @@ type MockBatchFileOperationRepositoryInterface_CreateBatch_Call struct {
 // CreateBatch is a helper method to define mock.On call
 //   - ctx context.Context
 //   - ops []*models.BatchFileOperation
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CreateBatch(ctx interface{}, ops interface{}) *MockBatchFileOperationRepositoryInterface_CreateBatch_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CreateBatch(ctx any, ops any) *MockBatchFileOperationRepositoryInterface_CreateBatch_Call {
 	return &MockBatchFileOperationRepositoryInterface_CreateBatch_Call{Call: _e.mock.On("CreateBatch", ctx, ops)}
 }
 
@@ -462,7 +462,7 @@ type MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call struct {
 // FindByBatchJobID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - batchJobID string
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByBatchJobID(ctx interface{}, batchJobID interface{}) *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByBatchJobID(ctx any, batchJobID any) *MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call {
 	return &MockBatchFileOperationRepositoryInterface_FindByBatchJobID_Call{Call: _e.mock.On("FindByBatchJobID", ctx, batchJobID)}
 }
 
@@ -531,7 +531,7 @@ type MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_C
 //   - ctx context.Context
 //   - batchJobID string
 //   - revertStatus models.RevertStatusEnum
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByBatchJobIDAndRevertStatus(ctx interface{}, batchJobID interface{}, revertStatus interface{}) *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByBatchJobIDAndRevertStatus(ctx any, batchJobID any, revertStatus any) *MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call {
 	return &MockBatchFileOperationRepositoryInterface_FindByBatchJobIDAndRevertStatus_Call{Call: _e.mock.On("FindByBatchJobIDAndRevertStatus", ctx, batchJobID, revertStatus)}
 }
 
@@ -604,7 +604,7 @@ type MockBatchFileOperationRepositoryInterface_FindByID_Call struct {
 // FindByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id uint
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByID(ctx interface{}, id interface{}) *MockBatchFileOperationRepositoryInterface_FindByID_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockBatchFileOperationRepositoryInterface_FindByID_Call {
 	return &MockBatchFileOperationRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
 }
 
@@ -661,7 +661,7 @@ type MockBatchFileOperationRepositoryInterface_Update_Call struct {
 // Update is a helper method to define mock.On call
 //   - ctx context.Context
 //   - op *models.BatchFileOperation
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) Update(ctx interface{}, op interface{}) *MockBatchFileOperationRepositoryInterface_Update_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) Update(ctx any, op any) *MockBatchFileOperationRepositoryInterface_Update_Call {
 	return &MockBatchFileOperationRepositoryInterface_Update_Call{Call: _e.mock.On("Update", ctx, op)}
 }
 
@@ -719,7 +719,7 @@ type MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call struct {
 //   - ctx context.Context
 //   - id uint
 //   - status models.RevertStatusEnum
-func (_e *MockBatchFileOperationRepositoryInterface_Expecter) UpdateRevertStatus(ctx interface{}, id interface{}, status interface{}) *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call {
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) UpdateRevertStatus(ctx any, id any, status any) *MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call {
 	return &MockBatchFileOperationRepositoryInterface_UpdateRevertStatus_Call{Call: _e.mock.On("UpdateRevertStatus", ctx, id, status)}
 }
 

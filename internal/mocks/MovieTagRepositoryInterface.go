@@ -64,7 +64,7 @@ type MockMovieTagRepositoryInterface_AddTag_Call struct {
 //   - ctx context.Context
 //   - movieID string
 //   - tag string
-func (_e *MockMovieTagRepositoryInterface_Expecter) AddTag(ctx interface{}, movieID interface{}, tag interface{}) *MockMovieTagRepositoryInterface_AddTag_Call {
+func (_e *MockMovieTagRepositoryInterface_Expecter) AddTag(ctx any, movieID any, tag any) *MockMovieTagRepositoryInterface_AddTag_Call {
 	return &MockMovieTagRepositoryInterface_AddTag_Call{Call: _e.mock.On("AddTag", ctx, movieID, tag)}
 }
 
@@ -137,7 +137,7 @@ type MockMovieTagRepositoryInterface_GetMoviesWithTag_Call struct {
 // GetMoviesWithTag is a helper method to define mock.On call
 //   - ctx context.Context
 //   - tag string
-func (_e *MockMovieTagRepositoryInterface_Expecter) GetMoviesWithTag(ctx interface{}, tag interface{}) *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call {
+func (_e *MockMovieTagRepositoryInterface_Expecter) GetMoviesWithTag(ctx any, tag any) *MockMovieTagRepositoryInterface_GetMoviesWithTag_Call {
 	return &MockMovieTagRepositoryInterface_GetMoviesWithTag_Call{Call: _e.mock.On("GetMoviesWithTag", ctx, tag)}
 }
 
@@ -205,7 +205,7 @@ type MockMovieTagRepositoryInterface_GetTagsForMovie_Call struct {
 // GetTagsForMovie is a helper method to define mock.On call
 //   - ctx context.Context
 //   - movieID string
-func (_e *MockMovieTagRepositoryInterface_Expecter) GetTagsForMovie(ctx interface{}, movieID interface{}) *MockMovieTagRepositoryInterface_GetTagsForMovie_Call {
+func (_e *MockMovieTagRepositoryInterface_Expecter) GetTagsForMovie(ctx any, movieID any) *MockMovieTagRepositoryInterface_GetTagsForMovie_Call {
 	return &MockMovieTagRepositoryInterface_GetTagsForMovie_Call{Call: _e.mock.On("GetTagsForMovie", ctx, movieID)}
 }
 
@@ -272,7 +272,7 @@ type MockMovieTagRepositoryInterface_GetUniqueTagsList_Call struct {
 
 // GetUniqueTagsList is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockMovieTagRepositoryInterface_Expecter) GetUniqueTagsList(ctx interface{}) *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call {
+func (_e *MockMovieTagRepositoryInterface_Expecter) GetUniqueTagsList(ctx any) *MockMovieTagRepositoryInterface_GetUniqueTagsList_Call {
 	return &MockMovieTagRepositoryInterface_GetUniqueTagsList_Call{Call: _e.mock.On("GetUniqueTagsList", ctx)}
 }
 
@@ -334,7 +334,7 @@ type MockMovieTagRepositoryInterface_ListAll_Call struct {
 
 // ListAll is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockMovieTagRepositoryInterface_Expecter) ListAll(ctx interface{}) *MockMovieTagRepositoryInterface_ListAll_Call {
+func (_e *MockMovieTagRepositoryInterface_Expecter) ListAll(ctx any) *MockMovieTagRepositoryInterface_ListAll_Call {
 	return &MockMovieTagRepositoryInterface_ListAll_Call{Call: _e.mock.On("ListAll", ctx)}
 }
 
@@ -397,7 +397,7 @@ type MockMovieTagRepositoryInterface_ListAllChunked_Call struct {
 // ListAllChunked is a helper method to define mock.On call
 //   - ctx context.Context
 //   - chunkSize int
-func (_e *MockMovieTagRepositoryInterface_Expecter) ListAllChunked(ctx interface{}, chunkSize interface{}) *MockMovieTagRepositoryInterface_ListAllChunked_Call {
+func (_e *MockMovieTagRepositoryInterface_Expecter) ListAllChunked(ctx any, chunkSize any) *MockMovieTagRepositoryInterface_ListAllChunked_Call {
 	return &MockMovieTagRepositoryInterface_ListAllChunked_Call{Call: _e.mock.On("ListAllChunked", ctx, chunkSize)}
 }
 
@@ -466,7 +466,7 @@ type MockMovieTagRepositoryInterface_ListTagsPaginated_Call struct {
 //   - ctx context.Context
 //   - limit int
 //   - offset int
-func (_e *MockMovieTagRepositoryInterface_Expecter) ListTagsPaginated(ctx interface{}, limit interface{}, offset interface{}) *MockMovieTagRepositoryInterface_ListTagsPaginated_Call {
+func (_e *MockMovieTagRepositoryInterface_Expecter) ListTagsPaginated(ctx any, limit any, offset any) *MockMovieTagRepositoryInterface_ListTagsPaginated_Call {
 	return &MockMovieTagRepositoryInterface_ListTagsPaginated_Call{Call: _e.mock.On("ListTagsPaginated", ctx, limit, offset)}
 }
 
@@ -528,7 +528,7 @@ type MockMovieTagRepositoryInterface_RemoveAllTags_Call struct {
 // RemoveAllTags is a helper method to define mock.On call
 //   - ctx context.Context
 //   - movieID string
-func (_e *MockMovieTagRepositoryInterface_Expecter) RemoveAllTags(ctx interface{}, movieID interface{}) *MockMovieTagRepositoryInterface_RemoveAllTags_Call {
+func (_e *MockMovieTagRepositoryInterface_Expecter) RemoveAllTags(ctx any, movieID any) *MockMovieTagRepositoryInterface_RemoveAllTags_Call {
 	return &MockMovieTagRepositoryInterface_RemoveAllTags_Call{Call: _e.mock.On("RemoveAllTags", ctx, movieID)}
 }
 
@@ -586,7 +586,7 @@ type MockMovieTagRepositoryInterface_RemoveTag_Call struct {
 //   - ctx context.Context
 //   - movieID string
 //   - tag string
-func (_e *MockMovieTagRepositoryInterface_Expecter) RemoveTag(ctx interface{}, movieID interface{}, tag interface{}) *MockMovieTagRepositoryInterface_RemoveTag_Call {
+func (_e *MockMovieTagRepositoryInterface_Expecter) RemoveTag(ctx any, movieID any, tag any) *MockMovieTagRepositoryInterface_RemoveTag_Call {
 	return &MockMovieTagRepositoryInterface_RemoveTag_Call{Call: _e.mock.On("RemoveTag", ctx, movieID, tag)}
 }
 

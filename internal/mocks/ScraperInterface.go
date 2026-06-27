@@ -75,7 +75,7 @@ type MockScraperInterface_Scrape_Call struct {
 //   - ctx context.Context
 //   - cmd scrape.ScrapeCmd
 //   - progress scrape.ProgressFunc
-func (_e *MockScraperInterface_Expecter) Scrape(ctx interface{}, cmd interface{}, progress interface{}) *MockScraperInterface_Scrape_Call {
+func (_e *MockScraperInterface_Expecter) Scrape(ctx any, cmd any, progress any) *MockScraperInterface_Scrape_Call {
 	return &MockScraperInterface_Scrape_Call{Call: _e.mock.On("Scrape", ctx, cmd, progress)}
 }
 

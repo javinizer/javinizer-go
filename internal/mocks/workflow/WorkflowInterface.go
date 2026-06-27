@@ -76,7 +76,7 @@ type MockWorkflowInterface_Apply_Call struct {
 //   - ctx context.Context
 //   - cmd workflow.ApplyCmd
 //   - progress scrape.ProgressFunc
-func (_e *MockWorkflowInterface_Expecter) Apply(ctx interface{}, cmd interface{}, progress interface{}) *MockWorkflowInterface_Apply_Call {
+func (_e *MockWorkflowInterface_Expecter) Apply(ctx any, cmd any, progress any) *MockWorkflowInterface_Apply_Call {
 	return &MockWorkflowInterface_Apply_Call{Call: _e.mock.On("Apply", ctx, cmd, progress)}
 }
 
@@ -149,7 +149,7 @@ type MockWorkflowInterface_Compare_Call struct {
 // Compare is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cmd workflow.CompareCmd
-func (_e *MockWorkflowInterface_Expecter) Compare(ctx interface{}, cmd interface{}) *MockWorkflowInterface_Compare_Call {
+func (_e *MockWorkflowInterface_Expecter) Compare(ctx any, cmd any) *MockWorkflowInterface_Compare_Call {
 	return &MockWorkflowInterface_Compare_Call{Call: _e.mock.On("Compare", ctx, cmd)}
 }
 
@@ -217,7 +217,7 @@ type MockWorkflowInterface_Preview_Call struct {
 // Preview is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cmd workflow.PreviewCmd
-func (_e *MockWorkflowInterface_Expecter) Preview(ctx interface{}, cmd interface{}) *MockWorkflowInterface_Preview_Call {
+func (_e *MockWorkflowInterface_Expecter) Preview(ctx any, cmd any) *MockWorkflowInterface_Preview_Call {
 	return &MockWorkflowInterface_Preview_Call{Call: _e.mock.On("Preview", ctx, cmd)}
 }
 
@@ -285,7 +285,7 @@ type MockWorkflowInterface_ScanAndMatch_Call struct {
 // ScanAndMatch is a helper method to define mock.On call
 //   - ctx context.Context
 //   - cmd workflow.ScanAndMatchCmd
-func (_e *MockWorkflowInterface_Expecter) ScanAndMatch(ctx interface{}, cmd interface{}) *MockWorkflowInterface_ScanAndMatch_Call {
+func (_e *MockWorkflowInterface_Expecter) ScanAndMatch(ctx any, cmd any) *MockWorkflowInterface_ScanAndMatch_Call {
 	return &MockWorkflowInterface_ScanAndMatch_Call{Call: _e.mock.On("ScanAndMatch", ctx, cmd)}
 }
 
@@ -362,7 +362,7 @@ type MockWorkflowInterface_Scrape_Call struct {
 //   - ctx context.Context
 //   - cmd scrape.ScrapeCmd
 //   - progress scrape.ProgressFunc
-func (_e *MockWorkflowInterface_Expecter) Scrape(ctx interface{}, cmd interface{}, progress interface{}) *MockWorkflowInterface_Scrape_Call {
+func (_e *MockWorkflowInterface_Expecter) Scrape(ctx any, cmd any, progress any) *MockWorkflowInterface_Scrape_Call {
 	return &MockWorkflowInterface_Scrape_Call{Call: _e.mock.On("Scrape", ctx, cmd, progress)}
 }
 

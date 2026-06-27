@@ -63,7 +63,7 @@ type MockContentIDMappingRepositoryInterface_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - mapping *models.ContentIDMapping
-func (_e *MockContentIDMappingRepositoryInterface_Expecter) Create(ctx interface{}, mapping interface{}) *MockContentIDMappingRepositoryInterface_Create_Call {
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) Create(ctx any, mapping any) *MockContentIDMappingRepositoryInterface_Create_Call {
 	return &MockContentIDMappingRepositoryInterface_Create_Call{Call: _e.mock.On("Create", ctx, mapping)}
 }
 
@@ -120,7 +120,7 @@ type MockContentIDMappingRepositoryInterface_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
 //   - searchID string
-func (_e *MockContentIDMappingRepositoryInterface_Expecter) Delete(ctx interface{}, searchID interface{}) *MockContentIDMappingRepositoryInterface_Delete_Call {
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) Delete(ctx any, searchID any) *MockContentIDMappingRepositoryInterface_Delete_Call {
 	return &MockContentIDMappingRepositoryInterface_Delete_Call{Call: _e.mock.On("Delete", ctx, searchID)}
 }
 
@@ -188,7 +188,7 @@ type MockContentIDMappingRepositoryInterface_FindBySearchID_Call struct {
 // FindBySearchID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - searchID string
-func (_e *MockContentIDMappingRepositoryInterface_Expecter) FindBySearchID(ctx interface{}, searchID interface{}) *MockContentIDMappingRepositoryInterface_FindBySearchID_Call {
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) FindBySearchID(ctx any, searchID any) *MockContentIDMappingRepositoryInterface_FindBySearchID_Call {
 	return &MockContentIDMappingRepositoryInterface_FindBySearchID_Call{Call: _e.mock.On("FindBySearchID", ctx, searchID)}
 }
 
@@ -255,7 +255,7 @@ type MockContentIDMappingRepositoryInterface_GetAll_Call struct {
 
 // GetAll is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockContentIDMappingRepositoryInterface_Expecter) GetAll(ctx interface{}) *MockContentIDMappingRepositoryInterface_GetAll_Call {
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) GetAll(ctx any) *MockContentIDMappingRepositoryInterface_GetAll_Call {
 	return &MockContentIDMappingRepositoryInterface_GetAll_Call{Call: _e.mock.On("GetAll", ctx)}
 }
 
@@ -318,7 +318,7 @@ type MockContentIDMappingRepositoryInterface_GetAllChunked_Call struct {
 // GetAllChunked is a helper method to define mock.On call
 //   - ctx context.Context
 //   - chunkSize int
-func (_e *MockContentIDMappingRepositoryInterface_Expecter) GetAllChunked(ctx interface{}, chunkSize interface{}) *MockContentIDMappingRepositoryInterface_GetAllChunked_Call {
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) GetAllChunked(ctx any, chunkSize any) *MockContentIDMappingRepositoryInterface_GetAllChunked_Call {
 	return &MockContentIDMappingRepositoryInterface_GetAllChunked_Call{Call: _e.mock.On("GetAllChunked", ctx, chunkSize)}
 }
 
@@ -387,7 +387,7 @@ type MockContentIDMappingRepositoryInterface_GetAllPaginated_Call struct {
 //   - ctx context.Context
 //   - limit int
 //   - offset int
-func (_e *MockContentIDMappingRepositoryInterface_Expecter) GetAllPaginated(ctx interface{}, limit interface{}, offset interface{}) *MockContentIDMappingRepositoryInterface_GetAllPaginated_Call {
+func (_e *MockContentIDMappingRepositoryInterface_Expecter) GetAllPaginated(ctx any, limit any, offset any) *MockContentIDMappingRepositoryInterface_GetAllPaginated_Call {
 	return &MockContentIDMappingRepositoryInterface_GetAllPaginated_Call{Call: _e.mock.On("GetAllPaginated", ctx, limit, offset)}
 }
 
