@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Per-field metadata.priority exclusivity (consistency + `--scrapers`)**: `AggregateWithPriority` (the selected-scrapers / `--scrapers` path) now honors a per-field override exclusively, matching `resolvePriorities` (the default path). Previously it applied `cmd.SelectedScrapers` as a flat priority for every field, ignoring per-field overrides — so `series: [tokyohot]` (skip Series via exclusivity) still populated Series from DMM when scraping with `--scrapers dmm` (BMD-284). Both paths now use pure v1 exclusivity consistently: a per-field list means "only these scrapers, no global fallback." No skip sentinel — a field is left empty by pointing it at a scraper that didn't run or lacks it (e.g. `series: [tokyohot]`).
 - **Rescrape merge strategies**: the API previously accepted + validated `preset` / `scalar_strategy` / `array_strategy` then silently dropped them; `RescrapeCmd` now carries `MergeOptions` and `CompleteRescrape` applies the merge (reusing the apply-path logic).
 - **Theme toggle**: rendered as a component, fixing an unknown-element regression in the web UI.
 - **Test coverage** raised to meet the 75% CI threshold; race-clean.

@@ -56,6 +56,8 @@ func (a *Aggregator) resolvePriorities() {
 	}
 
 	for _, field := range fields {
+		fieldSnake := toSnakeCase(field)
+
 		// Default: use the global priority list (unchanged behavior for fields
 		// without a per-field override).
 		fieldPriority := copySlice(globalPriority)
@@ -66,23 +68,15 @@ func (a *Aggregator) resolvePriorities() {
 		// a.cfg.Metadata.Priority here would panic for configs that rely only on
 		// ScrapersPriority (CodeRabbit, PR #51).
 		if a.cfg != nil && a.cfg.Metadata != nil {
-			if fp := a.cfg.Metadata.Priority.GetFieldPriority(toSnakeCase(field)); len(fp) > 0 {
+			if fp := a.cfg.Metadata.Priority.GetFieldPriority(fieldSnake); len(fp) > 0 {
 				// A per-field override is EXCLUSIVE: only the scrapers listed in the
 				// override are consulted for that field — there is NO fallback to
-				// the global priority list. This restores v1 (PowerShell
-				// Javinizer) semantics, where a per-field priority list suppressed
-				// fallback scrapers: e.g. `series: [tokyohot]` leaves Series empty
-				// when tokyohot has no Series, instead of filling it from
-				// r18dev/dmm via global fallback (#50).
-				//
-				// The no-override path is unchanged: when GetFieldPriority returns an
-				// empty list (no per-field override — including the case where the
-				// global list is derived from cfg.ScrapersPriority rather than
-				// Metadata.Priority), the len(fp) > 0 guard keeps the globalPriority
-				// default assigned above. globalPriority itself already incorporates
-				// both Metadata.Priority and the ScrapersPriority fallback (see
-				// getFieldPriorityFromConfig), so no behavior changes for fields
-				// without an explicit override.
+				// the global priority list. This restores v1 (PowerShell Javinizer)
+				// semantics (#50): `series: [tokyohot]` leaves Series empty when
+				// tokyohot has no Series, instead of filling it from r18dev/dmm via
+				// global fallback. There is no skip sentinel — suppression is the
+				// emergent result of pointing a field at a scraper (or a never-
+				// registered name) that doesn't provide it.
 				fieldPriority = copySlice(fp)
 			}
 		}

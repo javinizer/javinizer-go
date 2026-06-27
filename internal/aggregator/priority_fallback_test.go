@@ -179,7 +179,15 @@ func TestPerFieldPriorityOverrideIsExclusive(t *testing.T) {
 // must be exclusive and win over customPriority (same semantics as
 // resolvePriorities, PR #51/#50); customPriority is only the fallback for fields
 // without an override.
-func TestAggregateWithPriorityRespectsPerFieldSkip(t *testing.T) {
+// TestAggregateWithPriority_HonorsExclusivePerFieldOverride is the BMD-284
+// regression: scraping with selected scrapers (--scrapers dmm) must still honor
+// an exclusive per-field override. `series: [tokyohot]` means Series comes from
+// tokyohot ONLY — tokyohot didn't run (only dmm did) and there is NO fallback,
+// so Series stays empty even though DMM provides it. This is the v1 (original
+// PowerShell Javinizer) exclusivity semantics (#50), now applied consistently
+// in the AggregateWithPriority path too. No skip sentinel — suppression is the
+// emergent result of pointing a field at a scraper that didn't run / lacks it.
+func TestAggregateWithPriority_HonorsExclusivePerFieldOverride(t *testing.T) {
 	cfg := &config.Config{
 		Scrapers: config.ScrapersConfig{
 			Priority: []string{"dmm", "r18dev"},
@@ -188,7 +196,7 @@ func TestAggregateWithPriorityRespectsPerFieldSkip(t *testing.T) {
 			Priority: config.PriorityConfig{
 				Priority: []string{"dmm", "r18dev"},
 				Fields: map[string][]string{
-					"series": {"__skip__"},
+					"series": {"tokyohot"}, // exclusive: only tokyohot consulted for Series
 				},
 			},
 		},
@@ -204,7 +212,7 @@ func TestAggregateWithPriorityRespectsPerFieldSkip(t *testing.T) {
 		ID:          "BMD-284",
 		Title:       "DMM Title",
 		Maker:       "ビッグモーカル",
-		Series:      "淫楽口ワイヤル", // DMM HAS Series — must be suppressed by __skip__
+		Series:      "淫楽口ワイヤル", // DMM HAS Series — must NOT leak in via fallback
 		ReleaseDate: &releaseDate,
 	}
 
@@ -215,18 +223,55 @@ func TestAggregateWithPriorityRespectsPerFieldSkip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, movie)
 
-	// The bug: Series was populated by DMM because customPriority [dmm] was
-	// applied to every field, ignoring the series: [__skip__] override.
-	// The fix: the per-field __skip__ override wins, so Series stays empty.
+	// The BMD-284 bug: Series was populated by DMM because customPriority [dmm]
+	// was applied to every field, ignoring the exclusive `series: [tokyohot]`
+	// override. The fix: the per-field override is exclusive, tokyohot didn't
+	// run, so Series stays empty — no fallback to DMM.
 	assert.Empty(t, movie.Series,
-		"Series must be empty — per-field __skip__ override must win over customPriority")
+		"Series must be empty — exclusive override [tokyohot] has no fallback to DMM")
 
-	// A field WITHOUT an override must still use customPriority (DMM), proving
-	// the fallback path is intact and the fix is scoped to per-field overrides.
+	// Fields WITHOUT an override use customPriority (DMM), proving the fallback
+	// for non-overridden fields is intact.
 	assert.Equal(t, "DMM Title", movie.Title,
-		"Title (no per-field override) must use customPriority [dmm]")
+		"Title (no override) must use customPriority [dmm]")
 	assert.Equal(t, "ビッグモーカル", movie.Maker,
-		"Maker (no per-field override) must use customPriority [dmm]")
+		"Maker (no override) must use customPriority [dmm]")
+}
+
+// TestAggregateWithPriority_PerFieldOverrideSelectsSource verifies the
+// selective-source-choice that motivated reverting to pure exclusivity:
+// `maker: [r18dev]` routes Maker to r18dev even when scraping with `--scrapers
+// dmm` (dmm ran, but the exclusive per-field override picks r18dev — which must
+// also have run to contribute). This works consistently in both scrape paths.
+func TestAggregateWithPriority_PerFieldOverrideSelectsSource(t *testing.T) {
+	cfg := &config.Config{
+		Scrapers: config.ScrapersConfig{Priority: []string{"dmm", "r18dev"}},
+		Metadata: config.MetadataConfig{
+			Priority: config.PriorityConfig{
+				Priority: []string{"dmm", "r18dev"},
+				Fields: map[string][]string{
+					"maker": {"r18dev"}, // selective source choice: Maker from r18dev, not dmm
+				},
+			},
+		},
+	}
+
+	agg := newAggregatorNoDB(testConfigFromAppConfig(cfg))
+
+	results := []*models.ScraperResult{
+		{Source: "dmm", ID: "X-1", Title: "DMM Title", Maker: "DMM Maker"},
+		{Source: "r18dev", ID: "X-1", Title: "R18 Title", Maker: "R18 Maker"},
+	}
+
+	// Both ran (--scrapers dmm,r18dev). The exclusive `maker: [r18dev]` override
+	// picks r18dev for Maker, while Title (no override) uses customPriority order
+	// ([dmm, r18dev] → dmm first).
+	movie, _, err := agg.AggregateWithPriority(results, []string{"dmm", "r18dev"})
+	require.NoError(t, err)
+	assert.Equal(t, "R18 Maker", movie.Maker,
+		"Maker must come from r18dev — exclusive per-field override selects the source")
+	assert.Equal(t, "DMM Title", movie.Title,
+		"Title (no override) uses customPriority [dmm, r18dev] → dmm first")
 }
 
 func TestUnknownActressFilteredFromScraperResults(t *testing.T) {

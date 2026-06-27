@@ -143,8 +143,8 @@ func (p *PriorityConfig) GetFieldPriority(fieldKey string) []string {
 // aggregation path); PerFieldOverride returns Fields[fieldKey] only (useful
 // when a caller supplies its own priority list and wants per-field overrides
 // to still win — e.g. AggregateWithPriority, where customPriority replaces the
-// global order but an explicit `series: ["__skip__"]` must still suppress the
-// field).
+// global order for fields without an override, but an explicit per-field
+// override like `series: [tokyohot]` still wins exclusively).
 func (p *PriorityConfig) PerFieldOverride(fieldKey string) []string {
 	if p == nil {
 		return nil

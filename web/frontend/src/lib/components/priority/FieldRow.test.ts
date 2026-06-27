@@ -47,35 +47,15 @@ describe('FieldRow', () => {
 		expect(container.querySelector('[aria-label="Reset to global priority"]')).toBeTruthy();
 	});
 
-	it('shows the skipped (grey) state and hides the __skip__ scraper name', () => {
-		const { container } = render(
-			FieldRow,
-			{ props: makeProps({ status: 'skipped', priority: ['__skip__'] }) }
-		);
-
-		expect(container.textContent).toContain('Skipped');
-		const dot = container.querySelector('[role="img"]');
-		expect(dot?.className).toContain('bg-slate-400');
-
-		// skipped rows explain the suppression in plain language
-		expect(container.textContent).toContain('left empty');
-
-		// the raw sentinel must never leak into the UI as a scraper name
-		expect(container.textContent).not.toContain('__skip__');
-
-		// skipped rows offer a reset (re-enable via parent) action
-		expect(container.querySelector('[aria-label="Reset to global priority"]')).toBeTruthy();
-	});
-
-	it('renders the scraper chain for inherited/custom and not for skipped', () => {
+	it('renders the scraper chain for inherited/custom fields', () => {
 		const inherited = render(FieldRow, { props: makeProps() });
 		expect(inherited.container.textContent).toContain('R18.dev');
 		expect(inherited.container.textContent).toContain('→');
 
-		const skipped = render(
+		const custom = render(
 			FieldRow,
-			{ props: makeProps({ status: 'skipped', priority: ['__skip__'] }) }
+			{ props: makeProps({ status: 'custom', priority: ['tokyohot'] }) }
 		);
-		expect(skipped.container.textContent).not.toContain('R18.dev');
+		expect(custom.container.textContent).toContain('Tokyo-Hot');
 	});
 });

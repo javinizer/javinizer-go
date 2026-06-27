@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { SquarePen, RotateCcw, Ban } from 'lucide-svelte';
+	import { SquarePen, RotateCcw } from 'lucide-svelte';
 	import Button from '../ui/Button.svelte';
 	import type { FieldStatus } from './priority';
 
@@ -34,8 +34,8 @@
 
 	// Per-status visual language.
 	// inherited (green): no override, uses the global priority list.
-	// custom   (orange): an exclusive override listing real scrapers.
-	// skipped  (grey):   the __skip__ sentinel — the field is suppressed (left empty).
+	// custom   (orange): an exclusive override listing scrapers (possibly fewer
+	//             than the global list — the user removed some for this field).
 	const appearance: Record<
 		FieldStatus,
 		{ dot: string; badge: string; label: string; row: string }
@@ -51,12 +51,6 @@
 			badge: 'text-orange-600',
 			label: 'Custom',
 			row: 'bg-orange-50/50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-900'
-		},
-		skipped: {
-			dot: 'bg-slate-400',
-			badge: 'text-slate-500',
-			label: 'Skipped',
-			row: 'bg-slate-50 border-slate-300 dark:bg-slate-900/30 dark:border-slate-700'
 		}
 	};
 
@@ -74,25 +68,18 @@
 
 	<!-- Field Name -->
 	<div class="flex-1 min-w-0">
-		<div class="font-medium text-sm {status === 'skipped' ? 'text-muted-foreground line-through' : ''}">
+		<div class="font-medium text-sm">
 			{fieldLabel}
 		</div>
 		<div class="text-xs text-muted-foreground truncate">
-			{#if status === 'skipped'}
-				<span class="inline-flex items-center gap-1">
-					<Ban class="h-3 w-3" />
-					Field will be left empty (suppressed)
+			{#each priority as scraper, index}
+				<span class="inline-flex items-center">
+					{formatScraperName(scraper)}
+					{#if index < priority.length - 1}
+						<span class="mx-1 text-muted-foreground/50">→</span>
+					{/if}
 				</span>
-			{:else}
-				{#each priority as scraper, index}
-					<span class="inline-flex items-center">
-						{formatScraperName(scraper)}
-						{#if index < priority.length - 1}
-							<span class="mx-1 text-muted-foreground/50">→</span>
-						{/if}
-					</span>
-				{/each}
-			{/if}
+			{/each}
 		</div>
 	</div>
 

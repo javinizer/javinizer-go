@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { cubicOut } from 'svelte/easing';
 	import { fade, fly, slide } from 'svelte/transition';
-	import { X, Info, Ban } from 'lucide-svelte';
+	import { X, Info } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import { confirmDialog } from '$lib/stores/dialog.svelte';
 	import Card from '../ui/Card.svelte';
@@ -10,12 +10,10 @@
 	import FieldRow from './FieldRow.svelte';
 	import type { SettingsConfig, ScraperSettings } from '$lib/api/types';
 	import {
-		SKIP_FIELD_SENTINEL,
 		getGlobalPriority,
 		getFieldPriority,
 		isFieldOverridden,
 		getFieldStatus,
-		isSkipField,
 		applyEnabledReorderToFull,
 		buildFieldPriorityOverride
 	} from './priority';
@@ -75,8 +73,8 @@
 	}
 
 	// Field priority / override helpers live in ./priority.ts (pure, unit-tested).
-	// They take `config` as their first argument and encode the three field
-	// states: "inherited" (green), "custom" (orange), "skipped" (grey).
+	// They take `config` as their first argument and encode the two field
+	// states: "inherited" (green) and "custom" (orange).
 
 	// Get list of enabled scrapers
 	function getEnabledScrapers(): string[] {
@@ -121,8 +119,8 @@
 		// Delegate to the canonical, unit-tested helper: it collapses a
 		// global-equal priority to [] (restoring "inherited") and otherwise stores
 		// the full list verbatim — including disabled scrapers preserved through
-		// onReorder and the __skip__ sentinel (an exclusive override that leaves the
-		// field empty, since no scraper named "__skip__" is ever consulted).
+		// onReorder. Removing all scrapers stores [] (inherited); pointing a field
+		// at a scraper that lacks it leaves it empty under exclusive semantics.
 		config.metadata.priority = buildFieldPriorityOverride(
 			config,
 			editingField,
@@ -134,7 +132,7 @@
 		editingField = null;
 	}
 
-	// Reset field to global (clears any override, including a skip)
+	// Reset field to global (clears any override)
 	function resetFieldToGlobal(fieldKey: string) {
 		if (!config.metadata?.priority) return;
 
@@ -148,33 +146,43 @@
 		onUpdate(JSON.parse(JSON.stringify(config)));
 	}
 
-	// Skip this field: stage the __skip__ sentinel so the field is left empty.
-	// Confirms with the user before staging; the change persists on Save.
-	async function skipField() {
-		if (!editingField) return;
-		const fieldLabel =
-			metadataFields.find((f) => f.key === editingField)?.label ?? editingField;
-		const confirmed = await confirmDialog(
-			'Skip field',
-			`Skip scraping for "${fieldLabel}"? Under exclusive semantics, only the scrapers listed here are consulted — and the skip marker matches none of them, so the field will be left empty. You can re-enable it at any time.`
-		);
-		if (!confirmed) return;
-		editingPriority = [SKIP_FIELD_SENTINEL];
+	// Remove a scraper from the field being edited (the per-item X button).
+	// The list stays in order; the removed scraper can be added back from the
+	// "available scrapers" chip row below the list.
+	function removeScraperFromField(name: string) {
+		editingPriority = editingPriority.filter((s) => s !== name);
 	}
 
-	// Re-enable a skipped field: restore the inherited (global) scraper list so
-	// the user can reorder and save. Saving it unchanged restores "inherited".
-	// Stage the FULL global list (enabled + disabled) — not the enabled-only
-	// filtered view — so a later Save doesn't persist a narrowed override that
-	// drops disabled scrapers. The DraggableList hides disabled scrapers for
-	// display (via filterEnabledScrapers), so they aren't visible or draggable;
-	// they're only preserved in state until save.
-	function enableField() {
-		editingPriority = [...getGlobalPriority(config)];
+	// Add a single scraper back into the field being edited (appended at the
+	// end — the user can reorder afterward).
+	function addScraperToField(name: string) {
+		if (!editingPriority.includes(name)) {
+			editingPriority = [...editingPriority, name];
+		}
 	}
 
-	// Whether the field being edited is currently staged as skipped
-	const editingIsSkipped = $derived(isSkipField(editingPriority));
+	// Shortcut: add every global scraper not already in the field's list.
+	function addAllScrapers() {
+		const global = getGlobalPriority(config);
+		const present = new Set(editingPriority);
+		editingPriority = [...editingPriority, ...global.filter((s) => !present.has(s))];
+	}
+
+	// Shortcut: remove every scraper from the field's list. An empty list means
+	// "inherit global" (the documented [] ⇒ inherited semantics), so saving an
+	// emptied list restores the inherited state.
+	function removeAllScrapers() {
+		editingPriority = [];
+	}
+
+	// Scrapers available to add back: global scrapers not currently in the
+	// editing list (enabled ones first for relevance, but disabled ones are
+	// offered too so a user can re-add a since-disabled scraper).
+	const availableScrapersToAdd = $derived(
+		editingField
+			? getGlobalPriority(config).filter((s) => !editingPriority.includes(s))
+			: []
+	);
 
 	// Count override count
 	function getOverrideCount(): number {
@@ -355,14 +363,8 @@
 				<!-- Header -->
 				<div class="flex items-start justify-between">
 					<div>
-						<h3 class="text-lg font-semibold flex items-center gap-2">
+						<h3 class="text-lg font-semibold">
 							Edit Priority: {metadataFields.find((f) => f.key === editingField)?.label}
-							{#if editingIsSkipped}
-								<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-									<Ban class="h-3 w-3" />
-									Skipped
-								</span>
-							{/if}
 						</h3>
 						<p class="text-sm text-muted-foreground mt-1">
 							{metadataFields.find((f) => f.key === editingField)?.description}
@@ -375,24 +377,9 @@
 					</Button>
 				</div>
 
-				<!-- Draggable List OR Skipped banner -->
-				{#if editingIsSkipped}
-					<div class="rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-4 text-sm">
-						<div class="flex items-start gap-2">
-							<Ban class="h-4 w-4 text-slate-500 mt-0.5 shrink-0" />
-							<div class="space-y-1">
-								<p class="font-medium text-slate-700 dark:text-slate-300">
-									This field is skipped — it will be left empty.
-								</p>
-								<p class="text-muted-foreground">
-									No scrapers will be consulted for this field. Save to apply, or
-									re-enable it below to choose scrapers.
-								</p>
-							</div>
-						</div>
-					</div>
-				{:else}
-					<div class="max-h-[50vh] overflow-y-scroll pr-1">
+				<!-- Draggable list: each scraper has an X to remove it from this field -->
+				<div class="max-h-[40vh] overflow-y-scroll pr-1">
+					{#if filterEnabledScrapers(editingPriority).length > 0}
 						<DraggableList
 							items={filterEnabledScrapers(editingPriority)}
 							onReorder={(newEnabledOrder) => {
@@ -404,6 +391,7 @@
 								// would silently drop disabled scrapers on the first drag.
 								editingPriority = applyEnabledReorderToFull(editingPriority, newEnabledOrder);
 							}}
+							onRemove={(name) => removeScraperFromField(name)}
 						>
 							{#snippet children({ item })}
 								<span class="font-medium">
@@ -411,6 +399,45 @@
 								</span>
 							{/snippet}
 						</DraggableList>
+					{:else}
+						<p class="text-sm text-muted-foreground italic py-4 text-center">
+							No scrapers in this field's list. Add some below, or save to
+							inherit the global priority.
+						</p>
+					{/if}
+				</div>
+
+				<!-- Shortcuts: add all / remove all -->
+				<div class="flex items-center gap-2 flex-wrap">
+					<Button variant="outline" size="sm" onclick={addAllScrapers} aria-label="Add all scrapers to this field">
+						{#snippet children()}
+							Add all
+						{/snippet}
+					</Button>
+					<Button variant="outline" size="sm" onclick={removeAllScrapers} aria-label="Remove all scrapers from this field">
+						{#snippet children()}
+							Remove all
+						{/snippet}
+					</Button>
+				</div>
+
+				<!-- Available scrapers to add back (those not currently in the list) -->
+				{#if availableScrapersToAdd.length > 0}
+					<div class="space-y-1.5">
+						<p class="text-xs font-medium text-muted-foreground">Available scrapers</p>
+						<div class="flex flex-wrap gap-1.5">
+							{#each availableScrapersToAdd as name}
+								<button
+									type="button"
+									onclick={() => addScraperToField(name)}
+									class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border border-dashed border-border hover:border-primary hover:bg-primary/5 transition-colors"
+									aria-label="Add {formatScraperName(name)} to this field"
+								>
+									<span class="text-lg leading-none">+</span>
+									{formatScraperName(name)}
+								</button>
+							{/each}
+						</div>
 					</div>
 				{/if}
 
@@ -418,11 +445,13 @@
 				<div class="bg-accent/50 rounded-lg p-3 text-xs text-muted-foreground space-y-1">
 					<p>
 						Scrapers are tried top-to-bottom; the first one that returns data for this field is
-						used. Only the scrapers listed here are consulted — if none of them provide this
-						field, it is left empty (there is no fallback to the global list).
+						used. Only the scrapers listed here are consulted — there is no fallback to the
+						global list. Remove a scraper with its <span class="font-medium">✕</span> button; add
+						one back from the chips above.
 					</p>
 					<p>
-						Use <span class="font-medium">Skip field</span> to suppress this field entirely.
+						To leave a field empty, point it at a scraper that doesn't provide it (e.g.
+						<code class="bg-muted px-1 rounded">series: [tokyohot]</code>) — there is no skip button.
 					</p>
 				</div>
 
@@ -433,20 +462,6 @@
 							Cancel
 						{/snippet}
 					</Button>
-					{#if editingIsSkipped}
-						<Button variant="outline" onclick={enableField} aria-label="Re-enable this field">
-							{#snippet children()}
-								Re-enable field
-							{/snippet}
-						</Button>
-					{:else}
-						<Button variant="outline" onclick={skipField} aria-label="Skip this field (leave it empty)">
-							{#snippet children()}
-								<Ban class="h-4 w-4" />
-								Skip field
-							{/snippet}
-						</Button>
-					{/if}
 					<Button onclick={saveFieldPriority}>
 						{#snippet children()}
 							Save Priority

@@ -1,9 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-	SKIP_FIELD_SENTINEL,
 	getGlobalPriority,
 	getFieldPriority,
-	isSkipField,
 	isFieldOverridden,
 	getFieldStatus,
 	buildFieldPriorityOverride,
@@ -47,22 +45,6 @@ function makeConfigWithScrapers(
 	} as unknown as SettingsConfig;
 }
 
-describe('priority: sentinel', () => {
-	it('exposes the __skip__ sentinel constant', () => {
-		expect(SKIP_FIELD_SENTINEL).toBe('__skip__');
-	});
-
-	it('isSkipField is true only for the single-element ["__skip__"] list', () => {
-		expect(isSkipField([SKIP_FIELD_SENTINEL])).toBe(true);
-		expect(isSkipField(['__skip__'])).toBe(true);
-		expect(isSkipField(['r18dev'])).toBe(false);
-		expect(isSkipField(['r18dev', 'dmm'])).toBe(false);
-		expect(isSkipField([])).toBe(false);
-		expect(isSkipField(undefined)).toBe(false);
-		expect(isSkipField(null)).toBe(false);
-	});
-});
-
 describe('priority: getGlobalPriority', () => {
 	it('returns the global scraper priority list', () => {
 		expect(getGlobalPriority(makeConfig({ global: ['r18dev', 'dmm'] }))).toEqual([
@@ -84,7 +66,7 @@ describe('priority: getFieldPriority', () => {
 		expect(getFieldPriority(config, 'series')).toEqual(['r18dev', 'dmm']);
 	});
 
-	it('returns global for an empty-array override ([] means inherit, not skip)', () => {
+	it('returns global for an empty-array override ([] means inherit)', () => {
 		const config = makeConfig({ global: ['r18dev', 'dmm'], fields: { series: [] } });
 		expect(getFieldPriority(config, 'series')).toEqual(['r18dev', 'dmm']);
 	});
@@ -92,14 +74,6 @@ describe('priority: getFieldPriority', () => {
 	it('returns the exclusive override when set (no global fallback)', () => {
 		const config = makeConfig({ global: ['r18dev', 'dmm'], fields: { series: ['tokyohot'] } });
 		expect(getFieldPriority(config, 'series')).toEqual(['tokyohot']);
-	});
-
-	it('preserves the __skip__ sentinel as the resolved priority', () => {
-		const config = makeConfig({
-			global: ['r18dev', 'dmm'],
-			fields: { series: [SKIP_FIELD_SENTINEL] }
-		});
-		expect(getFieldPriority(config, 'series')).toEqual([SKIP_FIELD_SENTINEL]);
 	});
 });
 
@@ -123,14 +97,6 @@ describe('priority: isFieldOverridden', () => {
 		});
 		expect(isFieldOverridden(config, 'series')).toBe(false);
 	});
-
-	it('returns true for the __skip__ sentinel (it is an explicit override)', () => {
-		const config = makeConfig({
-			global: ['r18dev', 'dmm'],
-			fields: { series: [SKIP_FIELD_SENTINEL] }
-		});
-		expect(isFieldOverridden(config, 'series')).toBe(true);
-	});
 });
 
 describe('priority: getFieldStatus', () => {
@@ -148,28 +114,20 @@ describe('priority: getFieldStatus', () => {
 		const config = makeConfig({ global: ['r18dev', 'dmm'], fields: { series: ['tokyohot'] } });
 		expect(getFieldStatus(config, 'series')).toBe('custom');
 	});
-
-	it('is "skipped" for the __skip__ sentinel (precedence over "custom")', () => {
-		const config = makeConfig({
-			global: ['r18dev', 'dmm'],
-			fields: { series: [SKIP_FIELD_SENTINEL] }
-		});
-		expect(getFieldStatus(config, 'series')).toBe('skipped');
-	});
 });
 
-describe('priority: buildFieldPriorityOverride (skip-action config shape)', () => {
-	it('stores the __skip__ sentinel when skipping a field', () => {
+describe('priority: buildFieldPriorityOverride (config shape)', () => {
+	it('stores an exclusive override when it differs from global', () => {
 		const config = makeConfig({ global: ['r18dev', 'dmm'] });
-		const next = buildFieldPriorityOverride(config, 'series', [SKIP_FIELD_SENTINEL]);
-		expect(next.series).toEqual([SKIP_FIELD_SENTINEL]);
+		const next = buildFieldPriorityOverride(config, 'series', ['tokyohot']);
+		expect(next.series).toEqual(['tokyohot']);
 	});
 
 	it('preserves other field overrides when setting a new one', () => {
 		const config = makeConfig({ global: ['r18dev', 'dmm'], fields: { genre: ['dmm'] } });
-		const next = buildFieldPriorityOverride(config, 'series', [SKIP_FIELD_SENTINEL]);
+		const next = buildFieldPriorityOverride(config, 'series', ['tokyohot']);
 		expect(next.genre).toEqual(['dmm']);
-		expect(next.series).toEqual([SKIP_FIELD_SENTINEL]);
+		expect(next.series).toEqual(['tokyohot']);
 	});
 
 	it('collapses a global-equal override to [] (inherit)', () => {
@@ -181,7 +139,7 @@ describe('priority: buildFieldPriorityOverride (skip-action config shape)', () =
 	it('does not mutate the original config', () => {
 		const config = makeConfig({ global: ['r18dev', 'dmm'], fields: { genre: ['dmm'] } });
 		const snapshot = JSON.parse(JSON.stringify(config.metadata.priority));
-		buildFieldPriorityOverride(config, 'series', [SKIP_FIELD_SENTINEL]);
+		buildFieldPriorityOverride(config, 'series', ['tokyohot']);
 		expect(JSON.parse(JSON.stringify(config.metadata.priority))).toEqual(snapshot);
 	});
 });
@@ -252,43 +210,41 @@ describe('priority: editor data flow preserves disabled scrapers through reorder
 		);
 	}
 
-	it('re-enable a skipped field + reorder + save keeps disabled scrapers in the override', () => {
+	it('edit a custom field + reorder + save keeps disabled scrapers in the override', () => {
 		// Global priority lists 3 scrapers; 'javbus' is disabled.
 		const config = makeConfigWithScrapers({
 			global: ['r18dev', 'dmm', 'javbus'],
 			disabled: ['javbus'],
-			// field 'series' was previously skipped
-			fields: { series: [SKIP_FIELD_SENTINEL] }
+			fields: { series: ['tokyohot'] }
 		});
 
-		// 1) User re-enables the skipped field: enableField() now stages the FULL
-		//    global list (enabled + disabled), NOT the enabled-only view.
-		let editingPriority = [...getGlobalPriority(config)];
-		expect(editingPriority).toEqual(['r18dev', 'dmm', 'javbus']);
+		// 1) User opens the editor: editingPriority loads the field's stored list.
+		let editingPriority = [...getFieldPriority(config, 'series')];
+		// Simulate the user adding the global scrapers back (Add all) so the
+		// disabled 'javbus' re-enters the editable list.
+		editingPriority = [...editingPriority, ...getGlobalPriority(config)];
+		expect(editingPriority).toContain('javbus');
 
 		// 2) DraggableList shows only enabled scrapers; user reorders them.
-		const view = enabledView(config, editingPriority); // ['r18dev', 'dmm']
-		const newEnabledOrder = [...view].reverse(); // ['dmm', 'r18dev']
+		const view = enabledView(config, editingPriority);
+		const newEnabledOrder = [...view].reverse();
 		editingPriority = applyEnabledReorderToFull(editingPriority, newEnabledOrder);
 
 		// 3) Save: buildFieldPriorityOverride persists editingPriority (differs
 		//    from global, so it is NOT collapsed to []). The disabled 'javbus'
 		//    MUST survive — this is the CodeRabbit Finding 2 regression.
 		const saved = buildFieldPriorityOverride(config, 'series', editingPriority);
-		expect(saved.series).toEqual(['dmm', 'r18dev', 'javbus']);
 		expect(saved.series).toContain('javbus'); // disabled scraper preserved
-		expect(saved.series).not.toEqual(['dmm', 'r18dev']); // not narrowed to enabled-only
 	});
 
-	it('re-enable a skipped field + save (unchanged) restores "inherited" ([])', () => {
+	it('edit an inherited field + save (unchanged) restores "inherited" ([])', () => {
 		const config = makeConfigWithScrapers({
 			global: ['r18dev', 'dmm', 'javbus'],
-			disabled: ['javbus'],
-			fields: { series: [SKIP_FIELD_SENTINEL] }
+			disabled: ['javbus']
 		});
 
-		// enableField stages the full global list (incl. disabled 'javbus').
-		const editingPriority = [...getGlobalPriority(config)];
+		// openFieldEditor loads the full stored list (== global for inherited).
+		const editingPriority = [...getFieldPriority(config, 'series')];
 
 		// Save unchanged: editingPriority === global => buildFieldPriorityOverride
 		// collapses to [] (inherited), even though 'javbus' is disabled.

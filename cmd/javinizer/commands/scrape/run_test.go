@@ -274,11 +274,18 @@ func TestRun_CustomScrapers(t *testing.T) {
 
 // TestRun_CustomScrapers_OverridesMetadataPriority ensures --scrapers controls
 // aggregation order even when metadata priorities exclude the selected scraper.
-func TestRun_CustomScrapers_OverridesMetadataPriority(t *testing.T) {
+func TestRun_CustomScrapers_HonorsExclusivePerFieldPriority(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test")
 	}
 
+	// Pure exclusivity (#50): a per-field priority list means ONLY those
+	// scrapers are consulted for that field, with NO fallback. `--scrapers mock2`
+	// restricts what runs to mock2. So:
+	//   - id/content_id/title: [mock1, mock2] → mock1 didn't run, mock2 did and is
+	//     listed → filled by mock2.
+	//   - series: [mock1] → mock1 didn't run, and there is NO fallback to mock2
+	//     (which has Series) → Series stays empty. This proves exclusivity.
 	configContent := `
 config_version: 3
 database:
@@ -287,9 +294,10 @@ scrapers:
   priority: ["mock1"]
 metadata:
   priority:
-    id: ["mock1"]
-    content_id: ["mock1"]
-    title: ["mock1"]
+    id: ["mock1", "mock2"]
+    content_id: ["mock1", "mock2"]
+    title: ["mock1", "mock2"]
+    series: ["mock1"]
 matching:
   extensions: [".mp4"]
   regex_enabled: false
@@ -324,9 +332,14 @@ matching:
 	require.NotNil(t, movie)
 	require.Len(t, results, 1)
 	assert.Equal(t, "mock2", results[0].Source)
+	// id/content_id/title pref [mock1, mock2]: mock1 didn't run, mock2 did → mock2 fills.
 	assert.Equal(t, "TEST-002", movie.ID)
 	assert.Equal(t, "TEST-002", movie.ContentID)
 	assert.Equal(t, "Test Movie TEST-002", movie.Title)
+	// series pref [mock1] (exclusive): mock1 didn't run, NO fallback to mock2
+	// (which returns Series="Test Series") → Series stays empty.
+	assert.Empty(t, movie.Series,
+		"Series must be empty — exclusive [mock1] override has no fallback to mock2")
 }
 
 // TestRun_EmptyResults tests error handling when no scrapers return results
