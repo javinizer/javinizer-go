@@ -19,6 +19,7 @@ export interface SettingsStore {
 	settingsConfig: SettingsConfig | null;
 	configInitialized: boolean;
 	loading: boolean;
+	reloading: boolean;
 	error: string | null;
 	inputClass: string;
 	configQuery: ReturnType<typeof createConfigQuery>;
@@ -57,6 +58,7 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 	const queryClient = useQueryClient();
 	const configQuery = createConfigQuery();
 	let loading = $derived(configQuery.isPending && !configQuery.data);
+	let reloading = $state(false);
 	let error = $state<string | null>(null);
 	let fetchingTranslationModels = $state(false);
 	let translationModelOptions = $state<string[]>([]);
@@ -231,8 +233,20 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 	});
 
 	async function reloadConfig() {
+		reloading = true;
 		configInitialized = false;
-		await queryClient.refetchQueries({ queryKey: ['config'] });
+		try {
+			// throwOnError makes refetchQueries reject on a failed fetch instead of
+			// silently swallowing the error (its default `.catch(noop)`), so the
+			// catch below can surface a failure toast to the user.
+			await queryClient.refetchQueries({ queryKey: ['config'] }, { throwOnError: true });
+			toastStore.success('Configuration reloaded successfully', 4000);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : 'Failed to reload configuration';
+			toastStore.error(msg, 5000);
+		} finally {
+			reloading = false;
+		}
 	}
 
 	const saveConfigMutation = createMutation(() => ({
@@ -309,6 +323,9 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 		},
 		get loading() {
 			return loading;
+		},
+		get reloading() {
+			return reloading;
 		},
 		get error() {
 			return error;

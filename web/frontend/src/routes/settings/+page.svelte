@@ -92,9 +92,9 @@
 				</div>
 			</div>
 			<div class="flex gap-2">
-				<Button variant="outline" onclick={settings.reloadConfig} disabled={settings.loading}>
+				<Button variant="outline" onclick={settings.reloadConfig} disabled={settings.loading || settings.reloading}>
 					{#snippet children()}
-						<RefreshCw class="h-4 w-4 mr-2" />
+						<RefreshCw class="h-4 w-4 mr-2 {settings.reloading ? 'animate-spin' : ''}" />
 						Reload
 					{/snippet}
 				</Button>
