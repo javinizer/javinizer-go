@@ -34,11 +34,32 @@ func newMockRepo(t *testing.T) *mocks.MockHistoryRepositoryInterface {
 // getHistory error paths
 // ---------------------------------------------------------------------------
 
-func TestGetHistory_FindByMovieIDError(t *testing.T) {
+func TestGetHistory_MovieIDCountError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newMockRepo(t)
 
-	repo.EXPECT().FindByMovieID(context.Background(), "ABC-123").Return(nil, errors.New("db error"))
+	repo.EXPECT().CountByMovieID(context.Background(), "ABC-123").Return(int64(0), errors.New("db error"))
+
+	router := gin.New()
+	router.GET("/api/v1/history", getHistory(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/history?movie_id=ABC-123", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var resp contracts.ErrorResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "Failed to count history", resp.Error)
+}
+
+func TestGetHistory_MovieIDRetrieveError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newMockRepo(t)
+
+	repo.EXPECT().CountByMovieID(context.Background(), "ABC-123").Return(int64(1), nil)
+	repo.EXPECT().ListByMovieID(context.Background(), "ABC-123", 50, 0).Return(nil, errors.New("db error"))
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))
@@ -54,11 +75,32 @@ func TestGetHistory_FindByMovieIDError(t *testing.T) {
 	assert.Equal(t, "Failed to retrieve history", resp.Error)
 }
 
-func TestGetHistory_FindByOperationError(t *testing.T) {
+func TestGetHistory_OperationCountError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newMockRepo(t)
 
-	repo.EXPECT().FindByOperation(context.Background(), models.HistoryOpScrape, 0).Return(nil, errors.New("db error"))
+	repo.EXPECT().CountByOperation(context.Background(), models.HistoryOpScrape).Return(int64(0), errors.New("db error"))
+
+	router := gin.New()
+	router.GET("/api/v1/history", getHistory(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/history?operation=scrape", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var resp contracts.ErrorResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "Failed to count history", resp.Error)
+}
+
+func TestGetHistory_OperationRetrieveError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newMockRepo(t)
+
+	repo.EXPECT().CountByOperation(context.Background(), models.HistoryOpScrape).Return(int64(1), nil)
+	repo.EXPECT().ListByOperation(context.Background(), models.HistoryOpScrape, 50, 0).Return(nil, errors.New("db error"))
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))
@@ -74,11 +116,32 @@ func TestGetHistory_FindByOperationError(t *testing.T) {
 	assert.Equal(t, "Failed to retrieve history", resp.Error)
 }
 
-func TestGetHistory_FindByStatusError(t *testing.T) {
+func TestGetHistory_StatusCountError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newMockRepo(t)
 
-	repo.EXPECT().FindByStatus(context.Background(), models.HistoryStatusFailed, 0).Return(nil, errors.New("db error"))
+	repo.EXPECT().CountByStatus(context.Background(), models.HistoryStatusFailed).Return(int64(0), errors.New("db error"))
+
+	router := gin.New()
+	router.GET("/api/v1/history", getHistory(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/history?status=failed", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var resp contracts.ErrorResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "Failed to count history", resp.Error)
+}
+
+func TestGetHistory_StatusRetrieveError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newMockRepo(t)
+
+	repo.EXPECT().CountByStatus(context.Background(), models.HistoryStatusFailed).Return(int64(1), nil)
+	repo.EXPECT().ListByStatus(context.Background(), models.HistoryStatusFailed, 50, 0).Return(nil, errors.New("db error"))
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))
@@ -145,12 +208,14 @@ func TestGetHistory_MovieIDWithPagination(t *testing.T) {
 		{ID: 2, MovieID: "ABC-001", Operation: models.HistoryOpOrganize, Status: models.HistoryStatusSuccess, CreatedAt: ts},
 		{ID: 3, MovieID: "ABC-001", Operation: models.HistoryOpDownload, Status: models.HistoryStatusSuccess, CreatedAt: ts},
 	}
-	repo.EXPECT().FindByMovieID(context.Background(), "ABC-001").Return(records, nil)
+	repo.EXPECT().CountByMovieID(context.Background(), "ABC-001").Return(int64(3), nil)
+	repo.EXPECT().ListByMovieID(context.Background(), "ABC-001", 1, 1).Return([]models.History{records[1]}, nil)
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))
 
-	// Request with offset=1, limit=1 — should return only the second record
+	// Request with offset=1, limit=1 — pagination is now applied by the repository,
+	// so ListByMovieID returns only the requested page.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/history?movie_id=ABC-001&limit=1&offset=1", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -172,7 +237,8 @@ func TestGetHistory_OperationFilterSuccess(t *testing.T) {
 	records := []models.History{
 		{ID: 1, MovieID: "ABC-001", Operation: models.HistoryOpOrganize, Status: models.HistoryStatusSuccess, CreatedAt: ts},
 	}
-	repo.EXPECT().FindByOperation(context.Background(), models.HistoryOpOrganize, 0).Return(records, nil)
+	repo.EXPECT().CountByOperation(context.Background(), models.HistoryOpOrganize).Return(int64(1), nil)
+	repo.EXPECT().ListByOperation(context.Background(), models.HistoryOpOrganize, 50, 0).Return(records, nil)
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))
@@ -197,7 +263,8 @@ func TestGetHistory_StatusFilterReverted(t *testing.T) {
 	records := []models.History{
 		{ID: 5, MovieID: "ABC-005", Operation: models.HistoryOpScrape, Status: models.HistoryStatusReverted, CreatedAt: ts},
 	}
-	repo.EXPECT().FindByStatus(context.Background(), models.HistoryStatusReverted, 0).Return(records, nil)
+	repo.EXPECT().CountByStatus(context.Background(), models.HistoryStatusReverted).Return(int64(1), nil)
+	repo.EXPECT().ListByStatus(context.Background(), models.HistoryStatusReverted, 50, 0).Return(records, nil)
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))
@@ -247,8 +314,9 @@ func TestGetHistory_MovieIDTakesPrecedenceOverOperation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newMockRepo(t)
 
-	repo.EXPECT().FindByMovieID(context.Background(), "ABC-001").Return([]models.History{}, nil)
-	// FindByOperation should NOT be called
+	repo.EXPECT().CountByMovieID(context.Background(), "ABC-001").Return(int64(0), nil)
+	repo.EXPECT().ListByMovieID(context.Background(), "ABC-001", 50, 0).Return([]models.History{}, nil)
+	// CountByOperation / ListByOperation should NOT be called
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))
@@ -265,8 +333,9 @@ func TestGetHistory_OperationTakesPrecedenceOverStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newMockRepo(t)
 
-	repo.EXPECT().FindByOperation(context.Background(), models.HistoryOpScrape, 0).Return([]models.History{}, nil)
-	// FindByStatus should NOT be called
+	repo.EXPECT().CountByOperation(context.Background(), models.HistoryOpScrape).Return(int64(0), nil)
+	repo.EXPECT().ListByOperation(context.Background(), models.HistoryOpScrape, 50, 0).Return([]models.History{}, nil)
+	// CountByStatus / ListByStatus should NOT be called
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))
@@ -787,7 +856,8 @@ func TestGetHistory_MovieIDFilterWithEmptyResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newMockRepo(t)
 
-	repo.EXPECT().FindByMovieID(context.Background(), "NONEXISTENT").Return([]models.History{}, nil)
+	repo.EXPECT().CountByMovieID(context.Background(), "NONEXISTENT").Return(int64(0), nil)
+	repo.EXPECT().ListByMovieID(context.Background(), "NONEXISTENT", 50, 0).Return([]models.History{}, nil)
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))
@@ -830,11 +900,8 @@ func TestGetHistory_MovieIDWithOffsetBeyondResults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newMockRepo(t)
 
-	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	records := []models.History{
-		{ID: 1, MovieID: "ABC-001", Operation: models.HistoryOpScrape, Status: models.HistoryStatusSuccess, CreatedAt: ts},
-	}
-	repo.EXPECT().FindByMovieID(context.Background(), "ABC-001").Return(records, nil)
+	repo.EXPECT().CountByMovieID(context.Background(), "ABC-001").Return(int64(1), nil)
+	repo.EXPECT().ListByMovieID(context.Background(), "ABC-001", 50, 100).Return([]models.History{}, nil)
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))
@@ -875,7 +942,8 @@ func TestGetHistory_RecordWithAllFields(t *testing.T) {
 			CreatedAt:    ts,
 		},
 	}
-	repo.EXPECT().FindByMovieID(context.Background(), "XYZ-999").Return(records, nil)
+	repo.EXPECT().CountByMovieID(context.Background(), "XYZ-999").Return(int64(1), nil)
+	repo.EXPECT().ListByMovieID(context.Background(), "XYZ-999", 50, 0).Return(records, nil)
 
 	router := gin.New()
 	router.GET("/api/v1/history", getHistory(repo))

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -571,6 +572,151 @@ func TestRepoCRUD_History_CountByOperation(t *testing.T) {
 	count, err := repo.CountByOperation(context.Background(), models.HistoryOpOrganize)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, count, int64(1))
+}
+
+func TestRepoCRUD_History_CountByMovieID(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewHistoryRepository(db)
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		require.NoError(t, repo.Create(context.Background(), &models.History{
+			MovieID:   "HIST-CBM",
+			Operation: models.HistoryOpScrape,
+			Status:    models.HistoryStatusSuccess,
+			CreatedAt: base.Add(time.Duration(i) * time.Second),
+		}))
+	}
+	// An unrelated movie must not be counted.
+	require.NoError(t, repo.Create(context.Background(), &models.History{
+		MovieID: "HIST-OTHER", Operation: models.HistoryOpScrape,
+		Status: models.HistoryStatusSuccess, CreatedAt: base,
+	}))
+
+	count, err := repo.CountByMovieID(context.Background(), "HIST-CBM")
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), count)
+
+	other, err := repo.CountByMovieID(context.Background(), "HIST-OTHER")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), other)
+}
+
+func TestRepoCRUD_History_ListByMovieID_Pagination(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewHistoryRepository(db)
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const total = 15
+	for i := 0; i < total; i++ {
+		require.NoError(t, repo.Create(context.Background(), &models.History{
+			MovieID:   "PAG-MOVIE",
+			Operation: models.HistoryOpScrape,
+			Status:    models.HistoryStatusSuccess,
+			CreatedAt: base.Add(time.Duration(i) * time.Second),
+		}))
+	}
+
+	count, err := repo.CountByMovieID(context.Background(), "PAG-MOVIE")
+	require.NoError(t, err)
+	assert.Equal(t, int64(total), count)
+
+	// First page: the 10 newest records (created_at DESC).
+	page1, err := repo.ListByMovieID(context.Background(), "PAG-MOVIE", 10, 0)
+	require.NoError(t, err)
+	assert.Len(t, page1, 10)
+	assert.True(t, page1[0].CreatedAt.Equal(base.Add(14*time.Second)))
+
+	// Second page: the remaining 5 records.
+	page2, err := repo.ListByMovieID(context.Background(), "PAG-MOVIE", 10, 10)
+	require.NoError(t, err)
+	assert.Len(t, page2, 5)
+	assert.True(t, page2[0].CreatedAt.Equal(base.Add(4*time.Second)))
+
+	// Pages must not overlap and page1 must be strictly newer than page2.
+	seen := make(map[uint]struct{}, len(page1)+len(page2))
+	for _, h := range page1 {
+		seen[h.ID] = struct{}{}
+	}
+	for _, h := range page2 {
+		_, dup := seen[h.ID]
+		assert.False(t, dup, "page2 record %d must not appear in page1", h.ID)
+	}
+	assert.True(t, page1[0].CreatedAt.After(page2[0].CreatedAt))
+}
+
+func TestRepoCRUD_History_ListByOperation_Pagination(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewHistoryRepository(db)
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const total = 12
+	for i := 0; i < total; i++ {
+		require.NoError(t, repo.Create(context.Background(), &models.History{
+			MovieID:   fmt.Sprintf("OP-%03d", i+1),
+			Operation: models.HistoryOpScrape,
+			Status:    models.HistoryStatusSuccess,
+			CreatedAt: base.Add(time.Duration(i) * time.Second),
+		}))
+	}
+	// Records with a different operation must be excluded.
+	require.NoError(t, repo.Create(context.Background(), &models.History{
+		MovieID: "OP-OTHER", Operation: models.HistoryOpOrganize,
+		Status: models.HistoryStatusSuccess, CreatedAt: base,
+	}))
+
+	count, err := repo.CountByOperation(context.Background(), models.HistoryOpScrape)
+	require.NoError(t, err)
+	assert.Equal(t, int64(total), count)
+
+	page1, err := repo.ListByOperation(context.Background(), models.HistoryOpScrape, 10, 0)
+	require.NoError(t, err)
+	assert.Len(t, page1, 10)
+	for _, h := range page1 {
+		assert.Equal(t, models.HistoryOpScrape, h.Operation)
+	}
+
+	page2, err := repo.ListByOperation(context.Background(), models.HistoryOpScrape, 10, 10)
+	require.NoError(t, err)
+	assert.Len(t, page2, 2)
+	assert.True(t, page1[0].CreatedAt.After(page2[0].CreatedAt))
+}
+
+func TestRepoCRUD_History_ListByStatus_Pagination(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewHistoryRepository(db)
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const total = 12
+	for i := 0; i < total; i++ {
+		require.NoError(t, repo.Create(context.Background(), &models.History{
+			MovieID:   fmt.Sprintf("ST-%03d", i+1),
+			Operation: models.HistoryOpScrape,
+			Status:    models.HistoryStatusFailed,
+			CreatedAt: base.Add(time.Duration(i) * time.Second),
+		}))
+	}
+	// Records with a different status must be excluded.
+	require.NoError(t, repo.Create(context.Background(), &models.History{
+		MovieID: "ST-OTHER", Operation: models.HistoryOpScrape,
+		Status: models.HistoryStatusSuccess, CreatedAt: base,
+	}))
+
+	count, err := repo.CountByStatus(context.Background(), models.HistoryStatusFailed)
+	require.NoError(t, err)
+	assert.Equal(t, int64(total), count)
+
+	page1, err := repo.ListByStatus(context.Background(), models.HistoryStatusFailed, 10, 0)
+	require.NoError(t, err)
+	assert.Len(t, page1, 10)
+	for _, h := range page1 {
+		assert.Equal(t, models.HistoryStatusFailed, h.Status)
+	}
+
+	page2, err := repo.ListByStatus(context.Background(), models.HistoryStatusFailed, 10, 10)
+	require.NoError(t, err)
+	assert.Len(t, page2, 2)
+	assert.True(t, page1[0].CreatedAt.After(page2[0].CreatedAt))
 }
 
 func TestRepoCRUD_History_DeleteByMovieID(t *testing.T) {

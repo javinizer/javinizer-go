@@ -99,6 +99,72 @@ func (_c *MockHistoryRepositoryInterface_Count_Call) RunAndReturn(run func(ctx c
 	return _c
 }
 
+// CountByMovieID provides a mock function for the type MockHistoryRepositoryInterface
+func (_mock *MockHistoryRepositoryInterface) CountByMovieID(ctx context.Context, movieID string) (int64, error) {
+	ret := _mock.Called(ctx, movieID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountByMovieID")
+	}
+
+	var r0 int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (int64, error)); ok {
+		return returnFunc(ctx, movieID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) int64); ok {
+		r0 = returnFunc(ctx, movieID)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, movieID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockHistoryRepositoryInterface_CountByMovieID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountByMovieID'
+type MockHistoryRepositoryInterface_CountByMovieID_Call struct {
+	*mock.Call
+}
+
+// CountByMovieID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieID string
+func (_e *MockHistoryRepositoryInterface_Expecter) CountByMovieID(ctx any, movieID any) *MockHistoryRepositoryInterface_CountByMovieID_Call {
+	return &MockHistoryRepositoryInterface_CountByMovieID_Call{Call: _e.mock.On("CountByMovieID", ctx, movieID)}
+}
+
+func (_c *MockHistoryRepositoryInterface_CountByMovieID_Call) Run(run func(ctx context.Context, movieID string)) *MockHistoryRepositoryInterface_CountByMovieID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_CountByMovieID_Call) Return(n int64, err error) *MockHistoryRepositoryInterface_CountByMovieID_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_CountByMovieID_Call) RunAndReturn(run func(ctx context.Context, movieID string) (int64, error)) *MockHistoryRepositoryInterface_CountByMovieID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CountByOperation provides a mock function for the type MockHistoryRepositoryInterface
 func (_mock *MockHistoryRepositoryInterface) CountByOperation(ctx context.Context, operation models.HistoryOperation) (int64, error) {
 	ret := _mock.Called(ctx, operation)
@@ -1023,6 +1089,246 @@ func (_c *MockHistoryRepositoryInterface_List_Call) Return(historys []models.His
 }
 
 func (_c *MockHistoryRepositoryInterface_List_Call) RunAndReturn(run func(ctx context.Context, limit int, offset int) ([]models.History, error)) *MockHistoryRepositoryInterface_List_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListByMovieID provides a mock function for the type MockHistoryRepositoryInterface
+func (_mock *MockHistoryRepositoryInterface) ListByMovieID(ctx context.Context, movieID string, limit int, offset int) ([]models.History, error) {
+	ret := _mock.Called(ctx, movieID, limit, offset)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListByMovieID")
+	}
+
+	var r0 []models.History
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, int) ([]models.History, error)); ok {
+		return returnFunc(ctx, movieID, limit, offset)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, int) []models.History); ok {
+		r0 = returnFunc(ctx, movieID, limit, offset)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.History)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int, int) error); ok {
+		r1 = returnFunc(ctx, movieID, limit, offset)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockHistoryRepositoryInterface_ListByMovieID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListByMovieID'
+type MockHistoryRepositoryInterface_ListByMovieID_Call struct {
+	*mock.Call
+}
+
+// ListByMovieID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieID string
+//   - limit int
+//   - offset int
+func (_e *MockHistoryRepositoryInterface_Expecter) ListByMovieID(ctx any, movieID any, limit any, offset any) *MockHistoryRepositoryInterface_ListByMovieID_Call {
+	return &MockHistoryRepositoryInterface_ListByMovieID_Call{Call: _e.mock.On("ListByMovieID", ctx, movieID, limit, offset)}
+}
+
+func (_c *MockHistoryRepositoryInterface_ListByMovieID_Call) Run(run func(ctx context.Context, movieID string, limit int, offset int)) *MockHistoryRepositoryInterface_ListByMovieID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_ListByMovieID_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_ListByMovieID_Call {
+	_c.Call.Return(historys, err)
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_ListByMovieID_Call) RunAndReturn(run func(ctx context.Context, movieID string, limit int, offset int) ([]models.History, error)) *MockHistoryRepositoryInterface_ListByMovieID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListByOperation provides a mock function for the type MockHistoryRepositoryInterface
+func (_mock *MockHistoryRepositoryInterface) ListByOperation(ctx context.Context, operation models.HistoryOperation, limit int, offset int) ([]models.History, error) {
+	ret := _mock.Called(ctx, operation, limit, offset)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListByOperation")
+	}
+
+	var r0 []models.History
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryOperation, int, int) ([]models.History, error)); ok {
+		return returnFunc(ctx, operation, limit, offset)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryOperation, int, int) []models.History); ok {
+		r0 = returnFunc(ctx, operation, limit, offset)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.History)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, models.HistoryOperation, int, int) error); ok {
+		r1 = returnFunc(ctx, operation, limit, offset)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockHistoryRepositoryInterface_ListByOperation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListByOperation'
+type MockHistoryRepositoryInterface_ListByOperation_Call struct {
+	*mock.Call
+}
+
+// ListByOperation is a helper method to define mock.On call
+//   - ctx context.Context
+//   - operation models.HistoryOperation
+//   - limit int
+//   - offset int
+func (_e *MockHistoryRepositoryInterface_Expecter) ListByOperation(ctx any, operation any, limit any, offset any) *MockHistoryRepositoryInterface_ListByOperation_Call {
+	return &MockHistoryRepositoryInterface_ListByOperation_Call{Call: _e.mock.On("ListByOperation", ctx, operation, limit, offset)}
+}
+
+func (_c *MockHistoryRepositoryInterface_ListByOperation_Call) Run(run func(ctx context.Context, operation models.HistoryOperation, limit int, offset int)) *MockHistoryRepositoryInterface_ListByOperation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 models.HistoryOperation
+		if args[1] != nil {
+			arg1 = args[1].(models.HistoryOperation)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_ListByOperation_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_ListByOperation_Call {
+	_c.Call.Return(historys, err)
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_ListByOperation_Call) RunAndReturn(run func(ctx context.Context, operation models.HistoryOperation, limit int, offset int) ([]models.History, error)) *MockHistoryRepositoryInterface_ListByOperation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListByStatus provides a mock function for the type MockHistoryRepositoryInterface
+func (_mock *MockHistoryRepositoryInterface) ListByStatus(ctx context.Context, status models.HistoryStatus, limit int, offset int) ([]models.History, error) {
+	ret := _mock.Called(ctx, status, limit, offset)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListByStatus")
+	}
+
+	var r0 []models.History
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryStatus, int, int) ([]models.History, error)); ok {
+		return returnFunc(ctx, status, limit, offset)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, models.HistoryStatus, int, int) []models.History); ok {
+		r0 = returnFunc(ctx, status, limit, offset)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.History)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, models.HistoryStatus, int, int) error); ok {
+		r1 = returnFunc(ctx, status, limit, offset)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockHistoryRepositoryInterface_ListByStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListByStatus'
+type MockHistoryRepositoryInterface_ListByStatus_Call struct {
+	*mock.Call
+}
+
+// ListByStatus is a helper method to define mock.On call
+//   - ctx context.Context
+//   - status models.HistoryStatus
+//   - limit int
+//   - offset int
+func (_e *MockHistoryRepositoryInterface_Expecter) ListByStatus(ctx any, status any, limit any, offset any) *MockHistoryRepositoryInterface_ListByStatus_Call {
+	return &MockHistoryRepositoryInterface_ListByStatus_Call{Call: _e.mock.On("ListByStatus", ctx, status, limit, offset)}
+}
+
+func (_c *MockHistoryRepositoryInterface_ListByStatus_Call) Run(run func(ctx context.Context, status models.HistoryStatus, limit int, offset int)) *MockHistoryRepositoryInterface_ListByStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 models.HistoryStatus
+		if args[1] != nil {
+			arg1 = args[1].(models.HistoryStatus)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_ListByStatus_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_ListByStatus_Call {
+	_c.Call.Return(historys, err)
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_ListByStatus_Call) RunAndReturn(run func(ctx context.Context, status models.HistoryStatus, limit int, offset int) ([]models.History, error)) *MockHistoryRepositoryInterface_ListByStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }

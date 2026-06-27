@@ -76,9 +76,17 @@ type HistoryRepositoryInterface interface {
 	Create(ctx context.Context, history *models.History) error
 	FindByID(ctx context.Context, id uint) (*models.History, error)
 	FindByMovieID(ctx context.Context, movieID string) ([]models.History, error)
+	// ListByMovieID returns a paginated slice of history records for the given movie ID.
+	ListByMovieID(ctx context.Context, movieID string, limit, offset int) ([]models.History, error)
+	// CountByMovieID returns the total number of history records for the given movie ID.
+	CountByMovieID(ctx context.Context, movieID string) (int64, error)
 	FindByBatchJobID(ctx context.Context, batchJobID string) ([]models.History, error)
 	FindByOperation(ctx context.Context, operation models.HistoryOperation, limit int) ([]models.History, error)
+	// ListByOperation returns a paginated slice of history records for the given operation.
+	ListByOperation(ctx context.Context, operation models.HistoryOperation, limit, offset int) ([]models.History, error)
 	FindByStatus(ctx context.Context, status models.HistoryStatus, limit int) ([]models.History, error)
+	// ListByStatus returns a paginated slice of history records for the given status.
+	ListByStatus(ctx context.Context, status models.HistoryStatus, limit, offset int) ([]models.History, error)
 	FindRecent(ctx context.Context, limit int) ([]models.History, error)
 	FindByDateRange(ctx context.Context, start, end time.Time) ([]models.History, error)
 	Count(ctx context.Context) (int64, error)

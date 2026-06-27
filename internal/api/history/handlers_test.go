@@ -773,3 +773,117 @@ func TestGetHistory_DefaultList(t *testing.T) {
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Records, 2)
 }
+
+// TestGetHistory_FilteredPagination verifies the filtered branches (movie_id,
+// operation, status) paginate at the repository layer instead of loading every
+// matching row. With >10 matching rows, limit=10&offset=0 returns exactly 10
+// records and the true total, and offset shifts the window without overlap.
+func TestGetHistory_FilteredPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	type filterCase struct {
+		name  string
+		query string
+		// movieIDs/op/status of the seed rows that the filter must match.
+		validate func(t *testing.T, page1, page2 []HistoryRecord, total int64)
+	}
+
+	seed := func(t *testing.T, repo *database.HistoryRepository, movieID string, op models.HistoryOperation, status models.HistoryStatus) {
+		t.Helper()
+		base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		for i := 0; i < 15; i++ {
+			require.NoError(t, repo.Create(context.Background(), &models.History{
+				MovieID:   movieID,
+				Operation: op,
+				Status:    status,
+				CreatedAt: base.Add(time.Duration(i) * time.Second),
+			}))
+		}
+	}
+
+	cases := []filterCase{
+		{
+			name:  "movie_id",
+			query: "movie_id=PAG-001",
+			validate: func(t *testing.T, page1, page2 []HistoryRecord, total int64) {
+				assert.Equal(t, int64(15), total)
+				for _, r := range append(append([]HistoryRecord{}, page1...), page2...) {
+					assert.Equal(t, "PAG-001", r.MovieID)
+				}
+			},
+		},
+		{
+			name:  "operation",
+			query: "operation=scrape",
+			validate: func(t *testing.T, page1, page2 []HistoryRecord, total int64) {
+				assert.Equal(t, int64(15), total)
+				for _, r := range append(append([]HistoryRecord{}, page1...), page2...) {
+					assert.Equal(t, models.HistoryOpScrape, r.Operation)
+				}
+			},
+		},
+		{
+			name:  "status",
+			query: "status=failed",
+			validate: func(t *testing.T, page1, page2 []HistoryRecord, total int64) {
+				assert.Equal(t, int64(15), total)
+				for _, r := range append(append([]HistoryRecord{}, page1...), page2...) {
+					assert.Equal(t, models.HistoryStatusFailed, r.Status)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			db, repo := setupHistoryTestDB(t)
+			defer func() { _ = db.Close() }()
+
+			// 15 matching rows + a few non-matching rows to prove the filter is scoped.
+			seed(t, repo, "PAG-001", models.HistoryOpScrape, models.HistoryStatusFailed)
+			require.NoError(t, repo.Create(context.Background(), &models.History{
+				MovieID: "OTHER", Operation: models.HistoryOpOrganize, Status: models.HistoryStatusSuccess,
+			}))
+
+			router := gin.New()
+			router.GET("/api/v1/history", getHistory(repo))
+
+			// First page: limit=10, offset=0 -> exactly 10 records and the true total.
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/history?limit=10&offset=0&"+tc.query, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code)
+
+			var resp1 HistoryListResponse
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp1))
+			assert.Equal(t, int64(15), resp1.Total, "total must reflect all matching rows, not just the page")
+			assert.Len(t, resp1.Records, 10, "first page must be capped at limit=10")
+			assert.Equal(t, 10, resp1.Limit)
+			assert.Equal(t, 0, resp1.Offset)
+
+			// Second page: offset=10 -> the remaining 5 records, no overlap with page 1.
+			req2 := httptest.NewRequest(http.MethodGet, "/api/v1/history?limit=10&offset=10&"+tc.query, nil)
+			w2 := httptest.NewRecorder()
+			router.ServeHTTP(w2, req2)
+			require.Equal(t, http.StatusOK, w2.Code)
+
+			var resp2 HistoryListResponse
+			require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
+			assert.Equal(t, int64(15), resp2.Total)
+			assert.Len(t, resp2.Records, 5, "second page must contain the remaining records")
+
+			// Pages must not overlap.
+			seen := make(map[uint]struct{}, len(resp1.Records))
+			for _, r := range resp1.Records {
+				seen[r.ID] = struct{}{}
+			}
+			for _, r := range resp2.Records {
+				_, dup := seen[r.ID]
+				assert.False(t, dup, "second page record %d must not repeat in first page", r.ID)
+			}
+
+			tc.validate(t, resp1.Records, resp2.Records, resp1.Total)
+		})
+	}
+}

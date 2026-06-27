@@ -40,6 +40,32 @@ func (r *HistoryRepository) FindByMovieID(ctx context.Context, movieID string) (
 	return history, nil
 }
 
+// ListByMovieID returns a paginated slice of history records for the given movie
+// ID, ordered by most recent first. When limit is zero no pagination is applied,
+// matching the semantics of BaseRepository.List.
+func (r *HistoryRepository) ListByMovieID(ctx context.Context, movieID string, limit, offset int) ([]models.History, error) {
+	var history []models.History
+	query := r.GetDB().WithContext(ctx).Where("movie_id = ?", movieID).Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit).Offset(offset)
+	}
+	err := query.Find(&history).Error
+	if err != nil {
+		return nil, wrapDBErr("find", fmt.Sprintf("history for movie %s", movieID), err)
+	}
+	return history, nil
+}
+
+// CountByMovieID returns the total number of history records for the given movie ID.
+func (r *HistoryRepository) CountByMovieID(ctx context.Context, movieID string) (int64, error) {
+	var count int64
+	err := r.GetDB().WithContext(ctx).Model(&models.History{}).Where("movie_id = ?", movieID).Count(&count).Error
+	if err != nil {
+		return 0, wrapDBErr("count", fmt.Sprintf("history for movie %s", movieID), err)
+	}
+	return count, nil
+}
+
 func (r *HistoryRepository) FindByOperation(ctx context.Context, operation models.HistoryOperation, limit int) ([]models.History, error) {
 	var history []models.History
 	query := r.GetDB().WithContext(ctx).Where("operation = ?", operation).Order("created_at DESC")
@@ -53,11 +79,43 @@ func (r *HistoryRepository) FindByOperation(ctx context.Context, operation model
 	return history, nil
 }
 
+// ListByOperation returns a paginated slice of history records for the given
+// operation, ordered by most recent first. When limit is zero no pagination is
+// applied, matching the semantics of BaseRepository.List.
+func (r *HistoryRepository) ListByOperation(ctx context.Context, operation models.HistoryOperation, limit, offset int) ([]models.History, error) {
+	var history []models.History
+	query := r.GetDB().WithContext(ctx).Where("operation = ?", operation).Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit).Offset(offset)
+	}
+	err := query.Find(&history).Error
+	if err != nil {
+		return nil, wrapDBErr("find", fmt.Sprintf("history by operation %s", operation), err)
+	}
+	return history, nil
+}
+
 func (r *HistoryRepository) FindByStatus(ctx context.Context, status models.HistoryStatus, limit int) ([]models.History, error) {
 	var history []models.History
 	query := r.GetDB().WithContext(ctx).Where("status = ?", status).Order("created_at DESC")
 	if limit > 0 {
 		query = query.Limit(limit)
+	}
+	err := query.Find(&history).Error
+	if err != nil {
+		return nil, wrapDBErr("find", fmt.Sprintf("history by status %s", status), err)
+	}
+	return history, nil
+}
+
+// ListByStatus returns a paginated slice of history records for the given status,
+// ordered by most recent first. When limit is zero no pagination is applied,
+// matching the semantics of BaseRepository.List.
+func (r *HistoryRepository) ListByStatus(ctx context.Context, status models.HistoryStatus, limit, offset int) ([]models.History, error) {
+	var history []models.History
+	query := r.GetDB().WithContext(ctx).Where("status = ?", status).Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit).Offset(offset)
 	}
 	err := query.Find(&history).Error
 	if err != nil {
