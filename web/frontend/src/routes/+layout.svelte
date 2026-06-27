@@ -2,8 +2,6 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
-	import { cubicOut } from 'svelte/easing';
-	import { fly } from 'svelte/transition';
 	import { QueryClientProvider } from '@tanstack/svelte-query';
 	import favicon from '$lib/assets/favicon.svg';
 	import Navigation from '$lib/components/Navigation.svelte';
@@ -300,10 +298,7 @@
 				<Navigation authenticated={authAuthenticated} username={authUsername} onLogout={handleLogout} />
 				<main class="route-container">
 					{#key page.url.pathname}
-						<div
-							class="route-content"
-							in:fly|local={{ y: 12, duration: 220, opacity: 0.15, easing: cubicOut }}
-						>
+						<div class="route-content">
 							{@render children?.()}
 						</div>
 					{/key}
@@ -330,10 +325,7 @@
 			<Navigation authenticated={authAuthenticated} username={authUsername} onLogout={handleLogout} />
 			<main class="route-container">
 				{#key page.url.pathname}
-					<div
-						class="route-content"
-						in:fly|local={{ y: 12, duration: 220, opacity: 0.15, easing: cubicOut }}
-					>
+					<div class="route-content">
 						{@render children?.()}
 					</div>
 				{/key}

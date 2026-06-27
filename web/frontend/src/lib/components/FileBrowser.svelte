@@ -565,7 +565,10 @@
 	{/if}
 
 	<!-- File List -->
-	<div class="space-y-1">
+	<!-- max-h + overflow-y-auto: cap the list height so a long browse page (PAGE_SIZE=100)
+	     can't stretch the persistent layout wrapper ~6000px and bleed that height into other
+	     routes (e.g. /jobs) after browse -> scrape navigations. -->
+	<div class="space-y-1 max-h-[70vh] overflow-y-auto pr-1">
 		{#if loading}
 			<div class="text-center py-8 text-muted-foreground">
 				<RefreshCw class="h-8 w-8 animate-spin mx-auto mb-2" />
