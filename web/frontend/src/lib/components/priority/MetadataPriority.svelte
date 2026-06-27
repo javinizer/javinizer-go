@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { cubicOut } from 'svelte/easing';
 	import { fade, fly, slide } from 'svelte/transition';
-	import { X, Info } from 'lucide-svelte';
+	import { X, Info, Ban } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import { confirmDialog } from '$lib/stores/dialog.svelte';
 	import Card from '../ui/Card.svelte';
@@ -9,6 +9,14 @@
 	import DraggableList from './DraggableList.svelte';
 	import FieldRow from './FieldRow.svelte';
 	import type { SettingsConfig, ScraperSettings } from '$lib/api/types';
+	import {
+		SKIP_FIELD_SENTINEL,
+		getGlobalPriority,
+		getFieldPriority,
+		isFieldOverridden,
+		getFieldStatus,
+		isSkipField
+	} from './priority';
 
 	interface Props {
 		config: SettingsConfig;
@@ -49,11 +57,6 @@
 		{ key: 'trailer_url', label: 'Trailer', category: 'Media', description: 'Preview video URL' }
 	];
 
-	// Helper to get global priority from config
-	function getGlobalPriority(): string[] {
-		return config?.scrapers?.priority || [];
-	}
-
 	function formatScraperName(name: string): string {
 		if (name === 'dmm') return 'DMM/Fanza';
 		if (name === 'libredmm') return 'LibreDMM (Fanza, MGStage, SOD, FC2)';
@@ -69,63 +72,13 @@
 		return name;
 	}
 
-	// Helper to get field priority (either custom or global)
-	// Empty arrays mean "use global", same as undefined
-	function getFieldPriority(fieldKey: string): string[] {
-		const fieldConfig = config?.metadata?.priority?.[fieldKey];
-		// If field config is undefined, null, or empty array, use global priority
-		if (!fieldConfig || fieldConfig.length === 0) {
-			return getGlobalPriority();
-		}
-		return fieldConfig;
-	}
-
-	// Check if field has custom override (either touched by user or already in config)
-	// Empty arrays are treated the same as undefined (not overridden)
-	function isFieldOverridden(fieldKey: string): boolean {
-		const fieldConfig = config?.metadata?.priority?.[fieldKey];
-		const globalPriority = getGlobalPriority();
-
-		// Empty or undefined means "use global" (not overridden)
-		if (!fieldConfig || fieldConfig.length === 0) {
-			return false;
-		}
-
-		// Only consider it overridden if it's different from global
-		return JSON.stringify(fieldConfig) !== JSON.stringify(globalPriority);
-	}
-
-	// Count override count
-	function getOverrideCount(): number {
-		if (!config?.metadata?.priority) return 0;
-		return metadataFields.filter((field) => isFieldOverridden(field.key)).length;
-	}
-
-	// Get scraper usage count (how many fields use this scraper in their priority)
-	function getScraperUsageCount(scraperName: string): number {
-		let count = 0;
-
-		// Count fields using this scraper (either in global or field-specific priority)
-		metadataFields.forEach((field) => {
-			const fieldPriority = getFieldPriority(field.key);
-			if (fieldPriority.includes(scraperName)) {
-				count++;
-			}
-		});
-
-		return count;
-	}
-
-	// Get list of fields using a specific scraper
-	function getFieldsUsingScaper(scraperName: string): string[] {
-		return metadataFields
-			.filter((field) => getFieldPriority(field.key).includes(scraperName))
-			.map((field) => field.label);
-	}
+	// Field priority / override helpers live in ./priority.ts (pure, unit-tested).
+	// They take `config` as their first argument and encode the three field
+	// states: "inherited" (green), "custom" (orange), "skipped" (grey).
 
 	// Get list of enabled scrapers
 	function getEnabledScrapers(): string[] {
-		const allScrapers = getGlobalPriority();
+		const allScrapers = getGlobalPriority(config);
 		return allScrapers.filter((scraperName) => {
 			const scraperCfg = config?.scrapers?.[scraperName];
 			return (scraperCfg as ScraperSettings)?.enabled !== false;
@@ -151,7 +104,7 @@
 	// Open field editor
 	function openFieldEditor(fieldKey: string) {
 		editingField = fieldKey;
-		editingPriority = [...getFieldPriority(fieldKey)];
+		editingPriority = [...getFieldPriority(config, fieldKey)];
 	}
 
 	// Save field priority
@@ -164,14 +117,16 @@
 		// Mark this field as touched
 		touchedFields.add(editingField);
 
-		const global = getGlobalPriority();
+		const global = getGlobalPriority(config);
 		const isSameAsGlobal = JSON.stringify(editingPriority) === JSON.stringify(global);
 
 		if (isSameAsGlobal) {
 			// If it matches global, set to empty array (signals "use global")
 			config.metadata.priority[editingField] = [];
 		} else {
-			// Otherwise save the custom priority
+			// Otherwise save the custom priority. This includes the __skip__
+			// sentinel, which is an exclusive override that leaves the field
+			// empty (no scraper named "__skip__" is ever consulted).
 			config.metadata.priority[editingField] = editingPriority;
 		}
 
@@ -180,7 +135,7 @@
 		editingField = null;
 	}
 
-	// Reset field to global
+	// Reset field to global (clears any override, including a skip)
 	function resetFieldToGlobal(fieldKey: string) {
 		if (!config.metadata?.priority) return;
 
@@ -192,6 +147,57 @@
 
 		// Create a deep clone to trigger reactivity
 		onUpdate(JSON.parse(JSON.stringify(config)));
+	}
+
+	// Skip this field: stage the __skip__ sentinel so the field is left empty.
+	// Confirms with the user before staging; the change persists on Save.
+	async function skipField() {
+		if (!editingField) return;
+		const fieldLabel =
+			metadataFields.find((f) => f.key === editingField)?.label ?? editingField;
+		const confirmed = await confirmDialog(
+			'Skip field',
+			`Skip scraping for "${fieldLabel}"? Under exclusive semantics, only the scrapers listed here are consulted — and the skip marker matches none of them, so the field will be left empty. You can re-enable it at any time.`
+		);
+		if (!confirmed) return;
+		editingPriority = [SKIP_FIELD_SENTINEL];
+	}
+
+	// Re-enable a skipped field: restore the inherited (global) scraper list so
+	// the user can reorder and save. Saving it unchanged restores "inherited".
+	function enableField() {
+		editingPriority = [...filterEnabledScrapers(getGlobalPriority(config))];
+	}
+
+	// Whether the field being edited is currently staged as skipped
+	const editingIsSkipped = $derived(isSkipField(editingPriority));
+
+	// Count override count
+	function getOverrideCount(): number {
+		if (!config?.metadata?.priority) return 0;
+		return metadataFields.filter((field) => isFieldOverridden(config, field.key)).length;
+	}
+
+	// Get scraper usage count (how many fields use this scraper in their priority)
+	function getScraperUsageCount(scraperName: string): number {
+		let count = 0;
+
+		// Count fields using this scraper (either in global or field-specific priority)
+		metadataFields.forEach((field) => {
+			const fieldPriority = getFieldPriority(config, field.key);
+			if (fieldPriority.includes(scraperName)) {
+				count++;
+			}
+		});
+
+		return count;
+	}
+
+	// Get list of fields using a specific scraper
+	function getFieldsUsingScaper(scraperName: string): string[] {
+		return metadataFields
+			.filter((field) => getFieldPriority(config, field.key).includes(scraperName))
+			.map((field) => field.label);
 	}
 
 	// Switch to Advanced mode warning
@@ -214,7 +220,7 @@
 	// Filtered fields based on showOnlyOverrides
 	const filteredFields = $derived.by(() => {
 		if (!showOnlyOverrides) return metadataFields;
-		return metadataFields.filter((field) => isFieldOverridden(field.key));
+		return metadataFields.filter((field) => isFieldOverridden(config, field.key));
 	});
 
 	// Group fields by category
@@ -282,7 +288,7 @@
 				{/if}
 			</span>
 			<DraggableList
-				items={filterEnabledScrapers(getGlobalPriority())}
+				items={filterEnabledScrapers(getGlobalPriority(config))}
 				onReorder={updateGlobalPriority}
 			>
 				{#snippet children({ item })}
@@ -315,9 +321,9 @@
 									<FieldRow
 										fieldName={field.key}
 										fieldLabel={field.label}
-										priority={getFieldPriority(field.key)}
-										globalPriority={getGlobalPriority()}
-										isOverridden={isFieldOverridden(field.key)}
+										priority={getFieldPriority(config, field.key)}
+										globalPriority={getGlobalPriority(config)}
+										status={getFieldStatus(config, field.key)}
 										onEdit={() => openFieldEditor(field.key)}
 										onReset={() => resetFieldToGlobal(field.key)}
 									/>
@@ -345,39 +351,66 @@
 				<!-- Header -->
 				<div class="flex items-start justify-between">
 					<div>
-						<h3 class="text-lg font-semibold">
+						<h3 class="text-lg font-semibold flex items-center gap-2">
 							Edit Priority: {metadataFields.find((f) => f.key === editingField)?.label}
+							{#if editingIsSkipped}
+								<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+									<Ban class="h-3 w-3" />
+									Skipped
+								</span>
+							{/if}
 						</h3>
 						<p class="text-sm text-muted-foreground mt-1">
 							{metadataFields.find((f) => f.key === editingField)?.description}
 						</p>
 					</div>
-					<Button variant="ghost" size="icon" onclick={() => (editingField = null)}>
+					<Button variant="ghost" size="icon" onclick={() => (editingField = null)} aria-label="Close editor">
 						{#snippet children()}
 							<X class="h-4 w-4" />
 						{/snippet}
 					</Button>
 				</div>
 
-				<!-- Draggable List -->
-				<div class="max-h-[50vh] overflow-y-scroll pr-1">
-					<DraggableList
-						items={filterEnabledScrapers(editingPriority)}
-						onReorder={(newPriority) => { editingPriority = newPriority; }}
-					>
-						{#snippet children({ item })}
-							<span class="font-medium">
-								{formatScraperName(item)}
-							</span>
-						{/snippet}
-					</DraggableList>
-				</div>
+				<!-- Draggable List OR Skipped banner -->
+				{#if editingIsSkipped}
+					<div class="rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-4 text-sm">
+						<div class="flex items-start gap-2">
+							<Ban class="h-4 w-4 text-slate-500 mt-0.5 shrink-0" />
+							<div class="space-y-1">
+								<p class="font-medium text-slate-700 dark:text-slate-300">
+									This field is skipped — it will be left empty.
+								</p>
+								<p class="text-muted-foreground">
+									No scrapers will be consulted for this field. Save to apply, or
+									re-enable it below to choose scrapers.
+								</p>
+							</div>
+						</div>
+					</div>
+				{:else}
+					<div class="max-h-[50vh] overflow-y-scroll pr-1">
+						<DraggableList
+							items={filterEnabledScrapers(editingPriority)}
+							onReorder={(newPriority) => { editingPriority = newPriority; }}
+						>
+							{#snippet children({ item })}
+								<span class="font-medium">
+									{formatScraperName(item)}
+								</span>
+							{/snippet}
+						</DraggableList>
+					</div>
+				{/if}
 
 				<!-- Info -->
-				<div class="bg-accent/50 rounded-lg p-3 text-xs text-muted-foreground">
+				<div class="bg-accent/50 rounded-lg p-3 text-xs text-muted-foreground space-y-1">
 					<p>
-						Scrapers are tried in order from top to bottom. The first scraper that returns data
-						for this field will be used.
+						Scrapers are tried top-to-bottom; the first one that returns data for this field is
+						used. Only the scrapers listed here are consulted — if none of them provide this
+						field, it is left empty (there is no fallback to the global list).
+					</p>
+					<p>
+						Use <span class="font-medium">Skip field</span> to suppress this field entirely.
 					</p>
 				</div>
 
@@ -388,6 +421,20 @@
 							Cancel
 						{/snippet}
 					</Button>
+					{#if editingIsSkipped}
+						<Button variant="outline" onclick={enableField} aria-label="Re-enable this field">
+							{#snippet children()}
+								Re-enable field
+							{/snippet}
+						</Button>
+					{:else}
+						<Button variant="outline" onclick={skipField} aria-label="Skip this field (leave it empty)">
+							{#snippet children()}
+								<Ban class="h-4 w-4" />
+								Skip field
+							{/snippet}
+						</Button>
+					{/if}
 					<Button onclick={saveFieldPriority}>
 						{#snippet children()}
 							Save Priority

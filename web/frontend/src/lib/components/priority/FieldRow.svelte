@@ -1,18 +1,19 @@
 <script lang="ts">
-	import { SquarePen, RotateCcw } from 'lucide-svelte';
+	import { SquarePen, RotateCcw, Ban } from 'lucide-svelte';
 	import Button from '../ui/Button.svelte';
+	import type { FieldStatus } from './priority';
 
 	interface Props {
 		fieldName: string;
 		fieldLabel: string;
 		priority: string[];
 		globalPriority: string[];
-		isOverridden: boolean;
+		status: FieldStatus;
 		onEdit: () => void;
 		onReset: () => void;
 	}
 
-	let { fieldName, fieldLabel, priority, globalPriority, isOverridden, onEdit, onReset }: Props =
+	let { fieldName, fieldLabel, priority, globalPriority, status, onEdit, onReset }: Props =
 		$props();
 
 	// Helper to format scraper names
@@ -30,51 +31,100 @@
 		if (name === 'caribbeancom') return 'Caribbeancom';
 		return name.charAt(0).toUpperCase() + name.slice(1);
 	}
+
+	// Per-status visual language.
+	// inherited (green): no override, uses the global priority list.
+	// custom   (orange): an exclusive override listing real scrapers.
+	// skipped  (grey):   the __skip__ sentinel — the field is suppressed (left empty).
+	const appearance: Record<
+		FieldStatus,
+		{ dot: string; badge: string; label: string; row: string }
+	> = {
+		inherited: {
+			dot: 'bg-green-500',
+			badge: 'text-green-600',
+			label: 'Inherited',
+			row: 'bg-background'
+		},
+		custom: {
+			dot: 'bg-orange-500',
+			badge: 'text-orange-600',
+			label: 'Custom',
+			row: 'bg-orange-50/50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-900'
+		},
+		skipped: {
+			dot: 'bg-slate-400',
+			badge: 'text-slate-500',
+			label: 'Skipped',
+			row: 'bg-slate-50 border-slate-300 dark:bg-slate-900/30 dark:border-slate-700'
+		}
+	};
+
+	const a = $derived(appearance[status]);
+	const isOverridden = $derived(status !== 'inherited');
 </script>
 
-<div
-	class="flex items-center gap-3 p-3 rounded-lg border {isOverridden
-		? 'bg-orange-50/50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-900'
-		: 'bg-background'}"
->
+<div class="flex items-center gap-3 p-3 rounded-lg border {a.row}">
 	<!-- Status Indicator -->
 	<div
-		class="w-2 h-2 rounded-full shrink-0 {isOverridden
-			? 'bg-orange-500'
-			: 'bg-green-500'}"
-		aria-label={isOverridden ? 'Custom priority' : 'Inherited from global'}
+		class="w-2 h-2 rounded-full shrink-0 {a.dot}"
+		role="img"
+		aria-label="{a.label} priority"
 	></div>
 
 	<!-- Field Name -->
 	<div class="flex-1 min-w-0">
-		<div class="font-medium text-sm">{fieldLabel}</div>
+		<div class="font-medium text-sm {status === 'skipped' ? 'text-muted-foreground line-through' : ''}">
+			{fieldLabel}
+		</div>
 		<div class="text-xs text-muted-foreground truncate">
-			{#each priority as scraper, index}
-				<span class="inline-flex items-center">
-					{formatScraperName(scraper)}
-					{#if index < priority.length - 1}
-						<span class="mx-1 text-muted-foreground/50">→</span>
-					{/if}
+			{#if status === 'skipped'}
+				<span class="inline-flex items-center gap-1">
+					<Ban class="h-3 w-3" />
+					Field will be left empty (suppressed)
 				</span>
-			{/each}
+			{:else}
+				{#each priority as scraper, index}
+					<span class="inline-flex items-center">
+						{formatScraperName(scraper)}
+						{#if index < priority.length - 1}
+							<span class="mx-1 text-muted-foreground/50">→</span>
+						{/if}
+					</span>
+				{/each}
+			{/if}
 		</div>
 	</div>
 
 	<!-- Status Badge -->
-	<div class="text-xs font-medium {isOverridden ? 'text-orange-600' : 'text-green-600'}">
-		{isOverridden ? 'Custom' : 'Inherited'}
+	<div class="text-xs font-medium {a.badge}">
+		{a.label}
 	</div>
 
 	<!-- Actions -->
 	<div class="flex gap-1">
 		{#if isOverridden}
-			<Button variant="ghost" size="icon" onclick={onReset} class="h-8 w-8">
+			<Button
+				variant="ghost"
+				size="icon"
+				onclick={onReset}
+				class="h-8 w-8"
+				aria-label="Reset to global priority"
+				title="Reset to global"
+			>
 				{#snippet children()}
 					<RotateCcw class="h-4 w-4" />
 				{/snippet}
 			</Button>
 		{/if}
-		<Button variant="ghost" size="icon" onclick={onEdit} class="h-8 w-8">
+		<Button
+			variant="ghost"
+			size="icon"
+			onclick={onEdit}
+			class="h-8 w-8"
+			aria-label="Edit priority"
+			title="Edit priority"
+		>
 			{#snippet children()}
 				<SquarePen class="h-4 w-4" />
 			{/snippet}
