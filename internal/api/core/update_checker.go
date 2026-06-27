@@ -31,11 +31,18 @@ func startUpdateChecker(rt *APIRuntime, cfg *config.Config, opts update.ServiceO
 
 	ctx := rt.ServerCtx()
 
-	// One-shot check warms the cache before the first GetStatus read so the
-	// nil-state skip in GetStatus stays benign for fresh installs. Errors are
-	// logged inside BackgroundCheck and never propagate to the caller, so a
-	// transient network failure cannot break startup.
-	go svc.BackgroundCheck(ctx)
+	// One-shot check warms the cache SYNCHRONOUSLY before the first GetStatus
+	// read so the nil-state skip in GetStatus stays benign for fresh installs.
+	// This runs blocking (not `go`) by design: dispatching it as a goroutine would
+	// let GetStatus race ahead of the cache write and return UpdateSourceNone on
+	// the very first read — defeating the warm-up. BackgroundCheck bounds itself
+	// with a 30s context timeout (and the GitHub HTTP client has a 10s timeout),
+	// so the worst-case startup delay on a network failure is bounded; the common
+	// case (GitHub reachable) completes in well under a second. Errors are logged
+	// inside BackgroundCheck and never propagate to the caller, so a transient
+	// network failure delays — but cannot break — startup. Gated on
+	// VersionCheckEnabled above, so a disabled config never blocks.
+	svc.BackgroundCheck(ctx)
 
 	// Periodic ticker; stops when ctx (rt.ServerCtx) is cancelled on shutdown.
 	svc.StartBackgroundCheck(ctx, svc.Interval())
