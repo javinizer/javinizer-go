@@ -482,4 +482,265 @@ func TestHistoryRepository(t *testing.T) {
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(results), 0)
 	})
+
+	// The following subtests cover the pagination methods added for issue #42
+	// (ListByMovieID, CountByMovieID, ListByOperation, ListByStatus). Each uses an
+	// isolated :memory: database so that the real HistoryOperation/HistoryStatus
+	// constants yield deterministic exact counts independent of the shared repo's
+	// accumulated state (mirrors the "Count with empty database" subtest pattern).
+
+	t.Run("ListByMovieID and CountByMovieID pagination", func(t *testing.T) {
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
+		db, err := New(cfg)
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+		repo := NewHistoryRepository(db)
+
+		ctx := context.TODO()
+		// Seed 5 matching rows (1ms spacing -> distinct created_at for deterministic
+		// DESC ordering) and 2 non-matching rows to prove the filter excludes them.
+		ids := make([]uint, 5)
+		for i := 0; i < 5; i++ {
+			h := &models.History{MovieID: "M-LIST", Operation: models.HistoryOpScrape, Status: models.HistoryStatusSuccess}
+			require.NoError(t, repo.Create(ctx, h))
+			ids[i] = h.ID
+			time.Sleep(1 * time.Millisecond)
+		}
+		for i := 0; i < 2; i++ {
+			require.NoError(t, repo.Create(ctx, &models.History{MovieID: "M-OTHER", Operation: models.HistoryOpScrape, Status: models.HistoryStatusSuccess}))
+		}
+
+		// CountByMovieID returns the true total for the matching movie.
+		count, err := repo.CountByMovieID(ctx, "M-LIST")
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), count)
+
+		// Paginated slices: limit honored, offset shifts the window (DESC created_at).
+		page1, err := repo.ListByMovieID(ctx, "M-LIST", 2, 0)
+		require.NoError(t, err)
+		require.Len(t, page1, 2)
+		page2, err := repo.ListByMovieID(ctx, "M-LIST", 2, 2)
+		require.NoError(t, err)
+		require.Len(t, page2, 2)
+		page3, err := repo.ListByMovieID(ctx, "M-LIST", 2, 4)
+		require.NoError(t, err)
+		require.Len(t, page3, 1)
+
+		// ids[4] is the most recently inserted -> newest first under DESC ordering.
+		assert.Equal(t, ids[4], page1[0].ID)
+		assert.Equal(t, ids[3], page1[1].ID)
+		assert.Equal(t, ids[2], page2[0].ID)
+		assert.Equal(t, ids[1], page2[1].ID)
+		assert.Equal(t, ids[0], page3[0].ID)
+
+		// limit=0 applies no pagination, returning all matching rows in DESC order.
+		all, err := repo.ListByMovieID(ctx, "M-LIST", 0, 0)
+		require.NoError(t, err)
+		require.Len(t, all, 5)
+		for i := 0; i < len(all)-1; i++ {
+			assert.True(t, all[i].CreatedAt.After(all[i+1].CreatedAt), "expected DESC created_at ordering")
+		}
+	})
+
+	t.Run("ListByMovieID empty result and CountByMovieID zero", func(t *testing.T) {
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
+		db, err := New(cfg)
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+		repo := NewHistoryRepository(db)
+
+		ctx := context.TODO()
+		// Seed a row for a different movie to prove the filter excludes it.
+		require.NoError(t, repo.Create(ctx, &models.History{MovieID: "M-OTHER", Operation: models.HistoryOpScrape, Status: models.HistoryStatusSuccess}))
+
+		results, err := repo.ListByMovieID(ctx, "NOPE-EMPTY", 10, 0)
+		require.NoError(t, err)
+		assert.Empty(t, results)
+
+		count, err := repo.CountByMovieID(ctx, "NOPE-EMPTY")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), count)
+	})
+
+	t.Run("ListByMovieID and CountByMovieID error on closed db", func(t *testing.T) {
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
+		db, err := New(cfg)
+		require.NoError(t, err)
+		require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+		repo := NewHistoryRepository(db)
+
+		// Closing the underlying connection forces the query error branch (wrapDBErr).
+		require.NoError(t, db.Close())
+
+		ctx := context.TODO()
+		_, err = repo.ListByMovieID(ctx, "M-LIST", 10, 0)
+		assert.Error(t, err)
+
+		_, err = repo.CountByMovieID(ctx, "M-LIST")
+		assert.Error(t, err)
+	})
+
+	t.Run("ListByOperation pagination", func(t *testing.T) {
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
+		db, err := New(cfg)
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+		repo := NewHistoryRepository(db)
+
+		ctx := context.TODO()
+		// Seed 5 matching (scrape) + 2 non-matching (organize) rows.
+		ids := make([]uint, 5)
+		for i := 0; i < 5; i++ {
+			h := &models.History{MovieID: "OP-LIST", Operation: models.HistoryOpScrape, Status: models.HistoryStatusSuccess}
+			require.NoError(t, repo.Create(ctx, h))
+			ids[i] = h.ID
+			time.Sleep(1 * time.Millisecond)
+		}
+		for i := 0; i < 2; i++ {
+			require.NoError(t, repo.Create(ctx, &models.History{MovieID: "OP-OTHER", Operation: models.HistoryOpOrganize, Status: models.HistoryStatusSuccess}))
+		}
+
+		// CountByOperation confirms the true total of matching rows.
+		count, err := repo.CountByOperation(ctx, models.HistoryOpScrape)
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), count)
+
+		page1, err := repo.ListByOperation(ctx, models.HistoryOpScrape, 2, 0)
+		require.NoError(t, err)
+		require.Len(t, page1, 2)
+		page2, err := repo.ListByOperation(ctx, models.HistoryOpScrape, 2, 2)
+		require.NoError(t, err)
+		require.Len(t, page2, 2)
+		page3, err := repo.ListByOperation(ctx, models.HistoryOpScrape, 2, 4)
+		require.NoError(t, err)
+		require.Len(t, page3, 1)
+
+		assert.Equal(t, ids[4], page1[0].ID)
+		assert.Equal(t, ids[3], page1[1].ID)
+		assert.Equal(t, ids[2], page2[0].ID)
+		assert.Equal(t, ids[1], page2[1].ID)
+		assert.Equal(t, ids[0], page3[0].ID)
+
+		// limit=0 applies no pagination, returning all matching rows in DESC order.
+		all, err := repo.ListByOperation(ctx, models.HistoryOpScrape, 0, 0)
+		require.NoError(t, err)
+		require.Len(t, all, 5)
+		for i := 0; i < len(all)-1; i++ {
+			assert.True(t, all[i].CreatedAt.After(all[i+1].CreatedAt), "expected DESC created_at ordering")
+		}
+	})
+
+	t.Run("ListByOperation empty result", func(t *testing.T) {
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
+		db, err := New(cfg)
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+		repo := NewHistoryRepository(db)
+
+		ctx := context.TODO()
+		// Seed a non-matching operation to prove the filter excludes it.
+		require.NoError(t, repo.Create(ctx, &models.History{MovieID: "OP-OTHER", Operation: models.HistoryOpOrganize, Status: models.HistoryStatusSuccess}))
+
+		results, err := repo.ListByOperation(ctx, models.HistoryOpScrape, 10, 0)
+		require.NoError(t, err)
+		assert.Empty(t, results)
+	})
+
+	t.Run("ListByOperation error on closed db", func(t *testing.T) {
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
+		db, err := New(cfg)
+		require.NoError(t, err)
+		require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+		repo := NewHistoryRepository(db)
+
+		require.NoError(t, db.Close())
+
+		_, err = repo.ListByOperation(context.TODO(), models.HistoryOpScrape, 10, 0)
+		assert.Error(t, err)
+	})
+
+	t.Run("ListByStatus pagination", func(t *testing.T) {
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
+		db, err := New(cfg)
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+		repo := NewHistoryRepository(db)
+
+		ctx := context.TODO()
+		// Seed 5 matching (success) + 2 non-matching (failed) rows.
+		ids := make([]uint, 5)
+		for i := 0; i < 5; i++ {
+			h := &models.History{MovieID: "ST-LIST", Operation: models.HistoryOpScrape, Status: models.HistoryStatusSuccess}
+			require.NoError(t, repo.Create(ctx, h))
+			ids[i] = h.ID
+			time.Sleep(1 * time.Millisecond)
+		}
+		for i := 0; i < 2; i++ {
+			require.NoError(t, repo.Create(ctx, &models.History{MovieID: "ST-OTHER", Operation: models.HistoryOpScrape, Status: models.HistoryStatusFailed}))
+		}
+
+		// CountByStatus confirms the true total of matching rows.
+		count, err := repo.CountByStatus(ctx, models.HistoryStatusSuccess)
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), count)
+
+		page1, err := repo.ListByStatus(ctx, models.HistoryStatusSuccess, 2, 0)
+		require.NoError(t, err)
+		require.Len(t, page1, 2)
+		page2, err := repo.ListByStatus(ctx, models.HistoryStatusSuccess, 2, 2)
+		require.NoError(t, err)
+		require.Len(t, page2, 2)
+		page3, err := repo.ListByStatus(ctx, models.HistoryStatusSuccess, 2, 4)
+		require.NoError(t, err)
+		require.Len(t, page3, 1)
+
+		assert.Equal(t, ids[4], page1[0].ID)
+		assert.Equal(t, ids[3], page1[1].ID)
+		assert.Equal(t, ids[2], page2[0].ID)
+		assert.Equal(t, ids[1], page2[1].ID)
+		assert.Equal(t, ids[0], page3[0].ID)
+
+		// limit=0 applies no pagination, returning all matching rows in DESC order.
+		all, err := repo.ListByStatus(ctx, models.HistoryStatusSuccess, 0, 0)
+		require.NoError(t, err)
+		require.Len(t, all, 5)
+		for i := 0; i < len(all)-1; i++ {
+			assert.True(t, all[i].CreatedAt.After(all[i+1].CreatedAt), "expected DESC created_at ordering")
+		}
+	})
+
+	t.Run("ListByStatus empty result", func(t *testing.T) {
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
+		db, err := New(cfg)
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+		repo := NewHistoryRepository(db)
+
+		ctx := context.TODO()
+		// Seed a non-matching status to prove the filter excludes it.
+		require.NoError(t, repo.Create(ctx, &models.History{MovieID: "ST-OTHER", Operation: models.HistoryOpScrape, Status: models.HistoryStatusFailed}))
+
+		results, err := repo.ListByStatus(ctx, models.HistoryStatusSuccess, 10, 0)
+		require.NoError(t, err)
+		assert.Empty(t, results)
+	})
+
+	t.Run("ListByStatus error on closed db", func(t *testing.T) {
+		cfg := &Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"}
+		db, err := New(cfg)
+		require.NoError(t, err)
+		require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+		repo := NewHistoryRepository(db)
+
+		require.NoError(t, db.Close())
+
+		_, err = repo.ListByStatus(context.TODO(), models.HistoryStatusSuccess, 10, 0)
+		assert.Error(t, err)
+	})
 }
