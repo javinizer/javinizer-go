@@ -1,22 +1,23 @@
-# CodeRabbit configuration for the architecture-overhaul PR.
+# CodeRabbit configuration for javinizer-go
 #
-# FULL SCOPE restored after the 5-pass chunked full review (all 607 reviewable
-# files reviewed across passes 1–5, all findings resolved). Test files,
-# generated code, mocks, and bulky non-source files remain excluded to keep
-# production source in scope within the 150-file-per-review limit.
+# Durable repo-level review policy. Production source is in scope; tests,
+# generated code (mocks, swagger), and lockfiles are excluded to keep focus
+# within the per-review file limit.
 #
-# Chunked review history (all passes complete, findings fixed):
-#   1. internal/api (137)
-#   2. orchestration+config: worker/workflow/websocket/config + cmd/.github/docs/root (121)
-#   3. scrapers+scrape-infra (111)
-#   4. data+processing (128)
-#   5. frontend+tui+utils (132)
-#
-# path_instructions consolidated from all 5 passes + the pre-chunked config.
+# path_instructions encode forward-looking guardrails (invariants that must
+# hold on future changes), not reminders of already-fixed bugs.
 
 reviews:
+  # Auto-review PRs; skip drafts.
+  auto_review:
+    enabled: true
+    drafts: false
+
+  high_level_summary: true
+  poem: false
+
   path_filters:
-    # --- Permanent excludes (tests, generated, lockfiles) ---
+    # --- Excludes (tests, generated code, lockfiles, config noise) ---
     - "!**/*_test.go"
     - "!internal/mocks/**"
     - "!docs/swagger/**"
@@ -34,60 +35,56 @@ reviews:
     - "!**/package-lock.json"
 
   path_instructions:
-    # --- Worker / orchestration (from pre-chunked config) ---
+    # --- Worker / orchestration guardrails ---
     - path: "internal/worker/job_store_persist.go"
       instructions: >
-        Focus on wireJobDeps and reconstructBatchJob — these are the job
-        reconstruction paths after server restart. Verify that MovieRepo,
-        BatchCfg, PosterGen, and Matcher are properly restored so that
-        post-restart apply/rescrape and movie-edit persistence work correctly.
+        Guardrail: wireJobDeps and reconstructBatchJob (job reconstruction
+        after server restart) must fully restore MovieRepo, BatchCfg,
+        PosterGen, and Matcher so post-restart apply/rescrape and movie-edit
+        persistence work.
     - path: "internal/worker/job_store.go"
       instructions: >
-        Focus on SetReconstructionDeps — this re-hydrates infrastructure
-        dependencies on jobs loaded from the database at startup, after
-        the BatchJobFactory is built. Verify thread-safety of the
-        re-hydration loop.
+        Guardrail: SetReconstructionDeps re-hydrates infrastructure
+        dependencies on jobs loaded from the database at startup; the
+        re-hydration loop must be thread-safe.
     - path: "internal/worker/apply_phase.go"
       instructions: >
-        Focus on applyFile's named return + withFileRecovery(rc, &outcome)
-        deferred recovery — a recovered panic must propagate Failed/Panic to
-        the caller (trackApplyResults), never silently mark a file organized.
+        Guardrail: applyFile's deferred withFileRecovery(rc, &outcome) must
+        propagate a recovered panic as Failed/Panic to trackApplyResults —
+        never silently mark a panicked file as organized.
     - path: "internal/worker/batch_job.go"
       instructions: >
-        isJobTransitioned excludes Completed/Organized (valid rescrape sources).
-        excludeFile only cancels Pending/Running jobs — never clobber a
-        terminal-success (Completed/Organized) job when its last file is excluded.
+        Guardrail: excludeFile may only cancel Pending/Running jobs — never
+        clobber a terminal-success (Completed/Organized) job when its last
+        file is excluded.
     - path: "internal/api/system/config.go"
       instructions: >
-        HashProxyConfig errors must fail closed (return error) at both the
-        validation path and the ConfigUpdateMu save flow — never discard a
-        hash failure, or a token can be validated against the wrong proxy hash.
+        Guardrail: HashProxyConfig failures must fail closed (return error)
+        at both validation and the ConfigUpdateMu save flow — never discard
+        a hash failure, or a token can be validated against the wrong proxy.
     - path: "internal/api/system/translation.go"
       instructions: >
-        DeepL base_url must be validated (valid http(s) URL) before forwarding to
-        fetchDeepLUsage, mirroring getTranslationModels — reject with 400 to avoid
-        502 misclassification and SSRF.
-    - path: "internal/api/system/proxy.go"
-      instructions: >
-        Focus on the verification token scope — direct proxy tests should
-        issue tokens with scope "global" (not "direct") so they can be
-        validated by config-save validation.
+        Guardrail: DeepL base_url must be validated as a valid http(s) URL
+        before forwarding to fetchDeepLUsage, mirroring getTranslationModels;
+        reject with 400 to avoid 502 misclassification and SSRF.
     - path: "internal/api/core/runtime_manager.go"
       instructions: >
-        Focus on buildBatchJobFactory — verify that SetReconstructionDeps
-        is called after the factory dependencies are available, ensuring
-        reconstructed jobs get the correct BatchCfg/PosterGen/Matcher.
+        Guardrail: buildBatchJobFactory must call SetReconstructionDeps after
+        factory dependencies are available, so reconstructed jobs get the
+        correct BatchCfg/PosterGen/Matcher.
     - path: "internal/api/core/config_narrowing.go"
       instructions: >
-        APIConfig must surface download-proxy profiles (cfg.Output.Download.
-        DownloadProxy) so scrapers.go can offer download_proxy.profile choices.
-        Keep the Config-bridge reads comment + bridges_doc.go reverse index in sync.
+        Guardrail: APIConfig must surface download-proxy profiles
+        (cfg.Output.Download.DownloadProxy) so scrapers.go can offer
+        download_proxy.profile choices. Keep the Config-bridge reads comment
+        and bridges_doc.go reverse index in sync.
     - path: "internal/workflow/compare_diff.go"
       instructions: >
-        release_date must compare date-only formatted values (formatTimePtr),
-        not raw time.Time, to avoid timezone/time-of-day false mismatches.
+        Guardrail: release_date must compare date-only formatted values
+        (formatTimePtr), not raw time.Time, to avoid timezone/time-of-day
+        false mismatches.
 
-    # --- Frontend (from pass 5) ---
+    # --- Frontend ---
     - path: "web/frontend/src/lib/api/**"
       instructions: >
         Focus: API client correctness (request/response typing, error handling, no silent fetch failures), query key stability across operation modes, no leaked API tokens in client code. Flag unhandled non-2xx responses or untyped any casts.
@@ -107,7 +104,7 @@ reviews:
       instructions: >
         Focus: build/test config correctness (vite, vitest, playwright, tailwind, svelte config) — no broken aliases, no disabled type-checking, E2E config targets real endpoints. Flag configs that silently skip tests or widen CSP unsafely.
 
-    # --- TUI + utils (from pass 5) ---
+    # --- TUI + utils ---
     - path: "internal/tui/**"
       instructions: >
         Focus: Bubble Tea model/view/handlers correctness (no goroutine leaks in event loop, clean program teardown, Update returns consistent model+cmd, no unbounded message buffer). Flag panics in view rendering or missing quit handling.
@@ -144,7 +141,3 @@ reviews:
     - path: "internal/coverage/**"
       instructions: >
         Focus: coverage enforcement tool correctness (threshold computation, no false pass on missing packages). Flag coverage checks that ignore test build failures.
-
-review_status:
-  fail_commit_in_status: false
-  convey_status: false
