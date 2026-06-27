@@ -20,8 +20,14 @@ type PosterGenerator interface {
 //  1. Poster→Cover URL fallback: resolves the poster URL from the movie's
 //     PosterURL field, falling back to CoverURL when no explicit poster exists.
 //  2. Movie state mutation: after a successful download, sets
-//     CroppedPosterURL and ShouldCropPoster on the movie so downstream
-//     consumers (API handlers, persistence) see the updated poster state.
+//     CroppedPosterURL on the movie so downstream consumers (API handlers,
+//     persistence) see the updated temp preview poster. It intentionally
+//     does NOT touch ShouldCropPoster: that flag is the aggregator's
+//     source-derived statement about whether the FINAL poster needs
+//     cropping, and the apply-phase downloadPoster relies on it surviving
+//     scrape -> commit -> apply to crop the on-disk poster. Resetting it
+//     here (as an earlier version did) defeated that gate and left the
+//     final folder poster uncropped.
 //  3. Error sanitization: wraps download errors through sanitizedErrorFrom/
 //     stripSensitivePaths so internal filesystem paths never leak to callers.
 //
@@ -77,8 +83,11 @@ func (g *ScrapePosterGenerator) GeneratePoster(ctx context.Context, jobID string
 		return sanitizedErr
 	}
 
+	// CroppedPosterURL points at the temp preview poster (always cropped by
+	// DownloadFromURL). ShouldCropPoster is deliberately left untouched: it is
+	// the aggregator's source-derived flag that the apply-phase downloadPoster
+	// uses to decide whether to crop the FINAL on-disk poster.
 	movie.Poster.CroppedPosterURL = result.CroppedURL
-	movie.Poster.ShouldCropPoster = false
 	return nil
 }
 
