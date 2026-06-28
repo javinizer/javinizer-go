@@ -847,6 +847,20 @@ func TestExtractRating_OldSite(t *testing.T) {
 			expectedVotes: 100,
 		},
 		{
+			name:          "new dcd-review format",
+			html:          `<html><head></head><body><div class="dcd-review__points"><p class="dcd-review__average">平均評価<strong>4.5</strong></p><p class="dcd-review__evaluates">総評価数<strong>2</strong>（1件のコメント）</p></div></body></html>`,
+			expectNil:     false,
+			expectedScore: 9.0, // 4.5 * 2 = 9.0
+			expectedVotes: 2,
+		},
+		{
+			name:          "hybrid new score + legacy votes fallback",
+			html:          `<html><head></head><body><p class="dcd-review__average">平均評価<strong>4.5</strong></p><p class="d-review__evaluates">評価数: <strong>100</strong></p></body></html>`,
+			expectNil:     false,
+			expectedScore: 9.0, // 4.5 * 2 = 9.0
+			expectedVotes: 100,
+		},
+		{
 			name:      "no rating",
 			html:      `<html><body>No rating</body></html>`,
 			expectNil: true,
@@ -974,6 +988,30 @@ func TestExtractDirector_EdgeCases(t *testing.T) {
 			html:        `<a href="?director=123">  Director Name  </a>`,
 			expected:    "Director Name",
 			description: "Should clean whitespace from director name",
+		},
+		{
+			name:        "Director with new path-based href",
+			html:        `<a href="/mono/dvd/-/list/=/article=director/id=102296/">マサルパンサー</a>`,
+			expected:    "マサルパンサー",
+			description: "Should extract director from new DMM path-based href (article=director/id=)",
+		},
+		{
+			name:        "Director in new table-row format with 監督 label",
+			html:        `<table><tr><td>監督：</td><td><a href="/mono/dvd/-/list/=/article=director/id=102296/">マサルパンサー</a></td></tr></table>`,
+			expected:    "マサルパンサー",
+			description: "Should extract director from new DMM table format with 監督 label",
+		},
+		{
+			name:        "breadcrumb article=directory does not false-match director",
+			html:        `<a href="/mono/dvd/-/list/=/article=directory/id=5/">メーカー</a>`,
+			expected:    "",
+			description: "article=directory/id= (breadcrumb) must not match the article=director/id= selector",
+		},
+		{
+			name:        "mixed old and new director links — first in DOM wins",
+			html:        `<a href="?director=123">Old Director</a><a href="/mono/dvd/-/list/=/article=director/id=456/">New Director</a>`,
+			expected:    "Old Director",
+			description: "goquery returns combined-selector matches in document order; first match wins",
 		},
 		{
 			name:        "No director",

@@ -17,7 +17,6 @@ import (
 var (
 	dateRegex      = regexp.MustCompile(`\d{4}/\d{2}/\d{2}`)
 	runtimeRegex   = regexp.MustCompile(`(\d{2,3})\s?(?:minutes|分)`)
-	directorRegex  = regexp.MustCompile(`<a.*?href="[^"]*\?director=(\d+)".*?>([^<]+)</a>`)
 	seriesRegex    = regexp.MustCompile(`<a href="(?:/digital/videoa/|(?:/en)?/mono/dvd/)-/list/=/article=series/id=\d*/"[^>]*?>(.*)</a></td>`)
 	ratingRegex    = regexp.MustCompile(`<strong>(.*)\s?(?:points|点)</strong>`)
 	votesRegex     = regexp.MustCompile(`<p class="d-review__evaluates">.*?<strong>(\d+)</strong>`)
@@ -260,13 +259,13 @@ func (s *scraper) extractRuntime(doc *goquery.Document) int {
 }
 
 func (s *scraper) extractDirector(doc *goquery.Document) string {
-	html, _ := doc.Html()
-	matches := directorRegex.FindStringSubmatch(html)
-
-	if len(matches) > 2 {
-		return scraperutil.CleanString(matches[2])
-	}
-	return ""
+	var director string
+	doc.Find("a[href*='?director='], a[href*='/article=director/id=']").Each(func(i int, sel *goquery.Selection) {
+		if director == "" {
+			director = scraperutil.CleanString(sel.Text())
+		}
+	})
+	return director
 }
 
 func (s *scraper) extractMaker(doc *goquery.Document, isNewSite bool) string {
@@ -319,40 +318,43 @@ func (s *scraper) extractRating(doc *goquery.Document, isNewSite bool) *models.R
 		return nil
 	}
 
-	html, _ := doc.Html()
-	matches := ratingRegex.FindStringSubmatch(html)
-
-	if len(matches) > 1 {
-		ratingStr := matches[1]
-
-		ratingMap := map[string]float64{
-			"One":   1.0,
-			"Two":   2.0,
-			"Three": 3.0,
-			"Four":  4.0,
-			"Five":  5.0,
+	var rating float64
+	if scoreSel := doc.Find(".dcd-review__average strong").First(); scoreSel.Length() > 0 {
+		rating, _ = strconv.ParseFloat(strings.TrimSpace(scoreSel.Text()), 64)
+	} else {
+		html, _ := doc.Html()
+		if matches := ratingRegex.FindStringSubmatch(html); len(matches) > 1 {
+			ratingStr := matches[1]
+			ratingMap := map[string]float64{
+				"One":   1.0,
+				"Two":   2.0,
+				"Three": 3.0,
+				"Four":  4.0,
+				"Five":  5.0,
+			}
+			if val, exists := ratingMap[ratingStr]; exists {
+				rating = val
+			} else {
+				rating, _ = strconv.ParseFloat(ratingStr, 64)
+			}
 		}
+	}
+	rating = rating * 2
 
-		rating := 0.0
-		if val, exists := ratingMap[ratingStr]; exists {
-			rating = val
-		} else {
-			rating, _ = strconv.ParseFloat(ratingStr, 64)
-		}
-
-		rating = rating * 2
-
-		votesMatches := votesRegex.FindStringSubmatch(html)
-		votes := 0
-		if len(votesMatches) > 1 {
+	var votes int
+	if votesSel := doc.Find(".dcd-review__evaluates strong").First(); votesSel.Length() > 0 {
+		votes, _ = strconv.Atoi(strings.TrimSpace(votesSel.Text()))
+	} else {
+		html, _ := doc.Html()
+		if votesMatches := votesRegex.FindStringSubmatch(html); len(votesMatches) > 1 {
 			votes, _ = strconv.Atoi(votesMatches[1])
 		}
+	}
 
-		if rating > 0 || votes > 0 {
-			return &models.Rating{
-				Score: rating,
-				Votes: votes,
-			}
+	if rating > 0 || votes > 0 {
+		return &models.Rating{
+			Score: rating,
+			Votes: votes,
 		}
 	}
 	return nil
