@@ -421,9 +421,11 @@ func TestService_ForceCheck_NotModifiedKeepsCachedState(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, status)
 
-	// Cached version + availability are preserved verbatim.
+	// Cached version is preserved; availability is RE-EVALUATED under the
+	// current stableOnly policy (here stableOnly=false, so the prerelease stays
+	// available — the re-evaluation reproduces the cached value).
 	assert.Equal(t, "v0.3.15-alpha", status.Version)
-	assert.True(t, status.Available, "availability carried over from cache")
+	assert.True(t, status.Available, "prerelease stays available with stableOnly=false")
 	assert.True(t, status.Prerelease)
 	// CheckedAt is refreshed; the stale timestamp must be gone.
 	assert.NotEqual(t, "2026-01-01T00:00:00Z", status.CheckedAt)
@@ -466,4 +468,130 @@ func TestService_ForceCheck_NotModifiedWithoutCache(t *testing.T) {
 	require.NotNil(t, status)
 	assert.Equal(t, UpdateSourceError, status.Source)
 	assert.Empty(t, status.Version, "no version fabricated from a 304 with no cache")
+}
+
+// TestService_ForceCheck_NotModifiedReEvaluatesStableOnly is the regression
+// test for the bug CodeRabbit flagged on the 304 path: a prerelease previously
+// cached as Available=true must be suppressed on a 304 once the user enables
+// version_check_stable_only. The releases are unchanged (304), but the policy
+// term changed, so availability is re-derived rather than carried over.
+func TestService_ForceCheck_NotModifiedReEvaluatesStableOnly(t *testing.T) {
+	origVersion := appversion.Version
+	defer func() { appversion.Version = origVersion }()
+	appversion.Version = "v0.3.14-alpha"
+
+	tmpDir := t.TempDir()
+	statePath := filepath.Join(tmpDir, "update_cache.json")
+	store := newStateStore(statePath, defaultCheckInterval)
+
+	// Prior check ran with stableOnly=false, so a prerelease was cached as
+	// available — the state the bug would blindly preserve.
+	prior := &updateState{
+		Version:    "v0.3.15-alpha",
+		CheckedAt:  "2026-01-01T00:00:00Z",
+		Available:  true,
+		Prerelease: true,
+		Source:     UpdateSourceFresh,
+		ETag:       `W/"deadbeef"`,
+	}
+	require.NoError(t, store.SaveState(prior))
+
+	chk := &mockChecker{err: ErrNotModified}
+	svc := &service{
+		checker:    chk,
+		store:      store,
+		statePath:  statePath,
+		interval:   24 * time.Hour,
+		enabled:    true,
+		stableOnly: true, // user toggled stable-only ON since the prior check
+	}
+
+	status, err := svc.ForceCheck(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, status)
+
+	// Version + prerelease flag preserved (the 304 means releases unchanged).
+	assert.Equal(t, "v0.3.15-alpha", status.Version)
+	assert.True(t, status.Prerelease)
+	// Available is RE-EVALUATED and suppressed under the new stableOnly policy.
+	assert.False(t, status.Available, "prerelease must be suppressed on 304 once stableOnly is enabled")
+	assert.Equal(t, UpdateSourceCached, status.Source)
+
+	// The suppression persists into the on-disk cache for subsequent reads.
+	reloaded, err := store.LoadState()
+	require.NoError(t, err)
+	assert.False(t, reloaded.Available)
+}
+
+// TestService_ForceCheck_NotModifiedReEnablesWhenStableOnlyCleared verifies
+// the inverse of the stableOnly re-evaluation: if a prerelease was cached with
+// Available=false (because stableOnly was on) and the user later disables it,
+// a 304 re-evaluates availability back to true.
+func TestService_ForceCheck_NotModifiedReEnablesWhenStableOnlyCleared(t *testing.T) {
+	origVersion := appversion.Version
+	defer func() { appversion.Version = origVersion }()
+	appversion.Version = "v0.3.14-alpha"
+
+	tmpDir := t.TempDir()
+	statePath := filepath.Join(tmpDir, "update_cache.json")
+	store := newStateStore(statePath, defaultCheckInterval)
+
+	prior := &updateState{
+		Version:    "v0.3.15-alpha",
+		CheckedAt:  "2026-01-01T00:00:00Z",
+		Available:  false, // suppressed under the old stableOnly=true policy
+		Prerelease: true,
+		Source:     UpdateSourceFresh,
+		ETag:       `W/"deadbeef"`,
+	}
+	require.NoError(t, store.SaveState(prior))
+
+	chk := &mockChecker{err: ErrNotModified}
+	svc := &service{
+		checker:    chk,
+		store:      store,
+		statePath:  statePath,
+		interval:   24 * time.Hour,
+		enabled:    true,
+		stableOnly: false, // user disabled stable-only since the prior check
+	}
+
+	status, err := svc.ForceCheck(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	assert.True(t, status.Available, "prerelease re-surfaced once stableOnly is cleared")
+	assert.True(t, status.Prerelease)
+}
+
+// TestService_ForceCheck_ResetsConditionalHintsWhenCacheEmpty verifies the
+// sticky-state fix on the ConditionalChecker path: the githubChecker is shared
+// across checks, so if the on-disk cache is absent (fresh install, deleted
+// cache file), the service must reset the ETag/skipLatest hints to empty/false
+// rather than leaving a prior check's values in place — otherwise a stale
+// If-None-Match or an unintended /releases/latest skip would leak forward.
+func TestService_ForceCheck_ResetsConditionalHintsWhenCacheEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath := filepath.Join(tmpDir, "update_cache.json")
+	store := newStateStore(statePath, defaultCheckInterval) // empty cache
+
+	chk := &mockChecker{
+		version: &versionInfo{Version: "v1.0.0", TagName: "v1.0.0"},
+		// Simulate stale state left by a prior check against a different cache.
+		gotIfNoneMatch: `W/"stale-from-prior-check"`,
+		gotSkipLatest:  true,
+	}
+	svc := &service{
+		checker:   chk,
+		store:     store,
+		statePath: statePath,
+		interval:  24 * time.Hour,
+		enabled:   true,
+	}
+
+	_, err := svc.ForceCheck(context.Background())
+	require.NoError(t, err)
+
+	// With no cache, both hints must be reset to empty/false — not left sticky.
+	assert.Empty(t, chk.gotIfNoneMatch, "stale ETag must be reset when cache is empty")
+	assert.False(t, chk.gotSkipLatest, "stale skipLatest must be reset when cache is empty")
 }
