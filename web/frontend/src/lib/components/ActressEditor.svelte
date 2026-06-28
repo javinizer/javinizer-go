@@ -96,10 +96,11 @@
 	let thumbPreviewSrc = $state('');
 	let thumbDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	$effect(() => {
-		const url = editingActress.thumb_url;
+		const url = editingActress.thumb_url ?? '';
 		if (thumbDebounceTimer) { clearTimeout(thumbDebounceTimer); thumbDebounceTimer = null; }
+		thumbPreviewSrc = '';
 		thumbDebounceTimer = setTimeout(() => {
-			thumbPreviewSrc = url ?? '';
+			thumbPreviewSrc = url;
 		}, 250);
 		return () => {
 			if (thumbDebounceTimer) { clearTimeout(thumbDebounceTimer); thumbDebounceTimer = null; }
