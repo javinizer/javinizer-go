@@ -212,3 +212,94 @@ metadata:
 		assert.Equal(t, []string{"dmm"}, reloaded.Metadata.Priority.Priority)
 	})
 }
+
+// TestMergeYAMLNode_PruneMetadataPriorityEdgeCases covers the defensive early-return
+// branches of pruneMetadataPriorityFields and navigateToMapping that the happy-path
+// subtests above don't reach (scalar metadata/priority, missing priority key,
+// scalar src priority, and an empty DocumentNode).
+func TestMergeYAMLNode_PruneMetadataPriorityEdgeCases(t *testing.T) {
+	t.Run("no-op when metadata exists but priority key is absent in dst", func(t *testing.T) {
+		existing := mustParseYAMLDoc(t, `metadata:
+    other: value
+`)
+		// src also has no priority key -> merge does not add one, so prune hits the
+		// dstPriorityIdx == -1 guard and returns without touching metadata.
+		newDoc := mustParseYAMLDoc(t, `metadata:
+    another: value2
+`)
+		mergeYAMLNode(existing, newDoc)
+		metadata := navigateToMapping(existing, "metadata")
+		require.NotNil(t, metadata)
+		assert.Equal(t, -1, findMappingValueIndex(metadata, "priority"),
+			"no priority key should exist in dst after merge")
+	})
+
+	t.Run("no-op when dst metadata is a scalar and src has no metadata", func(t *testing.T) {
+		existing := mustParseYAMLDoc(t, `metadata: justastring
+server:
+    port: 8080
+`)
+		newDoc := mustParseYAMLDoc(t, `server:
+    port: 8080
+`)
+		mergeYAMLNode(existing, newDoc)
+		// dst metadata is a scalar -> pruneMetadataPriorityFields returns at the
+		// dstMetadata.Kind != MappingNode guard without touching anything.
+		metadata := navigateToMapping(existing, "metadata")
+		require.NotNil(t, metadata)
+	})
+
+	t.Run("no-op when dst metadata.priority is a scalar and src omits it", func(t *testing.T) {
+		existing := mustParseYAMLDoc(t, `metadata:
+    priority: notamapping
+server:
+    port: 8080
+`)
+		newDoc := mustParseYAMLDoc(t, `server:
+    port: 8080
+`)
+		mergeYAMLNode(existing, newDoc)
+		// dst priority is a scalar -> prune returns at the dstPriority.Kind guard;
+		// the scalar value is left untouched (src has no priority to merge in).
+		prio := navigateToMapping(existing, "metadata", "priority")
+		require.NotNil(t, prio)
+		assert.Equal(t, "notamapping", prio.Value)
+	})
+}
+
+// TestPruneMetadataPriorityFields_SrcScalarPriority covers the srcPriority.Kind
+// != MappingNode branch (the second operand of the nil-check) by calling the
+// helper directly with a scalar src priority — the merge flow always converts
+// dst to match src's kind first, so this branch is only reachable via a direct
+// call with mismatched dst/src shapes.
+func TestPruneMetadataPriorityFields_SrcScalarPriority(t *testing.T) {
+	dst := mustParseYAMLDoc(t, `metadata:
+    priority:
+        series:
+            - dmm
+`)
+	src := mustParseYAMLDoc(t, `metadata:
+    priority: notamapping
+`)
+
+	pruneMetadataPriorityFields(dst, src)
+
+	prio := navigateToMapping(dst, "metadata", "priority")
+	assert.Nil(t, prio, "non-mapping src priority must delete dst's priority block")
+}
+
+// TestNavigateToMapping_EmptyDocumentNode covers the empty-DocumentNode branch
+// (len(cur.Content) == 0) of navigateToMapping.
+func TestNavigateToMapping_EmptyDocumentNode(t *testing.T) {
+	emptyDoc := &yaml.Node{Kind: yaml.DocumentNode}
+	assert.Nil(t, navigateToMapping(emptyDoc, "metadata"))
+}
+
+// TestNavigateToMapping_NonMappingDocumentRoot covers the cur.Kind != MappingNode
+// guard inside the key loop: a document whose root is a scalar (not a mapping)
+// cannot be descended into by key.
+func TestNavigateToMapping_NonMappingDocumentRoot(t *testing.T) {
+	doc := mustParseYAMLDoc(t, `justastring
+`)
+	assert.Nil(t, navigateToMapping(doc, "metadata"))
+}

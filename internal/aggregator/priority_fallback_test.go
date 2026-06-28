@@ -492,3 +492,28 @@ func TestResolvePrioritiesNilMetadataNoPanic(t *testing.T) {
 	assert.Equal(t, []string{"dmm", "r18dev"}, agg.resolvedPriorities["Series"])
 	assert.Equal(t, []string{"dmm", "r18dev"}, agg.resolvedPriorities["Actress"])
 }
+
+// TestGetFieldPriorityFromConfig_PerFieldOverride covers the non-empty per-field
+// override branch (return fp) of getFieldPriorityFromConfig. The only in-tree
+// caller (resolvePriorities) passes fieldKey="" for the global, so the
+// per-field return path is otherwise unreachable — exercise it directly.
+func TestGetFieldPriorityFromConfig_PerFieldOverride(t *testing.T) {
+	cfg := &Config{
+		Metadata: &MetadataConfig{
+			Priority: config.PriorityConfig{
+				Priority: []string{"dmm", "r18dev"}, // global
+				Fields: map[string][]string{
+					"title": {"r18dev", "libredmm"}, // non-empty per-field override
+				},
+			},
+		},
+	}
+
+	// A present non-empty per-field override is returned verbatim (exclusive).
+	got := getFieldPriorityFromConfig(cfg, "title")
+	assert.Equal(t, []string{"r18dev", "libredmm"}, got)
+
+	// A field with NO override falls through to the global Priority list.
+	gotGlobal := getFieldPriorityFromConfig(cfg, "series")
+	assert.Equal(t, []string{"dmm", "r18dev"}, gotGlobal)
+}
