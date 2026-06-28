@@ -2,6 +2,7 @@ package update
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -13,18 +14,25 @@ import (
 
 // service handles update checking with caching and background refresh.
 type service struct {
-	checker   checker
-	store     *stateStore
-	statePath string
-	interval  time.Duration
-	enabled   bool
-	checkMu   sync.Mutex // prevents concurrent background checks
+	checker    checker
+	store      *stateStore
+	statePath  string
+	interval   time.Duration
+	enabled    bool
+	stableOnly bool       // honor system.version_check_stable_only: when true, never surface a prerelease as an available update
+	checkMu    sync.Mutex // prevents concurrent background checks
 }
 
 // UpdateConfig carries the narrow set of config fields the update service reads.
 type UpdateConfig struct {
 	Enabled                   bool
 	VersionCheckIntervalHours int
+	// StableOnly, when true, restricts update notifications to stable releases
+	// only (prereleases are still fetched and cached for transparency but never
+	// reported as available). Defaults to false: the Go repo currently ships
+	// only prereleases, so suppressing them by default would mean the checker
+	// never notifies any user until a stable release exists.
+	StableOnly bool
 }
 
 // NewService creates a new update service with production defaults (the real
@@ -65,15 +73,16 @@ func NewServiceWithOptions(cfg UpdateConfig, opts ServiceOptions) *service {
 
 	chk := opts.Checker
 	if chk == nil {
-		chk = newGitHubChecker("javinizer/Javinizer")
+		chk = newGitHubChecker(defaultRepo)
 	}
 
 	return &service{
-		checker:   chk,
-		store:     store,
-		statePath: statePath,
-		interval:  interval,
-		enabled:   cfg.Enabled,
+		checker:    chk,
+		store:      store,
+		statePath:  statePath,
+		interval:   interval,
+		enabled:    cfg.Enabled,
+		stableOnly: cfg.StableOnly,
 	}
 }
 
@@ -125,17 +134,77 @@ func (s *service) GetStatus(ctx context.Context) (*updateState, error) {
 }
 
 // ForceCheck performs an immediate sync check and updates the cache.
+//
+// Serialized via s.checkMu so the checker's conditional-request hints (ETag /
+// skipLatest) cannot be mutated by a concurrent check — the API version
+// endpoint and BackgroundCheck both flow through here. BackgroundCheck already
+// holds checkMu and calls forceCheckLocked directly to avoid a non-reentrant
+// deadlock.
 func (s *service) ForceCheck(ctx context.Context) (*updateState, error) {
 	if !s.enabled {
 		return &updateState{
 			Source: UpdateSourceDisabled,
 		}, nil
 	}
+	s.checkMu.Lock()
+	defer s.checkMu.Unlock()
+	return s.forceCheckLocked(ctx)
+}
 
+// forceCheckLocked is the ForceCheck body; the caller MUST hold s.checkMu.
+func (s *service) forceCheckLocked(ctx context.Context) (*updateState, error) {
 	logging.Info("Checking for updates...")
+
+	// Thread the cached ETag + "no-stable-latest" flag into the checker so this
+	// check is rate-limit-friendly: the ETag becomes If-None-Match (GitHub 304s
+	// don't count against quota) and skipLatest avoids the 404-throwing
+	// /releases/latest call for prerelease-only repos. Stub checkers don't
+	// implement ConditionalChecker — the assert fails silently and a full fetch
+	// runs, which is correct for hermetic tests.
+	//
+	// ALWAYS (re)set both hints, even when the cache is empty: the githubChecker
+	// is shared across checks, so leftover ifNoneMatch/skipLatest from a prior
+	// check (e.g. after the cache file is deleted between checks) would otherwise
+	// leak forward as a stale If-None-Match or an unintended /releases/latest
+	// skip. Empty/false yields a full fetch — the correct behavior with no cache.
+	cached, _ := s.store.LoadState()
+	if cc, ok := s.checker.(ConditionalChecker); ok {
+		etag, skipLatest := "", false
+		if cached != nil {
+			etag, skipLatest = cached.ETag, cached.NoStableLatest
+		}
+		cc.SetIfNoneMatch(etag)
+		cc.SetSkipLatest(skipLatest)
+	}
 
 	latest, err := s.checker.CheckLatestVersion(ctx)
 	if err != nil {
+		// 304 Not Modified: releases unchanged since the last check. Keep the
+		// cached version, but re-evaluate availability under the CURRENT
+		// stable-only policy — the user may have toggled version_check_stable_only
+		// since this state was cached, so a previously-surfaced prerelease must
+		// now be suppressed (and vice versa). The build version is constant for
+		// the process, so only the stableOnly term can change. Only CheckedAt is
+		// refreshed; this path burns no rate-limit quota, so it's the steady
+		// state for a long-running or frequently restarted instance.
+		if errors.Is(err, ErrNotModified) {
+			if cached != nil && cached.Version != "" {
+				cached.CheckedAt = nowISO8601()
+				cached.Source = UpdateSourceCached
+				cached.Error = ""
+				cached.Available = CompareVersions(version.Short(), cached.Version) < 0 &&
+					(!cached.Prerelease || !s.stableOnly)
+				_ = s.store.SaveState(cached)
+				logging.Debugf("Update check: not modified (304), keeping cached state")
+				return cached, nil
+			}
+			// No cached state to reuse — fall through to the error path below.
+			return &updateState{
+				Source: UpdateSourceError,
+				Error:  "not modified but no cached state available",
+			}, nil
+		}
+
 		logging.Debugf("Update check failed: %v", err)
 
 		// Try to load existing state
@@ -160,14 +229,30 @@ func (s *service) ForceCheck(ctx context.Context) (*updateState, error) {
 
 	// Compare versions
 	isAvailable := CompareVersions(currentVersion, latest.Version) < 0
-	isPrerelease := IsPrerelease(latest.Version)
+	// Treat a release as a prerelease if GitHub flagged it as one OR its tag
+	// looks like a prerelease. The GitHub flag is authoritative for the
+	// /releases/latest path; the tag heuristic covers the list-fallback path
+	// (which sets latest.Prerelease from the tag) and catches releases marked
+	// prerelease but tagged like a stable version.
+	isPrerelease := latest.Prerelease || IsPrerelease(latest.Version)
+
+	// Honor the user's stable-only preference: when restricting to stable
+	// releases, never surface a prerelease as an available update (the Go repo
+	// currently ships only prereleases, so this means "no update" until a
+	// stable release lands — by design, not a bug). The version is still cached
+	// so the UI can show what was found; only the Available flag is suppressed.
+	if isAvailable && isPrerelease && s.stableOnly {
+		isAvailable = false
+	}
 
 	state := &updateState{
-		Version:    latest.Version,
-		CheckedAt:  nowISO8601(),
-		Available:  isAvailable,
-		Prerelease: isPrerelease,
-		Source:     UpdateSourceFresh,
+		Version:        latest.Version,
+		CheckedAt:      nowISO8601(),
+		Available:      isAvailable,
+		Prerelease:     isPrerelease,
+		Source:         UpdateSourceFresh,
+		ETag:           latest.ETag,
+		NoStableLatest: latest.NoStableLatest,
 	}
 
 	// Only save if we have a valid state
@@ -195,11 +280,13 @@ func (s *service) BackgroundCheck(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Prevent concurrent background checks across all service instances
+	// Prevent concurrent background checks across all service instances.
+	// ForceCheck acquires this lock itself; call forceCheckLocked here to avoid
+	// a non-reentrant deadlock.
 	s.checkMu.Lock()
 	defer s.checkMu.Unlock()
 
-	state, err := s.ForceCheck(ctx)
+	state, err := s.forceCheckLocked(ctx)
 	if err != nil {
 		logging.Debugf("Background update check failed: %v", err)
 		return

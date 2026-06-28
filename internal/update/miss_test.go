@@ -95,7 +95,7 @@ func TestGetRecentReleases_Success(t *testing.T) {
 	defer server.Close()
 
 	checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
-	versions, err := checker.getRecentReleases(context.Background(), 10)
+	versions, _, err := checker.getRecentReleases(context.Background(), 10)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"v1.5.0", "v1.4.0", "v1.3.0"}, versions)
 }
@@ -108,7 +108,7 @@ func TestGetRecentReleases_Non200(t *testing.T) {
 	defer server.Close()
 
 	checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
-	_, err := checker.getRecentReleases(context.Background(), 10)
+	_, _, err := checker.getRecentReleases(context.Background(), 10)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "status 500")
 }
@@ -122,7 +122,7 @@ func TestGetRecentReleases_MalformedJSON(t *testing.T) {
 	defer server.Close()
 
 	checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
-	_, err := checker.getRecentReleases(context.Background(), 10)
+	_, _, err := checker.getRecentReleases(context.Background(), 10)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse response")
 }
@@ -130,7 +130,7 @@ func TestGetRecentReleases_MalformedJSON(t *testing.T) {
 // TestGetRecentReleases_NetworkError tests the network error path.
 func TestGetRecentReleases_NetworkError(t *testing.T) {
 	checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", "http://127.0.0.1:1")
-	_, err := checker.getRecentReleases(context.Background(), 10)
+	_, _, err := checker.getRecentReleases(context.Background(), 10)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to fetch releases")
 }
@@ -147,7 +147,7 @@ func TestGetRecentReleases_GHToken(t *testing.T) {
 
 	t.Setenv("GH_TOKEN", "recent-token")
 	checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
-	_, err := checker.getRecentReleases(context.Background(), 5)
+	_, _, err := checker.getRecentReleases(context.Background(), 5)
 	require.NoError(t, err)
 	assert.Equal(t, "Bearer recent-token", receivedAuth)
 }
@@ -164,7 +164,7 @@ func TestGetRecentReleases_EmptyNameAndTag(t *testing.T) {
 	defer server.Close()
 
 	checker := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
-	versions, err := checker.getRecentReleases(context.Background(), 10)
+	versions, _, err := checker.getRecentReleases(context.Background(), 10)
 	require.NoError(t, err)
 	// Empty entries should be skipped
 	assert.Equal(t, []string{"v1.0.0"}, versions)

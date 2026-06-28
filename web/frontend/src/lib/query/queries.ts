@@ -29,9 +29,7 @@ export function createBatchJobsQuery() {
 		// hasRunningJobs; this is its query-level replacement, so the list no
 		// longer freezes mid-run when started from elsewhere.
 		refetchInterval: (query) =>
-			query.state.data?.jobs?.some((j) => j.status?.toLowerCase() === 'running')
-				? 5_000
-				: false,
+			query.state.data?.jobs?.some((j) => j.status?.toLowerCase() === 'running') ? 5_000 : false,
 	}));
 }
 
@@ -85,5 +83,22 @@ export function createBatchJobPollingQuery(jobId: string) {
 		},
 		refetchIntervalInBackground: true,
 		staleTime: 0,
+	}));
+}
+
+// Version / update-check status. The server caches the check result (default
+// 24h check interval) and GET /api/v1/version returns the cache without hitting
+// GitHub, so a long staleTime + refetchInterval is cheap and keeps the nav
+// indicator fresh enough (e.g. after a server-side background check fires)
+// without hammering the endpoint on every navigation.
+export function createVersionStatusQuery() {
+	return createQuery(() => ({
+		queryKey: ['version-status'],
+		queryFn: () => apiClient.getVersionStatus(),
+		// The server-side cache is the rate limiter; re-read it every 10 min so a
+		// background check that landed server-side surfaces in the UI without us
+		// polling GitHub ourselves.
+		staleTime: 5 * 60_000,
+		refetchInterval: 10 * 60_000,
 	}));
 }

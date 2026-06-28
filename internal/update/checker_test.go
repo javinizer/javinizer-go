@@ -487,7 +487,7 @@ func TestWrapperFunctions(t *testing.T) {
 		original := http.DefaultTransport
 		http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			require.Equal(t, "api.github.com", req.URL.Host)
-			require.Equal(t, "/repos/javinizer/Javinizer/releases/latest", req.URL.Path)
+			require.Equal(t, "/repos/javinizer/javinizer-go/releases/latest", req.URL.Path)
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body: io.NopCloser(strings.NewReader(`{
@@ -511,7 +511,7 @@ func TestWrapperFunctions(t *testing.T) {
 		original := http.DefaultTransport
 		http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			require.Equal(t, "api.github.com", req.URL.Host)
-			require.Equal(t, "/repos/javinizer/Javinizer/releases/latest", req.URL.Path)
+			require.Equal(t, "/repos/javinizer/javinizer-go/releases/latest", req.URL.Path)
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body: io.NopCloser(strings.NewReader(`{
@@ -535,7 +535,7 @@ func TestWrapperFunctions(t *testing.T) {
 		original := http.DefaultTransport
 		http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			require.Equal(t, "api.github.com", req.URL.Host)
-			require.Equal(t, "/repos/javinizer/Javinizer/releases", req.URL.Path)
+			require.Equal(t, "/repos/javinizer/javinizer-go/releases", req.URL.Path)
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body: io.NopCloser(strings.NewReader(`[
@@ -552,4 +552,208 @@ func TestWrapperFunctions(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"v1.5.0", "v1.4.0", "v1.3.0"}, versions)
 	})
+}
+
+// TestDefaultRepoPointsAtGoRewrite is a regression guard: the update checker
+// must consult the Go rewrite (javinizer/javinizer-go), NOT the legacy Python
+// project (javinizer/Javinizer) whose releases are unrelated. A previous bug
+// pointed every production construction site at the old repo, so users were
+// notified about the Python project's 2.6.4 release. This test pins the
+// constant so a silent re-regression fails CI.
+func TestDefaultRepoPointsAtGoRewrite(t *testing.T) {
+	assert.Equal(t, "javinizer/javinizer-go", defaultRepo)
+	// The production default checker must use it.
+	chk := newGitHubChecker(defaultRepo)
+	assert.Equal(t, "javinizer/javinizer-go", chk.repo)
+}
+
+// TestCheckLatestVersion_FallsBackToPrereleaseOn404 verifies that a
+// prerelease-only repo (whose /releases/latest endpoint 404s because GitHub
+// excludes prereleases) still yields its most recent release via the list
+// endpoint fallback. Without this, the Go rewrite — which currently ships only
+// v0.x-alpha releases — would never surface an update.
+func TestCheckLatestVersion_FallsBackToPrereleaseOn404(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/javinizer/javinizer-go/releases/latest":
+			w.WriteHeader(http.StatusNotFound)
+		case "/repos/javinizer/javinizer-go/releases":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"tag_name":"v0.3.15-alpha","name":"v0.3.15-alpha","prerelease":true},
+				{"tag_name":"v0.3.14-alpha","name":"v0.3.14-alpha","prerelease":true}
+			]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	chk := newGitHubCheckerWithBaseURL("javinizer/javinizer-go", server.URL)
+	info, err := chk.CheckLatestVersion(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, "v0.3.15-alpha", info.Version)
+	assert.True(t, info.Prerelease, "404 fallback should surface the prerelease")
+}
+
+// TestCheckLatestVersion_404WithNoReleasesErrors verifies the 404 fallback
+// errors cleanly (rather than returning a zero-value) when the repo has no
+// releases at all.
+func TestCheckLatestVersion_404WithNoReleasesErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/javinizer/javinizer-go/releases/latest":
+			w.WriteHeader(http.StatusNotFound)
+		case "/repos/javinizer/javinizer-go/releases":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	chk := newGitHubCheckerWithBaseURL("javinizer/javinizer-go", server.URL)
+	info, err := chk.CheckLatestVersion(context.Background())
+	require.Error(t, err)
+	assert.Nil(t, info)
+}
+
+// TestCheckLatestVersion_ETag304ReturnsNotModified verifies the rate-limit
+// optimization on the stable-repo path: the first request captures the ETag,
+// and a second request sending it back as If-None-Match gets a 304 — which
+// GitHub does NOT count against quota — and surfaces as ErrNotModified.
+func TestCheckLatestVersion_ETag304ReturnsNotModified(t *testing.T) {
+	const etag = `W/"stable-etag-123"`
+	mockReleases := map[string]interface{}{
+		"tag_name":     "v1.6.0",
+		"name":         "Version 1.6.0",
+		"prerelease":   false,
+		"published_at": "2026-03-20T12:00:00Z",
+	}
+	jsonBytes, _ := json.Marshal(mockReleases)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/javinizer/Javinizer/releases/latest" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// Conditional GET: return 304 when the client sends our ETag back.
+		if inm := r.Header.Get("If-None-Match"); inm == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", etag)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(jsonBytes)
+	}))
+	defer server.Close()
+
+	chk := newGitHubCheckerWithBaseURL("javinizer/Javinizer", server.URL)
+
+	// First check: full fetch, captures the ETag.
+	info, err := chk.CheckLatestVersion(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, "v1.6.0", info.Version)
+	assert.Equal(t, etag, info.ETag, "ETag captured from the response header")
+
+	// Second check: send the ETag back, expect a 304 → ErrNotModified.
+	chk.SetIfNoneMatch(info.ETag)
+	info2, err := chk.CheckLatestVersion(context.Background())
+	require.ErrorIs(t, err, ErrNotModified)
+	assert.Nil(t, info2)
+}
+
+// TestCheckLatestVersion_SkipLatestSkips404Endpoint verifies that once the
+// service has learned a repo has no stable latest release (NoStableLatest),
+// the next check skips the /releases/latest 404 entirely and goes straight to
+// the /releases list — halving API calls for a prerelease-only repo. It also
+// confirms the list path honors If-None-Match (304 → ErrNotModified).
+func TestCheckLatestVersion_SkipLatestSkips404Endpoint(t *testing.T) {
+	const etag = `W/"prerelease-etag-456"`
+	var latestHit int
+	mockList := []map[string]interface{}{{
+		"tag_name":   "v0.3.15-alpha",
+		"name":       "v0.3.15-alpha",
+		"prerelease": true,
+	}}
+	listBytes, _ := json.Marshal(mockList)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/javinizer/javinizer-go/releases/latest":
+			latestHit++
+			w.WriteHeader(http.StatusNotFound)
+		case "/repos/javinizer/javinizer-go/releases":
+			if inm := r.Header.Get("If-None-Match"); inm == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+			w.Header().Set("ETag", etag)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(listBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	chk := newGitHubCheckerWithBaseURL("javinizer/javinizer-go", server.URL)
+
+	// First check: /releases/latest 404s → falls back to the list, captures
+	// the ETag and reports NoStableLatest=true.
+	info, err := chk.CheckLatestVersion(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, "v0.3.15-alpha", info.Version)
+	assert.Equal(t, etag, info.ETag)
+	assert.True(t, info.NoStableLatest, "404 fallback sets NoStableLatest")
+	assert.Equal(t, 1, latestHit, "first check hits /releases/latest")
+
+	// Second check: skipLatest set → /releases/latest must NOT be hit, and the
+	// list path returns 304 (rate-limit-free) via If-None-Match.
+	chk.SetSkipLatest(true)
+	chk.SetIfNoneMatch(info.ETag)
+	info2, err := chk.CheckLatestVersion(context.Background())
+	require.ErrorIs(t, err, ErrNotModified)
+	assert.Nil(t, info2)
+	assert.Equal(t, 1, latestHit, "skipLatest avoided the /releases/latest 404")
+}
+
+// TestCheckLatestVersion_SkipLatestGoesStraightToList verifies that with
+// skipLatest the result still resolves through the list endpoint (not a 304)
+// when there is no ETag to send — i.e. skipLatest alone is correct.
+func TestCheckLatestVersion_SkipLatestGoesStraightToList(t *testing.T) {
+	var latestHit int
+	mockList := []map[string]interface{}{{
+		"tag_name":   "v0.3.15-alpha",
+		"prerelease": true,
+	}}
+	listBytes, _ := json.Marshal(mockList)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/javinizer/javinizer-go/releases/latest":
+			latestHit++
+			w.WriteHeader(http.StatusNotFound)
+		case "/repos/javinizer/javinizer-go/releases":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(listBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	chk := newGitHubCheckerWithBaseURL("javinizer/javinizer-go", server.URL)
+	chk.SetSkipLatest(true)
+
+	info, err := chk.CheckLatestVersion(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, "v0.3.15-alpha", info.Version)
+	assert.True(t, info.NoStableLatest)
+	assert.Equal(t, 0, latestHit, "/releases/latest never hit when skipLatest is set")
 }

@@ -32,6 +32,7 @@ func NewCommand() *cobra.Command {
 				service := update.NewService(update.UpdateConfig{
 					Enabled:                   cfg.System.VersionCheckEnabled,
 					VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+					StableOnly:                cfg.System.VersionCheckStableOnly,
 				})
 				state, err := service.ForceCheck(ctx)
 
@@ -61,8 +62,12 @@ func NewCommand() *cobra.Command {
 				current := version.Short()
 				latestVer := state.Version
 
-				// Determine if update is available
-				updateAvailable := update.CompareVersions(current, latestVer) < 0
+				// state.Available already reflects the build version comparison AND
+				// the user's version_check_stable_only policy (prerelease
+				// suppression). Reusing it keeps the CLI consistent with the API/UI
+				// — recomputing CompareVersions here would surface a prerelease the
+				// service deliberately suppressed.
+				updateAvailable := state.Available
 
 				// Print to stdout for easy parsing
 				if updateAvailable {

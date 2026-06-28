@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { browser } from '$app/environment';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
 	import { FolderOpen, Settings, Film, Users, LogOut, Activity, FileText, ChevronDown, Sun, Moon, Monitor, Tags, Type } from 'lucide-svelte';
 	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import type { Theme } from '$lib/stores/theme.svelte';
+	import UpdateIndicator from '$lib/components/UpdateIndicator.svelte';
 
 	interface Props {
 		authenticated?: boolean;
@@ -94,6 +96,16 @@
 						<span class="hidden md:inline">{item.label}</span>
 					</a>
 				{/each}
+
+				<!-- Update available indicator (hidden when up-to-date / disabled).
+				Browser-only: UpdateIndicator uses TanStack Query (useQueryClient),
+				which requires a QueryClientProvider. The SSR branch of +layout.svelte
+				renders Navigation without a provider, so mounting this during SSR
+				would throw. The indicator is an interactive, API-polling widget with
+				no SSR value, so gating on `browser` is the correct fix. -->
+				{#if browser}
+					<UpdateIndicator />
+				{/if}
 
 				<!-- Settings & Logs dropdown -->
 				<div class="relative" data-submenu>

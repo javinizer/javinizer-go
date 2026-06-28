@@ -27,6 +27,7 @@ func startUpdateChecker(rt *APIRuntime, cfg *config.Config, opts update.ServiceO
 	svc := update.NewServiceWithOptions(update.UpdateConfig{
 		Enabled:                   cfg.System.VersionCheckEnabled,
 		VersionCheckIntervalHours: cfg.System.VersionCheckIntervalHours,
+		StableOnly:                cfg.System.VersionCheckStableOnly,
 	}, opts)
 
 	ctx := rt.ServerCtx()

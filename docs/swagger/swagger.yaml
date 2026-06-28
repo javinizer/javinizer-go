@@ -1726,6 +1726,17 @@ definitions:
         description: VersionCheckIntervalHours is the interval between version checks
           in hours
         type: integer
+      version_check_stable_only:
+        description: |-
+          VersionCheckStableOnly, when true, restricts update notifications to
+          stable releases only (prereleases are still fetched and cached for
+          transparency but never reported as available). Defaults to false: the
+          Go rewrite currently ships only prereleases (v0.x-alpha), so suppressing
+          them by default would mean no user is ever notified until a stable
+          release exists. Set to true to be notified only about stable releases.
+          Modeled as an opt-in restriction (not an opt-out) so the zero value is
+          the correct default for existing configs — no migration needed.
+        type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_config.TranslationConfig:
     properties:

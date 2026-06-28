@@ -151,6 +151,15 @@ type SystemConfig struct {
 	VersionCheckEnabled bool `yaml:"version_check_enabled" json:"version_check_enabled"`
 	// VersionCheckIntervalHours is the interval between version checks in hours
 	VersionCheckIntervalHours int `yaml:"version_check_interval_hours" json:"version_check_interval_hours"`
+	// VersionCheckStableOnly, when true, restricts update notifications to
+	// stable releases only (prereleases are still fetched and cached for
+	// transparency but never reported as available). Defaults to false: the
+	// Go rewrite currently ships only prereleases (v0.x-alpha), so suppressing
+	// them by default would mean no user is ever notified until a stable
+	// release exists. Set to true to be notified only about stable releases.
+	// Modeled as an opt-in restriction (not an opt-out) so the zero value is
+	// the correct default for existing configs — no migration needed.
+	VersionCheckStableOnly bool `yaml:"version_check_stable_only" json:"version_check_stable_only"`
 	// TempDir is the base directory for temporary files (default: "data/temp").
 	// Can be overridden with JAVINIZER_TEMP_DIR environment variable.
 	// Subdirectory "posters/{jobID}" is created for batch job temp posters.

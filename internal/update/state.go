@@ -35,6 +35,17 @@ type updateState struct {
 	Prerelease bool         `json:"prerelease"`      // Whether latest is prerelease
 	Source     UpdateSource `json:"source"`          // Update source status
 	Error      string       `json:"error,omitempty"` // Last error message
+	// ETag from the last successful GitHub API response. Sent back as
+	// If-None-Match on the next check so GitHub returns 304 (which does NOT
+	// count against the rate limit) when the releases haven't changed.
+	ETag string `json:"etag,omitempty"`
+	// NoStableLatest is true once /releases/latest has 404'd (the repo has no
+	// stable latest release — true for the Go rewrite, which ships only
+	// prereleases). When true, the next check skips the 404-throwing
+	// /releases/latest call and goes straight to the /releases list, halving
+	// API calls. The list endpoint surfaces stable releases too once one
+	// becomes newest, so this never misses a stable release.
+	NoStableLatest bool `json:"no_stable_latest,omitempty"`
 }
 
 // stateStore handles loading and saving update state.
