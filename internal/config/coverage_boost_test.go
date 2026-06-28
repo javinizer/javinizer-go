@@ -1346,3 +1346,22 @@ func TestPrepare_EmptyScrapersPriorityErrors(t *testing.T) {
 	_, err = Prepare(cfg)
 	assert.NoError(t, err)
 }
+
+// TestPriorityConfig_UnmarshalJSON_PriorityNonArrayValue covers decodeFromMap's
+// priority-key non-array branch (value present but not a []any).
+func TestPriorityConfig_UnmarshalJSON_PriorityNonArrayValue(t *testing.T) {
+	var p PriorityConfig
+	err := json.Unmarshal([]byte(`{"priority": "notanarray"}`), &p)
+	assert.NoError(t, err)
+	assert.Nil(t, p.Priority, "non-array priority value must be skipped")
+}
+
+// TestPriorityConfig_UnmarshalJSON_FieldNonStringElement covers decodeFromMap's
+// per-field non-string-element branch (array contains a non-string entry).
+func TestPriorityConfig_UnmarshalJSON_FieldNonStringElement(t *testing.T) {
+	var p PriorityConfig
+	err := json.Unmarshal([]byte(`{"series": [123, "r18dev"]}`), &p)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"r18dev"}, p.Fields["series"],
+		"non-string element must be skipped, string element kept")
+}

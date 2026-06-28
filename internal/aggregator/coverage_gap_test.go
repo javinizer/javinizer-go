@@ -769,3 +769,13 @@ type mockAliasLookupRepo struct {
 func (m *mockAliasLookupRepo) GetAliasMap(_ context.Context) (map[string]string, error) {
 	return m.aliases, nil
 }
+
+// TestIsUnknownActress_JapaneseNameMatches_NameKeyDiffers covers the
+// NormalizeActressNameKey(info.JapaneseName) == unknownText branch: nameKey is
+// set to a DIFFERENT value so the earlier nameKey == unknownText check is false,
+// forcing the JapaneseName match path to return true.
+func TestIsUnknownActress_JapaneseNameMatches_NameKeyDiffers(t *testing.T) {
+	info := models.ActressInfo{JapaneseName: "未知の女優"}
+	assert.True(t, isUnknownActress(info, "different", "未知の女優"),
+		"JapaneseName matching unknownText must return true even when nameKey differs")
+}

@@ -303,3 +303,19 @@ func TestNavigateToMapping_NonMappingDocumentRoot(t *testing.T) {
 `)
 	assert.Nil(t, navigateToMapping(doc, "metadata"))
 }
+
+// TestNavigateToMapping_NilRoot covers the root == nil guard.
+func TestNavigateToMapping_NilRoot(t *testing.T) {
+	assert.Nil(t, navigateToMapping(nil, "metadata"))
+}
+
+// TestNavigateToMapping_NilValueInChain covers the cur == nil branch of the
+// loop guard: descending into a mapping whose value is a nil node sets cur=nil,
+// and the next key iteration returns nil at the cur == nil check.
+func TestNavigateToMapping_NilValueInChain(t *testing.T) {
+	root := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: "metadata", Tag: "!!str"},
+		nil,
+	}}
+	assert.Nil(t, navigateToMapping(root, "metadata", "priority"))
+}
