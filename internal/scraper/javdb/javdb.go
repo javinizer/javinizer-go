@@ -898,6 +898,7 @@ func extractActresses(sel *goquery.Selection) []models.ActressInfo {
 	seen := make(map[string]bool)
 	type actressCandidate struct {
 		name          string
+		actorID       string
 		genderHint    string // "female", "male", or ""
 		maleHeuristic bool
 	}
@@ -915,6 +916,7 @@ func extractActresses(sel *goquery.Selection) []models.ActressInfo {
 		}
 		candidates = append(candidates, actressCandidate{
 			name:          name,
+			actorID:       javdbActorIDFromLink(a),
 			genderHint:    genderHint,
 			maleHeuristic: isLikelyMaleActorLink(a),
 		})
@@ -939,6 +941,7 @@ func extractActresses(sel *goquery.Selection) []models.ActressInfo {
 			// Keep unknown as zero and let downstream matching use names.
 			DMMID:        0,
 			JapaneseName: c.name,
+			ThumbURL:     javdbActorAvatarURL(c.actorID),
 		})
 	}
 
@@ -961,6 +964,36 @@ func extractActresses(sel *goquery.Selection) []models.ActressInfo {
 		return nil
 	}
 	return actresses
+}
+
+// javdbActorIDFromLink extracts the JavDB actor ID from an <a href="/actors/XXX"> link.
+// Returns "" when the link is not an actor profile link.
+func javdbActorIDFromLink(a *goquery.Selection) string {
+	href, ok := a.Attr("href")
+	if !ok {
+		return ""
+	}
+	const prefix = "/actors/"
+	if !strings.HasPrefix(href, prefix) {
+		return ""
+	}
+	id := strings.TrimPrefix(href, prefix)
+	if i := strings.IndexAny(id, "?#"); i >= 0 {
+		id = id[:i]
+	}
+	return id
+}
+
+// javdbActorAvatarURL builds the avatar image URL for a JavDB actor ID.
+// JavDB stores actor avatars at https://c0.jdbstatic.com/avatars/<pp>/<ID>.jpg
+// where <pp> is the first two characters of the ID, lowercased. Returns ""
+// when the ID is too short to form a valid path.
+func javdbActorAvatarURL(actorID string) string {
+	if len(actorID) < 2 {
+		return ""
+	}
+	prefix := strings.ToLower(actorID[:2])
+	return fmt.Sprintf("https://c0.jdbstatic.com/avatars/%s/%s.jpg", prefix, actorID)
 }
 
 func isLikelyMaleActorLink(sel *goquery.Selection) bool {

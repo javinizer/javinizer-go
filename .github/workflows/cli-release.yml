@@ -481,20 +481,65 @@ jobs:
           path: dist/*
 
   build-docker:
-    name: Build/push Docker image (GHCR)
+    name: Build Docker image (${{ matrix.platform }})
     needs: prepare-release
     if: github.event_name != 'schedule' || needs.prepare-release.outputs.nightly_should_run == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            suffix: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            suffix: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
 
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        if: needs.prepare-release.outputs.create_release == 'true' || needs.prepare-release.outputs.is_nightly == 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and (optionally) push single-arch image
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: ${{ needs.prepare-release.outputs.create_release == 'true' || needs.prepare-release.outputs.is_nightly == 'true' }}
+          tags: ${{ steps.image.outputs.name }}:${{ needs.prepare-release.outputs.docker_version }}-${{ matrix.suffix }}
+          build-args: |
+            VERSION=${{ needs.prepare-release.outputs.version }}
+            COMMIT=${{ needs.prepare-release.outputs.commit }}
+            BUILD_DATE=${{ needs.prepare-release.outputs.build_date }}
+          cache-from: type=gha,scope=${{ matrix.suffix }}
+          cache-to: type=gha,scope=${{ matrix.suffix }},mode=max
+
+  merge-manifest:
+    name: Merge multi-arch manifest (GHCR)
+    needs: [prepare-release, build-docker]
+    if: |
+      (github.event_name != 'schedule' || needs.prepare-release.outputs.nightly_should_run == 'true') &&
+      (needs.prepare-release.outputs.create_release == 'true' || needs.prepare-release.outputs.is_nightly == 'true')
+    runs-on: ubuntu-latest
+    steps:
       - name: Normalize image name
         id: image
         shell: bash
@@ -519,49 +564,63 @@ jobs:
           echo "minor=${minor}" >> "$GITHUB_OUTPUT"
 
       - name: Login to GHCR
-        if: needs.prepare-release.outputs.create_release == 'true' || needs.prepare-release.outputs.is_nightly == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate Docker metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
-        with:
-          images: ${{ steps.image.outputs.name }}
-          tags: |
-            type=raw,value=${{ needs.prepare-release.outputs.docker_version }}
-            type=raw,value=latest,enable=${{ needs.prepare-release.outputs.publish_latest == 'true' }}
-            type=raw,value=nightly,enable=${{ needs.prepare-release.outputs.is_nightly == 'true' }}
-            type=raw,value=nightly-${{ needs.prepare-release.outputs.commit }},enable=${{ needs.prepare-release.outputs.is_nightly == 'true' }}
-            type=raw,value=v${{ steps.semver.outputs.major }},enable=${{ needs.prepare-release.outputs.prerelease != 'true' && steps.semver.outputs.major != '' }}
-            type=raw,value=v${{ steps.semver.outputs.major }}.${{ steps.semver.outputs.minor }},enable=${{ needs.prepare-release.outputs.prerelease != 'true' && steps.semver.outputs.major != '' && steps.semver.outputs.minor != '' }}
-          labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.prepare-release.outputs.docker_version }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
 
-      - name: Build and (optionally) push Docker image
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: ${{ needs.prepare-release.outputs.create_release == 'true' || needs.prepare-release.outputs.is_nightly == 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: |
-            ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=${{ needs.prepare-release.outputs.version }}
-            COMMIT=${{ needs.prepare-release.outputs.commit }}
-            BUILD_DATE=${{ needs.prepare-release.outputs.build_date }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Assemble multi-arch manifest tags
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          img="${{ steps.image.outputs.name }}"
+          ver="${{ needs.prepare-release.outputs.docker_version }}"
+          publish_latest="${{ needs.prepare-release.outputs.publish_latest }}"
+          is_nightly="${{ needs.prepare-release.outputs.is_nightly }}"
+          commit="${{ needs.prepare-release.outputs.commit }}"
+          major="${{ steps.semver.outputs.major }}"
+          minor="${{ steps.semver.outputs.minor }}"
+          prerelease="${{ needs.prepare-release.outputs.prerelease }}"
+
+          tags=("${ver}")
+          [[ "${publish_latest}" == "true" ]] && tags+=("latest")
+          [[ "${is_nightly}" == "true" ]] && tags+=("nightly" "nightly-${commit}")
+          if [[ "${prerelease}" != "true" && -n "${major}" ]]; then
+            tags+=("v${major}")
+            [[ -n "${minor}" ]] && tags+=("v${major}.${minor}")
+          fi
+
+          args=""
+          for t in "${tags[@]}"; do args+=" -t ${img}:${t}"; done
+          echo "args=${args}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${tags[@]}" > /tmp/tags.txt
+
+      - name: Merge per-arch images into multi-arch manifest
+        run: |
+          set -euo pipefail
+          img="${{ steps.image.outputs.name }}"
+          ver="${{ needs.prepare-release.outputs.docker_version }}"
+          docker buildx imagetools create \
+            ${{ steps.tags.outputs.args }} \
+            "${img}:${ver}-amd64" \
+            "${img}:${ver}-arm64"
+
+      - name: Verify manifest
+        run: |
+          set -euo pipefail
+          img="${{ steps.image.outputs.name }}"
+          ver="${{ needs.prepare-release.outputs.docker_version }}"
+          echo "=== ${img}:${ver} manifest ==="
+          docker buildx imagetools inspect "${img}:${ver}"
 
   create-release:
     name: Create GitHub release
-    needs: [prepare-release, build-linux, build-darwin, build-windows-amd64, build-docker]
+    needs: [prepare-release, build-linux, build-darwin, build-windows-amd64, merge-manifest]
     if: needs.prepare-release.outputs.create_release == 'true'
     runs-on: ubuntu-latest
     permissions:
