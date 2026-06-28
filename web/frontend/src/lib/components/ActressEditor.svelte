@@ -30,6 +30,11 @@
 		thumb_url: ''
 	});
 
+	// Whether the thumbnail preview failed to load for the current URL. Reset
+	// whenever the URL changes so a corrected URL re-fetches instead of staying
+	// hidden by a stale onerror (display:none) from a prior failed URL.
+	let thumbPreviewError = $state(false);
+
 	// Autocomplete state
 	let searchQuery = $state('');
 	let searchResults = $state<Actress[]>([]);
@@ -72,6 +77,33 @@
 	$effect(() => {
 		const data = movie.actresses;
 		untrack(() => { actresses = data || []; });
+	});
+
+	// Reset the thumbnail preview error whenever the URL being edited changes
+	// (including when the editor opens on a different actress). Without this,
+	// a previously-failed URL leaves the preview <img> hidden via a stale
+	// onerror display:none, so correcting the URL does not re-fetch.
+	$effect(() => {
+		editingActress.thumb_url;
+		thumbPreviewError = false;
+	});
+
+	// Debounced copy of the thumbnail URL used ONLY for the preview <img src>
+	// and its {#if}/fallback, so rapid typing does not re-fetch per keystroke.
+	// The input stays bound to the live editingActress.thumb_url, and the
+	// error-reset $effect above still tracks the LIVE URL (clears immediately),
+	// so a corrected URL re-fetches once typing pauses.
+	let thumbPreviewSrc = $state('');
+	let thumbDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+	$effect(() => {
+		const url = editingActress.thumb_url;
+		if (thumbDebounceTimer) { clearTimeout(thumbDebounceTimer); thumbDebounceTimer = null; }
+		thumbDebounceTimer = setTimeout(() => {
+			thumbPreviewSrc = url ?? '';
+		}, 250);
+		return () => {
+			if (thumbDebounceTimer) { clearTimeout(thumbDebounceTimer); thumbDebounceTimer = null; }
+		};
 	});
 
 	// Helper to get full name
@@ -443,20 +475,21 @@
 					<div>
 						<span class="text-sm font-medium mb-1 block">Preview</span>
 						<Card class="p-3">
-							{#if editingActress.thumb_url}
+							<!-- Preview hides via {#if}+thumbPreviewError (unmounts the element),
+							     not the HTML [hidden] attr. If changed to hidden=, avoid Tailwind
+							     'block'/'flex' on this <img> — display utilities override [hidden]. -->
+							{#if thumbPreviewSrc && !thumbPreviewError}
 								<img
-									src={editingActress.thumb_url}
+									src={thumbPreviewSrc}
 									alt={getFullName(editingActress) || 'Preview'}
 									class="w-full aspect-2/3 object-cover rounded mb-2"
-									onerror={(e) => {
-										const target = e.currentTarget as HTMLImageElement; target.style.display = 'none';
-									}}
+									onerror={() => { thumbPreviewError = true; }}
 								/>
 							{:else}
 								<div
 									class="w-full aspect-2/3 bg-accent rounded flex items-center justify-center text-sm text-muted-foreground mb-2"
 								>
-									No Thumbnail
+									{thumbPreviewSrc ? 'Unable to load image' : 'No Thumbnail'}
 								</div>
 							{/if}
 							<p class="font-medium text-sm truncate">

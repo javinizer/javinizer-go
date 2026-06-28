@@ -45,6 +45,12 @@
 	let olderThanDays = $state(30);
 	let isCleaningHistory = $state(false);
 	let isCleaningEvents = $state(false);
+
+	// Reactive per-job poster error state — reset when the job list changes
+	// so a refreshed (same-URL) poster re-fetches instead of staying hidden
+	// by a stale onerror display:none from a prior failed load.
+	let posterErrors = $state<Set<string | undefined>>(new Set());
+	$effect(() => { paginatedJobs; posterErrors = new Set(); });
 	let activeFilter = $state<string>('all');
 	let currentPage = $state(1);
 	const pageSize = 10;
@@ -378,13 +384,13 @@
 								<div class="flex items-center p-3 gap-4">
 									{#if poster}
 										<div class="w-20 h-20 flex-shrink-0 bg-muted rounded-md overflow-hidden flex items-center justify-center">
+											<!-- [hidden] attr: a Tailwind 'block'/'flex' utility on this <img>
+											     would override [hidden]; keep display utilities off this element -->
 											<img
 												src={poster}
 												alt=""
-												class="w-full h-full object-cover object-center"
-												onerror={(e) => {
-													(e.target as HTMLImageElement).style.display = 'none';
-												}}
+												class="w-full h-full object-cover object-center" hidden={posterErrors.has(poster)}
+												onerror={() => { posterErrors = new Set([...posterErrors, poster]); }}
 											/>
 										</div>
 									{:else}

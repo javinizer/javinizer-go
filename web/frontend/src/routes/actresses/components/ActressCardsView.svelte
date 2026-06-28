@@ -28,6 +28,12 @@
 		onRemoveActress: (actress: Actress) => void;
 		deletePending: boolean;
 	} = $props();
+
+	// Reactive per-image error state — reset when the list changes so a
+	// refreshed (same-URL) image re-fetches instead of staying hidden by a
+	// stale onerror display:none from a prior failed load.
+	let actressImgErrors = $state<Set<string | undefined>>(new Set());
+	$effect(() => { actresses; actressImgErrors = new Set(); });
 </script>
 
 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -46,13 +52,13 @@
 						/>
 					</div>
 					{#if actress.thumb_url}
+						<!-- [hidden] attr: a Tailwind 'block'/'flex' utility on this <img>
+						     would override [hidden]; keep display utilities off this element -->
 						<img
 							src={actress.thumb_url}
 							alt={getDisplayName(actress)}
-							class="w-20 h-24 rounded object-cover border"
-							onerror={(event) => {
-								(event.currentTarget as HTMLImageElement).style.display = 'none';
-							}}
+							class="w-20 h-24 rounded object-cover border" hidden={actressImgErrors.has(actress.thumb_url)}
+							onerror={() => { actressImgErrors = new Set([...actressImgErrors, actress.thumb_url]); }}
 						/>
 					{:else}
 						<div class="w-20 h-24 rounded border bg-muted flex items-center justify-center text-muted-foreground">

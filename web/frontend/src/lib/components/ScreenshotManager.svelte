@@ -27,6 +27,17 @@
 	let trailerUrl = $state('');
 	let newScreenshotUrl = $state('');
 
+	// Reactive preview-error state — reset when the bound URL changes so a
+	// corrected URL re-fetches instead of staying hidden by a stale onerror
+	// (display:none) from a prior failed URL.
+	let posterPreviewError = $state(false);
+	let coverPreviewError = $state(false);
+	let screenshotErrors = $state<Set<string>>(new Set());
+	// The imgs below hide via the HTML `hidden` attribute (Tailwind preflight
+	// [hidden]{display:none}). Do NOT add `block`/`flex` or other display utility
+	// classes to those imgs — a display utility overrides [hidden] and breaks
+	// error-hiding (the prior inline style.display='none' survived this).
+
 	// Screenshot viewer modal state
 	let showViewer = $state(false);
 	let viewerIndex = $state(0);
@@ -47,6 +58,19 @@
 		coverUrl = movie.cover_url || '';
 		trailerUrl = movie.trailer_url || '';
 	});
+
+	// Reset preview-error state when the bound URL/list changes, so a corrected
+	// URL re-fetches instead of staying hidden by a stale onerror display:none.
+	$effect(() => { posterUrl; displayPosterUrl; posterPreviewError = false; });
+	$effect(() => { coverUrl; coverPreviewError = false; });
+	// Track a derived signature of the screenshot URLs — not the array ref — so
+	// the reset fires only on actual content change. An identical-content
+	// reassignment (e.g. movie-sync handing back a new array with the same URLs)
+	// leaves the signature unchanged, so this effect does not re-run and a
+	// previously-errored img stays hidden (the browser does not re-fetch an
+	// unchanged src, so un-hiding would flash a stale broken-image icon).
+	let screenshotsSignature = $derived(screenshots.join('\u0000'));
+	$effect(() => { screenshotsSignature; screenshotErrors = new Set(); });
 
 	let clearCropState = $state(false);
 
@@ -189,20 +213,16 @@
 								src={posterUrl}
 								alt="Poster"
 								class="absolute h-full"
-								style="right: 0; width: auto; min-width: 211.8%; object-fit: cover; object-position: right center;"
-								onerror={(e) => {
-									const target = e.currentTarget as HTMLImageElement; target.style.display = 'none';
-								}}
+								style="right: 0; width: auto; min-width: 211.8%; object-fit: cover; object-position: right center;" hidden={posterPreviewError}
+								onerror={() => { posterPreviewError = true; }}
 							/>
 						{:else}
 							<!-- Use displayPosterUrl (temp_poster_url if available) or posterUrl directly without cropping -->
 							<img
 								src={displayPosterUrl || posterUrl}
 								alt="Poster"
-								class="w-full h-full object-contain"
-								onerror={(e) => {
-									const target = e.currentTarget as HTMLImageElement; target.style.display = 'none';
-								}}
+								class="w-full h-full object-contain" hidden={posterPreviewError}
+								onerror={() => { posterPreviewError = true; }}
 							/>
 						{/if}
 					</div>
@@ -255,10 +275,8 @@
 							<img
 								src={previewImageURL(coverUrl)}
 								alt="Cover"
-								class="w-full"
-							onerror={(e) => {
-								const target = e.currentTarget as HTMLImageElement; target.style.display = 'none';
-							}}
+								class="w-full" hidden={coverPreviewError}
+							onerror={() => { coverPreviewError = true; }}
 						/>
 					</button>
 				{:else}
@@ -404,10 +422,8 @@
 							<img
 								src={previewImageURL(url)}
 								alt="Screenshot {index + 1}"
-								class="w-full aspect-video object-cover rounded"
-								onerror={(e) => {
-									const target = e.currentTarget as HTMLImageElement; target.style.display = 'none';
-								}}
+								class="w-full aspect-video object-cover rounded" hidden={screenshotErrors.has(url)}
+								onerror={() => { screenshotErrors = new Set([...screenshotErrors, url]); }}
 							/>
 						</button>
 						<div class="mt-2 flex items-center gap-1">
