@@ -114,34 +114,39 @@ type PriorityConfig struct {
 	Priority []string `yaml:"priority" json:"priority"`
 	// Fields holds per-metadata-field scraper priority overrides.
 	// Keys are snake_case field names matching the API (e.g. "title", "actress", "cover_url").
-	// A PRESENT key (even an empty []string{}) is an override: [] means "consult
-	// NO scrapers for this field" (the field is left empty); [a,b] means "consult
-	// a then b exclusively". An ABSENT key (or a nil slice) inherits the global
-	// Priority list. There is no skip sentinel — suppression is pure exclusivity.
+	// A non-empty value [a,b] means "consult a then b exclusively". A PRESENT key
+	// whose value is an empty slice ([]string{} / []) inherits the global Priority
+	// list (commit 9f882f22's documented intent: "[] still means 'inherit global'"),
+	// so configs carrying [] (common from the pre-9f882f22 merge era) upgrade
+	// safely instead of wiping the field. An ABSENT key (or a nil slice) also
+	// inherits. Deliberate suppression uses the ["__skip__"] sentinel, which
+	// matches no real scraper so the field is left empty.
 	Fields map[string][]string `yaml:"-" json:"-"`
 }
 
 // GetFieldPriority returns the EFFECTIVE priority list for a metadata field:
-// the per-field override when one is present (including an explicit empty
-// slice, which means "consult no scrapers — leave this field empty"), else the
-// global Priority list. Returns nil when neither is set.
+// the per-field override when one is present AND non-empty, else the global
+// Priority list. Returns nil when neither is set.
 //
-// The three field states map cleanly (no skip sentinel):
+// The three field states map cleanly:
 //
-//	key ABSENT (or nil) → inherit the global Priority list
-//	key present = []   → consult NO scrapers → field left empty
-//	key present = [a,b]→ consult a then b exclusively, no global fallback
+//	key ABSENT / nil / [] (present-empty) → inherit the global Priority list
+//	key present = ["__skip__"]           → consult NO scrapers → field left empty
+//	key present = [a,b]                   → consult a then b exclusively, no global fallback
 //
-// A nil slice stored under a present key is treated as "inherit global" (the
-// null/undefined state), matching the JSON/YAML round-trip where a null value
-// decodes to an absent key. Only a non-nil empty slice ([]string{}) is a
-// deliberate empty override. Callers that need to distinguish "present" from
-// "absent" should use PerFieldOverride.
+// A present-empty slice ([]string{} or []) is treated as "inherit global",
+// matching commit 9f882f22's documented intent ("[] ... still means 'inherit
+// global'") and the pre-9f882f22 behavior where [] was merged with global. This
+// keeps configs carrying [] (common from the merge era) upgrade-safe — they
+// inherit the global priority instead of wiping the field. Deliberate
+// suppression uses the ["__skip__"] sentinel, which matches no real scraper so
+// assignString leaves the field empty. Callers that need to distinguish
+// "present" from "absent" should use PerFieldOverride.
 func (p *PriorityConfig) GetFieldPriority(fieldKey string) []string {
 	if p == nil {
 		return nil
 	}
-	if override := p.PerFieldOverride(fieldKey); override != nil {
+	if override := p.PerFieldOverride(fieldKey); len(override) > 0 {
 		return override
 	}
 	if len(p.Priority) > 0 {
@@ -151,24 +156,24 @@ func (p *PriorityConfig) GetFieldPriority(fieldKey string) []string {
 }
 
 // PerFieldOverride returns the raw per-field override stored under fieldKey,
-// WITHOUT falling back to the global Priority list. This is the clean "is there
-// an override?" accessor: it returns the raw value for a PRESENT key (including
-// an explicit empty slice []string{}, which means "consult no scrapers for
-// this field" — deliberate suppression via pure exclusivity), and nil only for
-// an ABSENT key.
+// WITHOUT falling back to the global Priority list. This is the raw
+// "is there an override key?" accessor: it returns the raw value for a PRESENT
+// key (including an explicit empty slice []string{}), and nil only for an
+// ABSENT key.
 //
-// A nil slice stored under a present key is returned as nil, so callers using
-// `fp != nil` treat present-nil identically to absent (both inherit global) —
-// matching the null/undefined = inherit contract. Only a non-nil empty slice
-// is a deliberate empty override.
+// NOTE: this is a RAW accessor — it does NOT decide resolution. A present-empty
+// [] is returned as a non-nil empty slice here, but resolution sites
+// (GetFieldPriority, aggregator.resolvePriorities/getFieldPriorityFromConfig,
+// AggregateWithPriority) guard with `len(fp) > 0`, so a present [] inherits the
+// global priority (commit 9f882f22's documented intent: "[] still means 'inherit
+// global'"); deliberate suppression uses the ["__skip__"] sentinel (matches no
+// real scraper). PerFieldOverride is kept as a raw accessor so callers can
+// distinguish "explicitly stored []" from "absent" (e.g. for diagnostics/UI)
+// even though both now resolve to inherit.
 //
-// This is the per-field-only counterpart of GetFieldPriority: GetFieldPriority
-// returns Fields[fieldKey] OR the global Priority (useful for the default
-// aggregation path); PerFieldOverride returns Fields[fieldKey] only (useful
-// when a caller supplies its own priority list and wants per-field overrides
-// to still win — e.g. AggregateWithPriority, where customPriority replaces the
-// global order for fields without an override, but an explicit per-field
-// override like `series: [tokyohot]` still wins exclusively).
+// A nil slice stored under a present key is returned as nil, matching the
+// null/undefined = inherit contract. Callers that want the EFFECTIVE priority
+// (with global fallback) should use GetFieldPriority, not this accessor.
 func (p *PriorityConfig) PerFieldOverride(fieldKey string) []string {
 	if p == nil {
 		return nil

@@ -1,7 +1,22 @@
 import type { SettingsConfig } from '$lib/api/types';
 
+/**
+ * Canonical skip sentinel (slice form `["__skip__"]`).
+ *
+ * Under World A semantics, a present-empty `[]` field override means INHERIT
+ * the global priority (folding the legacy World-B suppression form on read).
+ * The only encoding for deliberate suppression is `["__skip__"]` — a sentinel
+ * that matches no real scraper, so the field is left empty when consulted.
+ */
+export const SKIP_SENTINEL = '__skip__';
+
+/** Whether a stored override list is the skip sentinel (`["__skip__"]`). */
+export function isSkipSentinel(list: string[]): boolean {
+	return list.length === 1 && list[0] === SKIP_SENTINEL;
+}
+
 /** Coarse display status for a field, driving the row's visual indicator. */
-export type FieldStatus = 'inherited' | 'custom';
+export type FieldStatus = 'inherited' | 'skipped' | 'custom';
 
 /** Global scraper execution priority from config. */
 export function getGlobalPriority(config: SettingsConfig | undefined | null): string[] {
@@ -11,14 +26,18 @@ export function getGlobalPriority(config: SettingsConfig | undefined | null): st
 /**
  * Resolve a field's effective scraper priority.
  *
- * Pure-exclusivity contract (no skip sentinel) — the three field states:
- *   - key ABSENT (or null/undefined) → inherit the global priority list
- *   - key present = []                → consult NO scrapers (field left empty)
- *   - key present = [a,b]             → consult a then b exclusively, no fallback
+ * World A semantics — the three (technically four) field states:
+ *   - key ABSENT (or null/undefined)          → inherit the global list
+ *   - key present = ["__skip__"]               → skipped (field left empty;
+ *                                               suppression sentinel)
+ *   - key present = []                          → inherit global (legacy World-B
+ *                                               form folded to inherit on read,
+ *                                               matching the backend)
+ *   - key present = [a,b] (any other list)     → consult a then b exclusively
  *
- * A PRESENT empty array is a deliberate empty field, NOT an inherit signal —
- * this is what makes "Remove all" + Save persist an empty field. Only an ABSENT
- * (or null) key inherits the global list. `[]` and `undefined` are distinct.
+ * `["__skip__"]` is the only suppression encoding. A legacy present `[]` is
+ * folded to inherit so the UI never crashes and matches the backend's
+ * task-2 ([]) = inherit semantics.
  */
 export function getFieldPriority(
 	config: SettingsConfig | undefined | null,
@@ -28,7 +47,12 @@ export function getFieldPriority(
 	if (fields) {
 		const v = fields[fieldKey];
 		if (v !== undefined && v !== null) {
-			return v; // present (incl. []) — [] means "no scrapers"
+			// Legacy present-empty [] folds to inherit (World A). The skip sentinel
+			// and any other list are returned verbatim.
+			if (Array.isArray(v) && v.length === 0) {
+				return getGlobalPriority(config);
+			}
+			return v;
 		}
 	}
 	return getGlobalPriority(config);
@@ -37,12 +61,12 @@ export function getFieldPriority(
 /**
  * Whether a field has a custom (non-inherited) override.
  *
- * A PRESENT value (including `[]`) that differs from the global list is an
- * override → true. A present `[]` differs from a non-empty global, so it counts
- * as overridden (custom). An ABSENT key (or null) → false (inherit global).
- * When the global list itself is empty, a present `[]` equals it and is NOT an
- * override (an empty field with an empty global is indistinguishable from
- * inherited, which is correct).
+ * Both 'custom' (`[a,b]` differs from global) and 'skipped' (`["__skip__"]`)
+ * are overrides of inherited → true. A present `[]` legacy form folds to
+ * inherit on read, so a stored `[]` equal to an empty global is NOT an
+ * override; a stored `[]` differing from a non-empty global is treated as
+ * inherited (since `getFieldPriority` folds it to global). Only the skip
+ * sentinel and genuinely custom lists count as overrides.
  */
 export function isFieldOverridden(
 	config: SettingsConfig | undefined | null,
@@ -52,31 +76,47 @@ export function isFieldOverridden(
 	if (!fields) return false;
 	const v = fields[fieldKey];
 	if (v === undefined || v === null) return false; // absent/null → inherit
+	if (isSkipSentinel(v)) return true; // skipped → overridden
+	if (Array.isArray(v) && v.length === 0) return false; // legacy [] → inherit
 	return JSON.stringify(v) !== JSON.stringify(getGlobalPriority(config));
 }
 
 /**
  * Display status for a field, driving the row's visual indicator:
- * - "inherited" (green): no override, uses global priority.
- * - "custom" (orange): an exclusive override listing scrapers (possibly fewer
+ * - "inherited" (green): no override, uses the global priority list.
+ * - "skipped"   (red/slate): suppressed via the `["__skip__"]` sentinel — the
+ *   field is left empty (no scrapers consulted).
+ * - "custom"   (orange): an exclusive override listing scrapers (possibly fewer
  *   than the global list — the user removed some for this field).
  */
 export function getFieldStatus(
 	config: SettingsConfig | undefined | null,
 	fieldKey: string,
 ): FieldStatus {
-	return isFieldOverridden(config, fieldKey) ? 'custom' : 'inherited';
+	const fields = config?.metadata?.priority;
+	if (!fields) return 'inherited';
+	const v = fields[fieldKey];
+	if (v === undefined || v === null) return 'inherited';
+	if (isSkipSentinel(v)) return 'skipped';
+	if (Array.isArray(v) && v.length === 0) return 'inherited'; // legacy [] folds to inherit
+	return JSON.stringify(v) !== JSON.stringify(getGlobalPriority(config))
+		? 'custom'
+		: 'inherited';
 }
 
 /**
  * Build a config mutation that sets a field's per-field priority override.
  *
- * Returns a new `metadata.priority` record (does not mutate the input). The
- * config shape encodes the three field states directly (no skip sentinel):
+ * Returns a new `metadata.priority` record (does not mutate the input). Under
+ * World A semantics:
  *   - priority deep-equals global → DELETE the key (inherit = key ABSENT).
- *     Do NOT write `[]` — a present `[]` means "empty field", not "inherit".
- *   - priority differs from global (incl. `[]` when global is non-empty) →
- *     store it verbatim. A deliberate empty list stores `[]` (present-empty).
+ *     Do NOT write `[]` — a present `[]` is LEGACY and folds to inherit on
+ *     read (matching the backend), so writing it would mean inherit anyway.
+ *   - priority is EMPTY (Remove all) → store `["__skip__"]` (the skip sentinel).
+ *     This is the key behavioral change: "Remove all" + Save now stores the
+ *     skip sentinel, NOT `[]`, so the field is deliberately suppressed rather
+ *     than silently treated as inherit.
+ *   - priority differs from global (non-empty override) → store it verbatim.
  */
 export function buildFieldPriorityOverride(
 	config: SettingsConfig | undefined | null,
@@ -87,8 +127,10 @@ export function buildFieldPriorityOverride(
 	const global = getGlobalPriority(config);
 	if (JSON.stringify(priority) === JSON.stringify(global)) {
 		delete base[fieldKey]; // inherit = key absent (NOT [])
+	} else if (priority.length === 0) {
+		base[fieldKey] = [SKIP_SENTINEL]; // "Remove all" → suppress via skip sentinel
 	} else {
-		base[fieldKey] = [...priority]; // differs — incl. deliberate-empty []
+		base[fieldKey] = [...priority]; // differs — store verbatim
 	}
 	return base;
 }

@@ -15,7 +15,8 @@
 		isFieldOverridden,
 		getFieldStatus,
 		applyEnabledReorderToFull,
-		buildFieldPriorityOverride
+		buildFieldPriorityOverride,
+		SKIP_SENTINEL
 	} from './priority';
 
 	interface Props {
@@ -184,7 +185,15 @@
 	// Open field editor
 	function openFieldEditor(fieldKey: string) {
 		editingField = fieldKey;
-		editingPriority = [...getFieldPriority(config, fieldKey)];
+		// When opening a 'skipped' field (stored ["__skip__"]), start with an
+		// empty list so the user sees an empty editor and can add scrapers back.
+		// Saving an empty list re-emits ["__skip__"] via buildFieldPriorityOverride.
+		const stored = config?.metadata?.priority?.[fieldKey];
+		if (stored && stored.length === 1 && stored[0] === SKIP_SENTINEL) {
+			editingPriority = [];
+		} else {
+			editingPriority = [...getFieldPriority(config, fieldKey)];
+		}
 	}
 
 	// Save field priority
@@ -198,11 +207,10 @@
 
 		// Delegate to the canonical, unit-tested helper: when the resolved
 		// priority equals the global list it DELETES the key (restoring
-		// "inherited" = key absent); otherwise it stores the full list verbatim
-		// — including disabled scrapers preserved through onReorder, AND a
-		// deliberate empty list (Remove all + Save), which stores [] so the
-		// field is left empty under exclusive semantics. There is no skip
-		// sentinel: [] means "consult no scrapers", distinct from a deleted key.
+		// "inherited" = key absent); when the priority is EMPTY (Remove all + Save)
+		// it stores ["__skip__"] (the skip sentinel — deliberate suppression,
+		// since [] now means inherit under World A); otherwise it stores the full
+		// list verbatim (including disabled scrapers preserved through onReorder).
 		config.metadata.priority = buildFieldPriorityOverride(
 			config,
 			editingField,
@@ -215,9 +223,10 @@
 	}
 
 	// Reset field to global (clears any override). Inherit = key ABSENT, so we
-	// DELETE the key rather than storing []. A present [] means "consult no
-	// scrapers" (deliberate empty field) — distinct from inherit — so writing []
-	// here would leave the field empty instead of restoring inheritance.
+	// DELETE the key rather than storing []. A present [] is LEGACY and folds to
+	// inherit on read under World A; a stored ["__skip__"] means suppression —
+	// distinct from inherit — so either way we delete the key to restore
+	// inheritance.
 	function resetFieldToGlobal(fieldKey: string) {
 		if (!config.metadata?.priority) return;
 
@@ -255,9 +264,10 @@
 	}
 
 	// Shortcut: remove every scraper from the field's list. Saving the emptied
-	// list stores [] (a PRESENT empty override) — under exclusive semantics the
-	// field is then left empty (no scraper consulted). To inherit the global list
-	// instead, use Reset to global (which deletes the key).
+	// list stores ["__skip__"] (the skip sentinel) via buildFieldPriorityOverride —
+	// under World A [] means inherit, so the skip sentinel is the only encoding
+	// for deliberate suppression. To inherit the global list instead, use Reset to
+	// global (which deletes the key).
 	function removeAllScrapers() {
 		editingPriority = [];
 	}
@@ -531,8 +541,9 @@
 						</DraggableList>
 					{:else}
 						<p class="text-sm text-muted-foreground italic py-4 text-center">
-							No scrapers in this field's list. Save to leave this field empty
-							(no scraper consulted), or add some below.
+							No scrapers in this field's list. Save with an empty list to suppress this
+							field (stores the <code class="bg-muted px-1 rounded">"__skip__"</code>
+							sentinel — no scraper is consulted), or add some below.
 						</p>
 					{/if}
 				</div>
@@ -581,10 +592,13 @@
 					</p>
 					<p>
 						To leave a field empty, remove all scrapers and Save (stores
-						<code class="bg-muted px-1 rounded">series: []</code> — no scraper is
-						consulted), or point it at a scraper that doesn't provide it (e.g.
-						<code class="bg-muted px-1 rounded">series: [tokyohot]</code>). There is no
-						skip button — suppression is just an empty (or non-matching) scraper list.
+						<code class="bg-muted px-1 rounded">series: ["__skip__"]</code> — the
+						skip sentinel, no scraper is consulted), or point it at a scraper that
+						doesn't provide it (e.g.
+						<code class="bg-muted px-1 rounded">series: [tokyohot]</code>). A legacy
+						<code class="bg-muted px-1 rounded">series: []</code> is treated as
+						inherit-global, not suppression — so "Remove all + Save" stores the
+						<code class="bg-muted px-1 rounded">__skip__</code> sentinel instead.
 					</p>
 				</div>
 

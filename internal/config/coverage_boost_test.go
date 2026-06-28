@@ -605,11 +605,12 @@ func TestPriorityConfig_GetFieldPriority_EmptyOverride(t *testing.T) {
 		Fields:   map[string][]string{"title": {}},
 	}
 	result := p.GetFieldPriority("title")
-	// A PRESENT empty override ([]string{}) is a deliberate empty field — it must
-	// NOT fall back to global. This is the pure-exclusivity contract: a present []
-	// means "consult no scrapers", distinct from an absent key (inherit global).
-	assert.Equal(t, []string{}, result)
-	assert.NotNil(t, result, "present [] must be a non-nil empty slice, not nil (nil ⇒ inherit)")
+	// A PRESENT empty override ([]string{}) inherits the global priority list —
+	// it is NOT a deliberate empty field. This matches commit 9f882f22's
+	// documented intent ("[] still means 'inherit global'") and keeps configs
+	// carrying [] (common from the merge era) upgrade-safe. Deliberate
+	// suppression uses the ["__skip__"] sentinel (matches no scraper) instead.
+	assert.Equal(t, []string{"dmm", "r18dev"}, result)
 }
 
 func TestPriorityConfig_GetFieldPriority_NilOverride(t *testing.T) {

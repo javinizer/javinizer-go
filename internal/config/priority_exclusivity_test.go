@@ -11,13 +11,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestPerFieldOverride_PresentEmptyVsAbsent locks in the pure-exclusivity
-// contract for the "is there an override?" accessor: a PRESENT key (even with
-// an explicit empty slice) returns a non-nil value, while an ABSENT key returns
-// nil. Callers use `fp != nil` to distinguish "override present" (honored
-// exclusively, including an empty list = "consult no scrapers") from "no
-// override" (inherit global). A nil slice stored under a present key is treated
-// as nil (inherit), matching the null/undefined = inherit contract.
+// TestPerFieldOverride_PresentEmptyVsAbsent locks in the raw-accessor contract
+// for the "is there an override?" question: a PRESENT key (even with an
+// explicit empty slice) returns a non-nil value, while an ABSENT key returns
+// nil. This is the RAW accessor — it does NOT decide resolution. Resolution
+// sites (GetFieldPriority, aggregator.resolvePriorities) use `len(fp) > 0`, so
+// a present-empty [] inherits the global priority (commit 9f882f22's documented
+// intent: "[] still means 'inherit global'"); deliberate suppression uses the
+// ["__skip__"] sentinel. PerFieldOverride is kept as a raw accessor so callers
+// can distinguish "explicitly stored []" from "absent" if needed (e.g. for
+// diagnostics/UI), even though both now resolve to inherit. A nil slice stored
+// under a present key is treated as nil (inherit), matching the
+// null/undefined = inherit contract.
 func TestPerFieldOverride_PresentEmptyVsAbsent(t *testing.T) {
 	p := &PriorityConfig{
 		Priority: []string{"r18dev", "dmm"},
@@ -77,9 +82,10 @@ func TestPriorityConfig_EmptySliceRoundTrip_JSON(t *testing.T) {
 	require.NotNil(t, series, "present [] must remain a non-nil empty slice, not nil (nil ⇒ inherit)")
 	assert.Equal(t, []string{}, series)
 
-	// And it must resolve as an empty effective priority (no global fallback).
-	assert.Equal(t, []string{}, rt.GetFieldPriority("series"))
-	assert.NotNil(t, rt.GetFieldPriority("series"), "present [] effective priority is non-nil (empty, not inherited)")
+	// And it resolves as the inherited global priority (present [] ⇒ inherit,
+	// NOT "consult no scrapers").
+	assert.Equal(t, []string{"r18dev", "dmm"}, rt.GetFieldPriority("series"))
+	assert.NotNil(t, rt.GetFieldPriority("series"), "present [] inherits global (non-nil), not an empty override")
 
 	// Non-empty override survives too.
 	assert.Equal(t, []string{"dmm"}, rt.GetFieldPriority("title"))
@@ -113,7 +119,8 @@ func TestPriorityConfig_EmptySliceRoundTrip_YAML(t *testing.T) {
 	require.True(t, ok, "series key must survive the YAML round-trip")
 	require.NotNil(t, series, "present [] must remain a non-nil empty slice after YAML round-trip")
 	assert.Equal(t, []string{}, series)
-	assert.Equal(t, []string{}, rt.GetFieldPriority("series"))
+	// Present [] inherits global (commit 9f882f22: "[] still means 'inherit global'").
+	assert.Equal(t, []string{"r18dev", "dmm"}, rt.GetFieldPriority("series"))
 }
 
 // TestConfig_EmptySliceRoundTrip_SaveLoad exercises the REAL persistence path
@@ -157,8 +164,9 @@ func TestConfig_EmptySliceRoundTrip_SaveLoad(t *testing.T) {
 	require.NotNil(t, series, "present [] must reload as a non-nil empty slice (nil ⇒ inherit)")
 	assert.Equal(t, []string{}, series)
 
-	// Effective priority for series is empty (deliberate empty field, not global).
-	assert.Equal(t, []string{}, loaded.Metadata.Priority.GetFieldPriority("series"))
+	// Effective priority for series inherits global (present [] ⇒ inherit, not
+	// a deliberate empty field).
+	assert.Equal(t, []string{"r18dev", "dmm"}, loaded.Metadata.Priority.GetFieldPriority("series"))
 
 	// Non-empty override and global priority survive too.
 	assert.Equal(t, []string{"dmm"}, loaded.Metadata.Priority.GetFieldPriority("title"))

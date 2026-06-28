@@ -34,6 +34,7 @@
 
 	// Per-status visual language.
 	// inherited (green): no override, uses the global priority list.
+	// skipped   (red/slate): suppressed via ["__skip__"] — field left empty.
 	// custom   (orange): an exclusive override listing scrapers (possibly fewer
 	//             than the global list — the user removed some for this field).
 	const appearance: Record<
@@ -45,6 +46,12 @@
 			badge: 'text-green-600',
 			label: 'Inherited',
 			row: 'bg-background'
+		},
+		skipped: {
+			dot: 'bg-slate-500',
+			badge: 'text-slate-600',
+			label: 'Skipped',
+			row: 'bg-red-50/50 border-red-200 dark:bg-red-950/20 dark:border-red-900'
 		},
 		custom: {
 			dot: 'bg-orange-500',
@@ -72,11 +79,23 @@
 			{fieldLabel}
 		</div>
 		<div class="text-xs text-muted-foreground truncate">
-			{#if status === 'custom' && priority.length === 0}
-				<!-- Deliberate empty override ([] = "consult no scrapers"): the field is
-				     left empty. Distinguished from "inherited" by the custom status, so
-				     the user sees their suppression intent reflected, not a scraper chain. -->
-				<span class="italic">No scrapers — this field will be left empty</span>
+			{#if status === 'skipped'}
+				<!-- Suppressed via ["__skip__"]: the field is deliberately left empty
+				     (no scrapers consulted). Distinguished from custom/orange so the
+				     user sees their suppression intent reflected. -->
+				<span class="italic">Suppressed (no scrapers consulted)</span>
+			{:else if status === 'custom' && priority.length === 0}
+				<!-- Defensive fallback: a present-empty [] override is LEGACY and folds
+				     to inherit on read (matched in getGlobalPriority), so this branch
+				     should rarely fire. Treat as inherited: show the global chain. -->
+				{#each globalPriority as scraper, index}
+					<span class="inline-flex items-center">
+						{formatScraperName(scraper)}
+						{#if index < globalPriority.length - 1}
+							<span class="mx-1 text-muted-foreground/50">→</span>
+						{/if}
+					</span>
+				{/each}
 			{:else}
 				{#each priority as scraper, index}
 					<span class="inline-flex items-center">
