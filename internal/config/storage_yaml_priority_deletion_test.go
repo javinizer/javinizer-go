@@ -166,6 +166,32 @@ metadata:
 		assert.NotEqual(t, -1, findMappingValueIndex(prio, "priority"))
 	})
 
+	t.Run("deletes whole metadata.priority block when absent in new cfg", func(t *testing.T) {
+		existing := mustParseYAMLDoc(t, `metadata:
+    priority:
+        series:
+            - dmm
+        priority:
+            - dmm
+            - r18dev
+`)
+		// New config omits metadata.priority entirely (e.g. user cleared all
+		// priority settings including the global list).
+		newDoc := mustParseYAMLDoc(t, `metadata:
+    some_other_field: keep
+`)
+
+		mergeYAMLNode(existing, newDoc)
+
+		prio := navigateToMapping(existing, "metadata", "priority")
+		assert.Nil(t, prio, "metadata.priority block must be deleted when absent in new cfg")
+
+		metadata := navigateToMapping(existing, "metadata")
+		require.NotNil(t, metadata)
+		assert.NotEqual(t, -1, findMappingValueIndex(metadata, "some_other_field"),
+			"sibling metadata key must be preserved (only the priority subtree is deleted)")
+	})
+
 	t.Run("Save persists deleted per-field priority override to disk", func(t *testing.T) {
 		path := t.TempDir() + "/config.yaml"
 		initial := DefaultConfig(nil, nil)

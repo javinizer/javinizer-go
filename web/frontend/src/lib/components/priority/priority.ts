@@ -125,10 +125,13 @@ export function buildFieldPriorityOverride(
 ): Record<string, string[]> {
 	const base = { ...(config?.metadata?.priority ?? {}) };
 	const global = getGlobalPriority(config);
-	if (JSON.stringify(priority) === JSON.stringify(global)) {
+	if (priority.length === 0) {
+		base[fieldKey] = [SKIP_SENTINEL]; // "Remove all" → suppress (checked first so an empty
+		// list always persists the sentinel even when global is itself empty —
+		// otherwise deep-equal-to-global would silently delete the key and the
+		// field would re-inherit if global scrapers are added later)
+	} else if (JSON.stringify(priority) === JSON.stringify(global)) {
 		delete base[fieldKey]; // inherit = key absent (NOT [])
-	} else if (priority.length === 0) {
-		base[fieldKey] = [SKIP_SENTINEL]; // "Remove all" → suppress via skip sentinel
 	} else {
 		base[fieldKey] = [...priority]; // differs — store verbatim
 	}

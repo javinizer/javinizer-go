@@ -225,17 +225,16 @@ describe('priority: buildFieldPriorityOverride (config shape)', () => {
 		expect('series' in next).toBe(true);
 	});
 
-	it('stores [] as ["__skip__"] even when global is empty (Remove all still suppresses)', () => {
+	it('stores ["__skip__"] even when global is empty (Remove all still suppresses)', () => {
 		// When the global list is itself empty, an empty editingPriority would
-		// deep-equal global — so it would normally DELETE the key (inherit). To
-		// preserve the "Remove all = suppress" UX, an explicit empty list still
-		// surfaces as inherit (key absent), since with an empty global there is
-		// nothing to suppress beyond. Document the actual behavior below.
+		// deep-equal global — but "Remove all" is a deliberate suppress action.
+		// Persist the skip sentinel so the field stays suppressed even if global
+		// scrapers are added later. The empty-list check runs before the
+		// deep-equal shortcut for exactly this reason.
 		const config = makeConfig({ global: [] });
 		const next = buildFieldPriorityOverride(config, 'series', []);
-		// Empty priority + empty global: priority === global → key DELETED.
-		// (No scrapers run anyway under an empty global, so suppress == inherit.)
-		expect('series' in next).toBe(false);
+		expect(next.series).toEqual([SKIP_SENTINEL]);
+		expect('series' in next).toBe(true);
 	});
 
 	it('does not mutate the original config', () => {

@@ -111,12 +111,22 @@ func navigateToMapping(root *yaml.Node, keys ...string) *yaml.Node {
 }
 
 func pruneMetadataPriorityFields(dst, src *yaml.Node) {
-	dstPriority := navigateToMapping(dst, "metadata", "priority")
-	if dstPriority == nil || dstPriority.Kind != yaml.MappingNode {
+	dstMetadata := navigateToMapping(dst, "metadata")
+	if dstMetadata == nil || dstMetadata.Kind != yaml.MappingNode {
+		return
+	}
+	dstPriorityIdx := findMappingValueIndex(dstMetadata, "priority")
+	if dstPriorityIdx == -1 {
+		return
+	}
+	dstPriority := dstMetadata.Content[dstPriorityIdx]
+	if dstPriority.Kind != yaml.MappingNode {
 		return
 	}
 	srcPriority := navigateToMapping(src, "metadata", "priority")
 	if srcPriority == nil || srcPriority.Kind != yaml.MappingNode {
+		keyIdx := dstPriorityIdx - 1
+		dstMetadata.Content = append(dstMetadata.Content[:keyIdx], dstMetadata.Content[dstPriorityIdx+1:]...)
 		return
 	}
 	srcKeys := make(map[string]bool, len(srcPriority.Content)/2)
