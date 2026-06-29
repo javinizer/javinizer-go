@@ -834,7 +834,7 @@ export interface OutputConfig {
 	folder_format: string;
 	file_format: string;
 	subfolder_format: string[];
-	delimiter: string;
+	actress_delimiter: string;
 	max_title_length: number;
 	max_path_length: number;
 	max_poster_height: number;

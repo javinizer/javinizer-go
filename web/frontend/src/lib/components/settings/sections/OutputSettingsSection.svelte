@@ -72,7 +72,7 @@
 				<input
 					id="delimiter"
 					type="text"
-					bind:value={config.output.delimiter}
+					bind:value={config.output.actress_delimiter}
 					class={inputClass}
 					placeholder=", "
 				/>
