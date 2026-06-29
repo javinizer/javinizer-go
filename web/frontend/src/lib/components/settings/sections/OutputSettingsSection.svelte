@@ -87,7 +87,7 @@
 			<input
 				id="subfolder-format"
 				type="text"
-				value={config.output.subfolder_format.join(', ')}
+				value={config.output.subfolder_format?.join(', ') ?? ''}
 				onchange={(e) => {
 					config.output.subfolder_format = e.currentTarget.value
 						.split(',')
