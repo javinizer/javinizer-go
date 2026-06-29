@@ -9,6 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scrape"
 )
 
 // rescrapeBatchMovie godoc
@@ -49,7 +50,7 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		logging.Infof("Batch rescrape request for job %s, result %s: scrapers=%v, manual_input=%s, force=%v",
-			job.GetID(), resultID, req.SelectedScrapers, req.ManualSearchInput, req.Force)
+			job.GetID(), resultID, req.SelectedScrapers, scrape.RedactURLQuery(req.ManualSearchInput), req.Force)
 
 		// Resolve result by resultID to get movieID and filePath
 		result, filePath, found := job.GetFileResultByResultID(resultID)

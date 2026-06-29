@@ -30,6 +30,10 @@ import (
 // @Router /api/v1/batch/scrape [post]
 func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Bound the request body (security F1): a body over 10MB is rejected before
+		// JSON parsing. Mirrors actress/genre handlers; stdlib-enforced.
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
+
 		var req contracts.BatchScrapeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
@@ -49,6 +53,14 @@ func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 		}
 
+		// Sanitize + validate per-file manual inputs (scheme, CanHandleURL, length,
+		// count) before starting the job; the sanitized map is what reaches the scrape.
+		sanitizedManualInputs, err := validateAndSanitizeManualInputs(req.ManualInputs, req.Files, deps.GetScraperLister())
+		if err != nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			return
+		}
+
 		output, err := StartScrapeUseCase(c.Request.Context(), rt, StartScrapeInput{
 			Files:            req.Files,
 			Destination:      req.Destination,
@@ -60,6 +72,7 @@ func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 			SelectedScrapers: req.SelectedScrapers,
 			Strict:           req.Strict,
 			Force:            req.Force,
+			ManualInputs:     sanitizedManualInputs,
 		})
 		if err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})

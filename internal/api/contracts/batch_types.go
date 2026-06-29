@@ -7,16 +7,17 @@ import (
 
 // BatchScrapeRequest represents a batch scrape request
 type BatchScrapeRequest struct {
-	Files            []string `json:"files" binding:"required"`
-	Strict           bool     `json:"strict" example:"false"`
-	Force            bool     `json:"force" example:"false"`
-	Destination      string   `json:"destination,omitempty" example:"/path/to/output"` // Persisted on job for UI retrieval; required for organize mode, optional for in-place modes
-	Update           bool     `json:"update" example:"false"`                          // Update mode: only create/update metadata files without moving video files
-	SelectedScrapers []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
-	Preset           string   `json:"preset,omitempty" example:"conservative"`        // Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)
-	ScalarStrategy   string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"` // For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
-	ArrayStrategy    string   `json:"array_strategy,omitempty" example:"merge"`       // For Update mode: merge, replace
-	OperationMode    string   `json:"operation_mode,omitempty" example:"organize"`    // Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-artwork, preview
+	Files            []string          `json:"files" binding:"required"`
+	Strict           bool              `json:"strict" example:"false"`
+	Force            bool              `json:"force" example:"false"`
+	Destination      string            `json:"destination,omitempty" example:"/path/to/output"` // Persisted on job for UI retrieval; required for organize mode, optional for in-place modes
+	Update           bool              `json:"update" example:"false"`                          // Update mode: only create/update metadata files without moving video files
+	SelectedScrapers []string          `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
+	Preset           string            `json:"preset,omitempty" example:"conservative"`                            // Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)
+	ScalarStrategy   string            `json:"scalar_strategy,omitempty" example:"prefer-nfo"`                     // For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
+	ArrayStrategy    string            `json:"array_strategy,omitempty" example:"merge"`                           // For Update mode: merge, replace
+	OperationMode    string            `json:"operation_mode,omitempty" example:"organize"`                        // Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-artwork, preview
+	ManualInputs     map[string]string `json:"manual_inputs,omitempty" example:"{\"/path/file.mp4\":\"IPX-123\"}"` // Per-file manual input override keyed by file path; an ID scrapes as that ID (bypasses matcher), a URL scrapes with URL-compatible scrapers
 }
 
 // BatchScrapeResponse represents batch scrape response

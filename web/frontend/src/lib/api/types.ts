@@ -78,6 +78,7 @@ export interface BatchScrapeRequest {
 		| 'merge-arrays';
 	array_strategy?: 'merge' | 'replace';
 	operation_mode?: OperationMode; // Per-request override of config operation_mode
+	manual_inputs?: Record<string, string>; // Per-file manual input override keyed by file path; an ID scrapes as that ID (bypasses matcher), a URL scrapes with URL-compatible scrapers
 }
 
 export interface RescrapeRequest {

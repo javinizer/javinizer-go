@@ -292,6 +292,14 @@ definitions:
       force:
         example: false
         type: boolean
+      manual_inputs:
+        additionalProperties:
+          type: string
+        description: Per-file manual input override keyed by file path; an ID scrapes
+          as that ID (bypasses matcher), a URL scrapes with URL-compatible scrapers
+        example:
+          '{"/path/file.mp4"': '"IPX-123"}'
+        type: object
       operation_mode:
         description: 'Override config.output.operation_mode: organize, in-place, in-place-norenamefolder,
           metadata-artwork, preview'

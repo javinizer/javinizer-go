@@ -21,6 +21,7 @@ import type {
 	TranslationConfig,
 	TranslationFieldsConfig,
 	ProxyProfile,
+	BatchScrapeRequest,
 } from './types';
 
 describe('types.ts has no unnecessary any', () => {
@@ -147,5 +148,29 @@ describe('types.ts has no unnecessary any', () => {
 		expect(nfo.enabled).toBe(true);
 		expect(metadata.translation?.provider).toBe('openai');
 		expect(db.type).toBe('sqlite');
+	});
+});
+
+describe('BatchScrapeRequest.manual_inputs wire contract', () => {
+	it('serializes per-file manual inputs under the snake_case manual_inputs key', () => {
+		const req: BatchScrapeRequest = {
+			files: ['/test/a.mp4', '/test/b.mp4'],
+			strict: false,
+			force: false,
+			manual_inputs: { '/test/a.mp4': 'IPX-123', '/test/b.mp4': 'https://example.com/v/456' },
+		};
+		const wire = JSON.stringify(req);
+		expect(wire).toContain('"manual_inputs"');
+		expect(wire).toContain('IPX-123');
+		const back = JSON.parse(wire) as BatchScrapeRequest;
+		expect(back.manual_inputs).toEqual({
+			'/test/a.mp4': 'IPX-123',
+			'/test/b.mp4': 'https://example.com/v/456',
+		});
+	});
+
+	it('omits manual_inputs when not set (existing callers unaffected)', () => {
+		const req: BatchScrapeRequest = { files: ['/test/a.mp4'], strict: false, force: false };
+		expect(JSON.stringify(req)).not.toContain('manual_inputs');
 	});
 });

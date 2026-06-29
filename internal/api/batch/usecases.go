@@ -133,6 +133,7 @@ type StartScrapeInput struct {
 	SelectedScrapers []string
 	Strict           bool
 	Force            bool
+	ManualInputs     map[string]string
 }
 
 // StartScrapeOutput holds the result of starting a batch scrape job.
@@ -153,6 +154,14 @@ func StartScrapeUseCase(
 	if len(allFiles) > len(input.Files) {
 		logging.Infof("Auto-discovered %d sibling files for batch job (original: %d, total: %d)",
 			len(allFiles)-len(input.Files), len(input.Files), len(allFiles))
+	}
+
+	// Resolve manual inputs: propagate each submitter's input to discovered
+	// siblings sharing the matcher MovieID, and reject conflicting inputs across
+	// co-parts of the same movie (handler maps the error to 400).
+	propagatedManualInputs, err := resolveManualInputOverride(input.Files, input.ManualInputs, fileMatchInfoMap, allFiles)
+	if err != nil {
+		return nil, err
 	}
 
 	resolved, err := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
@@ -193,6 +202,7 @@ func StartScrapeUseCase(
 	// otherwise metadata collected earlier in the usecase never reaches the
 	// scrape config.
 	scrapeOpts.FileMatchInfo = matchInfo
+	scrapeOpts.RawInputOverride = propagatedManualInputs
 	// Wire per-file scrape progress hooks so the frontend's messagesByFile
 	// populates during scrape and ProgressModal shows live per-file status.
 	// Restores main's realtime.ProgressAdapter behavior (deleted in this

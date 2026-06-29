@@ -3545,6 +3545,16 @@ const docTemplate = `{
                     "type": "boolean",
                     "example": false
                 },
+                "manual_inputs": {
+                    "description": "Per-file manual input override keyed by file path; an ID scrapes as that ID (bypasses matcher), a URL scrapes with URL-compatible scrapers",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "example": {
+                        "{\"/path/file.mp4\"": "\"IPX-123\"}"
+                    }
+                },
                 "operation_mode": {
                     "description": "Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-artwork, preview",
                     "type": "string",

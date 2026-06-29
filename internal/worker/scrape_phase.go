@@ -128,6 +128,16 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 	inputs.Lifecycle.MarkCompleted()
 }
 
+// isManualURLInput reports whether a manual input looks like an http(s) URL.
+// Mirrors rescrape_phase.go's manual-search URL detection. Post Phase-2
+// validation only http(s) URLs reach the scrape path (non-http schemes and
+// unhandleable URLs are rejected with 400), so this prefix check is a safe
+// proxy for matcher.ParseInput's IsURL at this seam.
+func isManualURLInput(raw string) bool {
+	lower := strings.ToLower(raw)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
 // buildScrapeCmd constructs a scrape.ScrapeCmd for a single file.
 // It resolves the movie ID (from override or matcher), determines scrapers
 // to use, and builds the command.
@@ -137,24 +147,36 @@ func buildScrapeCmd(
 	cfg ScrapePhaseConfig,
 ) scrape.ScrapeCmd {
 	var movieID string
-	if override, ok := cfg.MovieIDOverride[filePath]; ok {
-		movieID = override
-	} else {
-		movieID = ""
-		if inputs.Matcher != nil {
-			movieID = inputs.Matcher.MatchString(filepath.Base(filePath))
-		}
-		if movieID == "" {
-			movieID = filepath.Base(filePath)
-			ext := filepath.Ext(movieID)
-			if ext != "" {
-				movieID = movieID[:len(movieID)-len(ext)]
+	var rawInput string
+	var manualURL bool
+	if raw, ok := cfg.RawInputOverride[filePath]; ok && strings.TrimSpace(raw) != "" {
+		trimmed := strings.TrimSpace(raw)
+		rawInput = trimmed
+		movieID = trimmed
+		manualURL = isManualURLInput(trimmed)
+	}
+	if movieID == "" {
+		if override, ok := cfg.MovieIDOverride[filePath]; ok {
+			movieID = override
+		} else {
+			movieID = ""
+			if inputs.Matcher != nil {
+				movieID = inputs.Matcher.MatchString(filepath.Base(filePath))
+			}
+			if movieID == "" {
+				movieID = filepath.Base(filePath)
+				ext := filepath.Ext(movieID)
+				if ext != "" {
+					movieID = movieID[:len(movieID)-len(ext)]
+				}
 			}
 		}
 	}
 
 	scrapersToUse := cfg.SelectedScrapers
-	if len(scrapersToUse) == 0 && len(cfg.PriorityOverride) > 0 {
+	if manualURL {
+		scrapersToUse = nil
+	} else if len(scrapersToUse) == 0 && len(cfg.PriorityOverride) > 0 {
 		scrapersToUse = cfg.PriorityOverride
 	}
 	if len(scrapersToUse) == 0 {
@@ -163,6 +185,7 @@ func buildScrapeCmd(
 
 	return scrape.ScrapeCmd{
 		MovieID:          movieID,
+		RawInput:         rawInput,
 		ForceRefresh:     cfg.Force,
 		SelectedScrapers: scrapersToUse,
 		PriorityOverride: cfg.PriorityOverride,

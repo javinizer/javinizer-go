@@ -112,6 +112,35 @@ func TestOrganizePreviewRequest_OperationMode(t *testing.T) {
 	}
 }
 
+func TestBatchScrapeRequest_ManualInputsOmittedWhenEmpty(t *testing.T) {
+	var req BatchScrapeRequest
+	assert.NoError(t, json.Unmarshal([]byte(`{"files":["/test/a.mp4"]}`), &req))
+	assert.Nil(t, req.ManualInputs)
+
+	req = BatchScrapeRequest{Files: []string{"/test/a.mp4"}}
+	data, err := json.Marshal(req)
+	assert.NoError(t, err)
+	assert.NotContains(t, string(data), "manual_inputs")
+
+	req = BatchScrapeRequest{Files: []string{"/test/a.mp4"}, ManualInputs: map[string]string{}}
+	data, err = json.Marshal(req)
+	assert.NoError(t, err)
+	assert.NotContains(t, string(data), "manual_inputs")
+}
+
+func TestBatchScrapeRequest_ManualInputsRoundTrip(t *testing.T) {
+	req := BatchScrapeRequest{
+		Files:        []string{"/test/a.mp4", "/test/b.mp4"},
+		ManualInputs: map[string]string{"/test/a.mp4": "IPX-123", "/test/b.mp4": "https://example.com/v/456"},
+	}
+	data, err := json.Marshal(req)
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"manual_inputs":`)
+	var got BatchScrapeRequest
+	assert.NoError(t, json.Unmarshal(data, &got))
+	assert.Equal(t, req.ManualInputs, got.ManualInputs)
+}
+
 func TestOrganizePreviewResponse_OperationMode(t *testing.T) {
 	resp := OrganizePreviewResponse{
 		FolderName:    "TEST-001",
