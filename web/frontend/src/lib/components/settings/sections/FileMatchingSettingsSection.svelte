@@ -17,7 +17,7 @@
 			<input
 				id="file-extensions"
 				type="text"
-				value={config.file_matching.extensions.join(', ')}
+				value={config.file_matching.extensions?.join(', ') ?? ''}
 				onchange={(e) => {
 					config.file_matching.extensions = e.currentTarget.value
 						.split(',')
@@ -51,7 +51,7 @@
 			<input
 				id="exclude-patterns"
 				type="text"
-				value={config.file_matching.exclude_patterns.join(', ')}
+				value={config.file_matching.exclude_patterns?.join(', ') ?? ''}
 				onchange={(e) => {
 					config.file_matching.exclude_patterns = e.currentTarget.value
 						.split(',')

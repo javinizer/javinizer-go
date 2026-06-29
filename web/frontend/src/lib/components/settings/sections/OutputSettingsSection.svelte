@@ -72,7 +72,7 @@
 				<input
 					id="delimiter"
 					type="text"
-					bind:value={config.output.delimiter}
+					bind:value={config.output.actress_delimiter}
 					class={inputClass}
 					placeholder=", "
 				/>
@@ -87,7 +87,7 @@
 			<input
 				id="subfolder-format"
 				type="text"
-				value={config.output.subfolder_format.join(', ')}
+				value={config.output.subfolder_format?.join(', ') ?? ''}
 				onchange={(e) => {
 					config.output.subfolder_format = e.currentTarget.value
 						.split(',')
