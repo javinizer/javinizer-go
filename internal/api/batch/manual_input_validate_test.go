@@ -55,3 +55,41 @@ func TestValidateAndSanitizeManualInputs_RejectsMoreInputsThanFiles(t *testing.T
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exceeds files count")
 }
+
+func TestValidateAndSanitizeManualInputs_RejectsKeyNotInFiles(t *testing.T) {
+	testCases := []struct {
+		name     string
+		raw      map[string]string
+		files    []string
+		wantErr  bool
+		contains string
+	}{
+		{
+			name:     "orphan key passes count check but is not in files",
+			raw:      map[string]string{"/orphan/path": "IPX-123"},
+			files:    []string{"/real/a.mp4", "/real/b.mp4"},
+			wantErr:  true,
+			contains: "/orphan/path",
+		},
+		{
+			name:    "key in files passes (regression guard)",
+			raw:     map[string]string{"/real/a.mp4": "IPX-123"},
+			files:   []string{"/real/a.mp4", "/real/b.mp4"},
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := validateAndSanitizeManualInputs(tc.raw, tc.files, nil)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.contains)
+				assert.Nil(t, got)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.raw, got)
+			}
+		})
+	}
+}

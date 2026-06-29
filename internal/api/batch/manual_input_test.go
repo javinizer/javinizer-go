@@ -62,3 +62,21 @@ func TestResolveManualInputOverride_PropagatesToDiscoveredSibling(t *testing.T) 
 	assert.Equal(t, "IPX-999", result["/d/ABC-001-pt1.mp4"], "submitter keeps its own input")
 	assert.Equal(t, "IPX-999", result["/d/ABC-001-pt2.mp4"], "discovered sibling inherits the submitter's input (same matcher MovieID)")
 }
+
+func TestResolveManualInputOverride_MixedBatchManualAndAuto(t *testing.T) {
+	submitted := []string{"/a/SSIS-001.mp4", "/b/SSIS-002.mp4"}
+	manualInputs := map[string]string{"/a/SSIS-001.mp4": "ABC-123"}
+	fileMatchInfo := map[string]models.FileMatchInfo{
+		"/a/SSIS-001.mp4": fmiFor("/a/SSIS-001.mp4", "SSIS-001", 1),
+		"/b/SSIS-002.mp4": fmiFor("/b/SSIS-002.mp4", "SSIS-002", 1),
+	}
+	allFiles := submitted
+
+	result, err := resolveManualInputOverride(submitted, manualInputs, fileMatchInfo, allFiles)
+
+	require.NoError(t, err)
+	assert.Len(t, result, 1, "only the manually-input row gets an override; the auto row stays auto (no map entry)")
+	assert.Equal(t, "ABC-123", result["/a/SSIS-001.mp4"], "manual row scrapes as its explicit input")
+	_, hasAuto := result["/b/SSIS-002.mp4"]
+	assert.False(t, hasAuto, "auto row (no input, no matching sibling) is absent from the override map — buildScrapeCmd auto-IDs it from the matcher")
+}

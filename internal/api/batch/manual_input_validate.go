@@ -75,8 +75,15 @@ func validateAndSanitizeManualInputs(
 	if len(rawInputs) == 0 {
 		return rawInputs, nil
 	}
+	fileSet := make(map[string]struct{}, len(files))
+	for _, f := range files {
+		fileSet[f] = struct{}{}
+	}
 	result := make(map[string]string, len(rawInputs))
 	for path, raw := range rawInputs {
+		if _, ok := fileSet[path]; !ok {
+			return nil, fmt.Errorf("manual_inputs key %q is not in files", path)
+		}
 		sanitized := sanitizeManualInput(raw)
 		if len(sanitized) > maxManualInputLen {
 			return nil, fmt.Errorf("manual input for %q exceeds %d characters", path, maxManualInputLen)
