@@ -232,3 +232,34 @@ func TestEstablishScrapedBaseline_NilSafe(t *testing.T) {
 	assert.NotPanics(t, func() { establishScrapedBaseline(nil, &models.Movie{}) })
 	assert.NotPanics(t, func() { establishScrapedBaseline(&models.Movie{}, nil) })
 }
+
+// establishScrapedBaseline trims whitespace-only URLs so a whitespace scraper
+// value doesn't become a non-empty baseline that falsely enables Reset.
+func TestEstablishScrapedBaseline_TrimsWhitespace(t *testing.T) {
+	source := &models.Movie{ID: "NEW-001"}
+	source.Poster.PosterURL = "  https://new.invalid/poster.jpg  "
+	source.Poster.CroppedPosterURL = "   "
+	source.Poster.CoverURL = "  "
+	target := &models.Movie{}
+	establishScrapedBaseline(target, source)
+	assert.Equal(t, "https://new.invalid/poster.jpg", target.Poster.OriginalPosterURL)
+	assert.Equal(t, "", target.Poster.OriginalCroppedPosterURL, "whitespace-only should trim to empty")
+	assert.Equal(t, "", target.Poster.OriginalCoverURL, "whitespace-only should trim to empty")
+}
+
+// Padded scraper URLs on a same-id rescrape are trimmed for both the display
+// field and the baseline, so a whitespace-padded scraper value does not leave
+// display != baseline and spuriously enable Reset.
+func TestRescrapeImage_SameID_PaddedScraperURLTrimmed(t *testing.T) {
+	existing := existingMovie()
+	scraped := &models.Movie{ID: "OLD-001", Title: "Scraped"}
+	scraped.Poster.CoverURL = "  https://new.invalid/cover.jpg  "
+	scraped.Poster.PosterURL = "  https://new.invalid/poster.jpg  "
+	merged := mergeRescrapeMovie(existing, scraped, workflow.MergeOptions{
+		ScalarStrategy: nfo.PreferNFO, ArrayStrategy: true,
+	}, "file.mp4")
+	assert.Equal(t, "https://new.invalid/cover.jpg", merged.Poster.CoverURL)
+	assert.Equal(t, "https://new.invalid/poster.jpg", merged.Poster.PosterURL)
+	assert.Equal(t, "https://new.invalid/cover.jpg", merged.Poster.OriginalCoverURL)
+	assert.Equal(t, "https://new.invalid/poster.jpg", merged.Poster.OriginalPosterURL)
+}

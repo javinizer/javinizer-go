@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
@@ -448,4 +449,49 @@ func TestRescrapePhase_CompleteRescrape_CommitResultError(t *testing.T) {
 	outcome, err := phase.CompleteRescrape(inputs, "/source/IPX-777.mp4", newResult, 1, "IPX-778", "IPX-777")
 	require.Error(t, err, "Should return error when CommitResult fails")
 	require.Nil(t, outcome, "Should return nil outcome for non-conflict errors")
+}
+
+// TestRescrapePhase_Rescrape_MergeEnabledNoExistingEstablishesBaseline covers
+// the edge case where MergeEnabled is true but there is no prior result to
+// merge into. Previously this branch skipped establishScrapedBaseline entirely
+// (it only ran inside mergeRescrapeMovie, which was never called when there
+// was no existing movie), leaving Original* empty and Reset without a target
+// until the first manual edit.
+func TestRescrapePhase_Rescrape_MergeEnabledNoExistingEstablishesBaseline(t *testing.T) {
+	movie := &models.Movie{ID: "NEW-001"}
+	movie.Poster.PosterURL = "https://new.invalid/poster.jpg"
+	movie.Poster.CoverURL = "https://new.invalid/cover.jpg"
+	movie.Poster.ShouldCropPoster = true
+	wf := &stubRescrapeWorkflow{
+		scrapeResult: &scrape.ScrapeResult{Movie: movie},
+	}
+	rt := NewResultTracker(1, []string{"f1.mp4"})
+	inputs := rescrapePhaseInputs{
+		WF:        wf,
+		ResultMap: rt,
+		Finder:    rt,
+		JobID:     models.NewJobID(),
+	}
+
+	phase := NewRescrapePhase()
+	cmd := RescrapeCmd{
+		MovieID:      "NEW-001",
+		FilePath:     "f1.mp4",
+		MergeEnabled: true,
+		Merge: workflow.MergeOptions{
+			ScalarStrategy: nfo.PreferNFO,
+			ArrayStrategy:  true,
+		},
+	}
+	result, err := phase.Rescrape(context.Background(), inputs, cmd)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, models.RescrapeStatusSuccess, result.Status)
+	require.NotNil(t, result.Movie, "outcome.Movie should be populated on success")
+	assert.Equal(t, "https://new.invalid/poster.jpg", result.Movie.Poster.OriginalPosterURL,
+		"merge-enabled rescrape with no prior result must still establish the scraped baseline")
+	assert.Equal(t, "https://new.invalid/cover.jpg", result.Movie.Poster.OriginalCoverURL)
+	if result.Movie.Poster.OriginalShouldCropPoster == nil || !*result.Movie.Poster.OriginalShouldCropPoster {
+		t.Fatal("OriginalShouldCropPoster should mirror the scraped ShouldCropPoster (true)")
+	}
 }

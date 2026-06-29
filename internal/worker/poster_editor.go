@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -136,8 +137,14 @@ func backupCoverOriginal(current, next *models.Movie) {
 // the Reset baseline. Called by both the initial scrape phase and the
 // rescrape phase (merge + non-merge paths) so the review UI's Reset always
 // returns to what the scraper produced — never a stale prior-content value
-// carried across a content-id change, and never empty (which would leave
-// Reset without a target until the first manual edit).
+// carried across a content-id change. The baseline may legitimately be empty
+// when the scraper found no image; the frontend falls back to the current
+// field, so an empty baseline makes Reset a no-op rather than wiping a valid
+// image.
+//
+// URL fields are trimmed so the baseline matches the display field's
+// trimming in mergeRescrapeMovie (a whitespace-only scraper value should
+// not become a non-empty baseline that falsely enables the Reset button).
 //
 // This is the eager counterpart to backupPosterOriginals: backupPosterOriginals
 // snapshots the pre-edit state lazily on the first manual edit, while
@@ -150,8 +157,8 @@ func establishScrapedBaseline(target, source *models.Movie) {
 		return
 	}
 	shouldCrop := source.Poster.ShouldCropPoster
-	target.Poster.OriginalPosterURL = source.Poster.PosterURL
-	target.Poster.OriginalCroppedPosterURL = source.Poster.CroppedPosterURL
+	target.Poster.OriginalPosterURL = strings.TrimSpace(source.Poster.PosterURL)
+	target.Poster.OriginalCroppedPosterURL = strings.TrimSpace(source.Poster.CroppedPosterURL)
 	target.Poster.OriginalShouldCropPoster = &shouldCrop
-	target.Poster.OriginalCoverURL = source.Poster.CoverURL
+	target.Poster.OriginalCoverURL = strings.TrimSpace(source.Poster.CoverURL)
 }

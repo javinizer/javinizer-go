@@ -311,15 +311,27 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// RescrapeCmd silently dropped them. When MergeEnabled is false (the
 		// default for callers that supply no merge options), behavior is
 		// unchanged: the scraped Movie replaces the existing one on commit.
+		// Merge the scraped Movie into the existing one when requested AND an
+		// existing result is present. Per ADR-0030: MergeEnabled gates whether
+		// merging is applied at all; when false (the default for callers that
+		// supply no merge options), behavior is unchanged: the scraped Movie
+		// replaces the existing one on commit. The image-URL reconciliation and
+		// scraped-baseline establishment happen in mergeRescrapeMovie (merge path
+		// with existing) or in the unified establishScrapedBaseline call below
+		// (non-merge, or merge-enabled with no prior result).
+		baselineFromScraped := true
 		if cmd.MergeEnabled && movieResult.Movie != nil {
 			if existing, getErr := inputs.ResultMap.GetMovieResult(lookup.FilePath); getErr == nil && existing != nil && existing.Movie != nil {
 				movieResult.Movie = mergeRescrapeMovie(existing.Movie, movieResult.Movie, cmd.Merge, lookup.FilePath)
+				baselineFromScraped = false // mergeRescrapeMovie already established it
 			}
-		} else {
-			// Non-merge (wholesale-replace) path: the scraped movie carries no
-			// Original* (scrapers don't populate them), so without this the
-			// revert baseline would be wiped on rescrape. Establish the scraper
-			// baseline from the scraped movie's own poster fields.
+		}
+		if baselineFromScraped && movieResult.Movie != nil {
+			// Non-merge (wholesale-replace) path, or merge-enabled with no prior
+			// result: the scraped movie carries no Original* (scrapers don't
+			// populate them), so establish the revert baseline from its own poster
+			// fields. Without this, Reset would have no target until the first
+			// manual edit snapshotted it lazily.
 			establishScrapedBaseline(movieResult.Movie, movieResult.Movie)
 		}
 
@@ -385,10 +397,10 @@ func mergeRescrapeMovie(existing, scraped *models.Movie, opts workflow.MergeOpti
 		merged.Merged.Poster.PosterURL = strings.TrimSpace(scraped.Poster.PosterURL)
 	} else {
 		if strings.TrimSpace(scraped.Poster.CoverURL) != "" {
-			merged.Merged.Poster.CoverURL = scraped.Poster.CoverURL
+			merged.Merged.Poster.CoverURL = strings.TrimSpace(scraped.Poster.CoverURL)
 		}
 		if strings.TrimSpace(scraped.Poster.PosterURL) != "" {
-			merged.Merged.Poster.PosterURL = scraped.Poster.PosterURL
+			merged.Merged.Poster.PosterURL = strings.TrimSpace(scraped.Poster.PosterURL)
 		}
 	}
 
