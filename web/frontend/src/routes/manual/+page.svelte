@@ -17,7 +17,7 @@
 	} from 'lucide-svelte';
 	import { apiClient } from '$lib/api/client';
 	import { startJob } from '$lib/stores/background-job.svelte';
-	import { getPendingScrape, clearPendingScrape } from '$lib/stores/pending-scrape.svelte';
+	import { getPendingScrape, setPendingScrape, clearPendingScrape } from '$lib/stores/pending-scrape.svelte';
 	import type { PendingScrape } from '$lib/stores/pending-scrape.svelte';
 	import {
 		buildManualScrapeRequest,
@@ -142,6 +142,16 @@
 			rows.map((r) => r.filePath)
 		);
 		persistManualInputs(map);
+	});
+
+	// Persist inherited-setting edits (operation mode, destination, scrapers,
+	// force, update/strategy) back to the pending-scrape store so a refresh on
+	// /manual re-hydrates the user's edits, not the original /browse snapshot.
+	// Reads `snapshot` (local $state) and writes to the store (sessionStorage +
+	// module state) — the store's state is not read here, so no loop.
+	$effect(() => {
+		if (!snapshot) return;
+		setPendingScrape(snapshot);
 	});
 
 	function removeRow(idx: number) {

@@ -93,3 +93,35 @@ func TestValidateAndSanitizeManualInputs_RejectsKeyNotInFiles(t *testing.T) {
 		})
 	}
 }
+
+// A whitespace-padded URL is trimmed before the scheme/CanHandleURL check, so
+// an unhandleable URL with edge whitespace is rejected (400) just like its
+// trimmed counterpart — previously the leading space made url.Parse return
+// Scheme="" so it took the plain-ID branch and bypassed the check.
+func TestValidateAndSanitizeManualInputs_TrimsBeforeURLValidation(t *testing.T) {
+	raw := map[string]string{"/d/a.mp4": "  https://no-handler.example.com/v/123  "}
+	got, err := validateAndSanitizeManualInputs(raw, []string{"/d/a.mp4"}, nil)
+	require.Error(t, err, "whitespace-padded unhandleable URL must be rejected after trim")
+	assert.Contains(t, err.Error(), "no enabled scraper can handle URL")
+	assert.Nil(t, got)
+}
+
+// Empty-after-trim entries are dropped from the sanitized map (not stored as "")
+// so the override map carries no no-op entries.
+func TestValidateAndSanitizeManualInputs_DropsEmptyAfterTrim(t *testing.T) {
+	raw := map[string]string{"/d/a.mp4": "   "}
+	got, err := validateAndSanitizeManualInputs(raw, []string{"/d/a.mp4"}, nil)
+	require.NoError(t, err)
+	_, present := got["/d/a.mp4"]
+	assert.False(t, present, "empty-after-trim entry should be dropped, not stored as \"\"")
+}
+
+// The "no enabled scraper" 400 error redacts the URL query so a token in the
+// echoed URL is not leaked back to the client.
+func TestValidateManualURL_RedactsQueryInError(t *testing.T) {
+	err := validateManualURL("https://no-handler.example.com/v/123?token=secret", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no enabled scraper can handle URL")
+	assert.NotContains(t, err.Error(), "token=secret", "query token must be redacted from the error")
+	assert.NotContains(t, err.Error(), "secret")
+}

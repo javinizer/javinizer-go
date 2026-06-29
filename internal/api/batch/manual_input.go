@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scrape"
 )
 
 // resolveManualInputOverride produces the final per-file RawInputOverride map by
@@ -44,7 +45,7 @@ func resolveManualInputOverride(
 			continue
 		}
 		if existing, dup := movieInput[fmi.MovieID]; dup && existing != input {
-			return nil, fmt.Errorf("conflicting manual inputs for movie %q: %q vs %q", fmi.MovieID, existing, input)
+			return nil, fmt.Errorf("conflicting manual inputs for movie %q: %q vs %q", fmi.MovieID, scrape.RedactURLQuery(existing), scrape.RedactURLQuery(input))
 		}
 		movieInput[fmi.MovieID] = input
 	}

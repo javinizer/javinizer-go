@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/scrape"
 )
 
 const (
@@ -50,7 +51,7 @@ func validateManualURL(input string, registry matcher.URLScraperLister) error {
 			return perr
 		}
 		if !parsed.IsURL {
-			return fmt.Errorf("no enabled scraper can handle URL %q", input)
+			return fmt.Errorf("no enabled scraper can handle URL %q", scrape.RedactURLQuery(input))
 		}
 	}
 	return nil
@@ -84,12 +85,11 @@ func validateAndSanitizeManualInputs(
 		if _, ok := fileSet[path]; !ok {
 			return nil, fmt.Errorf("manual_inputs key %q is not in files", path)
 		}
-		sanitized := sanitizeManualInput(raw)
+		sanitized := strings.TrimSpace(sanitizeManualInput(raw))
 		if len(sanitized) > maxManualInputLen {
 			return nil, fmt.Errorf("manual input for %q exceeds %d characters", path, maxManualInputLen)
 		}
 		if sanitized == "" {
-			result[path] = sanitized
 			continue
 		}
 		if err := validateManualURL(sanitized, registry); err != nil {

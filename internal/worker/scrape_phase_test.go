@@ -118,7 +118,19 @@ type stubWorkflow struct {
 }
 
 func (s *stubWorkflow) Scrape(_ context.Context, _ scrape.ScrapeCmd, _ scrape.ProgressFunc) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
-	return s.scrapeResult, nil, s.scrapeErr
+	if s.scrapeResult == nil {
+		return nil, nil, s.scrapeErr
+	}
+	// Return a fresh copy per call so concurrent scrape workers (MaxWorkers>1)
+	// don't share a Movie pointer — establishScrapedBaseline writes to
+	// fileResult.Movie's Original* fields and would race under -race if two
+	// goroutines received the same pointer.
+	clone := *s.scrapeResult
+	if s.scrapeResult.Movie != nil {
+		movieClone := *s.scrapeResult.Movie
+		clone.Movie = &movieClone
+	}
+	return &clone, nil, s.scrapeErr
 }
 
 func (s *stubWorkflow) Apply(_ context.Context, _ workflow.ApplyCmd, _ scrape.ProgressFunc) (*workflow.ApplyResult, error) {
@@ -198,6 +210,36 @@ func TestBuildScrapeCmd_URLInputBypassesBatchGlobalScrapers_IDInputKeepsThem(t *
 	})
 	assert.Equal(t, "ABC-001", idCmd.RawInput)
 	assert.Equal(t, batchGlobal, idCmd.SelectedScrapers, "ID rows keep the batch-global scrapers so resolveScrapeInput reorders them")
+}
+
+// A manual URL input carrying a query token must be redacted from cmd.MovieID
+// (which surfaces in persisted job state, WebSocket events, and progress
+// messages) while cmd.RawInput keeps the raw URL so resolveScrapeInput/ScrapeURL
+// still see it. Regression guard for the buildScrapeCmd redaction seam.
+func TestBuildScrapeCmd_ManualURLInput_RedactsQueryFromMovieID(t *testing.T) {
+	const file = "/videos/ABC-001.mp4"
+	inputs := scrapePhaseInputs{Matcher: &stubMatcher{result: "ABC-001"}}
+
+	cmd := buildScrapeCmd(file, inputs, ScrapePhaseConfig{
+		RawInputOverride: map[string]string{file: "https://www.javbus.com/ABC-001?token=secret&sig=abc"},
+	})
+
+	assert.Equal(t, "https://www.javbus.com/ABC-001", cmd.MovieID, "MovieID must strip the query/fragment so tokens don't leak to persisted state/events")
+	assert.Equal(t, "https://www.javbus.com/ABC-001?token=secret&sig=abc", cmd.RawInput, "RawInput must stay unredacted so the scraper receives the real URL")
+	assert.Empty(t, cmd.SelectedScrapers, "URL rows bypass the batch-global scraper picker")
+}
+
+// A manual ID input is unaffected by redaction — RedactURLQuery passes plain
+// IDs (no scheme/host) through unchanged.
+func TestBuildScrapeCmd_ManualIDInput_RedactionIsNoOp(t *testing.T) {
+	const file = "/videos/ABC-001.mp4"
+	inputs := scrapePhaseInputs{Matcher: &stubMatcher{result: "ABC-001"}}
+
+	cmd := buildScrapeCmd(file, inputs, ScrapePhaseConfig{
+		RawInputOverride: map[string]string{file: "IPX-123"},
+	})
+	assert.Equal(t, "IPX-123", cmd.MovieID)
+	assert.Equal(t, "IPX-123", cmd.RawInput)
 }
 
 func TestBuildScrapeCmd_NoManualInputAutoIDsFromMatcher(t *testing.T) {

@@ -343,7 +343,7 @@
 		goto('/manual');
 	}
 
-async function startBatchScrape() {
+	async function startBatchScrape() {
 		if (selectedFiles.length === 0) return;
 
 		const isUpdateMode = operationMode === 'update';

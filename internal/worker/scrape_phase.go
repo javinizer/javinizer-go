@@ -152,7 +152,13 @@ func buildScrapeCmd(
 	if raw, ok := cfg.RawInputOverride[filePath]; ok && strings.TrimSpace(raw) != "" {
 		trimmed := strings.TrimSpace(raw)
 		rawInput = trimmed
-		movieID = trimmed
+		// MovieID is surfaced in persisted job state, WebSocket events, and
+		// per-file progress messages. A manual URL may carry a query token
+		// (e.g. ?token=secret); redact it here so the raw URL never reaches
+		// those sinks. RawInput stays unredacted so resolveScrapeInput/ScrapeURL
+		// still see the real URL. RedactURLQuery passes plain IDs through
+		// unchanged, so manual ID inputs are unaffected.
+		movieID = scrape.RedactURLQuery(trimmed)
 		manualURL = isManualURLInput(trimmed)
 	}
 	if movieID == "" {
